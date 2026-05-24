@@ -116,7 +116,32 @@ curl -sS -u "$SONAR_TOKEN:" -X POST \
 Verify in the SonarCloud UI: **Quality Gates** → "Zero Tolerance" → it should
 show the 10 conditions above. The project should now show this gate.
 
-### 2.4 Sign up for Snyk
+### 2.4 OpenSSF Scorecard — supply-chain health badge
+
+The generated `.github/workflows/scorecard.yml` runs weekly and publishes
+a score to <https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_NAME}}>.
+Nothing to set up — the workflow uses GitHub's OIDC token to publish, no
+secrets needed.
+
+After the first scheduled run (or push to `{{DEFAULT_BRANCH}}`), the score
+is available in three places:
+
+- `https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_NAME}}` — public landing page with per-check breakdown
+- The repo's **Security** tab → **Code scanning** → filter by tool "Scorecard"
+- The **Actions** run summary
+
+**Add the badge to your README** (optional but recommended for OSS):
+
+```markdown
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/{{PROJECT_NAME}}/badge)](https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_NAME}})
+```
+
+The score is **not gated as a required check** — Scorecard is a periodic
+informational signal, not a per-PR gate. Improvements should happen
+through normal PRs that address whichever specific checks are red (the
+Code scanning view shows each failing check with a fix recommendation).
+
+### 2.5 Sign up for Snyk
 
 1. Go to [snyk.io](https://snyk.io), sign in with GitHub.
 2. Account Settings → Auth Token → copy.
