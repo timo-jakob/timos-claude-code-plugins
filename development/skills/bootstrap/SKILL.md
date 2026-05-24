@@ -321,6 +321,7 @@ on:
   pull_request:    { branches: ["main"], paths-ignore: [docs + license] }
   push:            { branches: ["main"], paths-ignore: [docs + license] }
   release:         { types: [published] }   # workflows that produce artifacts
+  schedule:        { cron: "0 6 * * 1" }    # weekly Monday 06:00 UTC drift
   workflow_dispatch:
 ```
 
@@ -328,8 +329,19 @@ on:
 - `push` runs on main — required for SonarCloud/SonarQube to maintain its
   "Clean as You Code" baseline.
 - `release: published` runs on tag releases — drives semver image publishing.
+- `schedule` re-runs the full quality pipeline weekly so newly-disclosed
+  CVEs and license-database updates surface within ~7 days, even when no
+  PR touches the affected area.
 - `workflow_dispatch` enables manual reruns from the GitHub UI.
 - `paths-ignore` skips doc/license-only changes.
+
+### Pre-commit CI backstop
+
+Both quality workflows include a `pre-commit` job (using
+`pre-commit/action@v3.0.1`) that runs the same hooks as locally. This
+catches contributors who used `git commit --no-verify` or pushed from a
+machine without pre-commit installed — local hooks are an honour system,
+the CI job makes it enforced.
 
 ### 3d. Per-language fragments
 

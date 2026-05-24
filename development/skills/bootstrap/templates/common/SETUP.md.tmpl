@@ -246,7 +246,44 @@ human/legal judgment. Common pairings:
 
 ---
 
-## 3c. Security disclosure — enable Private Vulnerability Reporting
+## 3c. Weekly drift scan
+
+The quality workflows run on a weekly schedule (Monday 06:00 UTC) in
+addition to PR + push triggers. Same jobs, fresh data.
+
+**Why this matters**: vulnerability and license databases update
+continuously. A dep you pinned six months ago and last scanned at PR-time
+may have had a CVE disclosed against it last week. Without a scheduled
+re-run, you'd only learn about it the next time a PR happens to touch the
+affected area. The weekly schedule guarantees you find out within ~7 days.
+
+If a scheduled run fails, GitHub Actions sends an email to anyone with
+"Send notifications for failed workflows" enabled in their notification
+settings. For a stricter posture, add a "create issue on failure" step to
+the workflow — leaving it as default email keeps the noise low.
+
+## 3d. Dependabot — what's tracked
+
+The generated `.github/dependabot.yml` opens weekly grouped PRs for:
+
+| Ecosystem | What it tracks |
+|---|---|
+| `github-actions` | Actions versions in `.github/workflows/*.yml` |
+| `npm` | `package.json` (TypeScript projects) |
+| `pip` | `requirements.txt` / `pyproject.toml` (Python projects) |
+| `gomod` | `go.mod` (Go projects) |
+| `swift` | `Package.swift` (Swift projects) |
+| `docker` | `FROM` lines in your Dockerfile(s) (if generated with `has_dockerfile=true`) |
+
+Minor and patch updates are grouped into a single PR per ecosystem to keep
+the inbox manageable. Major version updates always open as separate PRs
+because they usually need code changes.
+
+If you add a new Dockerfile after the initial bootstrap, re-run the
+bootstrap skill or manually append a `package-ecosystem: "docker"` block
+to `dependabot.yml`.
+
+## 3e. Security disclosure — enable Private Vulnerability Reporting
 
 The generated `.github/SECURITY.md` directs reporters to **GitHub Security
 Advisories (GHSA)** as the preferred private channel. For most public repos
@@ -282,8 +319,8 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
 
 - [x] Require a pull request before merging (1 approval, dismiss stale reviews)
 - [x] Require status checks to pass before merging
-  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `license-fs`, `image` (if Docker), `semgrep`, `analyze` (CodeQL), `test-and-coverage`
-  - **PRIVATE**: `sonarqube`, `trivy-fs`, `license-fs`, `image` (if Docker), `semgrep`, `test-and-coverage`
+  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `license-fs`, `image` (if Docker), `semgrep`, `analyze` (CodeQL), `pre-commit`, `test-and-coverage`
+  - **PRIVATE**: `sonarqube`, `trivy-fs`, `license-fs`, `image` (if Docker), `semgrep`, `pre-commit`, `test-and-coverage`
 - [x] Require branches to be up to date before merging
 - [x] Require linear history
 - [x] Do not allow bypassing the above settings

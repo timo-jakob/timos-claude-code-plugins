@@ -39,7 +39,7 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 # --- build required-status-checks list ---------------------------------------
 # These names must match the `jobs.<id>` keys in the generated workflow files.
-checks=("test-and-coverage" "semgrep")
+checks=("test-and-coverage" "semgrep" "pre-commit")
 
 case "$VISIBILITY" in
   public)
