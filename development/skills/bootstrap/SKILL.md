@@ -244,6 +244,7 @@ Copy from `templates/common/`:
 - `SETUP.md` (manual steps the user must do after bootstrap)
 - `CLAUDE.md` (shift-left agent guidance — append a section if one already exists)
 - `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore`)
+- `.editorconfig` (cross-editor whitespace + encoding settings)
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
