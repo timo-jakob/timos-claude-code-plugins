@@ -198,17 +198,44 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build + push multi-arch image
+      - name: Build + push multi-arch image (with SBOM + provenance)
+        id: build-push
         if: github.event_name == 'push' || github.event_name == 'release'
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          # CycloneDX JSON SBOM via Syft, attached as OCI artifact.
+          sbom: true
+          # SLSA provenance attestation.
+          provenance: mode=max
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Export SBOM as CI artifact
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.pick.outputs.tag }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Validate SBOM is well-formed CycloneDX
+        if: github.event_name == 'push' || github.event_name == 'release'
+        run: |
+          docker run --rm -v "$PWD:/work" cyclonedx/cyclonedx-cli:latest \
+            validate --input-file /work/sbom.cdx.json --input-format json --fail-on-errors
+
+      - name: Upload SBOM artifact
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx-${{ github.sha }}
+          path: sbom.cdx.json
+          retention-days: 90
   # --- DOCKER-END -----------------------------------------------------------
 
   semgrep:
