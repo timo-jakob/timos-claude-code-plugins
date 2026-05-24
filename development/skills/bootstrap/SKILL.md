@@ -19,6 +19,10 @@ quality + security surroundings for a project.
 Supported flags:
 - `--review` — run the opt-in senior-review agent (Step 6) after the bootstrap
   completes. Adds an opus pass for high-stakes first bootstraps.
+- `--signed-commits` — additionally enforce cryptographically signed commits
+  (GPG or SSH) on the default branch. Off by default because every
+  contributor must register a signing key. When set, the orchestrator
+  invokes `branch-protection.sh --require-signed-commits true` in Step 4b.
 
 ## Guiding Principles
 
@@ -395,6 +399,12 @@ Confirm with the user, then via `gh api`:
   got created. Use the exact job IDs.
 - Require linear history.
 - Block force-push and deletion.
+- If `--signed-commits` flag was passed at invocation, also pass
+  `--require-signed-commits true` to `branch-protection.sh`, which sets
+  `required_signatures: true` on the rule. Warn the user that every
+  contributor must register a GPG or SSH signing key in their GitHub
+  account before they can push to a protected branch; `SETUP.md` has the
+  per-contributor setup recipe.
 
 If the user does not yet have any commits with the workflows present, point out
 that the check names will not appear in the GitHub UI until at least one workflow
