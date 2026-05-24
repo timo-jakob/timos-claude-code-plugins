@@ -53,6 +53,13 @@ if [[ "$git_initialized" == "true" ]]; then
       default_branch="$(printf '%s' "$gh_json" | sed -n 's/.*"defaultBranchRef":{"name":"\([^"]*\)".*/\1/p')"
     fi
   fi
+
+  # Fall back to the locally-checked-out branch when gh didn't tell us
+  # (no remote, no auth, or repo view failed). Without this fallback the
+  # orchestrator has no value to substitute for {{DEFAULT_BRANCH}}.
+  if [[ -z "$default_branch" ]]; then
+    default_branch="$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null || echo "")"
+  fi
 fi
 
 # --- languages ---------------------------------------------------------------
@@ -94,26 +101,53 @@ if [[ -f "$cwd/Dockerfile" ]] || \
 fi
 
 # --- existing artifacts ------------------------------------------------------
-# Files we would generate. We mark which already exist so the skill can skip/diff.
-candidate_paths=(
-  ".pre-commit-config.yaml"
-  ".github/dependabot.yml"
-  ".github/ISSUE_TEMPLATE/bug.yml"
-  ".github/ISSUE_TEMPLATE/feature.yml"
-  ".github/PULL_REQUEST_TEMPLATE.md"
-  ".github/workflows/quality-public.yml"
-  ".github/workflows/quality-private.yml"
-  ".github/workflows/codeql.yml"
-  "sonar-project.properties"
-  ".snyk"
-  "trivy.yaml"
-  "infra/sonarqube/docker-compose.yml"
-  "CONTRIBUTING.md"
-  "SETUP.md"
-  "CLAUDE.md"
-  ".gitignore"
-  "LICENSE"
-)
+# Files we would generate. We mark which already exist so the skill can
+# skip/diff. The candidate list is derived dynamically from the templates
+# directory so new templates auto-include without touching this script.
+#
+# Mapping rules:
+#   templates/<scope>/foo              → foo
+#   templates/<scope>/foo.tmpl         → foo
+#   templates/<scope>/.github/x.yml    → .github/x.yml
+# Language fragments (templates/languages/<lang>/*) follow the same shape
+# but are only candidates for languages actually detected above.
+# The merged .gitignore and conditional LICENSE are added explicitly.
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+templates_dir="$(cd -- "$script_dir/../templates" &>/dev/null && pwd)"
+
+# A "gitignore" fragment inside templates/languages/<lang>/ is merged into the
+# project's single top-level .gitignore — not a stand-alone file. Skip it from
+# the candidate list (the merged .gitignore is added explicitly below).
+collect_from() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  while IFS= read -r tmpl_path; do
+    rel="${tmpl_path#$dir/}"          # strip prefix
+    rel="${rel%.tmpl}"                # strip .tmpl suffix if present
+    [[ "$rel" == "gitignore" ]] && continue   # fragment, not a target file
+    candidate_paths+=("$rel")
+  done < <(find "$dir" -type f 2>/dev/null)
+}
+
+candidate_paths=()
+collect_from "$templates_dir/common"
+collect_from "$templates_dir/public"
+collect_from "$templates_dir/private"
+
+# Language-specific fragments (only for detected languages).
+# `${langs[@]+...}` guards against the array being empty under `set -u`.
+for lang in ${langs[@]+"${langs[@]}"}; do
+  collect_from "$templates_dir/languages/$lang"
+done
+
+# Always-check files that don't map 1:1 to a template:
+#   .gitignore (merged from language fragments above)
+#   LICENSE (asked of user if missing)
+candidate_paths+=(".gitignore" "LICENSE")
+
+# Dedupe (some files like sonar-project.properties exist in both public/ and
+# private/ scope — we'd otherwise list it twice).
+candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 
 artifacts_json="{"
 first=1
