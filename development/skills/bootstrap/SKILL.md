@@ -278,6 +278,11 @@ Behaviour summary:
   scanner) — one canonical source regardless of public/private path. The
   SBOM is independently validated with `cyclonedx-cli` after generation and
   also uploaded as a workflow artifact for human inspection.
+- **Every published image is signed by cosign** using keyless OIDC against
+  GitHub's token-issued identity. No key management. The signature proves
+  the image came from this workflow on this repo — defeats the
+  same-tag-substitution attack the SBOM and provenance alone don't address.
+  Verifiable with `cosign verify --certificate-identity-regexp ... --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
 - Image visibility is **inherited from the repo** but requires a one-time
   manual flip in package settings after first publish (GHCR defaults new
   packages to private). The generated `SETUP.md` walks the user through this.
