@@ -53,13 +53,13 @@ jobs:
   test-and-coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # SonarCloud needs full history for blame
 
       # --- TYPESCRIPT-START ------------------------------------------------
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -71,7 +71,7 @@ jobs:
 
       # --- PYTHON-START ----------------------------------------------------
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: "pip"
@@ -83,7 +83,7 @@ jobs:
 
       # --- GO-START --------------------------------------------------------
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "stable"
       - name: Test (Go)
@@ -102,7 +102,7 @@ jobs:
       # --- SWIFT-END -------------------------------------------------------
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-reports
           path: |
@@ -117,17 +117,17 @@ jobs:
     needs: test-and-coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Download coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-reports
           path: .
         continue-on-error: true
       - name: SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
@@ -136,9 +136,9 @@ jobs:
   snyk-code:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Snyk Code (SAST)
-        uses: snyk/actions/setup@master
+        uses: snyk/actions/setup@v1.0.0
       - run: snyk code test --severity-threshold=high
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -147,8 +147,8 @@ jobs:
   snyk-open-source:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: snyk/actions/setup@master
+      - uses: actions/checkout@v6
+      - uses: snyk/actions/setup@v1.0.0
       - run: snyk test --severity-threshold=high --all-projects
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -160,8 +160,8 @@ jobs:
   license-fs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/checkout@v6
+      - uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -184,17 +184,17 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -210,7 +210,7 @@ jobs:
       # — vulnerability scanners run on dependency manifests + distro
       # packages, which are arch-invariant at the source level.
       - name: Build image (amd64 only, for scanning)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -228,7 +228,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Snyk container scan
-        uses: snyk/actions/setup@master
+        uses: snyk/actions/setup@v1.0.0
       - run: |
           snyk container test "${{ steps.pick.outputs.tag }}" \
             --severity-threshold=high --file=Dockerfile
@@ -238,7 +238,7 @@ jobs:
       # License compliance on the built image — catches licenses introduced
       # via base-image layers that the filesystem scan would miss.
       - name: Trivy license scan (image)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: "image"
           image-ref: ${{ steps.pick.outputs.tag }}
@@ -252,7 +252,7 @@ jobs:
       # or release.
       - name: Login to GHCR
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -261,7 +261,7 @@ jobs:
       - name: Build + push multi-arch image (with SBOM + provenance)
         id: build-push
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -296,7 +296,7 @@ jobs:
 
       - name: Upload SBOM artifact
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-cyclonedx-${{ github.sha }}
           path: sbom.cdx.json
@@ -308,7 +308,7 @@ jobs:
       # OIDC certificate identity.
       - name: Install cosign
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
       - name: Sign image with cosign (keyless OIDC)
         if: github.event_name == 'push' || github.event_name == 'release'
@@ -331,7 +331,7 @@ jobs:
     container:
       image: returntocorp/semgrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: semgrep ci --config=auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional
@@ -343,10 +343,10 @@ jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # some hooks (gitleaks) want history
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - uses: pre-commit/action@v3.0.1

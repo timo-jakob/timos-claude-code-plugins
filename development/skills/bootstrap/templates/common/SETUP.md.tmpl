@@ -582,7 +582,7 @@ This is a one-time flip; subsequent publishes preserve the visibility you set.
 If you want to publish to Docker Hub instead of (or in addition to) GHCR, edit
 the `image` job in `.github/workflows/quality-{{VISIBILITY}}.yml`:
 
-1. Add a `Login to Docker Hub` step with `docker/login-action@v3`, registry
+1. Add a `Login to Docker Hub` step with `docker/login-action@v4`, registry
    `docker.io`, using `secrets.DOCKERHUB_USERNAME` + `secrets.DOCKERHUB_TOKEN`.
 2. Add a Docker Hub image to `docker/metadata-action`'s `images` input
    (newline-separated):

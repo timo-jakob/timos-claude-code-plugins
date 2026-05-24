@@ -51,12 +51,12 @@ jobs:
   test-and-coverage:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       # --- TYPESCRIPT-START ------------------------------------------------
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -66,7 +66,7 @@ jobs:
       # --- TYPESCRIPT-END --------------------------------------------------
 
       # --- PYTHON-START ----------------------------------------------------
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: "pip"
@@ -76,7 +76,7 @@ jobs:
       # --- PYTHON-END ------------------------------------------------------
 
       # --- GO-START --------------------------------------------------------
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "stable"
       - run: go test ./... -coverprofile=coverage.out -covermode=atomic
@@ -88,7 +88,7 @@ jobs:
         run: echo "Configure macOS self-hosted runner + xcodebuild test for Swift."
       # --- SWIFT-END -------------------------------------------------------
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-reports
           path: |
@@ -102,16 +102,16 @@ jobs:
     needs: test-and-coverage
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage-reports
           path: .
         continue-on-error: true
       - name: SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -122,8 +122,8 @@ jobs:
   trivy-fs:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/checkout@v6
+      - uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -139,8 +139,8 @@ jobs:
   license-fs:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/checkout@v6
+      - uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -162,17 +162,17 @@ jobs:
   image:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up QEMU (for foreign-arch emulation)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -186,7 +186,7 @@ jobs:
       # Single-arch build for scanning. Loading multi-arch images into the
       # local docker daemon isn't supported.
       - name: Build image (amd64 only, for scanning)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -204,7 +204,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Trivy image vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: "image"
           image-ref: ${{ steps.pick.outputs.tag }}
@@ -218,7 +218,7 @@ jobs:
       # License compliance on the built image — catches licenses introduced
       # via base-image layers that the filesystem scan would miss.
       - name: Trivy image license scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: "image"
           image-ref: ${{ steps.pick.outputs.tag }}
@@ -230,7 +230,7 @@ jobs:
 
       - name: Login to GHCR
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -239,7 +239,7 @@ jobs:
       - name: Build + push multi-arch image (with SBOM + provenance)
         id: build-push
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -269,7 +269,7 @@ jobs:
 
       - name: Upload SBOM artifact
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-cyclonedx-${{ github.sha }}
           path: sbom.cdx.json
@@ -281,7 +281,7 @@ jobs:
       # OIDC certificate identity.
       - name: Install cosign
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
       - name: Sign image with cosign (keyless OIDC)
         if: github.event_name == 'push' || github.event_name == 'release'
@@ -297,7 +297,7 @@ jobs:
   semgrep:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: |
           if ! command -v semgrep >/dev/null; then
             pip install --user semgrep
@@ -311,10 +311,10 @@ jobs:
   pre-commit:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # some hooks (gitleaks) want history
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - uses: pre-commit/action@v3.0.1
