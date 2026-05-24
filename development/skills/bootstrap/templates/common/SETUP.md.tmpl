@@ -333,6 +333,44 @@ them down (or up) if you have different bandwidth.
 
 ---
 
+## 3f. Push protection — block secrets at the server
+
+GitHub's **secret scanning + push protection** rejects any `git push`
+containing a detected token (AWS key, GitHub PAT, Stripe key, OpenAI key,
+~200+ patterns) *at the server*. It's the line of defense after pre-commit
+gitleaks and before CI sees the push, and it's the only one that can save
+you if someone uses `git push --no-verify` to bypass pre-commit and the
+secret was real.
+
+| Repo visibility | Cost | How to enable |
+|---|---|---|
+| **Public** | Free, **on by default** since 2024 | Repo Settings → Code security and analysis → confirm "Push protection" is on |
+| **Private** | **Requires GitHub Advanced Security (paid)** | Settings → Code security and analysis → Enable secret scanning + Enable push protection |
+
+For private repos without Advanced Security, the practical workaround is
+to rely on pre-commit gitleaks + a strict no-`--no-verify` policy and an
+incident runbook for token rotation if a secret leaks anyway.
+
+**What happens when push protection triggers**: the push is rejected with
+a clear message identifying the suspected secret and the line it appears
+on. The contributor can either:
+
+1. Remove the secret and retry the push (recommended).
+2. Mark the finding as a false positive in the GitHub UI, which produces
+   a one-time bypass URL.
+3. Confirm it really is a secret that needs to be committed (extremely
+   rare — usually means the architecture is wrong; secrets belong in
+   GitHub Actions secrets, not the repo).
+
+If a real secret slipped through (e.g., from a fork or before push
+protection was enabled), follow GitHub's [token revocation
+guide](https://docs.github.com/en/code-security/secret-scanning/managing-alerts-from-secret-scanning)
+and rotate the credential at its source. Removing the secret from git
+history is not enough — assume the moment it touched a public commit, it
+was scraped.
+
+---
+
 ## 4. GitHub branch protection on `{{DEFAULT_BRANCH}}`
 
 > 🤖 **Automated alternative**: `scripts/branch-protection.sh` applies the rules
