@@ -43,12 +43,12 @@ checks=("test-and-coverage" "semgrep")
 
 case "$VISIBILITY" in
   public)
-    checks+=("sonarcloud" "snyk-code" "snyk-open-source")
+    checks+=("sonarcloud" "snyk-code" "snyk-open-source" "license-fs")
     [[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
     [[ "$HAS_CODEQL"     == "true" ]] && checks+=("analyze")  # codeql job id
     ;;
   private)
-    checks+=("sonarqube" "trivy-fs")
+    checks+=("sonarqube" "trivy-fs" "license-fs")
     [[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
     ;;
 esac

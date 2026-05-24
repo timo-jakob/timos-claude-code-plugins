@@ -1,0 +1,59 @@
+# Trivy config — used by both vulnerability and license scans on the
+# filesystem (deps in lockfiles) and on the built container image.
+
+# Fail the scan on any CRITICAL or HIGH severity finding. Trivy classifies
+# license severity too: AGPL/SSPL forbidden → HIGH (blocks CI), GPL/LGPL
+# restricted → MEDIUM (reported but doesn't block by default).
+severity:
+  - CRITICAL
+  - HIGH
+
+# Don't ignore findings just because they don't yet have a fixed version —
+# we want to know about them so we can mitigate or pin.
+vulnerability:
+  ignore-unfixed: false
+
+# Scanners — vuln is the main one; secret + misconfig are inexpensive and
+# catch real problems (leaked tokens, world-writable Dockerfiles, etc.).
+# license enables license compliance gating.
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+    - license
+
+# License policy. Trivy ships sensible defaults — AGPL/SSPL are forbidden
+# (HIGH severity → blocks CI), GPL/LGPL are restricted (MEDIUM → reported
+# but doesn't fail by default).
+#
+# To enforce stricter rules (e.g., block GPL-2.0 too), uncomment and
+# customize `forbidden:` below. License names must be valid SPDX
+# identifiers; see https://spdx.org/licenses/.
+license:
+  # Whether to also scan the full text of license files (slower, more thorough).
+  full: false
+  # Confidence threshold for license classification (0.0 – 1.0).
+  confidence-level: 0.9
+  # Custom categorization — override Trivy defaults if your project license
+  # requires a stricter policy.
+  # forbidden:
+  #   - GPL-2.0
+  #   - GPL-2.0-only
+  #   - GPL-2.0-or-later
+  #   - GPL-3.0
+  #   - GPL-3.0-only
+  #   - GPL-3.0-or-later
+  # restricted:
+  #   - LGPL-2.1
+  #   - LGPL-3.0
+  # ignored:
+  #   - <license you have explicitly approved for a specific dep>
+
+# Output
+format: table
+exit-code: 1
+
+# Per-finding ignore list. Use sparingly — every entry should have a reason
+# and an expiration date in a comment above it.
+ignore-policy: ""
