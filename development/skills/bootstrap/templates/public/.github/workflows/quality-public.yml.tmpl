@@ -32,6 +32,7 @@ permissions:
   pull-requests: write
   security-events: write
   packages: write          # required for ghcr.io push
+  id-token: write          # required for cosign keyless OIDC signing
 
 concurrency:
   group: quality-${{ github.ref }}
@@ -265,6 +266,28 @@ jobs:
           name: sbom-cyclonedx-${{ github.sha }}
           path: sbom.cdx.json
           retention-days: 90
+
+      # Sign the image with Sigstore cosign — keyless OIDC, no key
+      # management. The signature is stored alongside the image in the
+      # registry. Verifiable with `cosign verify` using the workflow's
+      # OIDC certificate identity.
+      - name: Install cosign
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with cosign (keyless OIDC)
+        if: github.event_name == 'push' || github.event_name == 'release'
+        env:
+          IMAGE_DIGEST: ${{ steps.build-push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        # Sign every produced tag, by digest. Signing by digest avoids
+        # tag-mutation race conditions: even if `latest` is overwritten,
+        # the signature attached to the digest stays valid for that
+        # specific image content.
+        run: |
+          for tag in $TAGS; do
+            cosign sign --yes "${tag}@${IMAGE_DIGEST}"
+          done
   # --- DOCKER-END -----------------------------------------------------------
 
   # --- Semgrep (free OSS rules) ---------------------------------------------

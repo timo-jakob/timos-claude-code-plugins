@@ -298,6 +298,41 @@ slsa-verifier verify-image ghcr.io/{{PROJECT_NAME}}:latest \
   --source-uri github.com/{{PROJECT_NAME}}
 ```
 
+**Verify the image signature** (every published image is signed by cosign
+using GitHub's OIDC token — no key management required):
+
+```sh
+# Install once: brew install cosign
+
+# Verify by tag — checks the image was signed by this repo's workflow
+cosign verify ghcr.io/{{PROJECT_NAME}}:latest \
+  --certificate-identity-regexp "^https://github.com/{{PROJECT_NAME}}/" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+# Or verify by immutable digest (safer for production pulls)
+cosign verify ghcr.io/{{PROJECT_NAME}}@sha256:<digest> \
+  --certificate-identity-regexp "^https://github.com/{{PROJECT_NAME}}/" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+The signature is attached as an OCI artifact alongside the image, signed by
+a short-lived certificate issued by Sigstore's Fulcio against the workflow's
+OIDC token. The cert lifetime is ~10 minutes, but the signature's transparency
+log entry (in Rekor) is permanent.
+
+**Why this matters**: SBOM + provenance attestations describe *what the image
+contains* and *how it was built*. The cosign signature proves *who built it*.
+Without the signature, anyone with `packages: write` (or a stolen token) could
+push a malicious image with the same tag — the SBOM and provenance would be
+re-attached by the attacker and look legitimate. The cosign signature can
+only come from this workflow running on this repo's `main` branch (or
+release events).
+
+For pulls in production, enforce signature verification with a tool like
+[cosigned](https://docs.sigstore.dev/policy-controller/overview/) (a
+Kubernetes admission controller) or build the verification step into your
+deployment scripts.
+
 **Download the SBOM as a workflow artifact** from any successful run on
 the default branch: GitHub UI → Actions → workflow run → Artifacts →
 `sbom-cyclonedx-<sha>`. Useful for offline analysis or feeding into a
