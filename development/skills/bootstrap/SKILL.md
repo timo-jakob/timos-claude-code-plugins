@@ -14,7 +14,11 @@ disable-model-invocation: false
 You are a project bootstrap orchestrator. The user wants to set up the full
 quality + security surroundings for a project.
 
-**User input:** $ARGUMENTS (usually empty — all configuration is detected or asked)
+**User input:** $ARGUMENTS
+
+Supported flags:
+- `--review` — run the opt-in senior-review agent (Step 6) after the bootstrap
+  completes. Adds an opus pass for high-stakes first bootstraps.
 
 ## Guiding Principles
 
@@ -138,6 +142,40 @@ Bootstrap plan:
 ```
 
 Ask for confirmation. Do not proceed until the user explicitly approves.
+
+## Step 2.5: Plan Review (parallel agents)
+
+Before writing any files, fan out three review agents **in parallel** in a
+single message. They run against the **planned** output (template content
+after placeholder substitution, but not yet written to disk).
+
+Spawn all three in a single assistant turn with multiple `Agent` tool calls:
+
+| Agent | Model | What it reviews |
+|---|---|---|
+| `bootstrap-security-reviewer` | opus | GH Actions permissions, secret references, runner-event safety, scan-gates-push, unpinned third-party actions |
+| `bootstrap-config-consistency` | sonnet | Cross-references: Sonar keys, workflow job IDs ↔ branch-protection contexts, secret refs ↔ SETUP.md, language fragment ↔ detected languages |
+| `bootstrap-idempotency-reviewer` | sonnet | For each existing file conflicting with a template, recommends skip/overwrite/merge |
+
+Inputs to each agent are provided **in the agent's prompt**, not on disk
+(files aren't written yet):
+- Security reviewer: full text of each planned workflow file + the planned
+  permission blocks + the runner choice (`ubuntu-latest` vs `self-hosted`).
+- Consistency reviewer: full text of `sonar-project.properties`, the planned
+  workflow file, `SETUP.md`, and the `checks` array `branch-protection.sh`
+  would use given current detection results.
+- Idempotency reviewer: for each entry in `existing_artifacts` from
+  detection — the current on-disk content (read it) AND the planned
+  template content.
+
+Block on all three agents finishing. Aggregate their reports:
+
+1. If any agent returns `Verdict: BLOCK` → present findings to the user, fix
+   or override. Do not proceed to Step 3 without explicit user override.
+2. If all return `PROCEED` or `PROCEED WITH WARNINGS` → surface a short
+   summary to the user ("Plan review: 0 blockers, 2 warnings — proceeding").
+3. For idempotency findings: present per-file recommendations and confirm
+   each `overwrite` or `merge` with the user before applying.
 
 ## Step 3: Generate Files
 
@@ -272,6 +310,22 @@ For each target file path:
 3. If file exists and differs → show the user a diff, ask: overwrite, skip, or
    merge manually. Default to **skip** if the user does not answer clearly.
 4. Never delete files the user has.
+
+## Step 3.5: Post-Write Validation
+
+Run the `bootstrap-validator` agent (haiku — fast, cheap). It checks the
+files **on disk**:
+- All YAML and JSON parse.
+- No `{{...}}` placeholders remain.
+- Workflow `needs:` and `steps.<id>.outputs.*` references resolve.
+- Sonar properties are sane (keys set, coverage paths plausible).
+- If `pre-commit` is installed locally, validates the config.
+
+If the agent returns `Verdict: BLOCK`, show errors to the user. Offer to:
+- Re-run Step 3 (regenerate the offending files), or
+- Manually fix individual files and re-run the validator.
+
+Do not proceed to Step 4 until the validator returns `PROCEED`.
 
 ## Step 4: Post-Write Actions (each with explicit confirmation)
 
@@ -410,6 +464,17 @@ For private path the checklist additionally includes:
 - Start SonarQube: `cd infra/sonarqube && docker compose up -d`
 - Register self-hosted runner (see `infra/github-runner/README.md`).
 - Mint SonarQube project token, store as `SONAR_TOKEN` secret.
+
+## Step 6: Final Senior Review (opt-in, only if `--review` was passed)
+
+If the user invoked the skill with `--review`, run the `bootstrap-reviewer`
+agent (opus). It reads the full set of generated files and produces a
+short senior-engineer critique covering coherence, operability,
+maintainability, and first-impression.
+
+This is **opt-in** because the other three review agents already cover the
+common-case risks; the senior review is a deeper pass for high-stakes
+first bootstraps. Surface the agent's report to the user verbatim.
 
 ## Important Rules
 

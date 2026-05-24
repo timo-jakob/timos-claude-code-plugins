@@ -21,6 +21,11 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Agent | Model | Focus |
 |-------|-------|-------|
 | Commit Message | sonnet | Generates clear commit messages from diffs, ignoring formatting/linting noise |
+| Bootstrap Security Reviewer | opus | Reviews planned workflows for GH Actions permissions, secret refs, self-hosted runner safety, scan-before-push gates |
+| Bootstrap Config Consistency | sonnet | Cross-references Sonar keys, workflow job IDs ↔ branch-protection contexts, language fragments ↔ detected languages |
+| Bootstrap Idempotency Reviewer | sonnet | For each existing file conflicting with a template, recommends skip/overwrite/merge |
+| Bootstrap Validator | haiku | Fast post-write check — YAML/JSON parses, no unresolved placeholders, cross-references resolve |
+| Bootstrap Reviewer | opus | Optional senior-engineer review of the full bootstrap output (`--review` flag) |
 
 ### dev-swift
 
