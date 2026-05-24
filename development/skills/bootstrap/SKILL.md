@@ -108,6 +108,7 @@ wording so behavior stays consistent:
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the toolchain path — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the path for the rest of the skill. |
 | **Q4: Languages** | Whenever detected `languages=[]` | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / typescript / python / go — choose one or more)" | Selects per-language fragments and CodeQL matrix. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
+| **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
 
 ### After the decision tree
 
@@ -191,6 +192,27 @@ text replacement before writing:
 | `{{LANGUAGES}}` | space-separated detected languages |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
+| `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
+
+### `{{SECURITY_CONTACT_BLOCK}}` substitution
+
+If the user provided an email in Q6, substitute the following block (4-space indented to fit the existing markdown list level):
+
+```
+   Email **<email-from-Q6>**. For sensitive material, include the line
+   "Please respond via a private channel" in your subject so we route the
+   reply appropriately.
+```
+
+If the user left Q6 blank, substitute this block instead:
+
+```
+   No email channel is configured for this project. If you cannot reach us
+   through GitHub Security Advisories, open a public issue *only* with the
+   description "request to contact maintainers privately about a security
+   matter" — do not include vulnerability details — and a maintainer will
+   follow up over a private channel.
+```
 
 ### Block stripping in templates
 
@@ -224,6 +246,7 @@ Copy from `templates/common/`:
 - `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore`)
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
+- `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
 
 ### 3b. Public path (SonarCloud + Snyk)
 

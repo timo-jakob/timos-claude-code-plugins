@@ -246,6 +246,31 @@ human/legal judgment. Common pairings:
 
 ---
 
+## 3c. Security disclosure — enable Private Vulnerability Reporting
+
+The generated `.github/SECURITY.md` directs reporters to **GitHub Security
+Advisories (GHSA)** as the preferred private channel. For most public repos
+this works without configuration. Confirm it's enabled (or enable it once):
+
+1. Repo Settings → **Code security and analysis**.
+2. Find **Private vulnerability reporting** → click **Enable**.
+
+What this gives you:
+- A "Report a vulnerability" button on the repo's Security tab.
+- A private discussion area between reporter and maintainers.
+- Built-in CVE assignment workflow when a fix is published.
+
+For **private repos** the same feature is available but generally requires
+GitHub Advanced Security. If you can't enable it, the email fallback in
+`SECURITY.md` (configured during bootstrap) becomes your primary channel.
+
+Review `.github/SECURITY.md` before publishing — supported versions, response
+timelines, and the out-of-scope list should match what you can actually
+commit to. Defaults are calibrated to be realistic for a small project; tune
+them down (or up) if you have different bandwidth.
+
+---
+
 ## 4. GitHub branch protection on `{{DEFAULT_BRANCH}}`
 
 > 🤖 **Automated alternative**: `scripts/branch-protection.sh` applies the rules
