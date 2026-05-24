@@ -6,10 +6,21 @@ name: CodeQL
 on:
   pull_request:
     branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
   push:
     branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
   schedule:
-    - cron: "0 6 * * 1"   # weekly Monday 06:00 UTC
+    - cron: "0 6 * * 1"   # weekly Monday 06:00 UTC — drift detection
+  workflow_dispatch:
 
 permissions:
   contents: read

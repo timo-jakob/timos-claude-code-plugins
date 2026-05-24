@@ -226,8 +226,8 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
 
 - [x] Require a pull request before merging (1 approval, dismiss stale reviews)
 - [x] Require status checks to pass before merging
-  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `snyk-container` (if Docker), `semgrep`, `codeql`, `test-and-coverage`
-  - **PRIVATE**: `sonarqube`, `trivy-fs`, `trivy-image` (if Docker), `semgrep`, `test-and-coverage`
+  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `image` (if Docker), `semgrep`, `analyze` (CodeQL), `test-and-coverage`
+  - **PRIVATE**: `sonarqube`, `trivy-fs`, `image` (if Docker), `semgrep`, `test-and-coverage`
 - [x] Require branches to be up to date before merging
 - [x] Require linear history
 - [x] Do not allow bypassing the above settings
@@ -237,7 +237,73 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
 
 ---
 
-## 5. First run
+## 5. Container image publishing (only if Dockerfile present)
+
+The generated workflows build, scan, and publish your container image to
+**GitHub Container Registry** (`ghcr.io/{{PROJECT_NAME}}`). Publish events:
+
+| Trigger | Tags applied | Platforms |
+|---|---|---|
+| Push to `{{DEFAULT_BRANCH}}` (merge) | `latest`, `sha-<7>`, `{{DEFAULT_BRANCH}}` | `linux/amd64` + `linux/arm64` |
+| GitHub Release `v1.2.3` | `1.2.3`, `1.2`, `1`, `latest` (if not prerelease) | `linux/amd64` + `linux/arm64` |
+| PR | **Built + scanned but not pushed** — verifies image is clean without polluting the registry | `linux/amd64` only (fast feedback) |
+
+The scan (Snyk container for public repos, Trivy for private) runs **before**
+the push. A vulnerable image never reaches the registry.
+
+### Multi-arch builds
+
+Published images are multi-arch: both `linux/amd64` and `linux/arm64`. The
+arm64 image covers Apple Silicon Macs running Docker Desktop, AWS Graviton
+EC2 instances, Raspberry Pi, and other ARM hosts. PRs only build amd64 to
+keep feedback fast — security scanners read dependency manifests + distro
+packages, which are architecture-invariant at the source level, so scanning
+amd64 is a reasonable proxy for arm64 too.
+
+The arm64 build uses QEMU emulation on a single x86 runner, which is slower
+than native arm64 but free on GitHub-hosted `ubuntu-latest`. If build time
+becomes a problem on the public path, switch to a matrix using
+`runs-on: ubuntu-24.04-arm` for native arm64 (also free for public repos).
+
+### 5.1 Authentication
+
+The workflow uses the auto-provisioned `GITHUB_TOKEN` — no manual token setup
+needed. The `permissions: packages: write` block in the workflow grants the
+required scope.
+
+### 5.2 Image visibility — one-time manual step
+
+GHCR creates new container packages as **private** by default. After your
+first publish:
+
+- **Public repos that want a public image** — go to:
+  `https://github.com/users/<owner>/packages/container/<repo>/settings`
+  Scroll to "Danger Zone" → "Change visibility" → Public.
+- **Private repos** — no action needed; private is the right default.
+
+This is a one-time flip; subsequent publishes preserve the visibility you set.
+
+### 5.3 Switching to a different registry
+
+If you want to publish to Docker Hub instead of (or in addition to) GHCR, edit
+the `image` job in `.github/workflows/quality-{{VISIBILITY}}.yml`:
+
+1. Add a `Login to Docker Hub` step with `docker/login-action@v3`, registry
+   `docker.io`, using `secrets.DOCKERHUB_USERNAME` + `secrets.DOCKERHUB_TOKEN`.
+2. Add a Docker Hub image to `docker/metadata-action`'s `images` input
+   (newline-separated):
+   ```yaml
+   images: |
+     ghcr.io/${{ github.repository }}
+     docker.io/<your-user-or-org>/<repo>
+   ```
+3. Add the secrets in repo Settings → Secrets and variables → Actions.
+
+The same `push` and `build-push-action` steps will handle both registries.
+
+---
+
+## 6. First run
 
 1. Commit the bootstrap output: `git add . && git commit -m "Bootstrap quality + security toolchain"`.
 2. Push to a feature branch and open a PR.

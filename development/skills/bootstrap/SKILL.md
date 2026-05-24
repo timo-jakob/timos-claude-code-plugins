@@ -194,7 +194,8 @@ Copy from `templates/public/`:
 - `sonar-project.properties`
 - `.snyk`
 
-Snyk container scanning step is only included if `has_dockerfile=true`.
+The `image` job (build → scan → conditional GHCR push) is only kept if
+`has_dockerfile=true` — see "Container image publishing" below.
 
 ### 3c. Private path (SonarQube + Trivy)
 
@@ -206,7 +207,54 @@ Copy from `templates/private/`:
 - `infra/sonarqube/README.md`
 - `infra/github-runner/README.md`
 
-Trivy image-scanning job is only included if `has_dockerfile=true`.
+The `image` job (build → Trivy scan → conditional GHCR push) is only kept if
+`has_dockerfile=true` — see "Container image publishing" below.
+
+### Container image publishing (both paths, if Dockerfile present)
+
+The generated `image` job follows a single shape regardless of public/private:
+
+| Step | Always | On merge to `main` / release |
+|---|---|---|
+| Build image with Buildx | ✓ | ✓ |
+| Compute tags via `docker/metadata-action` (semver + `sha-<7>` + `latest`) | ✓ | ✓ |
+| Scan (Snyk container on public / Trivy image on private) | ✓ | ✓ |
+| Login to GHCR with `GITHUB_TOKEN` | | ✓ |
+| Push to `ghcr.io/<owner>/<repo>` | | ✓ |
+
+Behaviour summary:
+- Scan **always** runs — even on PRs — so contributors know if their image is
+  broken before merge.
+- Push **only** runs on `push` to the default branch and `release: published`.
+- The same Buildx cache is reused between scan and push, so the second build
+  is fast.
+- **Published images are multi-arch**: `linux/amd64` + `linux/arm64`. The arm64
+  build covers Apple Silicon Macs, AWS Graviton, and other ARM hosts. PR
+  builds stay amd64-only for fast scan feedback.
+- Multi-arch uses QEMU emulation on a single x86 runner (free on
+  `ubuntu-latest`). Documented upgrade path: matrix with native
+  `ubuntu-24.04-arm` runners if QEMU emulation becomes a bottleneck.
+- Image visibility is **inherited from the repo** but requires a one-time
+  manual flip in package settings after first publish (GHCR defaults new
+  packages to private). The generated `SETUP.md` walks the user through this.
+
+### CI trigger surface
+
+All workflows use:
+```yaml
+on:
+  pull_request:    { branches: ["main"], paths-ignore: [docs + license] }
+  push:            { branches: ["main"], paths-ignore: [docs + license] }
+  release:         { types: [published] }   # workflows that produce artifacts
+  workflow_dispatch:
+```
+
+- `pull_request` runs on every PR targeting main — gates merges.
+- `push` runs on main — required for SonarCloud/SonarQube to maintain its
+  "Clean as You Code" baseline.
+- `release: published` runs on tag releases — drives semver image publishing.
+- `workflow_dispatch` enables manual reruns from the GitHub UI.
+- `paths-ignore` skips doc/license-only changes.
 
 ### 3d. Per-language fragments
 

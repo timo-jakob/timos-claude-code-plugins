@@ -1,23 +1,45 @@
 # Quality + security pipeline for PUBLIC repositories.
 # Runs on github-hosted runners. Uses SonarCloud for static analysis +
 # coverage and Snyk for security (code + open source + container).
+#
+# Image publishing: built image is scanned, then pushed to GitHub Container
+# Registry (ghcr.io/<owner>/<repo>) on merge to main + release events. The
+# scan gates the push — a vulnerable image never reaches the registry.
 
 name: Quality (public)
 
 on:
   pull_request:
     branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
   push:
     branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  release:
+    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: write
   security-events: write
+  packages: write          # required for ghcr.io push
 
 concurrency:
   group: quality-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # --- Tests + coverage per language ----------------------------------------
@@ -126,18 +148,91 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-  # --- Snyk: container image (only if Dockerfile exists) --------------------
   # --- DOCKER-START ---------------------------------------------------------
-  snyk-container:
+  # Container image pipeline.
+  #
+  # PRs                     → build linux/amd64 only, scan, no push (fast)
+  # push to main / release  → build linux/amd64 + linux/arm64, scan, push to GHCR
+  #
+  # The multi-arch build uses QEMU emulation on the x86 runner. This is slower
+  # than native arm64 but free on GitHub-hosted ubuntu-latest. If build time
+  # becomes a problem, split into a matrix using native ubuntu-24.04-arm
+  # runners and merge manifests with `docker manifest create`.
+  image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t {{PROJECT_NAME}}:ci .
-      - uses: snyk/actions/setup@master
-      - run: snyk container test {{PROJECT_NAME}}:ci --severity-threshold=high --file=Dockerfile
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      # Single-arch build for scanning. Loading multi-arch images into the
+      # local docker daemon isn't supported, so we keep this step amd64-only
+      # — vulnerability scanners run on dependency manifests + distro
+      # packages, which are arch-invariant at the source level.
+      - name: Build image (amd64 only, for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Pick a tag for scanning
+        id: pick
+        run: |
+          tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Snyk container scan
+        uses: snyk/actions/setup@master
+      - run: |
+          snyk container test "${{ steps.pick.outputs.tag }}" \
+            --severity-threshold=high --file=Dockerfile
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      # Login + multi-arch push, only after scan passes, only on merge-to-main
+      # or release.
+      - name: Login to GHCR
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push multi-arch image
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
   # --- DOCKER-END -----------------------------------------------------------
 
   # --- Semgrep (free OSS rules) ---------------------------------------------
