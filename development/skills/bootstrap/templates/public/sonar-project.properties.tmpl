@@ -1,0 +1,33 @@
+# SonarCloud project configuration.
+# Docs: https://docs.sonarcloud.io/advanced-setup/analysis-parameters/
+
+sonar.organization={{ORG_KEY}}
+sonar.projectKey={{PROJECT_KEY}}
+sonar.projectName={{PROJECT_NAME}}
+
+# Sources / tests — adjust if your layout is non-standard.
+sonar.sources=.
+sonar.exclusions=**/node_modules/**,**/vendor/**,**/dist/**,**/.build/**,**/build/**,**/coverage/**,**/*.generated.*
+sonar.tests=.
+sonar.test.inclusions=**/*.test.*,**/*_test.*,**/test_*.*,**/tests/**,**/__tests__/**,**/*Tests.swift
+
+# Coverage report paths (the bootstrap skill keeps only the ones for detected
+# languages — keep them all if you're multi-language and they happen to all
+# produce reports).
+# --- TYPESCRIPT-START ---
+sonar.javascript.lcov.reportPaths=coverage/lcov.info
+# --- TYPESCRIPT-END -----
+# --- PYTHON-START -------
+sonar.python.coverage.reportPaths=coverage.xml
+# --- PYTHON-END ---------
+# --- GO-START -----------
+sonar.go.coverage.reportPaths=coverage.out
+# --- GO-END -------------
+# --- SWIFT-START --------
+sonar.swift.coverage.reportPaths=coverage.lcov
+# --- SWIFT-END ----------
+
+# SCM
+sonar.scm.provider=git
+
+# Quality gate — assigned in the UI (see SETUP.md), not here.

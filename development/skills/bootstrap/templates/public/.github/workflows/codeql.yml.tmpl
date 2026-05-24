@@ -1,0 +1,48 @@
+# CodeQL — GitHub-native SAST, free for public repos. Acts as a second-opinion
+# SAST alongside Sonar + Snyk Code.
+
+name: CodeQL
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  schedule:
+    - cron: "0 6 * * 1"   # weekly Monday 06:00 UTC — drift detection
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Languages auto-filled by bootstrap. CodeQL supports:
+        # cpp, csharp, go, java, javascript, python, ruby, swift
+        language: [{{CODEQL_LANGUAGES}}]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

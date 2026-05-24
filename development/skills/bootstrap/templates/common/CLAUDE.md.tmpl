@@ -1,0 +1,35 @@
+# Shift-left checks (added by /development:bootstrap)
+
+This repository enforces a Zero Tolerance Quality Gate on new code. To keep the
+loop tight and avoid CI ping-pong, run the same checks **locally during
+implementation** before declaring a task complete.
+
+## After editing code
+
+1. Run the language linter for the file you touched:
+   - Swift: `swiftlint lint --strict`
+   - TypeScript / JavaScript: `npx eslint <path>`
+   - Python: `ruff check <path>` and `ruff format --check <path>`
+   - Go: `golangci-lint run ./...`
+2. Run any tests that exercise the changed code.
+3. If the file is in a security-sensitive area (auth, request handling, file
+   I/O, deserialization), run `semgrep --config=auto` on it.
+
+## Before declaring a task done
+
+1. `pre-commit run --all-files` — must pass.
+2. The full test suite for the changed language must pass with coverage ≥ 90%
+   on the new code.
+3. Surface any Sonar / Snyk / Trivy findings as part of your response — don't
+   wait for CI to surface them.
+4. If you introduced any code smell, bug, vulnerability, or security hotspot —
+   fix it before declaring done. The Quality Gate is 0 tolerance; CI will block
+   the PR anyway.
+
+## What CI runs (so you don't surprise yourself)
+
+- Sonar scanner with the Zero Tolerance Quality Gate.
+- Security scans (Snyk if public repo; Trivy if private).
+- Language-specific tests + coverage report.
+- Semgrep + secret scanning.
+- CodeQL (public repos only).

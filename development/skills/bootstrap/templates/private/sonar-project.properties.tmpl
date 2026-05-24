@@ -1,0 +1,27 @@
+# SonarQube (self-hosted) project configuration.
+# Note: no `sonar.organization` — that's a SonarCloud-only field.
+
+sonar.projectKey={{PROJECT_KEY}}
+sonar.projectName={{PROJECT_NAME}}
+
+sonar.sources=.
+sonar.exclusions=**/node_modules/**,**/vendor/**,**/dist/**,**/.build/**,**/build/**,**/coverage/**,**/*.generated.*
+sonar.tests=.
+sonar.test.inclusions=**/*.test.*,**/*_test.*,**/test_*.*,**/tests/**,**/__tests__/**,**/*Tests.swift
+
+# --- TYPESCRIPT-START ---
+sonar.javascript.lcov.reportPaths=coverage/lcov.info
+# --- TYPESCRIPT-END -----
+# --- PYTHON-START -------
+sonar.python.coverage.reportPaths=coverage.xml
+# --- PYTHON-END ---------
+# --- GO-START -----------
+sonar.go.coverage.reportPaths=coverage.out
+# --- GO-END -------------
+# --- SWIFT-START --------
+sonar.swift.coverage.reportPaths=coverage.lcov
+# --- SWIFT-END ----------
+
+sonar.scm.provider=git
+
+# Quality gate assignment happens via API (see SETUP.md), not here.

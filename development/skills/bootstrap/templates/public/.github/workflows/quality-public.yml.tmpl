@@ -1,0 +1,279 @@
+# Quality + security pipeline for PUBLIC repositories.
+# Runs on github-hosted runners. Uses SonarCloud for static analysis +
+# coverage and Snyk for security (code + open source + container).
+#
+# Image publishing: built image is scanned, then pushed to GitHub Container
+# Registry (ghcr.io/<owner>/<repo>) on merge to main + release events. The
+# scan gates the push — a vulnerable image never reaches the registry.
+
+name: Quality (public)
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  packages: write          # required for ghcr.io push
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # --- Tests + coverage per language ----------------------------------------
+  # The bootstrap skill keeps only the steps matching detected languages.
+
+  test-and-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SonarCloud needs full history for blame
+
+      # --- TYPESCRIPT-START ------------------------------------------------
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install + test (TS/JS)
+        run: |
+          npm ci
+          npm test -- --coverage
+      # --- TYPESCRIPT-END --------------------------------------------------
+
+      # --- PYTHON-START ----------------------------------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install + test (Python)
+        run: |
+          pip install -r requirements.txt || pip install -e ".[dev]"
+          pytest --cov --cov-report=xml --cov-report=term
+      # --- PYTHON-END ------------------------------------------------------
+
+      # --- GO-START --------------------------------------------------------
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: Test (Go)
+        run: |
+          go test ./... -coverprofile=coverage.out -covermode=atomic
+      # --- GO-END ----------------------------------------------------------
+
+      # --- SWIFT-START -----------------------------------------------------
+      # Swift coverage requires macOS runners; if you're building an Apple
+      # platform target, switch `runs-on` to `macos-latest` and use:
+      #   xcodebuild test -enableCodeCoverage YES ...
+      #   xcrun llvm-cov export ... -format=lcov > coverage.lcov
+      - name: Note for Swift
+        if: false  # placeholder — adjust runner + steps for Swift projects
+        run: echo "Configure a macOS job for Swift coverage."
+      # --- SWIFT-END -------------------------------------------------------
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            coverage.out
+            coverage.lcov
+            coverage/lcov.info
+          if-no-files-found: ignore
+
+  # --- SonarCloud -----------------------------------------------------------
+  sonarcloud:
+    needs: test-and-coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports
+          path: .
+        continue-on-error: true
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+
+  # --- Snyk: source code ----------------------------------------------------
+  snyk-code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Snyk Code (SAST)
+        uses: snyk/actions/setup@master
+      - run: snyk code test --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  # --- Snyk: open-source dependencies ---------------------------------------
+  snyk-open-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: snyk/actions/setup@master
+      - run: snyk test --severity-threshold=high --all-projects
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  # --- DOCKER-START ---------------------------------------------------------
+  # Container image pipeline.
+  #
+  # PRs                     → build linux/amd64 only, scan, no push (fast)
+  # push to main / release  → build linux/amd64 + linux/arm64, scan, push to GHCR
+  #
+  # The multi-arch build uses QEMU emulation on the x86 runner. This is slower
+  # than native arm64 but free on GitHub-hosted ubuntu-latest. If build time
+  # becomes a problem, split into a matrix using native ubuntu-24.04-arm
+  # runners and merge manifests with `docker manifest create`.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      # Single-arch build for scanning. Loading multi-arch images into the
+      # local docker daemon isn't supported, so we keep this step amd64-only
+      # — vulnerability scanners run on dependency manifests + distro
+      # packages, which are arch-invariant at the source level.
+      - name: Build image (amd64 only, for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Pick a tag for scanning
+        id: pick
+        run: |
+          tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Snyk container scan
+        uses: snyk/actions/setup@master
+      - run: |
+          snyk container test "${{ steps.pick.outputs.tag }}" \
+            --severity-threshold=high --file=Dockerfile
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      # Login + multi-arch push, only after scan passes, only on merge-to-main
+      # or release.
+      - name: Login to GHCR
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push multi-arch image (with SBOM + provenance)
+        id: build-push
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Attaches a CycloneDX JSON SBOM (generated by Syft via BuildKit)
+          # as an OCI artifact referencing the image manifest. Discoverable
+          # via `docker buildx imagetools inspect <image> --format '{{json .SBOM}}'`.
+          sbom: true
+          # SLSA provenance attestation — records build steps, source repo,
+          # and inputs. Verifiable via cosign / slsa-verifier.
+          provenance: mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Export the SBOM as a CI artifact for human inspection. Uses Syft
+      # directly so the output matches the Buildx attestation byte-for-byte.
+      - name: Export SBOM as CI artifact
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.pick.outputs.tag }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Validate SBOM is well-formed CycloneDX
+        if: github.event_name == 'push' || github.event_name == 'release'
+        run: |
+          docker run --rm -v "$PWD:/work" cyclonedx/cyclonedx-cli:latest \
+            validate --input-file /work/sbom.cdx.json --input-format json --fail-on-errors
+
+      - name: Upload SBOM artifact
+        if: github.event_name == 'push' || github.event_name == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx-${{ github.sha }}
+          path: sbom.cdx.json
+          retention-days: 90
+  # --- DOCKER-END -----------------------------------------------------------
+
+  # --- Semgrep (free OSS rules) ---------------------------------------------
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep ci --config=auto
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional

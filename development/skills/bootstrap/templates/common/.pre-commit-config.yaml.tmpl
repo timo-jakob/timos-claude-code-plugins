@@ -1,0 +1,88 @@
+# Pre-commit hooks — run locally before each commit to enforce shift-left.
+# Install with: pip install pre-commit && pre-commit install
+# Run on all files: pre-commit run --all-files
+#
+# Language-specific blocks below are gated by the bootstrap skill — only the
+# blocks matching {{LANGUAGES}} are kept; the rest are stripped.
+
+repos:
+  # --- universal hooks -------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # --- secret scanning -------------------------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # --- static analysis (cross-language) --------------------------------------
+  - repo: https://github.com/returntocorp/semgrep
+    rev: v1.91.0
+    hooks:
+      - id: semgrep
+        args: ["--config=auto", "--error", "--quiet"]
+
+  # --- TYPESCRIPT-START ------------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.13.0
+    hooks:
+      - id: eslint
+        args: ["--max-warnings=0"]
+        files: \.(js|jsx|ts|tsx)$
+        additional_dependencies:
+          - eslint@9.13.0
+          - "@typescript-eslint/parser@8.12.2"
+          - "@typescript-eslint/eslint-plugin@8.12.2"
+  # --- TYPESCRIPT-END --------------------------------------------------------
+
+  # --- PYTHON-START ----------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.2
+    hooks:
+      - id: ruff
+        args: ["--fix", "--exit-non-zero-on-fix"]
+      - id: ruff-format
+  # --- PYTHON-END ------------------------------------------------------------
+
+  # --- GO-START --------------------------------------------------------------
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.61.0
+    hooks:
+      - id: golangci-lint
+  # --- GO-END ----------------------------------------------------------------
+
+  # --- SWIFT-START -----------------------------------------------------------
+  # SwiftLint is invoked via local hook because the official mirror is sparsely
+  # maintained. Install: brew install swiftlint.
+  - repo: local
+    hooks:
+      - id: swiftlint
+        name: SwiftLint
+        entry: swiftlint lint --strict --quiet
+        language: system
+        files: \.swift$
+  # --- SWIFT-END -------------------------------------------------------------
+
+  # --- PRIVATE-START ---------------------------------------------------------
+  # Trivy filesystem scan — kept private-only because public repos run Snyk in
+  # CI, and Snyk locally requires authentication. Trivy is unauthenticated and
+  # fast enough to gate pre-commit on. Install: brew install trivy.
+  - repo: local
+    hooks:
+      - id: trivy-fs
+        name: Trivy filesystem scan
+        entry: trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --quiet .
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+  # --- PRIVATE-END -----------------------------------------------------------

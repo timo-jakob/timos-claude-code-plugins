@@ -1,0 +1,11 @@
+# TypeScript / Node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.npm
+.eslintcache
+coverage/
+.nyc_output/
+.env
+.env.local

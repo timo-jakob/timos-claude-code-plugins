@@ -1,0 +1,54 @@
+# Dependabot config — automated dependency updates.
+# Ecosystem entries below are added by the bootstrap skill based on detected
+# languages. github-actions is always included.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # --- TYPESCRIPT-START ------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+  # --- TYPESCRIPT-END --------------------------------------------------------
+
+  # --- PYTHON-START ----------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-minor-patch:
+        update-types: ["minor", "patch"]
+  # --- PYTHON-END ------------------------------------------------------------
+
+  # --- GO-START --------------------------------------------------------------
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      gomod-minor-patch:
+        update-types: ["minor", "patch"]
+  # --- GO-END ----------------------------------------------------------------
+
+  # --- SWIFT-START -----------------------------------------------------------
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      swift-minor-patch:
+        update-types: ["minor", "patch"]
+  # --- SWIFT-END -------------------------------------------------------------
