@@ -1,20 +1,28 @@
-# golangci-lint config.
+# golangci-lint v2 config.
 # Docs: https://golangci-lint.run/usage/configuration/
+# Migration guide (v1 → v2): https://golangci-lint.run/docs/product/migration-guide/
+#
+# Key v2 changes from v1:
+#   - linters.disable-all: true → linters.default: none
+#   - gosimple + stylecheck merged into staticcheck; remove from enable
+#   - typecheck is always on; remove from enable
+#   - linters-settings → linters.settings (nested)
+#   - issues.exclude-rules → linters.exclusions.rules (nested)
+#   - run.timeout removed (no timeout by default in v2)
+
+version: "2"
 
 run:
-  timeout: 5m
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - govet
     - errcheck
     - staticcheck
     - unused
-    - gosimple
     - ineffassign
-    - typecheck
     - gosec
     - revive
     - gocritic
@@ -23,19 +31,19 @@ linters:
     - bodyclose
     - nilerr
 
-linters-settings:
-  gosec:
-    excludes:
-      - G104   # unhandled errors — errcheck covers this with more nuance
-  revive:
-    rules:
-      - name: exported
-      - name: error-return
-      - name: error-naming
+  settings:
+    gosec:
+      excludes:
+        - G104   # unhandled errors — errcheck covers this with more nuance
+    revive:
+      rules:
+        - name: exported
+        - name: error-return
+        - name: error-naming
 
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
