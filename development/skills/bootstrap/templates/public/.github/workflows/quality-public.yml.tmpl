@@ -1,0 +1,152 @@
+# Quality + security pipeline for PUBLIC repositories.
+# Runs on github-hosted runners. Uses SonarCloud for static analysis +
+# coverage and Snyk for security (code + open source + container).
+
+name: Quality (public)
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --- Tests + coverage per language ----------------------------------------
+  # The bootstrap skill keeps only the steps matching detected languages.
+
+  test-and-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SonarCloud needs full history for blame
+
+      # --- TYPESCRIPT-START ------------------------------------------------
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install + test (TS/JS)
+        run: |
+          npm ci
+          npm test -- --coverage
+      # --- TYPESCRIPT-END --------------------------------------------------
+
+      # --- PYTHON-START ----------------------------------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install + test (Python)
+        run: |
+          pip install -r requirements.txt || pip install -e ".[dev]"
+          pytest --cov --cov-report=xml --cov-report=term
+      # --- PYTHON-END ------------------------------------------------------
+
+      # --- GO-START --------------------------------------------------------
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: Test (Go)
+        run: |
+          go test ./... -coverprofile=coverage.out -covermode=atomic
+      # --- GO-END ----------------------------------------------------------
+
+      # --- SWIFT-START -----------------------------------------------------
+      # Swift coverage requires macOS runners; if you're building an Apple
+      # platform target, switch `runs-on` to `macos-latest` and use:
+      #   xcodebuild test -enableCodeCoverage YES ...
+      #   xcrun llvm-cov export ... -format=lcov > coverage.lcov
+      - name: Note for Swift
+        if: false  # placeholder — adjust runner + steps for Swift projects
+        run: echo "Configure a macOS job for Swift coverage."
+      # --- SWIFT-END -------------------------------------------------------
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            coverage.out
+            coverage.lcov
+            coverage/lcov.info
+          if-no-files-found: ignore
+
+  # --- SonarCloud -----------------------------------------------------------
+  sonarcloud:
+    needs: test-and-coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports
+          path: .
+        continue-on-error: true
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+
+  # --- Snyk: source code ----------------------------------------------------
+  snyk-code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Snyk Code (SAST)
+        uses: snyk/actions/setup@master
+      - run: snyk code test --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  # --- Snyk: open-source dependencies ---------------------------------------
+  snyk-open-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: snyk/actions/setup@master
+      - run: snyk test --severity-threshold=high --all-projects
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  # --- Snyk: container image (only if Dockerfile exists) --------------------
+  # --- DOCKER-START ---------------------------------------------------------
+  snyk-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t {{PROJECT_NAME}}:ci .
+      - uses: snyk/actions/setup@master
+      - run: snyk container test {{PROJECT_NAME}}:ci --severity-threshold=high --file=Dockerfile
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+  # --- DOCKER-END -----------------------------------------------------------
+
+  # --- Semgrep (free OSS rules) ---------------------------------------------
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep ci --config=auto
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional

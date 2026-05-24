@@ -1,0 +1,15 @@
+# Swift
+.build/
+.swiftpm/
+DerivedData/
+Pods/
+*.xcuserdatad/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+xcuserdata/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Package.resolved
+coverage.lcov

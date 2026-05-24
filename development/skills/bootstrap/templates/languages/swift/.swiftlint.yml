@@ -1,0 +1,40 @@
+# SwiftLint config.
+# Docs: https://realm.github.io/SwiftLint/
+
+excluded:
+  - .build
+  - DerivedData
+  - Pods
+  - .swiftpm
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - explicit_init
+  - first_where
+  - last_where
+  - literal_expression_end_indentation
+  - operator_usage_whitespace
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - sorted_imports
+  - toggle_bool
+  - unused_import
+  - vertical_parameter_alignment_on_call
+
+disabled_rules:
+  - todo   # we track TODOs through tickets, not lint
+
+line_length:
+  warning: 120
+  error: 200
+
+function_body_length:
+  warning: 50
+  error: 100
+
+cyclomatic_complexity:
+  warning: 10
+  error: 20
+
+reporter: "xcode"

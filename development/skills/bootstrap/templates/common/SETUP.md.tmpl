@@ -1,0 +1,248 @@
+# Setup — manual steps after `/development:bootstrap`
+
+The bootstrap skill wrote the config files and workflows. Some setup steps
+require human action — account creation, token storage, runner registration —
+and are listed below.
+
+> Sections marked **PUBLIC** apply only to public repositories using SonarCloud
+> + Snyk. Sections marked **PRIVATE** apply only to private repositories using
+> self-hosted SonarQube + Trivy. Sections without a label apply to both.
+
+> 🤖 **macOS users**: most of these steps can be automated. The bootstrap skill
+> offers to run `scripts/automate-public.sh` or `scripts/automate-private.sh`
+> after generating files. The manual instructions below remain useful as a
+> reference for what the automation does, and as a fallback for non-macOS
+> hosts or non-Homebrew workflows.
+
+---
+
+## 1. Install local toolchain
+
+```sh
+# pre-commit framework
+pip install pre-commit
+# or
+brew install pre-commit
+
+pre-commit install
+pre-commit run --all-files   # initial run, may take a minute
+```
+
+Language-specific tools — install only what you use:
+
+| Language | Tools |
+|---|---|
+| Swift | `brew install swiftlint swiftformat` |
+| TypeScript / JavaScript | Tools come from `package.json`; run `npm install` |
+| Python | `pip install ruff pytest coverage` (or use `uv` / `poetry`) |
+| Go | `brew install golangci-lint` |
+
+Cross-language:
+
+```sh
+brew install gitleaks
+brew install semgrep         # or: pip install semgrep
+brew install trivy           # PRIVATE only — for local container scanning
+```
+
+---
+
+## 2. **PUBLIC** — SonarCloud setup
+
+> 🤖 **Automated alternative**: `scripts/automate-public.sh` handles everything
+> in section 2 except the one-time SonarCloud sign-in (browser OAuth) and
+> pasting the user token. Run it after `preflight.sh` confirms your toolchain.
+
+### 2.1 Create the project
+
+1. Sign in to [sonarcloud.io](https://sonarcloud.io) with your GitHub account.
+2. Click **Analyze new project** → select this repository.
+3. Choose **With GitHub Actions** as the analysis method.
+4. Copy the `SONAR_TOKEN` shown — you'll only see it once.
+
+### 2.2 Add secrets to GitHub
+
+In repo Settings → Secrets and variables → Actions → New repository secret:
+
+| Name | Value |
+|---|---|
+| `SONAR_TOKEN` | from step 2.1 |
+
+### 2.3 Create the Zero Tolerance Quality Gate
+
+```sh
+# Set these once for the snippet below:
+export SONAR_TOKEN=<the token from 2.1>
+export SONAR_HOST=https://sonarcloud.io
+export ORG_KEY={{ORG_KEY}}
+export PROJECT_KEY={{PROJECT_KEY}}
+
+# Create the gate
+GATE_ID=$(curl -sS -u "$SONAR_TOKEN:" -X POST \
+  "$SONAR_HOST/api/qualitygates/create?name=Zero%20Tolerance&organization=$ORG_KEY" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+
+# Helper to add a condition
+add() {
+  curl -sS -u "$SONAR_TOKEN:" -X POST \
+    "$SONAR_HOST/api/qualitygates/create_condition" \
+    --data-urlencode "gateId=$GATE_ID" \
+    --data-urlencode "organization=$ORG_KEY" \
+    --data-urlencode "metric=$1" \
+    --data-urlencode "op=$2" \
+    --data-urlencode "error=$3" > /dev/null
+  echo "  + $1 $2 $3"
+}
+
+add new_coverage              LT  90
+add new_code_smells           GT  0
+add new_bugs                  GT  0
+add new_vulnerabilities       GT  0
+add new_security_hotspots_reviewed LT 100
+add new_reliability_rating    GT  1   # 1 = A
+add new_security_rating       GT  1
+add new_maintainability_rating GT 1
+add new_security_review_rating GT  1
+add new_duplicated_lines_density GT 3
+
+# Assign the gate to this project
+curl -sS -u "$SONAR_TOKEN:" -X POST \
+  "$SONAR_HOST/api/qualitygates/select" \
+  --data-urlencode "gateName=Zero Tolerance" \
+  --data-urlencode "projectKey=$PROJECT_KEY" \
+  --data-urlencode "organization=$ORG_KEY"
+```
+
+Verify in the SonarCloud UI: **Quality Gates** → "Zero Tolerance" → it should
+show the 10 conditions above. The project should now show this gate.
+
+### 2.4 Sign up for Snyk
+
+1. Go to [snyk.io](https://snyk.io), sign in with GitHub.
+2. Account Settings → Auth Token → copy.
+3. Add as repo secret `SNYK_TOKEN`.
+4. (Optional) Import the repo in Snyk's UI to enable PR comments.
+
+---
+
+## 3. **PRIVATE** — SonarQube + Trivy setup
+
+> 🤖 **Automated alternative**: `scripts/automate-private.sh` does all of
+> section 3 — starts SonarQube, generates and stores the admin password in the
+> macOS Keychain, creates the project + Quality Gate, mints the analysis token,
+> sets GitHub secrets, and registers the self-hosted runner as a launchd
+> service. Run it after `preflight.sh` confirms your toolchain.
+
+### 3.1 Start SonarQube (self-hosted)
+
+```sh
+cd infra/sonarqube
+docker compose up -d
+```
+
+Wait ~30 seconds, then open <http://localhost:9000>.
+
+Default login: `admin` / `admin`. SonarQube will force a password change on
+first login — pick something strong and store it somewhere safe.
+
+### 3.2 Create the project and mint a token
+
+In SonarQube UI:
+1. **Create project** → manual → key: `{{PROJECT_KEY}}` → name: `{{PROJECT_NAME}}`.
+2. Choose **With GitHub Actions** as the analysis method.
+3. Generate a **Project Analysis Token** — copy it. This is your `SONAR_TOKEN`.
+
+### 3.3 Register a self-hosted runner
+
+> Self-hosted runners may **only** be used on **private** repositories. Public
+> repos are not safe for self-hosted runners (forks can run arbitrary code).
+
+See `infra/github-runner/README.md` for full instructions. Summary:
+
+1. In GitHub: repo Settings → Actions → Runners → New self-hosted runner.
+2. Follow the copy-pasted commands on the host running SonarQube.
+3. Run `./svc.sh install && ./svc.sh start` so it runs as a service.
+4. Confirm the runner shows as "Idle" in GitHub Settings → Actions → Runners.
+
+### 3.4 Add GitHub Actions secrets
+
+In repo Settings → Secrets and variables → Actions → New repository secret:
+
+| Name | Value |
+|---|---|
+| `SONAR_TOKEN` | from step 3.2 |
+| `SONAR_HOST_URL` | URL reachable from the runner host (e.g., `http://localhost:9000` if the runner is on the same machine) |
+
+### 3.5 Create the Zero Tolerance Quality Gate
+
+The API is the same as SonarCloud but without `organization`:
+
+```sh
+export SONAR_TOKEN=<token from 3.2>
+export SONAR_HOST=http://localhost:9000
+export PROJECT_KEY={{PROJECT_KEY}}
+
+GATE_ID=$(curl -sS -u "$SONAR_TOKEN:" -X POST \
+  "$SONAR_HOST/api/qualitygates/create?name=Zero%20Tolerance" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+
+add() {
+  curl -sS -u "$SONAR_TOKEN:" -X POST \
+    "$SONAR_HOST/api/qualitygates/create_condition" \
+    --data-urlencode "gateId=$GATE_ID" \
+    --data-urlencode "metric=$1" \
+    --data-urlencode "op=$2" \
+    --data-urlencode "error=$3" > /dev/null
+  echo "  + $1 $2 $3"
+}
+
+add new_coverage              LT  90
+add new_code_smells           GT  0
+add new_bugs                  GT  0
+add new_vulnerabilities       GT  0
+add new_security_hotspots_reviewed LT 100
+add new_reliability_rating    GT  1
+add new_security_rating       GT  1
+add new_maintainability_rating GT 1
+add new_security_review_rating GT  1
+add new_duplicated_lines_density GT 3
+
+curl -sS -u "$SONAR_TOKEN:" -X POST \
+  "$SONAR_HOST/api/qualitygates/select" \
+  --data-urlencode "gateName=Zero Tolerance" \
+  --data-urlencode "projectKey=$PROJECT_KEY"
+```
+
+---
+
+## 4. GitHub branch protection on `{{DEFAULT_BRANCH}}`
+
+> 🤖 **Automated alternative**: `scripts/branch-protection.sh` applies the rules
+> below in one call. The automation scripts above invoke it automatically;
+> you can also run it standalone.
+
+The bootstrap skill offers to apply these automatically via `gh api`. If you
+want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_BRANCH}}`:
+
+- [x] Require a pull request before merging (1 approval, dismiss stale reviews)
+- [x] Require status checks to pass before merging
+  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `snyk-container` (if Docker), `semgrep`, `codeql`, `test-and-coverage`
+  - **PRIVATE**: `sonarqube`, `trivy-fs`, `trivy-image` (if Docker), `semgrep`, `test-and-coverage`
+- [x] Require branches to be up to date before merging
+- [x] Require linear history
+- [x] Do not allow bypassing the above settings
+- [x] Restrict pushes that create matching branches → no one
+- [x] Block force pushes
+- [x] Block deletions
+
+---
+
+## 5. First run
+
+1. Commit the bootstrap output: `git add . && git commit -m "Bootstrap quality + security toolchain"`.
+2. Push to a feature branch and open a PR.
+3. Watch CI — all checks should run. The first run takes longer (SonarCloud/Sonar
+   needs to index the project; Snyk pulls dep graphs).
+4. If anything fails, fix it locally — `pre-commit run --all-files` reproduces
+   most of the checks, and the agent guidance in `CLAUDE.md` keeps Claude Code
+   honest while you work.

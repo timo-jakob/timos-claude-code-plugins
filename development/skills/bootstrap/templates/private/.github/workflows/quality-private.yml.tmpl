@@ -1,0 +1,134 @@
+# Quality + security pipeline for PRIVATE repositories.
+# Runs on a self-hosted runner that can reach the local SonarQube instance.
+# Uses SonarQube CE for static analysis + coverage and Trivy for security
+# (filesystem deps + container image).
+
+name: Quality (private)
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-coverage:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # --- TYPESCRIPT-START ------------------------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: |
+          npm ci
+          npm test -- --coverage
+      # --- TYPESCRIPT-END --------------------------------------------------
+
+      # --- PYTHON-START ----------------------------------------------------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: |
+          pip install -r requirements.txt || pip install -e ".[dev]"
+          pytest --cov --cov-report=xml --cov-report=term
+      # --- PYTHON-END ------------------------------------------------------
+
+      # --- GO-START --------------------------------------------------------
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - run: go test ./... -coverprofile=coverage.out -covermode=atomic
+      # --- GO-END ----------------------------------------------------------
+
+      # --- SWIFT-START -----------------------------------------------------
+      # Switch this job's runner to a macOS self-hosted runner for Swift.
+      - if: false   # placeholder for Swift projects
+        run: echo "Configure macOS self-hosted runner + xcodebuild test for Swift."
+      # --- SWIFT-END -------------------------------------------------------
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            coverage.out
+            coverage.lcov
+            coverage/lcov.info
+          if-no-files-found: ignore
+
+  sonarqube:
+    needs: test-and-coverage
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports
+          path: .
+        continue-on-error: true
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.
+  trivy-fs:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          ignore-unfixed: false
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
+
+  # --- DOCKER-START ---------------------------------------------------------
+  trivy-image:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t {{PROJECT_NAME}}:ci .
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "image"
+          image-ref: "{{PROJECT_NAME}}:ci"
+          ignore-unfixed: false
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
+  # --- DOCKER-END -----------------------------------------------------------
+
+  semgrep:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if ! command -v semgrep >/dev/null; then
+            pip install --user semgrep
+            export PATH="$HOME/.local/bin:$PATH"
+          fi
+          semgrep ci --config=auto

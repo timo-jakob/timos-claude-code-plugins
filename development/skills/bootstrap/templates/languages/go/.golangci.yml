@@ -1,0 +1,41 @@
+# golangci-lint config.
+# Docs: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - gosec
+    - revive
+    - gocritic
+    - unconvert
+    - misspell
+    - bodyclose
+    - nilerr
+
+linters-settings:
+  gosec:
+    excludes:
+      - G104   # unhandled errors — errcheck covers this with more nuance
+  revive:
+    rules:
+      - name: exported
+      - name: error-return
+      - name: error-naming
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
