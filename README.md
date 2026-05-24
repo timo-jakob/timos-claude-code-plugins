@@ -97,6 +97,14 @@ Then use the slash commands:
 /dev-swift:review Sources/       # review a specific directory
 ```
 
+## Maintaining this repo
+
+The bootstrap skill pins versions inside `.tmpl` files (GitHub Actions
+versions, pre-commit hook revs, Docker image tags, language runtime
+versions). Standard Dependabot can't update those — see
+[MAINTAINING.md](./MAINTAINING.md) for the quarterly refresh checklist
+that keeps the templates current. ~20 minutes per quarter.
+
 ## License
 
 MIT
