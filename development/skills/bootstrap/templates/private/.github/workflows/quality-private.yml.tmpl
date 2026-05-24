@@ -26,6 +26,10 @@ on:
       - "docs/**"
   release:
     types: [published]
+  schedule:
+    # Weekly Monday 06:00 UTC — drift detection against newly-disclosed CVEs
+    # and updated license categorizations.
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -300,3 +304,17 @@ jobs:
             export PATH="$HOME/.local/bin:$PATH"
           fi
           semgrep ci --config=auto
+
+  # --- Pre-commit (CI backstop) ---------------------------------------------
+  # Catches contributors who bypassed local hooks with `git commit
+  # --no-verify`. Runs the exact same hooks as locally.
+  pre-commit:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # some hooks (gitleaks) want history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pre-commit/action@v3.0.1
