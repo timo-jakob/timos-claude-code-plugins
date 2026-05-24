@@ -6,7 +6,8 @@
 #   branch-protection.sh --visibility public|private \
 #                        --has-dockerfile true|false \
 #                        --has-codeql true|false \
-#                        --default-branch main
+#                        --default-branch main \
+#                        [--require-signed-commits true|false]
 #
 # Requires: gh CLI authenticated, repository admin permission. On 403 the
 # script falls back to printing manual instructions.
@@ -21,14 +22,16 @@ VISIBILITY=""
 HAS_DOCKERFILE="false"
 HAS_CODEQL="false"
 DEFAULT_BRANCH="main"
+REQUIRE_SIGNED_COMMITS="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --visibility)     VISIBILITY="$2"; shift 2 ;;
-    --has-dockerfile) HAS_DOCKERFILE="$2"; shift 2 ;;
-    --has-codeql)     HAS_CODEQL="$2"; shift 2 ;;
-    --default-branch) DEFAULT_BRANCH="$2"; shift 2 ;;
-    *)                die "Unknown argument: $1" ;;
+    --visibility)              VISIBILITY="$2"; shift 2 ;;
+    --has-dockerfile)          HAS_DOCKERFILE="$2"; shift 2 ;;
+    --has-codeql)              HAS_CODEQL="$2"; shift 2 ;;
+    --default-branch)          DEFAULT_BRANCH="$2"; shift 2 ;;
+    --require-signed-commits)  REQUIRE_SIGNED_COMMITS="$2"; shift 2 ;;
+    *)                         die "Unknown argument: $1" ;;
   esac
 done
 
@@ -106,6 +109,7 @@ $(printf '  • %s\n' "${checks[@]}")
 Plus: require PR before merging, require linear history, block force pushes,
 block deletions. See SETUP.md for the full list.
 EOF
+    rm -f "$http_body"
     exit 0   # not a hard failure — user can do it by hand
     ;;
   *)
@@ -117,3 +121,32 @@ EOF
 esac
 
 rm -f "$http_body"
+
+# --- required_signatures (separate endpoint) ---------------------------------
+# GitHub's main protection PUT doesn't include the signature requirement; it
+# lives on its own endpoint. POST to enable, DELETE to disable. We call the
+# matching verb either way so re-runs leave the rule in the requested state.
+if [[ "$REQUIRE_SIGNED_COMMITS" == "true" ]]; then
+  info "Enabling required_signatures on $REPO@$DEFAULT_BRANCH"
+  sig_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: token $(gh auth token)" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -X POST \
+    "https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures")
+  case "$sig_status" in
+    200|201) ok "Signed commits required on $DEFAULT_BRANCH" ;;
+    403)     warn "Could not enable required_signatures (403 — admin needed). Enable manually: Settings → Branches → Edit rule → 'Require signed commits'." ;;
+    *)       warn "required_signatures returned HTTP $sig_status — check Settings → Branches manually." ;;
+  esac
+  warn "Every contributor must register a GPG or SSH signing key in their GitHub account before they can push to $DEFAULT_BRANCH. See SETUP.md."
+else
+  # Disable explicitly so re-runs without the flag clear any previously-set
+  # requirement. 404 is fine (means it was already off).
+  curl -sS -o /dev/null \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: token $(gh auth token)" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -X DELETE \
+    "https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures" || true
+fi
