@@ -223,6 +223,7 @@ Copy from `templates/common/`:
 - `CLAUDE.md` (shift-left agent guidance — append a section if one already exists)
 - `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore`)
 - `LICENSE` — only if missing, ask which license (default MIT)
+- `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 
 ### 3b. Public path (SonarCloud + Snyk)
 
@@ -240,10 +241,12 @@ The `image` job (build → scan → conditional GHCR push) is only kept if
 Copy from `templates/private/`:
 - `.github/workflows/quality-private.yml` (runs on `self-hosted`)
 - `sonar-project.properties`
-- `trivy.yaml`
 - `infra/sonarqube/docker-compose.yml`
 - `infra/sonarqube/README.md`
 - `infra/github-runner/README.md`
+
+(`trivy.yaml` is now common — see 3a — because both paths run Trivy for
+license scanning.)
 
 The `image` job (build → Trivy scan → conditional GHCR push) is only kept if
 `has_dockerfile=true` — see "Container image publishing" below.

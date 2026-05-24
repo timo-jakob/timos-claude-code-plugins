@@ -113,6 +113,8 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
   # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.
+  # Scoped to vuln/secret/misconfig only; license scanning is a separate job
+  # for clearer triage (was this PR blocked by a CVE or by a license?).
   trivy-fs:
     runs-on: self-hosted
     steps:
@@ -121,7 +123,24 @@ jobs:
         with:
           scan-type: "fs"
           scan-ref: "."
+          scanners: "vuln,secret,misconfig"
           ignore-unfixed: false
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
+
+  # License compliance on dependencies — separate job so license failures
+  # don't get conflated with vulnerability failures.
+  license-fs:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "license"
           severity: "CRITICAL,HIGH"
           exit-code: "1"
           format: "table"
@@ -180,12 +199,26 @@ jobs:
           tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Trivy image scan
+      - name: Trivy image vulnerability scan
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: "image"
           image-ref: ${{ steps.pick.outputs.tag }}
+          scanners: "vuln,secret,misconfig"
           ignore-unfixed: false
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
+
+      # License compliance on the built image — catches licenses introduced
+      # via base-image layers that the filesystem scan would miss.
+      - name: Trivy image license scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "image"
+          image-ref: ${{ steps.pick.outputs.tag }}
+          scanners: "license"
           severity: "CRITICAL,HIGH"
           exit-code: "1"
           format: "table"

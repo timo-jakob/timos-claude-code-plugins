@@ -215,6 +215,37 @@ curl -sS -u "$SONAR_TOKEN:" -X POST \
 
 ---
 
+## 3b. License compliance policy
+
+The `license-fs` and (if you have a Dockerfile) `license-image` jobs run
+Trivy in license-only mode and gate merges on the same `CRITICAL,HIGH`
+severity bar as vulnerability scanning. Trivy classifies licenses into
+categories with an assigned severity:
+
+| Category | Examples | Default severity | Default CI behaviour |
+|---|---|---|---|
+| Forbidden | AGPL-1.0/3.0, SSPL-1.0 | **HIGH** | **Blocks merge** |
+| Restricted | GPL-2.0, GPL-3.0, LGPL-2.1, LGPL-3.0 | MEDIUM | Reported, does not block |
+| Reciprocal | MPL-2.0, EPL-2.0 | LOW | Reported, does not block |
+| Notice / Permissive | Apache-2.0, MIT, BSD, ISC | LOW | Reported, does not block |
+| Unknown | unrecognized | UNKNOWN | Reported, does not block |
+
+This is the **default policy**. If your project license requires stricter
+rules (e.g., an Apache-2.0 codebase can't include GPL deps), customize
+`trivy.yaml` — there's a commented `license:` block showing how to move
+specific licenses into `forbidden:` so they fail CI.
+
+A note on **your project's own license** vs **your dependencies' licenses**:
+the gates above check what comes *in* — they don't validate that your
+chosen LICENSE file is compatible with your deps' licenses. That's a
+human/legal judgment. Common pairings:
+
+- **MIT / Apache-2.0 / BSD project** → use any permissive dep; avoid GPL/AGPL deps.
+- **GPL-licensed project** → can use permissive AND GPL deps; cannot use AGPL deps unless you're prepared to be AGPL.
+- **Proprietary / private project** → typically forbids GPL, LGPL, and AGPL deps. Tighten Trivy's `forbidden:` list to enforce.
+
+---
+
 ## 4. GitHub branch protection on `{{DEFAULT_BRANCH}}`
 
 > 🤖 **Automated alternative**: `scripts/branch-protection.sh` applies the rules
@@ -226,8 +257,8 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
 
 - [x] Require a pull request before merging (1 approval, dismiss stale reviews)
 - [x] Require status checks to pass before merging
-  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `image` (if Docker), `semgrep`, `analyze` (CodeQL), `test-and-coverage`
-  - **PRIVATE**: `sonarqube`, `trivy-fs`, `image` (if Docker), `semgrep`, `test-and-coverage`
+  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `license-fs`, `image` (if Docker), `semgrep`, `analyze` (CodeQL), `test-and-coverage`
+  - **PRIVATE**: `sonarqube`, `trivy-fs`, `license-fs`, `image` (if Docker), `semgrep`, `test-and-coverage`
 - [x] Require branches to be up to date before merging
 - [x] Require linear history
 - [x] Do not allow bypassing the above settings

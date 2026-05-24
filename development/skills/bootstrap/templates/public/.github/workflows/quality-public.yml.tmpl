@@ -149,6 +149,24 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
+  # --- License compliance (dependencies) ------------------------------------
+  # Uses Trivy as an open-source license scanner. Catches deps shipping
+  # incompatible licenses (AGPL/SSPL → HIGH severity, blocks CI by default).
+  # Policy customizable via trivy.yaml.
+  license-fs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "license"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
+
   # --- DOCKER-START ---------------------------------------------------------
   # Container image pipeline.
   #
@@ -212,6 +230,19 @@ jobs:
             --severity-threshold=high --file=Dockerfile
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      # License compliance on the built image — catches licenses introduced
+      # via base-image layers that the filesystem scan would miss.
+      - name: Trivy license scan (image)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "image"
+          image-ref: ${{ steps.pick.outputs.tag }}
+          scanners: "license"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
 
       # Login + multi-arch push, only after scan passes, only on merge-to-main
       # or release.
