@@ -253,6 +253,7 @@ Copy from `templates/common/`:
 Copy from `templates/public/`:
 - `.github/workflows/quality-public.yml`
 - `.github/workflows/codeql.yml`
+- `.github/workflows/scorecard.yml` (OpenSSF Scorecard — weekly supply-chain health check; public-only because the score is publicly visible)
 - `sonar-project.properties`
 - `.snyk`
 
