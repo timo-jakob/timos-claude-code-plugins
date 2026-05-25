@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+# gather-python-findings.sh — produces the per-tool maintenance payload for
+# a Python project: which tools are configured, the findings they report,
+# and per-module coverage.
+#
+# Usage:
+#   gather-python-findings.sh <repo_path>
+#
+# Output (stdout, JSON):
+#   {
+#     "tooling_configured": {
+#       "ruff":       true|false,
+#       "semgrep":    true|false,
+#       "snyk_code":  true|false,
+#       "snyk_oss":   true|false,
+#       "sonarcloud": true|false,
+#       "dependabot": true|false
+#     },
+#     "findings_by_tool": {
+#       "ruff":       [ ... or omitted if not configured ... ],
+#       ...
+#     },
+#     "coverage": {
+#       "overall": 0..100|null,
+#       "by_module": { "src/x.py": 92, ... }
+#     }
+#   }
+#
+# Failure modes are graceful: a configured tool that can't run (auth missing,
+# command not in PATH, etc.) is reported as configured-but-no-findings with a
+# `notes` field at the bottom of the JSON explaining why. The orchestrator
+# surfaces these notes to the user.
+
+set -euo pipefail
+
+repo="${1:-}"
+[[ -n "$repo" && -d "$repo" ]] || { echo "usage: $0 <repo_path>" >&2; exit 2; }
+
+cd "$repo"
+
+notes=()
+
+# --- tooling_configured ------------------------------------------------------
+has_ruff_config="false"
+if [[ -f "ruff.toml" ]] || grep -q '^\[tool\.ruff' pyproject.toml 2>/dev/null; then
+  has_ruff_config="true"
+fi
+
+has_semgrep_config="false"
+if grep -qE 'returntocorp/semgrep|semgrep/semgrep' .pre-commit-config.yaml 2>/dev/null \
+   || grep -qE 'semgrep ci|returntocorp/semgrep' .github/workflows/*.yml 2>/dev/null; then
+  has_semgrep_config="true"
+fi
+
+has_snyk_config="false"
+if [[ -f ".snyk" ]] || grep -qE 'snyk/actions|snyk\s+(code|test|container)' .github/workflows/*.yml 2>/dev/null; then
+  has_snyk_config="true"
+fi
+
+has_sonar_config="false"
+if [[ -f "sonar-project.properties" ]]; then
+  has_sonar_config="true"
+fi
+
+has_dependabot_config="false"
+if [[ -f ".github/dependabot.yml" ]]; then
+  has_dependabot_config="true"
+fi
+
+# --- findings_by_tool --------------------------------------------------------
+# Each block writes JSON to a temp file, or "[]" if the tool can't produce
+# anything. We compose the final structure at the end via jq.
+findings_dir="$(mktemp -d)"
+trap 'rm -rf "$findings_dir"' EXIT
+
+# ruff — `ruff check --output-format=json`. Capture exit code separately
+# because ruff exits non-zero when it finds violations (which is the whole
+# point), and we don't want that to abort the script.
+if [[ "$has_ruff_config" == "true" ]]; then
+  if command -v ruff >/dev/null 2>&1; then
+    ruff check --output-format=json . > "$findings_dir/ruff.json" 2>/dev/null || true
+    # If ruff produced nothing (failure or no issues), default to []
+    [[ -s "$findings_dir/ruff.json" ]] || echo "[]" > "$findings_dir/ruff.json"
+  else
+    echo "[]" > "$findings_dir/ruff.json"
+    notes+=("ruff is configured (config file present) but the 'ruff' binary is not on PATH; install with 'brew install ruff' or 'pip install ruff'.")
+  fi
+fi
+
+# semgrep — local run can be slow; we run with --error so it exits non-zero
+# on findings, and capture JSON via --json.
+if [[ "$has_semgrep_config" == "true" ]]; then
+  if command -v semgrep >/dev/null 2>&1; then
+    semgrep --config=auto --json --quiet --error --metrics=off . \
+      > "$findings_dir/semgrep.json" 2>/dev/null || true
+    [[ -s "$findings_dir/semgrep.json" ]] || echo '{"results":[]}' > "$findings_dir/semgrep.json"
+    # Normalize to just the results array.
+    jq '.results // []' "$findings_dir/semgrep.json" > "$findings_dir/semgrep.normalized.json"
+    mv "$findings_dir/semgrep.normalized.json" "$findings_dir/semgrep.json"
+  else
+    echo "[]" > "$findings_dir/semgrep.json"
+    notes+=("semgrep is configured but the 'semgrep' binary is not on PATH; install with 'brew install semgrep' or 'pip install semgrep'.")
+  fi
+fi
+
+# snyk — requires local auth. Check `snyk config get api`; if no token, skip
+# gracefully with a note.
+if [[ "$has_snyk_config" == "true" ]]; then
+  if command -v snyk >/dev/null 2>&1; then
+    if snyk config get api >/dev/null 2>&1 && [[ -n "$(snyk config get api 2>/dev/null)" ]]; then
+      # Snyk Code (SAST) — exit code != 0 on findings; treat as success.
+      snyk code test --json . > "$findings_dir/snyk_code.json" 2>/dev/null || true
+      [[ -s "$findings_dir/snyk_code.json" ]] || echo "[]" > "$findings_dir/snyk_code.json"
+
+      # Snyk Open Source (deps) — same; capture .vulnerabilities array.
+      snyk test --json --all-projects . > "$findings_dir/snyk_oss_raw.json" 2>/dev/null || true
+      if [[ -s "$findings_dir/snyk_oss_raw.json" ]]; then
+        # snyk test --json can emit either a single object or an array (for
+        # --all-projects). Normalize to a flat array of vulnerability records.
+        jq '[ (if type == "array" then .[] else . end) | .vulnerabilities[]? ]' \
+          "$findings_dir/snyk_oss_raw.json" > "$findings_dir/snyk_oss.json" 2>/dev/null || \
+          echo "[]" > "$findings_dir/snyk_oss.json"
+      else
+        echo "[]" > "$findings_dir/snyk_oss.json"
+      fi
+    else
+      echo "[]" > "$findings_dir/snyk_code.json"
+      echo "[]" > "$findings_dir/snyk_oss.json"
+      notes+=("snyk is configured in CI but no local API token is set; run 'snyk auth --auth-type=token' to enable local finding gathering.")
+    fi
+  else
+    echo "[]" > "$findings_dir/snyk_code.json"
+    echo "[]" > "$findings_dir/snyk_oss.json"
+    notes+=("snyk is configured but the 'snyk' binary is not on PATH; install with 'brew install snyk-cli'.")
+  fi
+fi
+
+# sonarcloud — query SonarCloud REST API for issues. Requires SONAR_TOKEN env.
+# Skipping the implementation for v1 — the orchestrator's response will note
+# that Sonar findings need to be checked manually via the SonarCloud UI.
+if [[ "$has_sonar_config" == "true" ]]; then
+  echo "[]" > "$findings_dir/sonarcloud.json"
+  notes+=("sonarcloud is configured but live finding gathering is not implemented in v1 of the orchestrator; check the SonarCloud UI for current issues.")
+fi
+
+# dependabot — query GitHub for open PRs authored by dependabot[bot]. Requires
+# 'gh' authenticated.
+if [[ "$has_dependabot_config" == "true" ]]; then
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh pr list --author "app/dependabot" --state open --json number,title,body,headRefName \
+      > "$findings_dir/dependabot.json" 2>/dev/null || echo "[]" > "$findings_dir/dependabot.json"
+  else
+    echo "[]" > "$findings_dir/dependabot.json"
+    notes+=("dependabot is configured but 'gh' is not available/authenticated; can't list open Dependabot PRs.")
+  fi
+fi
+
+# --- coverage ----------------------------------------------------------------
+# Run pytest with --cov; produce coverage.json; parse per-module percentages.
+# If pytest isn't installed or tests fail to even start, leave coverage null.
+coverage_overall="null"
+coverage_by_module="{}"
+
+if command -v pytest >/dev/null 2>&1; then
+  # `coverage` package needed for --cov; check if it's importable in the env.
+  if python3 -c 'import pytest_cov' >/dev/null 2>&1; then
+    # Run pytest --cov --cov-report=json; tolerate test failures (we want
+    # coverage data even when some tests fail — though that's a separate
+    # issue we'll surface).
+    pytest --cov --cov-report=json --cov-report= -q --no-header \
+      > /dev/null 2>&1 || true
+    if [[ -f "coverage.json" ]]; then
+      coverage_overall=$(jq '.totals.percent_covered // null' coverage.json)
+      coverage_by_module=$(jq '
+        .files
+        | to_entries
+        | map({ key: .key, value: (.value.summary.percent_covered // 0) })
+        | from_entries
+      ' coverage.json)
+    fi
+  else
+    notes+=("pytest is on PATH but pytest-cov is not installed in the active environment; coverage gathering skipped. Install with 'pip install pytest-cov'.")
+  fi
+else
+  notes+=("pytest is not on PATH; coverage gathering skipped.")
+fi
+
+# --- emit --------------------------------------------------------------------
+# Build the final JSON. jq lets us compose without manual string escaping.
+
+emit_findings() {
+  local tool="$1"
+  local configured="$2"
+  local path="$findings_dir/${tool}.json"
+  if [[ "$configured" == "true" && -s "$path" ]]; then
+    jq --arg t "$tool" '.' "$path"
+  else
+    echo "null"
+  fi
+}
+
+# Build notes JSON.
+notes_json=$(printf '%s\n' "${notes[@]+"${notes[@]}"}" | jq -R . | jq -s . 2>/dev/null || echo "[]")
+
+jq -n \
+  --argjson ruff_cfg          "$has_ruff_config" \
+  --argjson semgrep_cfg       "$has_semgrep_config" \
+  --argjson snyk_cfg          "$has_snyk_config" \
+  --argjson sonar_cfg         "$has_sonar_config" \
+  --argjson dependabot_cfg    "$has_dependabot_config" \
+  --argjson ruff_findings     "$(emit_findings ruff       "$has_ruff_config")" \
+  --argjson semgrep_findings  "$(emit_findings semgrep    "$has_semgrep_config")" \
+  --argjson snyk_code_findings "$(emit_findings snyk_code "$has_snyk_config")" \
+  --argjson snyk_oss_findings  "$(emit_findings snyk_oss  "$has_snyk_config")" \
+  --argjson sonar_findings     "$(emit_findings sonarcloud "$has_sonar_config")" \
+  --argjson dependabot_findings "$(emit_findings dependabot "$has_dependabot_config")" \
+  --argjson coverage_overall   "$coverage_overall" \
+  --argjson coverage_by_module "$coverage_by_module" \
+  --argjson notes              "$notes_json" '
+{
+  tooling_configured: {
+    ruff:       $ruff_cfg,
+    semgrep:    $semgrep_cfg,
+    snyk_code:  $snyk_cfg,
+    snyk_oss:   $snyk_cfg,
+    sonarcloud: $sonar_cfg,
+    dependabot: $dependabot_cfg
+  },
+  findings_by_tool: (
+    {} +
+    (if $ruff_findings        != null then {ruff:       $ruff_findings}        else {} end) +
+    (if $semgrep_findings     != null then {semgrep:    $semgrep_findings}     else {} end) +
+    (if $snyk_code_findings   != null then {snyk_code:  $snyk_code_findings}   else {} end) +
+    (if $snyk_oss_findings    != null then {snyk_oss:   $snyk_oss_findings}    else {} end) +
+    (if $sonar_findings       != null then {sonarcloud: $sonar_findings}       else {} end) +
+    (if $dependabot_findings  != null then {dependabot: $dependabot_findings}  else {} end)
+  ),
+  coverage: {
+    overall:   $coverage_overall,
+    by_module: $coverage_by_module
+  },
+  notes: $notes
+}
+'
