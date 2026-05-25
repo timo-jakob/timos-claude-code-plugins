@@ -223,7 +223,8 @@ text replacement before writing:
 
 | Placeholder | Value |
 |---|---|
-| `{{PROJECT_NAME}}` | repo name from `gh repo view --json name` or the directory name |
+| `{{PROJECT_NAME}}` | display name — repo name from `gh repo view --json name` or the directory name. Use in titles, prose ("Contributing to X", "vulnerability in X"), and Sonar's `sonar.projectName`. |
+| `{{PROJECT_SLUG}}` | `<owner>/<repo>` — full GitHub path. Use in URL contexts (`ghcr.io/<slug>`, `github.com/<slug>/security/advisories/new`, `scorecard.dev/viewer/?uri=github.com/<slug>`, cosign `--certificate-identity-regexp`). From `gh repo view --json nameWithOwner` or `<github_repo>` field of `detect-stack.sh`. |
 | `{{PROJECT_KEY}}` | for Sonar — usually `<github-org>_<repo>` (SonarCloud convention) or `<repo>` (SonarQube) |
 | `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
@@ -286,6 +287,38 @@ Strip blocks where the tag does not apply:
 If a tag does not apply, delete the START line, the END line, and everything
 between them.
 
+### `.gitignore` merging
+
+When the target repo already has a `.gitignore`, do **not** simply append
+the language fragment — that produces a noisy diff full of duplicate
+patterns the user already had. Use the deduping helper:
+
+```bash
+"<skill-base-dir>/scripts/merge-gitignore.sh" \
+  "<target-repo>/.gitignore" \
+  "<skill-base-dir>/templates/languages/<lang>/gitignore" \
+  > /tmp/to-append.txt
+```
+
+`merge-gitignore.sh` reads the existing `.gitignore`, strips out any
+pattern lines from the fragment that already match (exact-string
+comparison, whitespace-trimmed), and emits the remaining lines —
+preserving comments and blank lines from the fragment so the appended
+block stays readable.
+
+Wrap the helper's output in a short header comment so a future reader
+knows where the appended entries came from:
+
+```
+# <blank line>
+# --- added by /development:bootstrap (Python fragment, deduped) ---
+<helper output here>
+```
+
+If the target repo has no `.gitignore` yet, copy the language fragment
+as-is (the helper handles that case too — pass a non-existent path as
+the first arg and it emits the fragment unchanged).
+
 ### 3a. Common artifacts (both paths)
 
 Copy from `templates/common/`:
@@ -297,7 +330,7 @@ Copy from `templates/common/`:
 - `CONTRIBUTING.md`
 - `SETUP.md` (manual steps the user must do after bootstrap)
 - `CLAUDE.md` (shift-left agent guidance — append a section if one already exists)
-- `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore`)
+- `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore` — see `.gitignore` merging below)
 - `.editorconfig` (cross-editor whitespace + encoding settings)
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
