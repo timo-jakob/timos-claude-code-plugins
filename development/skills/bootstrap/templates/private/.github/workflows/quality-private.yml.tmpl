@@ -32,12 +32,12 @@ on:
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
+# Least-privilege workflow defaults. Individual jobs may widen as needed:
+# the `image` job needs `packages: write` + `id-token: write` for GHCR
+# push and cosign keyless signing; nothing else needs anything beyond
+# `contents: read`.
 permissions:
   contents: read
-  pull-requests: write
-  security-events: write
-  packages: write          # required for ghcr.io push
-  id-token: write          # required for cosign keyless OIDC signing
 
 concurrency:
   group: quality-${{ github.ref }}
@@ -52,8 +52,8 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+        # No fetch-depth: 0 here — the sonarqube job below does its own
+        # checkout with full history. Test runners don't need git blame.
 
       # --- TYPESCRIPT-START ------------------------------------------------
       - uses: actions/setup-node@v6
@@ -111,7 +111,8 @@ jobs:
         with:
           name: coverage-reports
           path: .
-        continue-on-error: true
+        # No continue-on-error: if test-and-coverage didn't produce coverage,
+        # Sonar should fail loudly rather than silently report green without it.
       - name: SonarQube scan
         uses: SonarSource/sonarqube-scan-action@v8
         env:
@@ -163,6 +164,10 @@ jobs:
   # is QEMU-emulated; on an Intel Mac or Linux x86 host it's the reverse.
   image:
     runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write    # ghcr.io push
+      id-token: write    # cosign keyless OIDC signing
     steps:
       - uses: actions/checkout@v6
 
@@ -197,7 +202,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # mode=min on the scan build keeps PR-time cache writes minimal.
+          # The push build below uses mode=max (only fires on trusted ref).
+          cache-to: type=gha,mode=min
 
       - name: Pick a tag for scanning
         id: pick
@@ -251,7 +258,7 @@ jobs:
 
       - name: Export SBOM as CI artifact
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: ${{ steps.pick.outputs.tag }}
           format: cyclonedx-json
@@ -260,7 +267,7 @@ jobs:
       - name: Validate SBOM is well-formed CycloneDX
         if: github.event_name == 'push' || github.event_name == 'release'
         run: |
-          docker run --rm -v "$PWD:/work" cyclonedx/cyclonedx-cli:latest \
+          docker run --rm -v "$PWD:/work" cyclonedx/cyclonedx-cli:v0.32.0 \
             validate --input-file /work/sbom.cdx.json --input-format json --fail-on-errors
 
       - name: Upload SBOM artifact
