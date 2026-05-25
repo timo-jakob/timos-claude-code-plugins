@@ -161,7 +161,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: aquasecurity/trivy-action@0.36.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -238,7 +238,7 @@ jobs:
       # License compliance on the built image — catches licenses introduced
       # via base-image layers that the filesystem scan would miss.
       - name: Trivy license scan (image)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "image"
           image-ref: ${{ steps.pick.outputs.tag }}
@@ -308,7 +308,7 @@ jobs:
       # OIDC certificate identity.
       - name: Install cosign
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign image with cosign (keyless OIDC)
         if: github.event_name == 'push' || github.event_name == 'release'
