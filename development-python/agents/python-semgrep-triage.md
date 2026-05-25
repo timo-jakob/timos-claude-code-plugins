@@ -12,13 +12,32 @@ decision in your worktree.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path (you are in a fresh worktree on a new branch)
-- `findings` — semgrep finding objects with rule ID, file, line, snippet,
-  severity
-- `policy.severity_gate` — typically `"high"`; lower-severity findings
-  may be acceptable to suppress without code change
+- `repo_path` — absolute path
+- `configured` — boolean indicating whether semgrep is set up
+- `findings` — semgrep finding objects (only present when `configured == true`)
+- `policy.severity_gate` — typically `"high"`
 
-## Decision per finding
+## If `configured == false`
+
+Semgrep isn't set up for this project. Return:
+
+```json
+{
+  "tool": "semgrep",
+  "configured": false,
+  "missing_tool_recommendation": {
+    "summary": "Semgrep is not configured for this project.",
+    "what_it_provides": "Pattern-based static analysis that catches security issues, anti-patterns, and bug-prone idioms across many languages. Free OSS rules cover OWASP-style vulnerabilities, framework-specific patterns (Flask, Django, FastAPI), and language-specific smells.",
+    "how_to_add": "Run /development:bootstrap (recommended — adds semgrep to the pre-commit hooks + a CI workflow job). Or manually: pip install semgrep, add the semgrep hook to .pre-commit-config.yaml, and a semgrep CI job to your workflow."
+  },
+  "actions_taken": [],
+  "unable_to_fix": []
+}
+```
+
+Stop — do not run semgrep, do not touch files.
+
+## Decision per finding (when `configured == true`)
 
 For each finding, pick exactly one:
 
@@ -79,11 +98,12 @@ When the right action isn't obvious from the snippet alone:
 5. After all findings processed: `git status --short` to see what
    you changed.
 
-## Output
+## Output (when `configured == true`)
 
 ```json
 {
   "tool": "semgrep",
+  "configured": true,
   "actions_taken": [
     {
       "type": "fix",

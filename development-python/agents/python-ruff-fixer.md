@@ -12,13 +12,33 @@ report. No judgment, no triage — just apply the fixes ruff can apply.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path to the project root (you are running in
-  a freshly-created git worktree on a new branch)
-- `findings` — the ruff findings array from the dispatcher (context only;
-  re-run ruff to get the current state)
+- `repo_path` — absolute path to the project root
+- `configured` — boolean indicating whether ruff is set up for this project
+- `findings` — the ruff findings array (only present when `configured == true`)
 - `policy.severity_gate` — informational
 
-## Procedure
+## If `configured == false`
+
+Ruff isn't set up for this project. Don't try to run it. Return the
+missing-tool recommendation:
+
+```json
+{
+  "tool": "ruff",
+  "configured": false,
+  "missing_tool_recommendation": {
+    "summary": "Ruff is not configured for this project.",
+    "what_it_provides": "Fast Python linter + formatter. Catches common errors (E, W, F), import ordering (I), security smells (S), modernizations (UP), and reformats code consistently. Replaces a stack of legacy tools (flake8, isort, pyupgrade, etc.) with a single binary.",
+    "how_to_add": "Run /development:bootstrap (recommended — sets up ruff alongside the rest of the quality toolchain). Or manually: pip install ruff, then either add a ruff.toml to the repo root or a [tool.ruff] section to pyproject.toml. The bootstrap-generated ruff.toml is a sensible default."
+  },
+  "actions_taken": [],
+  "unable_to_fix": []
+}
+```
+
+Stop here — do not invoke ruff, do not touch any files.
+
+## Procedure (when `configured == true`)
 
 1. `cd <repo_path>`
 2. Run: `ruff check --fix --unsafe-fixes 2>&1 | tee /tmp/ruff-check.log`
@@ -28,13 +48,14 @@ Your prompt contains:
 6. Collect any **remaining** ruff findings (the ones that can't be
    auto-fixed even with `--unsafe-fixes`): `ruff check --output-format=json`
 
-## Output
+## Output (when `configured == true`)
 
 Return JSON only:
 
 ```json
 {
   "tool": "ruff",
+  "configured": true,
   "actions_taken": [
     {
       "type": "autofix",
@@ -62,7 +83,7 @@ If both ruff invocations leave the working tree clean (no changes),
 return:
 
 ```json
-{ "tool": "ruff", "actions_taken": [], "unable_to_fix": [...] }
+{ "tool": "ruff", "configured": true, "actions_taken": [], "unable_to_fix": [...] }
 ```
 
 …and do not commit. The runtime will clean up the empty worktree.

@@ -26,17 +26,27 @@ worktrees to do the actual work.
   "repo": { "path": "/abs/path", "default_branch": "main", "visibility": "public" },
   "language": "python",
   "language_meta": { "version": "3.13", "manifests": [...] },
+  "tooling_configured": {
+    "ruff":       true,
+    "semgrep":    true,
+    "snyk_code":  false,
+    "snyk_oss":   false,
+    "sonarcloud": true
+  },
   "findings_by_tool": {
-    "ruff":        [ ... tool-native finding objects ... ],
-    "semgrep":     [ ... ],
-    "snyk_code":   [ ... ],
-    "snyk_oss":    [ ... ],
-    "sonarcloud":  [ ... ]
+    "ruff":       [ ... tool-native finding objects ... ],
+    "semgrep":    [ ... ],
+    "sonarcloud": [ ... ]
   },
   "policy": { "coverage_threshold": 90, "severity_gate": "high", ... },
   "worktree": { "available": true, "base_branch": "main" }
 }
 ```
+
+`tooling_configured` lists every tool this plugin cares about, even
+ones not set up for this project. `findings_by_tool` only contains
+keys for configured tools (configured tools with zero findings appear
+as `[]`; unconfigured tools are absent here entirely).
 
 ## Validation
 
@@ -52,36 +62,47 @@ Before dispatching:
 
 ## Dispatch — which agents to spawn
 
-Look at the keys present in `findings_by_tool`. Spawn one agent per
-tool that has findings (skip tools with `[]` or absent keys):
+**Always spawn all four Python agents**, regardless of whether their
+tool is configured. Agents whose tool is configured do real work in a
+worktree. Agents whose tool is NOT configured produce a "this tool
+isn't set up" recommendation instead of work — so a half-bootstrapped
+project still gets partial maintenance plus a clear checklist of
+what's missing.
 
-| Tool key | Agent | Model | Worktree |
+| Agent | Model | Tool key(s) | Worktree (when configured) |
 |---|---|---|---|
-| `ruff` | `python-ruff-fixer` | haiku | yes |
-| `semgrep` | `python-semgrep-triage` | sonnet | yes |
-| `snyk_code` or `snyk_oss` | `python-snyk-triage` | sonnet | yes |
-| `sonarcloud` | `python-sonar-triage` | sonnet | yes |
+| `python-ruff-fixer` | haiku | `ruff` | yes |
+| `python-semgrep-triage` | sonnet | `semgrep` | yes |
+| `python-snyk-triage` | sonnet | `snyk_code` + `snyk_oss` | yes |
+| `python-sonar-triage` | sonnet | `sonarcloud` | yes |
 
-**Spawn all applicable agents in a single assistant turn with multiple
-`Agent` tool calls.** They run in parallel in isolated worktrees off the
-base branch from `worktree.base_branch` (default `main` if not set).
-Each agent gets only the slice of findings relevant to it.
+**Spawn all four in a single assistant turn with four `Agent` tool
+calls.** Configured agents run in isolated worktrees off
+`worktree.base_branch` (default `main`); unconfigured agents run
+without isolation (they produce no file changes).
 
-For each agent's prompt:
+For each agent's prompt, include:
 
-1. The full repo path (`repo.path`).
-2. The tool's findings array (sliced from `findings_by_tool[<tool>]`).
-3. The relevant subset of `policy` (e.g., severity_gate for semgrep).
-4. A note that the agent is running in an isolated worktree on a fresh
-   branch — modifications stay local until the orchestrator merges them.
+1. `repo_path` — full path to the project root (`repo.path`).
+2. `configured` — boolean from `tooling_configured[<tool>]`.
+3. `findings` — the tool's findings array if configured, else `null`.
+4. `policy` — relevant subset (e.g., severity_gate for semgrep).
+5. A note that worktree-isolated agents work in a fresh branch and
+   should not commit; the orchestrator handles merging.
+
+For the `python-snyk-triage` agent: it handles BOTH `snyk_code` and
+`snyk_oss`. Pass `configured.snyk_code` AND `configured.snyk_oss` —
+typically they share configuration (one Snyk token covers both), but
+the agent handles them as separate concerns.
 
 ## What each agent returns
 
-Each agent returns a JSON object describing what it did:
+When the tool **is** configured, agents return:
 
 ```json
 {
   "tool": "ruff",
+  "configured": true,
   "actions_taken": [
     { "type": "autofix", "summary": "...", "files_changed": [...], "worktree_branch": "wt-ruff-fixes-abc123" }
   ],
@@ -94,8 +115,25 @@ Each agent returns a JSON object describing what it did:
 }
 ```
 
-If an agent makes no changes, its `worktree_branch` is absent and the
-runtime automatically cleans up the worktree.
+When the tool is **not** configured, agents return:
+
+```json
+{
+  "tool": "ruff",
+  "configured": false,
+  "missing_tool_recommendation": {
+    "summary": "Ruff is not configured for this project.",
+    "what_it_provides": "Fast Python linter + formatter — common errors, security smells, modernizations, consistent formatting.",
+    "how_to_add": "Run /development:bootstrap (recommended — sets up the whole toolchain), or manually: pip install ruff + add ruff.toml or a [tool.ruff] section to pyproject.toml."
+  },
+  "actions_taken": [],
+  "unable_to_fix": []
+}
+```
+
+If an agent makes no changes (configured but clean, or not configured),
+its `worktree_branch` is absent and the runtime automatically cleans up
+the worktree.
 
 ## Aggregation
 
@@ -108,8 +146,9 @@ After all agents finish:
 ```json
 {
   "schema_version": "1",
-  "actions_taken": [ /* concatenation of every agent's actions_taken */ ],
+  "actions_taken": [ /* concatenation of every configured agent's actions_taken */ ],
   "actions_requiring_review": [ /* same */ ],
+  "missing_tooling": [ /* each unconfigured agent's missing_tool_recommendation, tagged with its tool name */ ],
   "unable_to_fix": [ /* same */ ]
 }
 ```

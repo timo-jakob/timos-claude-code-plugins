@@ -12,12 +12,38 @@ findings.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path (you are in a fresh worktree on a new branch)
-- `findings.snyk_code` — Snyk Code findings (file, line, rule, severity)
-- `findings.snyk_oss` — Snyk OSS findings (package, vuln-id, fix-availability)
+- `repo_path` — absolute path
+- `configured.snyk_code` — boolean: is Snyk Code set up
+- `configured.snyk_oss` — boolean: is Snyk OSS set up
+- `findings.snyk_code` — findings (only when `configured.snyk_code == true`)
+- `findings.snyk_oss` — findings (only when `configured.snyk_oss == true`)
 - `policy.severity_gate` — usually `"high"`
 
-## Decision tree
+## If both `configured.snyk_code` and `configured.snyk_oss` are false
+
+Snyk isn't set up. Return:
+
+```json
+{
+  "tool": "snyk",
+  "configured": false,
+  "missing_tool_recommendation": {
+    "summary": "Snyk is not configured for this project (neither Snyk Code nor Snyk Open Source).",
+    "what_it_provides": "Snyk Code = source-level SAST (catches vulnerable code patterns). Snyk Open Source = dependency CVE scanning across pip / npm / etc. Free tier covers public repos.",
+    "how_to_add": "Run /development:bootstrap (it walks you through Snyk signup + token + GitHub Actions secret). Or manually: sign up at snyk.io, set SNYK_TOKEN as a GitHub Actions secret, add Snyk steps to your workflow."
+  },
+  "actions_taken": [],
+  "unable_to_fix": []
+}
+```
+
+Stop.
+
+If only ONE is configured (rare — they usually come together), proceed
+with the configured side only. The other half goes in `missing_tooling`
+within your normal response.
+
+## Decision tree (when configured)
 
 ### Snyk Code findings (source-level)
 
@@ -72,11 +98,12 @@ The expiry date should be 90 days from today.
 5. Apply any code fixes you decided on.
 6. `git status --short` to see changes.
 
-## Output
+## Output (when at least one Snyk side is configured)
 
 ```json
 {
   "tool": "snyk",
+  "configured": true,
   "actions_taken": [
     {
       "type": "ignore",

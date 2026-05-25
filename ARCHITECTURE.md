@@ -232,13 +232,19 @@ file.
     "version": "3.13",
     "manifests": ["pyproject.toml", "requirements.txt"]
   },
+  "tooling_configured": {
+    "ruff":       true,
+    "semgrep":    true,
+    "snyk_code":  false,
+    "snyk_oss":   false,
+    "sonarcloud": true,
+    "dependabot": true
+  },
   "findings_by_tool": {
-    "ruff":         [/* tool-native finding objects */],
-    "snyk_code":    [/* … */],
-    "snyk_oss":     [/* … */],
-    "semgrep":      [/* … */],
-    "sonarcloud":   [/* … */],
-    "dependabot":   [/* … */]
+    "ruff":       [/* tool-native finding objects */],
+    "semgrep":    [/* … */],
+    "sonarcloud": [/* … */],
+    "dependabot": [/* … */]
   },
   "policy": {
     "coverage_threshold": 90,
@@ -255,6 +261,16 @@ file.
 Tool-native finding objects retain their original shape — we don't
 normalize. Each language plugin already knows the shape of its own
 tools' output; adding a translation layer is duplicate work.
+
+**`tooling_configured` covers tools the language plugin cares about,
+including ones that aren't set up for this project.** When
+`tooling_configured.X == false`, the language plugin still dispatches
+its agent for X, and the agent produces a "this tool isn't configured
+— here's how to add it" output instead of doing work. This lets a
+half-bootstrapped project still get partial maintenance plus a
+checklist of what's missing. `findings_by_tool` only contains keys
+for configured tools (tools with `configured == false` are absent
+from `findings_by_tool`).
 
 ### Response (`development-<lang>` → `development`)
 
@@ -279,6 +295,14 @@ tools' output; adding a translation layer is duplicate work.
       "draft_branch": "wt-snyk-bump-pkg-abc123"
     }
   ],
+  "missing_tooling": [
+    {
+      "tool": "snyk_code",
+      "summary": "Snyk Code (SAST) is not configured for this project.",
+      "what_it_provides": "Source-level vulnerability scanning; catches issues the lint tools miss.",
+      "how_to_add": "Run /development:bootstrap (it sets up Snyk end-to-end), or sign up at snyk.io and add SNYK_TOKEN to GitHub Actions secrets."
+    }
+  ],
   "unable_to_fix": [
     {
       "tool": "semgrep",
@@ -293,6 +317,13 @@ tools' output; adding a translation layer is duplicate work.
 with `isolation: "worktree"` and made changes. The orchestrator merges
 these branches back to the user's working branch in topological order
 (least-conflict first).
+
+`missing_tooling` is the aggregation of every agent that ran in
+"tool not configured" mode. The orchestrator surfaces this to the
+user as a checklist alongside the actual maintenance results. A
+project that wasn't bootstrapped can still benefit from the agents
+that DO have something to work with, while the rest of the agents
+explain what's missing.
 
 ## Agent model selection
 

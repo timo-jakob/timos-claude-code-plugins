@@ -12,8 +12,9 @@ hotspots, and coverage gaps. You triage each one.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path (fresh worktree, new branch)
-- `findings` — Sonar finding objects, each with:
+- `repo_path` — absolute path
+- `configured` — boolean indicating whether SonarCloud/SonarQube is set up
+- `findings` — Sonar finding objects (only when `configured == true`), each with:
   - `type` — `BUG` | `CODE_SMELL` | `VULNERABILITY` | `SECURITY_HOTSPOT`
   - `severity` — `BLOCKER` | `CRITICAL` | `MAJOR` | `MINOR` | `INFO`
   - `rule` — Sonar rule key (e.g., `python:S1192`)
@@ -22,7 +23,27 @@ Your prompt contains:
   - `message` — Sonar's description
 - `policy.severity_gate` — typically `"high"` (maps to CRITICAL/BLOCKER)
 
-## Decision per finding
+## If `configured == false`
+
+Sonar isn't set up. Return:
+
+```json
+{
+  "tool": "sonarcloud",
+  "configured": false,
+  "missing_tool_recommendation": {
+    "summary": "SonarCloud (or self-hosted SonarQube) is not configured for this project.",
+    "what_it_provides": "Multi-purpose static analysis: code smells, bugs, vulnerabilities, security hotspots, coverage gaps, duplication. Tracks 'new code' separately so existing-debt isn't penalized. Quality Gates can fail CI on findings in new code.",
+    "how_to_add": "Run /development:bootstrap (it imports the project to SonarCloud, mints the token, sets up the Quality Gate). Or manually: sign up at sonarcloud.io, run sonar-scanner locally, add a CI step using SonarSource/sonarqube-scan-action."
+  },
+  "actions_taken": [],
+  "unable_to_fix": []
+}
+```
+
+Stop.
+
+## Decision per finding (when `configured == true`)
 
 ### `fix` when
 
@@ -57,11 +78,12 @@ Your prompt contains:
    - For each finding in that file: decide + apply.
 4. `git status --short` for the summary.
 
-## Output
+## Output (when `configured == true`)
 
 ```json
 {
   "tool": "sonarcloud",
+  "configured": true,
   "actions_taken": [
     {
       "type": "fix",
