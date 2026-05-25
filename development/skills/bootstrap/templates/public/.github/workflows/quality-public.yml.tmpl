@@ -73,7 +73,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "{{PYTHON_VERSION}}"
           cache: "pip"
       - name: Install + test (Python)
         run: |
@@ -169,7 +169,7 @@ jobs:
       # --- PYTHON-START ----------------------------------------------------
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "{{PYTHON_VERSION}}"
           cache: "pip"
       - run: |
           [[ -f requirements.txt ]] && pip install -r requirements.txt
@@ -378,5 +378,5 @@ jobs:
           fetch-depth: 0   # some hooks (gitleaks) want history
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "{{PYTHON_VERSION}}"
       - uses: pre-commit/action@v3.0.1

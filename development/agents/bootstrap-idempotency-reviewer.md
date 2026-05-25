@@ -16,9 +16,17 @@ Your prompt contains a list of conflicts. For each, you're given:
 - The current content (what the user has)
 - The proposed template content (what bootstrap would write)
 
+Some entries may be tagged `[REPLACE-CANDIDATE: <description>]`. These are
+files that don't conflict by name (the orchestrator wouldn't generate a
+file at that path) but overlap **semantically** with what's being
+generated — the canonical case is a pre-existing `.github/workflows/test.yml`
+when the bootstrap is generating `quality-public.yml`. For these, the
+"template content" is the planned workflow that's intended to subsume
+the existing file's purpose.
+
 ## How to decide
 
-For each file, recommend exactly one of: **skip**, **overwrite**, **merge**.
+For each file, recommend exactly one of: **skip**, **overwrite**, **merge**, **delete**.
 
 ### Recommend `skip` when
 
@@ -52,26 +60,41 @@ For each file, recommend exactly one of: **skip**, **overwrite**, **merge**.
 For `merge`, also describe the merge strategy in one sentence (e.g.,
 "append template's hooks to the existing `repos:` list, dedupe by `id`").
 
+### Recommend `delete` when
+
+- The file is tagged `[REPLACE-CANDIDATE: ...]` AND the planned
+  workflow fully subsumes its purpose AND nothing in the existing file
+  would be lost (or losses are explicitly accepted by the user).
+
+For `delete` on a REPLACE-CANDIDATE, you **must** also enumerate what
+would be lost by the deletion: custom Python versions, apt-get system
+deps, `timeout-minutes`, env vars, container services, secret refs,
+schedule triggers. The orchestrator surfaces this list to the user as
+a final confirmation step. If anything substantive would be lost and
+isn't already in the planned template, recommend `merge` instead (with
+a strategy that folds the lost bits into the planned workflow before
+deleting the original).
+
 ## Output format
 
 ```
 ## Idempotency review
 
 ### <file/path/1>
-Recommendation: <skip | overwrite | merge>
+Recommendation: <skip | overwrite | merge | delete>
 Why: <one sentence>
-<merge strategy if merge>
+<merge strategy if merge; loss enumeration if delete>
 
 ### <file/path/2>
-Recommendation: <skip | overwrite | merge>
+Recommendation: <skip | overwrite | merge | delete>
 Why: <one sentence>
 
 ...
 ```
 
-Sort by recommendation in this order: overwrite first (most disruptive,
-needs most user attention), then merge, then skip. Within each group,
-sort alphabetically by path.
+Sort by recommendation in this order: delete first (highest stakes — a
+file is going away), then overwrite, then merge, then skip. Within each
+group, sort alphabetically by path.
 
 ## What you will not do
 
@@ -79,6 +102,9 @@ sort alphabetically by path.
   which will surface your recommendations to the user.
 - Do not invent merge strategies for files that should be skipped or
   overwritten.
-- Do not recommend overwrite for any file that contains content the
-  template doesn't replicate — that would silently delete the user's work.
+- Do not recommend overwrite or delete for any file that contains
+  content the template doesn't replicate — that would silently lose the
+  user's work. If a REPLACE-CANDIDATE has steps the planned template
+  doesn't carry (e.g., distro package installs, custom timeouts),
+  recommend `merge` and describe how to fold them in.
 - Do not request additional context. Work from the prompt alone.
