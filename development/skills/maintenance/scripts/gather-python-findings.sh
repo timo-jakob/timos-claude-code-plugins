@@ -129,9 +129,17 @@ fi
 if [[ "$has_snyk_config" == "true" ]]; then
   if command -v snyk >/dev/null 2>&1; then
     if snyk config get api >/dev/null 2>&1 && [[ -n "$(snyk config get api 2>/dev/null)" ]]; then
-      # Snyk Code (SAST) — exit code != 0 on findings; treat as success.
-      snyk code test --json . > "$findings_dir/snyk_code.json" 2>/dev/null || true
-      [[ -s "$findings_dir/snyk_code.json" ]] || echo "[]" > "$findings_dir/snyk_code.json"
+      # Snyk Code (SAST) — emits SARIF, not a finding array. Extract the
+      # actual results out of runs[].results[] so the python plugin's
+      # agent gets a flat array (consistent with snyk_oss and other tools).
+      snyk code test --json . > "$findings_dir/snyk_code_raw.json" 2>/dev/null || true
+      if [[ -s "$findings_dir/snyk_code_raw.json" ]]; then
+        jq '[ .runs[]?.results[]? ]' \
+          "$findings_dir/snyk_code_raw.json" > "$findings_dir/snyk_code.json" 2>/dev/null || \
+          echo "[]" > "$findings_dir/snyk_code.json"
+      else
+        echo "[]" > "$findings_dir/snyk_code.json"
+      fi
 
       # Snyk Open Source (deps) — same; capture .vulnerabilities array.
       snyk test --json --all-projects . > "$findings_dir/snyk_oss_raw.json" 2>/dev/null || true
