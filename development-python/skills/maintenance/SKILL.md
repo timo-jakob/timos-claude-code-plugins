@@ -140,11 +140,9 @@ guarantee. Other agents respect it.
 
 ## Dispatch — which agents to spawn
 
-**Always spawn all five Python agents (four for the v1 file set plus
-`python-major-upgrade` when there are major-version findings)**,
-regardless of whether their tool is configured. Configured agents do
-real work in worktrees; unconfigured ones produce a "tool isn't set
-up" recommendation.
+**Always spawn every Python agent**, regardless of whether their tool
+is configured. Configured agents do real work; unconfigured ones
+produce a "tool isn't set up" recommendation.
 
 | Agent | Model | Tool key(s) | Worktree (when configured) |
 |---|---|---|---|
@@ -153,14 +151,22 @@ up" recommendation.
 | `python-snyk-triage` | sonnet | `snyk_code` + `snyk_oss` (patch + minor bumps only) | yes |
 | `python-sonar-triage` | sonnet | `sonarcloud` | yes |
 | `python-major-upgrade` | opus | `snyk_oss` major-version bumps only | yes |
+| `python-dependabot-triage` | sonnet | `dependabot` | **no** (acts on GitHub via `gh`, not on local files) |
 
 **Spawn all applicable agents in a single assistant turn.** They run
-in parallel in isolated worktrees off `worktree.base_branch`.
+in parallel — the worktree-using ones in isolated worktrees off
+`worktree.base_branch`; `python-dependabot-triage` runs without a
+worktree (it modifies PRs on GitHub, not files locally).
 
 Snyk routing: scan `findings_by_tool.snyk_oss` for the per-finding
 upgrade type. Patch + minor go to `python-snyk-triage`; majors go to
 `python-major-upgrade`. Both can run in parallel; they touch different
 deps.
+
+Dependabot routing: pass the whole `findings_by_tool.dependabot` array
+to `python-dependabot-triage`. The agent itself parses each PR's title
+to determine bump level + decides per-PR (auto-merge patch+minor with
+green CI; defer majors and red-CI to human-review).
 
 For each agent's prompt, include:
 
