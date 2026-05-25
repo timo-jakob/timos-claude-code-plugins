@@ -78,7 +78,11 @@ ok "Token valid"
 
 # --- Quality Gate -------------------------------------------------------------
 create_zero_tolerance_gate "$SONAR_HOST" "$ORG_KEY"
-assign_gate_to_project "$SONAR_HOST" "$ORG_KEY" "$PROJECT_KEY" "Zero Tolerance"
+if [[ "${_gate_created:-false}" == "true" ]]; then
+  assign_gate_to_project "$SONAR_HOST" "$ORG_KEY" "$PROJECT_KEY" "Zero Tolerance"
+else
+  dim "  (Default 'Sonar way' gate is already assigned to new projects — no further action)"
+fi
 
 # --- Store SONAR_TOKEN as GitHub secret ---------------------------------------
 info "Storing SONAR_TOKEN as a GitHub Actions secret…"
@@ -135,10 +139,17 @@ fi
 # --- Summary ------------------------------------------------------------------
 echo
 ok "Public-path automation complete"
+
+if [[ "${_gate_created:-false}" == "true" ]]; then
+  gate_summary="Zero Tolerance (assigned)"
+else
+  gate_summary="Sonar way (default — Free plan fallback; see warning above)"
+fi
+
 cat <<EOF
 
   Project       $PROJECT_KEY
-  Quality Gate  Zero Tolerance (assigned)
+  Quality Gate  $gate_summary
   Secrets set   SONAR_TOKEN, SNYK_TOKEN
   Monitoring    $(snyk config get api >/dev/null 2>&1 && echo "Snyk authenticated" || echo "Snyk auth pending")
 

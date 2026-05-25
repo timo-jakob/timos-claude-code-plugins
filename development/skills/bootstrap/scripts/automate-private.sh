@@ -79,6 +79,7 @@ else
     --data-urlencode "login=admin" \
     --data-urlencode "previousPassword=admin" \
     --data-urlencode "password=$ADMIN_PW")
+  _load_http_status
   case "$_http_status" in
     200|204) ok "Admin password changed" ;;
     401)
@@ -97,6 +98,7 @@ info "Creating project '$PROJECT_KEY'…"
 resp=$(sonar_curl_basic "admin:$ADMIN_PW" POST "$SONAR_HOST/api/projects/create" \
   --data-urlencode "project=$PROJECT_KEY" \
   --data-urlencode "name=$PROJECT_NAME")
+_load_http_status
 case "$_http_status" in
   200|201) ok "Project created" ;;
   400)
@@ -119,6 +121,7 @@ resp=$(sonar_curl_basic "admin:$ADMIN_PW" POST "$SONAR_HOST/api/user_tokens/gene
   --data-urlencode "name=$TOKEN_NAME" \
   --data-urlencode "type=PROJECT_ANALYSIS_TOKEN" \
   --data-urlencode "projectKey=$PROJECT_KEY")
+_load_http_status
 [[ "$_http_status" =~ ^20 ]] || die "Token generation failed (HTTP $_http_status): $resp"
 ANALYSIS_TOKEN=$(printf '%s' "$resp" | jq -r .token)
 [[ -n "$ANALYSIS_TOKEN" ]] || die "Empty analysis token in response"
@@ -129,12 +132,17 @@ ok "Analysis token minted"
 ADMIN_TOKEN_NAME="bootstrap-admin-$(date +%Y%m%d%H%M%S)"
 resp=$(sonar_curl_basic "admin:$ADMIN_PW" POST "$SONAR_HOST/api/user_tokens/generate" \
   --data-urlencode "name=$ADMIN_TOKEN_NAME")
+_load_http_status
 [[ "$_http_status" =~ ^20 ]] || die "Admin token generation failed (HTTP $_http_status): $resp"
 SONAR_TOKEN=$(printf '%s' "$resp" | jq -r .token)
 export SONAR_TOKEN
 
 create_zero_tolerance_gate "$SONAR_HOST" ""
-assign_gate_to_project "$SONAR_HOST" "" "$PROJECT_KEY" "Zero Tolerance"
+if [[ "${_gate_created:-false}" == "true" ]]; then
+  assign_gate_to_project "$SONAR_HOST" "" "$PROJECT_KEY" "Zero Tolerance"
+else
+  dim "  (Default 'Sonar way' gate is already assigned to new projects — no further action)"
+fi
 
 # Revoke the admin token now that the gate is configured — least privilege.
 sonar_curl_basic "admin:$ADMIN_PW" POST "$SONAR_HOST/api/user_tokens/revoke" \
@@ -212,11 +220,18 @@ fi
 # --- 9. Summary --------------------------------------------------------------
 echo
 ok "Private-path automation complete"
+
+if [[ "${_gate_created:-false}" == "true" ]]; then
+  gate_summary="Zero Tolerance (assigned)"
+else
+  gate_summary="Sonar way (default — custom-gate creation failed; see warning above)"
+fi
+
 cat <<EOF
 
   SonarQube         $SONAR_HOST  (admin pw in Keychain: service=$KEYCHAIN_SERVICE)
   Project           $PROJECT_KEY
-  Quality Gate      Zero Tolerance (assigned)
+  Quality Gate      $gate_summary
   Secrets set       SONAR_TOKEN, SONAR_HOST_URL
   Runner            $([[ -d "$RUNNER_DIR" ]] && echo "registered + running" || echo "not registered")
 
