@@ -264,8 +264,10 @@ jobs:
       - name: Snyk container scan
         uses: snyk/actions/setup@v1.0.0
       - run: |
+          # --policy-path makes Snyk read .snyk ignores for container scans
+          # (it doesn't auto-discover the policy file in container mode).
           snyk container test "${{ steps.pick.outputs.tag }}" \
-            --severity-threshold=high --file=Dockerfile
+            --severity-threshold=high --file=Dockerfile --policy-path=.snyk
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
