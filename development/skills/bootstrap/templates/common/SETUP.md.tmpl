@@ -19,10 +19,11 @@ and are listed below.
 ## 1. Install local toolchain
 
 ```sh
-# pre-commit framework
-pip install pre-commit
-# or
+# pre-commit framework — brew is the recommended path; pre-commit manages
+# its own per-hook virtualenvs, so it doesn't need to live in your project venv.
 brew install pre-commit
+# or, into an active venv (pip must be on PATH):
+#   pip install pre-commit
 
 pre-commit install
 pre-commit run --all-files   # initial run, may take a minute

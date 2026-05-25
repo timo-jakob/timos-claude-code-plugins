@@ -41,6 +41,10 @@ done
 [[ -n "$ORG_KEY"      ]] || die "--org-key required"
 [[ -n "$PROJECT_NAME" ]] || die "--project-name required"
 
+# Tools the public-path automation directly invokes. Fail-fast with a
+# preflight-pointer instead of a confusing later failure.
+require_tools curl jq gh snyk
+
 SONAR_HOST="https://sonarcloud.io"
 
 # --- SonarCloud onboarding ----------------------------------------------------

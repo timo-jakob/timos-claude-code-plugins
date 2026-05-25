@@ -42,6 +42,11 @@ done
 [[ -n "$PROJECT_KEY"  ]] || die "--project-key required"
 [[ -n "$PROJECT_NAME" ]] || die "--project-name required"
 
+# Tools the private-path automation directly invokes. Fail-fast with a
+# preflight-pointer instead of a confusing later failure. (`security` and
+# `launchctl` ship with macOS and are checked by require_macos elsewhere.)
+require_tools curl jq gh docker
+
 KEYCHAIN_SERVICE="sonarqube-local-admin"
 COMPOSE_DIR="$REPO_ROOT/infra/sonarqube"
 [[ -f "$COMPOSE_DIR/docker-compose.yml" ]] || die "Expected $COMPOSE_DIR/docker-compose.yml — has bootstrap finished generating files?"
