@@ -56,8 +56,10 @@ brew install trivy           # PRIVATE only — for local container scanning
 > **Steps the script runs for you (no input needed)**: SonarCloud org-slug
 > resolution, Quality Gate creation (or 'Sonar way' fallback if your plan
 > doesn't allow custom gates), GitHub Actions secret writes (`SONAR_TOKEN`,
-> `SNYK_TOKEN`), Snyk monitor onboarding (optional Y/N prompt), branch
-> protection (optional Y/N prompt).
+> `SNYK_TOKEN`), **GitHub Security features** (Dependabot alerts, automated
+> security fixes, secret scanning + push protection, Private Vulnerability
+> Reporting — all free on public), Snyk monitor onboarding (optional Y/N
+> prompt), branch protection (optional Y/N prompt).
 >
 > **Interactive steps the script will pause for**:
 >
@@ -182,7 +184,10 @@ Code scanning view shows each failing check with a fix recommendation).
 > random admin password generation stored in macOS Keychain, password change
 > from default `admin/admin` via API, project creation, analysis token mint,
 > Quality Gate creation (or fallback), GitHub Actions secret writes
-> (`SONAR_TOKEN`, `SONAR_HOST_URL`).
+> (`SONAR_TOKEN`, `SONAR_HOST_URL`), **Dependabot alerts + automated security
+> fixes** (the two free-on-private toggles). Secret scanning, push protection,
+> and Private Vulnerability Reporting require GitHub Advanced Security on
+> private repos — flip those manually if your org has GHAS.
 >
 > **Interactive steps the script will pause for**:
 >
@@ -326,6 +331,19 @@ the workflow — leaving it as default email keeps the noise low.
 
 ## 3d. Dependabot — what's tracked
 
+Dependabot has two related features. The bootstrap automate scripts turn
+both on for you (free on both public and private repos):
+
+| Feature | What it does | API endpoint |
+|---|---|---|
+| **Dependabot alerts** | Flags known-vulnerable dependencies in your Security tab | `PUT /repos/{o}/{r}/vulnerability-alerts` |
+| **Automated security fixes** | Opens PRs that bump vulnerable deps to a patched version | `PUT /repos/{o}/{r}/automated-security-fixes` |
+| **Dependabot version updates** | Weekly PRs to keep deps current — drives the `.github/dependabot.yml` config below | (declarative, no API call) |
+
+> 🤖 The first two are GitHub-side toggles enabled by `automate-public.sh`
+> and `automate-private.sh`. If you ran a script, both are on. To verify,
+> see repo Settings → Code security and analysis.
+
 The generated `.github/dependabot.yml` opens weekly grouped PRs for:
 
 | Ecosystem | What it tracks |
@@ -348,8 +366,14 @@ to `dependabot.yml`.
 ## 3e. Security disclosure — enable Private Vulnerability Reporting
 
 The generated `.github/SECURITY.md` directs reporters to **GitHub Security
-Advisories (GHSA)** as the preferred private channel. For most public repos
-this works without configuration. Confirm it's enabled (or enable it once):
+Advisories (GHSA)** as the preferred private channel.
+
+> 🤖 **`automate-public.sh` enables Private Vulnerability Reporting via
+> the GitHub API for you** (the `PUT /repos/{owner}/{repo}/private-vulnerability-reporting`
+> endpoint). If you ran the automate script, this is already on — verify in
+> repo Settings → Code security and analysis.
+
+If you're setting things up manually:
 
 1. Repo Settings → **Code security and analysis**.
 2. Find **Private vulnerability reporting** → click **Enable**.
@@ -378,6 +402,13 @@ containing a detected token (AWS key, GitHub PAT, Stripe key, OpenAI key,
 gitleaks and before CI sees the push, and it's the only one that can save
 you if someone uses `git push --no-verify` to bypass pre-commit and the
 secret was real.
+
+> 🤖 **`automate-public.sh` enables secret scanning + push protection
+> for you** via the `PATCH /repos/{owner}/{repo}` endpoint with
+> `security_and_analysis.secret_scanning.status = enabled` and
+> `security_and_analysis.secret_scanning_push_protection.status = enabled`.
+> Free on public; on private repos this requires GitHub Advanced Security
+> (the private automate script skips it and prints a note).
 
 | Repo visibility | Cost | How to enable |
 |---|---|---|
