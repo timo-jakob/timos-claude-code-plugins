@@ -49,6 +49,48 @@ Swift-specific development tooling — code review and formatting/linting.
 | Test Reviewer | sonnet | Coverage gaps, assertion quality, flaky tests |
 | Swift Lint & Format | sonnet | Runs SwiftFormat and SwiftLint, fixes issues in-place |
 
+### development-python
+
+Python-specific maintenance — triages and fixes findings produced by the
+toolchain `/development:bootstrap` installs (ruff, semgrep, Snyk Code,
+Snyk Open Source, SonarCloud), and autonomously applies dependency
+upgrades (patch + minor + major) with test-based verification.
+
+Pure function of a JSON input per `ARCHITECTURE.md` — it does not run
+detection itself; the `/development:maintenance` orchestrator (forthcoming)
+constructs the input and dispatches here.
+
+> ⚠️ **Cost expectations**: These agents deliberately favor autonomy
+> over speed and token cost. They read code with LSP (find references,
+> type info, public-API detection), fetch release notes from the web for
+> major upgrades, run the project's test suite in their isolated
+> worktrees, and iterate up to 3 times on test failures before escalating.
+> A maintenance run on a non-trivial project can consume tens of thousands
+> of tokens; on a project with major-version CVEs requiring opus-driven
+> migration, more. The trade is intentional — see ARCHITECTURE.md's
+> "Maximizing autonomy" section.
+
+**Skills:**
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| Maintenance dispatcher | `/development-python:maintenance <json>` | Parses input, runs coverage pre-flight, spawns per-tool agents in parallel worktrees, aggregates results. Standalone invocation prints usage and stops. |
+
+**Agents:**
+
+| Agent | Model | Focus |
+|-------|-------|-------|
+| python-ruff-fixer | haiku | `ruff check --fix` (safe) + `ruff format` + `--unsafe-fixes` with test verification |
+| python-semgrep-triage | sonnet | Per-finding: fix (refactor) / suppress (`# nosemgrep` + reason); LSP-driven scope check; only escalates when public API changes |
+| python-snyk-triage | sonnet | Snyk Code + Snyk OSS; auto-bumps patch + minor versions in pyproject.toml/requirements.txt; distro CVEs → 90-day `.snyk` ignore |
+| python-sonar-triage | sonnet | SonarCloud bugs/smells/vulns; security hotspots investigated context-first, not punted by default |
+| python-major-upgrade | opus | Reads official release notes via WebFetch; maps breaking changes to call sites via LSP; applies migration; iterates up to 3 times on test failures |
+| python-coverage-improver | opus | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
+
+All worktree-modifying agents run their fixes through the project's
+test suite locally before declaring success. CI is the secondary
+safety net, not the primary verification loop.
+
 ## Requirements
 
 The plugins are written for **macOS** and assume **Homebrew** is the package
@@ -82,7 +124,7 @@ Additional runtime dependencies:
 Load plugins locally during development:
 
 ```sh
-claude --plugin-dir ./development --plugin-dir ./development-swift
+claude --plugin-dir ./development --plugin-dir ./development-swift --plugin-dir ./development-python
 ```
 
 Then use the slash commands:

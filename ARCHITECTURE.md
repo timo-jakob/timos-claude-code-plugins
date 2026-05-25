@@ -232,13 +232,19 @@ file.
     "version": "3.13",
     "manifests": ["pyproject.toml", "requirements.txt"]
   },
+  "tooling_configured": {
+    "ruff":       true,
+    "semgrep":    true,
+    "snyk_code":  false,
+    "snyk_oss":   false,
+    "sonarcloud": true,
+    "dependabot": true
+  },
   "findings_by_tool": {
-    "ruff":         [/* tool-native finding objects */],
-    "snyk_code":    [/* … */],
-    "snyk_oss":     [/* … */],
-    "semgrep":      [/* … */],
-    "sonarcloud":   [/* … */],
-    "dependabot":   [/* … */]
+    "ruff":       [/* tool-native finding objects */],
+    "semgrep":    [/* … */],
+    "sonarcloud": [/* … */],
+    "dependabot": [/* … */]
   },
   "policy": {
     "coverage_threshold": 90,
@@ -255,6 +261,16 @@ file.
 Tool-native finding objects retain their original shape — we don't
 normalize. Each language plugin already knows the shape of its own
 tools' output; adding a translation layer is duplicate work.
+
+**`tooling_configured` covers tools the language plugin cares about,
+including ones that aren't set up for this project.** When
+`tooling_configured.X == false`, the language plugin still dispatches
+its agent for X, and the agent produces a "this tool isn't configured
+— here's how to add it" output instead of doing work. This lets a
+half-bootstrapped project still get partial maintenance plus a
+checklist of what's missing. `findings_by_tool` only contains keys
+for configured tools (tools with `configured == false` are absent
+from `findings_by_tool`).
 
 ### Response (`development-<lang>` → `development`)
 
@@ -279,6 +295,14 @@ tools' output; adding a translation layer is duplicate work.
       "draft_branch": "wt-snyk-bump-pkg-abc123"
     }
   ],
+  "missing_tooling": [
+    {
+      "tool": "snyk_code",
+      "summary": "Snyk Code (SAST) is not configured for this project.",
+      "what_it_provides": "Source-level vulnerability scanning; catches issues the lint tools miss.",
+      "how_to_add": "Run /development:bootstrap (it sets up Snyk end-to-end), or sign up at snyk.io and add SNYK_TOKEN to GitHub Actions secrets."
+    }
+  ],
   "unable_to_fix": [
     {
       "tool": "semgrep",
@@ -293,6 +317,13 @@ tools' output; adding a translation layer is duplicate work.
 with `isolation: "worktree"` and made changes. The orchestrator merges
 these branches back to the user's working branch in topological order
 (least-conflict first).
+
+`missing_tooling` is the aggregation of every agent that ran in
+"tool not configured" mode. The orchestrator surfaces this to the
+user as a checklist alongside the actual maintenance results. A
+project that wasn't bootstrapped can still benefit from the agents
+that DO have something to work with, while the rest of the agents
+explain what's missing.
 
 ## Agent model selection
 
@@ -358,6 +389,143 @@ that, surface it to the user with `actions_requiring_review`.
 Read-only / advisory agents (review, audit, classify) shouldn't run
 in worktrees — they make no changes, so isolation buys nothing. Save
 the worktree creation time.
+
+## Maximizing autonomy
+
+The plugins deliberately favor autonomous fixes over speed and token
+cost. Maintenance runs are intended to be expensive and thorough, not
+cheap and shallow. The principle:
+
+> Human decides whether things should change. The plugins take care
+> of everything else — whatever it costs in tokens.
+
+### What's sacred (never changed autonomously)
+
+- Public API surface (function signatures, exported symbols, module
+  layout, return shapes)
+- Behavior contracts the project's tests don't cover
+- Database schemas and persisted-data formats
+- License-bearing choices (e.g., swapping a dep for one with a
+  different license is a strategic call, not a maintenance task)
+- Operational concerns (env vars, secrets, deploy config)
+
+### What agents fix autonomously
+
+- Bugs (changing wrong behavior to correct behavior)
+- Security findings whose fix preserves functionality
+- Style, format, mechanical refactors (ruff `--fix`, ruff format)
+- Dep upgrades (patch, minor, AND major — see below)
+- Code smells that don't change behavior
+- SQL injection refactors (parameterized queries — preserves results)
+- Test additions (never modifies production code under test)
+
+### Coverage as the safety floor
+
+Local tests — not CI — are the verification loop. Agents end every
+worktree-modifying run by executing the project's test suite in the
+worktree; only branches with passing tests are returned for merge.
+This means **coverage of the touched code must be high enough that
+"tests pass" actually means "behavior preserved."**
+
+Two thresholds, per action class:
+
+| Action class | Required coverage | Floor |
+|---|---|---|
+| Major-version dep upgrade | 90% (matches the Zero Tolerance Quality Gate) | 70% |
+| All other changes (refactors, patch/minor bumps, sonar/semgrep/snyk fixes) | 80% | 60% |
+
+Three branches per planned change, evaluated against the touched
+modules' coverage (not whole-project coverage):
+
+| Module coverage | Behavior |
+|---|---|
+| ≥ Required | Proceed with the change. |
+| Floor ≤ coverage < Required | Agent runs `python-coverage-improver` first to bring affected modules up to Required, then makes the change. Adds tests only; never modifies production code under test. |
+| < Floor | Refuse. Surface a `missing_tooling`-shaped recommendation pointing at the standalone `/development-python:improve-test-coverage` skill (issue #35). The user invests in coverage deliberately, then re-runs maintenance. |
+
+**Exception**: pure-mechanical agents skip the coverage check:
+- `ruff check --fix` without `--unsafe-fixes` (ruff has formally
+  verified these are behavior-preserving)
+- `ruff format` (whitespace + line-breaks only)
+
+`--unsafe-fixes` and all other refactors respect the policy.
+
+### Reading code: LSP first, grep fallback
+
+Claude Code's `LSP` tool gives agents proper code understanding —
+find-definition, find-references, type info, "is this symbol exported
+from `__init__.py` / `__all__`?". Use it as the default for any
+semantic question:
+
+- "Is this function part of the public API?" → LSP check `__all__` +
+  callers
+- "Does changing this signature break any caller?" → LSP find-references
+- "What's the actual type of this variable?" → LSP hover
+
+Grep / regex is the fallback when LSP can't answer (dynamic
+attribute access, string-based symbol lookup, dependencies that
+aren't in the workspace).
+
+### Model selection for autonomy at scale
+
+The earlier "haiku / sonnet / opus by task character" table still
+holds, with two refinements:
+
+- **Major-version dep upgrades use opus.** Reading release notes,
+  identifying breaking changes, applying migrations across the
+  codebase, and verifying against tests is exactly opus's strong
+  suit. Don't try this on sonnet.
+- **Coverage improvement uses opus.** Writing meaningful tests
+  (not just line-touching tests that pass false-confidently) requires
+  understanding intent. Mechanical test-writing is worse than no test
+  because it creates a false safety floor.
+
+### Major-version upgrades, end to end
+
+The hard case. Flow:
+
+1. `python-snyk-triage` (sonnet) identifies the major-version CVE finding;
+   dispatcher routes it to `python-major-upgrade` (opus).
+2. `python-major-upgrade` reads the official release notes (via WebFetch
+   to PyPI / the project's CHANGELOG). Identifies breaking changes.
+3. Uses LSP to map breaking-change patterns to actual call sites in
+   this repo.
+4. Applies migration in the worktree.
+5. Bumps the version pin.
+6. Runs the project's test suite in the worktree.
+7. If tests pass → success.
+8. If tests fail:
+   - Diagnose the failure (read the test, the prod code, the error).
+   - Attempt up to 2 more remediation passes (e.g., a migration pattern
+     the agent missed).
+   - If still failing after 3 attempts → escalate to
+     `actions_requiring_review` with full context (release notes URL,
+     migration applied, test failures, agent's diagnosis).
+
+### Residual human-in-the-loop list
+
+After all the above, the cases that genuinely need human decisions:
+
+- **Hardcoded secrets requiring env-var setup** — operational change,
+  not a code change.
+- **License-incompatible dep replacements** — strategic.
+- **DB schema or data-format migrations** — deploy concern.
+- **Public API removals** — even if LSP says "no internal callers,"
+  external users might exist. The agent can recommend; user decides.
+- **Major upgrades where the agent's 3 remediation passes still fail
+  tests** — escalation, not punt: the agent attaches release notes,
+  diff, test output, and its diagnosis.
+
+Everything else: the agent should figure it out.
+
+### Cost expectations
+
+Higher per-run token usage in exchange for fewer manual triage cycles
+is the deliberate trade. A maintenance run on a non-trivial project
+can consume tens of thousands of tokens (LSP queries, release-note
+reads, test runs, possibly opus on the major-upgrade branch). This
+is intentional — the alternative is the user spending an afternoon
+clicking through findings.
 
 ## Shared helpers — kept canonical in `development`
 
