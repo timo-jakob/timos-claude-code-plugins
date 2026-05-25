@@ -97,9 +97,43 @@ just `python-ruff-fixer` in safe-fixes-only mode and skip the rest.
 
 ### Step 2 — when coverage data IS present
 
-Determine the affected modules (union of file paths across all
-`findings_by_tool` entries), get their coverage from
-`coverage.by_module`, then apply per-action-class thresholds:
+Determine the **affected-modules set** — the set of modules a planned
+agent might touch. The right scope depends on what kind of work is
+planned:
+
+#### Step 2a — for findings with explicit file paths
+
+For each finding in `ruff`, `semgrep`, `snyk_code`, `sonarcloud`,
+collect the `file_path` field. The agent will edit only those files
+(plus possibly their direct dependents if a refactor is needed), so
+these are the modules at risk.
+
+#### Step 2b — for major dep upgrades (the no-file-path case)
+
+Dependency upgrade findings — `snyk_oss` patch/minor bumps,
+`snyk_oss` major bumps, and `dependabot` PRs — don't carry per-finding
+file paths. The agent discovers affected files at runtime via LSP
+`find-references` on the package's public API. The dispatcher can't
+predict which files those will be.
+
+**For major dep upgrades** (`snyk_oss` major findings OR pip-ecosystem
+Dependabot PRs classified as `major` or `major-equiv` in the Dependabot
+routing logic), the conservative safe answer is: the affected-modules
+set is **every Python source module in the project**. Rationale: any
+module could import the package being upgraded. If even one
+non-trivially-covered module imports it, the agent will edit it.
+Without LSP, the dispatcher can't tell which ones.
+
+In practice: for a planned major dep upgrade, scan **all of
+`coverage.by_module`** (the union of all measured modules) against the
+major-work thresholds (90% required / 70% floor). Treat the project as
+a single unit for this check.
+
+Patch / minor dep upgrades skip this conservative check — they
+don't change the package's API surface, so risk is concentrated in
+the bump itself, not in fragile call sites.
+
+#### Step 2c — apply per-action-class thresholds
 
 | Action | Required | Floor |
 |---|---|---|
@@ -108,13 +142,14 @@ Determine the affected modules (union of file paths across all
 
 Three branches:
 
-1. **All affected modules ≥ Required** → proceed to dispatch.
+1. **All modules in the affected set ≥ Required** → proceed to
+   dispatch.
 2. **Some modules between Floor and Required** → first spawn
    `python-coverage-improver` (opus, worktree) with the list of
    under-covered modules + target threshold. Wait for it to finish.
    Re-check coverage from its result. Then dispatch the work agents
    against its branch.
-3. **Any affected module below Floor** → halt. Return:
+3. **Any module in the affected set below Floor** → halt. Return:
    ```json
    {
      "schema_version": "1",
@@ -122,7 +157,7 @@ Three branches:
      "actions_requiring_review": [],
      "missing_tooling": [],
      "human_action_required": [{
-       "reason": "Coverage on <module> is <X>% — below the <Floor>% floor required for autonomous changes.",
+       "reason": "Coverage on <module> is <X>% — below the <Floor>% floor required for autonomous changes. Planned work: <action description>.",
        "recommendation": "Invest in test coverage first. Run /development-python:improve-test-coverage (when available — see issue #35) or write tests by hand. Re-run /development:maintenance once coverage is at least <Floor>%."
      }],
      "unable_to_fix": []
@@ -137,6 +172,36 @@ module(s) with no data.
 Pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
 format) skip this check — they're behavior-preserving by ruff's own
 guarantee. Other agents respect it.
+
+#### Step 2d — partial halt vs full halt
+
+If the floor check fails *only* for major dep upgrades (Step 2b
+expanded the scope to the whole project), but **other work categories
+have all their explicit-file-path modules above the floor**, you may
+proceed with the non-major work while skipping the major upgrades.
+Surface the skipped major upgrades in `human_action_required` with:
+
+```json
+{
+  "reason": "Skipped <N> major dep upgrade(s) — project-wide coverage floor of <Floor>% not met (lowest: <module> at <X>%).",
+  "recommendation": "Bring <module> coverage up to <Floor>% (preferably to 90% for major-upgrade work) before re-running maintenance. The patch/minor upgrades and other findings have been processed normally."
+}
+```
+
+This avoids the all-or-nothing problem where one weakly-tested module
+blocks every other autonomous fix.
+
+#### Worked example — ai-doc-organizer
+
+- 7 Dependabot PRs: 5 are pip-ecosystem major/major-equiv (PRs 13–17)
+- Project-wide coverage scan: `mutation_routes.py` at 61.9%, below
+  the 70% major-work floor
+- Decision: skip the 5 major upgrades, surface them in
+  `human_action_required`. The remaining 2 PRs (18 GHA major, 12
+  Docker) go to `python-dependabot-triage` as human-review per the
+  Dependabot routing logic. The other work agents (ruff, semgrep,
+  snyk, sonar) run normally — none have findings, so they each return
+  "0 findings, nothing to do."
 
 ## Dispatch — which agents to spawn
 
@@ -256,7 +321,7 @@ After classification:
 | 13 ruamel-yaml 0.18→0.19 | pip | major-equiv (0.x) | python-major-upgrade |
 | 12 python 3.13→3.14 (docker) | docker | minor | dependabot-triage (human-review: docker) |
 
-Six `python-major-upgrade` spawns + one `python-dependabot-triage` (handling PRs 18 and 12 as human-review cases). The latter does not auto-merge anything in this scenario.
+Five `python-major-upgrade` spawns (PRs 13, 14, 15, 16, 17) + one `python-dependabot-triage` (handling PRs 18 and 12 as human-review cases). The latter does not auto-merge anything in this scenario.
 
 For each agent's prompt, include:
 
