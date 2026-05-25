@@ -66,10 +66,40 @@ Before dispatching:
 ## Coverage pre-flight (per ARCHITECTURE.md "Maximizing autonomy")
 
 Before spawning any work agent, check whether the project's coverage
-clears the bar for the planned changes. Determine the affected modules
-(union of file paths across all `findings_by_tool` entries), get their
-coverage from `coverage.by_module`, then apply per-action-class
-thresholds:
+clears the bar for the planned changes.
+
+### Step 1 — coverage data must exist
+
+If `coverage.by_module` is empty `{}` or `coverage.overall` is `null`,
+the gather step couldn't produce coverage data (most commonly because
+pytest or pytest-cov isn't available in the project's environment).
+Without coverage data there's no safety floor; halt and return:
+
+```json
+{
+  "schema_version": "1",
+  "actions_taken": [],
+  "actions_requiring_review": [],
+  "missing_tooling": [],
+  "human_action_required": [{
+    "reason": "Coverage data is unavailable — maintenance requires measurable per-module coverage as the safety floor for autonomous changes.",
+    "recommendation": "Check the gather-step notes in the orchestrator's output for the exact cause (typically: pytest-cov not installed in the project venv). Install the missing piece (the note includes the exact command), then re-run /development:maintenance."
+  }],
+  "unable_to_fix": []
+}
+```
+
+Skip the rest of the pre-flight; do not spawn any agents. **Exception**:
+pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
+format) are behavior-preserving by ruff's own guarantee and can run
+without coverage data. If the only finding category is `ruff`, run
+just `python-ruff-fixer` in safe-fixes-only mode and skip the rest.
+
+### Step 2 — when coverage data IS present
+
+Determine the affected modules (union of file paths across all
+`findings_by_tool` entries), get their coverage from
+`coverage.by_module`, then apply per-action-class thresholds:
 
 | Action | Required | Floor |
 |---|---|---|
@@ -98,6 +128,11 @@ Three branches:
      "unable_to_fix": []
    }
    ```
+
+If an affected module is missing from `coverage.by_module` entirely
+(coverage data exists for some modules but not this one), treat that
+as "unknown coverage" → halt as in branch 3, citing the specific
+module(s) with no data.
 
 Pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
 format) skip this check — they're behavior-preserving by ruff's own

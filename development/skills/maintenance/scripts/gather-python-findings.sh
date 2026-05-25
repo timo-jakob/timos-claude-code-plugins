@@ -40,6 +40,27 @@ cd "$repo"
 
 notes=()
 
+# --- pick a Python interpreter -----------------------------------------------
+# Many projects keep pytest + coverage tooling inside a project-local venv
+# rather than on the global PATH. Check the conventional venv locations
+# first; fall back to system python3 / pytest if no venv is present.
+#
+# Sets PY_BIN (python3 to use) and PYTEST_BIN (pytest to use). Either may
+# be empty if nothing is found — downstream code adds notes in that case.
+PY_BIN=""
+PYTEST_BIN=""
+PY_SOURCE="system"
+for venv_dir in .venv venv env; do
+  if [[ -x "$venv_dir/bin/python3" ]]; then
+    PY_BIN="$repo/$venv_dir/bin/python3"
+    [[ -x "$venv_dir/bin/pytest" ]] && PYTEST_BIN="$repo/$venv_dir/bin/pytest"
+    PY_SOURCE="$venv_dir"
+    break
+  fi
+done
+[[ -z "$PY_BIN"     ]] && command -v python3 >/dev/null 2>&1 && PY_BIN="$(command -v python3)"
+[[ -z "$PYTEST_BIN" ]] && command -v pytest  >/dev/null 2>&1 && PYTEST_BIN="$(command -v pytest)"
+
 # --- tooling_configured ------------------------------------------------------
 has_ruff_config="false"
 if [[ -f "ruff.toml" ]] || grep -q '^\[tool\.ruff' pyproject.toml 2>/dev/null; then
@@ -157,17 +178,16 @@ fi
 
 # --- coverage ----------------------------------------------------------------
 # Run pytest with --cov; produce coverage.json; parse per-module percentages.
-# If pytest isn't installed or tests fail to even start, leave coverage null.
+# If neither pytest nor pytest-cov is available, leave coverage null + add
+# notes explaining what to install.
 coverage_overall="null"
 coverage_by_module="{}"
 
-if command -v pytest >/dev/null 2>&1; then
-  # `coverage` package needed for --cov; check if it's importable in the env.
-  if python3 -c 'import pytest_cov' >/dev/null 2>&1; then
-    # Run pytest --cov --cov-report=json; tolerate test failures (we want
-    # coverage data even when some tests fail — though that's a separate
-    # issue we'll surface).
-    pytest --cov --cov-report=json --cov-report= -q --no-header \
+if [[ -n "$PYTEST_BIN" && -n "$PY_BIN" ]]; then
+  # pytest-cov needs to be importable from the same env. Check using the
+  # interpreter we'll actually run.
+  if "$PY_BIN" -c 'import pytest_cov' >/dev/null 2>&1; then
+    "$PYTEST_BIN" --cov --cov-report=json --cov-report= -q --no-header \
       > /dev/null 2>&1 || true
     if [[ -f "coverage.json" ]]; then
       coverage_overall=$(jq '.totals.percent_covered // null' coverage.json)
@@ -177,12 +197,16 @@ if command -v pytest >/dev/null 2>&1; then
         | map({ key: .key, value: (.value.summary.percent_covered // 0) })
         | from_entries
       ' coverage.json)
+      [[ "$PY_SOURCE" != "system" ]] && \
+        notes+=("coverage gathered using $PY_SOURCE/bin/pytest (project-local venv).")
     fi
   else
-    notes+=("pytest is on PATH but pytest-cov is not installed in the active environment; coverage gathering skipped. Install with 'pip install pytest-cov'.")
+    notes+=("pytest found at $PYTEST_BIN but pytest-cov is not importable from that interpreter; install with '$PY_BIN -m pip install pytest-cov'.")
   fi
+elif [[ -n "$PYTEST_BIN" && -z "$PY_BIN" ]]; then
+  notes+=("pytest found but no usable python3 — coverage gathering skipped.")
 else
-  notes+=("pytest is not on PATH; coverage gathering skipped.")
+  notes+=("pytest is not available (checked PATH and .venv/, venv/, env/); coverage gathering skipped. Activate your project venv or install pytest globally.")
 fi
 
 # --- emit --------------------------------------------------------------------
