@@ -171,7 +171,41 @@ Inputs to each agent are provided **in the agent's prompt**, not on disk
   would use given current detection results.
 - Idempotency reviewer: for each entry in `existing_artifacts` from
   detection — the current on-disk content (read it) AND the planned
-  template content.
+  template content. **Also pass any pre-existing workflow files in
+  `.github/workflows/` that the user is replacing or that overlap
+  semantically with the generated workflows** — see "workflow
+  replacement diff" below. Those won't appear in `existing_artifacts`
+  because their filenames don't match our templates, but they're the
+  most common source of "we silently lost a custom step" regret.
+
+### Workflow replacement diff
+
+The orchestrator confirmed with the user which planned workflow file
+they want to land (e.g., `quality-public.yml`). If the target repo
+already has *other* workflows in `.github/workflows/` (e.g., a hand-
+rolled `test.yml`, `ci.yml`, `lint.yml`), the user usually wants the
+new workflow to subsume them — but only after seeing what would be
+lost. Custom Python version pins, apt-get system-dep installs,
+`timeout-minutes`, env vars, container service definitions, etc.,
+all live in user-authored workflows and DO NOT live in our templates.
+Silently deleting them is the most expensive bootstrap regret.
+
+**Required action:** before Step 3, list every file under
+`.github/workflows/` in the target repo. For each that is not part of
+the planned generation set:
+
+1. Read its full content.
+2. Include it in the idempotency-reviewer prompt with a tag like
+   `[REPLACE-CANDIDATE: tests/integration with custom apt-get installs]`.
+3. The reviewer compares it semantically against the planned
+   `quality-*.yml` and surfaces things that would be lost: Python
+   version pins, system deps, custom timeouts, env vars, secret refs,
+   container services, etc.
+4. Present findings to the user as a confirmation step:
+   *"Found `test.yml` with: Python 3.13, `apt-get install tesseract-ocr poppler-utils`, `timeout-minutes: 20`. Delete it, fold these into the new `quality-public.yml`, or keep both?"*
+5. **Default to keep-both unless the user explicitly chose merge or delete**
+   — that's the least-destructive option. Generating both workflows side-
+   by-side wastes a few seconds of CI but loses nothing.
 
 Block on all three agents finishing. Aggregate their reports:
 
@@ -191,12 +225,28 @@ text replacement before writing:
 |---|---|
 | `{{PROJECT_NAME}}` | repo name from `gh repo view --json name` or the directory name |
 | `{{PROJECT_KEY}}` | for Sonar — usually `<github-org>_<repo>` (SonarCloud convention) or `<repo>` (SonarQube) |
-| `{{ORG_KEY}}` | for SonarCloud — `<github-org>` |
+| `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated detected languages |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
+| `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`python_version` field) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
+| `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `python_version.replace('.', '')`. |
 | `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
 | `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
+
+### Python-specific recommendation (when applicable)
+
+If `has_pytest_cov=false` from detection AND Python is in the detected languages,
+surface a TODO to the user during Step 5 (manual checklist):
+
+> 🐍 **Add `pytest-cov` to your project's dev deps.** The generated workflow
+> installs it inline in CI so coverage works there, but for local
+> `pytest --cov` to work you need it in `[project.optional-dependencies].dev`
+> in `pyproject.toml`, or in your `requirements-dev.txt`. Recommended pin:
+> `pytest-cov>=5.0.0`.
+
+Do not modify the user's `pyproject.toml` automatically — that's their file.
+Just call it out.
 
 ### `{{SECURITY_CONTACT_BLOCK}}` substitution
 

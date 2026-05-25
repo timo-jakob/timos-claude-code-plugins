@@ -10,6 +10,8 @@
 #   visibility            "public" | "private" | "unknown"
 #   languages             []string  subset of [swift, typescript, python, go]
 #   has_dockerfile        bool
+#   python_version        string   ("3.13", "3.12", ...; "" if not Python)
+#   has_pytest_cov        bool     (true if pytest-cov is in dev deps already)
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #
 # All paths are evaluated relative to the current working directory.
@@ -92,6 +94,84 @@ for i in "${!langs[@]}"; do
 done
 languages_json+="]"
 
+# --- python version + pytest-cov --------------------------------------------
+# Both only meaningful when Python is in the detected language set. We still
+# emit defaults ("3.12" / false) when Python isn't detected so the
+# orchestrator doesn't have to special-case the JSON shape.
+python_version=""
+has_pytest_cov="false"
+
+python_in_langs="false"
+for l in ${langs[@]+"${langs[@]}"}; do
+  [[ "$l" == "python" ]] && python_in_langs="true"
+done
+
+if [[ "$python_in_langs" == "true" ]]; then
+  pyproject="$cwd/pyproject.toml"
+
+  # Parse `requires-python` and strip operators (>=, ~=, ^, <, >). Prefer
+  # python3's tomllib (stdlib 3.11+); fall back to grep so the script
+  # doesn't hard-require a recent Python on the host.
+  if [[ -f "$pyproject" ]] && command -v python3 >/dev/null 2>&1; then
+    python_version="$(python3 - <<EOF 2>/dev/null || true
+import re, sys
+try:
+    import tomllib
+    with open("$pyproject", "rb") as f:
+        data = tomllib.load(f)
+    rp = data.get("project", {}).get("requires-python", "")
+    m = re.search(r"\d+\.\d+", rp)
+    print(m.group(0) if m else "")
+except Exception:
+    pass
+EOF
+)"
+  fi
+
+  # Fallback: grep for "requires-python" if Python's tomllib path didn't
+  # yield anything (older python3 on host, malformed file, etc.).
+  if [[ -z "$python_version" && -f "$pyproject" ]]; then
+    python_version="$(grep -E '^[[:space:]]*requires-python' "$pyproject" 2>/dev/null \
+      | grep -oE '[0-9]+\.[0-9]+' | head -n1)"
+  fi
+
+  # Sensible default — current stable interpreter at time of writing.
+  [[ -z "$python_version" ]] && python_version="3.12"
+
+  # pytest-cov detection: search pyproject dev extras + requirements files.
+  if [[ -f "$pyproject" ]] && command -v python3 >/dev/null 2>&1; then
+    if python3 - <<EOF >/dev/null 2>&1
+import sys
+try:
+    import tomllib
+    with open("$pyproject", "rb") as f:
+        data = tomllib.load(f)
+    deps = data.get("project", {}).get("optional-dependencies", {}).get("dev", [])
+    for d in deps:
+        if d.lower().startswith("pytest-cov"):
+            sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+EOF
+    then
+      has_pytest_cov="true"
+    fi
+  fi
+
+  # Also scan requirements*.txt files (a common pattern for projects that
+  # split runtime + dev deps across multiple manifest files).
+  if [[ "$has_pytest_cov" == "false" ]]; then
+    for rf in "$cwd"/requirements*.txt; do
+      [[ -f "$rf" ]] || continue
+      if grep -qiE '^[[:space:]]*pytest-cov' "$rf" 2>/dev/null; then
+        has_pytest_cov="true"
+        break
+      fi
+    done
+  fi
+fi
+
 # --- dockerfile --------------------------------------------------------------
 has_dockerfile="false"
 if [[ -f "$cwd/Dockerfile" ]] || \
@@ -169,6 +249,8 @@ cat <<EOF
   "visibility": $(json_str "$visibility"),
   "languages": $languages_json,
   "has_dockerfile": $(json_bool "$has_dockerfile"),
+  "python_version": $(json_str "$python_version"),
+  "has_pytest_cov": $(json_bool "$has_pytest_cov"),
   "existing_artifacts": $artifacts_json
 }
 EOF

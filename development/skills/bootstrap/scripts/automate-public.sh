@@ -15,6 +15,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+# The user invokes automate-public.sh from their target repo's working dir,
+# so cwd is the repo root (where sonar-project.properties lives).
+REPO_ROOT="$(pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
@@ -76,6 +79,43 @@ resp=$(sonar_curl GET "$SONAR_HOST/api/authentication/validate")
 valid=$(printf '%s' "$resp" | jq -r '.valid // false')
 [[ "$valid" == "true" ]] || die "Token validation failed: $resp"
 ok "Token valid"
+
+# --- Resolve the real SonarCloud org slug ------------------------------------
+# The orchestrator passed `--org-key=<github-owner>` as a best guess, but
+# SonarCloud's actual org key can be `<github-owner>` OR `<github-owner>-github`
+# (and sometimes neither — auto-generated suffix on accounts with name
+# collisions). Query the user's actual orgs and pick the matching one.
+info "Resolving SonarCloud organization for '$ORG_KEY'…"
+orgs_resp=$(sonar_curl GET "$SONAR_HOST/api/organizations/search?member=true")
+_load_http_status
+[[ "$_http_status" =~ ^20 ]] || die "Could not enumerate SonarCloud orgs (HTTP $_http_status): $orgs_resp"
+
+resolved_org=$(printf '%s' "$orgs_resp" | jq -r --arg owner "$ORG_KEY" '
+  # Prefer the exact match; fall back to the -github-suffixed variant.
+  ([.organizations[] | select(.key == $owner)] + [.organizations[] | select(.key == ($owner + "-github"))])
+  | first
+  | .key // empty
+')
+
+if [[ -z "$resolved_org" ]]; then
+  available=$(printf '%s' "$orgs_resp" | jq -r '.organizations[].key' | paste -sd, -)
+  die "No SonarCloud org matches '$ORG_KEY' or '${ORG_KEY}-github'. Available orgs for this user: ${available:-<none>}. Re-run automate-public.sh with --org-key=<the correct slug>."
+fi
+
+if [[ "$resolved_org" != "$ORG_KEY" ]]; then
+  warn "GitHub owner is '$ORG_KEY' but SonarCloud org slug is '$resolved_org' — using the resolved slug."
+  # Patch sonar-project.properties in place so the workflow uses the right slug.
+  if [[ -f "$REPO_ROOT/sonar-project.properties" ]]; then
+    # Portable sed -i: use a backup extension then remove the backup.
+    sed -i.bak "s|^sonar\.organization=.*|sonar.organization=$resolved_org|" \
+      "$REPO_ROOT/sonar-project.properties"
+    rm -f "$REPO_ROOT/sonar-project.properties.bak"
+    ok "Patched sonar-project.properties: sonar.organization=$resolved_org"
+  fi
+  ORG_KEY="$resolved_org"
+else
+  ok "Org slug matches: $ORG_KEY"
+fi
 
 # Project may already exist (auto-created by the SonarCloud import flow).
 # Skip create-if-exists; we just need to be able to assign the Quality Gate.
