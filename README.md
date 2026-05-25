@@ -87,6 +87,7 @@ constructs the input and dispatches here.
 | python-sonar-triage | sonnet | SonarCloud bugs/smells/vulns; security hotspots investigated context-first, not punted by default |
 | python-major-upgrade | opus | Reads official release notes via WebFetch; maps breaking changes to call sites via LSP; applies migration; iterates up to 3 times on test failures |
 | python-coverage-improver | opus | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
+| python-dependabot-triage | sonnet | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
 
 All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary

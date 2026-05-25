@@ -1,6 +1,6 @@
 ---
 name: python-major-upgrade
-description: Apply a major-version dependency upgrade autonomously — read official release notes, identify breaking changes, migrate the call sites via LSP, run tests, iterate on failures. Escalates only when 3 remediation passes still fail. Used by development-python:maintenance.
+description: Apply a major-version dependency upgrade autonomously — read official release notes, identify breaking changes, migrate the call sites via LSP, run tests, iterate on failures. Handles bumps originating from either Snyk Open Source findings OR Dependabot major-version PRs. Escalates only when 3 remediation passes still fail. Used by development-python:maintenance.
 model: opus
 tools: Read, Edit, Bash, Grep, LSP, WebFetch
 ---
@@ -11,6 +11,10 @@ threshold for the affected modules; that's the safety net. Your job:
 make the upgrade work, autonomously, by reading the release notes and
 applying the migration.
 
+The bump may originate from either a **Snyk OSS** finding (CVE-driven)
+or a **Dependabot** major PR (routine bump). Both flow into the same
+procedure — only the input shape and output recommendations differ.
+
 ## Inputs
 
 Your prompt contains:
@@ -18,11 +22,17 @@ Your prompt contains:
   base branch)
 - `package` — name of the dep being upgraded (e.g., `pydantic`)
 - `current_version` — e.g., `"1.10.13"`
-- `target_version` — e.g., `"2.0.0"` (or the patched-major if it's
-  a CVE-driven upgrade)
-- `cve_reference` — optional; the Snyk finding that triggered this
+- `target_version` — e.g., `"2.0.0"`
+- `source` — `"snyk_oss"` (CVE-driven) or `"dependabot"` (routine bump)
+- `cve_reference` — optional; the Snyk finding ID when `source == "snyk_oss"`
+- `dependabot_pr` — optional; the Dependabot PR number when `source == "dependabot"`.
+  After a successful local migration, your output should recommend
+  closing this PR (the user can do so manually, or via `gh pr close`).
+  Local migration with proper tests + LSP-driven call-site updates is a
+  more complete result than Dependabot's "bumped the pin" PR.
 - `release_notes_url` — optional; the dispatcher's best guess at the
-  canonical release notes / migration guide URL
+  canonical release notes / migration guide URL. For dependabot-sourced
+  bumps the Dependabot PR body usually links to it — check there too.
 
 ## Procedure
 
@@ -108,7 +118,7 @@ full briefing on what was attempted and what they need to decide.
 
 ```json
 {
-  "tool": "snyk_oss",
+  "tool": "<source from input — 'snyk_oss' or 'dependabot'>",
   "configured": true,
   "actions_taken": [
     {
@@ -123,7 +133,9 @@ full briefing on what was attempted and what they need to decide.
       "files_changed": [...],
       "tests_passed": true,
       "remediation_passes": 0,
-      "worktree_branch": "<branch>"
+      "worktree_branch": "<branch>",
+      "supersedes_dependabot_pr": <PR number when source == 'dependabot', else null>,
+      "post_merge_recommendation": "<when supersedes_dependabot_pr is set:> After merging this worktree branch into your working branch, close Dependabot PR #<N> via 'gh pr close <N>' with a comment like 'Superseded by local major-upgrade with full migration + tests.' Leaving it open will conflict with the migration applied here."
     }
   ],
   "actions_requiring_review": [
