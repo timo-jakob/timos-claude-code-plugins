@@ -49,33 +49,64 @@ Validate from `detect.json`:
   detected (swift / typescript / python / go). If your project uses
   one of these, ensure manifest files (pyproject.toml, package.json,
   etc.) are present."
-- For v1: `languages` contains `python`. If it contains anything else
-  *exclusively*, halt with a clear "only Python is supported by
-  development-python so far; other language plugins are forthcoming."
-  If it contains Python plus others, proceed with Python only.
 
-Extract for use later: `repo` (path = cwd from script), `default_branch`,
-`visibility`, `python_version`.
+Extract for use in later phases: `repo` (path = cwd from script),
+`default_branch`, `visibility`, `python_version` (when applicable),
+`languages` (the array — could be one or more).
 
-## Phase 2 — gather findings + coverage
+## Phase 2 — discover which languages we can act on
 
-Run the Python findings gatherer:
+Maintenance support is gated by **gather script presence**. For each
+detected language, check whether the matching gather script exists:
 
 ```bash
-"<skill-base-dir>/scripts/gather-python-findings.sh" "$(pwd)" > /tmp/findings.json
+test -x "<skill-base-dir>/scripts/gather-<lang>-findings.sh"
 ```
 
-The script outputs a JSON with `tooling_configured`, `findings_by_tool`,
-`coverage`, and `notes`. Read those.
+The naming convention is strict: `gather-<lang>-findings.sh` (e.g.,
+`gather-python-findings.sh`). When a new language plugin lands in this
+repo, its sibling gather script is what makes it discoverable here.
 
-If `notes` is non-empty, **remember them** — they describe why certain
+Partition `languages` into:
+
+- **`supported`** — detected AND a matching gather script exists
+- **`unsupported`** — detected BUT no gather script (i.e., no
+  development-<lang> plugin built yet)
+
+If `supported` is empty (every detected language is unsupported), halt
+with a message listing the detected languages and pointing the user at
+the README's Plugins section for current per-language status. Don't
+proceed — there's nothing this run can do.
+
+If `supported` is non-empty but `unsupported` is also non-empty,
+proceed with the supported set; remember `unsupported` to include in
+the final summary as an informational note ("Detected <X>, <Y> but
+their plugins are not built yet — only <Z> findings were processed").
+
+## Phase 3 — gather findings per supported language
+
+For each `lang` in `supported`:
+
+```bash
+"<skill-base-dir>/scripts/gather-<lang>-findings.sh" "$(pwd)" > "/tmp/findings-<lang>.json"
+```
+
+Each script outputs a JSON with `tooling_configured`, `findings_by_tool`,
+`coverage`, and `notes`. Collect them all.
+
+If a script exits non-zero or produces malformed JSON, that's an
+internal error — surface it to the user (with the script path + stderr)
+and skip that language. Don't try to construct a payload from a broken
+gather output.
+
+Pool all `notes` across all gather scripts; they describe why certain
 tools couldn't produce live findings (e.g., snyk auth missing,
-pytest-cov not installed). Surface these to the user in the final
-report alongside the maintenance actions.
+pytest-cov not installed). Surface them in the final summary.
 
-## Phase 3 — construct the v1 payload
+## Phase 4 — construct one payload per supported language
 
-Build the JSON payload per ARCHITECTURE.md schema v1:
+For each `lang` in `supported`, build the JSON payload per ARCHITECTURE.md
+schema v1:
 
 ```json
 {
@@ -85,14 +116,14 @@ Build the JSON payload per ARCHITECTURE.md schema v1:
     "default_branch": "<from detect-stack>",
     "visibility": "<from detect-stack, or 'unknown'>"
   },
-  "language": "python",
+  "language": "<lang>",
   "language_meta": {
-    "version": "<python_version from detect-stack, or '3.12'>",
-    "manifests": [/* whichever of pyproject.toml / requirements.txt / setup.py exist */]
+    "version": "<lang-appropriate version from detect-stack, or a sensible default>",
+    "manifests": [/* lang-appropriate manifest files that exist */]
   },
-  "tooling_configured": <from findings.json>,
-  "findings_by_tool":   <from findings.json>,
-  "coverage":           <from findings.json>,
+  "tooling_configured": <from findings-<lang>.json>,
+  "findings_by_tool":   <from findings-<lang>.json>,
+  "coverage":           <from findings-<lang>.json>,
   "policy": {
     "coverage_threshold": 90,
     "coverage_threshold_minor_patch": 80,
@@ -108,43 +139,66 @@ Build the JSON payload per ARCHITECTURE.md schema v1:
 
 The user's current branch from `git rev-parse --abbrev-ref HEAD`.
 
-## Phase 4 — `--dry-run`?
+`language_meta.version` — language-appropriate:
+- python → `python_version` field from detect-stack (default `3.12`)
+- (future) typescript → Node version from package.json `engines.node`
+- (future) go → Go version from `go.mod`
+- etc.
 
-If the user passed `--dry-run`: print the payload (pretty-formatted via
-`jq .`), print the notes from phase 2, and stop. Nothing is dispatched
-or merged.
+`language_meta.manifests` — list whichever manifest files exist that
+are conventional for that language (Python: pyproject.toml,
+requirements.txt, setup.py, setup.cfg). Don't include files that
+don't exist.
 
-## Phase 5 — dispatch
+## Phase 5 — `--dry-run`?
 
-Invoke the language plugin via the Skill tool:
+If `--dry-run`: print each payload (pretty-formatted via `jq .`)
+labeled by language, print the pooled notes, list any unsupported
+languages, and stop. Nothing is dispatched or merged.
+
+## Phase 6 — dispatch per supported language
+
+For each `lang` in `supported`, invoke the matching language plugin via
+the Skill tool:
 
 ```
 Skill(
-  skill="development-python:maintenance",
+  skill="development-<lang>:maintenance",
   args="<the JSON payload as a single-line string>"
 )
 ```
 
-The python plugin will:
+The language plugin will:
 - Run its coverage pre-flight (it has the data it needs)
 - Spawn agents in worktrees
 - Return a response JSON with `actions_taken`, `actions_requiring_review`,
   `missing_tooling`, `unable_to_fix`, and possibly `human_action_required`
   (when coverage is below floor)
 
-Capture the response.
+Capture each response, keyed by language.
 
-## Phase 6 — handle `human_action_required` early-out
+If a `Skill(...)` invocation fails (plugin not actually registered
+despite the gather script existing — shouldn't happen but defend
+anyway), treat that language as if it were `unsupported` for this
+run and continue with the rest.
 
-If the response contains `human_action_required`, the python plugin
-halted because coverage was below floor. Show the reason + recommendation
-to the user, skip the merge step, and stop. No worktree branches to
-merge in this case.
+## Phase 7 — handle `human_action_required` early-outs
 
-## Phase 7 — merge worktree branches
+For any response that contains `human_action_required`, the language
+plugin halted because coverage was below floor. Pass the reasons +
+recommendations through to the user-facing summary, and **do not
+merge any worktree branches from that language** (the plugin produced
+none in this case anyway).
 
-The response's `actions_taken` items include `worktree_branch` names.
-Collect them all. For each branch, get a diff-stat to size it:
+Other languages' responses still process normally — one language
+halting on coverage doesn't block others.
+
+## Phase 8 — merge worktree branches
+
+Across all languages' responses, the `actions_taken` items include
+`worktree_branch` names. Collect them all into one flat list.
+
+For each branch, get a diff-stat to size it:
 
 ```bash
 git diff --stat <user_branch>..<worktree_branch> | tail -1
@@ -169,16 +223,25 @@ If a merge fails with conflicts:
 If `--no-merge` was passed: skip this phase. List the branches in the
 final summary so the user can merge manually.
 
-## Phase 8 — present the summary
+## Phase 9 — present the summary
 
-Render a user-facing summary:
+Render a user-facing summary. Each language's results are reported in
+its own block so it's clear which plugin produced what.
 
 ```
 === Maintenance summary ===
 
-Project:   <repo path>
-Language:  python (<version>)
-Branch:    <user's current branch>
+Project:       <repo path>
+Branch:        <user's current branch>
+Languages processed: <comma-separated list from supported>
+
+<If unsupported is non-empty:>
+⚠ Languages detected but not yet supported:
+  - <lang>: no development-<lang> plugin built yet — see README's
+    Plugins section for current per-language status.
+
+<For each language in supported, a block:>
+--- <lang> ---
 
 ✓ Actions applied (N):
   - <tool>: <summary>      <files_changed count>
@@ -200,6 +263,14 @@ Branch:    <user's current branch>
     <reason>
   ...
 
+<If human_action_required is non-empty for this language:>
+🛑 Halted — human action required:
+  - <reason>
+    recommendation: <recommendation>
+
+--- end <lang> ---
+
+<If pooled notes are non-empty:>
 Notes from the gather step:
   - <note 1>
   - <note 2>
