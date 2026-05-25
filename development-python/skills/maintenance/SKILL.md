@@ -164,31 +164,99 @@ upgrade type. Patch + minor go to `python-snyk-triage`; majors go to
 
 **Dependabot routing — pre-split before spawning:**
 
-1. Read each PR's `title` (Dependabot format: `Bump <pkg> from <old> to <new>`).
-2. Compare versions semver-style. Classify as **patch**, **minor**, or
-   **major**. For grouped PRs (`Bump the <group> group with N updates`),
-   classify by the highest level present in the body.
-3. Partition `findings_by_tool.dependabot`:
-   - **majors** → for each, spawn `python-major-upgrade` with:
-     ```
-     package: <pkg>
-     current_version: <old>
-     target_version: <new>
-     source: "dependabot"
-     dependabot_pr: <PR number>
-     release_notes_url: <best guess; PR body usually links one>
-     ```
-   - **patch + minor** → pass as the `findings` argument to a SINGLE
-     `python-dependabot-triage` spawn. That agent handles all
-     non-major PRs in one batch.
-4. If no patch/minor PRs remain after the partition, still spawn
-   `python-dependabot-triage` with an empty array — the agent will
-   short-circuit cleanly and the unified flow stays predictable.
+For each PR, you need TWO pieces of information: its **ecosystem**
+(from `headRefName`) and its **bump level** (from `title`).
 
-This means a project with 3 patch + 2 minor + 1 major Dependabot PRs
-spawns one `python-dependabot-triage` (handling the 5 patch/minor)
-AND one `python-major-upgrade` (handling the 1 major). All in parallel
-with the other tool agents.
+### Step 1 — extract the ecosystem
+
+`headRefName` follows the pattern `dependabot/<ecosystem>/<rest>`:
+
+| `headRefName` prefix | Ecosystem |
+|---|---|
+| `dependabot/pip/...` | `pip` (Python deps) |
+| `dependabot/github_actions/...` | `github-actions` |
+| `dependabot/docker/...` | `docker` (Dockerfile FROM lines) |
+| `dependabot/npm_and_yarn/...` | `npm` |
+| other / unrecognized | `unknown` — treat as human-review for safety |
+
+### Step 2 — extract + classify the bump level
+
+Parse the title for `<old>` and `<new>` versions. Standard semver:
+
+- `1.x → 2.x` → **major**
+- `1.2.x → 1.3.x` → **minor**
+- `1.2.3 → 1.2.4` → **patch**
+
+**0.x special case** — for packages still in `0.x` territory:
+
+- `0.1.0 → 0.2.0` (second number changed) → **major-equivalent**
+  (rationale: in pre-1.0 development, breaking changes commonly land
+  in minor bumps. Don't trust semver promises on `0.x`. Treat as major
+  for routing purposes.)
+- `0.1.2 → 0.1.3` (only third number changed) → **patch**
+
+For grouped PRs (`Bump the <group> group with N updates`), classify by
+the highest level present in the body. If the body lists a 0.x major-
+equivalent, the group is major.
+
+### Step 3 — route by `(ecosystem, bump level)` combination
+
+| Ecosystem | Bump | Route |
+|---|---|---|
+| pip | patch | `python-dependabot-triage` (batch) |
+| pip | minor | `python-dependabot-triage` (batch) |
+| pip | **major** (incl. 0.x-equiv) | `python-major-upgrade` (one spawn per PR, opus, worktree) |
+| github-actions | patch | `python-dependabot-triage` (batch) |
+| github-actions | minor | `python-dependabot-triage` (batch) |
+| github-actions | major | `python-dependabot-triage` as **human-review** — no Python-API migration applies; user reviews action input/output changes manually |
+| docker | any | `python-dependabot-triage` as **human-review** — Dockerfile base-image changes affect OS packages, language runtime, libc, etc. Even "patch" can include a Python interpreter rebuild that subtly shifts behavior. Always defer to human. |
+| unknown | any | `python-dependabot-triage` as **human-review** — unrecognized ecosystem, can't reason about safety |
+
+`python-major-upgrade` is **only** spawned for `(pip, major)`. The agent's procedure (LSP find-references, Python release-note migration patterns) doesn't apply to other ecosystems.
+
+### Step 4 — build the two agent invocations
+
+After classification:
+
+- For each `(pip, major)` PR: spawn one `python-major-upgrade` with:
+  ```
+  package: <pkg>
+  current_version: <old>
+  target_version: <new>
+  source: "dependabot"
+  dependabot_pr: <PR number>
+  release_notes_url: <best guess; PR body usually links one>
+  ```
+- All other PRs (regardless of ecosystem/bump) → pass as the `findings`
+  array to a SINGLE `python-dependabot-triage` spawn, **annotated with
+  the routing decision** so the agent knows what to do:
+  ```json
+  [
+    { "number": 12, "title": "...", "headRefName": "dependabot/docker/...",
+      "ecosystem": "docker", "bump_level": "minor",
+      "routing": "human-review", "routing_reason": "Docker base-image bumps always need manual review" },
+    { "number": 17, "title": "...", "headRefName": "dependabot/pip/...",
+      "ecosystem": "pip", "bump_level": "minor",
+      "routing": "auto-merge-if-green" },
+    ...
+  ]
+  ```
+- If both lists end up empty: still spawn `python-dependabot-triage`
+  with `[]` for predictability.
+
+### Worked example — ai-doc-organizer's current PRs
+
+| PR | Ecosystem | Bump | Route |
+|---|---|---|---|
+| 18 codeql-action 3→4 | github-actions | major | dependabot-triage (human-review: GHA major) |
+| 17 claude-agent-sdk 0.1→0.2 | pip | major-equiv (0.x) | python-major-upgrade |
+| 16 watchdog 4→6 | pip | major | python-major-upgrade |
+| 15 anthropic 0.40→0.104 | pip | major-equiv (0.x) | python-major-upgrade |
+| 14 pypdf 4→6 | pip | major | python-major-upgrade |
+| 13 ruamel-yaml 0.18→0.19 | pip | major-equiv (0.x) | python-major-upgrade |
+| 12 python 3.13→3.14 (docker) | docker | minor | dependabot-triage (human-review: docker) |
+
+Six `python-major-upgrade` spawns + one `python-dependabot-triage` (handling PRs 18 and 12 as human-review cases). The latter does not auto-merge anything in this scenario.
 
 For each agent's prompt, include:
 
