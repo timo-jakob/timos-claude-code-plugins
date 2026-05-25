@@ -27,16 +27,19 @@ worktrees to do the actual work.
   "language": "python",
   "language_meta": { "version": "3.13", "manifests": [...] },
   "tooling_configured": {
-    "ruff":       true,
-    "semgrep":    true,
-    "snyk_code":  false,
-    "snyk_oss":   false,
+    "ruff": true, "semgrep": true,
+    "snyk_code": false, "snyk_oss": false,
     "sonarcloud": true
   },
   "findings_by_tool": {
-    "ruff":       [ ... tool-native finding objects ... ],
-    "semgrep":    [ ... ],
-    "sonarcloud": [ ... ]
+    "ruff": [...], "semgrep": [...], "sonarcloud": [...]
+  },
+  "coverage": {
+    "overall": 85,
+    "by_module": {
+      "src/aido/store/persons.py": 92,
+      "src/aido/cli.py": 67
+    }
   },
   "policy": { "coverage_threshold": 90, "severity_gate": "high", ... },
   "worktree": { "available": true, "base_branch": "main" }
@@ -60,40 +63,79 @@ Before dispatching:
    orchestrator misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 
+## Coverage pre-flight (per ARCHITECTURE.md "Maximizing autonomy")
+
+Before spawning any work agent, check whether the project's coverage
+clears the bar for the planned changes. Determine the affected modules
+(union of file paths across all `findings_by_tool` entries), get their
+coverage from `coverage.by_module`, then apply per-action-class
+thresholds:
+
+| Action | Required | Floor |
+|---|---|---|
+| Major-version dep upgrade | 90% | 70% |
+| Everything else | 80% | 60% |
+
+Three branches:
+
+1. **All affected modules ≥ Required** → proceed to dispatch.
+2. **Some modules between Floor and Required** → first spawn
+   `python-coverage-improver` (opus, worktree) with the list of
+   under-covered modules + target threshold. Wait for it to finish.
+   Re-check coverage from its result. Then dispatch the work agents
+   against its branch.
+3. **Any affected module below Floor** → halt. Return:
+   ```json
+   {
+     "schema_version": "1",
+     "actions_taken": [],
+     "actions_requiring_review": [],
+     "missing_tooling": [],
+     "human_action_required": [{
+       "reason": "Coverage on <module> is <X>% — below the <Floor>% floor required for autonomous changes.",
+       "recommendation": "Invest in test coverage first. Run /development-python:improve-test-coverage (when available — see issue #35) or write tests by hand. Re-run /development:maintenance once coverage is at least <Floor>%."
+     }],
+     "unable_to_fix": []
+   }
+   ```
+
+Pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
+format) skip this check — they're behavior-preserving by ruff's own
+guarantee. Other agents respect it.
+
 ## Dispatch — which agents to spawn
 
-**Always spawn all four Python agents**, regardless of whether their
-tool is configured. Agents whose tool is configured do real work in a
-worktree. Agents whose tool is NOT configured produce a "this tool
-isn't set up" recommendation instead of work — so a half-bootstrapped
-project still gets partial maintenance plus a clear checklist of
-what's missing.
+**Always spawn all five Python agents (four for the v1 file set plus
+`python-major-upgrade` when there are major-version findings)**,
+regardless of whether their tool is configured. Configured agents do
+real work in worktrees; unconfigured ones produce a "tool isn't set
+up" recommendation.
 
 | Agent | Model | Tool key(s) | Worktree (when configured) |
 |---|---|---|---|
 | `python-ruff-fixer` | haiku | `ruff` | yes |
 | `python-semgrep-triage` | sonnet | `semgrep` | yes |
-| `python-snyk-triage` | sonnet | `snyk_code` + `snyk_oss` | yes |
+| `python-snyk-triage` | sonnet | `snyk_code` + `snyk_oss` (patch + minor bumps only) | yes |
 | `python-sonar-triage` | sonnet | `sonarcloud` | yes |
+| `python-major-upgrade` | opus | `snyk_oss` major-version bumps only | yes |
 
-**Spawn all four in a single assistant turn with four `Agent` tool
-calls.** Configured agents run in isolated worktrees off
-`worktree.base_branch` (default `main`); unconfigured agents run
-without isolation (they produce no file changes).
+**Spawn all applicable agents in a single assistant turn.** They run
+in parallel in isolated worktrees off `worktree.base_branch`.
+
+Snyk routing: scan `findings_by_tool.snyk_oss` for the per-finding
+upgrade type. Patch + minor go to `python-snyk-triage`; majors go to
+`python-major-upgrade`. Both can run in parallel; they touch different
+deps.
 
 For each agent's prompt, include:
 
-1. `repo_path` — full path to the project root (`repo.path`).
+1. `repo_path` — full path to the project root.
 2. `configured` — boolean from `tooling_configured[<tool>]`.
-3. `findings` — the tool's findings array if configured, else `null`.
-4. `policy` — relevant subset (e.g., severity_gate for semgrep).
-5. A note that worktree-isolated agents work in a fresh branch and
-   should not commit; the orchestrator handles merging.
-
-For the `python-snyk-triage` agent: it handles BOTH `snyk_code` and
-`snyk_oss`. Pass `configured.snyk_code` AND `configured.snyk_oss` —
-typically they share configuration (one Snyk token covers both), but
-the agent handles them as separate concerns.
+3. `findings` — the tool's findings array if configured.
+4. `policy` — relevant subset.
+5. `worktree.base_branch` — for context.
+6. A note: "End with `pytest` (or the project's test command) in the
+   worktree. Only return success if tests pass."
 
 ## What each agent returns
 
