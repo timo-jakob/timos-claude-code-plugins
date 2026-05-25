@@ -49,6 +49,35 @@ Swift-specific development tooling — code review and formatting/linting.
 | Test Reviewer | sonnet | Coverage gaps, assertion quality, flaky tests |
 | Swift Lint & Format | sonnet | Runs SwiftFormat and SwiftLint, fixes issues in-place |
 
+### development-python
+
+Python-specific maintenance — triages and fixes findings produced by the
+toolchain `/development:bootstrap` installs (ruff, semgrep, Snyk Code,
+Snyk Open Source, SonarCloud).
+
+Pure function of a JSON input per `ARCHITECTURE.md` — it does not run
+detection itself; the `/development:maintenance` orchestrator (forthcoming)
+constructs the input and dispatches here.
+
+**Skills:**
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| Maintenance dispatcher | `/development-python:maintenance <json>` | Parses the input, spawns per-tool agents in parallel isolated worktrees, aggregates their results. Standalone invocation prints usage and stops. |
+
+**Agents:**
+
+| Agent | Model | Focus |
+|-------|-------|-------|
+| python-ruff-fixer | haiku | `ruff check --fix` + `ruff format`; pure mechanical |
+| python-semgrep-triage | sonnet | Per-finding: fix (refactor) / suppress (`# nosemgrep` + reason) / human-review |
+| python-snyk-triage | sonnet | Snyk Code + Snyk OSS findings; dep upgrades go to `actions_requiring_review`, distro CVEs to 90-day `.snyk` ignore |
+| python-sonar-triage | sonnet | SonarCloud bugs/smells/vulns/hotspots; security hotspots always human-review |
+
+All agents run with `isolation: "worktree"` so they can work in parallel
+without conflicts; the orchestrator merges their branches back least-conflict
+first.
+
 ## Requirements
 
 The plugins are written for **macOS** and assume **Homebrew** is the package
@@ -82,7 +111,7 @@ Additional runtime dependencies:
 Load plugins locally during development:
 
 ```sh
-claude --plugin-dir ./development --plugin-dir ./development-swift
+claude --plugin-dir ./development --plugin-dir ./development-swift --plugin-dir ./development-python
 ```
 
 Then use the slash commands:

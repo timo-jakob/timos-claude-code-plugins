@@ -21,6 +21,14 @@
       "author": { "name": "Timo Jakob" },
       "source": "./development",
       "category": "development"
+    },
+    {
+      "name": "development-python",
+      "description": "Python development plugin — maintenance dispatcher that triages/fixes findings from ruff, semgrep, Snyk, and SonarCloud via per-tool agents in parallel worktrees.",
+      "version": "1.0.0",
+      "author": { "name": "Timo Jakob" },
+      "source": "./development-python",
+      "category": "development"
     }
   ]
 }
