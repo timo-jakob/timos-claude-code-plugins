@@ -115,16 +115,30 @@ check_docker_compose() {
 }
 
 # --- HTTP / JSON helpers ------------------------------------------------------
+# `sonar_curl` and `sonar_curl_basic` are invoked via `$(...)` so callers can
+# capture the response body. That command substitution runs the function in a
+# subshell, which means any variable the function tries to set in the parent
+# (like `_http_status`) gets discarded. We work around that by writing the
+# status code to a known file the parent can read. Callers invoke
+# `_load_http_status` after `resp=$(sonar_curl ...)` to populate `_http_status`
+# in their own shell.
+_HTTP_STATUS_FILE="${TMPDIR:-/tmp}/.bootstrap_http_status.$$"
+
+_load_http_status() {
+  _http_status="$(cat "$_HTTP_STATUS_FILE" 2>/dev/null || true)"
+}
+
 # Call Sonar API with token in HTTP Basic (Sonar convention: token as username,
-# empty password). Echoes the response body. Sets _http_status global.
+# empty password). Echoes the response body. Writes the HTTP status code to
+# $_HTTP_STATUS_FILE — call `_load_http_status` afterwards to populate
+# `$_http_status` in the parent shell.
 sonar_curl() {
   local method="$1" url="$2"; shift 2
-  local body status
+  local body
   body=$(mktemp); trap "rm -f $body" RETURN
-  status=$(curl -sS -o "$body" -w '%{http_code}' \
+  curl -sS -o "$body" -w '%{http_code}' \
     -u "${SONAR_TOKEN}:" \
-    -X "$method" "$url" "$@")
-  _http_status="$status"
+    -X "$method" "$url" "$@" > "$_HTTP_STATUS_FILE"
   cat "$body"
 }
 
@@ -132,12 +146,11 @@ sonar_curl() {
 # token exists. Username:password pair passed as $1.
 sonar_curl_basic() {
   local auth="$1" method="$2" url="$3"; shift 3
-  local body status
+  local body
   body=$(mktemp); trap "rm -f $body" RETURN
-  status=$(curl -sS -o "$body" -w '%{http_code}' \
+  curl -sS -o "$body" -w '%{http_code}' \
     -u "$auth" \
-    -X "$method" "$url" "$@")
-  _http_status="$status"
+    -X "$method" "$url" "$@" > "$_HTTP_STATUS_FILE"
   cat "$body"
 }
 
@@ -160,7 +173,15 @@ wait_for_sonar_up() {
 
 # --- Sonar Quality Gate helpers -----------------------------------------------
 # Creates the Zero Tolerance Quality Gate on Sonar (Cloud or QE).
-# Sets _gate_id global on success.
+#
+# Outputs:
+#   _gate_id       — id of the created/existing custom gate (empty if fallback)
+#   _gate_created  — "true" if Zero Tolerance gate exists and conditions are set,
+#                    "false" if we had to fall back to the default 'Sonar way'
+#                    (typically because the SonarCloud Free plan disallows
+#                    custom gates — see
+#                    https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-subscription/subscription-plans).
+#
 # Args:
 #   $1 — sonar host URL (e.g. https://sonarcloud.io or http://localhost:9000)
 #   $2 — organization key (SonarCloud only; pass empty string for SonarQube)
@@ -169,24 +190,47 @@ create_zero_tolerance_gate() {
   local org_arg=""
   [[ -n "$org" ]] && org_arg="&organization=$(printf %s "$org" | jq -sRr @uri)"
 
+  _gate_id=""
+  _gate_created="false"
+
   info "Creating 'Zero Tolerance' Quality Gate…"
   local resp
   resp=$(sonar_curl POST \
     "$host/api/qualitygates/create?name=Zero%20Tolerance${org_arg}")
+  _load_http_status
 
   case "$_http_status" in
     200|201)
       _gate_id=$(printf '%s' "$resp" | jq -r '.id')
+      _gate_created="true"
       ok "Created gate id=$_gate_id"
       ;;
     400)
       # Likely "already exists" — look it up by name.
       dim "  Gate already exists, looking up id…"
       resp=$(sonar_curl GET "$host/api/qualitygates/search${org_arg:+?$org_arg#/}")
+      _load_http_status
       # search response shape varies between versions; try both
       _gate_id=$(printf '%s' "$resp" | jq -r '.qualitygates[]? | select(.name=="Zero Tolerance") | .id // empty' | head -n1)
       [[ -n "$_gate_id" ]] || die "Could not resolve existing gate id"
+      _gate_created="true"
       ok "Found existing gate id=$_gate_id"
+      ;;
+    403)
+      # SonarCloud Free plan disallows custom Quality Gates (Team/Enterprise
+      # feature). Fall back to the default 'Sonar way' gate — weaker than
+      # Zero Tolerance but still a credible baseline.
+      warn "Insufficient privileges to create a custom Quality Gate."
+      warn "This is the expected response on the SonarCloud Free plan, where"
+      warn "custom Quality Gates require a Team or Enterprise subscription."
+      warn "See: https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-subscription/subscription-plans"
+      warn ""
+      warn "Falling back to the built-in 'Sonar way' Quality Gate. It's less"
+      warn "strict than Zero Tolerance (e.g., 80% coverage on new code instead"
+      warn "of 90%) but already applied to every new project by default — no"
+      warn "further action needed."
+      _gate_created="false"
+      return 0
       ;;
     *)
       die "Quality Gate create failed (HTTP $_http_status): $resp"
@@ -216,6 +260,7 @@ create_zero_tolerance_gate() {
       --data-urlencode "metric=$metric" \
       --data-urlencode "op=$op" \
       --data-urlencode "error=$err")
+    _load_http_status
     case "$_http_status" in
       200|201) dim "  + $metric $op $err" ;;
       400)     dim "  · $metric (already present)" ;;
@@ -234,6 +279,7 @@ assign_gate_to_project() {
     --data-urlencode "gateName=$gate" \
     --data-urlencode "projectKey=$project" \
     ${org:+--data-urlencode "organization=$org"})
+  _load_http_status
   case "$_http_status" in
     200|204) ok "Gate assigned" ;;
     *)       die "Gate assignment failed (HTTP $_http_status): $resp" ;;
