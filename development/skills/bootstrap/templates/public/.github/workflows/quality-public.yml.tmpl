@@ -77,7 +77,12 @@ jobs:
           cache: "pip"
       - name: Install + test (Python)
         run: |
-          pip install -r requirements.txt || pip install -e ".[dev]"
+          # Install runtime deps if requirements.txt exists; install dev
+          # deps from pyproject.toml; ensure pytest-cov is present even if
+          # the project doesn't track it as a dev dep.
+          [[ -f requirements.txt ]] && pip install -r requirements.txt
+          pip install -e ".[dev]"
+          pip install pytest-cov
           pytest --cov --cov-report=xml --cov-report=term
       # --- PYTHON-END ------------------------------------------------------
 
@@ -144,11 +149,40 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
   # --- Snyk: open-source dependencies ---------------------------------------
+  # Snyk needs deps installed to enumerate them accurately. Per-language
+  # install steps below match what test-and-coverage does, then `snyk test
+  # --all-projects` runs against the populated environment.
   snyk-open-source:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: snyk/actions/setup@v1.0.0
+
+      # --- TYPESCRIPT-START ------------------------------------------------
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      # --- TYPESCRIPT-END --------------------------------------------------
+
+      # --- PYTHON-START ----------------------------------------------------
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: |
+          [[ -f requirements.txt ]] && pip install -r requirements.txt
+          pip install -e ".[dev]"
+      # --- PYTHON-END ------------------------------------------------------
+
+      # --- GO-START --------------------------------------------------------
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+      - run: go mod download
+      # --- GO-END ----------------------------------------------------------
+
       - run: snyk test --severity-threshold=high --all-projects
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}

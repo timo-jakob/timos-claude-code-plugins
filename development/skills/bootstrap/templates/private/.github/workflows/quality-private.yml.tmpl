@@ -71,7 +71,9 @@ jobs:
           python-version: "3.12"
           cache: "pip"
       - run: |
-          pip install -r requirements.txt || pip install -e ".[dev]"
+          [[ -f requirements.txt ]] && pip install -r requirements.txt
+          pip install -e ".[dev]"
+          pip install pytest-cov
           pytest --cov --cov-report=xml --cov-report=term
       # --- PYTHON-END ------------------------------------------------------
 
