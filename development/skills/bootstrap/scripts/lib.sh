@@ -60,6 +60,27 @@ require_brew() {
   command -v brew >/dev/null 2>&1 || die "Homebrew not found. Install from https://brew.sh and re-run."
 }
 
+# Fail fast if any of the given tools is missing from PATH. Used by the
+# automate-*.sh entry points so users see a clear "run preflight first"
+# message instead of a confusing later failure deep in the API flow.
+# Args: list of binary names (e.g. `require_tools curl jq gh snyk`).
+require_tools() {
+  local missing=()
+  for t in "$@"; do
+    command -v "$t" >/dev/null 2>&1 || missing+=("$t")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    err "Required tool(s) not on PATH: ${missing[*]}"
+    err ""
+    err "Run preflight first to install them all in one step:"
+    err "  $SCRIPT_DIR/preflight.sh --visibility <public|private> \\"
+    err "    --languages \"<detected langs>\" --has-dockerfile <true|false>"
+    err ""
+    err "Or install manually via: brew install ${missing[*]}"
+    exit 1
+  fi
+}
+
 # brew_install_if_missing <formula> [--cask]
 brew_install_if_missing() {
   local pkg="$1" cask_flag=""
