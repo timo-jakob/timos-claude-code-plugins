@@ -1,5 +1,5 @@
 {
-  "name": "dev-swift",
+  "name": "development-swift",
   "description": "Swift development plugin with code review, formatting/linting, and Swift-specific tooling.",
   "version": "1.0.0",
   "author": {

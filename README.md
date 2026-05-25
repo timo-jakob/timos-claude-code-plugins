@@ -27,7 +27,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Bootstrap Validator | haiku | Fast post-write check — YAML/JSON parses, no unresolved placeholders, cross-references resolve |
 | Bootstrap Reviewer | opus | Optional senior-engineer review of the full bootstrap output (`--review` flag) |
 
-### dev-swift
+### development-swift
 
 Swift-specific development tooling — code review and formatting/linting.
 
@@ -35,7 +35,7 @@ Swift-specific development tooling — code review and formatting/linting.
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| Review | `/dev-swift:review [paths]` | Spawns 6 specialized agents in parallel to analyze bugs, security, performance, Swift 6 compliance, code quality, and test coverage |
+| Review | `/development-swift:review [paths]` | Spawns 6 specialized agents in parallel to analyze bugs, security, performance, Swift 6 compliance, code quality, and test coverage |
 
 **Agents:**
 
@@ -82,7 +82,7 @@ Additional runtime dependencies:
 Load plugins locally during development:
 
 ```sh
-claude --plugin-dir ./development --plugin-dir ./dev-swift
+claude --plugin-dir ./development --plugin-dir ./development-swift
 ```
 
 Then use the slash commands:
@@ -93,8 +93,8 @@ Then use the slash commands:
 /development:commit "Fix auth"   # format, lint, commit with given message
 
 # Swift code review
-/dev-swift:review                # review all Swift files
-/dev-swift:review Sources/       # review a specific directory
+/development-swift:review                # review all Swift files
+/development-swift:review Sources/       # review a specific directory
 ```
 
 ## Maintaining this repo
