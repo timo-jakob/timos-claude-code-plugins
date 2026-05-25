@@ -169,6 +169,48 @@ if ask_yn "Run 'snyk monitor' now to enable continuous monitoring on snyk.io?"; 
   snyk monitor --all-projects || warn "snyk monitor reported a non-zero status (often means findings were detected; check snyk.io)"
 fi
 
+# --- GitHub Security & Quality features --------------------------------------
+# All four are free on public repos. Each `gh api` call is idempotent — running
+# this against a repo where the feature is already on returns the same success.
+# We do these unconditionally (no Y/N prompt): the script's contract is "set up
+# the security toolchain for this public repo," and these toggles are part of
+# that. Users who want them off can disable from the UI afterwards.
+echo
+info "═══ GitHub Security & Quality features ═══"
+
+GH_REPO_FULL=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+
+info "Enabling Dependabot alerts…"
+if gh api --silent -X PUT "repos/$GH_REPO_FULL/vulnerability-alerts" 2>/dev/null; then
+  ok "Dependabot alerts enabled"
+else
+  warn "Dependabot alerts: enable call returned non-zero (likely already enabled)"
+fi
+
+info "Enabling Dependabot automated security fixes…"
+if gh api --silent -X PUT "repos/$GH_REPO_FULL/automated-security-fixes" 2>/dev/null; then
+  ok "Dependabot automated security fixes enabled"
+else
+  warn "Automated security fixes: enable call returned non-zero (likely already enabled)"
+fi
+
+info "Enabling secret scanning + push protection…"
+if gh api -X PATCH "repos/$GH_REPO_FULL" \
+    -F 'security_and_analysis[secret_scanning][status]=enabled' \
+    -F 'security_and_analysis[secret_scanning_push_protection][status]=enabled' \
+    --silent 2>/dev/null; then
+  ok "Secret scanning + push protection enabled"
+else
+  warn "Secret scanning: enable call returned non-zero (private repos require GHAS — fine on public)"
+fi
+
+info "Enabling Private Vulnerability Reporting…"
+if gh api --silent -X PUT "repos/$GH_REPO_FULL/private-vulnerability-reporting" 2>/dev/null; then
+  ok "Private Vulnerability Reporting enabled"
+else
+  warn "PVR: enable call returned non-zero (likely already enabled)"
+fi
+
 # --- Branch protection --------------------------------------------------------
 echo
 info "═══ Branch protection ═══"

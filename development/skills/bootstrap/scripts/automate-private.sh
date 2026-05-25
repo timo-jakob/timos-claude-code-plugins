@@ -211,6 +211,34 @@ else
   dim  "See infra/github-runner/README.md for manual steps."
 fi
 
+# --- 7b. GitHub Security features (free on private) --------------------------
+# Only the Dependabot toggles are free for private repos. Secret scanning,
+# push protection, and Private Vulnerability Reporting require GitHub
+# Advanced Security ($) on private repos — we skip them here and surface a
+# note. Org admins with GHAS can enable manually via repo Settings.
+echo
+info "═══ GitHub Security features ═══"
+
+GH_REPO_FULL=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+
+info "Enabling Dependabot alerts…"
+if gh api --silent -X PUT "repos/$GH_REPO_FULL/vulnerability-alerts" 2>/dev/null; then
+  ok "Dependabot alerts enabled"
+else
+  warn "Dependabot alerts: enable call returned non-zero (likely already enabled)"
+fi
+
+info "Enabling Dependabot automated security fixes…"
+if gh api --silent -X PUT "repos/$GH_REPO_FULL/automated-security-fixes" 2>/dev/null; then
+  ok "Dependabot automated security fixes enabled"
+else
+  warn "Automated security fixes: enable call returned non-zero (likely already enabled)"
+fi
+
+dim "  Secret scanning, push protection, and Private Vulnerability Reporting"
+dim "  require GitHub Advanced Security on private repos. If your org has GHAS,"
+dim "  enable them manually: repo Settings → Code security and analysis."
+
 # --- 8. Branch protection ----------------------------------------------------
 echo
 info "═══ Branch protection ═══"
