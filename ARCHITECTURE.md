@@ -8,21 +8,42 @@ conventions change; otherwise individual PR descriptions are enough.
 ## Plugin family
 
 ```
-development           ← generic, language-agnostic
-development-swift     ← Swift-specific
-development-python    ← Python-specific
-development-…         ← future: typescript, go, …
+development              ← generic, language-agnostic (orchestrator)
+development-swift        ← language: Swift
+development-python       ← language: Python
+development-javascript   ← language: JavaScript + TypeScript (combined)
+development-…            ← future: go, rust, …
+development-container    ← topic: containers / OCI images
+development-…            ← future topics: kubernetes, terraform, …
 ```
 
 All plugins live in this monorepo. End users install whichever subset
 they need; nothing forces installation of the full family.
 
+There are **three categories** of plugin:
+
+| Category | Purpose | Dispatched when | Examples |
+|---|---|---|---|
+| **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
+| **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, …) | `development-python`, `development-javascript`, `development-swift` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, …) | `development-container`, future: `development-kubernetes`, `development-terraform` |
+
+Language plugins and topic plugins share the **same dispatch contract**
+(same JSON schema, same response shape, same agent + worktree
+patterns). The only thing that differs is what triggers them. From
+`development`'s point of view, "this project uses Python and has a
+Dockerfile" leads to dispatching to both `development-python` and
+`development-container`, potentially in parallel.
+
 ### Naming
 
-`development` for the generic plugin. `development-<lang>` for every
-language-specific plugin. No abbreviations (`development-typescript`,
-not `development-ts`). Lowercase, hyphens, the language's most common
-public name (Python → `python`, not `py`).
+`development` for the generic plugin. `development-<lang>` for language
+plugins. `development-<topic>` for topic plugins. No abbreviations
+(`development-typescript` not `development-ts`, `development-kubernetes`
+not `development-k8s`). Lowercase, hyphens, the most common
+user-facing public name (Python → `python` not `py`; containers →
+`container` not `oci` or `docker` — the former is too jargony, the
+latter is vendor-coupled).
 
 **Special case: JavaScript + TypeScript** ship as one plugin,
 `development-javascript`. Most modern JS projects use TS somewhere; the
@@ -30,6 +51,40 @@ tooling (ESLint, Prettier, npm, package.json) overlaps so heavily that
 two plugins would duplicate ~90% of their content. The plugin handles
 both `.js` and `.ts` files; pure-JS projects get the same skill set
 minus TypeScript-specific bits.
+
+### Language-first principle (for topic plugins)
+
+When a language has a canonical path for a topic, the **language plugin
+gets first crack at it**, and the topic plugin handles only what's
+genuinely language-agnostic or what the language plugin couldn't reach.
+
+Concrete example — container images:
+
+| Language | Canonical container path (owned by the language plugin) |
+|---|---|
+| Java / Kotlin | Spring Boot's `bootBuildImage`, Cloud Native Buildpacks |
+| Python | Multi-stage with `distroless/python3` final |
+| Go | Single-stage `distroless/static` (Go binaries are static) |
+| Node | `distroless/nodejs` final |
+| Rust | `distroless/cc` for libc-linked binaries |
+
+`development-container` therefore does NOT own Dockerfile generation
+for these idioms — it owns:
+
+- Container-scan findings (Trivy / Snyk CVE response across base
+  images regardless of language)
+- Multi-arch build patterns + caching (already in `bootstrap`; the
+  maintenance side keeps them current)
+- SBOM + provenance + cosign signing patterns
+- Distroless migration recommendations when a language plugin's
+  default still uses a full base
+- Multi-language Dockerfiles (Python + Node bundled in one image,
+  etc.) — the case no single language plugin claims
+
+The principle generalizes: a future `development-kubernetes` plugin
+would defer to language plugins for the application's entrypoints, and
+own only the k8s-manifest concerns (resource limits, probes, network
+policy, security contexts).
 
 ### Why we split
 
@@ -69,7 +124,7 @@ by surfacing a category error.
 - Policy text: Zero Tolerance Quality Gate definitions, security
   thresholds, `.snyk` ignore conventions.
 - The **dispatch JSON schema** (see below) — the contract every
-  `development-<lang>` plugin reads and writes.
+  language plugin and topic plugin reads and writes.
 - This `ARCHITECTURE.md`.
 
 ### `development-<lang>` owns
@@ -82,13 +137,29 @@ by surfacing a category error.
   `contextlib.suppress`, `StrEnum`, adjacent-string-literal SQL).
 - Language-specific tool invocations (`ruff check --fix`, `pytest`,
   `go test`, `swift test`).
+- The language's canonical container path when one exists
+  (see "Language-first principle" above) — Spring Boot's
+  `bootBuildImage`, Python's distroless multi-stage, Go's distroless
+  static, etc.
 
-### What language plugins **must not** own
+### `development-<topic>` owns
+
+- Topic-specific skills for the cross-language part of the topic
+  (e.g., `development-container`: `respond-to-cve-findings`,
+  `migrate-to-distroless`, `refresh-pinned-digests`).
+- Topic-specific agents (same model-selection guidelines).
+- Knowledge that applies regardless of which language the project
+  uses (e.g., for containers: multi-arch QEMU patterns, cosign keyless
+  OIDC, SBOM attestation formats).
+
+### What language plugins and topic plugins **must not** own
 
 - Detection (always handled by `development`'s `detect-stack.sh`).
 - Cross-language policy (lives in `development`).
 - Cross-plugin helpers (`development` is the canonical source; see
   "shared helpers" below).
+- For topic plugins: anything a language plugin can do better
+  (see "Language-first principle").
 
 ## Dispatch model
 
@@ -98,18 +169,23 @@ by surfacing a category error.
 ```
 1. development runs detection + tool gathering.
 2. For each detected language L, development packages findings as a
-   JSON payload (schema below) and invokes `/development-<L>:maintenance`
-   (or specific sub-skill).
-3. development-<L> receives JSON, does its work, returns JSON.
-4. development aggregates results, presents to user, optionally
+   JSON payload (schema below) and invokes `/development-<L>:maintenance`.
+3. For each detected topic T (Dockerfile present, k8s manifests, etc.),
+   development packages findings the same way and invokes
+   `/development-<T>:maintenance`.
+4. Language and topic dispatches can run in parallel — they share no
+   state and the JSON payload is identical in shape.
+5. Each plugin receives JSON, does its work, returns JSON.
+6. development aggregates results, presents to user, optionally
    commits / opens PR.
 ```
 
-Language plugins are **pure functions of their JSON input**. They do
-not call back into `development` for helpers; they do not run their
-own detection; they do not read repo state outside of what the JSON
-payload tells them to read. This keeps coupling one-directional and
-prevents the "where does this helper live?" problem at install time.
+Language and topic plugins are **pure functions of their JSON input**.
+They do not call back into `development` for helpers; they do not run
+their own detection; they do not read repo state outside of what the
+JSON payload tells them to read. This keeps coupling one-directional
+and prevents the "where does this helper live?" problem at install
+time.
 
 ### Missing-plugin handling
 
@@ -298,11 +374,9 @@ to detect-stack.sh; go run it." Pure functions, no path coupling.
 
 ## Open questions
 
-- **Cross-language findings** — e.g., a Dockerfile CVE affects every
-  language project. Who fixes it? Probably `development` itself
-  (it's not language-specific), with the orchestrator emitting it as
-  a "common" finding section in the response aggregation. To be
-  decided when we hit the first concrete case.
+(none currently — see git history for resolved items: TS+JS combined,
+schema v1 stability stance, cross-language findings now handled via
+the topic-plugin category)
 
 ## Related documents
 
