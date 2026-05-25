@@ -22,8 +22,14 @@ they need; nothing forces installation of the full family.
 `development` for the generic plugin. `development-<lang>` for every
 language-specific plugin. No abbreviations (`development-typescript`,
 not `development-ts`). Lowercase, hyphens, the language's most common
-public name (Python → `python`, not `py`; JavaScript+TypeScript → split
-or combined? — see "open questions" below).
+public name (Python → `python`, not `py`).
+
+**Special case: JavaScript + TypeScript** ship as one plugin,
+`development-javascript`. Most modern JS projects use TS somewhere; the
+tooling (ESLint, Prettier, npm, package.json) overlaps so heavily that
+two plugins would duplicate ~90% of their content. The plugin handles
+both `.js` and `.ts` files; pure-JS projects get the same skill set
+minus TypeScript-specific bits.
 
 ### Why we split
 
@@ -123,10 +129,17 @@ on partial results.
 
 ## JSON schema (v1)
 
-The contract between `development` and any `development-<lang>`. Bump
-the version field when the schema changes incompatibly; language
-plugins declare supported versions in their `SKILL.md` so `development`
-picks the highest common.
+The contract between `development` and any `development-<lang>`.
+
+**Stability stance.** Treated as stable now. While we're the only
+consumer of these plugins, we may revise v1 in place if a real need
+surfaces — change the schema, update all language plugins in the same
+PR set, no version bump required. The moment a third party installs
+any of these plugins, v1 freezes and any incompatible change becomes
+v2 (language plugins declare supported versions in their `SKILL.md`
+so `development` picks the highest common). Until then, this section
+is the canonical reference and lives here, not in a versioned schema
+file.
 
 ### Request (`development` → `development-<lang>`)
 
@@ -285,16 +298,11 @@ to detect-stack.sh; go run it." Pure functions, no path coupling.
 
 ## Open questions
 
-- **TypeScript + JavaScript** — one plugin (`development-javascript`)
-  covering both, or split? Lean toward one — most JS projects use TS
-  somewhere and the tooling overlaps heavily.
-- **Schema evolution** — when do we stop iterating on v1 and freeze
-  it? Practical answer: first time an external user is depending on
-  it, or when we add a third language plugin. Whichever comes first.
-- **Cross-language findings** — e.g., a Dockerfile vulnerability
-  affects multiple language projects. Who fixes it? Probably
-  `development` itself (it's not language-specific), with the
-  orchestrator emitting it as a "common" finding section.
+- **Cross-language findings** — e.g., a Dockerfile CVE affects every
+  language project. Who fixes it? Probably `development` itself
+  (it's not language-specific), with the orchestrator emitting it as
+  a "common" finding section in the response aggregation. To be
+  decided when we hit the first concrete case.
 
 ## Related documents
 
