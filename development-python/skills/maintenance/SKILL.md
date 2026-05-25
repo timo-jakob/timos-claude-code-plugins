@@ -150,23 +150,45 @@ produce a "tool isn't set up" recommendation.
 | `python-semgrep-triage` | sonnet | `semgrep` | yes |
 | `python-snyk-triage` | sonnet | `snyk_code` + `snyk_oss` (patch + minor bumps only) | yes |
 | `python-sonar-triage` | sonnet | `sonarcloud` | yes |
-| `python-major-upgrade` | opus | `snyk_oss` major-version bumps only | yes |
-| `python-dependabot-triage` | sonnet | `dependabot` | **no** (acts on GitHub via `gh`, not on local files) |
+| `python-major-upgrade` | opus | `snyk_oss` AND `dependabot` major-version bumps | yes |
+| `python-dependabot-triage` | sonnet | `dependabot` patch + minor only | **no** (acts on GitHub via `gh`, not on local files) |
 
 **Spawn all applicable agents in a single assistant turn.** They run
-in parallel — the worktree-using ones in isolated worktrees off
+in parallel — worktree-using ones in isolated worktrees off
 `worktree.base_branch`; `python-dependabot-triage` runs without a
 worktree (it modifies PRs on GitHub, not files locally).
 
 Snyk routing: scan `findings_by_tool.snyk_oss` for the per-finding
 upgrade type. Patch + minor go to `python-snyk-triage`; majors go to
-`python-major-upgrade`. Both can run in parallel; they touch different
-deps.
+`python-major-upgrade` (one spawn per major bump).
 
-Dependabot routing: pass the whole `findings_by_tool.dependabot` array
-to `python-dependabot-triage`. The agent itself parses each PR's title
-to determine bump level + decides per-PR (auto-merge patch+minor with
-green CI; defer majors and red-CI to human-review).
+**Dependabot routing — pre-split before spawning:**
+
+1. Read each PR's `title` (Dependabot format: `Bump <pkg> from <old> to <new>`).
+2. Compare versions semver-style. Classify as **patch**, **minor**, or
+   **major**. For grouped PRs (`Bump the <group> group with N updates`),
+   classify by the highest level present in the body.
+3. Partition `findings_by_tool.dependabot`:
+   - **majors** → for each, spawn `python-major-upgrade` with:
+     ```
+     package: <pkg>
+     current_version: <old>
+     target_version: <new>
+     source: "dependabot"
+     dependabot_pr: <PR number>
+     release_notes_url: <best guess; PR body usually links one>
+     ```
+   - **patch + minor** → pass as the `findings` argument to a SINGLE
+     `python-dependabot-triage` spawn. That agent handles all
+     non-major PRs in one batch.
+4. If no patch/minor PRs remain after the partition, still spawn
+   `python-dependabot-triage` with an empty array — the agent will
+   short-circuit cleanly and the unified flow stays predictable.
+
+This means a project with 3 patch + 2 minor + 1 major Dependabot PRs
+spawns one `python-dependabot-triage` (handling the 5 patch/minor)
+AND one `python-major-upgrade` (handling the 1 major). All in parallel
+with the other tool agents.
 
 For each agent's prompt, include:
 
