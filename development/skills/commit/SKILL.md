@@ -22,7 +22,7 @@ Launch the following agents **in parallel in a single message**. The commit mess
 
 Detect the project language from the changed files and look for a language-specific formatting/linting agent in the appropriate plugin. For example:
 
-- **Swift projects** → use the `swift-lint-format` agent from the `dev-swift` plugin
+- **Swift projects** → use the `swift-lint-format` agent from the `development-swift` plugin
 - **Other languages** → if a matching agent exists in an installed plugin, use it; otherwise skip this step and inform the user that no formatter/linter is configured for this language
 
 Spawn the agent with `run_in_background: true`.
