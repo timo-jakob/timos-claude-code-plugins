@@ -50,9 +50,28 @@ brew install trivy           # PRIVATE only — for local container scanning
 
 ## 2. **PUBLIC** — SonarCloud setup
 
-> 🤖 **Automated alternative**: `scripts/automate-public.sh` handles everything
-> in section 2 except the one-time SonarCloud sign-in (browser OAuth) and
-> pasting the user token. Run it after `preflight.sh` confirms your toolchain.
+> 🤖 **Automated alternative**: `scripts/automate-public.sh` runs most of
+> section 2 end-to-end. Run it after `preflight.sh` confirms your toolchain.
+>
+> **Steps the script runs for you (no input needed)**: SonarCloud org-slug
+> resolution, Quality Gate creation (or 'Sonar way' fallback if your plan
+> doesn't allow custom gates), GitHub Actions secret writes (`SONAR_TOKEN`,
+> `SNYK_TOKEN`), Snyk monitor onboarding (optional Y/N prompt), branch
+> protection (optional Y/N prompt).
+>
+> **Interactive steps the script will pause for**:
+>
+> | When | What you do |
+> |---|---|
+> | At start | Browser opens to <https://sonarcloud.io/projects/create>. Sign in via GitHub, click "Analyze new project", select this repo, complete the import flow. (The script waits at a "Paste SONAR_TOKEN:" prompt while you do this.) |
+> | After token paste | Generate a **user token** (not project-analysis) at <https://sonarcloud.io/account/security>, paste it into the terminal. |
+> | After Quality Gate creation attempt | None — script auto-falls-back to 'Sonar way' if your plan returns 403 (Free plan typical). |
+> | At Snyk auth | If Snyk isn't already authed locally, browser opens for `snyk auth --auth-type=token`. Approve, return to terminal. |
+> | At `snyk monitor` prompt | Y/N — recommend Y for continuous monitoring on snyk.io. |
+> | At branch-protection prompt | Y/N — defer to **N** until your bootstrap PR has merged so you don't lock yourself out. |
+>
+> Total interactive time: ~3-5 minutes. The script's other operations
+> total ~30 seconds.
 
 ### 2.1 Create the project
 
@@ -65,9 +84,11 @@ brew install trivy           # PRIVATE only — for local container scanning
 
 In repo Settings → Secrets and variables → Actions → New repository secret:
 
-| Name | Value |
-|---|---|
-| `SONAR_TOKEN` | from step 2.1 |
+| Name | Required? | Value |
+|---|---|---|
+| `SONAR_TOKEN` | Yes | from step 2.1 |
+| `SNYK_TOKEN` | Yes | from step 2.5 below |
+| `SEMGREP_APP_TOKEN` | **Optional** | only needed if you connect Semgrep AppSec Platform for managed rules / dashboards. CI runs the free OSS ruleset without it; the env var is read defensively (`${{ secrets.SEMGREP_APP_TOKEN }}`) and won't fail when unset. |
 
 ### 2.3 Create the Zero Tolerance Quality Gate
 
@@ -120,21 +141,21 @@ show the 10 conditions above. The project should now show this gate.
 ### 2.4 OpenSSF Scorecard — supply-chain health badge
 
 The generated `.github/workflows/scorecard.yml` runs weekly and publishes
-a score to <https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_NAME}}>.
+a score to <https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_SLUG}}>.
 Nothing to set up — the workflow uses GitHub's OIDC token to publish, no
 secrets needed.
 
 After the first scheduled run (or push to `{{DEFAULT_BRANCH}}`), the score
 is available in three places:
 
-- `https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_NAME}}` — public landing page with per-check breakdown
+- `https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_SLUG}}` — public landing page with per-check breakdown
 - The repo's **Security** tab → **Code scanning** → filter by tool "Scorecard"
 - The **Actions** run summary
 
 **Add the badge to your README** (optional but recommended for OSS):
 
 ```markdown
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/{{PROJECT_NAME}}/badge)](https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_NAME}})
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/{{PROJECT_SLUG}}/badge)](https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_SLUG}})
 ```
 
 The score is **not gated as a required check** — Scorecard is a periodic
@@ -153,11 +174,26 @@ Code scanning view shows each failing check with a fix recommendation).
 
 ## 3. **PRIVATE** — SonarQube + Trivy setup
 
-> 🤖 **Automated alternative**: `scripts/automate-private.sh` does all of
-> section 3 — starts SonarQube, generates and stores the admin password in the
-> macOS Keychain, creates the project + Quality Gate, mints the analysis token,
-> sets GitHub secrets, and registers the self-hosted runner as a launchd
-> service. Run it after `preflight.sh` confirms your toolchain.
+> 🤖 **Automated alternative**: `scripts/automate-private.sh` runs most of
+> section 3 end-to-end. Run it after `preflight.sh` confirms your toolchain.
+>
+> **Steps the script runs for you (no input needed)**: `docker compose up`
+> for SonarQube CE + Postgres, health-check polling until SonarQube is up,
+> random admin password generation stored in macOS Keychain, password change
+> from default `admin/admin` via API, project creation, analysis token mint,
+> Quality Gate creation (or fallback), GitHub Actions secret writes
+> (`SONAR_TOKEN`, `SONAR_HOST_URL`).
+>
+> **Interactive steps the script will pause for**:
+>
+> | When | What you do |
+> |---|---|
+> | At self-hosted runner prompt | Y/N — Y to download + register the GitHub Actions runner as a launchd service on this machine. |
+> | If runner accepted | Browser tab opens at the GitHub Settings → Actions → Runners page. The script reads back a registration token via `gh api` — no copy/paste from you. |
+> | At branch-protection prompt | Y/N — defer to **N** until your bootstrap PR has merged. |
+>
+> Total interactive time: ~1-2 minutes (most of which is waiting for
+> SonarQube to start). The script's other operations total ~30 seconds.
 
 ### 3.1 Start SonarQube (self-hosted)
 
@@ -462,7 +498,7 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
 ## 5. Container image publishing (only if Dockerfile present)
 
 The generated workflows build, scan, and publish your container image to
-**GitHub Container Registry** (`ghcr.io/{{PROJECT_NAME}}`). Publish events:
+**GitHub Container Registry** (`ghcr.io/{{PROJECT_SLUG}}`). Publish events:
 
 | Trigger | Tags applied | Platforms |
 |---|---|---|
@@ -506,18 +542,18 @@ artifacts in the registry that reference the image by digest.
 **Inspect the SBOM** from the registry:
 ```sh
 # Pretty-print SBOM via Buildx
-docker buildx imagetools inspect ghcr.io/{{PROJECT_NAME}}:latest \
+docker buildx imagetools inspect ghcr.io/{{PROJECT_SLUG}}:latest \
   --format '{{ json .SBOM }}' | jq .
 
 # Or download via oras
-oras discover ghcr.io/{{PROJECT_NAME}}:latest
+oras discover ghcr.io/{{PROJECT_SLUG}}:latest
 ```
 
 **Verify provenance** with cosign or slsa-verifier:
 ```sh
 # Install once: brew install cosign slsa-verifier
-slsa-verifier verify-image ghcr.io/{{PROJECT_NAME}}:latest \
-  --source-uri github.com/{{PROJECT_NAME}}
+slsa-verifier verify-image ghcr.io/{{PROJECT_SLUG}}:latest \
+  --source-uri github.com/{{PROJECT_SLUG}}
 ```
 
 **Verify the image signature** (every published image is signed by cosign
@@ -527,13 +563,13 @@ using GitHub's OIDC token — no key management required):
 # Install once: brew install cosign
 
 # Verify by tag — checks the image was signed by this repo's workflow
-cosign verify ghcr.io/{{PROJECT_NAME}}:latest \
-  --certificate-identity-regexp "^https://github.com/{{PROJECT_NAME}}/" \
+cosign verify ghcr.io/{{PROJECT_SLUG}}:latest \
+  --certificate-identity-regexp "^https://github.com/{{PROJECT_SLUG}}/" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
 # Or verify by immutable digest (safer for production pulls)
-cosign verify ghcr.io/{{PROJECT_NAME}}@sha256:<digest> \
-  --certificate-identity-regexp "^https://github.com/{{PROJECT_NAME}}/" \
+cosign verify ghcr.io/{{PROJECT_SLUG}}@sha256:<digest> \
+  --certificate-identity-regexp "^https://github.com/{{PROJECT_SLUG}}/" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 ```
 
