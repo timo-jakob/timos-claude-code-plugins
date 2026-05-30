@@ -175,9 +175,16 @@ by surfacing a category error.
    `/development-<T>:maintenance`.
 4. Language and topic dispatches can run in parallel — they share no
    state and the JSON payload is identical in shape.
-5. Each plugin receives JSON, does its work, returns JSON.
-6. development aggregates results, presents to user, optionally
-   commits / opens PR.
+5. Each plugin receives JSON. It runs its coverage pre-flight (spawning
+   the coverage-improver in a worktree when needed) and its planner,
+   then returns JSON: `plan` + `improver_result` (when present) +
+   `missing_tooling`. The plugin does NOT spawn work agents.
+6. development reads the plan and walks it **group-by-group**, in
+   priority order. For each group: spawn the agent listed on the plan
+   entry (in a fresh worktree off the latest base), push, open a PR,
+   monitor CI, run the CI-fixer agent up to 3 times on failure, merge,
+   sync. The next group only starts after the previous PR has merged,
+   so each group's work runs against the latest base — no rebasing.
 ```
 
 Language and topic plugins are **pure functions of their JSON input**.
@@ -186,6 +193,11 @@ their own detection; they do not read repo state outside of what the
 JSON payload tells them to read. This keeps coupling one-directional
 and prevents the "where does this helper live?" problem at install
 time.
+
+The split also means **work-agent spawning is a generic concern** owned
+by `development` — every language plugin's planner outputs an `agent`
+field per group, and `development` does the per-group spawning. Adding
+a new language plugin doesn't require duplicating PR-cycle logic.
 
 ### Missing-plugin handling
 
@@ -302,24 +314,14 @@ from `findings_by_tool`).
       "priority_score": 0.78
     }
   ],
-  "actions_taken": [
-    {
-      "tool": "ruff",
-      "type": "autofix",
-      "summary": "applied 26 auto-fixes (UP042, SIM105, …)",
-      "files_changed": ["src/aido/types.py", "tests/conftest.py"],
-      "worktree_branch": "wt-ruff-fixes-abc123"
-    }
-  ],
-  "actions_requiring_review": [
-    {
-      "tool": "snyk_oss",
-      "finding_id": "SNYK-PYTHON-…",
-      "recommendation": "bump <pkg> from 1.2.3 to 1.2.5",
-      "rationale": "patches the CVE; one breaking change in <module>",
-      "draft_branch": "wt-snyk-bump-pkg-abc123"
-    }
-  ],
+  "improver_result": {
+    "worktree_branch": "<branch returned by python-coverage-improver>",
+    "summary": "Raised coverage on 2 modules above the 80% required threshold",
+    "modules_improved": [
+      { "file": "src/aido/webui/mutation_routes.py", "before": 61.9, "after": 94.0 },
+      { "file": "src/aido/cli.py", "before": 69.3, "after": 97.0 }
+    ]
+  },
   "missing_tooling": [
     {
       "tool": "snyk_code",
@@ -327,16 +329,19 @@ from `findings_by_tool`).
       "what_it_provides": "Source-level vulnerability scanning; catches issues the lint tools miss.",
       "how_to_add": "Run /development:bootstrap (it sets up Snyk end-to-end), or sign up at snyk.io and add SNYK_TOKEN to GitHub Actions secrets."
     }
-  ],
-  "unable_to_fix": [
-    {
-      "tool": "semgrep",
-      "finding": "python.flask.security.audit.hardcoded-config.…",
-      "reason": "test-fixture annotation requires human judgment"
-    }
   ]
 }
 ```
+
+`improver_result` is **omitted entirely** when the coverage pre-flight
+took Step 2c branch 1 (all modules already at Required) — only present
+when branch 2 fired and spawned the improver.
+
+The dispatcher does NOT include `actions_taken`, `actions_requiring_review`,
+or `unable_to_fix` in v2. Those arrays are produced by per-group work
+agents that the orchestrator spawns in Phase 8, and aggregated there.
+The dispatcher's response is now a planning artifact, not a work
+record.
 
 `plan` is the output of the language plugin's pre-dispatch planner
 (`python-maintenance-planner` for `development-python`). The planner is
@@ -344,24 +349,30 @@ a sonnet agent that runs without a worktree, reads the findings + git
 history, and returns an ordered list of "groups" that bundle findings
 expected to share a single PR (same rule across N files, co-located in
 one file, etc.). Each group carries: source tool, included finding IDs,
-affected files, rationale, the agent that will act on it, a suggested
-PR title, and a priority score. The dispatcher prints the plan to the
-user before any work agent starts, and passes it through to the
-response so the orchestrator's summary and the future auto-PR step
-(#54) have access to the grouping decisions. Plans are language-local
-— each language plugin produces its own.
+affected files, rationale, **the agent the orchestrator will spawn for
+this group's PR**, a suggested PR title, and a priority score.
+Plans are language-local — each language plugin produces its own.
 
-`worktree_branch` and `draft_branch` are populated when the agent ran
-with `isolation: "worktree"` and made changes. The orchestrator merges
-these branches back to the user's working branch in topological order
-(least-conflict first).
+The orchestrator processes the plan **sequentially in priority order**:
 
-`missing_tooling` is the aggregation of every agent that ran in
-"tool not configured" mode. The orchestrator surfaces this to the
-user as a checklist alongside the actual maintenance results. A
-project that wasn't bootstrapped can still benefit from the agents
-that DO have something to work with, while the rest of the agents
-explain what's missing.
+1. If `improver_result` is present, promote it to a PR first
+   (Stage 0): push, open, monitor CI, optionally invoke
+   `python-ci-fixer` up to 3 times on failure, merge, sync local main.
+2. For each entry in `plan`, in order: spawn `plan[i].agent` with
+   `isolation="worktree"` off the latest base; the runtime returns a
+   worktree branch; push, open a PR, run the same CI cycle, merge,
+   sync. Only then move to `plan[i+1]`.
+
+This serialization means each group's work runs against the latest
+post-merge state. There is no local merging, no topological ordering of
+worktree branches, and no rebasing. The pipeline ends when every
+group has either merged or escalated.
+
+`missing_tooling` lists tools the project hasn't configured. The
+dispatcher builds it directly from `tooling_configured` (entries with
+value `false`) — without spawning per-tool agents in unconfigured mode.
+The orchestrator surfaces this to the user as a checklist alongside
+the merged PR list.
 
 ## Agent model selection
 
@@ -399,28 +410,53 @@ and the runtime returns either:
 - "changes made" → branch + worktree path returned in the agent's
   result
 
-### Parallel execution
+### Sequential per-group execution (the maintenance pipeline)
 
-Spawn independent agents in a **single assistant turn** so they run
-concurrently:
+The maintenance pipeline runs work agents **sequentially**, one per
+planner group, with a full PR cycle between groups. The orchestrator
+spawns the agent listed on each plan entry off the latest base:
 
 ```
-Agent(name="python-ruff-fixer",   isolation="worktree", prompt=…)
-Agent(name="python-snyk-fixer",   isolation="worktree", prompt=…)
-Agent(name="python-semgrep-fixer", isolation="worktree", prompt=…)
+# group 1
+Agent(subagent_type="python-sonar-triage",
+      isolation="worktree",
+      prompt=<group 1 findings + repo_path + base_branch + …>)
+# … wait, push, PR, CI, merge, sync …
+
+# group 2 (now off the post-group-1 main)
+Agent(subagent_type="python-ruff-fixer",
+      isolation="worktree",
+      prompt=<group 2 findings + …>)
+# … wait, push, PR, CI, merge, sync …
 ```
 
-All three run in parallel against the same base SHA in separate
-worktrees. None can see or interfere with the others' work.
+Why sequential, not parallel: each group's PR may touch files that
+another group also intends to touch, and running them in parallel would
+either require risky rebasing or surface false conflicts. Sequencing
+makes every group's worktree open against the previous group's merged
+state, so the agent always sees the latest code. The cost is wall-clock
+time; the gain is reliability + a clean per-group PR for the human to
+review later.
 
-### Merging branches back
+The coverage improver (Stage 0) runs the same way — its PR closes
+before any work agent's worktree is created.
 
-The orchestrator collects branch names from each agent's result and
-merges them sequentially into the user's working branch. Default
-strategy: **least-conflict first** — count `git diff` lines per
-branch, merge smallest first to maximize the chance the bigger
-branches still apply cleanly. If a merge conflict surfaces despite
-that, surface it to the user with `actions_requiring_review`.
+### From worktrees to PRs
+
+The Agent runtime returns the worktree branch name when the agent made
+changes. The orchestrator then drives the per-PR cycle: push, `gh pr
+create`, `gh pr checks --watch`, `python-ci-fixer` on failure (up to 3
+iterations), `gh pr merge --squash --delete-branch`, sync local main.
+There is no local merging anymore — every change reaches `main` only
+via a merged PR with passing CI.
+
+### Parallel execution (other use cases)
+
+The original parallel pattern — multiple `Agent(...)` calls in a single
+assistant turn — is still valid for *non-maintenance* contexts where
+agents are read-only or operate on disjoint files. The maintenance
+pipeline specifically chose serialization because PRs are the unit of
+record.
 
 ### When NOT to use worktrees
 
