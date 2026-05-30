@@ -25,9 +25,21 @@ Supported flags in `$ARGUMENTS`:
 - `--no-merge` — dispatch normally, but skip the auto-merge of worktree
   branches at the end. The user is left with the branches available
   for manual inspection + merge.
+- `--tool=<name>` — scope dispatch to a single tool (testing aid).
+  `<name>` must be one of: `ruff`, `semgrep`, `snyk_code`, `snyk_oss`,
+  `sonarcloud`, `dependabot`. The gather phase still runs for every
+  tool (the payload stays complete), but the language plugin only
+  spawns the agent(s) for the chosen tool. Other agents are skipped
+  entirely — no work, no missing-tool recommendation. Combinable with
+  `--dry-run` and `--no-merge`.
 
 Anything else: surface the input to the user as "unrecognized
 arguments" and stop.
+
+When `--tool=<name>` is set, validate `<name>` against the known set
+above before proceeding. On a mismatch, halt with: "Unknown --tool
+'<name>'; supported: ruff, semgrep, snyk_code, snyk_oss, sonarcloud,
+dependabot."
 
 ## Phase 1 — detect
 
@@ -137,6 +149,16 @@ schema v1:
 }
 ```
 
+When `--tool=<name>` was passed in Phase 0, also add the optional
+`dispatch_filter` field to the payload (omit it entirely otherwise):
+
+```json
+"dispatch_filter": { "only_tools": ["<name>"] }
+```
+
+This is what the language plugin reads to know it should skip every
+other agent. The gather output is unchanged — only dispatch is scoped.
+
 The user's current branch from `git rev-parse --abbrev-ref HEAD`.
 
 `language_meta.version` — language-appropriate:
@@ -234,6 +256,10 @@ its own block so it's clear which plugin produced what.
 Project:       <repo path>
 Branch:        <user's current branch>
 Languages processed: <comma-separated list from supported>
+<If --tool=<name> was set:>
+⚠ Scoped to single tool: <name>
+  Other tools were gathered but not dispatched. Re-run without --tool
+  to process them.
 
 <If unsupported is non-empty:>
 ⚠ Languages detected but not yet supported:

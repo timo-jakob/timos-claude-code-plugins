@@ -254,6 +254,9 @@ file.
   "worktree": {
     "available": true,
     "base_branch": "main"
+  },
+  "dispatch_filter": {
+    "only_tools": ["sonarcloud"]
   }
 }
 ```
@@ -261,6 +264,14 @@ file.
 Tool-native finding objects retain their original shape — we don't
 normalize. Each language plugin already knows the shape of its own
 tools' output; adding a translation layer is duplicate work.
+
+**`dispatch_filter` is optional** and added by the orchestrator only
+when the user passed `--tool=<name>` (a testing aid). When present,
+the language plugin scopes dispatch to the listed tools only — every
+other agent is skipped entirely (no work, no missing-tool
+recommendation). The gather output remains complete; the filter is
+purely a dispatch concern. When `dispatch_filter` is absent the
+default "always spawn every agent" rule applies.
 
 **`tooling_configured` covers tools the language plugin cares about,
 including ones that aren't set up for this project.** When

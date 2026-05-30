@@ -101,6 +101,13 @@ Determine the **affected-modules set** — the set of modules a planned
 agent might touch. The right scope depends on what kind of work is
 planned:
 
+**When `dispatch_filter.only_tools` is set**, restrict every sub-step
+below to findings from the filtered tools only. Don't compute coverage
+risk for tools you won't dispatch — otherwise an unrelated tool's
+findings could block the scoped run. (Concretely: step 2a iterates only
+the filtered tools; step 2b is skipped entirely if neither `snyk_oss`
+nor `dependabot` is in the filter.)
+
 #### Step 2a — for findings with explicit file paths
 
 For each finding in `ruff`, `semgrep`, `snyk_code`, `sonarcloud`,
@@ -208,6 +215,35 @@ blocks every other autonomous fix.
 **Always spawn every Python agent**, regardless of whether their tool
 is configured. Configured agents do real work; unconfigured ones
 produce a "tool isn't set up" recommendation.
+
+**Exception — `dispatch_filter` (testing aid).** If the payload contains
+a `dispatch_filter.only_tools` array, only spawn agents whose tool key
+appears in that list. All other agents are skipped entirely — they
+don't run and they don't produce a missing-tool recommendation. The
+gather output stays complete; this is purely a dispatch-side restriction.
+
+Validation when `dispatch_filter` is present (perform before any spawn):
+
+- Each name in `only_tools` must be one of: `ruff`, `semgrep`,
+  `snyk_code`, `snyk_oss`, `sonarcloud`, `dependabot`. Unknown names
+  halt with: "Unknown tool '<X>' in dispatch_filter.only_tools;
+  supported: ruff, semgrep, snyk_code, snyk_oss, sonarcloud,
+  dependabot."
+- Each name with `tooling_configured.<name> == false` halts with:
+  "Cannot scope to <X>: not configured for this project. Set it up
+  first via /development:bootstrap, or drop `--tool=<X>`." A missing
+  tool can't be tested in isolation — there are no findings to act on.
+
+Tool → agent(s) for filter resolution:
+
+| Tool key | Agent(s) spawned when this key is in the filter |
+|---|---|
+| `ruff` | `python-ruff-fixer` |
+| `semgrep` | `python-semgrep-triage` |
+| `snyk_code` | `python-snyk-triage` (snyk_code findings only) |
+| `snyk_oss` | `python-snyk-triage` (patch/minor) + `python-major-upgrade` (one spawn per major) |
+| `sonarcloud` | `python-sonar-triage` |
+| `dependabot` | `python-dependabot-triage` for the non-major / non-pip cases + `python-major-upgrade` per pip-major PR (per the existing routing logic) |
 
 | Agent | Model | Tool key(s) | Worktree (when configured) |
 |---|---|---|---|
