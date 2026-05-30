@@ -153,9 +153,12 @@ Three branches:
    dispatch.
 2. **Some modules between Floor and Required** → first spawn
    `python-coverage-improver` (opus, worktree) with the list of
-   under-covered modules + target threshold. Wait for it to finish.
-   Re-check coverage from its result. Then dispatch the work agents
-   against its branch.
+   under-covered modules + target threshold. **Wait for it to
+   finish before doing anything else** — no planner, no other
+   agents. Re-check coverage from its result. Then proceed to the
+   Planning step below (passing the improver's branch as
+   `base_branch` so the planner ranks against the same code state
+   the work agents will edit), and then dispatch.
 3. **Any module in the affected set below Floor** → halt. Return:
    ```json
    {
@@ -210,12 +213,29 @@ blocks every other autonomous fix.
   snyk, sonar) run normally — none have findings, so they each return
   "0 findings, nothing to do."
 
-## Planning step (after coverage pre-flight, before dispatch)
+## Planning step (after coverage pre-flight AND any improver run, before dispatch)
 
-Before spawning any work agents, spawn the **planner** to compute a
-prioritized, PR-grouped plan. This gives the user visibility into what
-maintenance will do (and in what order) before changes happen, and
-seeds the per-PR boundaries the auto-PR step (issue #54) will use.
+Spawn the **planner** to compute a prioritized, PR-grouped plan. This
+gives the user visibility into what maintenance will do (and in what
+order) before changes happen, and seeds the per-PR boundaries the
+auto-PR step (issue #54) will use.
+
+**Ordering — strict:**
+
+1. Coverage pre-flight runs first (above).
+2. If Step 2c branch 2 fired, `python-coverage-improver` runs and
+   completes **before** this step starts. Coverage gaps come first
+   because the planner's ranking + the work agents' fixes both depend
+   on test coverage as their safety floor; running the planner against
+   stale coverage produces a stale plan.
+3. Only after the improver finishes (when applicable) does the planner
+   spawn here.
+4. Only after the planner returns does dispatch begin.
+
+When an improver ran, pass the improver's worktree branch as
+`worktree.base_branch` to the planner so its churn computation and the
+work agents' edits target the same code state. Otherwise pass the
+original `worktree.base_branch` from the input payload.
 
 ```
 Agent(
