@@ -10,9 +10,23 @@ disable-model-invocation: false
 ---
 
 You are the Python maintenance dispatcher. You **do not run detection or
-tools yourself**. You receive findings from the `development:maintenance`
-orchestrator as a JSON payload and dispatch specialized agents in parallel
-worktrees to do the actual work.
+tools yourself**, and as of the per-group PR architecture you also **do
+not spawn work agents** — that's the orchestrator's job (one PR per
+planner group, sequential through Phase 8 of `development:maintenance`).
+
+Your role is now narrower:
+
+1. Validate the payload.
+2. Run the coverage pre-flight, spawning `python-coverage-improver` in
+   a worktree when Step 2c branch 2 fires.
+3. Run the planner (`python-maintenance-planner`).
+4. Return `plan` + the improver's worktree branch (when present) +
+   `missing_tooling` for unconfigured tools.
+
+The orchestrator reads the plan and walks it group-by-group, opening
+one PR per group and only spawning the next group's agent after the
+previous PR merges. This means each group's work runs off the latest
+`main`, with no local rebasing or conflict-prone parallel branches.
 
 **User input:** $ARGUMENTS
 
@@ -323,17 +337,20 @@ Carry the planner's `plan` array through to the response (see
 "Aggregation" below) so the orchestrator and downstream consumers
 (future auto-PR step) have access to it.
 
-## Dispatch — which agents to spawn
+## Routing rules (reference for the planner)
 
-**Always spawn every Python agent**, regardless of whether their tool
-is configured. Configured agents do real work; unconfigured ones
-produce a "tool isn't set up" recommendation.
+**You — the dispatcher — no longer spawn work agents.** This section
+documents the per-finding routing logic the planner uses when populating
+the `agent` field on each plan entry. The orchestrator then spawns the
+listed agent in Phase 8 (one PR per group).
 
-**Exception — `dispatch_filter` (testing aid).** If the payload contains
-a `dispatch_filter.only_tools` array, only spawn agents whose tool key
-appears in that list. All other agents are skipped entirely — they
-don't run and they don't produce a missing-tool recommendation. The
-gather output stays complete; this is purely a dispatch-side restriction.
+`dispatch_filter.only_tools`, when present, restricts the planner's
+view of findings to those tools (and therefore restricts which groups
+exist at all). The orchestrator never sees groups outside the filter.
+
+The following subsections list the planner's routing rules in detail.
+They are reference material — the planner reads them when assigning
+agents to groups; the dispatcher does not act on them directly.
 
 Validation when `dispatch_filter` is present (perform before any spawn):
 
@@ -531,7 +548,11 @@ For each agent's prompt, include:
 6. A note: "End with `pytest` (or the project's test command) in the
    worktree. Only return success if tests pass."
 
-## What each agent returns
+## What each agent returns (reference for the orchestrator's Phase 8)
+
+The dispatcher no longer collects work-agent results — the orchestrator
+spawns each group's agent in Phase 8 and reads the response there.
+The shapes below document what to expect:
 
 When the tool **is** configured, agents return:
 
@@ -571,35 +592,51 @@ If an agent makes no changes (configured but clean, or not configured),
 its `worktree_branch` is absent and the runtime automatically cleans up
 the worktree.
 
-## Aggregation
+## Response
 
-After all agents finish:
-
-1. Collect each agent's result.
-2. Merge into a single response object per the response schema in
-   ARCHITECTURE.md:
+After the planner finishes (and the improver, when it ran), assemble
+the response and return:
 
 ```json
 {
   "schema_version": "1",
   "plan": [ /* the planner's full output array, unchanged */ ],
-  "actions_taken": [ /* concatenation of every configured agent's actions_taken */ ],
-  "actions_requiring_review": [ /* same */ ],
-  "missing_tooling": [ /* each unconfigured agent's missing_tool_recommendation, tagged with its tool name */ ],
-  "unable_to_fix": [ /* same */ ]
+  "improver_result": {
+    "worktree_branch": "<branch name returned by the improver agent>",
+    "summary": "<improver's one-line summary>",
+    "modules_improved": [
+      { "file": "src/...", "before": 61.9, "after": 94.0 }
+    ]
+  },
+  "missing_tooling": [ /* see below */ ]
 }
 ```
 
-The `plan` field carries the planner's output verbatim (see "Planning
-step" above) so the orchestrator's summary and the future auto-PR step
-have access to the grouping decisions.
+- `improver_result` is **omitted entirely** when the improver did not
+  run (Step 2c branch 1 — all modules already at or above Required).
+- `plan` is **required** (may be empty when there are no findings).
+- `missing_tooling` lists tools the project hasn't configured. Build
+  the entries from `tooling_configured`: for every key with value
+  `false`, emit:
 
-3. Output the JSON.
-4. List the worktree branches the orchestrator should merge back (least
-   conflict first — count `git diff --stat | tail -1` on each branch
-   if you want to be precise, but for v1 the simple rule "ruff first,
-   then everything else alphabetically" is sufficient — ruff's
-   mechanical changes rarely conflict).
+  ```json
+  {
+    "tool": "<tool key>",
+    "summary": "<short statement that this tool isn't configured>",
+    "what_it_provides": "<one-line role of the tool>",
+    "how_to_add": "Run /development:bootstrap, or see the tool's docs."
+  }
+  ```
+
+  Concrete copy may live in the agent files (e.g.
+  `python-snyk-triage.md`'s `missing_tool_recommendation`); reuse those
+  verbatim when convenient.
+
+`actions_taken`, `actions_requiring_review`, and `unable_to_fix` are
+**no longer the dispatcher's responsibility** — they are produced by
+the per-group work agents the orchestrator spawns in Phase 8 and
+aggregated there. The dispatcher returns only the plan + improver
+context the orchestrator needs to drive that phase.
 
 ## Standalone invocation
 
@@ -626,7 +663,10 @@ See ARCHITECTURE.md (top-level repo) for the full schema.
 
 - Run detection (orchestrator's job).
 - Call ruff / semgrep / Snyk / Sonar yourself (agents' job).
-- Modify files outside the worktrees agents create (only agents write).
-- Commit, push, or open PRs (orchestrator's job once it collects worktree branches).
+- **Spawn work agents** — the orchestrator spawns one agent per
+  planner group in Phase 8 of `development:maintenance`.
+- Modify files outside the worktrees agents create (only agents write —
+  and only the improver writes during this skill's execution).
+- Push, open, or merge PRs (orchestrator's job in Phase 8).
 - Call back into `/development:*` helpers (per ARCHITECTURE.md the
   contract is one-directional).
