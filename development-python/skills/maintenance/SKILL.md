@@ -159,6 +159,33 @@ Three branches:
    Planning step below (passing the improver's branch as
    `base_branch` so the planner ranks against the same code state
    the work agents will edit), and then dispatch.
+
+   The improver MUST spawn with `isolation="worktree"` so its new
+   tests land on a fresh branch off `worktree.base_branch`, not
+   in the user's working tree:
+
+   ```
+   Agent(
+     subagent_type="python-coverage-improver",
+     description="Raise coverage on under-covered affected modules",
+     isolation="worktree",
+     prompt="""
+       repo_path: <repo.path>
+       target_threshold: <Required for this action class, e.g. 80 or 90>
+       under_covered_modules: [
+         { "file": "src/...", "current_coverage": 61.9 },
+         ...
+       ]
+       worktree.base_branch: <worktree.base_branch>
+
+       Add meaningful behavior tests; do NOT modify production code.
+       Run pytest in the worktree; only return success if tests pass.
+     """
+   )
+   ```
+
+   The result's worktree branch is what subsequent steps (planner,
+   work agents) use as their effective `base_branch`.
 3. **Any module in the affected set below Floor** → halt. Return:
    ```json
    {
