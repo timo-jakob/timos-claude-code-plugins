@@ -288,6 +288,20 @@ from `findings_by_tool`).
 ```json
 {
   "schema_version": "1",
+  "plan": [
+    {
+      "group_id": 1,
+      "tool": "sonarcloud",
+      "rule": "python:S1192",
+      "description": "Define constants for duplicated literals",
+      "findings": ["<finding-key>", "..."],
+      "files": ["src/aido/webui/mutation_routes.py", "..."],
+      "rationale": "same rule across 3 files",
+      "agent": "python-sonar-triage",
+      "suggested_pr_title": "fix(sonar): define constants for duplicated literals",
+      "priority_score": 0.78
+    }
+  ],
   "actions_taken": [
     {
       "tool": "ruff",
@@ -323,6 +337,19 @@ from `findings_by_tool`).
   ]
 }
 ```
+
+`plan` is the output of the language plugin's pre-dispatch planner
+(`python-maintenance-planner` for `development-python`). The planner is
+a sonnet agent that runs without a worktree, reads the findings + git
+history, and returns an ordered list of "groups" that bundle findings
+expected to share a single PR (same rule across N files, co-located in
+one file, etc.). Each group carries: source tool, included finding IDs,
+affected files, rationale, the agent that will act on it, a suggested
+PR title, and a priority score. The dispatcher prints the plan to the
+user before any work agent starts, and passes it through to the
+response so the orchestrator's summary and the future auto-PR step
+(#54) have access to the grouping decisions. Plans are language-local
+— each language plugin produces its own.
 
 `worktree_branch` and `draft_branch` are populated when the agent ran
 with `isolation: "worktree"` and made changes. The orchestrator merges
