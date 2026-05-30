@@ -540,6 +540,42 @@ the results as part of the JSON payload. Language plugins receive
 "here is the parsed detect-stack output" rather than "here is the path
 to detect-stack.sh; go run it." Pure functions, no path coupling.
 
+## Scripting conventions
+
+This project targets **macOS only, Apple Silicon, Homebrew-based**. There
+is no Linux support claim in `marketplace.json` and none is planned.
+
+**New shell scripts use zsh, not bash.** Default shebang:
+
+```zsh
+#!/usr/bin/env zsh
+setopt err_exit nounset pipefail
+```
+
+Why zsh:
+- macOS ships bash 3.2 (from 2007) as `/bin/bash`; Apple won't update
+  it for GPLv3 reasons. `#!/usr/bin/env bash` resolves to whatever's
+  first on PATH, so contributors without Homebrew bash silently land
+  on 3.2 and lose features like associative arrays.
+- zsh has been the macOS default shell since Catalina (2019) and is
+  kept current by Apple.
+- zsh has cleaner idioms for the patterns this codebase actually uses:
+  `typeset -A` for lookups, `${(s/:/)var}` for splits, `${(j:,:)arr}`
+  for joins, `$match` for regex captures, sane empty-array expansion
+  without the `${arr[@]+"${arr[@]}"}` workaround.
+
+**Existing bash scripts in `development/skills/*/scripts/` are not
+being ported.** They were written carefully against bash 3.2, are
+tested in production, and a port would carry real regression risk
+(`BASH_REMATCH` → `match`, `BASH_SOURCE` → `${(%):-%N}`, `printf -v`
+→ `typeset -g`). When modifying one of those files, stay in bash for
+consistency. Don't half-port.
+
+The zsh default applies to new files only. If a substantial new feature
+inside an existing bash script would benefit clearly from zsh idioms
+(e.g., several associative-array lookups), propose extracting it into a
+new zsh helper rather than mixing styles in one file.
+
 ## Open questions
 
 (none currently — see git history for resolved items: TS+JS combined,
