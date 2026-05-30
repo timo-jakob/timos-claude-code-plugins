@@ -223,6 +223,55 @@ in parallel — worktree-using ones in isolated worktrees off
 `worktree.base_branch`; `python-dependabot-triage` runs without a
 worktree (it modifies PRs on GitHub, not files locally).
 
+### How to spawn — the Agent tool call shape
+
+Worktree isolation is a Claude Code platform feature, not something
+this plugin implements: pass `isolation="worktree"` to the Agent tool
+and the runtime creates a temp git worktree on a fresh branch off
+`worktree.base_branch`. If the agent makes no changes, the worktree is
+auto-cleaned; if it changes files, the branch name comes back in the
+agent's result for the orchestrator to merge in Phase 8.
+
+Example — a worktree-using agent (here `python-sonar-triage`):
+
+```
+Agent(
+  subagent_type="python-sonar-triage",
+  description="Triage Sonar findings",
+  isolation="worktree",
+  prompt="""
+    repo_path: /abs/path/to/repo
+    configured: true
+    findings: [<sliced from findings_by_tool.sonarcloud>]
+    policy: { severity_gate: "high", ... }
+    worktree.base_branch: "main"
+
+    Run pytest (or the project's test command) in the worktree before
+    returning success — only report success if tests pass.
+  """
+)
+```
+
+Example — `python-dependabot-triage` (no worktree; it acts on GitHub
+PRs via `gh`, not on local files):
+
+```
+Agent(
+  subagent_type="python-dependabot-triage",
+  description="Process classified Dependabot PRs",
+  prompt="""
+    repo_path: /abs/path/to/repo
+    configured: true
+    findings: [<pre-classified PR list with ecosystem + bump_level + routing>]
+  """
+)
+```
+
+Apply this shape to every agent in the spawn list — `python-ruff-fixer`,
+`python-semgrep-triage`, `python-snyk-triage`, `python-sonar-triage`,
+`python-major-upgrade`, and `python-coverage-improver` all take
+`isolation="worktree"`. Only `python-dependabot-triage` omits it.
+
 Snyk routing: scan `findings_by_tool.snyk_oss` for the per-finding
 upgrade type. Patch + minor go to `python-snyk-triage`; majors go to
 `python-major-upgrade` (one spawn per major bump).
