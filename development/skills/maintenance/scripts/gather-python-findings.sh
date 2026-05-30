@@ -33,6 +33,9 @@
 
 set -euo pipefail
 
+# Resolve sibling-script directory (needed to invoke gather-sonarcloud.zsh).
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+
 repo="${1:-}"
 [[ -n "$repo" && -d "$repo" ]] || { echo "usage: $0 <repo_path>" >&2; exit 2; }
 
@@ -164,12 +167,34 @@ if [[ "$has_snyk_config" == "true" ]]; then
   fi
 fi
 
-# sonarcloud — query SonarCloud REST API for issues. Requires SONAR_TOKEN env.
-# Skipping the implementation for v1 — the orchestrator's response will note
-# that Sonar findings need to be checked manually via the SonarCloud UI.
+# sonarcloud — fetch live findings (open issues + TO_REVIEW hotspots) via the
+# SonarCloud REST API using gather-sonarcloud.zsh. Token resolution is handled
+# inside that helper (env var → macOS keychain → interactive prompt on TTY).
+# The helper prints a one-line summary as its FINAL stderr line; we surface
+# that to the user via notes[].
 if [[ "$has_sonar_config" == "true" ]]; then
-  echo "[]" > "$findings_dir/sonarcloud.json"
-  notes+=("sonarcloud is configured but live finding gathering is not implemented in v1 of the orchestrator; check the SonarCloud UI for current issues.")
+  sonar_org=$(grep -E '^[[:space:]]*sonar\.organization' sonar-project.properties 2>/dev/null \
+    | head -1 | cut -d= -f2- | tr -d ' \r')
+  sonar_project=$(grep -E '^[[:space:]]*sonar\.projectKey' sonar-project.properties 2>/dev/null \
+    | head -1 | cut -d= -f2- | tr -d ' \r')
+
+  if [[ -z "$sonar_org" || -z "$sonar_project" ]]; then
+    echo "[]" > "$findings_dir/sonarcloud.json"
+    notes+=("sonarcloud is configured but sonar-project.properties is missing 'sonar.organization' or 'sonar.projectKey'; live findings can't be fetched until both are set.")
+  else
+    sonar_stderr=$(mktemp)
+    if "$SCRIPT_DIR/gather-sonarcloud.zsh" "$sonar_org" "$sonar_project" \
+         > "$findings_dir/sonarcloud.json" 2>"$sonar_stderr"; then
+      :  # success — final-line note still picked up below
+    else
+      echo "[]" > "$findings_dir/sonarcloud.json"
+    fi
+    # The helper's last stderr line is its caller-facing one-liner (success
+    # summary or failure note). Surface it either way so the user knows.
+    sonar_note=$(tail -1 "$sonar_stderr" 2>/dev/null || true)
+    [[ -n "$sonar_note" ]] && notes+=("$sonar_note")
+    rm -f "$sonar_stderr"
+  fi
 fi
 
 # dependabot — query GitHub for open PRs authored by dependabot[bot]. Requires
