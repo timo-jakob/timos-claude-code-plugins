@@ -210,6 +210,72 @@ blocks every other autonomous fix.
   snyk, sonar) run normally — none have findings, so they each return
   "0 findings, nothing to do."
 
+## Planning step (after coverage pre-flight, before dispatch)
+
+Before spawning any work agents, spawn the **planner** to compute a
+prioritized, PR-grouped plan. This gives the user visibility into what
+maintenance will do (and in what order) before changes happen, and
+seeds the per-PR boundaries the auto-PR step (issue #54) will use.
+
+```
+Agent(
+  subagent_type="python-maintenance-planner",
+  description="Plan the order + grouping of findings for dispatch",
+  prompt="""
+    repo_path: <repo.path>
+    findings: <union of every CONFIGURED tool's findings, with each
+              finding augmented by a `_tool` field naming its source>
+    coverage.by_module: <coverage.by_module>
+    policy.priority_window_days: <policy.priority_window_days or 30>
+    worktree.base_branch: <worktree.base_branch>
+  """
+)
+```
+
+**No worktree** — the planner only reads. `isolation` is omitted.
+
+When `dispatch_filter.only_tools` is set, restrict the findings passed
+to the planner to that filter's tools — the planner only sees what
+will actually be dispatched.
+
+The planner returns:
+
+```json
+{
+  "plan": [ { "group_id": 1, "tool": "sonarcloud", "rule": "...",
+              "description": "...", "findings": [...], "files": [...],
+              "rationale": "...", "agent": "python-sonar-triage",
+              "suggested_pr_title": "...", "priority_score": 0.78 },
+            ... ],
+  "summary": { "total_findings": 16, "total_groups": 5, "estimated_prs": 5 }
+}
+```
+
+### Render the plan to the user
+
+Immediately after the planner returns and BEFORE spawning any work
+agent, print a scannable summary to the conversation:
+
+```
+=== Maintenance plan ===
+
+<M> groups, <N> findings, target ~<M> PRs
+
+  1. [<tool>] <rule or category> — <description>
+     <findings-count> finding(s) across <files-count> file(s):
+       <comma-separated relative file paths>
+     → <agent>   (priority <score>)
+
+  2. ...
+```
+
+This is informational; dispatch proceeds automatically after rendering.
+The user can interrupt the run at this point if the plan looks wrong.
+
+Carry the planner's `plan` array through to the response (see
+"Aggregation" below) so the orchestrator and downstream consumers
+(future auto-PR step) have access to it.
+
 ## Dispatch — which agents to spawn
 
 **Always spawn every Python agent**, regardless of whether their tool
@@ -469,12 +535,17 @@ After all agents finish:
 ```json
 {
   "schema_version": "1",
+  "plan": [ /* the planner's full output array, unchanged */ ],
   "actions_taken": [ /* concatenation of every configured agent's actions_taken */ ],
   "actions_requiring_review": [ /* same */ ],
   "missing_tooling": [ /* each unconfigured agent's missing_tool_recommendation, tagged with its tool name */ ],
   "unable_to_fix": [ /* same */ ]
 }
 ```
+
+The `plan` field carries the planner's output verbatim (see "Planning
+step" above) so the orchestrator's summary and the future auto-PR step
+have access to the grouping decisions.
 
 3. Output the JSON.
 4. List the worktree branches the orchestrator should merge back (least

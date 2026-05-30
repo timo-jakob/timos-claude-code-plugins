@@ -269,6 +269,13 @@ Languages processed: <comma-separated list from supported>
 <For each language in supported, a block:>
 --- <lang> ---
 
+<If response.plan is non-empty (planner ran):>
+📋 Plan (M groups, N findings):
+  1. [<tool>] <description>
+     <findings-count> finding(s) across <files-count> file(s) — priority <score>
+     → <agent>
+  2. ...
+
 ✓ Actions applied (N):
   - <tool>: <summary>      <files_changed count>
   ...
