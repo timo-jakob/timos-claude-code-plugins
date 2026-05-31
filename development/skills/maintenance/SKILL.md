@@ -313,6 +313,28 @@ sequentially:
 - **Response has `human_action_required`** → halt as before
   (Phase 7).
 
+**Critical — do not stop here.** The `Skill(...)` call is one step
+inside Phase 6, **not** a turn boundary. When control returns from
+the dispatcher (it will print a multi-line plan summary that may look
+like a "final report" — it isn't), you stay in the same assistant
+turn:
+
+1. Mark the Phase 6 dispatch task **done** (if you used a tracker).
+2. **Without pausing**, move to Phase 7 (a no-op unless the response
+   carries `human_action_required`).
+3. **Without pausing**, move to Phase 8 and spawn the first stage's
+   agent. Phase 8 is where the orchestrator's real work happens — the
+   dispatcher's plan response is its **input**, not a checkpoint.
+
+A common failure mode is to name the dispatch task something like
+"Dispatch (Phase A)" and then wait for a "Phase B" trigger that never
+arrives because Phase B already ran inside the same Skill call. There
+is only one dispatch task in the simple (no-improver) path; after it
+returns `plan`, immediately drive Phase 8. The only events that
+should end a turn before Phase 8 finishes are: (a) `human_action_required`,
+(b) all Phase 8 stages complete and Phase 9 summary printed, or
+(c) the user explicitly says "stop".
+
 **Phase B — planning (always, possibly after Phase A's PR merged):**
 
 - Plugin validates payload (same shape as Phase A)
@@ -342,6 +364,12 @@ recommendations through to the user-facing summary and **skip all
 remaining phases for that language**. Other languages still proceed.
 
 ## Phase 8 — per-stage PR cycle
+
+**You arrive here in the same assistant turn as the dispatcher's
+response** — the plan is sitting in your context above. Do not treat
+this section header as a checkpoint or a place to wait for user input.
+Phase 8 is the orchestrator's main work; the dispatcher's job was to
+produce the plan that drives it.
 
 Replaces the old "merge worktree branches locally" with a remote-first
 flow: each stage (coverage improvement + each planner group) becomes
