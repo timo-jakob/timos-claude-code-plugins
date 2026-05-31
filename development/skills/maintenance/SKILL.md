@@ -328,14 +328,56 @@ After pushing and opening the PR:
    (Or poll `gh pr checks --json` until no check is in `PENDING` or
    `QUEUED` state.)
 2. **If all checks pass** → proceed to step 5 below.
-3. **If any check fails** → spawn the CI fixer (Python language plugin
-   provides `python-ci-fixer`). The fixer runs in a worktree of the
-   PR branch, identifies the failure, edits, runs tests locally,
-   pushes a new commit. Then re-monitor.
-4. **Repeat up to 3 fixer invocations**. If still failing after 3,
-   **do not merge** — record the PR in `actions_requiring_review` for
-   the final summary and **continue to the next stage**. Failure on
-   one stage does not block later stages.
+3. **If any check fails**, distinguish **new** from **pre-existing**
+   failures before spending tokens on `python-ci-fixer`.
+
+   A failure that's already failing on `<base_branch>` is not caused
+   by this PR — it belongs on the project's main, not on a maintenance
+   PR that didn't touch its cause. Spawning the fixer on it wastes
+   tokens and can produce confusing "fixes" that don't apply.
+
+   Run the classification:
+
+   ```bash
+   # 1. failing check names on this PR
+   gh pr checks "<pr_number>" --json name,state \
+     --jq '[.[] | select(.state == "FAILURE") | .name] | sort | unique' \
+     > /tmp/pr_fail.json
+
+   # 2. failing check-run names on <base_branch>'s latest commit
+   #    (use the same names that gh pr checks reports — workflow + job name)
+   gh api "repos/{owner}/{repo}/commits/<base_branch>/check-runs" \
+     --jq '[.check_runs[] | select(.conclusion == "failure") | .name] | sort | unique' \
+     > /tmp/base_fail.json
+
+   # 3. new failures = PR failures − base failures
+   comm -23 /tmp/pr_fail.json /tmp/base_fail.json > /tmp/new_fail.json
+   # 4. pre-existing failures = PR failures ∩ base failures
+   comm -12 /tmp/pr_fail.json /tmp/base_fail.json > /tmp/preexisting_fail.json
+   ```
+
+   (`gh` returns JSON arrays; `comm` needs sorted line-delimited input.
+   `jq -r '.[]'` between the two converts JSON arrays to lines if the
+   piping is awkward — adapt as needed for the shell. The intent is
+   the set diff, not the exact incantation.)
+
+   - **All failures pre-existing** → log the names ("pre-existing on
+     `<base_branch>`: `<list>`"), treat the checks as a noop for merge
+     gating, proceed to step 5 (merge). Record in the run summary so
+     the user knows these failures still need attention on main.
+   - **At least one new failure** → spawn `python-ci-fixer` for the
+     new ones (pass `failing_checks: <list of new failure names>` in
+     its prompt). Leave the pre-existing failures out of its scope —
+     they're not its responsibility.
+
+4. **Repeat up to 3 fixer invocations on the new failures**. After
+   each fixer commit, re-monitor and re-classify (a new failure might
+   resolve while a different pre-existing one persists — that's still
+   a green light to merge per the previous bullet). If new failures
+   still persist after 3 attempts, **do not merge** — record the PR
+   in `actions_requiring_review` for the final summary and **continue
+   to the next stage**. Failure on one stage does not block later
+   stages.
 5. **Remove the local worktree first, then merge the PR.** Order
    matters: `gh pr merge --delete-branch` tries to delete the local
    branch ref, which fails with *"cannot delete branch X used by
@@ -428,6 +470,12 @@ Languages processed: <comma-separated list from supported>
     Last failing checks: <list>
     Suggested action: <from ci-fixer's escalation_recommendation>
   ...
+
+<If any stage observed pre-existing failures on <base_branch>:>
+ℹ Pre-existing CI failures observed on <base_branch> (not maintenance's
+  scope — flagging so you know they're still red):
+  - <check_name>: failing on <base_branch> and on PR #<pr> — merged anyway
+  - ...
 
 <If human_action_required is non-empty for this language:>
 🛑 Halted — human action required:

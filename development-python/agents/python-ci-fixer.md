@@ -22,6 +22,10 @@ Your prompt contains:
 - `pr_number` — the GitHub PR number
 - `repo_path` — absolute path to a checked-out worktree of the PR's branch
 - `attempt_number` — 1, 2, or 3. After 3 the orchestrator escalates.
+- `failing_checks` — the **scoped** list of check names you should
+  attempt to fix. The orchestrator pre-classified failures and
+  excluded ones already failing on the base branch; those are not
+  your concern. Only work on the names in this list.
 - `previous_attempts` — short summaries of what earlier invocations
   tried (empty on the first attempt). Don't repeat a failing approach.
 
@@ -37,14 +41,18 @@ gh pr view "$pr_number" --json headRefName -q .headRefName
 
 If they don't match, halt — the orchestrator handed you a stale worktree.
 
-### 2. Fetch the failing checks
+### 2. Fetch the failing checks (scoped to your `failing_checks` list)
 
 ```bash
 gh pr checks "$pr_number" --json name,state,link,description \
   --jq '[.[] | select(.state == "FAILURE" or .state == "CANCELLED")]'
 ```
 
-For each failing check:
+Filter the result to entries whose `name` appears in your
+`failing_checks` input. **Ignore the rest** — they're either passing
+now or pre-existing on the base branch and out of scope.
+
+For each in-scope failing check:
 
 - Pull its log via `gh run view <run-id> --log-failed` (the link in the
   output points at the check run; extract the run id).
