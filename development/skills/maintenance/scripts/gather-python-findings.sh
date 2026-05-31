@@ -127,44 +127,33 @@ if [[ "$has_semgrep_config" == "true" ]]; then
   fi
 fi
 
-# snyk — requires local auth. Check `snyk config get api`; if no token, skip
-# gracefully with a note.
+# snyk — fetch findings via the REST API using gather-snyk.zsh. CLI scans
+# (`snyk code test`, `snyk test`) each consume one private-test slot from
+# the org's monthly quota REGARDLESS of repo visibility, so we go through
+# the GitHub-integration-imported project on app.snyk.io instead — API
+# reads don't consume quota. See timos-claude-code-plugins#82 for the
+# rationale and the original incident (Snyk GitHub App PR checks blocked
+# by quota exhaustion).
+#
+# Per the issue's design choice: if the API path fails for any reason
+# (no token, no integration project found, HTTP error), we do NOT fall
+# back to CLI scans — falling back would defeat the quota-protection
+# purpose. We emit "[]" for both arrays + a note explaining the cause.
 if [[ "$has_snyk_config" == "true" ]]; then
-  if command -v snyk >/dev/null 2>&1; then
-    if snyk config get api >/dev/null 2>&1 && [[ -n "$(snyk config get api 2>/dev/null)" ]]; then
-      # Snyk Code (SAST) — emits SARIF, not a finding array. Extract the
-      # actual results out of runs[].results[] so the python plugin's
-      # agent gets a flat array (consistent with snyk_oss and other tools).
-      snyk code test --json . > "$findings_dir/snyk_code_raw.json" 2>/dev/null || true
-      if [[ -s "$findings_dir/snyk_code_raw.json" ]]; then
-        jq '[ .runs[]?.results[]? ]' \
-          "$findings_dir/snyk_code_raw.json" > "$findings_dir/snyk_code.json" 2>/dev/null || \
-          echo "[]" > "$findings_dir/snyk_code.json"
-      else
-        echo "[]" > "$findings_dir/snyk_code.json"
-      fi
-
-      # Snyk Open Source (deps) — same; capture .vulnerabilities array.
-      snyk test --json --all-projects . > "$findings_dir/snyk_oss_raw.json" 2>/dev/null || true
-      if [[ -s "$findings_dir/snyk_oss_raw.json" ]]; then
-        # snyk test --json can emit either a single object or an array (for
-        # --all-projects). Normalize to a flat array of vulnerability records.
-        jq '[ (if type == "array" then .[] else . end) | .vulnerabilities[]? ]' \
-          "$findings_dir/snyk_oss_raw.json" > "$findings_dir/snyk_oss.json" 2>/dev/null || \
-          echo "[]" > "$findings_dir/snyk_oss.json"
-      else
-        echo "[]" > "$findings_dir/snyk_oss.json"
-      fi
-    else
-      echo "[]" > "$findings_dir/snyk_code.json"
-      echo "[]" > "$findings_dir/snyk_oss.json"
-      notes+=("snyk is configured in CI but no local API token is set; run 'snyk auth --auth-type=token' to enable local finding gathering.")
-    fi
+  snyk_stderr=$(mktemp)
+  if "$SCRIPT_DIR/gather-snyk.zsh" "$repo" \
+       > "$findings_dir/snyk_api.json" 2>"$snyk_stderr"; then
+    jq '.snyk_code' "$findings_dir/snyk_api.json" > "$findings_dir/snyk_code.json"
+    jq '.snyk_oss'  "$findings_dir/snyk_api.json" > "$findings_dir/snyk_oss.json"
   else
     echo "[]" > "$findings_dir/snyk_code.json"
     echo "[]" > "$findings_dir/snyk_oss.json"
-    notes+=("snyk is configured but the 'snyk' binary is not on PATH; install with 'brew install snyk-cli'.")
   fi
+  # The helper writes a single explanatory line to stderr in both success
+  # and failure cases — surface it so the user sees which path was used.
+  snyk_note=$(tail -1 "$snyk_stderr" 2>/dev/null || true)
+  [[ -n "$snyk_note" ]] && notes+=("$snyk_note")
+  rm -f "$snyk_stderr"
 fi
 
 # sonarcloud — fetch live findings (open issues + TO_REVIEW hotspots) via the
