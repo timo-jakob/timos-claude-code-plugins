@@ -128,10 +128,10 @@ else
   dim "  (Default 'Sonar way' gate is already assigned to new projects — no further action)"
 fi
 
-# --- Store SONAR_TOKEN as GitHub secret ---------------------------------------
-info "Storing SONAR_TOKEN as a GitHub Actions secret…"
-gh secret set SONAR_TOKEN -b "$SONAR_TOKEN"
-ok "SONAR_TOKEN set"
+# --- Store SONAR_TOKEN as GitHub secret (both scopes) -------------------------
+info "Storing SONAR_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
+gh_secret_set_both SONAR_TOKEN "$SONAR_TOKEN"
+ok "SONAR_TOKEN set (Actions + Dependabot)"
 
 # --- Snyk ---------------------------------------------------------------------
 echo
@@ -159,15 +159,24 @@ SNYK_TOKEN=$(snyk config get api 2>/dev/null || true)
 [[ -n "$SNYK_TOKEN" ]] || die "Could not read Snyk API token from local config"
 ok "Read Snyk token from local config"
 
-info "Storing SNYK_TOKEN as a GitHub Actions secret…"
-gh secret set SNYK_TOKEN -b "$SNYK_TOKEN"
-ok "SNYK_TOKEN set"
+info "Storing SNYK_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
+gh_secret_set_both SNYK_TOKEN "$SNYK_TOKEN"
+ok "SNYK_TOKEN set (Actions + Dependabot)"
 
-# Onboard for continuous monitoring
-if ask_yn "Run 'snyk monitor' now to enable continuous monitoring on snyk.io?"; then
-  # Best-effort — exit code != 0 if monitor finds issues but we still want to continue.
-  snyk monitor --all-projects || warn "snyk monitor reported a non-zero status (often means findings were detected; check snyk.io)"
-fi
+# Register the project with snyk.io for continuous monitoring (unconditional).
+# Without this, the project never appears on app.snyk.io/projects even though
+# CI scans against SNYK_TOKEN work fine — `snyk monitor` is what creates the
+# dashboard entry that enables alerts on newly-disclosed CVEs in installed
+# deps, recurring scans, and the org-level vuln inventory. Used to be opt-in;
+# now unconditional because "register the project" is a baseline part of
+# bootstrapping a public repo's security toolchain.
+info "Registering project on snyk.io (snyk monitor --all-projects)…"
+# Best-effort — `snyk monitor` exits non-zero when findings exist, which is
+# the expected case on a real codebase. We continue regardless and let the
+# Snyk dashboard surface what was found.
+snyk monitor --all-projects || \
+  warn "snyk monitor reported a non-zero status (typically: findings detected — check the project page on snyk.io)"
+ok "Project registered with snyk.io"
 
 # --- GitHub Security & Quality features --------------------------------------
 # All four are free on public repos. Each `gh api` call is idempotent — running
@@ -236,7 +245,7 @@ cat <<EOF
 
   Project       $PROJECT_KEY
   Quality Gate  $gate_summary
-  Secrets set   SONAR_TOKEN, SNYK_TOKEN
+  Secrets set   SONAR_TOKEN, SNYK_TOKEN  (Actions + Dependabot scopes)
   Monitoring    $(snyk config get api >/dev/null 2>&1 && echo "Snyk authenticated" || echo "Snyk auth pending")
 
   Next: push a branch and open a PR — CI will run on the new workflows.

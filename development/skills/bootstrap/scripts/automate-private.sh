@@ -157,9 +157,9 @@ ok "Revoked bootstrap admin token (analysis token retained)"
 # --- 6. GitHub secrets -------------------------------------------------------
 echo
 info "═══ GitHub secrets ═══"
-gh secret set SONAR_TOKEN    -b "$ANALYSIS_TOKEN"
-gh secret set SONAR_HOST_URL -b "$SONAR_HOST"
-ok "Secrets set: SONAR_TOKEN, SONAR_HOST_URL"
+gh_secret_set_both SONAR_TOKEN    "$ANALYSIS_TOKEN"
+gh_secret_set_both SONAR_HOST_URL "$SONAR_HOST"
+ok "Secrets set (Actions + Dependabot scopes): SONAR_TOKEN, SONAR_HOST_URL"
 
 # --- 7. Self-hosted runner ---------------------------------------------------
 echo
@@ -265,7 +265,7 @@ cat <<EOF
   SonarQube         $SONAR_HOST  (admin pw in Keychain: service=$KEYCHAIN_SERVICE)
   Project           $PROJECT_KEY
   Quality Gate      $gate_summary
-  Secrets set       SONAR_TOKEN, SONAR_HOST_URL
+  Secrets set       SONAR_TOKEN, SONAR_HOST_URL  (Actions + Dependabot scopes)
   Runner            $([[ -d "$RUNNER_DIR" ]] && echo "registered + running" || echo "not registered")
 
   Retrieve admin pw later:
