@@ -94,6 +94,21 @@ brew_install_if_missing() {
   brew install $cask_flag "$pkg"
 }
 
+# --- GitHub secrets ----------------------------------------------------------
+# Sets a secret in **both** the regular Actions scope AND the Dependabot scope.
+# Why both: Dependabot PRs run CI in a restricted security context where only
+# Dependabot secrets are visible — Actions secrets resolve to empty string.
+# A workflow that needs SONAR_TOKEN / SNYK_TOKEN / etc. will fail on every
+# Dependabot PR unless the same token is also stored in the Dependabot scope.
+# This helper keeps the two scopes in sync so each bootstrapped project works
+# for both regular contributor PRs and Dependabot PRs from day one.
+# Args: <secret name> <value>
+gh_secret_set_both() {
+  local name="$1" value="$2"
+  gh secret set "$name"                 -b "$value"
+  gh secret set "$name" --app dependabot -b "$value"
+}
+
 # --- Docker detection --------------------------------------------------------
 # Sets:
 #   _docker_kind   — desktop | cli-only | absent

@@ -128,10 +128,10 @@ else
   dim "  (Default 'Sonar way' gate is already assigned to new projects — no further action)"
 fi
 
-# --- Store SONAR_TOKEN as GitHub secret ---------------------------------------
-info "Storing SONAR_TOKEN as a GitHub Actions secret…"
-gh secret set SONAR_TOKEN -b "$SONAR_TOKEN"
-ok "SONAR_TOKEN set"
+# --- Store SONAR_TOKEN as GitHub secret (both scopes) -------------------------
+info "Storing SONAR_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
+gh_secret_set_both SONAR_TOKEN "$SONAR_TOKEN"
+ok "SONAR_TOKEN set (Actions + Dependabot)"
 
 # --- Snyk ---------------------------------------------------------------------
 echo
@@ -159,9 +159,9 @@ SNYK_TOKEN=$(snyk config get api 2>/dev/null || true)
 [[ -n "$SNYK_TOKEN" ]] || die "Could not read Snyk API token from local config"
 ok "Read Snyk token from local config"
 
-info "Storing SNYK_TOKEN as a GitHub Actions secret…"
-gh secret set SNYK_TOKEN -b "$SNYK_TOKEN"
-ok "SNYK_TOKEN set"
+info "Storing SNYK_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
+gh_secret_set_both SNYK_TOKEN "$SNYK_TOKEN"
+ok "SNYK_TOKEN set (Actions + Dependabot)"
 
 # Onboard for continuous monitoring
 if ask_yn "Run 'snyk monitor' now to enable continuous monitoring on snyk.io?"; then
@@ -236,7 +236,7 @@ cat <<EOF
 
   Project       $PROJECT_KEY
   Quality Gate  $gate_summary
-  Secrets set   SONAR_TOKEN, SNYK_TOKEN
+  Secrets set   SONAR_TOKEN, SNYK_TOKEN  (Actions + Dependabot scopes)
   Monitoring    $(snyk config get api >/dev/null 2>&1 && echo "Snyk authenticated" || echo "Snyk auth pending")
 
   Next: push a branch and open a PR — CI will run on the new workflows.

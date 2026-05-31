@@ -1,10 +1,15 @@
 {
   "name": "development",
   "description": "General development workflow skills for committing, branch naming, and other git operations.",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": {
     "name": "Timo Jakob"
   },
   "license": "MIT",
-  "keywords": ["git", "commit", "branch-naming", "workflow"]
+  "keywords": [
+    "git",
+    "commit",
+    "branch-naming",
+    "workflow"
+  ]
 }
