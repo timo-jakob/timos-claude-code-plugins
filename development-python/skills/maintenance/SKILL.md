@@ -14,14 +14,47 @@ tools yourself**, and as of the per-group PR architecture you also **do
 not spawn work agents** — that's the orchestrator's job (one PR per
 planner group, sequential through Phase 8 of `development:maintenance`).
 
-Your role is now narrower:
+Your role is now narrower, and it splits into **two distinct phases**
+the orchestrator invokes you for. You don't need to detect which
+phase: branch on the data in the payload.
+
+**Phase A — coverage improver (when needed):**
 
 1. Validate the payload.
-2. Run the coverage pre-flight, spawning `python-coverage-improver` in
-   a worktree when Step 2c branch 2 fires.
+2. Run the coverage pre-flight. If Step 2c branch 2 fires, spawn
+   `python-coverage-improver` in a worktree.
+3. **Return immediately** with `improver_result` (worktree branch +
+   path + summary) and **no `plan`**. Do NOT run the planner here.
+   The orchestrator will:
+     - push the improver's branch
+     - open a PR
+     - monitor CI, run `python-ci-fixer` up to 3 times if needed
+     - merge the PR
+     - sync local main
+     - re-invoke you for Phase B.
+
+**Phase B — planning (always, possibly after Phase A merged):**
+
+1. Validate the payload.
+2. Run the coverage pre-flight again. With Phase A's PR merged, all
+   affected modules should now be at or above Required (branch 1 of
+   Step 2c). If somehow not, that's an unexpected state — escalate
+   via `human_action_required`. Do NOT re-spawn the improver here.
 3. Run the planner (`python-maintenance-planner`).
-4. Return `plan` + the improver's worktree branch (when present) +
-   `missing_tooling` for unconfigured tools.
+4. Return `plan` + `missing_tooling`. No `improver_result` (that was
+   the previous invocation's responsibility).
+
+**Detecting which phase to run** is based on coverage state, not a
+flag. The orchestrator passes the same payload shape both times; what
+differs is that on the second invocation the project's tests are
+already at Required coverage thanks to the merged improver PR. Step
+2c naturally lands on branch 1 (proceed) instead of branch 2 (spawn
+improver), so the planner runs.
+
+If coverage was already above Required on the first invocation
+(branch 1 fired right away), you skip directly to the planner — there
+is no Phase A run at all. In that case Phase A and Phase B collapse
+into a single invocation that returns `plan` only.
 
 The orchestrator reads the plan and walks it group-by-group, opening
 one PR per group and only spawning the next group's agent after the
@@ -169,10 +202,20 @@ Three branches:
    `python-coverage-improver` (opus, worktree) with the list of
    under-covered modules + target threshold. **Wait for it to
    finish before doing anything else** — no planner, no other
-   agents. Re-check coverage from its result. Then proceed to the
-   Planning step below (passing the improver's branch as
-   `base_branch` so the planner ranks against the same code state
-   the work agents will edit), and then dispatch.
+   agents.
+
+   When it finishes: **return immediately** (this is Phase A — see
+   the intro). The response shape is `improver_result` only, no
+   `plan`. The orchestrator will run the improver's full PR cycle
+   (push → CI → fix loop → merge → sync local main), then re-invoke
+   you. On that second invocation, with the improver's tests merged
+   into main, coverage will be at Required and Step 2c naturally
+   lands on branch 1 — the planner runs.
+
+   This is the strict sequencing: improver runs locally → improver's
+   PR gets opened + reviewed by CI + merged → only THEN does the
+   planner see the post-merge code state. The planner therefore
+   ranks against actual `main`, not a worktree branch.
 
    The improver MUST spawn with `isolation="worktree"` so its new
    tests land on a fresh branch off `worktree.base_branch`, not
@@ -201,8 +244,25 @@ Three branches:
    )
    ```
 
-   The result's worktree branch is what subsequent steps (planner,
-   work agents) use as their effective `base_branch`.
+   Return shape from this Phase A invocation:
+
+   ```json
+   {
+     "schema_version": "1",
+     "improver_result": {
+       "worktree_branch": "<branch>",
+       "worktree_path":   "<absolute path>",
+       "summary": "<one-line>",
+       "modules_improved": [
+         { "file": "src/...", "before": 61.9, "after": 94.0 }
+       ]
+     },
+     "missing_tooling": []
+   }
+   ```
+
+   No `plan` field. The orchestrator detects "improver_result without
+   plan" and routes accordingly.
 3. **Any module in the affected set below Floor** → halt. Return:
    ```json
    {
@@ -257,28 +317,37 @@ blocks every other autonomous fix.
   snyk, sonar) run normally — none have findings, so they each return
   "0 findings, nothing to do."
 
-## Planning step (after coverage pre-flight AND any improver run, before dispatch)
+## Planning step (Phase B only)
 
 Spawn the **planner** to compute a prioritized, PR-grouped plan. This
 gives the user visibility into what maintenance will do (and in what
 order) before changes happen, and seeds the per-PR boundaries the
-auto-PR step (issue #54) will use.
+orchestrator uses to drive Phase 8.
 
-**Ordering — strict:**
+**Strict ordering across both phases:**
 
-1. Coverage pre-flight runs first (above).
-2. If Step 2c branch 2 fired, `python-coverage-improver` runs and
-   completes **before** this step starts. Coverage gaps come first
-   because the planner's ranking + the work agents' fixes both depend
-   on test coverage as their safety floor; running the planner against
-   stale coverage produces a stale plan.
-3. Only after the improver finishes (when applicable) does the planner
-   spawn here.
-4. Only after the planner returns does dispatch begin.
+1. **Phase A**: coverage pre-flight runs. If branch 2 fires, the
+   improver runs locally and the dispatcher returns immediately (no
+   planner here).
+2. **Orchestrator-side**: the improver's PR is opened, CI runs,
+   `python-ci-fixer` cleans up failures, the PR merges, local main
+   syncs.
+3. **Phase B (this section)**: orchestrator re-invokes the dispatcher.
+   Coverage pre-flight runs again; with the improver's tests now on
+   `main`, all affected modules clear Required (branch 1). Planner
+   runs here.
+4. Dispatcher returns the plan; orchestrator drives per-group PRs.
 
-When an improver ran, pass the improver's worktree branch as
-`worktree.base_branch` to the planner so its churn computation and the
-work agents' edits target the same code state. Otherwise pass the
+If the coverage pre-flight on the FIRST invocation already lands on
+branch 1 (improver wasn't needed at all), Phase A and Phase B collapse
+into a single invocation and the planner runs immediately. In that
+case the orchestrator only sees a `plan` response and goes straight
+to per-group PRs.
+
+The planner always runs against the original `worktree.base_branch`
+from the payload (e.g. `main`). It does not need to know whether
+Phase A ran — by the time it runs, any improver work has already
+been merged into main by the orchestrator. Pass the
 original `worktree.base_branch` from the input payload.
 
 ```
