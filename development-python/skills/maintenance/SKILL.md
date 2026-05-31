@@ -669,7 +669,17 @@ the worktree.
 ## Response
 
 After the planner finishes (and the improver, when it ran), assemble
-the response and return:
+the response and emit it as JSON in your output.
+
+**This is a mid-turn handoff, not a turn boundary.** The orchestrator
+SKILL — which is still loaded in your context above this one — uses
+this JSON as the input to its Phase 7 / Phase 8 work. Do NOT frame
+the emission as "Returning dispatcher response to the orchestrator:"
+or any similar "report and stop" pattern; that wording has caused
+runs to stall here historically. Emit the JSON, then **immediately
+continue with the orchestrator's Phase 7 (if `human_action_required`
+is set) or Phase 8 (per-stage PR cycle)** in the same assistant turn.
+Do not pause for user input.
 
 ```json
 {
