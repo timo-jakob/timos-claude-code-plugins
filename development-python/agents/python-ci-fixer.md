@@ -135,6 +135,18 @@ unless its log clearly points to a file in the PR's diff (i.e. the
 sonar agent's edits inadvertently broke snyk-code's analysis on a
 file).
 
+**Note on Snyk check naming.** With the Snyk GitHub integration
+enabled (default for bootstrap >=1.2.3), Snyk PR checks consolidate
+under a single status check named **`security/snyk`** instead of the
+per-product names (`snyk-code`, `snyk-open-source`) that the older
+CI-job-style scans used. The same-tool rule still applies via
+substring match: `pr_scope.tool` of `"snyk_oss"` or `"snyk_code"`
+matches `security/snyk` because both contain "snyk". When you see
+`security/snyk` failing on a non-snyk-scoped PR (e.g. a sonar PR
+introduced a vulnerable dep), classify it as cross-tool damage in
+scope per the existing rule — investigate, fix, and let the
+integration re-check.
+
 ### 3.4. Special case — Python runtime-upgrade PRs
 
 If `pr_scope.tool == "python-runtime-upgrade"`, the PR is bumping the

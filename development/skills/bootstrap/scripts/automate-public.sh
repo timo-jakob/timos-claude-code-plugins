@@ -163,20 +163,104 @@ info "Storing SNYK_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
 gh_secret_set_both SNYK_TOKEN "$SNYK_TOKEN"
 ok "SNYK_TOKEN set (Actions + Dependabot)"
 
-# Register the project with snyk.io for continuous monitoring (unconditional).
-# Without this, the project never appears on app.snyk.io/projects even though
-# CI scans against SNYK_TOKEN work fine — `snyk monitor` is what creates the
-# dashboard entry that enables alerts on newly-disclosed CVEs in installed
-# deps, recurring scans, and the org-level vuln inventory. Used to be opt-in;
-# now unconditional because "register the project" is a baseline part of
-# bootstrapping a public repo's security toolchain.
-info "Registering project on snyk.io (snyk monitor --all-projects)…"
-# Best-effort — `snyk monitor` exits non-zero when findings exist, which is
-# the expected case on a real codebase. We continue regardless and let the
-# Snyk dashboard surface what was found.
-snyk monitor --all-projects || \
-  warn "snyk monitor reported a non-zero status (typically: findings detected — check the project page on snyk.io)"
-ok "Project registered with snyk.io"
+# --- Register the project with Snyk via the GitHub integration ----------------
+# Why not `snyk monitor --all-projects`? Because CLI-registered Snyk projects
+# always count as PRIVATE tests against the org's monthly quota — Snyk has no
+# way to discover the underlying GitHub repo from a local `pip install` graph,
+# so it categorizes them as private regardless of GitHub repo visibility. For
+# public repos with a GitHub integration, the GitHub-typed project gets
+# UNLIMITED testing AND continuous re-scanning on every commit AND PR-level
+# status checks AND auto-fix PRs — all things CLI monitoring can't do.
+#
+# Flow:
+#   1. Discover the user's Snyk org from their CLI config.
+#   2. Check whether the org has an active GitHub integration.
+#   3. If yes → POST to the integration's import endpoint with this repo.
+#   4. If no → open the Snyk integrations page in the browser, ask the user
+#      to set up the integration, then re-check. Up to 3 tries; halt the
+#      bootstrap on the third failure (don't fall back to broken CLI
+#      registration — that's the trap we're trying to climb out of).
+
+# Small helper: hit the Snyk REST API with the user's token.
+SNYK_API='https://api.snyk.io/v1'
+snyk_api() {
+  local method="$1" path="$2"; shift 2
+  curl -sS -X "$method" \
+    -H "Authorization: token $SNYK_TOKEN" \
+    -H "Content-Type: application/json" \
+    -w '\nHTTP_STATUS=%{http_code}\n' \
+    "$SNYK_API$path" "$@"
+}
+
+# Discover the org (prefer the user's CLI default, else the first org listed).
+SNYK_ORG_SLUG=$(snyk config get org 2>/dev/null | tr -d '[:space:]' || true)
+if [[ -z "$SNYK_ORG_SLUG" ]]; then
+  SNYK_ORG_SLUG=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d' | jq -r '.orgs[0].slug // empty')
+fi
+[[ -n "$SNYK_ORG_SLUG" ]] || die "Could not discover Snyk org (check 'snyk config get org' or your token's org assignments)"
+
+orgs_resp=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d')
+SNYK_ORG_ID=$(printf '%s' "$orgs_resp" | jq -r --arg s "$SNYK_ORG_SLUG" '.orgs[] | select(.slug == $s) | .id // empty' | head -1)
+[[ -n "$SNYK_ORG_ID" ]] || die "Could not resolve Snyk org ID for slug '$SNYK_ORG_SLUG'"
+ok "Snyk org: $SNYK_ORG_SLUG (id=$SNYK_ORG_ID)"
+
+# Detect the GitHub integration on this org.
+detect_github_integration() {
+  local resp
+  resp=$(snyk_api GET "/org/$SNYK_ORG_ID/integrations" | sed '/^HTTP_STATUS=/d')
+  printf '%s' "$resp" | jq -r '.github // empty'
+}
+
+GH_INT_ID=$(detect_github_integration)
+attempt=1
+while [[ -z "$GH_INT_ID" && $attempt -le 3 ]]; do
+  warn "Snyk's GitHub integration isn't connected for org '$SNYK_ORG_SLUG' (attempt $attempt of 3)."
+  info "Opening Snyk's integrations page. In the browser:"
+  info "  1. Find the GitHub integration."
+  info "  2. Click 'Connect' (or 'Add integration → GitHub')."
+  info "  3. Complete the OAuth flow."
+  info "  4. Come back here and confirm."
+  echo
+  open "https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations" 2>/dev/null \
+    || warn "Could not auto-open the browser. Visit: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
+  echo
+  ask_yn "Done setting up the GitHub integration?" || true
+  GH_INT_ID=$(detect_github_integration)
+  attempt=$((attempt + 1))
+done
+[[ -n "$GH_INT_ID" ]] || die "Snyk GitHub integration still missing after 3 attempts. Set it up manually at https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations and re-run /development:bootstrap."
+ok "Snyk GitHub integration: $GH_INT_ID"
+
+# Import this repo via the integration. Snyk runs the actual scan
+# asynchronously and creates Open Source + Code (and Dockerfile if detected)
+# projects under the GitHub-typed target. Public repos: unlimited testing.
+gh_repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+gh_owner=${gh_repo%%/*}
+gh_name=${gh_repo##*/}
+gh_branch=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+
+info "Importing $gh_repo into Snyk via the GitHub integration…"
+import_body=$(jq -n \
+  --arg owner  "$gh_owner" \
+  --arg name   "$gh_name" \
+  --arg branch "$gh_branch" \
+  '{ target: { owner: $owner, name: $name, branch: $branch } }')
+
+import_resp=$(snyk_api POST "/org/$SNYK_ORG_ID/integrations/$GH_INT_ID/import" --data "$import_body")
+import_status=$(printf '%s' "$import_resp" | sed -n 's/^HTTP_STATUS=//p')
+case "$import_status" in
+  201|202)
+    ok "Import job accepted by Snyk (HTTP $import_status). The project appears at app.snyk.io within ~1 minute."
+    ;;
+  409)
+    ok "Project was already imported (HTTP 409). Snyk will continue monitoring it."
+    ;;
+  *)
+    warn "Unexpected response from Snyk import (HTTP $import_status). Response body:"
+    printf '%s\n' "$import_resp" | sed '/^HTTP_STATUS=/d' | head -10
+    warn "The integration is set up; you can import manually via 'Import GitHub Projects' on the Snyk integrations page."
+    ;;
+esac
 
 # --- GitHub Security & Quality features --------------------------------------
 # All four are free on public repos. Each `gh api` call is idempotent — running
