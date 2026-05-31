@@ -361,14 +361,50 @@ After pushing and opening the PR:
    piping is awkward — adapt as needed for the shell. The intent is
    the set diff, not the exact incantation.)
 
-   - **All failures pre-existing** → log the names ("pre-existing on
-     `<base_branch>`: `<list>`"), treat the checks as a noop for merge
+   **Per-tool override (conservative).** Before treating any check as
+   pre-existing, **promote any check that matches THIS PR's own tool
+   back into the "investigate" bucket**. The PR's tool is
+   `plan[i].tool` for the current group (or `coverage` for the
+   improver Stage 0 PR). A same-tool failure on the PR is never
+   trusted as "pre-existing" because the work agent was responsible
+   for resolving findings from this tool — the failure may mean either:
+
+   - the agent's fix didn't actually land (incomplete commit, bad
+     patch), or
+   - other groups of the same tool are still surfacing on this PR
+     (out of scope for the group, but indistinguishable at this
+     coarse-grained level).
+
+   In both cases the right move is to investigate, not silently merge.
+   `python-ci-fixer` will dig into the log and either fix the failure
+   or escalate when the cause is purely other-groups' findings.
+
+   Tool → check-name correspondence is judgment-based; use substring
+   match on the tool key (case-insensitive). Examples:
+
+   - PR is a sonar group → `plan[i].tool == "sonarcloud"`. A failing
+     `sonarcloud` (or `sonar-quality-gate`, etc.) check is this PR's
+     own tool — keep in the new-failures bucket. A failing `image`
+     (Snyk container) check is a different tool — eligible for
+     pre-existing-skip.
+   - PR is a snyk_oss group → `plan[i].tool == "snyk_oss"`. A failing
+     `snyk-open-source` check is this PR's own tool. A failing
+     `snyk-code` check is a different tool — eligible for skip.
+   - Stage 0 (coverage improver) → treat the project's coverage gate
+     check (typically Sonar's QG "new code coverage") as the PR's
+     own tool; everything else is eligible for skip.
+
+   After applying this override:
+
+   - **All remaining (non-same-tool) failures pre-existing** AND **no
+     same-tool failures** → log the pre-existing names ("pre-existing
+     on `<base_branch>`: `<list>`"), treat them as a noop for merge
      gating, proceed to step 5 (merge). Record in the run summary so
-     the user knows these failures still need attention on main.
-   - **At least one new failure** → spawn `python-ci-fixer` for the
-     new ones (pass `failing_checks: <list of new failure names>` in
-     its prompt). Leave the pre-existing failures out of its scope —
-     they're not its responsibility.
+     the user knows they're still red.
+   - **At least one same-tool failure** OR **at least one new
+     non-same-tool failure** → spawn `python-ci-fixer` for that
+     combined set (pass `failing_checks: <list>` in its prompt).
+     Leave the truly-pre-existing failures out of its scope.
 
 4. **Repeat up to 3 fixer invocations on the new failures**. After
    each fixer commit, re-monitor and re-classify (a new failure might
