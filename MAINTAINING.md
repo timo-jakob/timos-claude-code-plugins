@@ -1,5 +1,44 @@
 # Maintaining this plugin repo
 
+Two unrelated upkeep tasks live here: **per-merge plugin version bumps**
+(critical, every PR that changes plugin content) and a **quarterly template
+refresh** (slower-paced, the original purpose of this doc).
+
+## Per-merge: bump plugin versions whenever you change a plugin
+
+**Every PR that modifies content under `<plugin>/`** (a SKILL.md, an agent
+file, a script, anything Claude Code loads at plugin install time) must
+bump that plugin's `version` field in **both**:
+
+- `<plugin>/.claude-plugin/plugin.json`
+- `.claude-plugin/marketplace.json` (the entry for that plugin)
+
+SemVer-ish:
+
+- **Patch** (`1.1.0 → 1.1.1`) — bug fix in an existing SKILL, agent, or
+  script. No new capability.
+- **Minor** (`1.1.0 → 1.2.0`) — new agent, new skill, new script, or a
+  meaningful behavior change in an existing one.
+- **Major** (`1.x → 2.0.0`) — breaking change to a plugin's external
+  contract (input schema, response shape, expected file layout).
+
+**Why this matters.** Claude Code caches plugins by version in
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`. If you ship a
+change without bumping the version, end users (including you on subsequent
+test runs) keep loading the stale cached copy — even after `update`. Bugs
+"come back from the dead" and fixes appear inert. We've been bitten by this.
+
+The change is one line per file. Make the version bump part of the same
+commit as the content change, never a follow-up — that way the cache
+boundary lines up with the content boundary.
+
+Plugins that didn't change in a given PR keep their existing version
+(don't blanket-bump everything).
+
+---
+
+## Quarterly: refresh pinned versions inside `bootstrap` templates
+
 The bootstrap skill generates projects from pinned templates — GitHub Actions
 versions, pre-commit hook revs, Docker image tags, brew formulas, language
 runtime versions. **Dependabot can't update these because they live in
