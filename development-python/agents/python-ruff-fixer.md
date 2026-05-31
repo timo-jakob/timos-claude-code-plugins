@@ -60,6 +60,21 @@ Stop here — do not invoke ruff, do not touch any files.
    (`git checkout -- .` then re-apply only the safe fixes from phase 1)
    and report which unsafe fix caused the failure (if attributable).
 
+9. **Commit your work before returning** (only when you made
+   changes). If `git status --porcelain` is empty, skip this step.
+   Otherwise:
+
+   ```bash
+   git add -A
+   git commit -m "<commit_subject>"
+   ```
+
+   `commit_subject` is in your prompt (the planner's
+   `suggested_pr_title` for this group). If absent, compose one like
+   `fix(ruff): apply <N> auto-fixes (<top rule codes>)`. Pre-commit
+   hooks must pass. **Never use `--no-verify`.** Do NOT push — the
+   orchestrator pushes your branch after you return.
+
 ## Output (when `configured == true`)
 
 Return JSON only:

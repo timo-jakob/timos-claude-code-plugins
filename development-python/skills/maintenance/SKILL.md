@@ -191,9 +191,12 @@ Three branches:
          ...
        ]
        worktree.base_branch: <worktree.base_branch>
+       commit_subject: "test(coverage): raise coverage on <comma-separated module names>"
 
        Add meaningful behavior tests; do NOT modify production code.
        Run pytest in the worktree; only return success if tests pass.
+       Commit your changes on the worktree branch before returning —
+       the orchestrator will push the branch as-is.
      """
    )
    ```

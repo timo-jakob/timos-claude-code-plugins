@@ -92,6 +92,21 @@ Your prompt contains:
     - `pytest --tb=short`
     - All tests must pass.
 
+12. **Commit your work before returning** (only when you actually
+    added tests). If `git status --porcelain` is empty, skip this
+    step. Otherwise:
+
+    ```bash
+    git add -A
+    git commit -m "<commit_subject>"
+    ```
+
+    `commit_subject` is in your prompt (the orchestrator passes it
+    from the dispatcher's improver-spawn block). If absent, compose
+    one like `test(coverage): raise coverage on <module(s)>`.
+    Pre-commit hooks must pass. **Never use `--no-verify`.** Do NOT
+    push — the orchestrator pushes your branch after you return.
+
 ## Output
 
 ```json

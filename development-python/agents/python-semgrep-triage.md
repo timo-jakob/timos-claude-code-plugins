@@ -126,6 +126,21 @@ not the first.
      (`git checkout -- <file>`) and mark it human-review with the
      test output.
 
+7. **Commit your work before returning** (only when you made
+   changes). If `git status --porcelain` is empty, skip this step.
+   Otherwise:
+
+   ```bash
+   git add -A
+   git commit -m "<commit_subject>"
+   ```
+
+   `commit_subject` is in your prompt (the planner's
+   `suggested_pr_title` for this group). If absent, compose one like
+   `fix(semgrep): <short description of group's outcome>`.
+   Pre-commit hooks must pass. **Never use `--no-verify`.** Do NOT
+   push — the orchestrator pushes your branch after you return.
+
 ## Output (when `configured == true`)
 
 ```json
