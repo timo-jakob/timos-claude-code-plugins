@@ -216,6 +216,19 @@ Commit even when local verification failed — the file edits themselves
 are correct; the verification result is reported separately. Pre-commit
 hooks must pass. **Never use `--no-verify`.** Do NOT push.
 
+**Do NOT create a new branch or rename the worktree's branch.** The
+Claude Code runtime allocated this worktree on a branch with a name
+like `worktree-agent-<id>`. That ugly name is what the orchestrator
+will push and PR against — it has the branch reference cached from
+the moment it spawned you. If you `git checkout -b chore/whatever`,
+or `git branch -m`, the orchestrator can't find the commits you made
+and ends up creating an ad-hoc branch from your changes after the
+fact. The PR title comes from `commit_subject` / `suggested_pr_title`,
+not from the branch name — branch readability is a non-goal here.
+
+Stay on whatever branch `git rev-parse --abbrev-ref HEAD` reports
+when you enter the worktree. Commit on it. Return it.
+
 ### 7. Return the verdict
 
 If install + tests passed (or verification was skipped):
@@ -321,3 +334,9 @@ issues, or close the bump.
 - Push to remote, open a PR, or modify the parent PR's metadata.
 - Use `--no-verify` on the commit.
 - Spawn other agents.
+- **Create a new branch (`git checkout -b ...`) or rename the
+  worktree's branch (`git branch -m ...`).** See the closing
+  paragraphs of step 6. The orchestrator already has a reference to
+  the branch the runtime allocated for you; if you switch to a
+  different ref it loses track of your commits and has to do ad-hoc
+  recovery. Use whatever branch the worktree came on.
