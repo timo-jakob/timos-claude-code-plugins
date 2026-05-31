@@ -143,6 +143,47 @@ Also check for explicit version mentions in `mise.toml`, `.python-version`,
 `tool.poetry.dependencies.python`, `setup.cfg`'s `python_requires`,
 or CI workflow `python-version` matrices — update them coherently.
 
+**Additional version pins to update coherently.** These aren't
+`requires-python`-shaped fields, but they pin the Python version for
+specific tools and drift out of sync if you only touch the canonical
+ones. Check each, update to `<to_version>` if currently set to
+`<from_version>`:
+
+- **`sonar-project.properties`'s `sonar.python.version`** — the
+  SonarCloud / SonarQube analyzer reads this to pick the right
+  version-aware rules. If absent, Sonar warns *"Your code is analyzed
+  as compatible with all Python 3 versions by default..."* and runs a
+  lowest-common-denominator pass. If the project has the line set,
+  bump it. If the line is missing AND the warning is something the
+  project owner wants gone, add it (set to `<to_version>`); otherwise
+  leave the file alone.
+- **`ruff.toml`'s `target-version`** (or `[tool.ruff] target-version`
+  in `pyproject.toml`) — controls which Python syntax ruff considers
+  valid for lint + format. Bump to match the new runtime.
+  ⚠️ **Special-case for py314 (as of ruff 0.15.x)**: ruff format with
+  `target-version = "py314"` has a known bug that rewrites valid
+  `except (A, B, C):` into invalid `except A, B, C:` syntax. See
+  ai-doc-organizer#38 / timos-claude-code-plugins#81. If your
+  `to_version` is `3.14` and ruff is < the version that fixes
+  astral-sh/ruff#TBD, **leave `target-version` at the previous value**
+  and note the deferral in your escalation report's
+  `code_adaptations` section as a follow-up.
+- **`mypy.ini`'s `python_version`** (or `[tool.mypy] python_version`
+  in `pyproject.toml`) — similar to Sonar's setting; tells mypy
+  which version's typeshed and feature set to assume.
+
+Always grep before assuming a file exists:
+
+```bash
+grep -nE "sonar\.python\.version|target-version|python_version" \
+  sonar-project.properties pyproject.toml ruff.toml mypy.ini setup.cfg \
+  2>/dev/null
+```
+
+Add any matches to the bump set; record each in your eventual
+`actions_taken` PR description (Runtime bump section) so the human
+reviewer sees the full sweep.
+
 ### 5. Local verification + dep cascade (up to 3 passes)
 
 **Branch on `local_verification_mode`:**
