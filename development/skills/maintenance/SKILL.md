@@ -97,6 +97,86 @@ their plugins are not built yet — only <Z> findings were processed").
 
 ## Phase 3 — gather findings per supported language
 
+### State pre-flight (per supported language)
+
+Before invoking each language's gather script, run that language's
+state-verification helper to make sure the gather will produce
+trustworthy results. The helper's job is to surface stale or
+inconsistent local state (a venv built against the wrong interpreter,
+a deleted Bundler cache, a missing Go toolchain, etc.) and recover
+where it can autonomously.
+
+Naming convention mirrors the gather scripts: per detected language
+`lang`, look for and invoke:
+
+```bash
+"<skill-base-dir>/scripts/verify-<lang>-state.sh" "$(pwd)"
+```
+
+If the script doesn't exist for a language, skip — that plugin
+hasn't published a state-verification helper yet, and the gather
+script's own internal notes path will handle whatever state issues
+surface. Don't fail the run on a missing helper.
+
+#### Verify-state script contract (all languages)
+
+The script's exit code drives the orchestrator's next move. Don't
+parse stdout/stderr to guess intent; trust the exit code.
+
+| Exit code | Meaning | What you do |
+|---|---|---|
+| `0`, no stdout | State is fine, no action needed | Proceed to the gather script |
+| `0`, stdout is JSON `{"recovered": true, ...}` | State was rebuilt successfully (e.g., venv recreated, deps reinstalled) | Proceed to the gather script. Include the JSON in the run summary so the user knows their local env changed. |
+| `1`, message on stderr | User must intervene; cannot recover autonomously (typically: a tool isn't installed) | **Halt the run.** Forward the stderr message to the user verbatim. |
+| `2`, stdout JSON `{"recreate_failed": true, ...}` (or other "tried, failed" shapes) | Recovery attempt failed mid-flight; user needs to choose | Invoke the **R.4 fallback** below: surface the JSON details via `AskUserQuestion` and act on the choice. |
+
+Anything else (non-zero with no JSON, etc.) → halt and forward stderr.
+Treat unknown failure modes as user-intervention paths rather than
+silently continuing on broken state.
+
+#### R.4 — fallback when the state script exits 2
+
+The recovery attempt found a problem it couldn't auto-fix (typically:
+a dep cascade exhausted before the venv would install). The state
+script's JSON payload identifies the blockers; surface them via
+`AskUserQuestion` with three options that work for any language's
+state model:
+
+```
+Question: "Local <lang> state can't be reconciled with main's declared
+           configuration:
+             - <blocker 1 from script JSON>
+             - <blocker 2>
+           Main is already at the new configuration. What now?"
+
+Options:
+  1. "Fall back to the previous configuration locally"
+        — invoke the same verify-<lang>-state.sh with a
+          --target-<something>=<old_value> flag so the script rebuilds
+          state matching what main USED to look like. Specifics per
+          language (Python: --target-py=<old_version>). Subsequent
+          Phase 8 stages SKIP the pre-flight for the rest of this run
+          (in-memory flag; resets next /development:maintenance call).
+        — record in the summary: "Local <lang> state reverted to
+          previous config; main is at the new config pending the
+          blocker resolution."
+
+  2. "Open a GitHub issue capturing the blockers, then halt"
+        — orchestrator drafts an issue body from the script's JSON
+          blockers, posts via `gh issue create`. Halt the run.
+
+  3. "Halt — I'll handle it manually"
+        — no further action. Run ends with the script's report in the
+          summary.
+```
+
+This fallback shape is language-agnostic. The script JSON tells the
+orchestrator what to put in the question; the option-1 fallback
+command is `verify-<lang>-state.sh --target-...` with a flag the
+language plugin defined.
+
+### Run the gather script
+
 For each `lang` in `supported`:
 
 ```bash
@@ -637,6 +717,32 @@ After pushing and opening the PR:
    git -C "<repo.path>" switch "<base_branch>"
    git -C "<repo.path>" pull --ff-only origin "<base_branch>"
    ```
+
+7. **Re-run the state pre-flight from Phase 3.** A merge — especially
+   of a runtime-version-bumping PR — can change the project's
+   declared configuration, leaving local state (venv, toolchain cache,
+   etc.) inconsistent. Without this re-check, subsequent stages'
+   agents run their verification against state that no longer matches
+   what's on `main`, producing false-positive errors and missed
+   regressions (the live test on ai-doc-organizer's Stage 7 surfaced
+   exactly this for the Python venv case after a 3.13 → 3.14 merge).
+
+   Invoke the same per-language helper from Phase 3:
+
+   ```bash
+   "<skill-base-dir>/scripts/verify-<lang>-state.sh" "$(pwd)"
+   ```
+
+   Handle the exit code per Phase 3's script-contract table. The R.4
+   fallback applies here too — the script's exit-2 JSON drives the
+   `AskUserQuestion` shape.
+
+   **In-memory skip flag.** If R.4's option 1 ("fall back to previous
+   configuration locally") was chosen earlier in this run, set a
+   run-scoped flag and SKIP this step on every subsequent stage. The
+   user has explicitly accepted the mismatch; re-asking on every stage
+   would be noisy. The flag is in-memory only; the next
+   `/development:maintenance` invocation re-evaluates from scratch.
 
 ### Agents commit before returning
 
