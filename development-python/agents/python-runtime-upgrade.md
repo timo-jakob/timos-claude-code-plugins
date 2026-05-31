@@ -55,6 +55,15 @@ Your prompt contains:
   don't depend on it)
 - `worktree.base_branch` — the branch your worktree is off
 - `commit_subject` — passed from the planner's `suggested_pr_title`
+- `local_verification_mode` — `"auto"` or `"skip"`. **The orchestrator
+  has already pre-flighted the target interpreter's availability and
+  made the decision** (it can prompt the user interactively; you
+  can't, since subagents return JSON, not questions). Honor the value:
+  - `"auto"` → the interpreter is available; run step 5's cascade.
+  - `"skip"` → the user chose to skip local verification; do NOT
+    attempt interpreter discovery, do NOT run the cascade. Just edit
+    the Dockerfile + `requires-python`, commit, return with
+    `local_verification: skipped`. CI verifies for real.
 
 ## Procedure
 
@@ -106,14 +115,19 @@ or CI workflow `python-version` matrices — update them coherently.
 
 ### 5. Local verification + dep cascade (up to 3 passes)
 
-Try to install the project against the new interpreter. If the target
-interpreter isn't on this machine, skip the local verification entirely
-— **don't install Python locally**, and don't escalate just because
-you couldn't verify locally. CI will run on the actual
-`<to_version>` Docker image.
+**Branch on `local_verification_mode`:**
+
+- `"skip"` → proceed directly to step 6 (commit). Do NOT attempt
+  interpreter discovery and do NOT run the cascade. The orchestrator
+  already negotiated this with the user; respect their choice.
+- `"auto"` → run the cascade below. The orchestrator already confirmed
+  `python<to_version>` is available, so interpreter discovery should
+  succeed. If it nevertheless doesn't (race condition, PATH oddity),
+  treat as a hard error and surface in the escalation block — do not
+  silently downgrade to skip.
 
 ```bash
-# Interpreter discovery in this order:
+# Interpreter discovery — must succeed in "auto" mode.
 for py in python<to_version> /opt/homebrew/bin/python<to_version> \
           $(uv python find <to_version> 2>/dev/null); do
   if [ -x "$py" ]; then
@@ -123,9 +137,9 @@ for py in python<to_version> /opt/homebrew/bin/python<to_version> \
 done
 
 if [ -z "$PY" ]; then
-  echo "python<to_version> not available locally — skipping local verify."
-  # Set local_verification: skipped in output, proceed to commit.
-  # The file edits (FROM + requires-python) are still correct; CI verifies.
+  echo "ERROR: local_verification_mode=auto but python<to_version> not found."
+  echo "This indicates an orchestrator pre-flight mismatch. Escalate."
+  # Fall through to escalation path in step 7 with phase: "interpreter_discovery"
 fi
 ```
 
@@ -301,10 +315,9 @@ issues, or close the bump.
   reads your escalation report and decides whether to wait or close
   the Dependabot PR.
 - Install Python locally (no `brew install python@X.Y`, no `uv python
-  install X.Y`). If the interpreter isn't there, set
-  `local_verification: skipped` and let CI do the real verification.
-  An unavailable interpreter is NOT an escalation case — the file
-  edits are still correct.
+  install X.Y`). The orchestrator handled this decision with the user
+  before spawning you — it set `local_verification_mode` accordingly.
+  Honor that mode; don't second-guess it.
 - Push to remote, open a PR, or modify the parent PR's metadata.
 - Use `--no-verify` on the commit.
 - Spawn other agents.

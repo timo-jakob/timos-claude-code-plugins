@@ -318,6 +318,63 @@ For each entry in `response.plan`, in priority order:
    `isolation` (it acts on GitHub PRs via `gh`, not local files).
    See the dispatcher SKILL for the full case list.
 
+   **Pre-flight for `python-runtime-upgrade` groups.** Before spawning
+   this agent, you must check whether the target Python interpreter is
+   available locally — the agent's cascade depends on it, and subagents
+   can't prompt the user interactively, so this decision must happen
+   here in the orchestrator.
+
+   Extract `<to_version>` from the plan entry (e.g. `3.14` from a
+   `python:3.14-slim-bookworm` PR), then check:
+
+   ```bash
+   # Check in order: PATH, Homebrew prefix, uv-managed interpreters
+   HAS_PY=""
+   for cmd in "python<to_version>" "/opt/homebrew/bin/python<to_version>"; do
+     if [ -x "$(command -v "$cmd" 2>/dev/null)" ] || [ -x "$cmd" ]; then
+       HAS_PY="$cmd"; break
+     fi
+   done
+   if [ -z "$HAS_PY" ] && command -v uv >/dev/null 2>&1; then
+     if uv python find "<to_version>" >/dev/null 2>&1; then
+       HAS_PY="uv-managed"
+     fi
+   fi
+   ```
+
+   If `HAS_PY` is set → spawn the agent with `local_verification_mode:
+   "auto"` and proceed normally (the agent runs the 3-pass cascade).
+
+   If `HAS_PY` is empty → **ask the user** via `AskUserQuestion` with
+   exactly these options (label them clearly so the choice is obvious):
+
+   - **"Install via uv now"** (only when `uv` is on PATH; preferred when
+     available — fast, no sudo, no system mutation)
+   - **"Install via Homebrew now"** (only when `brew` is on PATH and uv
+     isn't preferred for this project)
+   - **"I'll install it myself"** — orchestrator pauses, prints the
+     exact command(s) (`uv python install <to_version>` or
+     `brew install python@<to_version>`), then asks a follow-up
+     `AskUserQuestion` "Ready to continue?" with options
+     ["Yes, re-check", "Cancel — skip local verify"]. On "Yes, re-check",
+     re-run the detection block above; if still missing, loop with one
+     more confirmation, then fall through to skip.
+   - **"Skip local verification"** — spawn the agent with
+     `local_verification_mode: "skip"`. The agent will only edit + commit
+     the Dockerfile + `requires-python` and won't attempt the cascade.
+     CI does the real verification.
+
+   On the auto-install choices, run the command, re-check that
+   `python<to_version>` is now resolvable, and only then spawn the
+   agent. If the install fails, surface the install error and re-ask
+   the user (don't silently fall back to skip).
+
+   The agent's prompt gains one extra field:
+
+   ```
+   local_verification_mode: "auto" | "skip"
+   ```
+
 3. **Wait for the agent** → receive **both** the worktree branch and
    the worktree path. The Claude Code runtime returns both alongside
    the agent's response because you passed `isolation`. **Capture
