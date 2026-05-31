@@ -138,55 +138,23 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
 
-  # --- Snyk: source code ----------------------------------------------------
-  snyk-code:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Snyk Code (SAST)
-        uses: snyk/actions/setup@v1.0.0
-      - run: snyk code test --severity-threshold=high
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-  # --- Snyk: open-source dependencies ---------------------------------------
-  # Snyk needs deps installed to enumerate them accurately. Per-language
-  # install steps below match what test-and-coverage does, then `snyk test
-  # --all-projects` runs against the populated environment.
-  snyk-open-source:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: snyk/actions/setup@v1.0.0
-
-      # --- TYPESCRIPT-START ------------------------------------------------
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: "npm"
-      - run: npm ci
-      # --- TYPESCRIPT-END --------------------------------------------------
-
-      # --- PYTHON-START ----------------------------------------------------
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "{{PYTHON_VERSION}}"
-          cache: "pip"
-      - run: |
-          [[ -f requirements.txt ]] && pip install -r requirements.txt
-          pip install -e ".[dev]"
-      # --- PYTHON-END ------------------------------------------------------
-
-      # --- GO-START --------------------------------------------------------
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "stable"
-      - run: go mod download
-      # --- GO-END ----------------------------------------------------------
-
-      - run: snyk test --severity-threshold=high --all-projects
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+  # --- Snyk source-code + open-source scans -----------------------------------
+  # NOT a CI job. These checks come from the **Snyk GitHub integration**:
+  #
+  #   Snyk → Org Settings → GitHub → Pull request status checks
+  #     Open Source security and licenses → Enable
+  #     Code analysis                     → Enable
+  #
+  # Once enabled, every PR gets a `security/snyk` GitHub status check that
+  # runs Open Source + Code analysis, posts inline comments, and (with a PAT
+  # configured) opens auto-fix PRs for upgradeable dependencies.
+  #
+  # Running these as CI jobs against SNYK_TOKEN is REDUNDANT with the
+  # integration's PR checks and counts twice against your monthly test
+  # quota. The bootstrap (`automate-public.sh`) imports the project via the
+  # integration so the PR checks fire from day one. The `image` job below
+  # stays as a CI job because the integration only scans the Dockerfile
+  # statically — it doesn't build the image and inspect installed packages.
 
   # --- License compliance (dependencies) ------------------------------------
   # Uses Trivy as an open-source license scanner. Catches deps shipping
