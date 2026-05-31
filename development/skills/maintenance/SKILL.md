@@ -190,6 +190,24 @@ Skill(
 )
 ```
 
+**Pass the payload as-is.** Do NOT trim, summarize, drop fields, or
+restructure entries from `findings_by_tool` (including verbose
+`dependabot[].body` blobs) before dispatching. Even when a body looks
+like dead weight to you, downstream agents may consume it:
+
+- `python-dependabot-triage` parses Dependabot PR bodies for
+  grouped-PR member lists, release-note breaking-change flags, and
+  Dependabot compatibility scores.
+- `python-major-upgrade` extracts the release-notes URL hint from the
+  body for its WebFetch step.
+- A future runtime-upgrade agent inspects the body to distinguish a
+  Python interpreter bump from a generic Docker base-image bump.
+
+A 200–300 KB payload is fine for the Skill tool; payload size is not
+a concern at this scale. If you ever see a payload approaching the
+multi-MB range, surface it as a quality bug on the gather script
+rather than trimming silently.
+
 The language plugin will:
 
 - Validate the payload
