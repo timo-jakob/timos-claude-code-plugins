@@ -792,6 +792,41 @@ final summary so the user can merge manually.
 
 ## Phase 9 — present the summary
 
+### Before rendering — cross-link known issues
+
+Before emitting any advisory / TODO / "investigate this" line in the
+run notes, check whether the project already has an open issue
+tracking it. List the repo's open issues:
+
+```bash
+gh issue list --state open --limit 50 --json number,title,labels
+```
+
+For each advisory you're about to emit, scan the titles for an
+obvious topical match (keywords from the advisory's subject — tool
+name, bug type, version pin, etc.). If you find one, append
+`(see #<n>)` to the advisory line so the user isn't pointed at
+investigation work that's already filed.
+
+Examples of the kind of match worth surfacing:
+
+- An advisory about a ruff py314 bug → matches an issue titled
+  "Re-enable ruff format once upstream py314 except-tuple bug is
+  fixed" → emit `(see #38)`.
+- An advisory about a Snyk container CVE → matches an issue titled
+  "Suppress Debian base-image CVEs in .snyk" → emit `(see #N)`.
+
+Be conservative — only cross-link when the topical match is
+unambiguous. A wrong `(see #N)` is worse than no link. If you're
+unsure, omit the link.
+
+The same applies for the **plugin repo's** issues
+(`timo-jakob/timos-claude-code-plugins`) when the advisory is about
+the maintenance pipeline itself (e.g., a recurring scrape failure,
+a known agent quirk) — use `gh issue list --repo <plugin-repo>`.
+
+### Render
+
 Render a user-facing summary. Each language's results are reported in
 its own block so it's clear which plugin produced what.
 
@@ -841,7 +876,40 @@ Languages processed: <comma-separated list from supported>
 ℹ Pre-existing CI failures observed on <base_branch> (not maintenance's
   scope — flagging so you know they're still red):
   - <check_name>: failing on <base_branch> and on PR #<pr> — merged anyway
+    <if you can identify the channel, name it explicitly (see Snyk
+    channels guidance below); otherwise just report the check name>
   - ...
+
+**Snyk-specific guidance — naming the channel correctly.** Snyk surfaces
+findings through *three* independent channels, and run-note prose has
+historically confused them. Get this right:
+
+| Check / job name shape | Channel | Status |
+|---|---|---|
+| `security/snyk (<org>)`, `code/snyk (<org>)`, `open-source/snyk (<org>)` | Snyk **GitHub App** (integration PR checks, posted from app.snyk.io) | **Intentional** — kept after PR #34; the project's primary SAST + OSS signal |
+| `image` job in the workflow (running `snyk container test`) | CI workflow job | **Intentional** — scans the freshly-built container image, which the GitHub App cannot see |
+| `snyk-code`, `snyk-open-source` jobs in the workflow (running `snyk code test` / `snyk test --all-projects`) | CI workflow jobs | **Removed by PR #34** — were duplicate of the GitHub App AND burned the org's monthly private-test quota |
+
+When a `security/snyk (<org>)` check fails with state `ERROR` (not
+`FAILURE`), it is almost always an **infrastructure** condition (most
+commonly the org's monthly private-test quota is exhausted), not a
+finding on the PR's diff. Phrase it that way:
+
+> security/snyk (<org>): ERROR state from the Snyk GitHub App's
+> integration check — typically quota exhaustion on the org's monthly
+> private-test budget. Top up the plan or wait for the monthly reset.
+
+Do **not** describe such a failing check as a "legacy CI job to
+remove" — the GitHub App's PR check is the post-#34 design, not legacy.
+Don't recommend deleting workflow jobs that were already removed in PR
+#34 either; check the workflow file before suggesting removals.
+
+If the maintenance gather's `gather-snyk.zsh` (REST API path) emitted
+its summary line into `notes[]` (`Snyk findings via REST API (no quota
+consumed): X code, Y OSS. Projects scanned: ...`), include that note
+verbatim in the "Notes from the gather step" section below — it tells
+the user the maintenance pipeline did NOT burn quota this run, which
+is load-bearing diagnostic when the GitHub App's check is erroring.
 
 <If human_action_required is non-empty for this language:>
 🛑 Halted — human action required:

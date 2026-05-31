@@ -141,19 +141,39 @@ fi
 # purpose. We emit "[]" for both arrays + a note explaining the cause.
 if [[ "$has_snyk_config" == "true" ]]; then
   snyk_stderr=$(mktemp)
-  if "$SCRIPT_DIR/gather-snyk.zsh" "$repo" \
-       > "$findings_dir/snyk_api.json" 2>"$snyk_stderr"; then
-    jq '.snyk_code' "$findings_dir/snyk_api.json" > "$findings_dir/snyk_code.json"
-    jq '.snyk_oss'  "$findings_dir/snyk_api.json" > "$findings_dir/snyk_oss.json"
-  else
+  snyk_helper="$SCRIPT_DIR/gather-snyk.zsh"
+  if [[ ! -x "$snyk_helper" ]]; then
+    # Defensive: catches the stale-marketplace-install case where PR #83's
+    # new helper script never made it into the cache. Without this, the
+    # block falls through to "[] + no note" — leaving the user with no
+    # signal that the Snyk REST API path wasn't even tried.
     echo "[]" > "$findings_dir/snyk_code.json"
     echo "[]" > "$findings_dir/snyk_oss.json"
+    notes+=("Snyk gather: helper script not found or not executable at $snyk_helper. Update your plugin install (cd to the marketplace dir, 'git pull'). Plugin development >= 1.3.0 is required.")
+  else
+    if "$snyk_helper" "$repo" \
+         > "$findings_dir/snyk_api.json" 2>"$snyk_stderr"; then
+      jq '.snyk_code' "$findings_dir/snyk_api.json" > "$findings_dir/snyk_code.json"
+      jq '.snyk_oss'  "$findings_dir/snyk_api.json" > "$findings_dir/snyk_oss.json"
+      snyk_exit_label="ok"
+    else
+      echo "[]" > "$findings_dir/snyk_code.json"
+      echo "[]" > "$findings_dir/snyk_oss.json"
+      snyk_exit_label="failed"
+    fi
+    # ALWAYS emit at least one note so the user can tell from the
+    # final summary which Snyk gather path ran (or that it ran at all).
+    # Silent success was a real bug: an exit-0 helper with empty stderr
+    # left the summary identical to "no snyk config at all" — see #82
+    # follow-up after the 2026-05-31 retest.
+    snyk_stderr_content=$(tr '\n' ' ' < "$snyk_stderr" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+    if [[ -n "$snyk_stderr_content" ]]; then
+      notes+=("Snyk gather ($snyk_exit_label): $snyk_stderr_content")
+    else
+      notes+=("Snyk gather ($snyk_exit_label): helper emitted no diagnostic line. Check gather-snyk.zsh — every code path is expected to print a summary to stderr.")
+    fi
+    rm -f "$snyk_stderr"
   fi
-  # The helper writes a single explanatory line to stderr in both success
-  # and failure cases — surface it so the user sees which path was used.
-  snyk_note=$(tail -1 "$snyk_stderr" 2>/dev/null || true)
-  [[ -n "$snyk_note" ]] && notes+=("$snyk_note")
-  rm -f "$snyk_stderr"
 fi
 
 # sonarcloud — fetch live findings (open issues + TO_REVIEW hotspots) via the
