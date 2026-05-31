@@ -431,10 +431,13 @@ After pushing and opening the PR:
        }
        ```
 
-     The fixer uses `pr_scope` to scope its work: it only attempts
-     fixes that touch in-scope files or that resolve in-scope findings,
-     and escalates anything else as "out of scope" rather than
-     guessing. See `python-ci-fixer.md` for the exact decision rules.
+     The fixer uses `pr_scope` to scope its work at the **tool
+     level**: every failing finding from this PR's tool is in scope,
+     other tools' checks are out of scope (escalated). Same-tool
+     scope is exhaustive — `pr_scope.findings` is informational
+     context for the fixer (what the work agent intended to address),
+     not a filter for narrowing scope further. See
+     `python-ci-fixer.md` step 3 for the full decision table.
 
 4. **Process the fixer's response.** The fixer returns JSON
    distinguishing three outcomes:

@@ -92,33 +92,48 @@ For each in-scope failing check:
 
 ### 3. Classify each failure: in-scope vs out-of-scope
 
-Before fixing anything, decide whether each failing check is **in
-scope** for this PR by cross-referencing `pr_scope`:
+The scope rule is **tool-level**, not per-finding. Each tool's findings
+belong to that tool's agent in their entirety — there is no "this PR
+is responsible for these 3 sonar findings but not those 12 others."
+If a tool's CI check is failing on this PR, **every** failing finding
+from that tool is in scope when the PR's tool matches.
+
+Cross-reference each failing check against `pr_scope.tool`:
 
 | Failure shape | Classification | Action |
 |---|---|---|
-| Check `name` matches `pr_scope.tool` (substring) AND the failure log references files in `pr_scope.files` OR finding keys in `pr_scope.findings` | **in scope** | Fix (proceed to step 4) |
-| Check `name` matches `pr_scope.tool` (substring) BUT the failure references files / finding keys NOT in `pr_scope.*` | **out of scope** (other groups' work, processed in later PRs) | Escalate, do NOT fix |
-| Check `name` does NOT match `pr_scope.tool` (different tool's check failing on this PR) | **in scope** (cross-tool damage caused by the work agent's edits) | Fix (proceed to step 4) |
-| Failure is a generic project check (pytest, ruff, type check) and the failure references files in `pr_scope.files` or files the diff modified | **in scope** | Fix (proceed to step 4) |
-| Failure references files NOT in `pr_scope.files` AND NOT in the PR's diff | **out of scope** | Escalate, do NOT fix |
+| Failing check is for **this PR's tool** (name substring-matches `pr_scope.tool`) | **in scope** — every flagged finding belongs to the agent that owns this tool | Fix (step 4) |
+| Failing check is for a **different tool** | **out of scope** — that tool has its own agent | Escalate, do NOT fix |
+| Generic project check (pytest / ruff / mypy / coverage) referencing files **in the PR's diff** | **in scope** — cross-tool damage caused by this PR's edits | Fix (step 4) |
+| Generic check referencing files **outside the diff AND outside `pr_scope.files`** | **out of scope** — pre-existing project issue unrelated to this PR | Escalate, do NOT fix |
 
-**Out-of-scope failures** are returned as a single `escalation_recommendation`
-in the output (see step 6). Do not delete out-of-scope failures from
-the failing list silently — surface them so the orchestrator and the
-final summary can show them as needing human review.
+**`pr_scope.findings`** is reference context, not a scope filter. Use
+it to know **what the work agent intended to address** (so you can tell
+whether your fix completes their work vs. starts fresh), but never use
+it to declare a same-tool finding "out of scope." All same-tool
+findings are in scope by virtue of the tool match.
 
-For sonarcloud-tool failures specifically, the typical case is:
+**Out-of-scope failures** are returned in `out_of_scope_failures` in
+the output (see step 6) — not silently dropped. The orchestrator
+surfaces them in the final summary as needing human review.
 
-- Sonar's CI report flags 15 findings on this PR, of which 3 are
-  yours (in `pr_scope.findings`) and 12 are from other groups.
-- The 3 yours: investigate — your work agent may have committed a
-  bad patch. **Fix them** (proceed to step 4 with focus on those
-  3 keys).
-- The 12 others: out of scope. Escalate.
+**Example — sonarcloud failure on a sonar PR:**
 
-If the sonar API isn't directly queryable, parse the SonarCloud check
-log for finding keys + file paths and match against `pr_scope`.
+The sonarcloud check fails with 16 findings flagged. All 16 are sonar
+findings on this PR's tool, so **all 16 are in scope** regardless of
+whether each specific key is in `pr_scope.findings`. The PR's sonar
+agent was responsible for resolving sonar findings completely; any
+that remain are this PR's responsibility to fix or to escalate as
+`resolved: false` with an actionable recommendation.
+
+**Example — snyk-code failure on a sonar PR:**
+
+snyk-code is a different tool from sonarcloud. The sonar agent doesn't
+touch snyk-code findings — those belong to `python-snyk-triage`'s PR
+(later, or unrelated). Treat the snyk-code failure as **out of scope**
+unless its log clearly points to a file in the PR's diff (i.e. the
+sonar agent's edits inadvertently broke snyk-code's analysis on a
+file).
 
 ### 3.5. Identify the root cause (for in-scope failures only)
 
@@ -193,16 +208,18 @@ Or on inability to fix in-scope issues:
 }
 ```
 
-Or when the failure was classified out of scope by step 3:
+Or when the failure was classified out of scope by step 3 (different
+tool's check failing, or a generic check pointing at files this PR
+didn't touch):
 
 ```json
 {
   "resolved": true,
-  "summary": "Sonarcloud check fails on this PR because 12 sonar findings from other groups (S6965, S4502, ...) are still on main. The 3 findings in this PR's pr_scope (S1192 × 2, S3776 × 1) were already resolved by the work agent. Nothing to fix here.",
+  "summary": "snyk-code failing on this PR. This is a sonar-tool PR; snyk-code is owned by python-snyk-triage. The snyk-code log points at src/aido/auth.py which this PR didn't touch. Out of scope.",
   "commit_sha": null,
   "files_changed": [],
   "out_of_scope_failures": [
-    { "check": "sonarcloud", "reason": "12 findings out of scope — belong to later groups; this PR's 3 findings already resolved." }
+    { "check": "snyk-code", "reason": "Different tool from this PR's pr_scope.tool ('sonarcloud'); no overlap with PR's diff." }
   ]
 }
 ```
