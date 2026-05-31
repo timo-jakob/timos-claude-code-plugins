@@ -346,28 +346,29 @@ For each entry in `response.plan`, in priority order:
    "auto"` and proceed normally (the agent runs the 3-pass cascade).
 
    If `HAS_PY` is empty → **ask the user** via `AskUserQuestion` with
-   exactly these options (label them clearly so the choice is obvious):
+   exactly these three options (no others — the project's install
+   convention is Homebrew):
 
-   - **"Install via uv now"** (only when `uv` is on PATH; preferred when
-     available — fast, no sudo, no system mutation)
-   - **"Install via Homebrew now"** (only when `brew` is on PATH and uv
-     isn't preferred for this project)
+   - **"Install via Homebrew now"** — orchestrator runs
+     `brew install python@<to_version>`.
    - **"I'll install it myself"** — orchestrator pauses, prints the
-     exact command(s) (`uv python install <to_version>` or
-     `brew install python@<to_version>`), then asks a follow-up
-     `AskUserQuestion` "Ready to continue?" with options
-     ["Yes, re-check", "Cancel — skip local verify"]. On "Yes, re-check",
-     re-run the detection block above; if still missing, loop with one
-     more confirmation, then fall through to skip.
+     command (`brew install python@<to_version>`) plus the manual
+     alternative the user might prefer (their choice — pyenv, asdf,
+     etc.; don't prescribe), then asks a follow-up `AskUserQuestion`
+     "Ready to continue?" with options
+     ["Yes, re-check", "Cancel — skip local verify"]. On "Yes,
+     re-check", re-run the detection block above; if still missing,
+     loop with one more confirmation, then fall through to skip.
    - **"Skip local verification"** — spawn the agent with
-     `local_verification_mode: "skip"`. The agent will only edit + commit
-     the Dockerfile + `requires-python` and won't attempt the cascade.
-     CI does the real verification.
+     `local_verification_mode: "skip"`. The agent will only edit +
+     commit the Dockerfile + `requires-python` and won't attempt the
+     cascade. CI does the real verification.
 
-   On the auto-install choices, run the command, re-check that
-   `python<to_version>` is now resolvable, and only then spawn the
-   agent. If the install fails, surface the install error and re-ask
-   the user (don't silently fall back to skip).
+   On "Install via Homebrew now", run `brew install python@<to_version>`,
+   re-check that `python<to_version>` is now resolvable, and only then
+   spawn the agent. If the install fails (network error, formula not
+   found yet, etc.), surface the install error and re-ask the user
+   with the same three options (don't silently fall back to skip).
 
    The agent's prompt gains one extra field:
 
