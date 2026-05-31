@@ -384,8 +384,9 @@ Tool → agent(s) for filter resolution:
 | `python-semgrep-triage` | sonnet | `semgrep` | yes |
 | `python-snyk-triage` | sonnet | `snyk_code` + `snyk_oss` (patch + minor bumps only) | yes |
 | `python-sonar-triage` | sonnet | `sonarcloud` | yes |
-| `python-major-upgrade` | opus | `snyk_oss` AND `dependabot` major-version bumps | yes |
-| `python-dependabot-triage` | sonnet | `dependabot` patch + minor only | **no** (acts on GitHub via `gh`, not on local files) |
+| `python-major-upgrade` | opus | `snyk_oss` AND `dependabot` major-version bumps (pip) | yes |
+| `python-runtime-upgrade` | opus | `dependabot` Docker bumps where the base image is the Python interpreter (`python:X.Y...`) | yes |
+| `python-dependabot-triage` | sonnet | `dependabot` patch + minor pip, plus all github-actions / non-Python-image docker / unknown ecosystems | **no** (acts on GitHub via `gh`, not on local files) |
 
 **Spawn all applicable agents in a single assistant turn.** They run
 in parallel — worktree-using ones in isolated worktrees off
@@ -492,7 +493,8 @@ equivalent, the group is major.
 | github-actions | patch | `python-dependabot-triage` (batch) |
 | github-actions | minor | `python-dependabot-triage` (batch) |
 | github-actions | major | `python-dependabot-triage` as **human-review** — no Python-API migration applies; user reviews action input/output changes manually |
-| docker | any | `python-dependabot-triage` as **human-review** — Dockerfile base-image changes affect OS packages, language runtime, libc, etc. Even "patch" can include a Python interpreter rebuild that subtly shifts behavior. Always defer to human. |
+| docker | **image matches `python:\d+\.\d+`** (Python interpreter bump) | `python-runtime-upgrade` (opus, worktree). The runtime-upgrade agent attempts the swap, verifies locally if possible, escalates cleanly with a structured report on dep-compat failures. |
+| docker | anything else (libxml2, alpine, non-Python images, etc.) | `python-dependabot-triage` as **human-review** — Dockerfile base-image changes affect OS packages, libc, etc. Always defer to human. |
 | unknown | any | `python-dependabot-triage` as **human-review** — unrecognized ecosystem, can't reason about safety |
 
 `python-major-upgrade` is **only** spawned for `(pip, major)`. The agent's procedure (LSP find-references, Python release-note migration patterns) doesn't apply to other ecosystems.

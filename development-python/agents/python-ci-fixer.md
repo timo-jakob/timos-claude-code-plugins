@@ -135,6 +135,41 @@ unless its log clearly points to a file in the PR's diff (i.e. the
 sonar agent's edits inadvertently broke snyk-code's analysis on a
 file).
 
+### 3.4. Special case — Python runtime-upgrade PRs
+
+If `pr_scope.tool == "python-runtime-upgrade"`, the PR is bumping the
+project's Python interpreter (e.g. `python:3.13 → python:3.14`). The
+runtime-upgrade agent has **already exhausted its own 3-pass dep
+cascade** before committing — it tried bumping deps, reading their
+release notes, and applying migration patterns. If CI is now failing,
+it means one of two things:
+
+- A blocking dep with no compatible PyPI version. The agent already
+  flagged this in its `actions_requiring_review`; CI is confirming it.
+- A new failure mode that surfaced only in CI's actual Docker context
+  (not the local install). Rare, but possible.
+
+In both cases, you should **escalate immediately on attempt 1**. Do
+NOT iterate. The agent's iteration budget already covered the
+practical dep-cascade work; retrying here is unlikely to find new
+options and risks burning tokens on a known dead end. Library swaps
+are explicitly out of scope for this maintenance flow — that's a
+project architecture decision the human owns.
+
+Return shape for this case:
+
+```json
+{
+  "resolved": false,
+  "summary": "Python runtime-upgrade PR <to_version> blocked by CI failures. The runtime-upgrade agent already exhausted its 3-pass dep cascade; further retry is unlikely to help.",
+  "files_changed": [],
+  "out_of_scope_failures": [],
+  "escalation_recommendation": "Forward the runtime-upgrade agent's actions_requiring_review block (cascade_attempts + blocking_dependencies) to the user. Either wait for upstream wheels, file issues with the named packages, or close the Dependabot PR."
+}
+```
+
+This bypasses the 3-iteration cap by exhausting it on attempt 1.
+
 ### 3.5. Identify the root cause (for in-scope failures only)
 
 Categories you'll commonly see:

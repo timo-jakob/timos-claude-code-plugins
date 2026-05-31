@@ -128,7 +128,25 @@ Order groups by descending priority. Ties broken by:
 | `sonarcloud` | `python-sonar-triage` |
 | `dependabot` patch/minor (pip) | `python-dependabot-triage` |
 | `dependabot` major (pip) | `python-major-upgrade` |
-| `dependabot` (github-actions, docker, unknown) | `python-dependabot-triage` (human-review) |
+| `dependabot` **docker, image matches `python:\d+\.\d+`** (Python interpreter bump) | `python-runtime-upgrade` (one PR per bump) |
+| `dependabot` (github-actions, docker non-Python, unknown) | `python-dependabot-triage` (human-review) |
+
+**Python-interpreter docker bumps are a special case.** A
+`dependabot/docker/...` PR whose `headRefName` or `body` references
+the `python:X.Y...` base image is the project's runtime Python being
+bumped (e.g. `python:3.13-slim-bookworm → 3.14-slim-bookworm`). That
+has very different consequences from a generic Docker bump
+(libxml2 update, alpine bump, etc.) — it's a language migration. Route
+it to `python-runtime-upgrade`, which attempts the swap once,
+escalates cleanly on dep-compat issues, and produces a structured
+report instead of looping. Other docker bumps still go to
+`python-dependabot-triage` as human-review per the existing rule.
+
+Detection: regex-match the headRefName tail or PR title for
+`python:\d+\.\d+`. A grouped PR with `python:` as one member of the
+group also counts — extract just the Python interpreter bump into a
+`python-runtime-upgrade` group and leave the rest for
+`python-dependabot-triage`.
 
 The two exceptions to "one group per tool" (snyk_oss splits by upgrade
 level; dependabot splits similarly) are driven by this table: when a

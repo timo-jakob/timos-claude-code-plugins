@@ -398,8 +398,8 @@ Pick by task character, not by importance:
 | Model | When | Examples |
 |---|---|---|
 | **haiku** | Mechanical, deterministic transforms; no judgment | Apply `ruff check --fix`; bump pinned versions; remove unused imports |
-| **sonnet** | Context-aware work; reads surrounding code to decide what fix is appropriate | Triage a Snyk finding (suppress vs fix); choose between refactor patterns; pick a `# nosemgrep` annotation |
-| **opus** | High-stakes judgment; security-critical or architectural | Decide if a vulnerability is exploitable; review whether a `# noqa` is justified; senior-eng PR review |
+| **sonnet** | Context-aware work; reads surrounding code to decide what fix is appropriate | Triage a Snyk finding (suppress vs fix); choose between refactor patterns; pick a `# nosemgrep` annotation; CI-failure triage |
+| **opus** | High-stakes judgment; security-critical or architectural; cross-codebase migration | Decide if a vulnerability is exploitable; review whether a `# noqa` is justified; migrate a major dep version; apply a Python interpreter upgrade and structured-escalate when deps aren't ready |
 
 The right model is whichever produces a correct result on the first
 try most often. A wrong haiku output costs more than the haiku tokens
