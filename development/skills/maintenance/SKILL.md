@@ -97,171 +97,83 @@ their plugins are not built yet — only <Z> findings were processed").
 
 ## Phase 3 — gather findings per supported language
 
-### Pre-flight (Python only): venv matches project's Python version
+### State pre-flight (per supported language)
 
-Before invoking the Python gather script, confirm the project's local
-`.venv` was built against the Python version the project declares.
-Otherwise the gather step's pytest + coverage data is from the wrong
-interpreter, and every subsequent stage's agents will run their test
-verification against that wrong venv too — producing false-positive
-syntax errors, missed runtime regressions, etc.
+Before invoking each language's gather script, run that language's
+state-verification helper to make sure the gather will produce
+trustworthy results. The helper's job is to surface stale or
+inconsistent local state (a venv built against the wrong interpreter,
+a deleted Bundler cache, a missing Go toolchain, etc.) and recover
+where it can autonomously.
 
-This check ALSO runs again after Phase 8's sync step (see step 6
-there), in case a runtime-upgrade PR merged during the run.
-
-```bash
-# Project's declared Python version, in priority order:
-#   1. Dockerfile FROM python:X.Y... (most authoritative — that's what CI runs)
-#   2. pyproject.toml requires-python = ">=X.Y"
-project_py=""
-if [[ -f Dockerfile ]]; then
-  project_py=$(grep -E '^FROM[[:space:]]+python:' Dockerfile \
-                | head -1 | sed -E 's|.*python:([0-9]+\.[0-9]+).*|\1|')
-fi
-if [[ -z "$project_py" && -f pyproject.toml ]]; then
-  project_py=$(grep -E '^[[:space:]]*requires-python' pyproject.toml \
-                | grep -oE '[0-9]+\.[0-9]+' | head -1)
-fi
-
-# venv's actual Python version
-venv_py=""
-if [[ -x .venv/bin/python ]]; then
-  venv_py=$(.venv/bin/python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-fi
-
-if [[ -n "$project_py" && -n "$venv_py" && "$project_py" != "$venv_py" ]]; then
-  run_venv_recovery "$project_py" "$venv_py"   # see procedure below
-fi
-```
-
-If `project_py` couldn't be determined (no Dockerfile + no
-`requires-python` constraint), skip the check — the user hasn't pinned
-a runtime, so any venv is acceptable.
-
-If `venv_py` is empty (no `.venv/bin/python`), also skip — the gather
-script will surface "pytest not found" via its existing notes path,
-which is the right place for that message.
-
-### Venv recovery procedure (shared with Phase 8 step 7)
-
-Both this Phase 3 pre-flight and Phase 8 step 7 (after sync) invoke
-the same recovery logic when they detect a mismatch. Keeping it in one
-place avoids drift; treat the following as the one canonical procedure
-both checkpoints call:
-
-#### Step R.1 — verify the target interpreter exists
+Naming convention mirrors the gather scripts: per detected language
+`lang`, look for and invoke:
 
 ```bash
-if ! command -v "python$project_py" >/dev/null 2>&1; then
-  halt: "Project declares Python $project_py but local .venv is on
-         Python $venv_py, and python$project_py is not on PATH.
-         Install it (`brew install python@$project_py`) and re-run
-         /development:maintenance."
-fi
+"<skill-base-dir>/scripts/verify-<lang>-state.sh" "$(pwd)"
 ```
 
-This is the **one halt path that needs user intervention**. The
-maintenance pipeline does not install language runtimes — that's an
-operational decision the user owns.
+If the script doesn't exist for a language, skip — that plugin
+hasn't published a state-verification helper yet, and the gather
+script's own internal notes path will handle whatever state issues
+surface. Don't fail the run on a missing helper.
 
-#### Step R.2 — first install attempt against the new interpreter
+#### Verify-state script contract (all languages)
 
-```bash
-rm -rf .venv
-"python$project_py" -m venv .venv
-.venv/bin/pip install --quiet --upgrade pip
-.venv/bin/pip install -e ".[dev]" 2>&1 | tee /tmp/recover_install.log
-```
+The script's exit code drives the orchestrator's next move. Don't
+parse stdout/stderr to guess intent; trust the exit code.
 
-If install **succeeds** → done. Proceed to the caller's next step
-(Phase 3 → run the gather script; Phase 8 → spawn the next stage's
-agent).
+| Exit code | Meaning | What you do |
+|---|---|---|
+| `0`, no stdout | State is fine, no action needed | Proceed to the gather script |
+| `0`, stdout is JSON `{"recovered": true, ...}` | State was rebuilt successfully (e.g., venv recreated, deps reinstalled) | Proceed to the gather script. Include the JSON in the run summary so the user knows their local env changed. |
+| `1`, message on stderr | User must intervene; cannot recover autonomously (typically: a tool isn't installed) | **Halt the run.** Forward the stderr message to the user verbatim. |
+| `2`, stdout JSON `{"recreate_failed": true, ...}` (or other "tried, failed" shapes) | Recovery attempt failed mid-flight; user needs to choose | Invoke the **R.4 fallback** below: surface the JSON details via `AskUserQuestion` and act on the choice. |
 
-If install **fails** → proceed to R.3 (cascade).
+Anything else (non-zero with no JSON, etc.) → halt and forward stderr.
+Treat unknown failure modes as user-intervention paths rather than
+silently continuing on broken state.
 
-#### Step R.3 — dep cascade (up to 3 passes)
+#### R.4 — fallback when the state script exits 2
 
-Mirror the procedure in `python-runtime-upgrade.md` step 5, applied
-here in the orchestrator's context. The agent's logic is exactly what
-needs to happen if a dep version constraint excludes the new
-interpreter:
-
-```
-PASS N (N in 1..3):
-  Parse /tmp/recover_install.log for the offending dep(s). Common shapes:
-    - "Could not find a version of <pkg> that satisfies the requirement"
-    - "<pkg> X.Y.Z requires python>=3.13,<3.14"
-    - Build failures from a sdist where no wheel is available
-
-  For each offending dep:
-    .venv/bin/pip index versions "<pkg>"           # or query PyPI JSON
-    Pick the lowest version that supports python$project_py.
-    If the chosen version crosses a major boundary vs the current pin:
-      WebFetch the dep's release notes / changelog.
-      Identify breaking changes that affect this project.
-      Apply migration patterns to call sites if needed.
-    Update the pin in pyproject.toml (or requirements*.txt).
-    If NO version of the dep on PyPI supports python$project_py,
-    mark it a HARD BLOCKER and continue identifying others.
-
-  Re-run R.2's install.
-
-After PASS 3:
-  If install passed AND `pytest --co -q` runs without collection
-  errors → recovery succeeded. The bumped pins are committed on the
-  current branch as a small extra commit (the orchestrator handles
-  this — pre-commit hooks must pass, never --no-verify). Next stage
-  proceeds normally.
-
-  If at least one HARD BLOCKER remains → proceed to R.4.
-```
-
-The cascade is the runtime-upgrade agent's procedure transplanted to
-the orchestrator's post-sync context. **Do NOT replace blocking deps
-with alternatives** (no swapping pypdf for pdfminer); that's a project
-architecture decision and out of scope here too.
-
-#### Step R.4 — fallback after cascade exhausted
-
-The Python upgrade is genuinely not viable right now. The user needs
-options. Surface the blockers and ask via `AskUserQuestion`:
+The recovery attempt found a problem it couldn't auto-fix (typically:
+a dep cascade exhausted before the venv would install). The state
+script's JSON payload identifies the blockers; surface them via
+`AskUserQuestion` with three options that work for any language's
+state model:
 
 ```
-Question: "The Python <project_py> upgrade can't proceed locally: 
-           - <pkg>: latest <ver> on PyPI supports up to Python <maxpy>
-           - <pkg>: ...
-           Main is already on Python <project_py> (the runtime PR
-           merged earlier). What now?"
+Question: "Local <lang> state can't be reconciled with main's declared
+           configuration:
+             - <blocker 1 from script JSON>
+             - <blocker 2>
+           Main is already at the new configuration. What now?"
 
 Options:
-  1. "Recreate venv on python<venv_py> as a local fallback"
-        — most pragmatic. Main stays on $project_py; you can keep
-          coding while the upgrade fate is decided.
-        — implementation: rm -rf .venv && python$venv_py -m venv .venv
-                          && pip install --quiet -e ".[dev]"
-        — record in the run summary: "Local .venv reverted to
-          Python $venv_py; main is on Python $project_py — pending
-          dep resolution."
-        — proceed with subsequent stages, but DO NOT re-trigger the
-          pre-flight (we know it won't pass; the user accepted the
-          mismatch).
+  1. "Fall back to the previous configuration locally"
+        — invoke the same verify-<lang>-state.sh with a
+          --target-<something>=<old_value> flag so the script rebuilds
+          state matching what main USED to look like. Specifics per
+          language (Python: --target-py=<old_version>). Subsequent
+          Phase 8 stages SKIP the pre-flight for the rest of this run
+          (in-memory flag; resets next /development:maintenance call).
+        — record in the summary: "Local <lang> state reverted to
+          previous config; main is at the new config pending the
+          blocker resolution."
 
   2. "Open a GitHub issue capturing the blockers, then halt"
-        — the orchestrator drafts an issue body listing the blockers,
-          the release notes URLs it consulted, and the suggested
-          remediation paths. Posts via `gh issue create`. Halts the
-          maintenance run.
+        — orchestrator drafts an issue body from the script's JSON
+          blockers, posts via `gh issue create`. Halt the run.
 
   3. "Halt — I'll handle it manually"
-        — no further auto-action. The user runs whatever they want.
-          Maintenance run ends with the cascade report in the summary.
+        — no further action. Run ends with the script's report in the
+          summary.
 ```
 
-The fallback question makes the trade-off explicit. The default
-recommendation (option 1) lets the user keep working without losing
-the day's already-merged maintenance work; the audit trail of the
-choice is preserved in the run summary so a future maintenance run
-sees the same blockers and can re-ask once the ecosystem catches up.
+This fallback shape is language-agnostic. The script JSON tells the
+orchestrator what to put in the question; the option-1 fallback
+command is `verify-<lang>-state.sh --target-...` with a flag the
+language plugin defined.
 
 ### Run the gather script
 
@@ -806,29 +718,31 @@ After pushing and opening the PR:
    git -C "<repo.path>" pull --ff-only origin "<base_branch>"
    ```
 
-7. **Re-run the venv pre-flight from Phase 3.** A merge — especially of
-   a `python-runtime-upgrade` PR — can change the project's declared
-   Python version, leaving the local `.venv` stale. Without this
-   re-check, subsequent stages' agents run their test verification
-   against a venv whose interpreter no longer matches the project's
-   `Dockerfile` / `requires-python`, producing false-positive syntax
-   errors and missed regressions (this exact bug surfaced in the live
-   test on ai-doc-organizer's Stage 7).
+7. **Re-run the state pre-flight from Phase 3.** A merge — especially
+   of a runtime-version-bumping PR — can change the project's
+   declared configuration, leaving local state (venv, toolchain cache,
+   etc.) inconsistent. Without this re-check, subsequent stages'
+   agents run their verification against state that no longer matches
+   what's on `main`, producing false-positive errors and missed
+   regressions (the live test on ai-doc-organizer's Stage 7 surfaced
+   exactly this for the Python venv case after a 3.13 → 3.14 merge).
 
-   Apply the same `project_py` vs `venv_py` resolution as Phase 3,
-   then invoke the shared **Venv recovery procedure** (R.1 → R.2 →
-   R.3 cascade → R.4 fallback) defined in Phase 3 above. Same halt
-   path (interpreter missing on PATH), same cascade-up-to-3-passes on
-   `pip install` failure, same three-option `AskUserQuestion`
-   fallback when the cascade exhausts.
+   Invoke the same per-language helper from Phase 3:
 
-   One context-specific note: if R.4's option 1 ("recreate venv on
-   the OLD python version as a local fallback") is chosen here mid-
-   pipeline, set a run-scoped flag so subsequent Phase 8 stages SKIP
-   the venv pre-flight in step 7 — the user has explicitly accepted
-   the mismatch; re-asking on every stage would be noisy. The flag is
-   in-memory only; the next `/development:maintenance` invocation
-   re-evaluates from scratch.
+   ```bash
+   "<skill-base-dir>/scripts/verify-<lang>-state.sh" "$(pwd)"
+   ```
+
+   Handle the exit code per Phase 3's script-contract table. The R.4
+   fallback applies here too — the script's exit-2 JSON drives the
+   `AskUserQuestion` shape.
+
+   **In-memory skip flag.** If R.4's option 1 ("fall back to previous
+   configuration locally") was chosen earlier in this run, set a
+   run-scoped flag and SKIP this step on every subsequent stage. The
+   user has explicitly accepted the mismatch; re-asking on every stage
+   would be noisy. The flag is in-memory only; the next
+   `/development:maintenance` invocation re-evaluates from scratch.
 
 ### Agents commit before returning
 

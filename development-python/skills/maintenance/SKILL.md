@@ -734,6 +734,51 @@ See ARCHITECTURE.md (top-level repo) for the full schema.
 
 …and stop.
 
+## Helper scripts owned by this plugin
+
+These scripts live under `development/skills/maintenance/scripts/` for
+co-location with the orchestrator that calls them, but they are
+**owned by this plugin** — Python-specific logic, Python-specific
+return shapes. The orchestrator just dispatches by filename
+convention (`gather-<lang>-findings.sh`,
+`verify-<lang>-state.sh`).
+
+### `gather-python-findings.sh <repo_path>`
+
+Used by Phase 3 of `/development:maintenance`. Runs ruff, semgrep,
+Snyk, SonarCloud + pytest with coverage; emits one JSON document
+matching the gather-output schema this skill expects in its input.
+
+### `verify-python-state.sh [--target-py=X.Y] <repo_path>`
+
+Used by Phase 3 (pre-gather) and Phase 8 step 7 (post-merge sync)
+of `/development:maintenance`. Confirms `.venv/bin/python` matches
+the project's declared Python version (resolved from `Dockerfile`'s
+`FROM python:X.Y...` first, then `pyproject.toml`'s
+`requires-python`). Recreates the venv when there's a mismatch.
+
+Auto-detect mode (no flag) compares declared vs actual and recovers
+on mismatch. `--target-py=X.Y` forces a specific version — used by
+the orchestrator's R.4 option 1 ("fall back to previous configuration
+locally") to rebuild the venv on the old interpreter when the upgrade
+is blocked.
+
+Exit contract (Phase 3's script-contract table is the authoritative
+copy; reproduced here for Python-plugin readers):
+
+| Exit | stdout | Meaning |
+|---|---|---|
+| `0` | empty | State is fine, no action taken |
+| `0` | `{"recovered": true, "from_py": "X.Y", "to_py": "Z.W"}` | venv was rebuilt successfully |
+| `1` | empty (stderr has message) | `python<X.Y>` not on PATH; user must `brew install python@X.Y` |
+| `2` | `{"recreate_failed": true, "project_py": ..., "venv_py": ..., "install_log_excerpt": "..."}` | venv recreate's `pip install` failed; orchestrator drives R.4 |
+
+Python-specific scope decisions documented here so the orchestrator
+SKILL doesn't carry them:
+- **Dockerfile `FROM python:X.Y...` is authoritative over `requires-python`** because CI builds and runs from the Dockerfile; `requires-python` is a soft constraint pip respects.
+- **`.venv/` at the repo root is the only convention checked** (no support for `venv/`, `env/`, or a `VIRTUAL_ENV` env var). Bootstrapped projects standardize on `.venv/`.
+- **`pip install -e ".[dev]"` is the recreate's install command** — matches what `automate-public.sh` uses during bootstrap. Future iterations could detect `uv.lock` / `poetry.lock` and prefer the lock-respecting install, but for v1 pip is the floor.
+
 ## What you will NOT do
 
 - Run detection (orchestrator's job).
