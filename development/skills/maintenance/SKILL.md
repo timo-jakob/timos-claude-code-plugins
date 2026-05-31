@@ -322,12 +322,22 @@ Agent(
     findings: <plan[i].findings, with their full finding objects>
     policy: <policy>
     worktree.base_branch: <effective base after prior merges>
+    commit_subject: <plan[i].suggested_pr_title>
 
     End with the project's test command in the worktree; only return
-    success if tests pass.
+    success if tests pass. Commit your changes on the worktree branch
+    before returning — the orchestrator will push the branch as-is.
   """
 )
 ```
+
+**Agents commit before returning.** The agent's final procedure step
+runs `git add -A && git commit -m "<commit_subject>"` on its worktree
+branch (only if it made changes). The orchestrator then pushes that
+already-committed branch — no ad-hoc "commit pending changes" logic in
+this phase. If a worktree branch comes back uncommitted (legacy agent
+or runtime quirk), surface it in the summary as a quality bug; do not
+silently bridge it.
 
 Exception: `python-dependabot-triage` is spawned **without** `isolation`
 (it acts on GitHub PRs via `gh`, not local files). See the dispatcher

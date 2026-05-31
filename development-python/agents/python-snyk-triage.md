@@ -122,6 +122,22 @@ The expiry date should be 90 days from today.
    - If you can't resolve after 2 attempts, roll back the offending
      bump and mark it human-review.
 
+7. **Commit your work before returning** (only when you made
+   changes). If `git status --porcelain` is empty, skip this step.
+   Otherwise:
+
+   ```bash
+   git add -A
+   git commit -m "<commit_subject>"
+   ```
+
+   `commit_subject` is in your prompt (the planner's
+   `suggested_pr_title` for this group). If absent, compose one
+   matching the scope: `chore(deps): bump <pkg> from <old> to <new>`
+   for an OSS bump, `fix(snyk): <short description>` for a code
+   fix. Pre-commit hooks must pass. **Never use `--no-verify`.** Do
+   NOT push — the orchestrator pushes your branch after you return.
+
 ## Output (when at least one Snyk side is configured)
 
 ```json

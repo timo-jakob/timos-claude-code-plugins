@@ -103,6 +103,24 @@ If tests fail:
 15. **Remediation pass 3:** last try. If you have a specific
     hypothesis about what's still wrong, test it.
 
+16. **Commit your work before returning** (only when tests pass).
+    If tests still fail, skip the commit and go to the escalation
+    block below — do NOT commit a broken state. If `git
+    status --porcelain` is empty, also skip. Otherwise:
+
+    ```bash
+    git add -A
+    git commit -m "<commit_subject>"
+    ```
+
+    `commit_subject` is in your prompt (the planner's
+    `suggested_pr_title` for this group). If absent, compose one
+    like `chore(deps): bump <pkg> from <old> to <new>` (or use the
+    `!` breaking-change marker if a public API in the consuming
+    project changed: `chore(deps)!: bump <pkg> from <old> to <new>`).
+    Pre-commit hooks must pass. **Never use `--no-verify`.** Do NOT
+    push — the orchestrator pushes your branch after you return.
+
 If 3 passes still don't get tests green → escalate. Return
 `actions_requiring_review` with:
 - The release notes URL you used
