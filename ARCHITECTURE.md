@@ -304,14 +304,13 @@ from `findings_by_tool`).
     {
       "group_id": 1,
       "tool": "sonarcloud",
-      "rule": "python:S1192",
-      "description": "Define constants for duplicated literals",
+      "description": "Triage all 16 SonarCloud findings (14 issues + 2 hotspots)",
       "findings": ["<finding-key>", "..."],
       "files": ["src/aido/webui/mutation_routes.py", "..."],
-      "rationale": "same rule across 3 files",
+      "rationale": "all sonarcloud findings handled together by python-sonar-triage",
       "agent": "python-sonar-triage",
-      "suggested_pr_title": "fix(sonar): define constants for duplicated literals",
-      "priority_score": 0.78
+      "suggested_pr_title": "fix(sonar): triage all 16 SonarCloud findings",
+      "priority_score": 0.91
     }
   ],
   "improver_result": {
@@ -347,12 +346,18 @@ record.
 `plan` is the output of the language plugin's pre-dispatch planner
 (`python-maintenance-planner` for `development-python`). The planner is
 a sonnet agent that runs without a worktree, reads the findings + git
-history, and returns an ordered list of "groups" that bundle findings
-expected to share a single PR (same rule across N files, co-located in
-one file, etc.). Each group carries: source tool, included finding IDs,
-affected files, rationale, **the agent the orchestrator will spawn for
-this group's PR**, a suggested PR title, and a priority score.
-Plans are language-local — each language plugin produces its own.
+history, and returns an ordered list of "groups". **One group per
+agent**: each tool's findings stay together as a single group handled
+end-to-end by that tool's agent. The two exceptions are `snyk_oss` and
+`dependabot`, which split when their findings dispatch to multiple
+agents (e.g. a `snyk_oss` major bump goes to `python-major-upgrade`
+while patch/minor bumps stay with `python-snyk-triage`; one group per
+agent in that case).
+
+Each group carries: source tool, included finding IDs, affected files,
+rationale, **the agent the orchestrator will spawn for this group's
+PR**, a suggested PR title, and a priority score. Plans are
+language-local — each language plugin produces its own.
 
 The orchestrator processes the plan **sequentially in priority order**:
 
