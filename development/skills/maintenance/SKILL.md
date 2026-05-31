@@ -367,17 +367,18 @@ After pushing and opening the PR:
    `plan[i].tool` for the current group (or `coverage` for the
    improver Stage 0 PR). A same-tool failure on the PR is never
    trusted as "pre-existing" because the work agent was responsible
-   for resolving findings from this tool — the failure may mean either:
+   for resolving the tool's findings completely — under the planner's
+   one-group-per-agent rule, there are no "other groups" of the same
+   tool to absorb the blame. The failure means either:
 
    - the agent's fix didn't actually land (incomplete commit, bad
      patch), or
-   - other groups of the same tool are still surfacing on this PR
-     (out of scope for the group, but indistinguishable at this
-     coarse-grained level).
+   - a finding the agent intentionally left in `actions_requiring_review`
+     is now blocking CI.
 
    In both cases the right move is to investigate, not silently merge.
-   `python-ci-fixer` will dig into the log and either fix the failure
-   or escalate when the cause is purely other-groups' findings.
+   `python-ci-fixer` will dig into the log and either fix the
+   remaining failures or escalate with an actionable recommendation.
 
    Tool → check-name correspondence is judgment-based; use substring
    match on the tool key (case-insensitive). Examples:
@@ -445,11 +446,11 @@ After pushing and opening the PR:
    - `resolved: true` with empty `out_of_scope_failures` → fixer made
      a commit; re-monitor CI for the next check round.
    - `resolved: true` with non-empty `out_of_scope_failures` → the
-     failure was classified out of scope (typically other groups'
-     findings of the same tool that don't belong to this PR). **This
-     PR is safe to merge** — skip further fixer invocations for that
-     check, proceed to step 5. Record the out-of-scope failures so
-     they appear in the run summary.
+     failure was classified out of scope (a different tool's check
+     failing, or a generic check pointing at files outside this PR's
+     diff). **This PR is safe to merge** — skip further fixer
+     invocations for that check, proceed to step 5. Record the
+     out-of-scope failures so they appear in the run summary.
    - `resolved: false` → fixer couldn't resolve an in-scope failure;
      `escalation_recommendation` says why. Re-monitor only if a fix
      commit was made; otherwise count this attempt.

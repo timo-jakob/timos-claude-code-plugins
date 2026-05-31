@@ -1,6 +1,6 @@
 ---
 name: python-maintenance-planner
-description: Pre-dispatch planner. Reads a set of Python maintenance findings, ranks them by impact + file churn + critical-path proximity, and groups them by PR-combinability ("same rule across N files", "co-located in single file"). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-python:maintenance.
+description: Pre-dispatch planner. Reads a set of Python maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together; snyk_oss and dependabot split when their findings dispatch to multiple agents). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-python:maintenance.
 model: sonnet
 tools: Bash, Read, Grep
 ---
@@ -65,36 +65,56 @@ Your prompt contains:
 
   Clamp to `[0, 1]`.
 
-### 3. Cluster findings into groups
+### 3. Cluster findings into groups — one group per agent
 
-Apply these rules in order; a finding falls into the first matching group:
+Each tool's findings belong to that tool's agent in their entirety.
+**Do not subdivide findings within a tool.** All `sonarcloud` findings
+go into one group handled by `python-sonar-triage`. All `ruff` findings
+go into one group handled by `python-ruff-fixer`. And so on. The agent
+is responsible for resolving its tool's findings completely; mid-tool
+splits create confusion at the PR boundary and force the orchestrator's
+ci-fixer to reason about "in-scope vs out-of-scope" within a tool — a
+problem that simply doesn't exist when groups are tool-scoped.
 
-1. **Same rule + same tool, across multiple files** → one group.
-   Biggest cohesion win — these are all the same fix pattern applied in
-   different places. Rationale: "same rule across N files".
-2. **Same file, multiple findings (any rule, same tool)** → one group.
-   Avoids repeated edits to the same file across separate PRs.
-   Rationale: "co-located in single file".
-3. **Same tool + same finding type** (e.g., all `sonar` `VULNERABILITY`,
-   all `semgrep` security warnings) when there are only a handful that
-   didn't fit above → one group. Rationale: "same category".
-4. **Singletons** that don't match anything → their own group.
+The grouping rule is therefore tool-level (with two specific
+exceptions documented below):
 
-**Cross-tool findings are never grouped together.** Different tools mean
-different agents and different review concerns (a ruff lint fix doesn't
-go in the same PR as a sonar refactor).
+1. **One group per (configured tool, single-instance agent)** carrying
+   ALL of that tool's findings. Even if findings span different rules,
+   different files, different severities, different `type` values
+   (`BUG`, `CODE_SMELL`, `VULNERABILITY`, `SECURITY_HOTSPOT`), they
+   stay in one group. The agent handles internal sub-batching for
+   token efficiency on its own.
 
-**`SECURITY_HOTSPOT` findings** always get their own group(s), even when
-co-located in the same file as other findings — they're handled
-differently by the triage agent (often `human-review`).
+2. **`snyk_oss` splits by upgrade level**, not by rule:
+   - Patch + minor + no-fix bumps → one `python-snyk-triage` group.
+   - Each major bump → its own `python-major-upgrade` group (one PR
+     per package upgrade, since each major migration touches a
+     different package's call sites).
+
+3. **`dependabot` splits similarly**:
+   - Patch + minor pip + every github-actions / docker / unknown PR
+     → one `python-dependabot-triage` group.
+   - Each pip major PR → its own `python-major-upgrade` group.
+
+Cross-tool findings are never grouped together — different tools mean
+different agents, different review concerns, and different PRs. There
+is also no `SECURITY_HOTSPOT` special case: hotspots stay in their
+tool's group (sonar hotspots go in the sonar group). The triage agent
+handles them per its own internal decision logic; the planner doesn't
+split.
 
 ### 4. Group priority + ordering
 
 A group's priority is the **max** of its members' individual priorities.
+For single-finding groups (a major upgrade), the priority is that
+finding's own score.
 
 Order groups by descending priority. Ties broken by:
-1. Group size descending (more findings → more value per PR)
-2. Tool name ascending (stable order for reproducibility)
+1. Group size descending (a tool with 16 findings outranks a major
+   upgrade with 1, when their max priorities are equal — more value
+   per PR).
+2. Tool name ascending (stable order for reproducibility).
 
 ### 5. Map tool → agent (per the dispatcher's routing)
 
@@ -110,9 +130,10 @@ Order groups by descending priority. Ties broken by:
 | `dependabot` major (pip) | `python-major-upgrade` |
 | `dependabot` (github-actions, docker, unknown) | `python-dependabot-triage` (human-review) |
 
-For groups whose findings imply multiple agents (e.g. a snyk_oss group
-containing both a minor bump and a major), split into per-agent groups
-during clustering (step 3) — don't emit a multi-agent group.
+The two exceptions to "one group per tool" (snyk_oss splits by upgrade
+level; dependabot splits similarly) are driven by this table: when a
+single tool's findings would dispatch to multiple agents, those become
+distinct groups per agent. A single group never spans multiple agents.
 
 ## Output
 
@@ -124,32 +145,45 @@ Emit a single JSON object. **No prose, no preamble, no trailing text.**
     {
       "group_id": 1,
       "tool": "sonarcloud",
-      "rule": "python:S1192",
-      "description": "Define constants for duplicated literals",
-      "findings": ["AZ5enl4...", "AZ5enl5..."],
-      "files": ["src/aido/webui/mutation_routes.py", "src/aido/webui/routes.py"],
-      "rationale": "same rule across 3 files",
+      "description": "Triage all 16 SonarCloud findings (14 issues + 2 hotspots)",
+      "findings": ["AZ5enl4...", "AZ5enl5...", "...all 16 keys..."],
+      "files": ["src/aido/webui/mutation_routes.py", "src/aido/cli.py", "..."],
+      "rationale": "all sonarcloud findings handled together by python-sonar-triage",
       "agent": "python-sonar-triage",
-      "suggested_pr_title": "fix(sonar): define constants for duplicated literals",
-      "priority_score": 0.78
+      "suggested_pr_title": "fix(sonar): triage all 16 SonarCloud findings",
+      "priority_score": 0.91
+    },
+    {
+      "group_id": 2,
+      "tool": "snyk_oss",
+      "description": "Bump claude-agent-sdk from 0.1 to 0.2 (major-equivalent)",
+      "findings": ["claude-agent-sdk-0.1.0->0.2.0"],
+      "files": [],
+      "rationale": "single major upgrade routes to python-major-upgrade",
+      "agent": "python-major-upgrade",
+      "suggested_pr_title": "chore(deps): bump claude-agent-sdk from 0.1 to 0.2",
+      "priority_score": 0.74
     }
   ],
   "summary": {
-    "total_findings": 16,
-    "total_groups": 5,
-    "estimated_prs": 5
+    "total_findings": 17,
+    "total_groups": 2,
+    "estimated_prs": 2
   }
 }
 ```
 
 - `description` — one-line human-readable label for the group (used by
   the dispatcher when rendering the plan).
-- `rationale` — short explanation of why these findings cluster
-  ("same rule across 3 files", "co-located in single file", "singleton",
-  "same category").
+- `rationale` — short explanation of why the findings belong together
+  in this group ("all sonarcloud findings handled together by python-
+  sonar-triage", "single major upgrade routes to python-major-upgrade",
+  etc.). With the one-group-per-agent rule the rationale is mostly
+  mechanical, but stating it explicitly makes the plan self-documenting.
 - `priority_score` — the group's score, rounded to 2 decimals.
 - `suggested_pr_title` — follows conventional commit style; lowercase,
-  no trailing period. Used later by the auto-PR step (#54).
+  no trailing period. Used both as the agent's commit message subject
+  and as the PR title in Phase 8.
 
 ## What you will NOT do
 
