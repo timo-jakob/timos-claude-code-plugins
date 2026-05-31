@@ -97,6 +97,70 @@ their plugins are not built yet — only <Z> findings were processed").
 
 ## Phase 3 — gather findings per supported language
 
+### Pre-flight (Python only): venv matches project's Python version
+
+Before invoking the Python gather script, confirm the project's local
+`.venv` was built against the Python version the project declares.
+Otherwise the gather step's pytest + coverage data is from the wrong
+interpreter, and every subsequent stage's agents will run their test
+verification against that wrong venv too — producing false-positive
+syntax errors, missed runtime regressions, etc.
+
+This check ALSO runs again after Phase 8's sync step (see step 6
+there), in case a runtime-upgrade PR merged during the run.
+
+```bash
+# Project's declared Python version, in priority order:
+#   1. Dockerfile FROM python:X.Y... (most authoritative — that's what CI runs)
+#   2. pyproject.toml requires-python = ">=X.Y"
+project_py=""
+if [[ -f Dockerfile ]]; then
+  project_py=$(grep -E '^FROM[[:space:]]+python:' Dockerfile \
+                | head -1 | sed -E 's|.*python:([0-9]+\.[0-9]+).*|\1|')
+fi
+if [[ -z "$project_py" && -f pyproject.toml ]]; then
+  project_py=$(grep -E '^[[:space:]]*requires-python' pyproject.toml \
+                | grep -oE '[0-9]+\.[0-9]+' | head -1)
+fi
+
+# venv's actual Python version
+venv_py=""
+if [[ -x .venv/bin/python ]]; then
+  venv_py=$(.venv/bin/python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+fi
+
+if [[ -n "$project_py" && -n "$venv_py" && "$project_py" != "$venv_py" ]]; then
+  # Mismatch — auto-recreate, but only if python<project_py> is on PATH.
+  if ! command -v "python$project_py" >/dev/null 2>&1; then
+    # Halt — this is the one case where the user must intervene.
+    halt: "Project declares Python $project_py but local .venv is on Python $venv_py,
+           and python$project_py is not on PATH. Install it first
+           (`brew install python@$project_py`) and re-run /development:maintenance."
+  fi
+
+  info "Recreating .venv against Python $project_py (was $venv_py)…"
+  rm -rf .venv
+  "python$project_py" -m venv .venv
+  .venv/bin/pip install --quiet --upgrade pip
+  if ! .venv/bin/pip install --quiet -e ".[dev]" 2>&1 | tail -30; then
+    halt: "Failed to install project deps into the new Python $project_py venv.
+           Most common cause: a pinned dependency lacks a $project_py wheel.
+           Fix the dep pin (or wait for upstream) and re-run /development:maintenance."
+  fi
+  ok ".venv recreated on Python $project_py"
+fi
+```
+
+If `project_py` couldn't be determined (no Dockerfile + no
+`requires-python` constraint), skip the check — the user hasn't pinned
+a runtime, so any venv is acceptable.
+
+If `venv_py` is empty (no `.venv/bin/python`), also skip — the gather
+script will surface "pytest not found" via its existing notes path,
+which is the right place for that message.
+
+### Run the gather script
+
 For each `lang` in `supported`:
 
 ```bash
@@ -637,6 +701,22 @@ After pushing and opening the PR:
    git -C "<repo.path>" switch "<base_branch>"
    git -C "<repo.path>" pull --ff-only origin "<base_branch>"
    ```
+
+7. **Re-run the venv pre-flight from Phase 3.** A merge — especially of
+   a `python-runtime-upgrade` PR — can change the project's declared
+   Python version, leaving the local `.venv` stale. Without this
+   re-check, subsequent stages' agents run their test verification
+   against a venv whose interpreter no longer matches the project's
+   `Dockerfile` / `requires-python`, producing false-positive syntax
+   errors and missed regressions (this exact bug surfaced in the live
+   test on ai-doc-organizer's Stage 7).
+
+   Apply the same `project_py` vs `venv_py` comparison + auto-recreate
+   logic from Phase 3's pre-flight. The same precondition holds: if
+   `python<project_py>` isn't on PATH, halt with the "install via brew
+   first" message — that's the one case where the run can't proceed
+   autonomously. The auto-recreate path (when the interpreter IS on
+   PATH) runs in a few minutes and is safe to do mid-pipeline.
 
 ### Agents commit before returning
 
