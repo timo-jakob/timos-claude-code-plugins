@@ -163,11 +163,20 @@ info "Storing SNYK_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
 gh_secret_set_both SNYK_TOKEN "$SNYK_TOKEN"
 ok "SNYK_TOKEN set (Actions + Dependabot)"
 
-# Onboard for continuous monitoring
-if ask_yn "Run 'snyk monitor' now to enable continuous monitoring on snyk.io?"; then
-  # Best-effort — exit code != 0 if monitor finds issues but we still want to continue.
-  snyk monitor --all-projects || warn "snyk monitor reported a non-zero status (often means findings were detected; check snyk.io)"
-fi
+# Register the project with snyk.io for continuous monitoring (unconditional).
+# Without this, the project never appears on app.snyk.io/projects even though
+# CI scans against SNYK_TOKEN work fine — `snyk monitor` is what creates the
+# dashboard entry that enables alerts on newly-disclosed CVEs in installed
+# deps, recurring scans, and the org-level vuln inventory. Used to be opt-in;
+# now unconditional because "register the project" is a baseline part of
+# bootstrapping a public repo's security toolchain.
+info "Registering project on snyk.io (snyk monitor --all-projects)…"
+# Best-effort — `snyk monitor` exits non-zero when findings exist, which is
+# the expected case on a real codebase. We continue regardless and let the
+# Snyk dashboard surface what was found.
+snyk monitor --all-projects || \
+  warn "snyk monitor reported a non-zero status (typically: findings detected — check the project page on snyk.io)"
+ok "Project registered with snyk.io"
 
 # --- GitHub Security & Quality features --------------------------------------
 # All four are free on public repos. Each `gh api` call is idempotent — running
