@@ -208,16 +208,41 @@ a concern at this scale. If you ever see a payload approaching the
 multi-MB range, surface it as a quality bug on the gather script
 rather than trimming silently.
 
-The language plugin will:
+The language plugin works in **two phases** the orchestrator drives
+sequentially:
 
-- Validate the payload
-- Run its coverage pre-flight (it has the data it needs)
-- Spawn `python-coverage-improver` if Step 2c branch 2 fired
-- Run its planner against the (possibly improved) base branch
-- Return a response JSON containing **`plan`** and (when present)
-  the **coverage improver's worktree branch + summary**
+**Phase A — coverage improver (only when needed):**
 
-**The language plugin does NOT spawn work agents in this Phase.** Work
+- Plugin validates payload
+- Plugin runs coverage pre-flight
+- If Step 2c branch 2 fired → plugin spawns `python-coverage-improver`
+  in a worktree and returns immediately with `improver_result` and
+  **no `plan`**
+- Otherwise (coverage already at Required) → plugin proceeds directly
+  to Phase B in the same invocation, returning `plan` only
+
+**Orchestrator's response handling for the first dispatch:**
+
+- **Response has `improver_result` and no `plan`** → improver ran.
+  Run Stage 0 of Phase 8 first (push the improver's branch, open a
+  PR, monitor CI, merge, sync local main). Then **re-invoke the
+  plugin with the same payload** to get the plan. The second
+  invocation sees post-merge coverage and naturally lands on Phase B.
+- **Response has `plan` and no `improver_result`** → improver wasn't
+  needed. Skip Stage 0. Proceed straight to Phase 8's per-group PRs.
+- **Response has `human_action_required`** → halt as before
+  (Phase 7).
+
+**Phase B — planning (always, possibly after Phase A's PR merged):**
+
+- Plugin validates payload (same shape as Phase A)
+- Plugin runs coverage pre-flight; with Phase A's PR merged, all
+  affected modules are at Required (branch 1 fires)
+- Plugin runs its planner against the original `base_branch` (now
+  reflecting the merged improver work)
+- Plugin returns response containing `plan` and `missing_tooling`
+
+**The language plugin does NOT spawn work agents in either phase.** Work
 agents are spawned per-group in Phase 8 below so that each group's PR
 cycle (push → CI → merge → sync) completes before the next group
 starts off the just-merged main.
@@ -244,15 +269,26 @@ its own PR. PRs are processed **sequentially** — the next stage only
 spawns its agent after the previous stage's PR has merged, so each
 stage runs off the latest `main`.
 
+**Stage 0 (improver) is special: it runs BEFORE the planner has even
+been invoked.** When Phase 6's first dispatcher call returned an
+`improver_result`-only response, you immediately do Stage 0 here.
+Only after the improver's PR is merged + main is synced do you go
+back and re-invoke the dispatcher for Phase B, which gives you the
+plan. Then Stages 1..N proceed. This serialization is the whole
+point — the planner must rank against actually-merged main, not a
+worktree branch.
+
 If `--no-merge` was passed, **skip this phase entirely** and list the
 plan + any local worktree branches in the final summary for manual
 handling.
 
 ### Stage 0 — coverage improver (when present)
 
-If the language plugin's response includes an improver worktree branch
-**and path** (both are returned by the Claude Code runtime when the
-improver was spawned with `isolation="worktree"`):
+When Phase 6's first dispatcher call returned `improver_result` (no
+plan yet), run Stage 0 now, **before re-invoking the dispatcher for
+Phase B**. The improver's worktree branch + path are in the response;
+both are returned by the Claude Code runtime because the improver
+spawned with `isolation="worktree"`.
 
 1. **Push the branch** to origin:
    ```bash
@@ -273,6 +309,27 @@ improver was spawned with `isolation="worktree"`):
    git -C "<repo.path>" switch "<base_branch>"
    git -C "<repo.path>" pull --ff-only origin "<base_branch>"
    ```
+
+5. **Now re-invoke the dispatcher** with the same payload that drove
+   the first dispatch — coverage is now at Required on main, so the
+   second invocation lands on Phase B and returns the plan:
+
+   ```
+   Skill(
+     skill="development-<lang>:maintenance",
+     args="<the original JSON payload, unchanged>"
+   )
+   ```
+
+   The new response will have `plan` and no `improver_result` (that
+   was the previous response's responsibility). Capture the plan and
+   continue with Stages 1..N below.
+
+   **If the improver's PR was escalated** (3 ci-fixer attempts failed
+   or coverage somehow not at Required after merge), surface the
+   escalation and halt the run for this language. Do NOT re-invoke
+   the dispatcher; the project's coverage isn't where Stages 1..N
+   need it to be.
 
 ### Stages 1..N — one PR per planner group, in priority order
 
