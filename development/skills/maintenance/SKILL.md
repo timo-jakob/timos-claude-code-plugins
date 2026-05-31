@@ -403,17 +403,65 @@ After pushing and opening the PR:
      the user knows they're still red.
    - **At least one same-tool failure** OR **at least one new
      non-same-tool failure** → spawn `python-ci-fixer` for that
-     combined set (pass `failing_checks: <list>` in its prompt).
-     Leave the truly-pre-existing failures out of its scope.
+     combined set. Pass two things in its prompt:
 
-4. **Repeat up to 3 fixer invocations on the new failures**. After
-   each fixer commit, re-monitor and re-classify (a new failure might
-   resolve while a different pre-existing one persists — that's still
-   a green light to merge per the previous bullet). If new failures
-   still persist after 3 attempts, **do not merge** — record the PR
-   in `actions_requiring_review` for the final summary and **continue
-   to the next stage**. Failure on one stage does not block later
-   stages.
+     - `failing_checks: <list>` — the names from the combined bucket
+       above (truly-pre-existing failures are NOT in this list).
+     - `pr_scope` — what this PR was responsible for, so the fixer
+       can distinguish "this PR should have fixed X but didn't" from
+       "X isn't this PR's responsibility, escalate." Shape:
+
+       ```json
+       {
+         "tool":        "<plan[i].tool>",
+         "description": "<plan[i].description>",
+         "files":       <plan[i].files>,
+         "findings":    <plan[i].findings, full objects with keys + messages>
+       }
+       ```
+
+       For Stage 0 (coverage improver), use:
+
+       ```json
+       {
+         "tool":             "coverage",
+         "description":      "Raise coverage on under-covered modules",
+         "files":            <modules the improver was supposed to bring above threshold>,
+         "target_threshold": <the Required value, e.g. 80 or 90>
+       }
+       ```
+
+     The fixer uses `pr_scope` to scope its work at the **tool
+     level**: every failing finding from this PR's tool is in scope,
+     other tools' checks are out of scope (escalated). Same-tool
+     scope is exhaustive — `pr_scope.findings` is informational
+     context for the fixer (what the work agent intended to address),
+     not a filter for narrowing scope further. See
+     `python-ci-fixer.md` step 3 for the full decision table.
+
+4. **Process the fixer's response.** The fixer returns JSON
+   distinguishing three outcomes:
+
+   - `resolved: true` with empty `out_of_scope_failures` → fixer made
+     a commit; re-monitor CI for the next check round.
+   - `resolved: true` with non-empty `out_of_scope_failures` → the
+     failure was classified out of scope (typically other groups'
+     findings of the same tool that don't belong to this PR). **This
+     PR is safe to merge** — skip further fixer invocations for that
+     check, proceed to step 5. Record the out-of-scope failures so
+     they appear in the run summary.
+   - `resolved: false` → fixer couldn't resolve an in-scope failure;
+     `escalation_recommendation` says why. Re-monitor only if a fix
+     commit was made; otherwise count this attempt.
+
+   **Repeat up to 3 fixer invocations on the remaining in-scope new
+   failures**. After each fixer commit, re-monitor and re-classify
+   (a new failure might resolve while a different pre-existing one
+   persists — that's still a green light to merge per the previous
+   bullet). If in-scope failures still persist after 3 attempts, **do
+   not merge** — record the PR in `actions_requiring_review` for the
+   final summary and **continue to the next stage**. Failure on one
+   stage does not block later stages.
 5. **Remove the local worktree first, then merge the PR.** Order
    matters: `gh pr merge --delete-branch` tries to delete the local
    branch ref, which fails with *"cannot delete branch X used by
