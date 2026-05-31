@@ -607,10 +607,24 @@ After pushing and opening the PR:
    # Free the local branch from its worktree first.
    # <worktree_path> is what the Agent runtime returned alongside the
    # branch name in step 3 — capture both, use both here.
-   git -C "<repo.path>" worktree remove "<worktree_path>" --force
+   #
+   # IMPORTANT: use -f -f (double force), not --force / -f.
+   # Claude Code's Agent runtime locks every worktree it creates
+   # (lock reason: "claude agent agent-<id>"). The lock survives even
+   # after the originating claude process exits, so single -f errors
+   # out with "cannot remove a locked working tree". -f -f overrides
+   # the lock AND any uncommitted state. Without this, the remove
+   # silently fails, the local branch stays attached to the worktree,
+   # gh pr merge --delete-branch fails to delete the local ref, and
+   # the worktree accumulates across runs.
+   git -C "<repo.path>" worktree remove "<worktree_path>" -f -f
 
    # Now gh can cleanly delete the merged branch from both ends.
    gh pr merge "<pr_number>" --squash --delete-branch
+
+   # Belt-and-suspenders: prune any administrative refs left over from
+   # earlier runs where the remove failed silently.
+   git -C "<repo.path>" worktree prune
    ```
 
    If `<worktree_path>` is empty (legacy path where isolation didn't
