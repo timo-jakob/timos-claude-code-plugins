@@ -18,8 +18,14 @@ procedure — only the input shape and output recommendations differ.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path (you are in a fresh worktree off the
-  base branch)
+- `repo_path` — absolute path to the **parent project root** (e.g.,
+  `/Users/timo/repositories/<repo-name>`). Informational only —
+  use it for absolute file references in your output JSON. **Do
+  NOT cd here.** The Claude Code runtime spawned you with
+  `isolation="worktree"`, which made your cwd the worktree (e.g.,
+  `<repo_path>/.claude/worktrees/agent-<id>/`). That's where you
+  operate. Editing from `repo_path` would land changes in main's
+  working tree directly — never what you want.
 - `package` — name of the dep being upgraded (e.g., `pydantic`)
 - `current_version` — e.g., `"1.10.13"`
 - `target_version` — e.g., `"2.0.0"`
@@ -38,7 +44,11 @@ Your prompt contains:
 
 ### Phase 1 — gather knowledge
 
-1. `cd <repo_path>`
+1. **You are already in your worktree** — the runtime put you there
+   via `isolation="worktree"`. Confirm with `pwd` if you like; it
+   should match `<repo_path>/.claude/worktrees/agent-<id>/`. Operate
+   from this cwd. **Do NOT `cd "$repo_path"`** — that would take you
+   to the parent project where edits would touch main's working tree.
 2. Fetch the official release notes. In order of preference:
    - `release_notes_url` if provided
    - The package's PyPI page → `Project links` → `Changelog` / `Release notes`

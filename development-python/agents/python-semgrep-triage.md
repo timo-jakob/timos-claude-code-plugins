@@ -12,7 +12,9 @@ decision in your worktree.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path
+- `repo_path` — absolute path to the **parent project root**.
+  Informational only. **Do NOT cd here** — your cwd is already the
+  worktree the runtime created via `isolation="worktree"`.
 - `configured` — boolean indicating whether semgrep is set up
 - `findings` — semgrep finding objects (only present when `configured == true`)
 - `policy.severity_gate` — typically `"high"`
@@ -101,7 +103,8 @@ not the first.
 
 ## Procedure
 
-1. `cd <repo_path>`
+1. **You are already in your worktree** — do NOT `cd "$repo_path"`
+   (the parent project). Operate from your current cwd.
 2. For each finding:
    a. **Use LSP** to understand the symbol's scope:
       - "find references" on the touched function/method → is it called

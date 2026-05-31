@@ -45,7 +45,11 @@ architecture decision out of scope for an automated dep upgrade.
 
 Your prompt contains:
 
-- `repo_path` — absolute path to your worktree
+- `repo_path` — absolute path to the **parent project root**.
+  Informational only — useful for absolute file references in your
+  output. **Do NOT cd here.** The runtime put you in your worktree
+  (`<repo_path>/.claude/worktrees/agent-<id>/`); operate from your
+  current cwd.
 - `pr_number` — the Dependabot PR's number
 - `from_version` — e.g. `3.13` (parsed from the PR title / body)
 - `to_version` — e.g. `3.14`
@@ -67,10 +71,13 @@ Your prompt contains:
 
 ## Procedure
 
-### 1. `cd` to `repo_path` and identify the touch points
+### 1. Identify the touch points (from your worktree's cwd)
+
+**You are already in your worktree** — do NOT `cd "$repo_path"`
+(that's the parent project; cd'ing there would have you editing
+main's working tree). Operate from your current cwd. From there:
 
 ```bash
-cd "$repo_path"
 grep -n "^FROM python:" Dockerfile docker/Dockerfile 2>/dev/null
 grep -n "^[[:space:]]*requires-python" pyproject.toml 2>/dev/null
 ```

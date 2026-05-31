@@ -20,7 +20,12 @@ tries before the orchestrator escalates.
 Your prompt contains:
 
 - `pr_number` — the GitHub PR number
-- `repo_path` — absolute path to a checked-out worktree of the PR's branch
+- `repo_path` — absolute path to the **parent project root**.
+  Informational only. **Do NOT cd here.** The runtime spawned you
+  with `isolation="worktree"`, checking out the PR's branch into a
+  fresh worktree — that's your cwd already. (For ci-fixer the worktree
+  is off the PR's branch, not main; the other maintenance agents'
+  worktrees are off main.)
 - `attempt_number` — 1, 2, or 3. After 3 the orchestrator escalates.
 - `failing_checks` — the **scoped** list of check names you should
   attempt to fix. The orchestrator pre-classified failures and
@@ -62,10 +67,14 @@ Your prompt contains:
 
 ## Procedure
 
-### 1. cd to `repo_path` and confirm the worktree branch matches the PR
+### 1. Confirm you're in the worktree of the PR's branch
+
+**You are already in your worktree** — do NOT `cd "$repo_path"` (the
+parent project). The runtime checked out the PR's branch into a fresh
+worktree as your cwd. Verify the branch matches the PR's
+`headRefName`:
 
 ```bash
-cd "$repo_path"
 git rev-parse --abbrev-ref HEAD          # should match the PR's headRefName
 gh pr view "$pr_number" --json headRefName -q .headRefName
 ```
