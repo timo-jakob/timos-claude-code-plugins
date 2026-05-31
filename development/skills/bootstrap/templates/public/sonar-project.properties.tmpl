@@ -19,6 +19,12 @@ sonar.javascript.lcov.reportPaths=coverage/lcov.info
 # --- TYPESCRIPT-END -----
 # --- PYTHON-START -------
 sonar.python.coverage.reportPaths=coverage.xml
+# Without this, Sonar warns "Your code is analyzed as compatible with all
+# Python 3 versions by default. You can get a more precise analysis by
+# setting the exact Python version..." — set it to the project's actual
+# runtime (derived from pyproject.toml's `requires-python` by the
+# bootstrap script).
+sonar.python.version={{PYTHON_VERSION}}
 # --- PYTHON-END ---------
 # --- GO-START -----------
 sonar.go.coverage.reportPaths=coverage.out
