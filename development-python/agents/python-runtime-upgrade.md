@@ -1,6 +1,6 @@
 ---
 name: python-runtime-upgrade
-description: Apply a Python interpreter upgrade triggered by a Dependabot Docker base-image bump (`python:X.Y → python:Z.W`). Read the upstream release notes, swap the Dockerfile FROM line and pyproject.toml's `requires-python`, attempt one best-effort local verification against the new interpreter if it's available, and commit the swap regardless. **One-shot**: does NOT iterate trying to make incompatible dependencies work; escalates with a structured report instead. Used by development-python:maintenance for the special case where a Dependabot docker bump is the Python runtime itself.
+description: Apply a Python interpreter upgrade triggered by a Dependabot Docker base-image bump (`python:X.Y → python:Z.W`). Reads the upstream release notes, swaps the Dockerfile FROM line and pyproject.toml's `requires-python`, attempts local verification against the new interpreter, and **cascade-upgrades dependencies as needed** (reading their release notes and applying migrations) when their current pin doesn't support the new Python. Iterates up to 3 passes. Stops only when a required dep has no version supporting the target interpreter — that's the escalation case. Does NOT search for alternative libraries. Used by development-python:maintenance for the special case where a Dependabot docker bump is the Python runtime itself.
 model: opus
 tools: Read, Edit, Bash, Grep, WebFetch
 ---
@@ -18,15 +18,28 @@ The architecture treats this as its own scope (one PR for the runtime
 upgrade) rather than letting `python-dependabot-triage` defer it to
 human review.
 
-**You try the upgrade. If it works locally, you commit the swap and
-return success. If you detect blocking issues, you commit the swap
-anyway** (the file changes are correct; only the verification
-result differs) **and return an `actions_requiring_review` block
-that tells the human exactly what's blocking the bump.**
+**You take the upgrade seriously.** That means actually trying it:
 
-You **do NOT** iterate trying to fix dependency-compatibility issues.
-That's a multi-day investigation per dep, well outside maintenance
-scope.
+1. Swap the interpreter pin (Dockerfile + `requires-python`).
+2. Try to install + test against the new interpreter.
+3. **If install fails because a dep's pinned range doesn't include a
+   `<to_version>`-compatible version, cascade-upgrade that dep** —
+   query PyPI for the lowest version that supports the new interpreter,
+   bump the pin in `pyproject.toml`, read its release notes via
+   `WebFetch` for breaking changes, apply migration patterns to call
+   sites, retry.
+4. Iterate up to 3 passes. Tests must pass at the end.
+
+The **only** scenario where you escalate is: **a required dependency
+has no version on PyPI that supports `<to_version>`** (the package
+hasn't released 3.W wheels yet, or it's been abandoned). That's a
+genuine "ecosystem isn't ready" case — escalate cleanly with the
+blocking dep name(s) and let the human decide whether to wait, file
+upstream, or close the bump.
+
+You **do NOT search for alternative libraries**. If `pypdf` is blocking
+the upgrade, you don't replace it with `pdfminer.six`. That's a project
+architecture decision out of scope for an automated dep upgrade.
 
 ## Inputs
 
@@ -91,13 +104,16 @@ Also check for explicit version mentions in `mise.toml`, `.python-version`,
 `tool.poetry.dependencies.python`, `setup.cfg`'s `python_requires`,
 or CI workflow `python-version` matrices — update them coherently.
 
-### 5. Best-effort local verification (one attempt)
+### 5. Local verification + dep cascade (up to 3 passes)
 
-Try to install the project against the new interpreter. Skip cleanly
-if not available — don't try to install Python.
+Try to install the project against the new interpreter. If the target
+interpreter isn't on this machine, skip the local verification entirely
+— **don't install Python locally**, and don't escalate just because
+you couldn't verify locally. CI will run on the actual
+`<to_version>` Docker image.
 
 ```bash
-# Try interpreter discovery in this order:
+# Interpreter discovery in this order:
 for py in python<to_version> /opt/homebrew/bin/python<to_version> \
           $(uv python find <to_version> 2>/dev/null); do
   if [ -x "$py" ]; then
@@ -107,30 +123,71 @@ for py in python<to_version> /opt/homebrew/bin/python<to_version> \
 done
 
 if [ -z "$PY" ]; then
-  echo "python<to_version> not available locally; skipping local verify"
+  echo "python<to_version> not available locally — skipping local verify."
   # Set local_verification: skipped in output, proceed to commit.
-else
-  # Fresh venv against the new interpreter
-  "$PY" -m venv .venv-runtime-upgrade-check
-  .venv-runtime-upgrade-check/bin/pip install --quiet --upgrade pip
-  # The crucial step: does pip resolve a full install against <to_version>?
-  if ! .venv-runtime-upgrade-check/bin/pip install -e ".[dev]" \
-       2>&1 | tee /tmp/install.log; then
-    INSTALL_FAILED=1
-  else
-    # Run the test suite
-    if ! .venv-runtime-upgrade-check/bin/pytest --tb=short 2>&1 \
-         | tee /tmp/pytest.log; then
-      TESTS_FAILED=1
-    fi
-  fi
-  # Clean up the throwaway venv to keep the worktree tidy
-  rm -rf .venv-runtime-upgrade-check
+  # The file edits (FROM + requires-python) are still correct; CI verifies.
 fi
 ```
 
-Capture which step failed (install vs tests) and the failing output.
-**Do not** iterate. One install attempt, one test pass.
+If `$PY` is set, run the **install + iterate** loop (up to 3 passes):
+
+```
+PASS 1
+  Fresh venv against <to_version>:
+    "$PY" -m venv .venv-runtime-upgrade-check
+    .venv-runtime-upgrade-check/bin/pip install --quiet --upgrade pip
+  Try the project install:
+    .venv-runtime-upgrade-check/bin/pip install -e ".[dev]"
+
+  If install succeeds → run tests:
+    .venv-runtime-upgrade-check/bin/pytest --tb=short
+    All pass → DONE. Clean up venv, proceed to step 6 (commit).
+
+  If install FAILS → identify the offending dep(s) from the error.
+  Common shapes:
+    - "Could not find a version of <pkg> that satisfies the requirement
+       <pkg>X.Y, ... (from versions: ...). No matching distribution
+       found for <pkg>..."
+    - "<pkg>X.Y.Z requires python>=3.13,<3.14"
+    - Build failures from a sdist where wheels aren't available.
+
+  For each offending dep, run:
+    .venv-runtime-upgrade-check/bin/pip index versions <pkg>
+    # OR query PyPI directly:
+    #   https://pypi.org/pypi/<pkg>/json
+    #   then filter releases where any file's classifier or wheel tag
+    #   indicates Python <to_version> support.
+
+  Pick the LOWEST version that supports <to_version>. Minimizing the
+  jump keeps the migration small. If the chosen version crosses a
+  major boundary from the current pin, WebFetch its release notes /
+  changelog and identify breaking changes that affect the project.
+
+  Update the pin in pyproject.toml (and apply migration patterns to
+  the project's call sites if breaking changes exist).
+
+  If NO version of the dep on PyPI supports <to_version>, mark it as
+  a "hard blocker" — there's nothing the agent can do. Don't replace
+  it with an alternative library. Don't pin <to_version> back.
+
+PASS 2, PASS 3
+  Repeat: fresh venv → install → tests. Each pass may reveal more
+  deps that need bumping (a transitive constraint surfaces once the
+  first-order dep is unblocked). Apply the same logic.
+
+After PASS 3:
+  - All install attempts succeeded AND tests pass → success path
+    (proceed to step 6, commit, normal return).
+  - At least one hard blocker remains (a required dep with no
+    <to_version>-compatible version) → escalation path (see step 7
+    for the structured report shape).
+  - Install eventually worked but tests still fail after 3 passes
+    AND the failures aren't from the deps you bumped → escalation
+    path. Don't paper over real test failures.
+```
+
+Throughout: keep the throwaway venv in `.venv-runtime-upgrade-check`
+and remove it before returning so the worktree stays tidy.
 
 ### 6. Commit the swap
 
@@ -158,10 +215,14 @@ If install + tests passed (or verification was skipped):
   "actions_taken": [
     {
       "type": "runtime_upgrade",
-      "summary": "Bumped Python interpreter 3.13 → 3.14. Updated Dockerfile FROM line and pyproject.toml requires-python.",
+      "summary": "Bumped Python interpreter 3.13 → 3.14. Cascade-upgraded 2 deps: pypdf 4.0.0 → 6.12.1, watchdog 4.0.0 → 6.0.0.",
       "files_changed": ["Dockerfile", "pyproject.toml"],
       "worktree_branch": "<branch>",
-      "local_verification": "passed"
+      "local_verification": "passed",
+      "cascaded_deps": [
+        { "name": "pypdf",    "from": "4.0.0", "to": "6.12.1", "reason": "no 3.14-compatible release in 4.x or 5.x" },
+        { "name": "watchdog", "from": "4.0.0", "to": "6.0.0",  "reason": "select.select() removed in 3.14; watchdog 6 switched to select.poll()" }
+      ]
     }
   ],
   "actions_requiring_review": [],
@@ -169,11 +230,13 @@ If install + tests passed (or verification was skipped):
 }
 ```
 
-(Use `"local_verification": "skipped"` when the target interpreter
-wasn't available locally — that's the common case on developer
-machines that don't have every Python version installed.)
+(Use `"local_verification": "skipped"` and omit `cascaded_deps` if the
+target interpreter wasn't available locally. In that case you only
+edited the Dockerfile + `requires-python`; CI does the real
+verification.)
 
-If install or tests failed:
+If a required dep has no `<to_version>`-compatible version after the
+3-pass cascade (the only legitimate escalation case):
 
 ```json
 {
@@ -184,10 +247,13 @@ If install or tests failed:
   "actions_taken": [
     {
       "type": "runtime_upgrade",
-      "summary": "Bumped Python interpreter 3.13 → 3.14 (file edits committed). Local verification BLOCKED — see actions_requiring_review.",
+      "summary": "Bumped Python interpreter 3.13 → 3.14 (file edits committed) and cascade-upgraded 1 dep. BLOCKED on <pkg> — see actions_requiring_review.",
       "files_changed": ["Dockerfile", "pyproject.toml"],
       "worktree_branch": "<branch>",
-      "local_verification": "failed"
+      "local_verification": "failed",
+      "cascaded_deps": [
+        { "name": "watchdog", "from": "4.0.0", "to": "6.0.0", "reason": "..." }
+      ]
     }
   ],
   "actions_requiring_review": [
@@ -195,17 +261,19 @@ If install or tests failed:
       "finding_id": "python-runtime-upgrade:<from>-to-<to>",
       "type": "RUNTIME_UPGRADE_BLOCKED",
       "severity": "MAJOR",
-      "recommendation": "<one-line summary, e.g. 'pypdf 4.0.0 has no 3.14 wheels; awaiting upstream'>",
-      "rationale": "Python <to_version> runtime upgrade attempted; local pip install or pytest failed on the new interpreter. Details below.",
+      "recommendation": "<one-line summary, e.g. 'pypdf has no 3.14-compatible release on PyPI yet — awaiting upstream'>",
+      "rationale": "Python <to_version> runtime upgrade attempted with 3-pass dep cascade. One or more required dependencies have no version on PyPI supporting <to_version>.",
       "details": {
-        "phase": "install" | "tests",
-        "failing_dependencies": ["<pkg-name>", "..."],
-        "failing_tests": ["<test_id>", "..."],
-        "log_excerpt": "<last ~40 lines of the failing log>",
-        "breaking_changes_to_check": [
-          "<from the whatsnew doc — items most likely related to the failure>"
+        "blocking_dependencies": [
+          { "name": "pypdf", "current_pin": ">=4.0.0", "latest_on_pypi": "6.12.1", "max_supported_python": "3.13", "upstream_tracking_issue": "<url if discoverable>" }
         ],
-        "next_steps_for_human": "Wait for upstream wheels / file issues with the listed packages / decide whether to pin the interpreter back."
+        "cascade_attempts": [
+          { "pass": 1, "bumped": ["watchdog 4.0.0 → 6.0.0"], "still_failing": ["pypdf"] },
+          { "pass": 2, "bumped": [], "still_failing": ["pypdf"], "note": "no compatible version exists" },
+          { "pass": 3, "bumped": [], "still_failing": ["pypdf"], "note": "confirmed blocker" }
+        ],
+        "log_excerpt": "<last ~40 lines of the failing pip install log>",
+        "next_steps_for_human": "Wait for upstream <pkg> to add <to_version> support / file an issue / decide whether to revert the interpreter bump for now."
       }
     }
   ],
@@ -219,16 +287,24 @@ issues, or close the bump.
 
 ## What you will NOT do
 
-- Iterate after a failed install or test pass. **One attempt only.**
-- Edit dependency version constraints to "make them compatible." If
-  `pypdf 4.0.0` doesn't have 3.14 wheels, that's pypdf's problem, not
-  yours. Don't try `pip install pypdf==<some-other-version>`.
-- Edit application code to work around stdlib deprecations. The whole
-  point of the escalation is that the human decides whether the
-  upgrade is ready.
+- **Search for alternative libraries.** If `pypdf` is blocking the
+  upgrade and has no 3.14-compatible release on PyPI, you do NOT
+  replace it with `pdfminer.six` (or any other library). Library
+  swaps are a project architecture decision out of scope for an
+  automated bump. Escalate via the blocking report instead.
+- Iterate beyond 3 cascade passes. After the third pass, either
+  everything works (commit + success) or you have a confirmed
+  hard blocker (commit the partial state + escalation report).
+  Don't keep retrying.
+- **Pin the interpreter back.** If 3.14 doesn't work, you don't
+  revert the Dockerfile to 3.13 — the file edits stay. The human
+  reads your escalation report and decides whether to wait or close
+  the Dependabot PR.
 - Install Python locally (no `brew install python@X.Y`, no `uv python
   install X.Y`). If the interpreter isn't there, set
   `local_verification: skipped` and let CI do the real verification.
+  An unavailable interpreter is NOT an escalation case — the file
+  edits are still correct.
 - Push to remote, open a PR, or modify the parent PR's metadata.
 - Use `--no-verify` on the commit.
 - Spawn other agents.
