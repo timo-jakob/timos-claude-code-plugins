@@ -260,18 +260,52 @@ For each entry in `response.plan`, in priority order:
 1. **Determine the effective base branch** — the user's current branch
    after all prior merges (initially `worktree.base_branch`; updated
    after each merge by the sync step).
-2. **Spawn the group's agent** with `isolation="worktree"` off that
-   effective base. Pass:
-   - `repo_path`
-   - `configured: true`
-   - `findings` — the slice from this group's `findings[]`
-   - `policy`
-   - `worktree.base_branch` — the effective base
-   - The agent's procedural prompt (test-must-pass suffix)
 
-   The `subagent_type` comes from the plan entry's `agent` field.
+2. **Spawn the group's agent with `isolation="worktree"`.** This is
+   the single most load-bearing parameter in the call. **Omitting it
+   silently breaks the entire per-group-PR invariant**: the agent
+   then edits the main workspace instead of a fresh worktree branch,
+   its changes land on `main`'s working tree, and you (the
+   orchestrator) end up creating a branch + commit ad-hoc after the
+   fact — exactly the failure mode this phase exists to prevent.
+
+   **Always pass `isolation="worktree"`, every group, no exceptions
+   for work agents.** Use this exact call shape:
+
+   ```
+   Agent(
+     subagent_type="<plan[i].agent>",
+     description="<plan[i].description>",
+     isolation="worktree",
+     prompt="""
+       repo_path: <repo.path>
+       configured: true
+       findings: <plan[i].findings, with their full finding objects>
+       policy: <policy>
+       worktree.base_branch: <effective base after prior merges>
+       commit_subject: <plan[i].suggested_pr_title>
+
+       End with the project's test command in the worktree; only
+       return success if tests pass. Commit your changes on the
+       worktree branch before returning — the orchestrator will push
+       the branch as-is.
+     """
+   )
+   ```
+
+   Only exception: `python-dependabot-triage` is spawned WITHOUT
+   `isolation` (it acts on GitHub PRs via `gh`, not local files).
+   See the dispatcher SKILL for the full case list.
+
 3. **Wait for the agent** → receive its worktree branch (the
-   Claude Code runtime returns it from the worktree isolation).
+   Claude Code runtime returns it because you passed `isolation`).
+
+   **If the agent comes back without a worktree branch and the main
+   workspace has uncommitted changes, that's a contract violation,
+   not a graceful path.** Surface it in the summary as a quality bug.
+   Do NOT silently create a `maint/...` branch from the dirty main
+   workspace — that masks the underlying failure and breaks
+   reproducibility for subsequent stages.
 4. **Push, open PR, run CI cycle** (same as Stage 0), titled per the
    plan entry's `suggested_pr_title`.
 5. **After merge, sync local main**.
@@ -307,41 +341,20 @@ After pushing and opening the PR:
    git -C "<repo.path>" pull --ff-only origin "<base_branch>"
    ```
 
-### Agent → spawn shape (Phase 8 reference)
+### Agents commit before returning
 
-When spawning a work agent for a group, the call shape is:
-
-```
-Agent(
-  subagent_type="<plan[i].agent>",
-  description="<plan[i].description>",
-  isolation="worktree",
-  prompt="""
-    repo_path: <repo.path>
-    configured: true
-    findings: <plan[i].findings, with their full finding objects>
-    policy: <policy>
-    worktree.base_branch: <effective base after prior merges>
-    commit_subject: <plan[i].suggested_pr_title>
-
-    End with the project's test command in the worktree; only return
-    success if tests pass. Commit your changes on the worktree branch
-    before returning — the orchestrator will push the branch as-is.
-  """
-)
-```
-
-**Agents commit before returning.** The agent's final procedure step
-runs `git add -A && git commit -m "<commit_subject>"` on its worktree
-branch (only if it made changes). The orchestrator then pushes that
+The agent's final procedure step runs
+`git add -A && git commit -m "<commit_subject>"` on its worktree branch
+(only when it made changes). The orchestrator then pushes that
 already-committed branch — no ad-hoc "commit pending changes" logic in
-this phase. If a worktree branch comes back uncommitted (legacy agent
-or runtime quirk), surface it in the summary as a quality bug; do not
-silently bridge it.
+this phase. **If a worktree branch comes back uncommitted, that's a
+legacy-agent quality bug** — surface it in the summary; do not silently
+bridge it.
 
-Exception: `python-dependabot-triage` is spawned **without** `isolation`
-(it acts on GitHub PRs via `gh`, not local files). See the dispatcher
-SKILL for the full case list.
+This pairs with the isolation contract in step 2: the agent only ever
+commits to its own worktree branch, and the orchestrator only ever
+pushes a branch the runtime created. Together those two invariants
+keep `main`'s working tree clean throughout the entire run.
 
 If `--no-merge` was passed: skip this phase. List the branches in the
 final summary so the user can merge manually.
