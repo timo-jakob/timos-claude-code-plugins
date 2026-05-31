@@ -26,6 +26,37 @@ Your prompt contains:
   attempt to fix. The orchestrator pre-classified failures and
   excluded ones already failing on the base branch; those are not
   your concern. Only work on the names in this list.
+- `pr_scope` — **what this PR was responsible for**. The orchestrator
+  passes this so you can distinguish a failure caused by the PR's
+  own incomplete work from a failure that belongs to someone else's
+  work (typically other groups of the same tool, processed in
+  later PRs). Shape for a work-agent PR:
+
+  ```json
+  {
+    "tool":        "sonarcloud",
+    "description": "Define constants for duplicated string literals",
+    "files":       ["src/aido/webui/mutation_routes.py", "..."],
+    "findings":    [
+      { "key": "AZ5enl4CgbS7DYtyS95H", "rule": "python:S1192",
+        "component": "src/aido/webui/mutation_routes.py",
+        "line": 59, "message": "Define a constant ..." },
+      ...
+    ]
+  }
+  ```
+
+  Shape for Stage 0 (coverage improver):
+
+  ```json
+  {
+    "tool":             "coverage",
+    "description":      "Raise coverage on under-covered modules",
+    "files":            ["src/aido/cli.py", "..."],
+    "target_threshold": 80
+  }
+  ```
+
 - `previous_attempts` — short summaries of what earlier invocations
   tried (empty on the first attempt). Don't repeat a failing approach.
 
@@ -59,7 +90,37 @@ For each in-scope failing check:
 - Parse the actual failure: pytest assertion, ruff violation, mypy
   error, build error, coverage drop, etc.
 
-### 3. Identify the root cause
+### 3. Classify each failure: in-scope vs out-of-scope
+
+Before fixing anything, decide whether each failing check is **in
+scope** for this PR by cross-referencing `pr_scope`:
+
+| Failure shape | Classification | Action |
+|---|---|---|
+| Check `name` matches `pr_scope.tool` (substring) AND the failure log references files in `pr_scope.files` OR finding keys in `pr_scope.findings` | **in scope** | Fix (proceed to step 4) |
+| Check `name` matches `pr_scope.tool` (substring) BUT the failure references files / finding keys NOT in `pr_scope.*` | **out of scope** (other groups' work, processed in later PRs) | Escalate, do NOT fix |
+| Check `name` does NOT match `pr_scope.tool` (different tool's check failing on this PR) | **in scope** (cross-tool damage caused by the work agent's edits) | Fix (proceed to step 4) |
+| Failure is a generic project check (pytest, ruff, type check) and the failure references files in `pr_scope.files` or files the diff modified | **in scope** | Fix (proceed to step 4) |
+| Failure references files NOT in `pr_scope.files` AND NOT in the PR's diff | **out of scope** | Escalate, do NOT fix |
+
+**Out-of-scope failures** are returned as a single `escalation_recommendation`
+in the output (see step 6). Do not delete out-of-scope failures from
+the failing list silently — surface them so the orchestrator and the
+final summary can show them as needing human review.
+
+For sonarcloud-tool failures specifically, the typical case is:
+
+- Sonar's CI report flags 15 findings on this PR, of which 3 are
+  yours (in `pr_scope.findings`) and 12 are from other groups.
+- The 3 yours: investigate — your work agent may have committed a
+  bad patch. **Fix them** (proceed to step 4 with focus on those
+  3 keys).
+- The 12 others: out of scope. Escalate.
+
+If the sonar API isn't directly queryable, parse the SonarCloud check
+log for finding keys + file paths and match against `pr_scope`.
+
+### 3.5. Identify the root cause (for in-scope failures only)
 
 Categories you'll commonly see:
 
@@ -115,20 +176,40 @@ A single JSON object:
   "resolved": true,
   "summary": "Fixed pytest failure in test_mutation_routes.py: test was asserting old non-parameterized SQL; updated to assert parameterized query shape.",
   "commit_sha": "abc1234",
-  "files_changed": ["tests/integration/test_mutation_routes.py"]
+  "files_changed": ["tests/integration/test_mutation_routes.py"],
+  "out_of_scope_failures": []
 }
 ```
 
-Or on inability to fix:
+Or on inability to fix in-scope issues:
 
 ```json
 {
   "resolved": false,
   "summary": "Pytest failure persists after two local-fix passes. test_seed_from_yaml fails with 'sqlite3.OperationalError: database is locked' — likely a fixture cleanup race introduced by the cli.py refactor in this PR.",
   "files_changed": [],
+  "out_of_scope_failures": [],
   "escalation_recommendation": "Roll back the cli.py refactor and re-triage; the python:S3776 finding may not be safely autofixable for this codebase."
 }
 ```
+
+Or when the failure was classified out of scope by step 3:
+
+```json
+{
+  "resolved": true,
+  "summary": "Sonarcloud check fails on this PR because 12 sonar findings from other groups (S6965, S4502, ...) are still on main. The 3 findings in this PR's pr_scope (S1192 × 2, S3776 × 1) were already resolved by the work agent. Nothing to fix here.",
+  "commit_sha": null,
+  "files_changed": [],
+  "out_of_scope_failures": [
+    { "check": "sonarcloud", "reason": "12 findings out of scope — belong to later groups; this PR's 3 findings already resolved." }
+  ]
+}
+```
+
+`resolved: true` with a populated `out_of_scope_failures` means **the
+PR is safe to merge** — the failing check is not this PR's
+responsibility. The orchestrator will merge.
 
 No prose, no preamble — just the JSON.
 
