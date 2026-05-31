@@ -12,7 +12,9 @@ findings.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path
+- `repo_path` — absolute path to the **parent project root**.
+  Informational only. **Do NOT cd here** — your cwd is already the
+  worktree the runtime created via `isolation="worktree"`.
 - `configured.snyk_code` — boolean: is Snyk Code set up
 - `configured.snyk_oss` — boolean: is Snyk OSS set up
 - `findings.snyk_code` — findings (only when `configured.snyk_code == true`)
@@ -97,7 +99,8 @@ The expiry date should be 90 days from today.
 
 ## Procedure
 
-1. `cd <repo_path>`
+1. **You are already in your worktree** — do NOT `cd "$repo_path"`
+   (the parent project). Operate from your current cwd.
 2. For each `snyk_code` finding:
    a. Use LSP to scope the symbol (find-references, exported-from-package).
    b. Decide fix / suppress / human-review per the same

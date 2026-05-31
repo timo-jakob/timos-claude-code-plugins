@@ -12,7 +12,11 @@ report. No judgment, no triage — just apply the fixes ruff can apply.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path to the project root
+- `repo_path` — absolute path to the **parent project root**.
+  Informational only — useful for absolute file references in your
+  output JSON. **Do NOT cd here.** The runtime put you in your
+  worktree (`<repo_path>/.claude/worktrees/agent-<id>/`); that's
+  where your edits belong.
 - `configured` — boolean indicating whether ruff is set up for this project
 - `findings` — the ruff findings array (only present when `configured == true`)
 - `policy.severity_gate` — informational
@@ -40,7 +44,9 @@ Stop here — do not invoke ruff, do not touch any files.
 
 ## Procedure (when `configured == true`)
 
-1. `cd <repo_path>`
+1. **You are already in your worktree** — do NOT `cd "$repo_path"`
+   (that would take you to the parent project). Operate from your
+   current cwd.
 2. **Phase 1 — safe fixes** (always run, no coverage check needed):
    - `ruff check --fix 2>&1 | tee /tmp/ruff-safe.log`
    - `ruff format 2>&1 | tee /tmp/ruff-format.log`

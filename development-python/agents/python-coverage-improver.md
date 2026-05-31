@@ -19,7 +19,12 @@ tests at all.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path (fresh worktree, new branch)
+- `repo_path` — absolute path to the **parent project root**.
+  Informational only. **Do NOT cd here** — the Claude Code runtime
+  spawned you with `isolation="worktree"`, so your cwd IS the
+  worktree (e.g., `<repo_path>/.claude/worktrees/agent-<id>/`).
+  Editing from `repo_path` would land changes in main's working
+  tree directly.
 - `modules_to_improve` — list of file paths with their current coverage
   and the target threshold:
   ```
@@ -35,7 +40,9 @@ Your prompt contains:
 
 ### Phase 1 — understand the coverage gap
 
-1. `cd <repo_path>`
+1. **You are already in your worktree** (the runtime put you there via
+   `isolation="worktree"`). Do NOT `cd "$repo_path"`; that's the
+   parent project. Operate from your current cwd.
 2. Run `pytest --cov --cov-report=term-missing --cov-report=json`
 3. Read `coverage.json` (or `.coverage` + `coverage report -m`) to
    identify the **specific uncovered lines and branches** for each

@@ -12,7 +12,9 @@ hotspots, and coverage gaps. You triage each one.
 ## Inputs
 
 Your prompt contains:
-- `repo_path` — absolute path
+- `repo_path` — absolute path to the **parent project root**.
+  Informational only. **Do NOT cd here** — your cwd is already the
+  worktree the runtime created via `isolation="worktree"`.
 - `configured` — boolean indicating whether SonarCloud/SonarQube is set up
 - `findings` — Sonar finding objects (only when `configured == true`), each with:
   - `type` — `BUG` | `CODE_SMELL` | `VULNERABILITY` | `SECURITY_HOTSPOT`
@@ -93,7 +95,8 @@ operational setup.
 
 ## Procedure
 
-1. `cd <repo_path>`
+1. **You are already in your worktree** — do NOT `cd "$repo_path"`
+   (the parent project). Operate from your current cwd.
 2. Group findings by file to minimize re-reads.
 3. For each file:
    - Read the file once.
