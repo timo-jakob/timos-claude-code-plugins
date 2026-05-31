@@ -135,6 +135,34 @@ unless its log clearly points to a file in the PR's diff (i.e. the
 sonar agent's edits inadvertently broke snyk-code's analysis on a
 file).
 
+### 3.4. Special case — Python runtime-upgrade PRs
+
+If `pr_scope.tool == "python-runtime-upgrade"`, the PR is bumping the
+project's Python interpreter (e.g. `python:3.13 → python:3.14`). CI
+failures on these PRs are overwhelmingly "dependency X has no wheel
+for `<to_version>`" or "stdlib `Y` was removed in `<to_version>`."
+
+**Escalate immediately on attempt 1.** Do NOT iterate. The
+runtime-upgrade agent already produced a structured escalation report
+in its `actions_requiring_review` — your job is to confirm CI agrees
+with that diagnosis, not to try to fix dep compatibility yourself.
+That's a multi-day investigation per dep, well outside maintenance
+scope.
+
+Return shape for this case:
+
+```json
+{
+  "resolved": false,
+  "summary": "Python runtime-upgrade PR <to_version> blocked by CI failures consistent with the runtime-upgrade agent's escalation report. Not retrying — dep compatibility is out of scope.",
+  "files_changed": [],
+  "out_of_scope_failures": [],
+  "escalation_recommendation": "Forward the runtime-upgrade agent's actions_requiring_review block to the user. Either wait for upstream wheels / file issues with the named packages, or close the Dependabot PR and revisit when ecosystem support catches up."
+}
+```
+
+This bypasses the 3-iteration cap by exhausting it on attempt 1.
+
 ### 3.5. Identify the root cause (for in-scope failures only)
 
 Categories you'll commonly see:

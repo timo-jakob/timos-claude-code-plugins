@@ -86,6 +86,7 @@ constructs the input and dispatches here.
 | python-snyk-triage | sonnet | Snyk Code + Snyk OSS; auto-bumps patch + minor versions in pyproject.toml/requirements.txt; distro CVEs → 90-day `.snyk` ignore |
 | python-sonar-triage | sonnet | SonarCloud bugs/smells/vulns; security hotspots investigated context-first, not punted by default |
 | python-major-upgrade | opus | Reads official release notes via WebFetch; maps breaking changes to call sites via LSP; applies migration; iterates up to 3 times on test failures |
+| python-runtime-upgrade | opus | Applies a Python interpreter bump (Dependabot's `python:X.Y → Z.W` Docker base-image PR). Swaps Dockerfile FROM and pyproject.toml `requires-python`; best-effort local verify against the new interpreter if available; one-shot — escalates with a structured report when deps aren't 3.W-ready instead of looping |
 | python-coverage-improver | opus | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
 | python-dependabot-triage | sonnet | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
 
