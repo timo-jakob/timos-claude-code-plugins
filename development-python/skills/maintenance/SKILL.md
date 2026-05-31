@@ -606,6 +606,7 @@ the response and return:
   "plan": [ /* the planner's full output array, unchanged */ ],
   "improver_result": {
     "worktree_branch": "<branch name returned by the improver agent>",
+    "worktree_path":   "<absolute path returned alongside the branch>",
     "summary": "<improver's one-line summary>",
     "modules_improved": [
       { "file": "src/...", "before": 61.9, "after": 94.0 }

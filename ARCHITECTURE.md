@@ -316,6 +316,7 @@ from `findings_by_tool`).
   ],
   "improver_result": {
     "worktree_branch": "<branch returned by python-coverage-improver>",
+    "worktree_path":   "<absolute path the runtime returned alongside the branch>",
     "summary": "Raised coverage on 2 modules above the 80% required threshold",
     "modules_improved": [
       { "file": "src/aido/webui/mutation_routes.py", "before": 61.9, "after": 94.0 },
