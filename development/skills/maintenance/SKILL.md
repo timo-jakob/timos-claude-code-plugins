@@ -130,24 +130,7 @@ if [[ -x .venv/bin/python ]]; then
 fi
 
 if [[ -n "$project_py" && -n "$venv_py" && "$project_py" != "$venv_py" ]]; then
-  # Mismatch — auto-recreate, but only if python<project_py> is on PATH.
-  if ! command -v "python$project_py" >/dev/null 2>&1; then
-    # Halt — this is the one case where the user must intervene.
-    halt: "Project declares Python $project_py but local .venv is on Python $venv_py,
-           and python$project_py is not on PATH. Install it first
-           (`brew install python@$project_py`) and re-run /development:maintenance."
-  fi
-
-  info "Recreating .venv against Python $project_py (was $venv_py)…"
-  rm -rf .venv
-  "python$project_py" -m venv .venv
-  .venv/bin/pip install --quiet --upgrade pip
-  if ! .venv/bin/pip install --quiet -e ".[dev]" 2>&1 | tail -30; then
-    halt: "Failed to install project deps into the new Python $project_py venv.
-           Most common cause: a pinned dependency lacks a $project_py wheel.
-           Fix the dep pin (or wait for upstream) and re-run /development:maintenance."
-  fi
-  ok ".venv recreated on Python $project_py"
+  run_venv_recovery "$project_py" "$venv_py"   # see procedure below
 fi
 ```
 
@@ -158,6 +141,127 @@ a runtime, so any venv is acceptable.
 If `venv_py` is empty (no `.venv/bin/python`), also skip — the gather
 script will surface "pytest not found" via its existing notes path,
 which is the right place for that message.
+
+### Venv recovery procedure (shared with Phase 8 step 7)
+
+Both this Phase 3 pre-flight and Phase 8 step 7 (after sync) invoke
+the same recovery logic when they detect a mismatch. Keeping it in one
+place avoids drift; treat the following as the one canonical procedure
+both checkpoints call:
+
+#### Step R.1 — verify the target interpreter exists
+
+```bash
+if ! command -v "python$project_py" >/dev/null 2>&1; then
+  halt: "Project declares Python $project_py but local .venv is on
+         Python $venv_py, and python$project_py is not on PATH.
+         Install it (`brew install python@$project_py`) and re-run
+         /development:maintenance."
+fi
+```
+
+This is the **one halt path that needs user intervention**. The
+maintenance pipeline does not install language runtimes — that's an
+operational decision the user owns.
+
+#### Step R.2 — first install attempt against the new interpreter
+
+```bash
+rm -rf .venv
+"python$project_py" -m venv .venv
+.venv/bin/pip install --quiet --upgrade pip
+.venv/bin/pip install -e ".[dev]" 2>&1 | tee /tmp/recover_install.log
+```
+
+If install **succeeds** → done. Proceed to the caller's next step
+(Phase 3 → run the gather script; Phase 8 → spawn the next stage's
+agent).
+
+If install **fails** → proceed to R.3 (cascade).
+
+#### Step R.3 — dep cascade (up to 3 passes)
+
+Mirror the procedure in `python-runtime-upgrade.md` step 5, applied
+here in the orchestrator's context. The agent's logic is exactly what
+needs to happen if a dep version constraint excludes the new
+interpreter:
+
+```
+PASS N (N in 1..3):
+  Parse /tmp/recover_install.log for the offending dep(s). Common shapes:
+    - "Could not find a version of <pkg> that satisfies the requirement"
+    - "<pkg> X.Y.Z requires python>=3.13,<3.14"
+    - Build failures from a sdist where no wheel is available
+
+  For each offending dep:
+    .venv/bin/pip index versions "<pkg>"           # or query PyPI JSON
+    Pick the lowest version that supports python$project_py.
+    If the chosen version crosses a major boundary vs the current pin:
+      WebFetch the dep's release notes / changelog.
+      Identify breaking changes that affect this project.
+      Apply migration patterns to call sites if needed.
+    Update the pin in pyproject.toml (or requirements*.txt).
+    If NO version of the dep on PyPI supports python$project_py,
+    mark it a HARD BLOCKER and continue identifying others.
+
+  Re-run R.2's install.
+
+After PASS 3:
+  If install passed AND `pytest --co -q` runs without collection
+  errors → recovery succeeded. The bumped pins are committed on the
+  current branch as a small extra commit (the orchestrator handles
+  this — pre-commit hooks must pass, never --no-verify). Next stage
+  proceeds normally.
+
+  If at least one HARD BLOCKER remains → proceed to R.4.
+```
+
+The cascade is the runtime-upgrade agent's procedure transplanted to
+the orchestrator's post-sync context. **Do NOT replace blocking deps
+with alternatives** (no swapping pypdf for pdfminer); that's a project
+architecture decision and out of scope here too.
+
+#### Step R.4 — fallback after cascade exhausted
+
+The Python upgrade is genuinely not viable right now. The user needs
+options. Surface the blockers and ask via `AskUserQuestion`:
+
+```
+Question: "The Python <project_py> upgrade can't proceed locally: 
+           - <pkg>: latest <ver> on PyPI supports up to Python <maxpy>
+           - <pkg>: ...
+           Main is already on Python <project_py> (the runtime PR
+           merged earlier). What now?"
+
+Options:
+  1. "Recreate venv on python<venv_py> as a local fallback"
+        — most pragmatic. Main stays on $project_py; you can keep
+          coding while the upgrade fate is decided.
+        — implementation: rm -rf .venv && python$venv_py -m venv .venv
+                          && pip install --quiet -e ".[dev]"
+        — record in the run summary: "Local .venv reverted to
+          Python $venv_py; main is on Python $project_py — pending
+          dep resolution."
+        — proceed with subsequent stages, but DO NOT re-trigger the
+          pre-flight (we know it won't pass; the user accepted the
+          mismatch).
+
+  2. "Open a GitHub issue capturing the blockers, then halt"
+        — the orchestrator drafts an issue body listing the blockers,
+          the release notes URLs it consulted, and the suggested
+          remediation paths. Posts via `gh issue create`. Halts the
+          maintenance run.
+
+  3. "Halt — I'll handle it manually"
+        — no further auto-action. The user runs whatever they want.
+          Maintenance run ends with the cascade report in the summary.
+```
+
+The fallback question makes the trade-off explicit. The default
+recommendation (option 1) lets the user keep working without losing
+the day's already-merged maintenance work; the audit trail of the
+choice is preserved in the run summary so a future maintenance run
+sees the same blockers and can re-ask once the ecosystem catches up.
 
 ### Run the gather script
 
@@ -711,12 +815,20 @@ After pushing and opening the PR:
    errors and missed regressions (this exact bug surfaced in the live
    test on ai-doc-organizer's Stage 7).
 
-   Apply the same `project_py` vs `venv_py` comparison + auto-recreate
-   logic from Phase 3's pre-flight. The same precondition holds: if
-   `python<project_py>` isn't on PATH, halt with the "install via brew
-   first" message — that's the one case where the run can't proceed
-   autonomously. The auto-recreate path (when the interpreter IS on
-   PATH) runs in a few minutes and is safe to do mid-pipeline.
+   Apply the same `project_py` vs `venv_py` resolution as Phase 3,
+   then invoke the shared **Venv recovery procedure** (R.1 → R.2 →
+   R.3 cascade → R.4 fallback) defined in Phase 3 above. Same halt
+   path (interpreter missing on PATH), same cascade-up-to-3-passes on
+   `pip install` failure, same three-option `AskUserQuestion`
+   fallback when the cascade exhausts.
+
+   One context-specific note: if R.4's option 1 ("recreate venv on
+   the OLD python version as a local fallback") is chosen here mid-
+   pipeline, set a run-scoped flag so subsequent Phase 8 stages SKIP
+   the venv pre-flight in step 7 — the user has explicitly accepted
+   the mismatch; re-asking on every stage would be noisy. The flag is
+   in-memory only; the next `/development:maintenance` invocation
+   re-evaluates from scratch.
 
 ### Agents commit before returning
 
