@@ -554,8 +554,15 @@ If preflight passed, ask the user whether to run the path-specific automation.
   --project-name "<PROJECT_NAME>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --has-dockerfile "<true|false>" \
-  --has-codeql "true"
+  --has-codeql "true" \
+  --codeql-languages "<space-separated languages, e.g. 'python typescript'>"
 ```
+
+`--codeql-languages` must be passed whenever `--has-codeql=true`. CodeQL's
+`analyze` job runs as a matrix per language and GitHub reports each one
+as `analyze (<lang>)`. Without the language list, the script can't build
+the right required-status-check contexts and CodeQL checks would never
+register as required.
 
 This walks the user through:
 - Opening SonarCloud, signing in via GitHub, importing the repo (one-time

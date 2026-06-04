@@ -6,8 +6,13 @@
 #   branch-protection.sh --visibility public|private \
 #                        --has-dockerfile true|false \
 #                        --has-codeql true|false \
+#                        [--codeql-languages "python typescript ..."] \
 #                        --default-branch main \
 #                        [--require-signed-commits true|false]
+#
+# --codeql-languages is required when --has-codeql=true. CodeQL's analyze
+# job runs as a matrix per language and GitHub reports each one as
+# `analyze (<lang>)`, so a bare `analyze` context never resolves.
 #
 # Requires: gh CLI authenticated, repository admin permission. On 403 the
 # script falls back to printing manual instructions.
@@ -21,6 +26,7 @@ source "$SCRIPT_DIR/lib.sh"
 VISIBILITY=""
 HAS_DOCKERFILE="false"
 HAS_CODEQL="false"
+CODEQL_LANGUAGES=""
 DEFAULT_BRANCH="main"
 REQUIRE_SIGNED_COMMITS="false"
 
@@ -29,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     --visibility)              VISIBILITY="$2"; shift 2 ;;
     --has-dockerfile)          HAS_DOCKERFILE="$2"; shift 2 ;;
     --has-codeql)              HAS_CODEQL="$2"; shift 2 ;;
+    --codeql-languages)        CODEQL_LANGUAGES="$2"; shift 2 ;;
     --default-branch)          DEFAULT_BRANCH="$2"; shift 2 ;;
     --require-signed-commits)  REQUIRE_SIGNED_COMMITS="$2"; shift 2 ;;
     *)                         die "Unknown argument: $1" ;;
@@ -46,9 +53,30 @@ checks=("test-and-coverage" "semgrep" "pre-commit")
 
 case "$VISIBILITY" in
   public)
-    checks+=("sonarcloud" "snyk-code" "snyk-open-source" "license-fs")
+    # Note: `snyk-code` and `snyk-open-source` are NOT workflow jobs in the
+    # current public template. Snyk runs via the GitHub integration, which
+    # reports a single `security/snyk` check on the PR rather than per-rule
+    # GitHub Actions status checks — see quality-public.yml.tmpl's `# ---
+    # Snyk source-code + open-source scans ---` comment block. Listing
+    # them here would produce a permanent stuck-on-expected state.
+    checks+=("sonarcloud" "license-fs")
     [[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
-    [[ "$HAS_CODEQL"     == "true" ]] && checks+=("analyze")  # codeql job id
+    if [[ "$HAS_CODEQL" == "true" ]]; then
+      # CodeQL's `analyze` job is a matrix over `language`, so GitHub
+      # reports one check per language as `analyze (<lang>)`. The bare
+      # `analyze` context never resolves to a real check — must be
+      # language-suffixed.
+      if [[ -n "$CODEQL_LANGUAGES" ]]; then
+        for lang in $CODEQL_LANGUAGES; do
+          checks+=("analyze ($lang)")
+        done
+      else
+        warn "--has-codeql=true but --codeql-languages was not provided."
+        warn "Skipping CodeQL contexts — without language list, the bare"
+        warn "'analyze' context would never resolve. Pass --codeql-languages"
+        warn "\"python typescript ...\" (space-separated) to enable them."
+      fi
+    fi
     ;;
   private)
     checks+=("sonarqube" "trivy-fs" "license-fs")

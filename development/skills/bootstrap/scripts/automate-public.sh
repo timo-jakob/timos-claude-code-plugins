@@ -27,6 +27,7 @@ PROJECT_NAME=""
 DEFAULT_BRANCH="main"
 HAS_DOCKERFILE="false"
 HAS_CODEQL="false"
+CODEQL_LANGUAGES=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --default-branch) DEFAULT_BRANCH="$2"; shift 2 ;;
     --has-dockerfile) HAS_DOCKERFILE="$2"; shift 2 ;;
     --has-codeql)     HAS_CODEQL="$2"; shift 2 ;;
+    --codeql-languages) CODEQL_LANGUAGES="$2"; shift 2 ;;
     *) die "Unknown argument: $1" ;;
   esac
 done
@@ -312,6 +314,7 @@ if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; th
     --visibility public \
     --has-dockerfile "$HAS_DOCKERFILE" \
     --has-codeql "$HAS_CODEQL" \
+    --codeql-languages "$CODEQL_LANGUAGES" \
     --default-branch "$DEFAULT_BRANCH"
 fi
 
