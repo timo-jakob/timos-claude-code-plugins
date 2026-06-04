@@ -13,6 +13,21 @@
 #   python_version        string   ("3.13", "3.12", ...; "" if not Python)
 #   has_pytest_cov        bool     (true if pytest-cov is in dev deps already)
 #   existing_artifacts    object   path -> true for files we would otherwise generate
+#   github_state          object   GitHub-side state — see github_state shape below
+#
+# github_state shape (added 2026-06-04 per issue #90 — keeps detection
+# honest about GitHub-side configuration the on-disk artifacts don't see):
+#   branch_protection.state            "applied" | "missing" | "forbidden" | "unknown" | "skipped"
+#   branch_protection.applied_contexts []string  (when state="applied")
+#   branch_protection.required_reviews int
+#   branch_protection.linear_history   bool
+#   branch_protection.force_push       bool
+#   secrets.names                      []string  (configured Actions secrets)
+#   sonar_project_exists               bool | null  (null = unknown / private / no project key)
+#
+# `github_state` is `{}` when has_github_remote=false OR gh is not
+# authenticated. State="skipped" means a specific probe didn't run
+# (e.g., no project key for the Sonar probe).
 #
 # All paths are evaluated relative to the current working directory.
 
@@ -239,6 +254,77 @@ for p in "${candidate_paths[@]}"; do
 done
 artifacts_json+="}"
 
+# --- github-side state (issue #90) -------------------------------------------
+# Probe GitHub for state the bootstrap installs in Step 4 (branch protection,
+# secrets, SonarCloud project). detect_stack used to be files-only, so a repo
+# with all 19 generated artifacts looked "fully bootstrapped" even when none
+# of Step 4 had completed. This block makes the JSON honest about what's
+# actually configured on the remote.
+#
+# Behavior:
+#   - Returns {} when has_github_remote=false OR gh is not authenticated.
+#   - Each probe degrades gracefully on auth/network failure; the orchestrator
+#     can distinguish "not yet applied" from "could not check" by reading
+#     the per-probe state field.
+github_state="{}"
+
+if [[ "$has_github_remote" == "true" ]] \
+   && command -v gh   >/dev/null 2>&1 \
+   && command -v curl >/dev/null 2>&1 \
+   && command -v jq   >/dev/null 2>&1 \
+   && gh auth status >/dev/null 2>&1; then
+
+  gh_token="$(gh auth token 2>/dev/null || true)"
+
+  # --- branch protection ---
+  bp_tmp="$(mktemp)"
+  bp_status=$(curl -sS -o "$bp_tmp" -w '%{http_code}' \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: token $gh_token" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "https://api.github.com/repos/$github_repo/branches/$default_branch/protection" \
+    2>/dev/null || echo "000")
+  case "$bp_status" in
+    200)
+      bp_contexts=$(jq -c '.required_status_checks.contexts // []' "$bp_tmp" 2>/dev/null || echo "[]")
+      bp_reviews=$(jq -r '.required_pull_request_reviews.required_approving_review_count // 0' "$bp_tmp" 2>/dev/null || echo "0")
+      bp_linear=$(jq -r '.required_linear_history.enabled // false' "$bp_tmp" 2>/dev/null || echo "false")
+      bp_force=$(jq -r '.allow_force_pushes.enabled // false' "$bp_tmp" 2>/dev/null || echo "false")
+      bp_json=$(printf '{"state":"applied","applied_contexts":%s,"required_reviews":%s,"linear_history":%s,"force_push":%s}' \
+        "$bp_contexts" "$bp_reviews" "$bp_linear" "$bp_force")
+      ;;
+    404) bp_json='{"state":"missing"}' ;;
+    403) bp_json='{"state":"forbidden"}' ;;
+    *)   bp_json=$(printf '{"state":"unknown","http_code":"%s"}' "$bp_status") ;;
+  esac
+  rm -f "$bp_tmp"
+
+  # --- secrets (Actions scope) ---
+  secrets_names=$(gh secret list --repo "$github_repo" --json name --jq '[.[].name]' 2>/dev/null || echo "[]")
+  [[ -z "$secrets_names" ]] && secrets_names="[]"
+
+  # --- SonarCloud project (anonymous query — no token needed) ---
+  # Only meaningful for public-path bootstraps. Skip when visibility is
+  # private or the project key can't be derived from sonar-project.properties.
+  sonar_exists="null"
+  if [[ "$visibility" == "public" && -f "$cwd/sonar-project.properties" ]]; then
+    sonar_key=$(grep -E '^[[:space:]]*sonar\.projectKey[[:space:]]*=' "$cwd/sonar-project.properties" 2>/dev/null \
+      | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+    if [[ -n "$sonar_key" ]]; then
+      sonar_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+        "https://sonarcloud.io/api/components/show?component=$sonar_key" 2>/dev/null || echo "000")
+      case "$sonar_status" in
+        200) sonar_exists="true" ;;
+        404) sonar_exists="false" ;;
+        *)   sonar_exists="null" ;;
+      esac
+    fi
+  fi
+
+  github_state=$(printf '{"branch_protection":%s,"secrets":{"names":%s},"sonar_project_exists":%s}' \
+    "$bp_json" "$secrets_names" "$sonar_exists")
+fi
+
 # --- emit --------------------------------------------------------------------
 cat <<EOF
 {
@@ -251,6 +337,7 @@ cat <<EOF
   "has_dockerfile": $(json_bool "$has_dockerfile"),
   "python_version": $(json_str "$python_version"),
   "has_pytest_cov": $(json_bool "$has_pytest_cov"),
-  "existing_artifacts": $artifacts_json
+  "existing_artifacts": $artifacts_json,
+  "github_state": $github_state
 }
 EOF
