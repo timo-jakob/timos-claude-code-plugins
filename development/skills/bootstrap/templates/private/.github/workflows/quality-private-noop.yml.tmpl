@@ -1,0 +1,57 @@
+# Doc-only PR companion for quality-private.yml — see the public-path
+# noop's header for the rationale and mixed-PR caveat. Runs on the same
+# self-hosted runner as the main workflow so the noop ALSO exercises the
+# runner availability (a self-hosted runner being down would otherwise
+# silently fail to satisfy required-checks even on doc-only PRs).
+
+name: Quality (private) — docs noop
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-coverage:
+    runs-on: self-hosted
+    steps:
+      - run: echo "Doc-only PR — skipping tests."
+
+  sonarqube:
+    runs-on: self-hosted
+    steps:
+      - run: echo "Doc-only PR — skipping SonarQube scan."
+
+  trivy-fs:
+    runs-on: self-hosted
+    steps:
+      - run: echo "Doc-only PR — skipping trivy filesystem scan."
+
+  license-fs:
+    runs-on: self-hosted
+    steps:
+      - run: echo "Doc-only PR — skipping license scan."
+
+  semgrep:
+    runs-on: self-hosted
+    steps:
+      - run: echo "Doc-only PR — skipping semgrep scan."
+
+  pre-commit:
+    runs-on: self-hosted
+    steps:
+      - run: echo "Doc-only PR — skipping pre-commit."
+
+  # --- DOCKER-START ---------------------------------------------------------
+  image:
+    runs-on: self-hosted
+    steps:
+      - run: echo "Doc-only PR — skipping image build/scan."
+  # --- DOCKER-END -----------------------------------------------------------

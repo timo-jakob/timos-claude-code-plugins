@@ -389,18 +389,30 @@ Copy from `templates/common/`:
 
 Copy from `templates/public/`:
 - `.github/workflows/quality-public.yml`
+- `.github/workflows/quality-public-noop.yml` (doc-only PR companion — see below)
 - `.github/workflows/codeql.yml`
+- `.github/workflows/codeql-noop.yml` (doc-only PR companion for CodeQL)
 - `.github/workflows/scorecard.yml` (OpenSSF Scorecard — weekly supply-chain health check; public-only because the score is publicly visible)
 - `sonar-project.properties`
 - `.snyk`
 
 The `image` job (build → scan → conditional GHCR push) is only kept if
-`has_dockerfile=true` — see "Container image publishing" below.
+`has_dockerfile=true` in both `quality-public.yml` AND
+`quality-public-noop.yml` — see "Container image publishing" below.
+
+The `-noop.yml` companion workflows define dummy jobs with the SAME
+names as the required-status-check jobs in their main counterparts,
+but trigger only on doc-only PRs (the inverse of the main workflow's
+`paths-ignore`). Without these companions, doc-only PRs would sit
+unmergeable forever because GitHub leaves a required check in the
+`expected` state when its defining workflow is skipped via
+`paths-ignore`. See issue #96.
 
 ### 3c. Private path (SonarQube + Trivy)
 
 Copy from `templates/private/`:
 - `.github/workflows/quality-private.yml` (runs on `self-hosted`)
+- `.github/workflows/quality-private-noop.yml` (doc-only PR companion — runs on `self-hosted` too so it also catches runner-down failures on doc PRs)
 - `sonar-project.properties`
 - `infra/sonarqube/docker-compose.yml`
 - `infra/sonarqube/README.md`

@@ -1,0 +1,68 @@
+# Doc-only PR companion for quality-public.yml.
+#
+# Why this file exists: required status checks resolve by NAME, and
+# GitHub leaves a required check in the `expected` state forever when
+# the workflow that defines it was skipped via `paths-ignore`. That
+# blocks doc-only PRs from ever merging. This sibling workflow defines
+# dummy jobs with the SAME names as the required checks in
+# quality-public.yml, but triggers ONLY on doc-path PRs (the inverse of
+# the main workflow's paths-ignore). On a doc-only PR, the noop runs,
+# instantly reports success for every required check, and the PR
+# becomes mergeable.
+#
+# Mixed PRs (both code and doc paths changed): both workflows fire.
+# GitHub treats the most recent check completion as authoritative for
+# required-status purposes. Since the noop completes in seconds and the
+# real workflow takes minutes, the real workflow's result wins on mixed
+# PRs in practice. Caveat documented in
+# https://github.com/timo-jakob/timos-claude-code-plugins/issues/96.
+
+name: Quality (public) — docs noop
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping tests (noop companion for required status check)."
+
+  sonarcloud:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping SonarCloud scan."
+
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping semgrep scan."
+
+  license-fs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping license scan."
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping pre-commit."
+
+  # --- DOCKER-START ---------------------------------------------------------
+  # Only emitted when the project ships a Dockerfile. Mirrors the
+  # conditional `image` job in quality-public.yml so that, if `image` is
+  # added to the required-status-check list, doc PRs still resolve.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping image build/scan."
+  # --- DOCKER-END -----------------------------------------------------------
