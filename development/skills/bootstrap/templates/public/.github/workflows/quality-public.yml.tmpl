@@ -84,6 +84,31 @@ jobs:
           pip install -e ".[dev]"
           pip install pytest-cov
           pytest --cov --cov-report=xml --cov-report=term
+
+      # Coverage floor — the load-bearing 90% new-code enforcer on
+      # SonarCloud free (where custom Quality Gate assignment is paywalled
+      # and the default `Sonar way` gate only requires 80%). Uses
+      # `diff-cover` on the cobertura `coverage.xml` produced above.
+      # PR-only — on push to the default branch there's no "new code" diff
+      # to enforce against.
+      - name: Install diff-cover (Python — coverage floor)
+        if: github.event_name == 'pull_request'
+        run: pip install 'diff-cover>=9'
+      - name: Fetch base ref for diff-cover (Python)
+        if: github.event_name == 'pull_request'
+        # The repo-level checkout above intentionally doesn't fetch history.
+        # diff-cover needs the base ref to compute the new-lines diff; pull
+        # the minimum needed.
+        run: |
+          git fetch --no-tags --prune --depth=100 origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+      - name: Coverage floor — 90% on new code (Python)
+        if: github.event_name == 'pull_request'
+        run: |
+          diff-cover coverage.xml \
+            --compare-branch="origin/${{ github.base_ref }}" \
+            --fail-under=90 \
+            --show-uncovered
       # --- PYTHON-END ------------------------------------------------------
 
       # --- GO-START --------------------------------------------------------

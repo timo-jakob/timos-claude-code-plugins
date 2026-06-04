@@ -12,7 +12,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain for a project. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the Zero Tolerance Quality Gate (≥90% coverage on new code, 0 code smells, all A ratings). On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, Quality Gate creation, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see Requirements below). |
+| Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see Requirements below). |
 | Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the v1 JSON payload, dispatches to the language plugin (currently only `development-python`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
@@ -93,6 +93,169 @@ constructs the input and dispatches here.
 All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
 safety net, not the primary verification loop.
+
+## Claude Approver (planned)
+
+> **Status:** Design phase. Not yet implemented. This section captures the
+> design; comprehensive adoption documentation is tracked in
+> [#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88).
+
+### Idea
+
+`/development:bootstrap` installs a Zero Tolerance toolchain — CI runs ruff,
+mypy, semgrep, Sonar, Snyk, CodeQL, and a `coverage-floor` step that fails
+the build below 90% new-code coverage; branch protection on `main` requires
+every check green plus one approving review before merge. The Approver is
+the **final synthesis layer** that decides whether that approving review
+can come from Claude rather than (or in addition to) a human.
+
+It is *not* another CI check. It runs **after** every other gate has passed
+and asks two judgment questions a checker can't:
+
+- **Risk** — given everything is green, what could still go wrong?
+- **Confidence** — how sure am I that this PR actually does what it claims,
+  with the quality the project expects?
+
+Verdict is one of:
+- `APPROVE` — confidence HIGH and risk register has no load-bearing entries.
+- `REQUEST_CHANGES` — at least one criterion failed OR confidence below HIGH.
+  Findings are emitted both as human-readable markdown *and* a hidden
+  machine-readable JSON block so the maintenance pipeline can re-ingest them.
+- `COMMENT` with reservations — bot would approve "if X is verified by a
+  human"; defers to a human for the binary call.
+
+### How it runs (gating)
+
+The Approver only spends a token once every other signal is clean:
+
+- All required GitHub Actions status checks = SUCCESS
+- No new findings from SonarCloud/SonarQube, Snyk Code, Snyk OSS, CodeQL
+- All review threads resolved
+- All checkboxes in the PR body checked
+- PR not in draft; no pending review requests
+- HEAD SHA matches the SHA that produced the green checks (no race)
+
+If any gate fails → workflow exits neutral and waits for the next event.
+Optional `/approve` PR comment manually re-triggers; `/approve --dry-run`
+runs as a non-binding COMMENT.
+
+### Identity (two distinct GitHub Apps)
+
+- **Claude Approver** — its `pull_request_review` calls satisfy branch
+  protection's one-approval requirement. Permissions:
+  `pull_requests: write`, `contents: read`.
+- **Claude Maintenance** — separate App used by `/development:maintenance`
+  to open PRs. Distinct identity so the anti-rubber-stamp gate
+  ("PR author ≠ approver identity") fires correctly even when maintenance
+  PRs are evaluated by the Approver.
+
+One-time per-org setup registers both Apps; per-repo bootstrap installs
+them and stores `*_APP_ID` repo variables + `*_PRIVATE_KEY` repo secrets.
+
+### Author allowlist (machine-only by default)
+
+The Approver only evaluates PRs from authors on a configurable allowlist.
+Default: `dependabot[bot]`, `github-actions[bot]`, `claude-maintenance[bot]`.
+Override per-repo via the `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` repo variable
+(set to `["*"]` to opt into reviewing human-authored PRs).
+
+It supplements, rather than replaces, `python-dependabot-triage`'s
+auto-merge for safe patch + minor Dependabot PRs — when triage defers a PR
+or CI is red, the Approver picks it up once everything turns green.
+
+### PR type taxonomy
+
+Detection: conventional-commit prefix in PR title (primary), diff heuristic
+(fallback), author hint (tiebreaker). Ambiguity is itself a finding.
+
+| Prefix | Type | Headline risk |
+|---|---|---|
+| `feat:` | New feature | Implementation matches the story; tests are meaningful, not coverage farming |
+| `fix:` | Bug fix | Regression test exists; root cause addressed, not the symptom |
+| `refactor:` | Behavior preserved | No public-API change; coverage holds; diff is atomic |
+| `chore(deps):` | Patch/minor dep bump | Changelog scanned; supplements `python-dependabot-triage` |
+| `chore(deps-major):` | Major dep bump | Migration notes verifiably addressed |
+| `chore(runtime):` | Python / Docker base-image bump | Structured commit body from `python-runtime-upgrade` matches the diff |
+| `security:` | CVE / finding fix | Test demonstrates the unsafe input no longer succeeds |
+| `docs:` | Documentation only | Claims cross-checked against the code described |
+| `test:` | Tests only | Assertions are meaningful, not line-touching |
+| `ci:` / `build:` | Workflows / config | No required gate weakened |
+| `chore:` | Cleanup / maintenance | Dead-code removal verified including dynamic references |
+| `revert:` | Clean revert | Dependents since the original commit checked |
+| `hotfix:` | Emergency | Always REQUEST_CHANGES with "human review required" |
+
+Full criteria per type live in the in-repo policy file.
+
+### Policy file (in target repo)
+
+Bootstrap generates `.claude/approver-policy.md` from the language-matched
+template. The policy is the source of truth for "ready to approve" —
+versioning it in-repo means changes to the criteria themselves go through
+code review. A policy-change PR is evaluated by the *previous* policy; the
+new policy applies to PRs opened after it merges.
+
+Policy file content:
+- Type detection rules (primary / fallback / tiebreaker)
+- Baseline criteria (apply to every type)
+- Per-type must-have criteria
+- Per-type risk factors to weigh
+- Confidence calibration rules
+
+### PR description template
+
+Bootstrap also generates `.github/pull_request_template.md` mirroring the
+structure the Approver expects:
+
+```markdown
+## Type
+<!-- feat | fix | refactor | chore(deps) | chore(deps-major) |
+     chore(runtime) | security | docs | test | ci | chore | revert | hotfix -->
+
+## Linked issue
+<!-- #123 or Closes #123 — GitHub issue body is read by the Approver for `feat:` -->
+
+## Risk
+<!-- What could go wrong? Edge cases not exercised? Anything load-bearing untested? -->
+
+## Test plan
+<!-- How was this verified beyond `pytest`? -->
+
+## Checklist
+- [ ] ...
+```
+
+### REQUEST_CHANGES feedback loop
+
+The Approver's findings include a hidden machine-readable JSON block. **v1**:
+the user re-runs `/development:maintenance`, which reads the JSON block from
+the most recent Approver review, dispatches the relevant triage agents
+(ruff, semgrep, snyk, sonar, etc.), pushes fixes, and the Approver re-runs
+on workflow synchronize. **v2** closes the loop in CI via a
+`pull_request_review`-triggered workflow. v1's JSON bridge is the
+load-bearing primitive; v2 is just a different trigger on top of it.
+
+### How to adopt
+
+1. **Per-org (one-time)** — register both GitHub Apps (Claude Approver +
+   Claude Maintenance); capture App IDs and private keys.
+2. **Per-repo** — `/development:bootstrap --claude-approver true`. Bootstrap
+   stores credentials, installs the Apps on the repo, generates the
+   workflow, the policy file, and the PR template.
+3. **Per-policy** — amend `.claude/approver-policy.md` as your team's norms
+   evolve. Changes go through normal PR review.
+
+### Local dry-run
+
+`python-approver` runs locally too: invoke the agent in your worktree and
+it executes the same logic without posting a review. Useful for predicting
+what CI's Approver will say before pushing.
+
+### Languages
+
+Python first (`python-approver`, opus). Future plugins
+(`development-node`, `development-go`, etc.) ship their own `<lang>-approver`
+agents and policy templates following the same pattern. Bootstrap with
+`--claude-approver true` on an unsupported language warns and skips.
 
 ## Requirements
 

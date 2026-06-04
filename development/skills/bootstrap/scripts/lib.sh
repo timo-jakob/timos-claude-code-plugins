@@ -261,10 +261,11 @@ create_zero_tolerance_gate() {
       warn "custom Quality Gates require a Team or Enterprise subscription."
       warn "See: https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-subscription/subscription-plans"
       warn ""
-      warn "Falling back to the built-in 'Sonar way' Quality Gate. It's less"
-      warn "strict than Zero Tolerance (e.g., 80% coverage on new code instead"
-      warn "of 90%) but already applied to every new project by default — no"
-      warn "further action needed."
+      warn "Falling back to the built-in 'Sonar way' Quality Gate. Its coverage"
+      warn "threshold is 80% on new code, not the 90% the Zero Tolerance standard"
+      warn "calls for. The CI 'coverage-floor' step (in the bootstrap-generated"
+      warn "workflow) enforces the 90% bar on every PR independent of SonarCloud,"
+      warn "so the standard is preserved — no further action needed here."
       _gate_created="false"
       return 0
       ;;
@@ -308,8 +309,15 @@ create_zero_tolerance_gate() {
 
 # Assigns the named gate to a project.
 # Args: host, org (or empty), project-key, gate-name
+#
+# Outputs:
+#   _gate_assigned — "true" if the assignment succeeded, "false" on a 403
+#                    soft-fail (SonarCloud Free plan blocks custom-gate
+#                    assignment even when the gate itself exists). On any
+#                    other non-2xx status the function dies as before.
 assign_gate_to_project() {
   local host="$1" org="$2" project="$3" gate="$4" resp
+  _gate_assigned="false"
   info "Assigning gate '$gate' to project '$project'…"
   resp=$(sonar_curl POST "$host/api/qualitygates/select" \
     --data-urlencode "gateName=$gate" \
@@ -317,7 +325,24 @@ assign_gate_to_project() {
     ${org:+--data-urlencode "organization=$org"})
   _load_http_status
   case "$_http_status" in
-    200|204) ok "Gate assigned" ;;
-    *)       die "Gate assignment failed (HTTP $_http_status): $resp" ;;
+    200|204)
+      _gate_assigned="true"
+      ok "Gate assigned"
+      ;;
+    403)
+      # SonarCloud Free plan: assigning custom Quality Gates to projects is
+      # paywalled (Team/Enterprise feature) even when gate creation is
+      # permitted under the org's admin token. Fall back: leave the project
+      # on the default `Sonar way` gate. The CI `coverage-floor` step (added
+      # by the bootstrap templates) is the real 90% enforcement on free, so
+      # missing the custom assignment is not a hard failure.
+      warn "Could not assign custom gate to project (HTTP 403)."
+      warn "On SonarCloud Free this is expected — custom-gate assignment is paywalled."
+      warn "Project will use the default 'Sonar way' gate; the CI coverage-floor"
+      warn "step enforces the 90% new-code coverage bar regardless."
+      ;;
+    *)
+      die "Gate assignment failed (HTTP $_http_status): $resp"
+      ;;
   esac
 }
