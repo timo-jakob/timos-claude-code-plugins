@@ -17,13 +17,16 @@
 #
 # github_state shape (added 2026-06-04 per issue #90 — keeps detection
 # honest about GitHub-side configuration the on-disk artifacts don't see):
-#   branch_protection.state            "applied" | "missing" | "forbidden" | "unknown" | "skipped"
-#   branch_protection.applied_contexts []string  (when state="applied")
-#   branch_protection.required_reviews int
-#   branch_protection.linear_history   bool
-#   branch_protection.force_push       bool
-#   secrets.names                      []string  (configured Actions secrets)
-#   sonar_project_exists               bool | null  (null = unknown / private / no project key)
+#   branch_protection.state                "applied" | "missing" | "forbidden" | "unknown" | "skipped"
+#   branch_protection.applied_contexts     []string  (when state="applied")
+#   branch_protection.required_reviews     int
+#   branch_protection.linear_history       bool
+#   branch_protection.force_push           bool
+#   branch_protection.required_signatures  bool | null  (null = couldn't probe;
+#                                                       false = rule exists but
+#                                                       signed-commits is off)
+#   secrets.names                          []string  (configured Actions secrets)
+#   sonar_project_exists                   bool | null  (null = unknown / private / no project key)
 #
 # `github_state` is `{}` when has_github_remote=false OR gh is not
 # authenticated. State="skipped" means a specific probe didn't run
@@ -290,8 +293,24 @@ if [[ "$has_github_remote" == "true" ]] \
       bp_reviews=$(jq -r '.required_pull_request_reviews.required_approving_review_count // 0' "$bp_tmp" 2>/dev/null || echo "0")
       bp_linear=$(jq -r '.required_linear_history.enabled // false' "$bp_tmp" 2>/dev/null || echo "false")
       bp_force=$(jq -r '.allow_force_pushes.enabled // false' "$bp_tmp" 2>/dev/null || echo "false")
-      bp_json=$(printf '{"state":"applied","applied_contexts":%s,"required_reviews":%s,"linear_history":%s,"force_push":%s}' \
-        "$bp_contexts" "$bp_reviews" "$bp_linear" "$bp_force")
+
+      # `required_signatures` lives on its own endpoint, not the main
+      # protection object. Probe separately. Endpoint returns 200 with
+      # `enabled: true|false` when the parent rule exists.
+      sig_status=$(curl -sS -o "$bp_tmp.sig" -w '%{http_code}' \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: token $gh_token" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/repos/$github_repo/branches/$default_branch/protection/required_signatures" \
+        2>/dev/null || echo "000")
+      case "$sig_status" in
+        200) bp_sigs=$(jq -r '.enabled // false' "$bp_tmp.sig" 2>/dev/null || echo "false") ;;
+        *)   bp_sigs="null" ;;
+      esac
+      rm -f "$bp_tmp.sig"
+
+      bp_json=$(printf '{"state":"applied","applied_contexts":%s,"required_reviews":%s,"linear_history":%s,"force_push":%s,"required_signatures":%s}' \
+        "$bp_contexts" "$bp_reviews" "$bp_linear" "$bp_force" "$bp_sigs")
       ;;
     404) bp_json='{"state":"missing"}' ;;
     403) bp_json='{"state":"forbidden"}' ;;

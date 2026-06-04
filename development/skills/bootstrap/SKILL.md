@@ -131,6 +131,15 @@ flow. Stop and ask for input wherever marked; do not guess.
    - `branch_protection.state == "applied"` but `applied_contexts` doesn't
      include every context the rendered workflows would produce → offer
      "Reconcile branch-protection contexts (M missing, N stale)."
+   - `branch_protection.state == "applied"` but
+     `branch_protection.required_signatures == false` AND the original
+     bootstrap was invoked with `--signed-commits` (or the user asks for
+     it now) → offer "Enable required-signatures on the branch protection
+     rule." This calls `branch-protection.sh --require-signed-commits true`
+     against the existing rule; no contexts list rebuild needed. Warn the
+     user that every contributor must register a signing key in their
+     GitHub account before they can push to the protected branch — see
+     `SETUP.md` Section 3g.
    - Expected secrets not in `secrets.names` (public: `SONAR_TOKEN`,
      `SNYK_TOKEN`; private: `SONAR_TOKEN`, `SONAR_HOST_URL`) → offer "Store
      missing secrets: \<list\>."
