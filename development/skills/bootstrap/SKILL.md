@@ -531,10 +531,21 @@ Do not proceed to Step 4 until the validator returns `PROCEED`.
 ### 4a. Install pre-commit hooks
 If `pre-commit` is installed on the user's machine, run:
 ```bash
-pre-commit install
+"<skill-base-dir>/scripts/install-precommit-hooks.sh"
 ```
-If not installed, tell the user how to install it (`brew install pre-commit` or
-`pip install pre-commit`) and skip.
+This installs the default `pre-commit` git hook AND every additional
+hook type referenced by `stages:` entries in the rendered
+`.pre-commit-config.yaml` (e.g., `pre-push` for the coverage-floor
+hook). Running a plain `pre-commit install` would only install the
+default type and silently leave pre-push (and any other stage) wired
+up in config but missing from `.git/hooks/`.
+
+If `pre-commit` is not installed, tell the user how to install it
+(`brew install pre-commit` or `pip install pre-commit`) and skip.
+
+Run this step again whenever `.pre-commit-config.yaml` changes — the
+script is idempotent, and a refresh that adds a new stage won't fire
+on push until the corresponding hook type is installed.
 
 ### 4b. Branch protection on `main`
 Confirm with the user, then via `gh api`:
