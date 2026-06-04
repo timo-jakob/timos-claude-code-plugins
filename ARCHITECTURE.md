@@ -121,8 +121,9 @@ by surfacing a category error.
 - Shared scripts that operate on detected state without language
   knowledge: `detect-stack.sh`, `merge-gitignore.sh`,
   `branch-protection.sh`, `preflight.sh`, the `automate-*.sh` family.
-- Policy text: Zero Tolerance Quality Gate definitions, security
-  thresholds, `.snyk` ignore conventions.
+- Policy text: Zero Tolerance standard definitions (the 90/0/A thresholds
+  and the layered enforcement model — Sonar gate + CI `coverage-floor` +
+  pre-push hook), security thresholds, `.snyk` ignore conventions.
 - The **dispatch JSON schema** (see below) — the contract every
   language plugin and topic plugin reads and writes.
 - This `ARCHITECTURE.md`.
@@ -511,7 +512,7 @@ Two thresholds, per action class:
 
 | Action class | Required coverage | Floor |
 |---|---|---|
-| Major-version dep upgrade | 90% (matches the Zero Tolerance Quality Gate) | 70% |
+| Major-version dep upgrade | 90% (matches the Zero Tolerance standard, enforced by the bootstrap-generated `coverage-floor` CI step) | 70% |
 | All other changes (refactors, patch/minor bumps, sonar/semgrep/snyk fixes) | 80% | 60% |
 
 Three branches per planned change, evaluated against the touched

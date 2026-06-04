@@ -41,8 +41,13 @@ this as a PR if you were the maintainer.
    - Are language-specific configs realistic baselines, or do they
      enforce rules so strict that the user will spend the first hour
      turning them off?
-   - Is the Zero Tolerance Quality Gate going to be hit on the first
-     real codebase, or set the user up for permanent red?
+   - Is the Zero Tolerance standard reachable on the first real
+     codebase, or will it set the user up for permanent red? Check
+     each enforcement layer separately: the `coverage-floor` CI step
+     (90% on new lines via `diff-cover`), the pre-push hook (same
+     check locally), and the Sonar Quality Gate (custom on paid plans,
+     `Sonar way` fallback on SonarCloud free). A misconfigured base
+     ref on `diff-cover` is a common foot-gun.
 
 4. **First-impression test**
    - If a new contributor cloned this repo, ran `git status`, and

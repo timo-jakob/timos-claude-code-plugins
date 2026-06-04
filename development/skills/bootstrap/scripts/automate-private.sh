@@ -254,17 +254,21 @@ fi
 echo
 ok "Private-path automation complete"
 
-if [[ "${_gate_created:-false}" == "true" ]]; then
-  gate_summary="Zero Tolerance (assigned)"
+if [[ "${_gate_created:-false}" == "true" && "${_gate_assigned:-false}" == "true" ]]; then
+  gate_summary="Zero Tolerance custom gate (created + assigned)"
+elif [[ "${_gate_created:-false}" == "true" ]]; then
+  gate_summary="Zero Tolerance gate exists but unassigned; coverage-floor CI step enforces 90%"
 else
-  gate_summary="Sonar way (default — custom-gate creation failed; see warning above)"
+  gate_summary="Sonar way (custom-gate creation failed; see warning above) — coverage-floor CI step enforces 90%"
 fi
 
 cat <<EOF
 
   SonarQube         $SONAR_HOST  (admin pw in Keychain: service=$KEYCHAIN_SERVICE)
   Project           $PROJECT_KEY
-  Quality Gate      $gate_summary
+  Sonar gate        $gate_summary
+  Coverage 90%      Enforced by the 'coverage-floor' CI step (diff-cover) + pre-push hook,
+                    regardless of which Sonar gate is active on the project.
   Secrets set       SONAR_TOKEN, SONAR_HOST_URL  (Actions + Dependabot scopes)
   Runner            $([[ -d "$RUNNER_DIR" ]] && echo "registered + running" || echo "not registered")
 

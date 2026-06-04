@@ -319,16 +319,20 @@ fi
 echo
 ok "Public-path automation complete"
 
-if [[ "${_gate_created:-false}" == "true" ]]; then
-  gate_summary="Zero Tolerance (assigned)"
+if [[ "${_gate_created:-false}" == "true" && "${_gate_assigned:-false}" == "true" ]]; then
+  gate_summary="Zero Tolerance custom gate (created + assigned)"
+elif [[ "${_gate_created:-false}" == "true" ]]; then
+  gate_summary="Zero Tolerance gate exists but unassigned (Free-plan paywall) — Sonar way active; coverage-floor CI step enforces 90%"
 else
-  gate_summary="Sonar way (default — Free plan fallback; see warning above)"
+  gate_summary="Sonar way (Free-plan fallback; see warning above) — coverage-floor CI step enforces 90%"
 fi
 
 cat <<EOF
 
   Project       $PROJECT_KEY
-  Quality Gate  $gate_summary
+  Sonar gate    $gate_summary
+  Coverage 90%  Enforced by the 'coverage-floor' CI step (diff-cover) + pre-push hook,
+                regardless of which Sonar gate is active on the project.
   Secrets set   SONAR_TOKEN, SNYK_TOKEN  (Actions + Dependabot scopes)
   Monitoring    $(snyk config get api >/dev/null 2>&1 && echo "Snyk authenticated" || echo "Snyk auth pending")
 

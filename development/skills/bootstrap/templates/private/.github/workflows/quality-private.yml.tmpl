@@ -75,6 +75,27 @@ jobs:
           pip install -e ".[dev]"
           pip install pytest-cov
           pytest --cov --cov-report=xml --cov-report=term
+
+      # Coverage floor — belt-and-suspenders for the 90% bar. Custom
+      # Quality Gates work on self-hosted SonarQube CE so the Sonar gate
+      # would catch this too, but the CI step gives faster feedback (PR
+      # status check fails immediately, not after the Sonar scan completes)
+      # and stays consistent with the public-path template.
+      - name: Install diff-cover (Python — coverage floor)
+        if: github.event_name == 'pull_request'
+        run: pip install 'diff-cover>=9'
+      - name: Fetch base ref for diff-cover (Python)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --prune --depth=100 origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+      - name: Coverage floor — 90% on new code (Python)
+        if: github.event_name == 'pull_request'
+        run: |
+          diff-cover coverage.xml \
+            --compare-branch="origin/${{ github.base_ref }}" \
+            --fail-under=90 \
+            --show-uncovered
       # --- PYTHON-END ------------------------------------------------------
 
       # --- GO-START --------------------------------------------------------

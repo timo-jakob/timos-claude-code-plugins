@@ -6,7 +6,11 @@ description: >
   GitHub Actions workflows, scanner configs, pre-commit hooks, branch protection,
   Dependabot, templates, and developer docs. Public repos use SonarCloud + Snyk;
   private repos use self-hosted SonarQube + Trivy. Enforces a Zero Tolerance
-  Quality Gate (≥90% coverage on new code, 0 code smells, all A ratings).
+  standard (≥90% new-code coverage, 0 code smells, all A ratings) via layered
+  enforcement: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the
+  Sonar Quality Gate (custom on paid SonarCloud / self-hosted SonarQube; falls
+  back to `Sonar way` on SonarCloud free, where the CI step is the real 90%
+  gate because custom-gate assignment is paywalled).
   Idempotent — safe to re-run on partially configured repos.
 disable-model-invocation: false
 ---
@@ -29,10 +33,15 @@ Supported flags:
 - **Shift-left first**: every check that runs in CI must also run locally before
   the commit. Pre-commit hooks + agent-guided scans during implementation are
   the primary lines of defence; CI is the safety net.
-- **Zero Tolerance Quality Gate** on *new code*: ≥90% line coverage, 0 code
+- **Zero Tolerance standard** on *new code*: ≥90% line coverage, 0 code
   smells, 0 bugs, 0 vulnerabilities, all Sonar ratings = A, ≤3% duplications,
-  100% security hotspots reviewed. Existing-code debt is out of scope (tracked
-  separately by the maintenance skill — GitHub issue #5).
+  100% security hotspots reviewed. Enforced in three layers, not just one:
+  the `coverage-floor` CI step (fails the build below 90% on new lines), the
+  `diff-cover` pre-push hook (same check locally), and the Sonar Quality Gate
+  (custom "Zero Tolerance" gate on paid SonarCloud / self-hosted SonarQube;
+  `Sonar way` fallback on SonarCloud free, where the CI step is the real 90%
+  gate). Existing-code debt is out of scope (tracked separately by the
+  maintenance skill — GitHub issue #5).
 - **Idempotent**: never overwrite a user file without confirmation. Always
   detect what already exists and skip or diff before writing.
 - **Public vs private paths are strictly separated**: SonarCloud + Snyk for
@@ -135,8 +144,8 @@ Bootstrap plan:
   Visibility:       <public | private>
   Languages:        <swift, typescript, ...>
   Docker scanning:  <yes | no>
-  Coverage gate:    90% line coverage on new code
-  Quality gate:     Zero Tolerance (0 smells, all A ratings)
+  Coverage gate:    90% on new code, enforced by CI `coverage-floor` step + pre-push hook
+  Sonar gate:       "Zero Tolerance" custom gate (paid plan / self-hosted) or `Sonar way` fallback (SonarCloud free)
   CI runner:        <github-hosted | self-hosted>
   Will create:
     - <list of files to create>
@@ -552,7 +561,10 @@ This walks the user through:
 - Opening SonarCloud, signing in via GitHub, importing the repo (one-time
   human step — the only browser action required).
 - Pasting their SonarCloud user token.
-- Auto-creating the "Zero Tolerance" Quality Gate and assigning it.
+- Best-effort creating + assigning the "Zero Tolerance" Sonar Quality Gate.
+  On SonarCloud free, create/assign returns 403 (custom gates are Team/Enterprise
+  features); the script falls back to the default `Sonar way` gate. In either
+  case the CI `coverage-floor` step is the real 90% enforcement.
 - Running `snyk auth --auth-type=token` (token-mode, not OAuth — required for
   GitHub Actions secrets).
 - Storing `SONAR_TOKEN` and `SNYK_TOKEN` as GitHub Actions secrets via `gh`.
@@ -576,7 +588,10 @@ This handles:
 - Changing the SonarQube admin password from `admin/admin` to the generated
   one via API.
 - Creating the project, minting an analysis token, creating + assigning the
-  "Zero Tolerance" Quality Gate.
+  "Zero Tolerance" Sonar Quality Gate (works on self-hosted SonarQube CE
+  unlike SonarCloud free — custom gates are unrestricted self-hosted). The
+  CI `coverage-floor` step adds belt-and-suspenders enforcement of the same
+  90% bar.
 - Setting `SONAR_TOKEN` and `SONAR_HOST_URL` as GitHub Actions secrets.
 - Downloading and registering a self-hosted GitHub Actions runner as a
   launchd service.
@@ -599,8 +614,11 @@ NEXT STEPS:
 3. In GitHub repo Settings → Secrets and variables → Actions:
    - Add SONAR_TOKEN
    - Add SNYK_TOKEN
-4. In SonarCloud, create the "Zero Tolerance" Quality Gate as documented in
-   SETUP.md, and assign it to this project.
+4. SonarCloud paid plan: create the "Zero Tolerance" Quality Gate as documented
+   in SETUP.md and assign it to this project. **SonarCloud free: skip this
+   step** — custom-gate assignment is paywalled. The CI `coverage-floor` step
+   is the real 90% enforcement on free; the default `Sonar way` gate carries
+   the smells / ratings / duplications signals.
 5. Push the branch and open a PR — CI will run.
 ```
 
@@ -628,7 +646,11 @@ first bootstraps. Surface the agent's report to the user verbatim.
   Actions secrets only.
 - If the visibility detection fails or `gh` is not authenticated, ask the user
   directly; do not guess.
-- The Quality Gate definition (90/0/A) is non-negotiable and identical between
-  SonarCloud and SonarQube — see `SETUP.md` for the API recipe.
+- The Zero Tolerance standard (90/0/A) is non-negotiable. The Sonar gate
+  definition encodes it on paid SonarCloud and self-hosted SonarQube. On
+  SonarCloud free (where custom-gate assignment is paywalled), the standard is
+  carried by the CI `coverage-floor` step + pre-push hook + the default
+  `Sonar way` gate for the remaining signals. See `SETUP.md` for the API
+  recipe and the layered-enforcement model.
 - Self-hosted runners are **only** used for private repos. Never configure a
   self-hosted runner for a public repo (forks can run arbitrary code).
