@@ -64,6 +64,20 @@ The script reports:
 - `has_dockerfile` — whether a Dockerfile exists at the repo root or in common locations
 - `existing_artifacts` — map of well-known config files already present, so we
   can skip or diff them
+- `github_state` — **GitHub-side state** the on-disk artifacts don't see:
+  - `branch_protection` — `state` is one of `applied | missing | forbidden |
+    unknown`; when applied, also includes `applied_contexts` (the
+    required-status-check list), `required_reviews`, `linear_history`,
+    `force_push`.
+  - `secrets.names` — Actions secrets currently set on the repo.
+  - `sonar_project_exists` — `true|false|null` (null = couldn't check —
+    private repo, no project key in `sonar-project.properties`, or network
+    failure).
+
+  Empty `{}` when `has_github_remote=false` or `gh` is not authenticated.
+  This block is the load-bearing input for distinguishing "files present
+  + Step 4 done" from "files present + Step 4 never ran" — see State D
+  handling below.
 
 ### Decision tree (handle these in order — each step builds on the prior)
 
@@ -106,8 +120,34 @@ flow. Stop and ask for input wherever marked; do not guess.
 
 1. Skip the GitHub repo creation questions — already done.
 2. Skip the visibility question — already known.
-3. Continue to **shared questions** below (language detection may still need
-   user input if `languages=[]`).
+3. **Inspect `github_state` before deciding what to offer the user.** If
+   `existing_artifacts` is complete (every expected file present) AND
+   `github_state` reports any of the following gaps, the right next action
+   is a **gap-fill flow**, not the template-drift menu — Step 4 of a prior
+   bootstrap clearly didn't complete:
+
+   - `branch_protection.state == "missing"` → offer "Apply branch protection
+     now" as the primary action.
+   - `branch_protection.state == "applied"` but `applied_contexts` doesn't
+     include every context the rendered workflows would produce → offer
+     "Reconcile branch-protection contexts (M missing, N stale)."
+   - Expected secrets not in `secrets.names` (public: `SONAR_TOKEN`,
+     `SNYK_TOKEN`; private: `SONAR_TOKEN`, `SONAR_HOST_URL`) → offer "Store
+     missing secrets: \<list\>."
+   - `visibility == "public"` AND `sonar_project_exists == false` → offer
+     "Set up the SonarCloud project."
+
+   Gap-fill actions invoke only the specific Step 4 sub-scripts they need
+   (e.g., `branch-protection.sh`, `gh secret set`); they do NOT touch files
+   in the working tree. If multiple gaps coexist, present them as a
+   checkboxed list so the user can pick a subset.
+
+4. When `existing_artifacts` is complete AND `github_state` shows no gaps,
+   THEN fall through to the template-drift menu (compare on-disk files
+   against current templates and offer per-file apply / skip / cherry-pick).
+
+5. Continue to **shared questions** below if any answer is still unknown
+   (language detection may still need user input if `languages=[]`).
 
 ### Shared questions
 
