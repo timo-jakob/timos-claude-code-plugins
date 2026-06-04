@@ -94,19 +94,27 @@ jobs:
       - name: Install diff-cover (Python — coverage floor)
         if: github.event_name == 'pull_request'
         run: pip install 'diff-cover>=9'
+      # BASE_REF is funnelled through `env:` rather than inlined into
+      # `run:` to keep semgrep's run-shell-injection rule happy —
+      # github-context values are untrusted input (a PR author can target
+      # a maliciously-named base branch). Applies to both steps below.
       - name: Fetch base ref for diff-cover (Python)
         if: github.event_name == 'pull_request'
         # The repo-level checkout above intentionally doesn't fetch history.
         # diff-cover needs the base ref to compute the new-lines diff; pull
         # the minimum needed.
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           git fetch --no-tags --prune --depth=100 origin \
-            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
       - name: Coverage floor — 90% on new code (Python)
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           diff-cover coverage.xml \
-            --compare-branch="origin/${{ github.base_ref }}" \
+            --compare-branch="origin/${BASE_REF}" \
             --fail-under=90 \
             --show-uncovered
       # --- PYTHON-END ------------------------------------------------------
