@@ -648,7 +648,8 @@ This is a one-time flip; subsequent publishes preserve the visibility you set.
 ### 5.3 Switching to a different registry
 
 If you want to publish to Docker Hub instead of (or in addition to) GHCR, edit
-the `image` job in `.github/workflows/quality-{{VISIBILITY}}.yml`:
+the `image` job in your `quality-*.yml` workflow (`quality-public.yml` for
+public repos, `quality-private.yml` for private):
 
 1. Add a `Login to Docker Hub` step with `docker/login-action@v4`, registry
    `docker.io`, using `secrets.DOCKERHUB_USERNAME` + `secrets.DOCKERHUB_TOKEN`.
