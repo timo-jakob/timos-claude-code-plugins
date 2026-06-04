@@ -83,7 +83,14 @@ jobs:
           [[ -f requirements.txt ]] && pip install -r requirements.txt
           pip install -e ".[dev]"
           pip install pytest-cov
-          pytest --cov --cov-report=xml --cov-report=term
+          # Pass --cov=<source-dir> explicitly so coverage.py tracks every
+          # file under it, including modules no test imports. Without this,
+          # a never-imported new module is absent from coverage.xml entirely,
+          # and diff-cover reports "No lines with coverage information" on
+          # its diffed lines — the gate fires correctly but looks like a
+          # tool failure rather than a coverage shortfall. See issue #101.
+          if [[ -d src ]]; then COV_SRC="src"; else COV_SRC="."; fi
+          pytest --cov="$COV_SRC" --cov-report=xml --cov-report=term
 
       # Coverage floor — the load-bearing 90% new-code enforcer on
       # SonarCloud free (where custom Quality Gate assignment is paywalled
