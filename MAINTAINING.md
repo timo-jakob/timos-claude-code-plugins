@@ -35,6 +35,71 @@ boundary lines up with the content boundary.
 Plugins that didn't change in a given PR keep their existing version
 (don't blanket-bump everything).
 
+### Two-stage refresh: what end users (including you) need to know
+
+The per-merge version bump above invalidates the per-version cache so
+Claude Code stops serving stale content. But the cache is only ONE of
+TWO local copies of your plugin source. The other is the marketplaces
+clone:
+
+```
+~/.claude/plugins/marketplaces/<marketplace>/
+```
+
+This is a git clone of the marketplace repo, checked out to whatever
+commit `/plugin marketplace add` initially pulled. Claude Code reads
+plugin source from there, not from GitHub directly. Without an explicit
+pull, this clone stays at a stale commit indefinitely — even after the
+maintainer bumps the version on `main`. The user sees the old templates
+even though `git log` on `main` shows the fix landed.
+
+**The end-user-side dance, after a release ships:**
+
+```sh
+# In Claude Code (the slash command):
+/plugin marketplace update <marketplace>
+```
+
+This `git pull`s the marketplaces clone, picking up the new commit
+(with the version bump). The version-keyed cache invalidation then
+takes effect on next plugin load.
+
+**Verification command** — confirm the marketplaces clone has the
+expected version after the refresh:
+
+```sh
+grep version ~/.claude/plugins/marketplaces/<marketplace>/<plugin>/.claude-plugin/plugin.json
+```
+
+If the version is still the old one, the marketplace refresh hasn't
+happened yet. Re-run `/plugin marketplace update`.
+
+**Why this is easy to misdiagnose.** When a published fix appears
+inert, the cache is the natural first suspect. But removing a stale
+cache directory just causes Claude Code to re-populate it from the
+marketplaces clone — which is itself stale — so the next load still
+serves old content. Order matters: marketplace refresh first, cache
+second (if needed). Diagnosing this in reverse order can burn
+substantial time. This was the root cause of the
+[ai-doc-organizer 1.3.3 → 1.3.4 misadventure on 2026-06-04](https://github.com/timo-jakob/timos-claude-code-plugins/issues/100).
+
+**Recovery if a release shipped without a version bump.** Past PRs
+have occasionally landed without the corresponding version bump (the
+exact failure mode the per-merge rule above is designed to prevent).
+If a user is stuck on a cached version and `/plugin marketplace update`
+alone doesn't dislodge it because the version field on `main` matches
+the cached one:
+
+```sh
+# Force-invalidate the cache after refreshing the marketplaces clone
+rm -rf ~/.claude/plugins/cache/<marketplace>/<plugin>/<stale-version>
+```
+
+Then re-invoke any plugin command to re-extract from the (now refreshed)
+marketplaces source. This is a hack, not a fix — the right answer is
+to land a follow-up release PR that bumps the version. See PR #94 for
+the canonical example of a one-line catch-up release.
+
 ---
 
 ## Quarterly: refresh pinned versions inside `bootstrap` templates
