@@ -170,11 +170,15 @@ Without coverage data there's no safety floor; halt and return:
 }
 ```
 
-Skip the rest of the pre-flight; do not spawn any agents. **Exception**:
-pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
-format) are behavior-preserving by ruff's own guarantee and can run
-without coverage data. If the only finding category is `ruff`, run
-just `python-ruff-fixer` in safe-fixes-only mode and skip the rest.
+Skip the rest of the pre-flight. **Exception — pure-mechanical ruff:**
+if the only finding category is `ruff` (and ruff is configured), do
+not halt. Return a plan containing a single group routed to
+`python-ruff-fixer` with `safe_fixes_only: true` instead of the
+`human_action_required` halt above. The orchestrator's Phase 8 spawns
+that group normally — the dispatcher still does not spawn the work
+agent itself. This is safe because ruff `--fix` without `--unsafe-fixes`
+(and ruff format) is behavior-preserving by ruff's own guarantee —
+coverage data isn't load-bearing for this case.
 
 ### Step 2 — when coverage data IS present
 
