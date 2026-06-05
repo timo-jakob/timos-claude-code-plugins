@@ -419,9 +419,9 @@ agent, print a scannable summary to the conversation:
 This is informational; dispatch proceeds automatically after rendering.
 The user can interrupt the run at this point if the plan looks wrong.
 
-Carry the planner's `plan` array through to the response (see
-"Aggregation" below) so the orchestrator and downstream consumers
-(future auto-PR step) have access to it.
+Carry the planner's `plan` array through to the response (see the
+Response section below) so the orchestrator and downstream consumers
+have access to it.
 
 ## dispatch_filter validation
 
