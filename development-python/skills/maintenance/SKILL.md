@@ -115,7 +115,8 @@ as `[]`; unconfigured tools are absent here entirely).
 `policy.priority_window_days` defaults to `30` when absent. `dispatch_filter`
 is optional — the orchestrator adds it only when the user passed
 `--tool=<name>`; when present, it scopes dispatch to the listed tools and
-every other agent is skipped (see "dispatch_filter validation" below).
+every other agent is skipped (validation rules are step 5 of the Validation
+section below).
 
 ## Validation
 
@@ -143,6 +144,21 @@ Before dispatching:
 3. Confirm `language == "python"`. If not, error and stop — the
    orchestrator misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
+5. **Validate `dispatch_filter`** (when present). The orchestrator adds
+   it only when the user passed `--tool=<name>`. When present, the
+   dispatcher restricts the planner's view of findings to those tools
+   (and therefore restricts which groups exist at all); the
+   orchestrator never sees groups outside the filter.
+   - Each name in `dispatch_filter.only_tools` must be one of: `ruff`,
+     `semgrep`, `snyk_code`, `snyk_oss`, `sonarcloud`, `dependabot`.
+     Unknown names halt with: "Unknown tool '<X>' in
+     dispatch_filter.only_tools; supported: ruff, semgrep, snyk_code,
+     snyk_oss, sonarcloud, dependabot."
+   - Each name with `tooling_configured.<name> == false` halts with:
+     "Cannot scope to <X>: not configured for this project. Set it up
+     first via /development:bootstrap, or drop `--tool=<X>`." A missing
+     tool can't be tested in isolation — there are no findings to act
+     on.
 
 ## Coverage pre-flight (per ARCHITECTURE.md "Maximizing autonomy")
 
@@ -393,25 +409,6 @@ The user can interrupt the run at this point if the plan looks wrong.
 Carry the planner's `plan` array through to the response (see the
 Response section below) so the orchestrator and downstream consumers
 have access to it.
-
-## dispatch_filter validation
-
-When the payload's `dispatch_filter.only_tools` is present, the
-dispatcher restricts the planner's view of findings to those tools
-(and therefore restricts which groups exist at all). The orchestrator
-never sees groups outside the filter.
-
-Validation (perform before invoking the planner):
-
-- Each name in `only_tools` must be one of: `ruff`, `semgrep`,
-  `snyk_code`, `snyk_oss`, `sonarcloud`, `dependabot`. Unknown names
-  halt with: "Unknown tool '<X>' in dispatch_filter.only_tools;
-  supported: ruff, semgrep, snyk_code, snyk_oss, sonarcloud,
-  dependabot."
-- Each name with `tooling_configured.<name> == false` halts with:
-  "Cannot scope to <X>: not configured for this project. Set it up
-  first via /development:bootstrap, or drop `--tool=<X>`." A missing
-  tool can't be tested in isolation — there are no findings to act on.
 
 ## Routing rules (owned by the planner)
 
