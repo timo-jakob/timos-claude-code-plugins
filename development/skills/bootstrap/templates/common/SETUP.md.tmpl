@@ -172,6 +172,28 @@ Code scanning view shows each failing check with a fix recommendation).
 3. Add as repo secret `SNYK_TOKEN`.
 4. (Optional) Import the repo in Snyk's UI to enable PR comments.
 
+### 2.6 Enable Snyk auto-Fix-PRs (manual UI step)
+
+Snyk's integration-settings API requires paid plan entitlement, so this
+is a one-time manual step in the Snyk Web UI on free plans:
+
+1. Open your Snyk org's integrations page:
+   `https://app.snyk.io/org/<org-slug>/manage/integrations`
+2. Click the **GitHub integration** → **Edit Settings**.
+3. Find the **Automatic Fix PRs** section and toggle it **ON**.
+4. Set **Max open PRs** to `5` (default; raise later if PRs queue up).
+5. Leave **Automatic Upgrade PRs** OFF — Dependabot handles non-security
+   version upgrades.
+
+After this, when Snyk detects a vulnerable dependency with a known fix,
+it opens a PR with branch name starting `snyk-fix-…`. The maintenance
+pipeline's triage agent handles these alongside Dependabot PRs.
+
+> **Why manual?** Snyk's v1 integrations API returns 403 *"not entitled
+> for API access"* on free plans, and the REST API doesn't expose this
+> endpoint at all. UI is the only path on free. Paid customers may
+> automate this via the v1 API in a future iteration; see issue #87.
+
 ---
 
 ## 3. **PRIVATE** — SonarQube + Trivy setup

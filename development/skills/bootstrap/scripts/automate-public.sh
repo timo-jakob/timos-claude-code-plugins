@@ -264,6 +264,23 @@ case "$import_status" in
     ;;
 esac
 
+# --- Snyk auto-Fix-PRs (manual UI step on free plans) ------------------------
+# We cannot enable autoFixPR via the v1/REST API on free plans — Snyk gates
+# the v1 integrations endpoint behind paid-plan entitlement (returns 403
+# "not entitled for API access"), and the REST API does not expose an
+# equivalent settings endpoint at all (verified 2026-06-05 against
+# api.snyk.io/rest/orgs/{id}/integrations → 404). UI is the only path on
+# free. Surface this clearly to the user instead of failing silently.
+echo
+info "═══ Manual step: enable Snyk auto-Fix-PRs ═══"
+info "Snyk's API doesn't expose the auto-Fix-PR toggle on free plans. To"
+info "make Snyk open PRs when new vulnerabilities are detected:"
+info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
+info "  2. Click the GitHub integration → 'Edit Settings'."
+info "  3. Toggle 'Automatic Fix PRs' ON; set max open PRs to 5."
+info "  4. Leave 'Automatic Upgrade PRs' OFF (Dependabot handles upgrades)."
+info "See SETUP.md section 2.6 for the full recipe."
+
 # --- GitHub Security & Quality features --------------------------------------
 # All four are free on public repos. Each `gh api` call is idempotent — running
 # this against a repo where the feature is already on returns the same success.
