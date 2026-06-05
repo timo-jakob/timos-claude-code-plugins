@@ -1,11 +1,13 @@
 ---
 name: maintenance
 description: >
-  Python project maintenance dispatcher. Receives findings from
-  /development:maintenance (or equivalent JSON input) and dispatches
-  per-tool agents in parallel worktrees to triage or fix. Pure function
-  of its JSON input — does not run its own detection. See ARCHITECTURE.md
-  for the schema and dispatch contract.
+  Python project maintenance planner. Receives findings from
+  /development:maintenance (or equivalent JSON input), runs the coverage
+  pre-flight, optionally spawns the coverage-improver, then runs the
+  planner and returns a per-PR plan for the orchestrator to drive. Pure
+  function of its JSON input — does not run its own detection and does
+  not spawn work agents. See ARCHITECTURE.md for the schema and dispatch
+  contract.
 disable-model-invocation: false
 ---
 
