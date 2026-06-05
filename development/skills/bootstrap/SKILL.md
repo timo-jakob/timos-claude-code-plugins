@@ -149,8 +149,23 @@ flow. Stop and ask for input wherever marked; do not guess.
    checkboxed list so the user can pick a subset.
 
 4. When `existing_artifacts` is complete AND `github_state` shows no gaps,
-   THEN fall through to the template-drift menu (compare on-disk files
-   against current templates and offer per-file apply / skip / cherry-pick).
+   THEN fall through to the template-drift menu. **You MUST invoke
+   `bootstrap-idempotency-reviewer` for this comparison** — do not delegate
+   to a generic Explore or do an ad-hoc diff yourself. The reviewer's
+   contract is the only one that distinguishes:
+   - **user customization** (skip-default — user edits the template would
+     overwrite)
+   - **template-add drift** (merge-default — template added new sections
+     the user file lacks, with no conflicting user edits)
+   - **outdated patterns** (overwrite-default — pinned versions or
+     deprecated actions the template explicitly upgrades)
+
+   Without the reviewer's classification, template additions silently
+   look like "no change" and propagate stale toolchains to existing repos
+   — exactly the bug captured in issue #166. Pass each existing file's
+   on-disk content AND the rendered template content (after substitution)
+   to the reviewer, then surface the recommendations to the user for
+   per-file apply / skip / cherry-pick.
 
 5. Continue to **shared questions** below if any answer is still unknown
    (language detection may still need user input if `languages=[]`).
