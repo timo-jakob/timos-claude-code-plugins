@@ -27,20 +27,20 @@ Supported flags in `$ARGUMENTS`:
   branches at the end. The user is left with the branches available
   for manual inspection + merge.
 - `--tool=<name>` — scope dispatch to a single tool (testing aid).
-  `<name>` must be one of: `ruff`, `semgrep`, `snyk_code`, `snyk_oss`,
-  `sonarcloud`, `dependabot`. The gather phase still runs for every
-  tool (the payload stays complete), but the language plugin only
-  spawns the agent(s) for the chosen tool. Other agents are skipped
-  entirely — no work, no missing-tool recommendation. Combinable with
-  `--dry-run` and `--no-merge`.
+  `<name>` must be one of: `ruff`, `semgrep`, `code_scanning`,
+  `snyk_prs`, `sonarcloud`, `dependabot`. The gather phase still runs
+  for every tool (the payload stays complete), but the language plugin
+  only spawns the agent(s) for the chosen tool. Other agents are
+  skipped entirely — no work, no missing-tool recommendation.
+  Combinable with `--dry-run` and `--no-merge`.
 
 Anything else: surface the input to the user as "unrecognized
 arguments" and stop.
 
 When `--tool=<name>` is set, validate `<name>` against the known set
 above before proceeding. On a mismatch, halt with: "Unknown --tool
-'<name>'; supported: ruff, semgrep, snyk_code, snyk_oss, sonarcloud,
-dependabot."
+'<name>'; supported: ruff, semgrep, code_scanning, snyk_prs,
+sonarcloud, dependabot."
 
 ## Phase 1 — detect
 
@@ -583,9 +583,11 @@ After pushing and opening the PR:
      own tool — keep in the new-failures bucket. A failing `image`
      (Snyk container) check is a different tool — eligible for
      pre-existing-skip.
-   - PR is a snyk_oss group → `plan[i].tool == "snyk_oss"`. A failing
-     `snyk-open-source` check is this PR's own tool. A failing
-     `snyk-code` check is a different tool — eligible for skip.
+   - PR is a `snyk_prs` or `dependabot` group → `plan[i].tool` is
+     `"snyk_prs"` or `"dependabot"`. A failing CI check that matches
+     the same vendor's other PR signals (e.g. another Snyk App check)
+     is this PR's own tool. A failing `code-scanning`/`codeql` check
+     is a different tool — eligible for pre-existing-skip.
    - Stage 0 (coverage improver) → treat the project's coverage gate
      check (typically Sonar's QG "new code coverage") as the PR's
      own tool; everything else is eligible for skip.

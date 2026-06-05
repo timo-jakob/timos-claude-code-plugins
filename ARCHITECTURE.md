@@ -246,18 +246,20 @@ file.
     "manifests": ["pyproject.toml", "requirements.txt"]
   },
   "tooling_configured": {
-    "ruff":       true,
-    "semgrep":    true,
-    "snyk_code":  false,
-    "snyk_oss":   false,
-    "sonarcloud": true,
-    "dependabot": true
+    "ruff":           true,
+    "semgrep":        true,
+    "code_scanning":  true,
+    "snyk_prs":       true,
+    "sonarcloud":     true,
+    "dependabot":     true
   },
   "findings_by_tool": {
-    "ruff":       [/* tool-native finding objects */],
-    "semgrep":    [/* … */],
-    "sonarcloud": [/* … */],
-    "dependabot": [/* … */]
+    "ruff":                 [/* tool-native finding objects */],
+    "semgrep":              [/* … */],
+    "code_scanning_alerts": [/* GitHub Code Scanning alerts (CodeQL etc.) */],
+    "snyk_prs":             [/* open PRs with snyk-fix-* / snyk-upgrade-* head branches */],
+    "sonarcloud":           [/* … */],
+    "dependabot":           [/* … */]
   },
   "policy": {
     "coverage_threshold": 90,
@@ -325,10 +327,10 @@ from `findings_by_tool`).
   },
   "missing_tooling": [
     {
-      "tool": "snyk_code",
-      "summary": "Snyk Code (SAST) is not configured for this project.",
-      "what_it_provides": "Source-level vulnerability scanning; catches issues the lint tools miss.",
-      "how_to_add": "Run /development:bootstrap (it sets up Snyk end-to-end), or sign up at snyk.io and add SNYK_TOKEN to GitHub Actions secrets."
+      "tool": "code_scanning",
+      "summary": "GitHub Code Scanning (CodeQL etc.) is not enabled for this project.",
+      "what_it_provides": "Source-level vulnerability scanning via CodeQL — free for public repos, GitHub-native, populated by bootstrap's CodeQL workflow.",
+      "how_to_add": "Run /development:bootstrap (it generates .github/workflows/codeql.yml). For existing repos: enable in GitHub repo Settings → Code security → Code scanning."
     }
   ]
 }
@@ -349,11 +351,11 @@ record.
 a sonnet agent that runs without a worktree, reads the findings + git
 history, and returns an ordered list of "groups". **One group per
 agent**: each tool's findings stay together as a single group handled
-end-to-end by that tool's agent. The two exceptions are `snyk_oss` and
-`dependabot`, which split when their findings dispatch to multiple
-agents (e.g. a `snyk_oss` major bump goes to `python-major-upgrade`
-while patch/minor bumps stay with `python-snyk-triage`; one group per
-agent in that case).
+end-to-end by that tool's agent. The exceptions are `dependabot` and
+`snyk_prs`, which split when their findings dispatch to multiple
+agents (e.g. a pip-major Dependabot PR or Snyk Fix PR goes to
+`python-major-upgrade` while patch/minor PRs stay with
+`python-dependabot-snyk-triage`; one group per agent in that case).
 
 Each group carries: source tool, included finding IDs, affected files,
 rationale, **the agent the orchestrator will spawn for this group's

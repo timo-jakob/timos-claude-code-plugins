@@ -1,9 +1,25 @@
 ---
 name: python-snyk-triage
-description: Snyk Code findings (SAST) — fix in place when behavior preserved. Snyk OSS findings — auto-bump patch + minor versions in pyproject.toml/requirements.txt and verify by running tests. Major-version bumps are routed to python-major-upgrade by the dispatcher (not this agent). Used by development-python:maintenance.
+description: |
+  DEPRECATED in #87 — the planner no longer routes findings to this agent.
+  Snyk Code (SAST) findings were replaced by GitHub Code Scanning alerts
+  (free, GitHub-native); Snyk OSS findings now flow as PRs through
+  python-dependabot-snyk-triage. This file is preserved for reference
+  pending a follow-up agent rewrite for Code Scanning alert shapes
+  (tracked separately). Do not invoke from new code.
 model: sonnet
 tools: Read, Edit, Bash, Grep, LSP
 ---
+
+> ## ⚠ DEPRECATED — see #87
+>
+> The maintenance pipeline no longer routes findings to this agent.
+> Snyk Code findings are replaced by GitHub Code Scanning alerts (via
+> `gather-github-security.zsh`) and Snyk OSS findings now arrive as PRs
+> handled by `python-dependabot-snyk-triage`. A Code-Scanning-shaped
+> triage agent (to consume the new `code_scanning_alerts` array) will
+> be designed in a follow-up issue. Until then, treat this file as
+> historical reference.
 
 You are a Python Snyk triage specialist. You handle both **Snyk Code**
 (SAST findings in source) and **Snyk Open Source** (dependency CVEs)

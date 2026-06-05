@@ -153,10 +153,10 @@ Before dispatching:
    (and therefore restricts which groups exist at all); the
    orchestrator never sees groups outside the filter.
    - Each name in `dispatch_filter.only_tools` must be one of: `ruff`,
-     `semgrep`, `snyk_code`, `snyk_oss`, `sonarcloud`, `dependabot`.
+     `semgrep`, `code_scanning`, `snyk_prs`, `sonarcloud`, `dependabot`.
      Unknown names halt with: "Unknown tool '<X>' in
-     dispatch_filter.only_tools; supported: ruff, semgrep, snyk_code,
-     snyk_oss, sonarcloud, dependabot."
+     dispatch_filter.only_tools; supported: ruff, semgrep,
+     code_scanning, snyk_prs, sonarcloud, dependabot."
    - Each name with `tooling_configured.<name> == false` halts with:
      "Cannot scope to <X>: not configured for this project. Set it up
      first via /development:bootstrap, or drop `--tool=<X>`." A missing
@@ -209,31 +209,30 @@ planned:
 below to findings from the filtered tools only. Don't compute coverage
 risk for tools you won't dispatch — otherwise an unrelated tool's
 findings could block the scoped run. (Concretely: step 2a iterates only
-the filtered tools; step 2b is skipped entirely if neither `snyk_oss`
+the filtered tools; step 2b is skipped entirely if neither `snyk_prs`
 nor `dependabot` is in the filter.)
 
 #### Step 2a — for findings with explicit file paths
 
-For each finding in `ruff`, `semgrep`, `snyk_code`, `sonarcloud`,
-collect the `file_path` field. The agent will edit only those files
-(plus possibly their direct dependents if a refactor is needed), so
-these are the modules at risk.
+For each finding in `ruff`, `semgrep`, `code_scanning`, `sonarcloud`,
+collect the `file_path` field (or `file` for `code_scanning_alerts`).
+The agent will edit only those files (plus possibly their direct
+dependents if a refactor is needed), so these are the modules at risk.
 
 #### Step 2b — for major dep upgrades (the no-file-path case)
 
-Dependency upgrade findings — `snyk_oss` patch/minor bumps,
-`snyk_oss` major bumps, and `dependabot` PRs — don't carry per-finding
-file paths. The agent discovers affected files at runtime via LSP
-`find-references` on the package's public API. The dispatcher can't
-predict which files those will be.
+Dependency upgrade findings — `snyk_prs` and `dependabot` PRs — don't
+carry per-finding file paths. The agent discovers affected files at
+runtime via LSP `find-references` on the package's public API. The
+dispatcher can't predict which files those will be.
 
-**For major dep upgrades** (`snyk_oss` major findings OR pip-ecosystem
-Dependabot PRs classified as `major` or `major-equiv` in the Dependabot
-routing logic), the conservative safe answer is: the affected-modules
-set is **every Python source module in the project**. Rationale: any
-module could import the package being upgraded. If even one
-non-trivially-covered module imports it, the agent will edit it.
-Without LSP, the dispatcher can't tell which ones.
+**For major dep upgrades** (pip-ecosystem PRs from either source
+classified as `major` or `major-equiv` per the routing logic), the
+conservative safe answer is: the affected-modules set is **every
+Python source module in the project**. Rationale: any module could
+import the package being upgraded. If even one non-trivially-covered
+module imports it, the agent will edit it. Without LSP, the dispatcher
+can't tell which ones.
 
 In practice: for a planned major dep upgrade, scan **all of
 `coverage.by_module`** (the union of all measured modules) against the
