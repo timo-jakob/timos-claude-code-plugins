@@ -11,7 +11,10 @@ description: >
   Sonar Quality Gate (custom on paid SonarCloud / self-hosted SonarQube; falls
   back to `Sonar way` on SonarCloud free, where the CI step is the real 90%
   gate because custom-gate assignment is paywalled).
-  Idempotent — safe to re-run on partially configured repos.
+  Idempotent — safe to re-run on partially configured repos. Also
+  reconciles GitHub-side state (branch protection, secrets, Sonar
+  project) when files are already in place but Step 4 didn't complete
+  (the State D gap-fill mode).
 disable-model-invocation: false
 ---
 

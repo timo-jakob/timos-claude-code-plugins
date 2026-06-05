@@ -3,9 +3,10 @@ name: maintenance
 description: >
   Maintenance orchestrator. Runs detection + per-tool findings gathering +
   coverage measurement, constructs the v1 JSON payload, dispatches to the
-  language plugin (development-python in v1), collects results, and merges
-  worktree branches back to the user's working branch. The user-facing
-  entry point for "go fix everything you safely can on this project."
+  language plugin (development-python in v1), and drives a sequential
+  per-stage PR cycle (push → CI → merge → sync) until the plan is
+  exhausted. The user-facing entry point for "go fix everything you safely
+  can on this project."
 disable-model-invocation: false
 ---
 
