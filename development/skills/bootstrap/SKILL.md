@@ -551,26 +551,39 @@ script is idempotent, and a refresh that adds a new stage won't fire
 on push until the corresponding hook type is installed.
 
 ### 4b. Branch protection on `main`
-Confirm with the user, then via `gh api`:
-- Require PR before merge.
-- Require status checks: include all jobs from the generated workflow that just
-  got created. Use the exact job IDs.
-- Require linear history.
-- Block force-push and deletion.
-- If `--signed-commits` flag was passed at invocation, also pass
-  `--require-signed-commits true` to `branch-protection.sh`, which sets
-  `required_signatures: true` on the rule. Warn the user that every
-  contributor must register a GPG or SSH signing key in their GitHub
-  account before they can push to a protected branch; `SETUP.md` has the
-  per-contributor setup recipe.
+Confirm with the user, then call the helper script:
+
+```bash
+"<skill-base-dir>/scripts/branch-protection.sh" \
+  --visibility "<public|private>" \
+  --has-dockerfile "<true|false>" \
+  --has-codeql "<true|false — whether codeql.yml was generated>" \
+  --codeql-languages "<comma-separated CodeQL language list, when has-codeql=true>" \
+  --default-branch "<DEFAULT_BRANCH>" \
+  --require-signed-commits "<true if --signed-commits was passed at invocation, else false>"
+```
+
+The script applies a single protection rule that:
+- Requires PR before merge.
+- Requires status checks — the script computes the exact contexts from
+  the flags above (visibility, has-dockerfile, has-codeql, codeql-languages),
+  so they line up with the jobs the generated workflow produces.
+- Requires linear history.
+- Blocks force-push and deletion.
+- When `--require-signed-commits true` is set, also enables
+  `required_signatures: true`. Warn the user that every contributor must
+  register a GPG or SSH signing key in their GitHub account before they
+  can push to a protected branch; `SETUP.md` has the per-contributor
+  setup recipe.
 
 If the user does not yet have any commits with the workflows present, point out
 that the check names will not appear in the GitHub UI until at least one workflow
 run completes — branch protection rules referencing them are still valid, but
 GitHub displays them as "expected" until first run.
 
-If the `gh api` call returns a 403 (user is not a repo admin), do not retry.
-Print the equivalent manual setup instructions from `SETUP.md` and continue.
+If the script exits non-zero with a 403 (user is not a repo admin), do not
+retry. Print the equivalent manual setup instructions from `SETUP.md` and
+continue.
 
 ### 4c. Initial commit
 Offer to commit the generated files using the `/development:commit` flow with a
