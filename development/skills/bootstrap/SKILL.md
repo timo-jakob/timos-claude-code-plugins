@@ -230,7 +230,7 @@ Before writing any files, fan out three review agents **in parallel** in a
 single message. They run against the **planned** output (template content
 after placeholder substitution, but not yet written to disk).
 
-Spawn all three in a single assistant turn with multiple `Agent` tool calls:
+Spawn all three in a single assistant turn with multiple `Task` tool calls:
 
 | Agent | Model | What it reviews |
 |---|---|---|
