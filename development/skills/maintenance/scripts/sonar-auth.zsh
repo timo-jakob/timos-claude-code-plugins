@@ -108,7 +108,7 @@ fi
 info "Validating token..."
 validate_body=$(mktemp); _tmpfiles+=("$validate_body")
 
-if ! http_code=$(curl -sS -o "$validate_body" -w '%{http_code}' \
+if ! http_code=$(command curl -sS -o "$validate_body" -w '%{http_code}' \
        -H "Authorization: Bearer $token" \
        "$VALIDATE_URL" 2>/dev/null); then
   err_block \

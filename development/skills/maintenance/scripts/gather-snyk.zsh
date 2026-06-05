@@ -72,7 +72,10 @@ SNYK_REST_VERSION='2024-10-15'
 
 snyk_v1() {
   local method="$1" path="$2"
-  curl -sS -X "$method" \
+  # `command curl` bypasses any zsh function/alias named `curl` that may
+  # shadow the real binary on the user's PATH (e.g. Antigravity prefix on
+  # this machine — see issue #87).
+  command curl -sS -X "$method" \
     -H "Authorization: token $SNYK_TOKEN" \
     -H "Accept: application/json" \
     -w '\nHTTP_STATUS=%{http_code}\n' \
@@ -82,7 +85,7 @@ snyk_v1() {
 snyk_rest() {
   local path="$1" sep='?'
   [[ "$path" == *"?"* ]] && sep='&'
-  curl -sS \
+  command curl -sS \
     -H "Authorization: token $SNYK_TOKEN" \
     -H "Accept: application/vnd.api+json" \
     -w '\nHTTP_STATUS=%{http_code}\n' \
