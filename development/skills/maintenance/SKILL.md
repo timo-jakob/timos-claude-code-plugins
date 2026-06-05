@@ -288,18 +288,13 @@ a concern at this scale. If you ever see a payload approaching the
 multi-MB range, surface it as a quality bug on the gather script
 rather than trimming silently.
 
-The language plugin works in **two phases** the orchestrator drives
-sequentially:
+The dispatcher's internal Phase A / Phase B sequencing — when it spawns
+the coverage-improver, when it runs the planner, what payload validation
+it performs — is owned by the language plugin. See
+`development-python/skills/maintenance/SKILL.md` (intro) for the canonical
+Phase A/B contract.
 
-**Phase A — coverage improver (only when needed):**
-
-- Plugin validates payload
-- Plugin runs coverage pre-flight
-- If Step 2c branch 2 fired → plugin spawns `python-coverage-improver`
-  in a worktree and returns immediately with `improver_result` and
-  **no `plan`**
-- Otherwise (coverage already at Required) → plugin proceeds directly
-  to Phase B in the same invocation, returning `plan` only
+The orchestrator only needs to handle the three response shapes:
 
 **Orchestrator's response handling for the first dispatch:**
 
@@ -320,19 +315,11 @@ The only events that end a turn before Phase 9 are (a) `human_action_required`,
 (b) all Phase 8 stages complete + Phase 9 summary printed, or (c) the user
 explicitly says "stop".
 
-**Phase B — planning (always, possibly after Phase A's PR merged):**
-
-- Plugin validates payload (same shape as Phase A)
-- Plugin runs coverage pre-flight; with Phase A's PR merged, all
-  affected modules are at Required (branch 1 fires)
-- Plugin runs its planner against the original `base_branch` (now
-  reflecting the merged improver work)
-- Plugin returns response containing `plan` and `missing_tooling`
-
-**The language plugin does NOT spawn work agents in either phase.** Work
-agents are spawned per-group in Phase 8 below so that each group's PR
-cycle (push → CI → merge → sync) completes before the next group
-starts off the just-merged main.
+**The language plugin does NOT spawn the per-group work agents** in
+either phase. Work agents are spawned per-group in Phase 8 below so that
+each group's PR cycle (push → CI → merge → sync) completes before the
+next group starts off the just-merged main. The one exception is the
+coverage-improver itself, which the dispatcher spawns during Phase A.
 
 Capture each response, keyed by language.
 

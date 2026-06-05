@@ -236,28 +236,10 @@ Three branches:
 
 1. **All modules in the affected set ≥ Required** → proceed to
    dispatch.
-2. **Some modules between Floor and Required** → first spawn
-   `python-coverage-improver` (opus, worktree) with the list of
-   under-covered modules + target threshold. **Wait for it to
-   finish before doing anything else** — no planner, no other
-   agents.
-
-   When it finishes: **return immediately** (this is Phase A — see
-   the intro). The response shape is `improver_result` only, no
-   `plan`. The orchestrator will run the improver's full PR cycle
-   (push → CI → fix loop → merge → sync local main), then re-invoke
-   you. On that second invocation, with the improver's tests merged
-   into main, coverage will be at Required and Step 2c naturally
-   lands on branch 1 — the planner runs.
-
-   This is the strict sequencing: improver runs locally → improver's
-   PR gets opened + reviewed by CI + merged → only THEN does the
-   planner see the post-merge code state. The planner therefore
-   ranks against actual `main`, not a worktree branch.
-
-   The improver MUST spawn with `isolation="worktree"` so its new
-   tests land on a fresh branch off `worktree.base_branch`, not
-   in the user's working tree:
+2. **Some modules between Floor and Required** → this is Phase A. Spawn
+   `python-coverage-improver` with `isolation="worktree"` so its new tests
+   land on a fresh branch off `worktree.base_branch`, not in the user's
+   working tree:
 
    ```
    Agent(
@@ -282,25 +264,10 @@ Three branches:
    )
    ```
 
-   Return shape from this Phase A invocation:
-
-   ```json
-   {
-     "schema_version": "1",
-     "improver_result": {
-       "worktree_branch": "<branch>",
-       "worktree_path":   "<absolute path>",
-       "summary": "<one-line>",
-       "modules_improved": [
-         { "file": "src/...", "before": 61.9, "after": 94.0 }
-       ]
-     },
-     "missing_tooling": []
-   }
-   ```
-
-   No `plan` field. The orchestrator detects "improver_result without
-   plan" and routes accordingly.
+   When it finishes, **return immediately** with the `improver_result`
+   shape (see the Response section). No `plan` field. See the intro's
+   Phase A bullet for the orchestrator-side loop that re-invokes you
+   after the improver's PR merges.
 3. **Any module in the affected set below Floor** → halt. Return:
    ```json
    {
