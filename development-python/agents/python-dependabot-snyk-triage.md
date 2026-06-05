@@ -94,10 +94,92 @@ Your prompt contains:
 
 Stop.
 
+## Pre-pass — dedup vendor PRs targeting the same package
+
+Dependabot and Snyk can both open PRs for the same vulnerable
+dependency. If two PRs upgrade the same package to overlapping target
+versions, processing both would create churn or conflicting merges. Run
+this dedup pass **before** the per-PR decision tree below.
+
+### Step 0a — extract `(package, target_version)` from each PR
+
+Parse `title` for the package + target version:
+
+| Source | Title pattern | Extraction |
+|---|---|---|
+| `dependabot` | `Bump <pkg> from <old> to <new>` | `pkg` after "Bump "; `new` after " to " |
+| `snyk` (Fix PR) | `[Snyk] <type>: upgrade <pkg> from <old> to <new>` | `pkg` after "upgrade "; `new` after " to " |
+| `snyk` (Upgrade PR) | `[Snyk] Upgrade <pkg> from <old> to <new>` | same as Fix PR |
+| grouped Dependabot | `Bump the <group> group with <N> updates` | skip dedup — multi-package PRs don't dedup cleanly; let them flow through |
+
+### Step 0b — group PRs by `package`
+
+Build a map `pkg → [pr1, pr2, ...]`. Most packages will appear in just
+one PR — no dedup needed. The interesting case is packages with ≥2 PRs.
+
+### Step 0c — for each multi-PR package, pick the survivor
+
+Apply these tiebreakers in order:
+
+1. **Filter out already-merged**: if one PR in the group is already
+   merged (check via `gh pr view <number> --json state`), skip dedup;
+   process the remaining (open) PRs normally.
+2. **Compare CVE coverage**: count CVE / GHSA references in each PR's
+   `body`. The one addressing more CVEs wins. (Snyk bodies typically
+   list the CVEs explicitly; Dependabot security PRs link the advisory.)
+3. **Tiebreak on source**: if tied, prefer Snyk (more granular fix-version
+   selection per Snyk's vulnerability DB).
+4. **Tiebreak on target version**: if still tied, prefer the **lower**
+   target version (less change, smaller blast radius).
+5. **Tiebreak on CI state**: if both are still tied (rare), prefer the
+   one whose CI is already green or further along.
+
+### Step 0d — close the losers
+
+For each non-survivor PR:
+
+```bash
+gh pr close <loser_number> --comment "Superseded by #<survivor_number>: same package upgrade (\`<package>\`) — kept the one with broader CVE coverage / preferred source (\`<reason>\`)."
+```
+
+Then **remove the closed PR from the `findings` list**. The decision
+tree below only processes survivors.
+
+### Step 0e — log the decisions
+
+For each dedup decision, append to a `dedup_actions` array (emitted in
+the agent's output alongside `actions_taken`):
+
+```json
+{
+  "type": "dedup_closed",
+  "closed_pr": <loser>,
+  "kept_pr":   <survivor>,
+  "package":   "<pkg>",
+  "reason":    "<one-line reason>"
+}
+```
+
+The orchestrator's Phase 9 summary surfaces these so the user can see
+what was deduped.
+
+### Edge cases
+
+- **Same package, different target versions, non-overlapping** (e.g.,
+  Snyk patches 2.1.x→2.1.5; Dependabot bumps 2.1.x→3.0.0). Not a dedup
+  case — they address different needs. Process both.
+- **Same package, one survivor's CI is red**: still pick the survivor by
+  the rules above; the red-CI handling in the decision tree below will
+  defer it to `actions_requiring_review`. Don't switch survivors just to
+  avoid a red CI.
+- **Grouped PR partially overlaps with a single-package PR**: skip dedup;
+  let both proceed. The grouped PR is hard to compare against single-package
+  ones.
+
 ## Decision tree per PR
 
-For each PR in `findings`, the dispatcher has already set `routing` to
-one of two values. Behave according to it:
+For each PR remaining in `findings` after the dedup pass, the dispatcher
+has already set `routing` to one of two values. Behave according to it:
 
 ### Path A — `routing == "human-review"`
 
@@ -208,9 +290,21 @@ If `gh pr merge` fails (branch protection blocks it without an admin review): no
       "pr_number": 51,
       "reason": "CI still in progress; will be actionable once it completes"
     }
+  ],
+  "dedup_actions": [
+    {
+      "type": "dedup_closed",
+      "closed_pr": 77,
+      "kept_pr":   99,
+      "package":   "jinja2",
+      "reason":    "Snyk PR addresses 2 CVEs vs Dependabot's 1; preferred broader coverage"
+    }
   ]
 }
 ```
+
+`dedup_actions` is omitted when no dedup decisions were made (no
+multi-PR-per-package cases).
 
 ## Constraints
 
