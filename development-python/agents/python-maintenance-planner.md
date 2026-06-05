@@ -127,9 +127,7 @@ Order groups by descending priority. Ties broken by:
 |---|---|
 | `ruff` | `python-ruff-fixer` |
 | `semgrep` | `python-semgrep-triage` |
-| `snyk_code` | `python-snyk-triage` |
-| `snyk_oss` patch/minor | `python-snyk-triage` |
-| `snyk_oss` major | `python-major-upgrade` |
+| `code_scanning` | `python-snyk-triage` (interim — agent rename + prompt update to consume Code Scanning alert shapes is deferred to PR η of #87) |
 | `sonarcloud` | `python-sonar-triage` |
 | `dependabot` patch/minor (pip) | `python-dependabot-snyk-triage` |
 | `dependabot` major (pip) | `python-major-upgrade` |
@@ -137,6 +135,11 @@ Order groups by descending priority. Ties broken by:
 | `dependabot` (github-actions, docker non-Python, unknown) | `python-dependabot-snyk-triage` (human-review) |
 | `snyk_prs` patch/minor (pip, from `snyk-fix-…` / `snyk-upgrade-…` branches) | `python-dependabot-snyk-triage` |
 | `snyk_prs` major (pip) | `python-major-upgrade` |
+
+The legacy `snyk_code` / `snyk_oss` tool keys were retired in PR ε of
+#87 — Snyk Code SAST findings are replaced by `code_scanning` (CodeQL
+via GitHub Code Scanning, free, GitHub-native), and Snyk Open Source
+vulnerabilities are now consumed as PRs flowing through `snyk_prs`.
 
 **Python-interpreter docker bumps are a special case.** A
 `dependabot/docker/...` PR whose `headRefName` or `body` references
