@@ -29,9 +29,12 @@ Your prompt contains:
 - `package` — name of the dep being upgraded (e.g., `pydantic`)
 - `current_version` — e.g., `"1.10.13"`
 - `target_version` — e.g., `"2.0.0"`
-- `source` — `"snyk_oss"` (CVE-driven) or `"dependabot"` (routine bump)
-- `cve_reference` — optional; the Snyk finding ID when `source == "snyk_oss"`
-- `dependabot_pr` — optional; the Dependabot PR number when `source == "dependabot"`.
+- `source` — `"snyk_prs"` (Snyk auto-Fix-PR, CVE-driven) or `"dependabot"`
+  (Dependabot security update or routine version bump)
+- `cve_reference` — optional; the Snyk advisory ID or CVE when
+  `source == "snyk_prs"` and the bump is security-motivated
+- `pr_number` — the GitHub PR number that triggered this major upgrade,
+  from either Dependabot or Snyk.
   After a successful local migration, your output should recommend
   closing this PR (the user can do so manually, or via `gh pr close`).
   Local migration with proper tests + LSP-driven call-site updates is a
@@ -146,7 +149,7 @@ full briefing on what was attempted and what they need to decide.
 
 ```json
 {
-  "tool": "<source from input — 'snyk_oss' or 'dependabot'>",
+  "tool": "<source from input — 'snyk_prs' or 'dependabot'>",
   "configured": true,
   "actions_taken": [
     {

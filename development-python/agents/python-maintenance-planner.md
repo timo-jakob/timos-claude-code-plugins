@@ -1,6 +1,6 @@
 ---
 name: python-maintenance-planner
-description: Pre-dispatch planner. Reads a set of Python maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together; snyk_oss and dependabot split when their findings dispatch to multiple agents). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-python:maintenance.
+description: Pre-dispatch planner. Reads a set of Python maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together; dependabot and snyk_prs split when their findings dispatch to multiple agents). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-python:maintenance.
 model: sonnet
 tools: Bash, Read, Grep
 ---
@@ -86,13 +86,8 @@ exceptions documented below):
    stay in one group. The agent handles internal sub-batching for
    token efficiency on its own.
 
-2. **`snyk_oss` splits by upgrade level**, not by rule:
-   - Patch + minor + no-fix bumps → one `python-snyk-triage` group.
-   - Each major bump → its own `python-major-upgrade` group (one PR
-     per package upgrade, since each major migration touches a
-     different package's call sites).
-
-3. **`dependabot` and `snyk_prs` split similarly**:
+2. **`dependabot` and `snyk_prs` split similarly** (and are the only
+   splitting tools post-#87):
    - Patch + minor pip + every github-actions / docker / unknown PR
      → one `python-dependabot-snyk-triage` group (mixed sources OK —
      the agent reads each PR's `source` field).
@@ -127,7 +122,7 @@ Order groups by descending priority. Ties broken by:
 |---|---|
 | `ruff` | `python-ruff-fixer` |
 | `semgrep` | `python-semgrep-triage` |
-| `code_scanning` | `python-snyk-triage` (interim — agent rename + prompt update to consume Code Scanning alert shapes is deferred to PR η of #87) |
+| `code_scanning` | **informational only** — no triage agent yet (see "Code Scanning informational handling" below) |
 | `sonarcloud` | `python-sonar-triage` |
 | `dependabot` patch/minor (pip) | `python-dependabot-snyk-triage` |
 | `dependabot` major (pip) | `python-major-upgrade` |
@@ -140,6 +135,17 @@ The legacy `snyk_code` / `snyk_oss` tool keys were retired in PR ε of
 #87 — Snyk Code SAST findings are replaced by `code_scanning` (CodeQL
 via GitHub Code Scanning, free, GitHub-native), and Snyk Open Source
 vulnerabilities are now consumed as PRs flowing through `snyk_prs`.
+
+### Code Scanning informational handling
+
+For `code_scanning` findings, emit a group with `agent: null` (or skip
+the group from the dispatchable plan) and put a summary into the
+planner's response under a separate `informational` array. The
+orchestrator's Phase 9 summary surfaces these to the user with a
+recommendation to review in the GitHub Code Scanning UI. Until a
+dedicated Code-Scanning-shaped triage agent ships, the pipeline does
+not auto-action SAST findings — they remain visible and counted, but
+no PRs are opened for them.
 
 **Python-interpreter docker bumps are a special case.** A
 `dependabot/docker/...` PR whose `headRefName` or `body` references
@@ -158,10 +164,10 @@ group also counts — extract just the Python interpreter bump into a
 `python-runtime-upgrade` group and leave the rest for
 `python-dependabot-snyk-triage`.
 
-The two exceptions to "one group per tool" (snyk_oss splits by upgrade
-level; dependabot splits similarly) are driven by this table: when a
-single tool's findings would dispatch to multiple agents, those become
-distinct groups per agent. A single group never spans multiple agents.
+The exception to "one group per tool" (`dependabot` and `snyk_prs`
+split by upgrade level) is driven by this table: when a single tool's
+findings would dispatch to multiple agents, those become distinct
+groups per agent. A single group never spans multiple agents.
 
 ## Output
 
@@ -183,14 +189,14 @@ Emit a single JSON object. **No prose, no preamble, no trailing text.**
     },
     {
       "group_id": 2,
-      "tool": "snyk_oss",
-      "description": "Bump claude-agent-sdk from 0.1 to 0.2 (major-equivalent)",
-      "findings": ["claude-agent-sdk-0.1.0->0.2.0"],
+      "tool": "snyk_prs",
+      "description": "Snyk Fix PR: upgrade jinja2 from 3.1.0 to 3.1.6 (2 CVE fixes)",
+      "findings": ["snyk-fix-jinja2-3.1.6"],
       "files": [],
-      "rationale": "single major upgrade routes to python-major-upgrade",
-      "agent": "python-major-upgrade",
-      "suggested_pr_title": "chore(deps): bump claude-agent-sdk from 0.1 to 0.2",
-      "priority_score": 0.74
+      "rationale": "patch upgrade routes to python-dependabot-snyk-triage",
+      "agent": "python-dependabot-snyk-triage",
+      "suggested_pr_title": "fix(deps): merge Snyk Fix PR for jinja2",
+      "priority_score": 0.81
     }
   ],
   "summary": {
