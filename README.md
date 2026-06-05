@@ -88,7 +88,7 @@ constructs the input and dispatches here.
 | python-major-upgrade | opus | Reads official release notes via WebFetch; maps breaking changes to call sites via LSP; applies migration; iterates up to 3 times on test failures |
 | python-runtime-upgrade | opus | Applies a Python interpreter bump (Dependabot's `python:X.Y → Z.W` Docker base-image PR). Swaps Dockerfile FROM and pyproject.toml `requires-python`; best-effort local verify; **cascade-upgrades dependencies** that need newer versions for the new interpreter, reading their release notes and applying migrations (up to 3 passes). Stops only when a required dep has no version on PyPI supporting the new Python — does NOT search for alternative libraries |
 | python-coverage-improver | opus | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
-| python-dependabot-triage | sonnet | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
+| python-dependabot-snyk-triage | sonnet | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
 
 All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
@@ -159,7 +159,7 @@ Default: `dependabot[bot]`, `github-actions[bot]`, `claude-maintenance[bot]`.
 Override per-repo via the `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` repo variable
 (set to `["*"]` to opt into reviewing human-authored PRs).
 
-It supplements, rather than replaces, `python-dependabot-triage`'s
+It supplements, rather than replaces, `python-dependabot-snyk-triage`'s
 auto-merge for safe patch + minor Dependabot PRs — when triage defers a PR
 or CI is red, the Approver picks it up once everything turns green.
 
@@ -173,7 +173,7 @@ Detection: conventional-commit prefix in PR title (primary), diff heuristic
 | `feat:` | New feature | Implementation matches the story; tests are meaningful, not coverage farming |
 | `fix:` | Bug fix | Regression test exists; root cause addressed, not the symptom |
 | `refactor:` | Behavior preserved | No public-API change; coverage holds; diff is atomic |
-| `chore(deps):` | Patch/minor dep bump | Changelog scanned; supplements `python-dependabot-triage` |
+| `chore(deps):` | Patch/minor dep bump | Changelog scanned; supplements `python-dependabot-snyk-triage` |
 | `chore(deps-major):` | Major dep bump | Migration notes verifiably addressed |
 | `chore(runtime):` | Python / Docker base-image bump | Structured commit body from `python-runtime-upgrade` matches the diff |
 | `security:` | CVE / finding fix | Test demonstrates the unsafe input no longer succeeds |

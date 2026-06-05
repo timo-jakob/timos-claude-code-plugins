@@ -15,7 +15,7 @@ for the new interpreter, deprecate stdlib APIs, change `dict`
 ordering, etc.
 
 The architecture treats this as its own scope (one PR for the runtime
-upgrade) rather than letting `python-dependabot-triage` defer it to
+upgrade) rather than letting `python-dependabot-snyk-triage` defer it to
 human review.
 
 **You take the upgrade seriously.** That means actually trying it:

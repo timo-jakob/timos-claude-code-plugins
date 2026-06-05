@@ -92,10 +92,15 @@ exceptions documented below):
      per package upgrade, since each major migration touches a
      different package's call sites).
 
-3. **`dependabot` splits similarly**:
+3. **`dependabot` and `snyk_prs` split similarly**:
    - Patch + minor pip + every github-actions / docker / unknown PR
-     → one `python-dependabot-triage` group.
+     → one `python-dependabot-snyk-triage` group (mixed sources OK —
+     the agent reads each PR's `source` field).
    - Each pip major PR → its own `python-major-upgrade` group.
+
+   `snyk_prs` PRs (from Snyk's auto-Fix/Upgrade-PR feature, branches
+   prefixed `snyk-fix-` / `snyk-upgrade-`) get the same routing as
+   `dependabot` PRs because the triage agent handles both.
 
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs. There
@@ -126,10 +131,12 @@ Order groups by descending priority. Ties broken by:
 | `snyk_oss` patch/minor | `python-snyk-triage` |
 | `snyk_oss` major | `python-major-upgrade` |
 | `sonarcloud` | `python-sonar-triage` |
-| `dependabot` patch/minor (pip) | `python-dependabot-triage` |
+| `dependabot` patch/minor (pip) | `python-dependabot-snyk-triage` |
 | `dependabot` major (pip) | `python-major-upgrade` |
 | `dependabot` **docker, image matches `python:\d+\.\d+`** (Python interpreter bump) | `python-runtime-upgrade` (one PR per bump) |
-| `dependabot` (github-actions, docker non-Python, unknown) | `python-dependabot-triage` (human-review) |
+| `dependabot` (github-actions, docker non-Python, unknown) | `python-dependabot-snyk-triage` (human-review) |
+| `snyk_prs` patch/minor (pip, from `snyk-fix-…` / `snyk-upgrade-…` branches) | `python-dependabot-snyk-triage` |
+| `snyk_prs` major (pip) | `python-major-upgrade` |
 
 **Python-interpreter docker bumps are a special case.** A
 `dependabot/docker/...` PR whose `headRefName` or `body` references
@@ -140,13 +147,13 @@ has very different consequences from a generic Docker bump
 it to `python-runtime-upgrade`, which attempts the swap once,
 escalates cleanly on dep-compat issues, and produces a structured
 report instead of looping. Other docker bumps still go to
-`python-dependabot-triage` as human-review per the existing rule.
+`python-dependabot-snyk-triage` as human-review per the existing rule.
 
 Detection: regex-match the headRefName tail or PR title for
 `python:\d+\.\d+`. A grouped PR with `python:` as one member of the
 group also counts — extract just the Python interpreter bump into a
 `python-runtime-upgrade` group and leave the rest for
-`python-dependabot-triage`.
+`python-dependabot-snyk-triage`.
 
 The two exceptions to "one group per tool" (snyk_oss splits by upgrade
 level; dependabot splits similarly) are driven by this table: when a
