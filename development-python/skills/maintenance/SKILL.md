@@ -326,31 +326,11 @@ gives the user visibility into what maintenance will do (and in what
 order) before changes happen, and seeds the per-PR boundaries the
 orchestrator uses to drive Phase 8.
 
-**Strict ordering across both phases:**
-
-1. **Phase A**: coverage pre-flight runs. If branch 2 fires, the
-   improver runs locally and the dispatcher returns immediately (no
-   planner here).
-2. **Orchestrator-side**: the improver's PR is opened, CI runs,
-   `python-ci-fixer` cleans up failures, the PR merges, local main
-   syncs.
-3. **Phase B (this section)**: orchestrator re-invokes the dispatcher.
-   Coverage pre-flight runs again; with the improver's tests now on
-   `main`, all affected modules clear Required (branch 1). Planner
-   runs here.
-4. Dispatcher returns the plan; orchestrator drives per-group PRs.
-
-If the coverage pre-flight on the FIRST invocation already lands on
-branch 1 (improver wasn't needed at all), Phase A and Phase B collapse
-into a single invocation and the planner runs immediately. In that
-case the orchestrator only sees a `plan` response and goes straight
-to per-group PRs.
-
-The planner always runs against the original `worktree.base_branch`
-from the payload (e.g. `main`). It does not need to know whether
-Phase A ran — by the time it runs, any improver work has already
-been merged into main by the orchestrator. Pass the
-original `worktree.base_branch` from the input payload.
+The planner runs against the original `worktree.base_branch` from the
+payload (e.g. `main`). It does not need to know whether Phase A ran —
+any improver work has already been merged into main by the orchestrator
+by the time the planner is invoked. Pass the original
+`worktree.base_branch` through.
 
 ```
 Agent(
