@@ -135,10 +135,8 @@ flow. Stop and ask for input wherever marked; do not guess.
      bootstrap was invoked with `--signed-commits` (or the user asks for
      it now) → offer "Enable required-signatures on the branch protection
      rule." This calls `branch-protection.sh --require-signed-commits true`
-     against the existing rule; no contexts list rebuild needed. Warn the
-     user that every contributor must register a signing key in their
-     GitHub account before they can push to the protected branch — see
-     `SETUP.md` Section 3g.
+     against the existing rule; no contexts list rebuild needed. The
+     signing-key contributor warning applies as in Step 4b.
    - Expected secrets not in `secrets.names` (public: `SONAR_TOKEN`,
      `SNYK_TOKEN`; private: `SONAR_TOKEN`, `SONAR_HOST_URL`) → offer "Store
      missing secrets: \<list\>."
@@ -205,6 +203,27 @@ Bootstrap plan:
 
 Ask for confirmation. Do not proceed until the user explicitly approves.
 
+## Step 2.4: Gather workflow-replacement candidates
+
+If the target repo already has workflows in `.github/workflows/` (e.g., a
+hand-rolled `test.yml`, `ci.yml`, `lint.yml`) that are not part of the
+planned generation set, the user usually wants the new workflow to subsume
+them — but only after seeing what would be lost. Custom Python version
+pins, apt-get system-dep installs, `timeout-minutes`, env vars, container
+service definitions, etc., all live in user-authored workflows and DO NOT
+live in our templates. Silently deleting them is the most expensive
+bootstrap regret.
+
+**Required action:** list every file under `.github/workflows/` in the
+target repo. For each that is not part of the planned generation set:
+
+1. Read its full content.
+2. Tag it as `[REPLACE-CANDIDATE: <filename> — <one-line summary>]`.
+
+The tagged set is fed into Step 2.5's idempotency-reviewer prompt; user
+confirmation happens after the review surfaces what's at risk (see Step
+2.5's aggregation step).
+
 ## Step 2.5: Plan Review (parallel agents)
 
 Before writing any files, fan out three review agents **in parallel** in a
@@ -228,41 +247,13 @@ Inputs to each agent are provided **in the agent's prompt**, not on disk
   would use given current detection results.
 - Idempotency reviewer: for each entry in `existing_artifacts` from
   detection — the current on-disk content (read it) AND the planned
-  template content. **Also pass any pre-existing workflow files in
-  `.github/workflows/` that the user is replacing or that overlap
-  semantically with the generated workflows** — see "workflow
-  replacement diff" below. Those won't appear in `existing_artifacts`
-  because their filenames don't match our templates, but they're the
-  most common source of "we silently lost a custom step" regret.
-
-### Workflow replacement diff
-
-The orchestrator confirmed with the user which planned workflow file
-they want to land (e.g., `quality-public.yml`). If the target repo
-already has *other* workflows in `.github/workflows/` (e.g., a hand-
-rolled `test.yml`, `ci.yml`, `lint.yml`), the user usually wants the
-new workflow to subsume them — but only after seeing what would be
-lost. Custom Python version pins, apt-get system-dep installs,
-`timeout-minutes`, env vars, container service definitions, etc.,
-all live in user-authored workflows and DO NOT live in our templates.
-Silently deleting them is the most expensive bootstrap regret.
-
-**Required action:** before Step 3, list every file under
-`.github/workflows/` in the target repo. For each that is not part of
-the planned generation set:
-
-1. Read its full content.
-2. Include it in the idempotency-reviewer prompt with a tag like
-   `[REPLACE-CANDIDATE: tests/integration with custom apt-get installs]`.
-3. The reviewer compares it semantically against the planned
-   `quality-*.yml` and surfaces things that would be lost: Python
-   version pins, system deps, custom timeouts, env vars, secret refs,
-   container services, etc.
-4. Present findings to the user as a confirmation step:
-   *"Found `test.yml` with: Python 3.13, `apt-get install tesseract-ocr poppler-utils`, `timeout-minutes: 20`. Delete it, fold these into the new `quality-public.yml`, or keep both?"*
-5. **Default to keep-both unless the user explicitly chose merge or delete**
-   — that's the least-destructive option. Generating both workflows side-
-   by-side wastes a few seconds of CI but loses nothing.
+  template content. **Also pass the tagged `[REPLACE-CANDIDATE: ...]` set
+  from Step 2.4.** Those won't appear in `existing_artifacts` because
+  their filenames don't match our templates, but they're the most common
+  source of "we silently lost a custom step" regret. The reviewer compares
+  each candidate semantically against the planned `quality-*.yml` and
+  surfaces what would be lost: Python version pins, system deps, custom
+  timeouts, env vars, secret refs, container services.
 
 Block on all three agents finishing. Aggregate their reports:
 
@@ -270,8 +261,12 @@ Block on all three agents finishing. Aggregate their reports:
    or override. Do not proceed to Step 3 without explicit user override.
 2. If all return `PROCEED` or `PROCEED WITH WARNINGS` → surface a short
    summary to the user ("Plan review: 0 blockers, 2 warnings — proceeding").
-3. For idempotency findings: present per-file recommendations and confirm
-   each `overwrite` or `merge` with the user before applying.
+3. For idempotency findings (including each replace-candidate from Step
+   2.4): present per-file recommendations and confirm each `overwrite`,
+   `merge`, or `delete` with the user before applying. **Default to
+   keep-both for replace-candidates unless the user explicitly chose merge
+   or delete** — least-destructive option. Example confirmation:
+   *"Found `test.yml` with: Python 3.13, `apt-get install tesseract-ocr poppler-utils`, `timeout-minutes: 20`. Delete it, fold these into the new `quality-public.yml`, or keep both?"*
 
 ## Step 3: Generate Files
 
