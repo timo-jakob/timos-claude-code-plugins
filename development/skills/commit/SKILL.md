@@ -16,22 +16,19 @@ Before any formatting or linting, run `git diff` and `git diff --staged` using B
 
 ## Step 2: Format/Lint and Generate Commit Message
 
-Launch the following agents **in parallel in a single message**. The commit message agent works from the diff captured in Step 1, so it does not need to wait for formatting/linting to finish.
+Launch Agent A and Agent B **in parallel in a single message** (multiple Task tool_use blocks in one assistant turn). Both must finish before Step 3. The commit message agent works from the diff captured in Step 1, so it does not need to wait for formatting/linting to finish.
 
 ### Agent A — Formatting + Linting
 
-Detect the project language from the changed files and look for a language-specific formatting/linting agent in the appropriate plugin. For example:
+Detect the project language from the changed files and pick the matching agent from an installed plugin:
 
-- **Swift projects** → use the `swift-lint-format` agent from the `development-swift` plugin
+- **Swift projects** → `swift-lint-format` agent from the `development-swift` plugin
+- **Python projects** → `python-ruff-fixer` agent from the `development-python` plugin
 - **Other languages** → if a matching agent exists in an installed plugin, use it; otherwise skip this step and inform the user that no formatter/linter is configured for this language
-
-Spawn the agent with `run_in_background: true`.
 
 ### Agent B — Commit Message (sonnet) — skip if user provided a message in `$ARGUMENTS`
 
 Use the `commit-message` agent. Pass it the git diff captured in Step 1.
-
-Wait for both agents to complete before proceeding.
 
 ## Step 3: Ensure We Are on a Feature Branch
 
