@@ -101,7 +101,7 @@ fetch_all() {
 
   while (( page <= MAX_PAGES )); do
     body=$(mktemp); _tmpfiles+=("$body")
-    if ! http=$(curl -sS -o "$body" -w '%{http_code}' \
+    if ! http=$(command curl -sS -o "$body" -w '%{http_code}' \
          -H "Authorization: Bearer $token" \
          "${API_BASE}${endpoint}?${extra_qs}&ps=${PAGE_SIZE}&p=${page}" 2>/dev/null); then
       err_block \
