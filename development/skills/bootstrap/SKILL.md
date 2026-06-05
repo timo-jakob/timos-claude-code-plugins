@@ -702,7 +702,11 @@ NEXT STEPS:
    SETUP.md) and assign it. **SonarCloud free: skip this step** — custom-gate
    assignment is paywalled; the CI `coverage-floor` step + `Sonar way` gate
    together carry the standard (see *Guiding Principles* for details).
-5. Push the branch and open a PR — CI will run.
+5. Enable Snyk auto-Fix-PRs in the Snyk UI (SETUP.md section 2.6) — one-time
+   UI step (Snyk org → Integrations → GitHub → Edit Settings → toggle on).
+   Required because Snyk's API gates this behind paid plan; UI is the only
+   path on free.
+6. Push the branch and open a PR — CI will run.
 ```
 
 For private path the checklist additionally includes:
