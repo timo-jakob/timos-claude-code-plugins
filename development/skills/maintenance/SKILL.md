@@ -786,13 +786,13 @@ section. These rules govern *how to name the channel* when emitting a line —
 they are guidance for you, not output.
 
 Snyk surfaces findings through *three* independent channels, and run-note
-prose has historically confused them. Get this right:
+prose has historically confused them. Disambiguate before naming:
 
-| Check / job name shape | Channel | Status |
+| Check / job name shape | Channel | Notes |
 |---|---|---|
-| `security/snyk (<org>)`, `code/snyk (<org>)`, `open-source/snyk (<org>)` | Snyk **GitHub App** (integration PR checks, posted from app.snyk.io) | **Intentional** — kept after PR #34; the project's primary SAST + OSS signal |
-| `image` job in the workflow (running `snyk container test`) | CI workflow job | **Intentional** — scans the freshly-built container image, which the GitHub App cannot see |
-| `snyk-code`, `snyk-open-source` jobs in the workflow (running `snyk code test` / `snyk test --all-projects`) | CI workflow jobs | **Removed by PR #34** — were duplicate of the GitHub App AND burned the org's monthly private-test quota |
+| `security/snyk (<org>)`, `code/snyk (<org>)`, `open-source/snyk (<org>)` | Snyk **GitHub App** (integration PR checks, posted from app.snyk.io) | Primary SAST + OSS signal for projects with the App installed. |
+| `image` job in the workflow (running `snyk container test`) | CI workflow job | Scans the freshly-built container image, which the GitHub App cannot see. |
+| `snyk-code`, `snyk-open-source` jobs in the workflow (running `snyk code test` / `snyk test --all-projects`) | CI workflow jobs | When present, they duplicate the GitHub App's SAST + OSS signal AND burn private-test quota. If they appear in a failure list, suggest replacing them with the GitHub App. |
 
 When a `security/snyk (<org>)` check fails with state `ERROR` (not
 `FAILURE`), it is almost always an **infrastructure** condition (most
@@ -804,13 +804,12 @@ finding on the PR's diff. Phrase it that way:
 > private-test budget. Top up the plan or wait for the monthly reset.
 
 Do **not** describe such a failing check as a "legacy CI job to
-remove" — the GitHub App's PR check is the post-#34 design, not legacy.
-Don't recommend deleting workflow jobs that were already removed in PR
-#34 either; check the workflow file before suggesting removals.
+remove" — the GitHub App's PR check is the canonical signal, not
+legacy. Check the actual workflow file before suggesting removals.
 
-If the maintenance gather's `gather-snyk.zsh` (REST API path) emitted
-its summary line into `notes[]` (`Snyk findings via REST API (no quota
-consumed): X code, Y OSS. Projects scanned: ...`), include that note
+If the maintenance gather's per-language Snyk script emitted a summary
+into `notes[]` of the form `Snyk findings via REST API (no quota
+consumed): X code, Y OSS. Projects scanned: ...`, include that note
 verbatim in the "Notes from the gather step" section of the Render
 output — it tells the user the maintenance pipeline did NOT burn quota
 this run, which is load-bearing diagnostic when the GitHub App's check
