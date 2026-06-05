@@ -218,7 +218,6 @@ schema v1:
   "coverage":           <from findings-<lang>.json>,
   "policy": {
     "coverage_threshold": 90,
-    "coverage_threshold_minor_patch": 80,
     "severity_gate": "high",
     "allow_nosemgrep_with_justification": true
   },
