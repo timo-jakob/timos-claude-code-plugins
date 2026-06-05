@@ -1,14 +1,14 @@
 ---
 name: maintenance
 description: >
-  Python project maintenance planner. Receives findings from
-  /development:maintenance (or equivalent JSON input), runs the coverage
-  pre-flight, and during the pre-flight may spawn `python-coverage-improver`
-  in a worktree when modules are below Required. Otherwise runs the planner
-  and returns a per-PR plan for the orchestrator to drive — the per-group
-  work agents are the orchestrator's job, not the dispatcher's. Pure function
-  of its JSON input; does not run its own detection. See ARCHITECTURE.md for
-  the schema and dispatch contract.
+  Python project maintenance dispatcher. Receives findings from
+  /development:maintenance (or equivalent JSON input), validates the payload,
+  runs a coverage pre-flight (may spawn `python-coverage-improver` in a
+  worktree when affected modules sit between Floor and Required), and
+  otherwise invokes `python-maintenance-planner` and returns its plan. The
+  per-group work agents are the orchestrator's job, not the dispatcher's.
+  Pure function of its JSON input; does not run its own detection. See
+  ARCHITECTURE.md for the schema and dispatch contract.
 disable-model-invocation: false
 ---
 
