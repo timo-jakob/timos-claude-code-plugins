@@ -104,8 +104,23 @@ as `[]`; unconfigured tools are absent here entirely).
 
 Before dispatching:
 
-1. Parse `$ARGUMENTS` as JSON. If it's empty, output the standalone
-   message in the "Standalone invocation" section below and stop.
+1. Parse `$ARGUMENTS` as JSON. If it's empty, print this message and
+   stop:
+
+   ```
+   This plugin is a function of its JSON input. Invoke via:
+
+     /development:maintenance
+
+   …which constructs the JSON payload by running detection + tool
+   gathering, then dispatches here. For testing, you can pass JSON
+   inline:
+
+     /development-python:maintenance {"schema_version":"1", ...}
+
+   See ARCHITECTURE.md (top-level repo) for the full schema.
+   ```
+
 2. Confirm `schema_version == "1"`. If not, error: "Schema version
    <X> unsupported; this plugin supports v1." Stop.
 3. Confirm `language == "python"`. If not, error and stop — the
@@ -391,22 +406,14 @@ Carry the planner's `plan` array through to the response (see
 "Aggregation" below) so the orchestrator and downstream consumers
 (future auto-PR step) have access to it.
 
-## Routing rules (reference for the planner)
+## dispatch_filter validation
 
-**You — the dispatcher — no longer spawn work agents.** This section
-documents the per-finding routing logic the planner uses when populating
-the `agent` field on each plan entry. The orchestrator then spawns the
-listed agent in Phase 8 (one PR per group).
+When the payload's `dispatch_filter.only_tools` is present, the
+dispatcher restricts the planner's view of findings to those tools
+(and therefore restricts which groups exist at all). The orchestrator
+never sees groups outside the filter.
 
-`dispatch_filter.only_tools`, when present, restricts the planner's
-view of findings to those tools (and therefore restricts which groups
-exist at all). The orchestrator never sees groups outside the filter.
-
-The following subsections list the planner's routing rules in detail.
-They are reference material — the planner reads them when assigning
-agents to groups; the dispatcher does not act on them directly.
-
-Validation when `dispatch_filter` is present (perform before any spawn):
+Validation (perform before invoking the planner):
 
 - Each name in `only_tools` must be one of: `ruff`, `semgrep`,
   `snyk_code`, `snyk_oss`, `sonarcloud`, `dependabot`. Unknown names
@@ -418,250 +425,27 @@ Validation when `dispatch_filter` is present (perform before any spawn):
   first via /development:bootstrap, or drop `--tool=<X>`." A missing
   tool can't be tested in isolation — there are no findings to act on.
 
-Tool → agent(s) for filter resolution:
+## Routing rules (owned by the planner)
 
-| Tool key | Agent(s) spawned when this key is in the filter |
-|---|---|
-| `ruff` | `python-ruff-fixer` |
-| `semgrep` | `python-semgrep-triage` |
-| `snyk_code` | `python-snyk-triage` (snyk_code findings only) |
-| `snyk_oss` | `python-snyk-triage` (patch/minor) + `python-major-upgrade` (one spawn per major) |
-| `sonarcloud` | `python-sonar-triage` |
-| `dependabot` | `python-dependabot-triage` for the non-major / non-pip cases + `python-major-upgrade` per pip-major PR (per the existing routing logic) |
+The per-finding → per-agent routing logic — Snyk patch/minor vs major,
+Dependabot ecosystem + bump-level classification, the `(pip, major)` →
+`python-major-upgrade` rule, the Docker `python:X.Y` → `python-runtime-upgrade`
+rule — is owned by `python-maintenance-planner.md`. See that file for
+the full rule tables.
 
-| Agent | Model | Tool key(s) | Worktree (when configured) |
-|---|---|---|---|
-| `python-ruff-fixer` | haiku | `ruff` | yes |
-| `python-semgrep-triage` | sonnet | `semgrep` | yes |
-| `python-snyk-triage` | sonnet | `snyk_code` + `snyk_oss` (patch + minor bumps only) | yes |
-| `python-sonar-triage` | sonnet | `sonarcloud` | yes |
-| `python-major-upgrade` | opus | `snyk_oss` AND `dependabot` major-version bumps (pip) | yes |
-| `python-runtime-upgrade` | opus | `dependabot` Docker bumps where the base image is the Python interpreter (`python:X.Y...`) | yes |
-| `python-dependabot-triage` | sonnet | `dependabot` patch + minor pip, plus all github-actions / non-Python-image docker / unknown ecosystems | **no** (acts on GitHub via `gh`, not on local files) |
-
-**Spawn all applicable agents in a single assistant turn.** They run
-in parallel — worktree-using ones in isolated worktrees off
-`worktree.base_branch`; `python-dependabot-triage` runs without a
-worktree (it modifies PRs on GitHub, not files locally).
-
-### How to spawn — the Agent tool call shape
-
-Worktree isolation is a Claude Code platform feature, not something
-this plugin implements: pass `isolation="worktree"` to the Agent tool
-and the runtime creates a temp git worktree on a fresh branch off
-`worktree.base_branch`. If the agent makes no changes, the worktree is
-auto-cleaned; if it changes files, the branch name comes back in the
-agent's result for the orchestrator to merge in Phase 8.
-
-Example — a worktree-using agent (here `python-sonar-triage`):
-
-```
-Agent(
-  subagent_type="python-sonar-triage",
-  description="Triage Sonar findings",
-  isolation="worktree",
-  prompt="""
-    repo_path: /abs/path/to/repo
-    configured: true
-    findings: [<sliced from findings_by_tool.sonarcloud>]
-    policy: { severity_gate: "high", ... }
-    worktree.base_branch: "main"
-
-    Run pytest (or the project's test command) in the worktree before
-    returning success — only report success if tests pass.
-  """
-)
-```
-
-Example — `python-dependabot-triage` (no worktree; it acts on GitHub
-PRs via `gh`, not on local files):
-
-```
-Agent(
-  subagent_type="python-dependabot-triage",
-  description="Process classified Dependabot PRs",
-  prompt="""
-    repo_path: /abs/path/to/repo
-    configured: true
-    findings: [<pre-classified PR list with ecosystem + bump_level + routing>]
-  """
-)
-```
-
-Apply this shape to every agent in the spawn list — `python-ruff-fixer`,
-`python-semgrep-triage`, `python-snyk-triage`, `python-sonar-triage`,
-`python-major-upgrade`, and `python-coverage-improver` all take
-`isolation="worktree"`. Only `python-dependabot-triage` omits it.
-
-Snyk routing: scan `findings_by_tool.snyk_oss` for the per-finding
-upgrade type. Patch + minor go to `python-snyk-triage`; majors go to
-`python-major-upgrade` (one spawn per major bump).
-
-**Dependabot routing — pre-split before spawning:**
-
-For each PR, you need TWO pieces of information: its **ecosystem**
-(from `headRefName`) and its **bump level** (from `title`).
-
-### Step 1 — extract the ecosystem
-
-`headRefName` follows the pattern `dependabot/<ecosystem>/<rest>`:
-
-| `headRefName` prefix | Ecosystem |
-|---|---|
-| `dependabot/pip/...` | `pip` (Python deps) |
-| `dependabot/github_actions/...` | `github-actions` |
-| `dependabot/docker/...` | `docker` (Dockerfile FROM lines) |
-| `dependabot/npm_and_yarn/...` | `npm` |
-| other / unrecognized | `unknown` — treat as human-review for safety |
-
-### Step 2 — extract + classify the bump level
-
-Parse the title for `<old>` and `<new>` versions. Standard semver:
-
-- `1.x → 2.x` → **major**
-- `1.2.x → 1.3.x` → **minor**
-- `1.2.3 → 1.2.4` → **patch**
-
-**0.x special case** — for packages still in `0.x` territory:
-
-- `0.1.0 → 0.2.0` (second number changed) → **major-equivalent**
-  (rationale: in pre-1.0 development, breaking changes commonly land
-  in minor bumps. Don't trust semver promises on `0.x`. Treat as major
-  for routing purposes.)
-- `0.1.2 → 0.1.3` (only third number changed) → **patch**
-
-For grouped PRs (`Bump the <group> group with N updates`), classify by
-the highest level present in the body. If the body lists a 0.x major-
-equivalent, the group is major.
-
-### Step 3 — route by `(ecosystem, bump level)` combination
-
-| Ecosystem | Bump | Route |
-|---|---|---|
-| pip | patch | `python-dependabot-triage` (batch) |
-| pip | minor | `python-dependabot-triage` (batch) |
-| pip | **major** (incl. 0.x-equiv) | `python-major-upgrade` (one spawn per PR, opus, worktree) |
-| github-actions | patch | `python-dependabot-triage` (batch) |
-| github-actions | minor | `python-dependabot-triage` (batch) |
-| github-actions | major | `python-dependabot-triage` as **human-review** — no Python-API migration applies; user reviews action input/output changes manually |
-| docker | **image matches `python:\d+\.\d+`** (Python interpreter bump) | `python-runtime-upgrade` (opus, worktree). The runtime-upgrade agent attempts the swap, verifies locally if possible, escalates cleanly with a structured report on dep-compat failures. |
-| docker | anything else (libxml2, alpine, non-Python images, etc.) | `python-dependabot-triage` as **human-review** — Dockerfile base-image changes affect OS packages, libc, etc. Always defer to human. |
-| unknown | any | `python-dependabot-triage` as **human-review** — unrecognized ecosystem, can't reason about safety |
-
-`python-major-upgrade` is **only** spawned for `(pip, major)`. The agent's procedure (LSP find-references, Python release-note migration patterns) doesn't apply to other ecosystems.
-
-### Step 4 — build the two agent invocations
-
-After classification:
-
-- For each `(pip, major)` PR: spawn one `python-major-upgrade` with:
-  ```
-  package: <pkg>
-  current_version: <old>
-  target_version: <new>
-  source: "dependabot"
-  dependabot_pr: <PR number>
-  release_notes_url: <best guess; PR body usually links one>
-  ```
-- All other PRs (regardless of ecosystem/bump) → pass as the `findings`
-  array to a SINGLE `python-dependabot-triage` spawn, **annotated with
-  the routing decision** so the agent knows what to do:
-  ```json
-  [
-    { "number": 12, "title": "...", "headRefName": "dependabot/docker/...",
-      "ecosystem": "docker", "bump_level": "minor",
-      "routing": "human-review", "routing_reason": "Docker base-image bumps always need manual review" },
-    { "number": 17, "title": "...", "headRefName": "dependabot/pip/...",
-      "ecosystem": "pip", "bump_level": "minor",
-      "routing": "auto-merge-if-green" },
-    ...
-  ]
-  ```
-- If both lists end up empty: still spawn `python-dependabot-triage`
-  with `[]` for predictability.
-
-### Worked example — ai-doc-organizer's current PRs
-
-| PR | Ecosystem | Bump | Route |
-|---|---|---|---|
-| 18 codeql-action 3→4 | github-actions | major | dependabot-triage (human-review: GHA major) |
-| 17 claude-agent-sdk 0.1→0.2 | pip | major-equiv (0.x) | python-major-upgrade |
-| 16 watchdog 4→6 | pip | major | python-major-upgrade |
-| 15 anthropic 0.40→0.104 | pip | major-equiv (0.x) | python-major-upgrade |
-| 14 pypdf 4→6 | pip | major | python-major-upgrade |
-| 13 ruamel-yaml 0.18→0.19 | pip | major-equiv (0.x) | python-major-upgrade |
-| 12 python 3.13→3.14 (docker) | docker | minor | dependabot-triage (human-review: docker) |
-
-Five `python-major-upgrade` spawns (PRs 13, 14, 15, 16, 17) + one `python-dependabot-triage` (handling PRs 18 and 12 as human-review cases). The latter does not auto-merge anything in this scenario.
-
-For each agent's prompt, include:
-
-1. `repo_path` — full path to the project root.
-2. `configured` — boolean from `tooling_configured[<tool>]`.
-3. `findings` — the tool's findings array if configured.
-4. `policy` — relevant subset.
-5. `worktree.base_branch` — for context.
-6. A note: "End with `pytest` (or the project's test command) in the
-   worktree. Only return success if tests pass."
-
-## What each agent returns (reference for the orchestrator's Phase 8)
-
-The dispatcher no longer collects work-agent results — the orchestrator
-spawns each group's agent in Phase 8 and reads the response there.
-The shapes below document what to expect:
-
-When the tool **is** configured, agents return:
-
-```json
-{
-  "tool": "ruff",
-  "configured": true,
-  "actions_taken": [
-    { "type": "autofix", "summary": "...", "files_changed": [...], "worktree_branch": "wt-ruff-fixes-abc123" }
-  ],
-  "actions_requiring_review": [
-    { "finding_id": "...", "recommendation": "...", "rationale": "..." }
-  ],
-  "unable_to_fix": [
-    { "finding_id": "...", "reason": "..." }
-  ]
-}
-```
-
-When the tool is **not** configured, agents return:
-
-```json
-{
-  "tool": "ruff",
-  "configured": false,
-  "missing_tool_recommendation": {
-    "summary": "Ruff is not configured for this project.",
-    "what_it_provides": "Fast Python linter + formatter — common errors, security smells, modernizations, consistent formatting.",
-    "how_to_add": "Run /development:bootstrap (recommended — sets up the whole toolchain), or manually: pip install ruff + add ruff.toml or a [tool.ruff] section to pyproject.toml."
-  },
-  "actions_taken": [],
-  "unable_to_fix": []
-}
-```
-
-If an agent makes no changes (configured but clean, or not configured),
-its `worktree_branch` is absent and the runtime automatically cleans up
-the worktree.
+The dispatcher does **not** apply these rules. It passes filtered
+findings to the planner and returns the planner's `plan` array
+unchanged. Each plan entry has an `agent` field; the orchestrator
+spawns that agent in Phase 8 with `isolation="worktree"` (except for
+`python-dependabot-triage`, which acts on GitHub PRs via `gh` and runs
+without a worktree).
 
 ## Response
 
-After the planner finishes (and the improver, when it ran), assemble
-the response and emit it as JSON in your output.
-
-**This is a mid-turn handoff, not a turn boundary.** The orchestrator
-SKILL — which is still loaded in your context above this one — uses
-this JSON as the input to its Phase 7 / Phase 8 work. Do NOT frame
-the emission as "Returning dispatcher response to the orchestrator:"
-or any similar "report and stop" pattern; that wording has caused
-runs to stall here historically. Emit the JSON, then **immediately
-continue with the orchestrator's Phase 7 (if `human_action_required`
-is set) or Phase 8 (per-stage PR cycle)** in the same assistant turn.
-Do not pause for user input.
+After the planner finishes (and the improver, when it ran), emit the
+JSON below as your response and stop — the orchestrator (still loaded
+in context above) consumes it as input to its Phase 7 / Phase 8 work
+in the same assistant turn.
 
 ```json
 {
@@ -705,71 +489,28 @@ the per-group work agents the orchestrator spawns in Phase 8 and
 aggregated there. The dispatcher returns only the plan + improver
 context the orchestrator needs to drive that phase.
 
-## Standalone invocation
+## Plugin-scope decisions (for contributors)
 
-If `$ARGUMENTS` is empty, the user invoked you directly without going
-through `/development:maintenance`. Print:
+These choices live with the plugin's helper scripts, not the
+orchestrator. They are documented here so the orchestrator SKILL
+doesn't carry Python-specific scope:
 
-```
-This plugin is a function of its JSON input. Invoke via:
-
-  /development:maintenance
-
-…which constructs the JSON payload by running detection + tool
-gathering, then dispatches here. For testing, you can pass JSON
-inline:
-
-  /development-python:maintenance {"schema_version":"1", ...}
-
-See ARCHITECTURE.md (top-level repo) for the full schema.
-```
-
-…and stop.
-
-## Helper scripts owned by this plugin
-
-These scripts live under `development/skills/maintenance/scripts/` for
-co-location with the orchestrator that calls them, but they are
-**owned by this plugin** — Python-specific logic, Python-specific
-return shapes. The orchestrator just dispatches by filename
-convention (`gather-<lang>-findings.sh`,
-`verify-<lang>-state.sh`).
-
-### `gather-python-findings.sh <repo_path>`
-
-Used by Phase 3 of `/development:maintenance`. Runs ruff, semgrep,
-Snyk, SonarCloud + pytest with coverage; emits one JSON document
-matching the gather-output schema this skill expects in its input.
-
-### `verify-python-state.sh [--target-py=X.Y] <repo_path>`
-
-Used by Phase 3 (pre-gather) and Phase 8 step 7 (post-merge sync)
-of `/development:maintenance`. Confirms `.venv/bin/python` matches
-the project's declared Python version (resolved from `Dockerfile`'s
-`FROM python:X.Y...` first, then `pyproject.toml`'s
-`requires-python`). Recreates the venv when there's a mismatch.
-
-Auto-detect mode (no flag) compares declared vs actual and recovers
-on mismatch. `--target-py=X.Y` forces a specific version — used by
-the orchestrator's R.4 option 1 ("fall back to previous configuration
-locally") to rebuild the venv on the old interpreter when the upgrade
-is blocked.
-
-Exit contract (Phase 3's script-contract table is the authoritative
-copy; reproduced here for Python-plugin readers):
-
-| Exit | stdout | Meaning |
-|---|---|---|
-| `0` | empty | State is fine, no action taken |
-| `0` | `{"recovered": true, "from_py": "X.Y", "to_py": "Z.W"}` | venv was rebuilt successfully |
-| `1` | empty (stderr has message) | `python<X.Y>` not on PATH; user must `brew install python@X.Y` |
-| `2` | `{"recreate_failed": true, "project_py": ..., "venv_py": ..., "install_log_excerpt": "..."}` | venv recreate's `pip install` failed; orchestrator drives R.4 |
-
-Python-specific scope decisions documented here so the orchestrator
-SKILL doesn't carry them:
-- **Dockerfile `FROM python:X.Y...` is authoritative over `requires-python`** because CI builds and runs from the Dockerfile; `requires-python` is a soft constraint pip respects.
-- **`.venv/` at the repo root is the only convention checked** (no support for `venv/`, `env/`, or a `VIRTUAL_ENV` env var). Bootstrapped projects standardize on `.venv/`.
-- **`pip install -e ".[dev]"` is the recreate's install command** — matches what `automate-public.sh` uses during bootstrap. Future iterations could detect `uv.lock` / `poetry.lock` and prefer the lock-respecting install, but for v1 pip is the floor.
+- **`gather-python-findings.sh` + `verify-python-state.sh`** live under
+  `development/skills/maintenance/scripts/` for co-location with the
+  orchestrator that invokes them. The orchestrator dispatches by
+  filename convention (`gather-<lang>-findings.sh`,
+  `verify-<lang>-state.sh`); contracts are in the orchestrator's
+  Phase 3.
+- **Dockerfile `FROM python:X.Y...` is authoritative over
+  `requires-python`** because CI builds and runs from the Dockerfile;
+  `requires-python` is a soft constraint pip respects.
+- **`.venv/` at the repo root is the only convention checked** (no
+  support for `venv/`, `env/`, or `VIRTUAL_ENV`). Bootstrapped projects
+  standardize on `.venv/`.
+- **`pip install -e ".[dev]"` is the recreate's install command** —
+  matches `automate-public.sh`'s bootstrap step. Future iterations
+  could detect `uv.lock` / `poetry.lock` and prefer the lock-respecting
+  install, but for v1 pip is the floor.
 
 ## What you will NOT do
 
