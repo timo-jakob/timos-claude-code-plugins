@@ -333,7 +333,7 @@ blocks every other autonomous fix.
   the 70% major-work floor
 - Decision: skip the 5 major upgrades, surface them in
   `human_action_required`. The remaining 2 PRs (18 GHA major, 12
-  Docker) go to `python-dependabot-triage` as human-review per the
+  Docker) go to `python-dependabot-snyk-triage` as human-review per the
   Dependabot routing logic. The other work agents (ruff, semgrep,
   snyk, sonar) run normally — none have findings, so they each return
   "0 findings, nothing to do."
@@ -422,7 +422,7 @@ The dispatcher does **not** apply these rules. It passes filtered
 findings to the planner and returns the planner's `plan` array
 unchanged. Each plan entry has an `agent` field; the orchestrator
 spawns that agent in Phase 8 with `isolation="worktree"` (except for
-`python-dependabot-triage`, which acts on GitHub PRs via `gh` and runs
+`python-dependabot-snyk-triage`, which acts on GitHub PRs via `gh` and runs
 without a worktree).
 
 ## Response

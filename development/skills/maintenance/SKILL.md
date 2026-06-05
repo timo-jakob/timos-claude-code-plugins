@@ -275,7 +275,7 @@ restructure entries from `findings_by_tool` (including verbose
 `dependabot[].body` blobs) before dispatching. Even when a body looks
 like dead weight to you, downstream agents may consume it:
 
-- `python-dependabot-triage` parses Dependabot PR bodies for
+- `python-dependabot-snyk-triage` parses Dependabot PR bodies for
   grouped-PR member lists, release-note breaking-change flags, and
   Dependabot compatibility scores.
 - `python-major-upgrade` extracts the release-notes URL hint from the
@@ -445,7 +445,7 @@ For each entry in `response.plan`, in priority order:
    )
    ```
 
-   Only exception: `python-dependabot-triage` is spawned WITHOUT
+   Only exception: `python-dependabot-snyk-triage` is spawned WITHOUT
    `isolation` (it acts on GitHub PRs via `gh`, not local files).
    See the dispatcher SKILL for the full case list.
 
