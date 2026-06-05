@@ -463,56 +463,44 @@ For each entry in `response.plan`, in priority order:
    See the dispatcher SKILL for the full case list.
 
    **Pre-flight for `python-runtime-upgrade` groups.** Before spawning
-   this agent, you must check whether the target Python interpreter is
-   available locally — the agent's cascade depends on it, and subagents
-   can't prompt the user interactively, so this decision must happen
-   here in the orchestrator.
+   this agent, the orchestrator must check whether the target runtime
+   is locally available — the agent's cascade depends on it, and
+   subagents can't prompt the user interactively, so this decision must
+   happen here.
 
-   Extract `<to_version>` from the plan entry (e.g. `3.14` from a
-   `python:3.14-slim-bookworm` PR), then check:
+   Interpreter detection + install is **plugin-owned** (the orchestrator
+   has no language-specific knowledge). For Python, invoke the
+   development-python plugin's helper script:
 
    ```bash
-   # Check in order: PATH, Homebrew prefix, uv-managed interpreters
-   HAS_PY=""
-   for cmd in "python<to_version>" "/opt/homebrew/bin/python<to_version>"; do
-     if [ -x "$(command -v "$cmd" 2>/dev/null)" ] || [ -x "$cmd" ]; then
-       HAS_PY="$cmd"; break
-     fi
-   done
-   if [ -z "$HAS_PY" ] && command -v uv >/dev/null 2>&1; then
-     if uv python find "<to_version>" >/dev/null 2>&1; then
-       HAS_PY="uv-managed"
-     fi
-   fi
+   "<plugin-base-dir>/development-python/scripts/pre-dispatch-runtime-upgrade.sh" \
+     detect "<to_version>"
    ```
 
-   If `HAS_PY` is set → spawn the agent with `local_verification_mode:
-   "auto"` and proceed normally (the agent runs the 3-pass cascade).
+   The script extracts `<to_version>` from the plan entry (e.g. `3.14`
+   from a `python:3.14-slim-bookworm` PR), probes the standard install
+   locations, and prints a JSON result on stdout. Exit 0 if the runtime
+   is found, exit 1 if missing.
 
-   If `HAS_PY` is empty → **ask the user** via `AskUserQuestion` with
-   exactly these three options (no others — the project's install
-   convention is Homebrew):
+   - **Found** (exit 0) → spawn the agent with `local_verification_mode:
+     "auto"` and proceed normally (the agent runs the 3-pass cascade).
+   - **Missing** (exit 1) → **ask the user** via `AskUserQuestion` with
+     exactly these three options:
 
-   - **"Install via Homebrew now"** — orchestrator runs
-     `brew install python@<to_version>`.
-   - **"I'll install it myself"** — orchestrator pauses, prints the
-     command (`brew install python@<to_version>`) plus the manual
-     alternative the user might prefer (their choice — pyenv, asdf,
-     etc.; don't prescribe), then asks a follow-up `AskUserQuestion`
-     "Ready to continue?" with options
-     ["Yes, re-check", "Cancel — skip local verify"]. On "Yes,
-     re-check", re-run the detection block above; if still missing,
-     loop with one more confirmation, then fall through to skip.
-   - **"Skip local verification"** — spawn the agent with
-     `local_verification_mode: "skip"`. The agent will only edit +
-     commit the Dockerfile + `requires-python` and won't attempt the
-     cascade. CI does the real verification.
-
-   On "Install via Homebrew now", run `brew install python@<to_version>`,
-   re-check that `python<to_version>` is now resolvable, and only then
-   spawn the agent. If the install fails (network error, formula not
-   found yet, etc.), surface the install error and re-ask the user
-   with the same three options (don't silently fall back to skip).
+     1. **"Install the runtime now"** — orchestrator runs the script's
+        `install <to_version>` subcommand, then re-runs `detect`. If
+        re-detect still fails, surface the install error and re-ask the
+        user (don't silently fall through to skip).
+     2. **"I'll install it myself"** — pause, point the user at the
+        plugin's installation guidance, then ask a follow-up
+        `AskUserQuestion` "Ready to continue?" with options
+        ["Yes, re-check", "Cancel — skip local verify"]. On "Yes,
+        re-check", re-run the `detect` subcommand; loop at most once,
+        then fall through to skip.
+     3. **"Skip local verification"** — spawn the agent with
+        `local_verification_mode: "skip"`. The agent edits + commits
+        the Dockerfile + `requires-python` only; CI does the real
+        verification.
 
    The agent's prompt gains one extra field:
 
