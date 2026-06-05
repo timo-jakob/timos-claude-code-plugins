@@ -80,15 +80,18 @@ previous PR merges. This means each group's work runs off the latest
   "language_meta": { "version": "3.13", "manifests": [...] },
   "tooling_configured": {
     "ruff": true, "semgrep": true,
-    "snyk_code": false, "snyk_oss": false,
+    "code_scanning": true,
+    "snyk_prs": true,
     "sonarcloud": true,
     "dependabot": true
   },
   "findings_by_tool": {
-    "ruff":       [...],
-    "semgrep":    [...],
-    "sonarcloud": [...],
-    "dependabot": [...]
+    "ruff":                 [...],
+    "semgrep":              [...],
+    "code_scanning_alerts": [...],
+    "snyk_prs":             [...],
+    "sonarcloud":           [...],
+    "dependabot":           [...]
   },
   "coverage": {
     "overall": 85,
