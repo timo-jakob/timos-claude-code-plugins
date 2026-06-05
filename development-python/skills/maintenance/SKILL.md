@@ -81,10 +81,14 @@ previous PR merges. This means each group's work runs off the latest
   "tooling_configured": {
     "ruff": true, "semgrep": true,
     "snyk_code": false, "snyk_oss": false,
-    "sonarcloud": true
+    "sonarcloud": true,
+    "dependabot": true
   },
   "findings_by_tool": {
-    "ruff": [...], "semgrep": [...], "sonarcloud": [...]
+    "ruff":       [...],
+    "semgrep":    [...],
+    "sonarcloud": [...],
+    "dependabot": [...]
   },
   "coverage": {
     "overall": 85,
@@ -93,8 +97,13 @@ previous PR merges. This means each group's work runs off the latest
       "src/aido/cli.py": 67
     }
   },
-  "policy": { "coverage_threshold": 90, "severity_gate": "high", ... },
-  "worktree": { "available": true, "base_branch": "main" }
+  "policy": {
+    "coverage_threshold": 90,
+    "severity_gate": "high",
+    "priority_window_days": 30
+  },
+  "worktree": { "available": true, "base_branch": "main" },
+  "dispatch_filter": { "only_tools": ["sonarcloud"] }
 }
 ```
 
@@ -102,6 +111,11 @@ previous PR merges. This means each group's work runs off the latest
 ones not set up for this project. `findings_by_tool` only contains
 keys for configured tools (configured tools with zero findings appear
 as `[]`; unconfigured tools are absent here entirely).
+
+`policy.priority_window_days` defaults to `30` when absent. `dispatch_filter`
+is optional — the orchestrator adds it only when the user passed
+`--tool=<name>`; when present, it scopes dispatch to the listed tools and
+every other agent is skipped (see "dispatch_filter validation" below).
 
 ## Validation
 
