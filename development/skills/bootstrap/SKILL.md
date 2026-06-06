@@ -573,48 +573,26 @@ Offer to drop the flag and continue, or abort. The Step 4.5 install path
 also skips when there's no Approver workflow to consume the App
 credentials.
 
-### 3f. API stability artifacts (when Python detected with `[project]`)
+### 3f. Language-specific bootstrap artifacts
 
-Independent of `--claude-approver` — this gate protects every Python repo
-that publishes a `pyproject.toml [project]` block, whether or not the
-Approver is enabled.
+For each detected language, check whether the language plugin publishes
+a bootstrap-artifacts spec and render whatever it lists. The spec is
+authoritative for the artifact set: file list with target paths,
+placeholder substitutions, branch-protection stance, validator checks,
+and idempotency notes. This SKILL only dispatches — the *what* lives in
+the language plugin per the language-first principle in
+`ARCHITECTURE.md`.
 
-When Python is in the detected languages list **and** `pyproject.toml`
-contains a `[project]` table with a `name` field, render:
-
-| Template | Target path in repo | Placeholders |
+| Language | Plugin spec file | Renders when |
 |---|---|---|
-| `templates/common/.github/workflows/api-stability.yml.tmpl` | `.github/workflows/api-stability.yml` | `{{DEFAULT_BRANCH}}`, `{{PYTHON_VERSION}}` |
-| `templates/languages/python/check-api-stability.py` | `.github/scripts/check-api-stability.py` | (none) |
+| Python | `development-python/docs/api-stability.md` | `pyproject.toml` has a `[project]` table with `name` |
+| *(future)* TypeScript / Go / Rust / Swift | *(per the plugin once it ships)* | … |
 
-The workflow runs `griffe check` between the PR's merge-base and HEAD,
-gates with a **version-bump bypass** (breaking changes are allowed when
-either `pyproject.toml [project].version`'s major bumps OR the PR title
-declares the break with `!` after the conventional-commit type), and
-uploads `griffe-findings.json` as an artifact.
-
-Both files follow the standard idempotency rules. The script is bumped
-out-of-band by the plugin family on Griffe-API changes; treat the
-generated copy as the user's to customise.
-
-**Branch protection.** Step 4b's `branch-protection.sh` does **not**
-add `api-stability` as a required status check by default — the gate
-starts in **advisory mode**, visible in the GitHub UI but not blocking
-merges. Once the user has lived with the gate for a release or two and
-trusts it, they promote it to required via the GitHub Settings →
-Branches UI (or by re-running `branch-protection.sh` with the
-`api-stability` context added explicitly). This is the
-advisory-→-strict rollout from #174.
-
-**Approver coupling.** When the Claude Approver is also enabled
-(Step 3e ran), the Approver reads `griffe-findings.json` from this
-workflow's artifact and applies per-PR-type criteria from
-`.claude/approver-policy.md` on top of this gate's binary verdict. A
-typical case: a `refactor:` PR that the gate let through with a `!`
-declaration still triggers `REQUEST_CHANGES` from the Approver, because
-the per-type rule for `refactor:` is "no public API change, full stop."
-The gate's bypass and the Approver's per-type criteria are deliberately
-not the same thing.
+The Python plugin's API-stability spec is independent of
+`--claude-approver`: it renders for any Python project that publishes a
+package, regardless of whether the Approver is also enabled. When both
+are enabled, the spec describes how the gate's artifact couples with
+the Approver's per-type criteria.
 
 ### Idempotency rules (apply for every file write)
 
@@ -641,12 +619,9 @@ files **on disk**:
   - `.claude/approver-policy.md` has the load-bearing sections
     (`## Type detection`, `## Baseline criteria`, `## Per-type criteria`,
     `## Confidence calibration`).
-- When `.github/workflows/api-stability.yml` was rendered (3f):
-  - The workflow YAML parses.
-  - `.github/scripts/check-api-stability.py` exists, is executable, and
-    its first line is the shebang.
-  - The workflow's `--old-ref` uses the resolved default branch (no
-    `{{DEFAULT_BRANCH}}` placeholder remains).
+- Language-specific bootstrap-artifact checks per each language
+  plugin's spec file (see Step 3f). For Python, the spec is
+  `development-python/docs/api-stability.md`.
 
 If the agent returns `Verdict: BLOCK`, show errors to the user. Offer to:
 - Re-run Step 3 (regenerate the offending files), or
