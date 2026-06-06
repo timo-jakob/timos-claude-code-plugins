@@ -1,0 +1,48 @@
+# Enforce that .claude-plugin/marketplace.json's per-plugin version entries
+# match the corresponding plugin.json files. See issue #188 and
+# MAINTAINING.md "Per-merge: bump plugin versions whenever you change a
+# plugin".
+#
+# Drift this prevents: between PRs #177 and #186, eight plugin.json bumps
+# landed without matching marketplace.json bumps. #187 reset the baseline;
+# this workflow stops it from recurring.
+
+name: marketplace sync
+
+on:
+  pull_request:
+    paths:
+      - "**/plugin.json"
+      - ".claude-plugin/marketplace.json"
+      - "scripts/check-marketplace-sync.zsh"
+      - ".github/workflows/marketplace-sync.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/plugin.json"
+      - ".claude-plugin/marketplace.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install zsh
+        # Ubuntu runners have bash + jq but not zsh. The check script
+        # uses zsh-specific features (the (N) glob qualifier); installing
+        # zsh is cheaper than rewriting in bash.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+
+      - name: Check marketplace.json + plugin.json sync
+        run: ./scripts/check-marketplace-sync.zsh
