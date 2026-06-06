@@ -141,8 +141,11 @@ separate type.
 
 **Must-haves:**
 
-- No public API change (semver-compatible — verified by `griffe` or
-  equivalent when available; manual review otherwise).
+- No public API change (semver-compatible — verified against the
+  `griffe-findings.json` artifact from the `api-stability` workflow when
+  the repo has one; manual review otherwise). Even if the gate's
+  version-bump bypass allowed it through, `refactor:` is non-negotiably
+  no-break — flag a `REQUEST_CHANGES`.
 - Coverage on touched files holds (drop > 0.5% is a finding).
 - Diff is atomic — one refactoring intent per PR.
 
@@ -303,22 +306,29 @@ applies these per-type additions:
 - `chore(deps-major):` → consider whether the upgrade itself forces a
   contract change downstream.
 
-Detector tools per surface (the Approver invokes these on the PR head
-when the surface marker exists in the repo):
+Detector tools per surface. The **Python library-exports** surface is
+checked by the `api-stability` workflow (bootstrap-generated when
+`pyproject.toml [project]` is present, per SKILL Step 3f); the Approver
+reads its `griffe-findings.json` artifact directly. Other surfaces are
+specified here but not yet wired — they'll be added as #174 covers each:
 
-| Surface | Marker | Detector |
-|---|---|---|
-| REST / OpenAPI | `contracts/openapi.yaml` | `oasdiff` |
-| gRPC / Protobuf | `*.proto` under `contracts/` | `buf breaking` |
-| GraphQL | `*.graphql` under `contracts/` | `graphql-inspector` |
-| AsyncAPI / event schemas | `contracts/asyncapi.yaml` | `asyncapi-diff` |
-| Library public API | `[project]` in `pyproject.toml` | `griffe` + `python-semver-check` |
-| CLI parameters | `contracts/cli-help.txt` snapshot | line-diff |
-| Env vars / config / webhooks | JSON Schema files under `contracts/` | JSON Schema diff |
-| MCP tool signatures | MCP server registration in code | inspect tool-definition JSON |
+| Surface | Marker | Detector | Source for the Approver |
+|---|---|---|---|
+| REST / OpenAPI | `contracts/openapi.yaml` | `oasdiff` | TBD |
+| gRPC / Protobuf | `*.proto` under `contracts/` | `buf breaking` | TBD |
+| GraphQL | `*.graphql` under `contracts/` | `graphql-inspector` | TBD |
+| AsyncAPI / event schemas | `contracts/asyncapi.yaml` | `asyncapi-diff` | TBD |
+| **Library public API (Python)** | `[project]` in `pyproject.toml` | `griffe` (via `.github/scripts/check-api-stability.py`) | `griffe-findings.json` from the `api-stability` workflow |
+| CLI parameters | `contracts/cli-help.txt` snapshot | line-diff | TBD |
+| Env vars / config / webhooks | JSON Schema files under `contracts/` | JSON Schema diff | TBD |
+| MCP tool signatures | MCP server registration in code | inspect tool-definition JSON | TBD |
 
 A breaking diff without the matching version-bump signal is automatic
-`REQUEST_CHANGES`.
+`REQUEST_CHANGES`. The bypass logic the gate uses (`!` in title + major
+version bump) is **not** the same as the Approver's per-type rules —
+`refactor:` PRs that the gate allowed through with `!` still trigger
+`REQUEST_CHANGES` here, because refactors are non-negotiably
+behaviour-preserving.
 
 ---
 

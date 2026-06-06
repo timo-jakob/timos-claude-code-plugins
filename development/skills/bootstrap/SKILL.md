@@ -573,6 +573,27 @@ Offer to drop the flag and continue, or abort. The Step 4.5 install path
 also skips when there's no Approver workflow to consume the App
 credentials.
 
+### 3f. Language-specific bootstrap artifacts
+
+For each detected language, check whether the language plugin publishes
+a bootstrap-artifacts spec and render whatever it lists. The spec is
+authoritative for the artifact set: file list with target paths,
+placeholder substitutions, branch-protection stance, validator checks,
+and idempotency notes. This SKILL only dispatches — the *what* lives in
+the language plugin per the language-first principle in
+`ARCHITECTURE.md`.
+
+| Language | Plugin spec file | Renders when |
+|---|---|---|
+| Python | `development-python/docs/api-stability.md` | `pyproject.toml` has a `[project]` table with `name` |
+| *(future)* TypeScript / Go / Rust / Swift | *(per the plugin once it ships)* | … |
+
+The Python plugin's API-stability spec is independent of
+`--claude-approver`: it renders for any Python project that publishes a
+package, regardless of whether the Approver is also enabled. When both
+are enabled, the spec describes how the gate's artifact couples with
+the Approver's per-type criteria.
+
 ### Idempotency rules (apply for every file write)
 
 For each target file path:
@@ -598,6 +619,9 @@ files **on disk**:
   - `.claude/approver-policy.md` has the load-bearing sections
     (`## Type detection`, `## Baseline criteria`, `## Per-type criteria`,
     `## Confidence calibration`).
+- Language-specific bootstrap-artifact checks per each language
+  plugin's spec file (see Step 3f). For Python, the spec is
+  `development-python/docs/api-stability.md`.
 
 If the agent returns `Verdict: BLOCK`, show errors to the user. Offer to:
 - Re-run Step 3 (regenerate the offending files), or
