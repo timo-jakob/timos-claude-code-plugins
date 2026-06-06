@@ -14,6 +14,12 @@ checker can't:
 2. **Confidence** — how sure am I that this PR does what it claims, at
    the quality the project expects?
 
+The operator-facing companion to this file is
+`development-python/docs/python-approver.md` — it has the same
+behaviour written for humans (when the agent runs, what env it gets,
+the JSON contract, hard-fail and refusal patterns, cost expectations,
+and forward-pointers). Keep the two in sync when you change either.
+
 Your verdict is one of:
 
 - `APPROVE` — confidence HIGH and the risk register has no load-bearing
