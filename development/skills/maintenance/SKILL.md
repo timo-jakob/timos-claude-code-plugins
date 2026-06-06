@@ -252,6 +252,18 @@ are conventional for that language (Python: pyproject.toml,
 requirements.txt, setup.py, setup.cfg). Don't include files that
 don't exist.
 
+**Construction discipline.** Copy `tooling_configured`,
+`findings_by_tool`, and `coverage` straight out of
+`findings-<lang>.json`. Do not drop entries from `coverage.by_module`
+because there are "many"; do not truncate
+`findings_by_tool.dependabot[].body` because it contains 10 KB+ of
+release notes; do not flatten or summarise any nested value. The full
+**no-trim contract** — including the two real incidents that motivated
+it — is documented in Phase 6. Construction is where the trimming
+most commonly enters; if the payload you build here already has
+fields shortened, Phase 6's contract is broken before dispatch even
+starts.
+
 ## Phase 5 — `--dry-run`?
 
 If `--dry-run`: print each payload (pretty-formatted via `jq .`)
@@ -270,23 +282,74 @@ Skill(
 )
 ```
 
-**Pass the payload as-is.** Do NOT trim, summarize, drop fields, or
-restructure entries from `findings_by_tool` (including verbose
-`dependabot[].body` blobs) before dispatching. Even when a body looks
-like dead weight to you, downstream agents may consume it:
+### No-trim contract — known recurring bug
 
-- `python-dependabot-snyk-triage` parses Dependabot PR bodies for
-  grouped-PR member lists, release-note breaking-change flags, and
+Payload trimming by the orchestrator has been observed in **two real
+maintenance runs**, despite the previous version of this section
+already saying "pass the payload as-is." The prose below is the
+strengthened replacement; the earlier wording was not enough to
+prevent the trimming.
+
+The two incidents:
+
+- **2026-06-05** — scoped `--tool=dependabot` run. The orchestrator
+  dropped entries from `coverage.by_module` because it judged the
+  payload "had lots of entries." The dispatcher's safety net halted
+  with `human_action_required` citing missing coverage data; the
+  orchestrator caught itself mid-narration and re-dispatched with the
+  full payload.
+- **2026-06-06** — full run. The orchestrator truncated
+  `findings_by_tool.dependabot[].body` because it judged "10 KB+
+  release notes per PR pushed the payload to ~70 KB." The triage
+  agent's `gh` refetch silently compensated — that is **lucky, not
+  correct**. Pre-spawn routing decisions that depend on body content
+  would have routed wrong.
+
+**The rule, with no judgement attached: pass the payload as-is.** Do
+not trim, summarise, drop fields, sample, flatten, or restructure
+any value before the `Skill(...)` call. The fields that have been
+trimmed in the wild — and that downstream code reads — include:
+
+- `coverage.by_module` — every module, every row. Eighty-plus
+  modules is normal; do not sample because there are "many."
+- `findings_by_tool.dependabot[].body` — the full body, even when
+  it's 10 KB of release notes. The triage agent reads it for
+  grouped-PR member lists, release-notes breaking-change flags, and
   Dependabot compatibility scores.
-- `python-major-upgrade` extracts the release-notes URL hint from the
-  body for its WebFetch step.
-- A future runtime-upgrade agent inspects the body to distinguish a
-  Python interpreter bump from a generic Docker base-image bump.
+- `findings_by_tool.snyk_prs[].body` — same rule, same reasons.
+- `findings_by_tool.code_scanning_alerts[]` — every alert, every
+  field; `python-major-upgrade` and a future runtime-upgrade agent
+  consume fields the orchestrator does not see used in the immediate
+  dispatch.
 
-A 200–300 KB payload is fine for the Skill tool; payload size is not
-a concern at this scale. If you ever see a payload approaching the
-multi-MB range, surface it as a quality bug on the gather script
-rather than trimming silently.
+And every other schema field. Trimming silently changes routing
+because downstream agents parse fields the orchestrator never read.
+
+**On payload size.** Both observed incidents (~70 KB and smaller)
+were well below any actual Skill-tool limit — the trimming was a
+behavioural error, not a capacity workaround. Inline payloads up
+to ~200 KB are handled cleanly today, which covers every payload
+this project has produced against the current test bed.
+
+That ceiling is real, not infinite. Above ~200 KB, the right
+answer is **not** to trim and **not** to summarise to fit — it is
+to halt with `human_action_required` naming the payload size and
+citing [#178](https://github.com/timo-jakob/timos-claude-code-plugins/issues/178),
+where the file-based handover contract (orchestrator writes the
+payload to a temp file, dispatcher reads from disk) is being
+designed as the architecturally proper fix. Until that ships,
+~200 KB is the practical inline ceiling; never drop fields
+silently as a workaround for hitting it. If a payload routinely
+grows multi-MB, also file a quality bug against the gather script
+— it should not produce that much. But "feels big" is never enough
+to justify trimming.
+
+**Self-check before each dispatch.** The JSON string you are about
+to pass as `args=` should be character-for-character identical to
+the payload you constructed in Phase 4. If you cannot say that with
+certainty — because you "tidied up," "shortened," "deduplicated,"
+or "summarised" something — the contract is broken. Reconstruct the
+payload from `findings-<lang>.json` and dispatch again.
 
 The dispatcher's internal Phase A / Phase B sequencing — when it spawns
 the coverage-improver, when it runs the planner, what payload validation
