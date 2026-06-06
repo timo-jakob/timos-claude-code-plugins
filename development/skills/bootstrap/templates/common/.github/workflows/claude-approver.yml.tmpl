@@ -48,8 +48,20 @@ jobs:
   approve:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # One linear chain of gates. Each gate either passes or exits 78 (neutral).
-    # When debugging, the failing step IS the failing gate.
+    # Entry-point gate for `/approve` PR comments. Anyone with read access
+    # can post a PR comment; without this `if:`, a random commenter could
+    # fire the workflow on any PR and burn API tokens before the in-job
+    # gates exit-78. For check_suite and pull_request_review triggers,
+    # GitHub itself already requires actor permissions, so this gate is
+    # scoped to issue_comment. See #190.
+    if: >
+      github.event_name != 'issue_comment' ||
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+               github.event.comment.author_association)
+    # The in-job gates below protect the verdict (anti-rubber-stamp,
+    # author allowlist, all-green checks). Each gate either passes or
+    # exits 78 (neutral). When debugging, the failing step IS the
+    # failing gate.
     steps:
 
       # ============================================================
