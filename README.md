@@ -41,12 +41,16 @@ What is shipped and aligned with the motivation:
   before declaring success. CI is the secondary safety net, not the primary
   verification loop — exactly the shape that makes raising automation safe
   as models improve.
-- **The Approver design.** The planned-but-not-yet-shipped expression of
-  the motivation's "movable seam": today the Approver runs alongside
-  humans, tomorrow it can take on more of the approval surface without an
-  architecture change. Two distinct GitHub Apps, in-repo policy file,
-  author allowlist, per-type criteria. See "Claude Approver (planned)"
-  below.
+- **The Approver.** The motivation's "movable seam." Two distinct
+  GitHub Apps, in-repo policy file, author allowlist, per-type
+  criteria, hidden-JSON re-ingest into `/development:maintenance`.
+  Phases 0–3 are shipped (App registration, bootstrap install, workflow
+  + policy + PR templates, the `python-approver` opus agent); Phases
+  4–6 (maintenance re-ingest, local `/approve`, end-to-end validation)
+  remain. The Python library-exports API-stability gate (`griffe` +
+  version-bump bypass) is also shipped and couples into the Approver's
+  per-type rules. See "Claude Approver" below for the design and the
+  current ship-status table.
 
 ### Current gaps
 
@@ -54,17 +58,25 @@ Honest list of where the implementation does not yet match the motivation.
 Each gap has a tracking issue, and that issue is responsible for updating
 this section when it lands.
 
-1. **The Approver is designed, not shipped.** It is the load-bearing piece
-   of the motivation's bet on growing automation, and right now it's a
-   design doc only. Tracked:
+1. **Approver foundation shipped; closed-loop and adoption story
+   remain.** Phases 0–3 of
    [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89)
-   (implementation),
-   [#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88)
-   (documentation).
-2. **Coverage is a number, not a judgment.** The gate today is mechanical
-   (≥ 90 % new-code coverage); a coverage-farming PR can clear it. The
-   Approver's Phase 3 includes test-quality detection that closes this
-   gap. Tracked under
+   have merged — App registration, bootstrap install, workflow / policy
+   / PR templates, and the `python-approver` opus agent. The remaining
+   pieces are Phase 4 (`/development:maintenance` re-ingests the
+   Approver's hidden-JSON findings and re-dispatches triage agents),
+   Phase 5 (local `/approve` dry-run command), Phase 6 (end-to-end
+   validation against the `ai-doc-organizer` test bed — also where the
+   workflow's remaining Claude-Code-install detail gets validated), and
+   the comprehensive adoption documentation tracked in
+   [#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88).
+2. **Coverage is a number, not a judgment — addressed by Phase 3
+   test-quality detection.** Phase 3 of #89 ships the agent's
+   test-quality detection: it flags `assert True`-style filler,
+   assertions only on mock return values, tests that mock the unit
+   under test, and name-promises-behaviour-the-assertions-don't-verify
+   patterns. The full closed-loop story (gap → finding → maintenance
+   re-dispatch → fix) lands once Phase 4 ships under
    [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89).
 3. **Maintenance language parity.** Only Python has the full triage +
    worktree + autonomous-fix pipeline. Swift is review-only; Java,
@@ -175,11 +187,33 @@ All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
 safety net, not the primary verification loop.
 
-## Claude Approver (planned)
+## Claude Approver
 
-> **Status:** Design phase. Not yet implemented. This section captures the
-> design; comprehensive adoption documentation is tracked in
-> [#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88).
+> **Status — Phases 0–3 shipped, 4–6 in progress.** The foundation is
+> in: the two GitHub App identities can be registered (`Phase 0`),
+> bootstrap installs them on a repo with the secrets + variables they
+> need (`Phase 1`), the workflow + Python policy + PR description
+> template render at bootstrap time (`Phase 2`), and the
+> `python-approver` opus agent that the workflow invokes is in
+> `development-python/agents/python-approver.md` with an operator-facing
+> runtime spec at
+> [`development-python/docs/python-approver.md`](./development-python/docs/python-approver.md)
+> (`Phase 3`). The
+> [`api-stability`](./development-python/docs/api-stability.md) gate
+> (`griffe` + version-bump bypass, from
+> [#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174))
+> couples in via the artifact the agent reads. **Remaining:** Phase 4
+> (`/development:maintenance` re-ingests the Approver's hidden-JSON
+> findings), Phase 5 (local `/approve` dry-run), Phase 6 (end-to-end
+> validation against `ai-doc-organizer`, which also validates the
+> workflow's remaining Claude-Code-install detail), and #88
+> (comprehensive user-facing adoption guide). All tracked under
+> [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89)
+> and the meta-tracker
+> [#176](https://github.com/timo-jakob/timos-claude-code-plugins/issues/176).
+>
+> The section below is the design summary. Operator-facing runtime
+> details live in the linked docs files.
 
 ### Idea
 
@@ -307,21 +341,28 @@ structure the Approver expects:
 
 ### REQUEST_CHANGES feedback loop
 
-The Approver's findings include a hidden machine-readable JSON block. **v1**:
-the user re-runs `/development:maintenance`, which reads the JSON block from
-the most recent Approver review, dispatches the relevant triage agents
-(ruff, semgrep, snyk, sonar, etc.), pushes fixes, and the Approver re-runs
-on workflow synchronize. **v2** closes the loop in CI via a
-`pull_request_review`-triggered workflow. v1's JSON bridge is the
-load-bearing primitive; v2 is just a different trigger on top of it.
+The Approver's findings include a hidden machine-readable JSON block —
+**this is shipped** (Phase 3); the schema lives in
+[`development-python/docs/python-approver.md`](./development-python/docs/python-approver.md).
+**v1** *(Phase 4, pending)*: the user re-runs `/development:maintenance`,
+which reads the JSON block from the most recent Approver review,
+dispatches the relevant triage agents (ruff, semgrep, snyk, sonar, etc.),
+pushes fixes, and the Approver re-runs on workflow synchronize.
+**v2** closes the loop in CI via a `pull_request_review`-triggered
+workflow. v1's JSON bridge is the load-bearing primitive; v2 is just a
+different trigger on top of it.
 
 ### How to adopt
 
 1. **Per-org (one-time)** — register both GitHub Apps (Claude Approver +
-   Claude Maintenance); capture App IDs and private keys.
+   Claude Maintenance); capture App IDs and private keys. The
+   `development/skills/bootstrap/scripts/register-claude-apps.sh` script
+   walks the manifest flow; see
+   [`development/skills/bootstrap/docs/CLAUDE-APPS.md`](./development/skills/bootstrap/docs/CLAUDE-APPS.md)
+   for the design and the manual fallback.
 2. **Per-repo** — `/development:bootstrap --claude-approver true`. Bootstrap
-   stores credentials, installs the Apps on the repo, generates the
-   workflow, the policy file, and the PR template.
+   stores credentials (via `install-claude-apps.sh`), installs the Apps on
+   the repo, generates the workflow + policy + PR template.
 3. **Per-policy** — amend `.claude/approver-policy.md` as your team's norms
    evolve. Changes go through normal PR review.
 
