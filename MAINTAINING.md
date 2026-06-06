@@ -35,6 +35,20 @@ boundary lines up with the content boundary.
 Plugins that didn't change in a given PR keep their existing version
 (don't blanket-bump everything).
 
+**This rule is enforced in CI** by `.github/workflows/marketplace-sync.yml`,
+which runs `scripts/check-marketplace-sync.zsh` on every PR touching a
+`plugin.json` or `marketplace.json`. If `plugin.json`'s `version` and
+`marketplace.json`'s entry for the same plugin disagree, the workflow
+fails the PR with a diagnostic showing both versions. Run the script
+locally before pushing to catch drift early:
+
+```sh
+./scripts/check-marketplace-sync.zsh
+```
+
+The check was added in #188 after eight bumps of drift accumulated
+silently across PRs #177 → #186 and #187 reset the baseline.
+
 ### Two-stage refresh: what end users (including you) need to know
 
 The per-merge version bump above invalidates the per-version cache so
