@@ -25,6 +25,16 @@ on:
   check_suite:
     types: [completed]
 
+  # Backstop trigger: PR opened / pushed-to / un-drafted / reopened. Catches
+  # the case where check_suite never fires — e.g. all required workflows
+  # were paths-ignored on a doc-only PR, or every check resolved from cache
+  # before a suite was created. Gate 5 (all-green check gate) exits 78 if
+  # the PR isn't actually green yet, so the only cost of this trigger is a
+  # short noop run. Without it, all-green-on-open PRs sit unreviewed until
+  # someone manually posts /approve. See #198.
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
   # Manual re-trigger via a PR comment: "/approve" or "/approve --dry-run".
   issue_comment:
     types: [created]
@@ -78,7 +88,10 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
           ISSUE_IS_PR: ${{ github.event.issue.pull_request != null }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-          PR_REVIEW_NUMBER: ${{ github.event.pull_request.number }}
+          # github.event.pull_request.number is populated for both
+          # `pull_request` and `pull_request_review` events; same env var
+          # serves both case arms below.
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -e
           dry_run=""
@@ -104,8 +117,13 @@ jobs:
                 dry_run="true"
               fi
               ;;
-            pull_request_review)
-              number="$PR_REVIEW_NUMBER"
+            pull_request|pull_request_review)
+              # Both events expose github.event.pull_request.number. The
+              # backstop `pull_request` trigger (#198) lands here when no
+              # check_suite ever fires for the head SHA (cache-only runs,
+              # paths-ignored on doc-only PRs). Gate 5 below will exit 78
+              # if the PR isn't actually green yet.
+              number="$PULL_REQUEST_NUMBER"
               ;;
             *)
               echo "::notice::Unrecognised event $EVENT_NAME."

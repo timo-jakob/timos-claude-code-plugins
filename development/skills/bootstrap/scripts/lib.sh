@@ -20,6 +20,13 @@ dim()    { printf '%s%s%s\n' "$_c_dim"    "$*" "$_c_reset"; }
 die() { err "$*"; exit 1; }
 
 # --- prompts ------------------------------------------------------------------
+# These helpers are sourced from BOTH bash and zsh entry-points. zsh treats
+# `read -p` as "read from coprocess", not "prompt", so the bash-style
+# `read -r -p '<prompt>' var` fails immediately in zsh with "no coprocess".
+# Use `printf > /dev/tty` for the prompt + bare `read < /dev/tty` instead;
+# works in both shells, and routing via /dev/tty also survives subshell
+# capture (e.g. `value=$(ask_secret ...)`). See #196.
+
 # Ask a yes/no question. Default Y unless second arg is "n".
 # In a non-interactive context (stdin not a TTY) returns false — callers must
 # pass --assume-yes if they want to skip prompts during automation.
@@ -29,7 +36,8 @@ ask_yn() {
   if [[ ! -t 0 ]]; then
     return 1
   fi
-  if ! read -r -p "$prompt $hint " answer; then
+  printf '%s %s ' "$prompt" "$hint" > /dev/tty
+  if ! read -r answer < /dev/tty; then
     return 1
   fi
   answer="${answer:-$default}"
@@ -39,16 +47,45 @@ ask_yn() {
 # Ask for a secret without echoing it. Stores in the named variable.
 ask_secret() {
   local prompt="$1" __var="$2" value
-  read -r -s -p "$prompt " value
-  echo
+  printf '%s ' "$prompt" > /dev/tty
+  read -r -s value < /dev/tty
+  printf '\n' > /dev/tty
   printf -v "$__var" '%s' "$value"
 }
 
 # Ask for a freeform string with a default value.
 ask_str() {
   local prompt="$1" default="$2" __var="$3" value
-  read -r -p "$prompt [$default]: " value
+  printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
+  read -r value < /dev/tty
   printf -v "$__var" '%s' "${value:-$default}"
+}
+
+# --- browser opening ---------------------------------------------------------
+# `open <file-or-url>` on macOS uses the Launch-Services default-app registry,
+# which can be empty (no default handler for .html) or wrong (e.g. an IDE
+# claimed text/html). In both cases the call fails non-zero and downstream
+# scripts (e.g. register-claude-apps.sh's auto-submit HTML page,
+# install-claude-apps.sh's App-install URLs) silently hang waiting for a
+# request that never comes.
+#
+# This helper tries common browsers in order and falls back to the default.
+# See #197.
+open_browser() {
+  local target="$1" browser
+  for browser in \
+      "Google Chrome" \
+      "Safari" \
+      "Firefox" \
+      "Microsoft Edge" \
+      "Brave Browser" \
+      "Arc"; do
+    if [[ -d "/Applications/${browser}.app" || -d "$HOME/Applications/${browser}.app" ]]; then
+      open -a "$browser" "$target" 2>/dev/null && return 0
+    fi
+  done
+  # Fallback — may still fail if Launch Services has no .html handler.
+  open "$target"
 }
 
 # --- pre-flight helpers -------------------------------------------------------

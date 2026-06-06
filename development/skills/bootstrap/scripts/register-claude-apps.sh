@@ -224,7 +224,15 @@ build_manifest_json() {
 write_submit_html() {
   local manifest_json="$1" state="$2"
   local html
-  html=$(mktemp -t claude-plugins.submit.XXXXXX.html)
+  # macOS `mktemp -t <template>` appends its random suffix AFTER the entire
+  # template, so `claude-plugins.submit.XXXXXX.html` becomes
+  # `claude-plugins.submit.XXXXXX.html.<random>` — the `.html` ends up in
+  # the middle and the OS sees it as text/plain. Browsers then show the
+  # raw HTML source instead of running the auto-submit JS. Rename to
+  # ensure the file ends in `.html`. See #194.
+  html=$(mktemp -t claude-plugins.submit)
+  mv "$html" "${html}.html"
+  html="${html}.html"
   # Single-quoted heredoc with controlled interpolation.
   cat > "$html" <<HTML
 <!DOCTYPE html>
@@ -309,7 +317,7 @@ manifest_flow() {
 
   info "  Opening the App-creation page in your browser…"
   info "  After clicking 'Create GitHub App', return here. Timeout: ${MANIFEST_TIMEOUT}s."
-  open "$html"
+  open_browser "$html"
 
   local result
   if ! result=$(run_redirect_listener); then
@@ -332,9 +340,14 @@ manifest_flow() {
     || die "Code exchange failed. The code is single-use; re-run register-claude-apps.sh to retry."
 
   local app_id slug pem
-  app_id=$(print -- "$resp" | jq -r '.id')
-  slug=$(print   -- "$resp" | jq -r '.slug')
-  pem=$(print    -- "$resp" | jq -r '.pem')
+  # `print -r --` (raw) prevents zsh from interpreting `\n` escape sequences
+  # inside the JSON response — without `-r`, the embedded PEM's `\n` becomes
+  # a real newline before reaching jq, and jq rejects the resulting raw
+  # newlines inside the string with "control characters … must be escaped".
+  # See #195.
+  app_id=$(print -r -- "$resp" | jq -r '.id')
+  slug=$(print -r -- "$resp" | jq -r '.slug')
+  pem=$(print -r -- "$resp" | jq -r '.pem')
   [[ -n "$app_id" && "$app_id" != "null" ]] \
     || die "Conversion response missing 'id'."
   [[ -n "$pem" && "$pem" != "null" ]] \
