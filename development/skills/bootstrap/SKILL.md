@@ -543,9 +543,19 @@ Default substitutions:
 - `{{CLAUDE_PLUGINS_REPO}}` → `timo-jakob/timos-claude-code-plugins` (the
   canonical plugin family). Users who fork the family can override after
   bootstrap by hand-editing the generated workflow.
-- `{{CLAUDE_PLUGINS_REF}}` → `main`. A pinned release tag is preferable
-  once the family ships versioned releases; until then `main` is the
-  working answer.
+- `{{CLAUDE_PLUGINS_REF}}` → the **current commit SHA** of the plugin
+  family's `main` branch, resolved at render time:
+  ```bash
+  git ls-remote https://github.com/timo-jakob/timos-claude-code-plugins main | awk '{print $1}'
+  ```
+  Pin the literal SHA into the workflow, not the moving `main` ref.
+  Why: a breaking change in the plugin family's `main` would otherwise
+  silently break every downstream Approver workflow with no commit in
+  the downstream repo to bisect. Users opt into upstream changes by
+  re-running `/development:bootstrap`, which re-resolves the SHA and
+  regenerates the workflow as a normal PR. Once the plugin family ships
+  versioned releases, this substitution moves to the latest release tag.
+  See #199.
 
 The workflow file applies the standard idempotency rules below. The
 policy file (`.claude/approver-policy.md`) is the source of truth for

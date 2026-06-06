@@ -122,7 +122,10 @@ walk_browser_install() {
     warn "Slug missing in apps.json for $(app_display_name "$app")."
     warn "  Find the App at https://github.com/settings/apps and click Install."
     print
-    read -r -p "Press Enter once the install is complete… " _
+    # `read -p` is bash-only; in zsh `-p` means "read from coprocess". Use
+    # /dev/tty so it works in both shells. See #196.
+    printf 'Press Enter once the install is complete… ' > /dev/tty
+    read -r _ < /dev/tty
     return
   fi
 
@@ -136,9 +139,13 @@ walk_browser_install() {
   if ! ask_yn "Open install page in browser now?"; then
     die "Aborted by user."
   fi
-  open "$install_url"
+  # `open_browser` (from lib.sh) tries named browsers in order, falling back
+  # to the default — robust against Launch Services having no .html handler.
+  # See #197.
+  open_browser "$install_url"
   print
-  read -r -p "Press Enter once the install is complete… " _
+  printf 'Press Enter once the install is complete… ' > /dev/tty
+  read -r _ < /dev/tty
 }
 
 # --- Anthropic API key -------------------------------------------------------
@@ -264,8 +271,9 @@ main() {
 
   print
   ok "Claude Apps installed and configured on $repo_nwo."
-  print -- "  Next: the Approver workflow + policy templates ship in #89 Phase 2."
-  print -- "  Until then, the credentials sit unused but ready."
+  print -- "  Next: open a PR — the Approver evaluates once CI lands green."
+  print -- "  See development-python/docs/python-approver.md for runtime behaviour."
+  print -- "  Run '/development-python:approve' locally to dry-run before pushing."
 }
 
 main "$@"

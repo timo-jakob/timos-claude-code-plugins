@@ -25,6 +25,16 @@ on:
   check_suite:
     types: [completed]
 
+  # Backstop trigger: PR opened / pushed-to / un-drafted / reopened. Catches
+  # the case where check_suite never fires — e.g. all required workflows
+  # were paths-ignored on a doc-only PR, or every check resolved from cache
+  # before a suite was created. Gate 5 (all-green check gate) exits 78 if
+  # the PR isn't actually green yet, so the only cost of this trigger is a
+  # short noop run. Without it, all-green-on-open PRs sit unreviewed until
+  # someone manually posts /approve. See #198.
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
   # Manual re-trigger via a PR comment: "/approve" or "/approve --dry-run".
   issue_comment:
     types: [created]
