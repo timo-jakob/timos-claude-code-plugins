@@ -96,6 +96,120 @@ proceed with the supported set; remember `unsupported` to include in
 the final summary as an informational note ("Detected <X>, <Y> but
 their plugins are not built yet — only <Z> findings were processed").
 
+## Phase 2.5 — Approver feedback ingestion (when Claude Apps registered)
+
+Closes the loop between the **Claude Approver** (which posts
+`REQUEST_CHANGES` reviews on PRs with a hidden JSON block of findings)
+and the language-plugin triage agents that can fix those findings.
+
+When the Approver posts `REQUEST_CHANGES` on a PR, the user re-runs
+`/development:maintenance` to ingest the feedback. This phase finds the
+flagged PRs, dispatches agents to fix what's auto-fixable, and pushes
+the fixes back to the PR branches. CI re-runs on each push; the
+Approver re-evaluates on the next `check_suite: completed` event. The
+loop closes without further user intervention.
+
+**Skip silently** when `~/.config/claude-plugins/apps.json` doesn't
+exist — the Approver isn't set up on this machine, there's nothing
+to ingest.
+
+### Detection
+
+For each open PR in the current repo (`gh pr list --state open --json
+number,headRefName,headRefOid,author`), fetch the most recent review
+by `claude-approver[bot]`:
+
+```bash
+gh pr view <pr> --json reviews --jq \
+  '[.reviews[] | select(.author.login == "claude-approver[bot]")] | sort_by(.submittedAt) | last'
+```
+
+A PR is **Approver-flagged** when ALL hold:
+- A review by `claude-approver[bot]` exists.
+- Its `state` is `CHANGES_REQUESTED`.
+- Its `commit_id` equals the PR's current `headRefOid` (no push since
+  the review).
+- Its `body` contains a `<!-- claude-approver:findings ... -->` HTML
+  comment block.
+
+### JSON parsing
+
+Extract the hidden block, parse the JSON. Schema documented in
+[`development-python/docs/python-approver.md`](../../../development-python/docs/python-approver.md)
+(the *JSON schema* section). Key fields:
+
+- `verdict` — must be `"REQUEST_CHANGES"` for this phase to act.
+- `findings[]` — each finding has `category`, `title`, `detail`,
+  `suggested_agent`, `file`, `line`.
+
+### Dispatch
+
+Group findings by `suggested_agent`. Findings with `suggested_agent:
+null` are unfixable by automation; record them in the Phase 9 summary's
+*"Approver-flagged, needs human attention"* list with the finding's
+`title` and `detail`.
+
+For each agent group, spawn the agent with `isolation="worktree"`
+**and the PR's head SHA as worktree base**:
+
+```
+Agent(
+  subagent_type="<finding.suggested_agent>",
+  description="Fix Approver findings on PR #<n>",
+  isolation="worktree",
+  prompt="""
+    repo_path: <repo.path>
+    pr_number: <n>
+    pr_branch: <pr.headRefName>
+    findings: [ ... group of findings for this agent ... ]
+    source: approver
+
+    Address the findings above on the worktree branch (already based
+    on the PR's HEAD). Run the project's test command before declaring
+    success. Commit on the worktree branch — the orchestrator will push
+    the commit to the PR branch.
+  """
+)
+```
+
+**Critical**: the worktree base is the PR's head SHA, not main. The
+agent's fix layers on top of the PR; it doesn't replace it.
+
+After the agent returns:
+
+```bash
+git -C "<worktree>" push --force-with-lease origin "<worktree_branch>:<pr.headRefName>"
+git -C "<repo.path>" worktree remove "<worktree>" -f -f
+```
+
+The `--force-with-lease` protects against a parallel push race; the
+agent's commit is the new head and we need to fast-forward the PR
+branch to it.
+
+### Identity
+
+Phase 2.5 itself uses the user's `gh` auth. The PR was opened by
+`claude-maintenance[bot]` in a prior maintenance run (when the
+identity switch in Phase 8 fired), so the PR author is already the
+bot; pushes don't change the PR author. Identity-switching matters
+only at **PR creation time** — see Phase 8's *Identity for PR
+creation* subsection.
+
+### Skip conditions
+
+- `suggested_agent` is `null` — record in the summary, skip the
+  finding. Author judgement required.
+- Named agent isn't installed in this plugin family (e.g., a Node
+  agent on a Python-only project) — record in the summary, skip.
+- Agent returns `human_action_required` — record the reason in the
+  summary, skip.
+
+### After this phase
+
+Continue to Phase 3 (gather + plan + Phase 8 normal flow). The
+Approver-driven fixes are pushed; the normal flow finds and addresses
+any new issues from tools.
+
 ## Phase 3 — gather findings per supported language
 
 ### State pre-flight (per supported language)
@@ -418,6 +532,46 @@ worktree branch.
 If `--no-merge` was passed, **skip this phase entirely** and list the
 plan + any local worktree branches in the final summary for manual
 handling.
+
+### Identity for PR creation (when Claude Apps registered)
+
+When `~/.config/claude-plugins/apps.json` has a `claude_maintenance`
+entry, mint an installation token before every `gh pr create` call in
+this phase so the new PRs attribute to `claude-maintenance[bot]`:
+
+```bash
+maint_token=$("<skill-base-dir>/scripts/mint-maintenance-token.zsh")
+GH_TOKEN="$maint_token" gh pr create --base ... --head ... --title ... --body ...
+```
+
+Why this matters for the Approver loop:
+
+- The Approver's default author allowlist
+  (`CLAUDE_APPROVER_AUTHOR_ALLOWLIST` per-repo variable) is
+  **machine-only** by default and includes `claude-maintenance[bot]`.
+  Without the identity switch, maintenance PRs would be authored by
+  the user, the allowlist would reject them, and the Approver would
+  not evaluate the PR at all — the entire Approver→maintenance loop
+  would never start.
+- The Approver's anti-rubber-stamp gate (PR author ≠
+  `claude-approver[bot]`) fires correctly: `claude-maintenance[bot]`
+  and `claude-approver[bot]` are distinct App identities by design.
+
+The installation token has a 1-hour lifetime. If a maintenance run
+takes longer than an hour and you need another `gh pr create`, re-mint
+by calling `mint-maintenance-token.zsh` again.
+
+If `mint-maintenance-token.zsh` fails (App not installed on the repo,
+key revoked, network down), surface the error to the user and **abort
+PR creation for that stage**. Falling back to the user's PAT would
+open a PR the Approver couldn't evaluate — worse than skipping. The
+Phase 9 summary should clearly call out the skipped stage with the
+reason.
+
+If `~/.config/claude-plugins/apps.json` doesn't have a
+`claude_maintenance` entry (Claude Apps not registered on this
+machine), open PRs with the user's existing `gh` auth — the Approver
+isn't installed on the repo either, so the identity mismatch is moot.
 
 ### Stage 0 — coverage improver (when present)
 
