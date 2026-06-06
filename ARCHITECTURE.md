@@ -112,6 +112,182 @@ If you find yourself adding language-specific logic to `development`,
 or generic logic to `development-<lang>`, the split is doing its job
 by surfacing a category error.
 
+## Polyrepo, contracts, and the cross-repo big picture
+
+The plugin family is *about* a single repo at a time — bootstrap runs in
+one repo, maintenance runs in one repo. But the **projects those plugins
+serve are not single-repo systems.** The default project shape we design
+for is:
+
+- Many small repos, each producing a deployable artifact (microservice,
+  micro-UI, library, design-system package, CLI tool).
+- Each repo deployable **independently** — no coordinated-release
+  requirements between repos.
+- Each producer-consumer pair held together by a **stable contract**, so
+  the producer can roll forward without breaking the consumer and vice
+  versa.
+- Different teams owning different repos (often a frontend team vs. a
+  backend team; sometimes per-service teams).
+- Shared libraries and a shared UI/UX design system, each in their own
+  published-package repos consumed across many projects.
+
+This is a deliberate architectural choice, not a default. A repo design
+that *forces* coordinated releases across producer + consumer is, by our
+standard, **not stable**. Backward-compatible evolution is the criterion;
+polyrepo is the shape that makes the criterion enforceable per-repo.
+
+Monorepo projects still work — `development:maintenance` already dispatches
+to multiple language and topic plugins in parallel, so a polyglot
+monorepo bootstraps and maintains identically to a polyrepo from the
+plugin family's point of view. The architecture is monorepo-tolerant; the
+*default design we optimize for* is polyrepo.
+
+### API contracts are first-class published artifacts
+
+Every repo that exposes an outward-facing surface treats its contract as
+a **published artifact**, not an implementation detail to be inferred from
+the code. "Outward-facing surface" is broad and the bootstrap detection
+must recognise every form of it:
+
+- **REST APIs** (OpenAPI / Swagger).
+- **gRPC and Protobuf services**.
+- **GraphQL schemas**.
+- **AsyncAPI / event-driven message schemas** (Avro, JSON Schema, Protobuf
+  in a registry).
+- **CLI tools** — flags, subcommands, exit codes, output formats. The
+  `--help` snapshot is the contract.
+- **Library public exports** — any function, class, type, or constant
+  exported from a published package. Per language: TypeScript declaration
+  files, Python `__all__` + type stubs, Java public classes, Go exported
+  identifiers, Rust `pub` items, Swift `public` declarations.
+- **Environment-variable contracts** — required env vars, their formats,
+  their defaults.
+- **Config-file schemas** — anything a user writes to configure the
+  program.
+- **Webhook payload shapes** — outgoing event bodies the consumer parses.
+- **Queue / topic message formats** — every shape this repo publishes to
+  a shared bus.
+- **MCP tool signatures** — for repos exposing MCP servers, the tool
+  argument schemas.
+- **Database views / stored procedures** when the repo shares state with
+  other services through a database (anti-pattern but real).
+
+Any of those that the bootstrap detection finds in a repo becomes a
+tracked contract artifact.
+
+### Contracts are prominent, not buried
+
+The contract must be **readable by a downstream consumer (human or
+Claude) without reading the whole producer repo.** Concretely, every
+producer repo gets:
+
+- A top-level **`contracts/`** (or `api/`) directory holding the
+  authoritative artifacts. Generated artifacts are committed, not built
+  on demand — consumers and grep can read them directly.
+- A top-level **`CONTRACTS.md`** that names every exposed surface, links
+  to its artifact, records the surface type (REST, gRPC, library export,
+  CLI, …), describes the compatibility policy (semver for libraries,
+  URL-path versioning for REST, etc.), and best-effort lists known
+  consumers.
+
+These exist because the central question for any consumer working in a
+sibling repo is: *what can I rely on from this producer?* The answer
+should be `cat CONTRACTS.md` + reading the linked artifact, never "clone
+the whole repo and read its code." This is the seam that makes polyrepo
+work — without it, every cross-repo task degrades into a full-repo read.
+
+### Backward compatibility is enforced mechanically, not by policy text
+
+Policy text in `CONTRACTS.md` describes the intent; the **enforcement is
+in CI** and runs on every PR that touches a contract artifact. The
+detector is matched to the surface type:
+
+| Surface | Detector |
+|---|---|
+| REST / OpenAPI | `oasdiff` / `openapi-diff` |
+| gRPC / Protobuf | `buf breaking` |
+| GraphQL | `graphql-inspector` |
+| AsyncAPI / event schemas | `asyncapi-diff` or schema-registry diff |
+| CLI parameters | `--help` snapshot diff |
+| Library exports (TS) | `api-extractor` |
+| Library exports (Python) | `griffe` + `python-semver-check` |
+| Library exports (Java) | `revapi` or `japicmp` |
+| Library exports (Go) | `gorelease` |
+| Library exports (Rust) | `cargo-semver-checks` |
+| Library exports (Swift) | `swift-api-digester` |
+| Env-var schemas, config schemas, webhook payloads | JSON Schema diff |
+| MCP tool signatures | JSON Schema diff against the tool definitions |
+
+A breaking change in any contract artifact fails the build **unless** the
+PR carries a deliberate signal that the break is intentional and the
+version bump matches (`feat!:` / `BREAKING CHANGE:` for libraries, major
+version increment for the package, URL-path or header version bump for
+REST).
+
+The Approver's per-language policy template ships an *API stability*
+criterion that reads the same detector output, so a breaking change
+without the right signal is automatic `REQUEST_CHANGES` — not a separate
+judgement call, just the mechanical gate raised to a review verdict.
+
+The full bootstrap-and-Approver scope for this is tracked in
+[#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174).
+
+### Cross-repo Claude: the big-picture problem
+
+A Claude session in one repo cannot see siblings by default, and in a
+polyrepo world most non-trivial tasks span at least one producer and one
+consumer. Patterns we lean on, ranked by leverage:
+
+1. **Contract repos as the source of truth.** Most cross-repo work
+   doesn't actually need both implementations — it needs the contract.
+   If the producer's `contracts/` is prominent and complete, the
+   consumer-side Claude reads one file and proceeds. This is the highest
+   leverage and the cheapest to set up.
+2. **Parent-workspace folder.** Check out related repos as siblings under
+   a parent (e.g. `~/work/product-x/{frontend-cart, backend-orders,
+   design-system, contracts}`) and launch Claude from the parent.
+   `Read` / `Grep` / `Bash` cross repo boundaries trivially when invoked
+   above them. Cheap, works for tens of repos.
+3. **Workspace manifest.** A small file (e.g. `.claude-workspace.yaml`)
+   declaring the constellation: which repos belong, their roles, where
+   their contracts live. Lets a skill validate that a breaking change
+   has been propagated to all consumers, and lets bootstrap learn
+   "this repo is part of constellation X" so it can apply
+   constellation-specific conventions.
+4. **MCP server for cross-repo indexing.** Indexes contracts across the
+   org's repos and answers "who consumes `POST /orders`?" or "which
+   services depend on `@design-system/button`?" Higher build cost; the
+   only path that scales to hundreds of repos.
+
+The leverage stack is the order of investment: get the contracts right,
+then the parent-workspace pattern handles 80% of cross-repo work, then a
+workspace manifest formalises the convention, then MCP for scale. Don't
+build (4) before (1) — without prominent contracts, an indexer indexes
+the wrong thing.
+
+### What this implies for the plugin family
+
+Each piece below is captured at the right level of detail in #174; the
+plugin-family implications:
+
+- **Bootstrap** detects every outward-facing surface in the repo and
+  installs the matching breaking-change detector. It also generates
+  `contracts/` + `CONTRACTS.md` from templates.
+- **Approver** policy templates gain an `## API stability` section
+  evaluated for every PR that touches a contract artifact.
+- **Language plugins gain a library mode** — `--library` (or auto-detected
+  from `publishConfig` / `[project].version` / `Cargo.toml [package]
+  .publish`, etc.). Library mode applies stricter public-API gates,
+  semver enforcement, and a different coverage / test-quality
+  expectation (more public-API snapshot, less integration).
+- **The design-system case is a library at the constellation scale** —
+  same library-mode bootstrap, but with the additional expectation that
+  visual-regression tests (Chromatic, Percy, or equivalent) sit in the
+  test mix.
+
+This section frames the *why*; the *how* lives in #174 and in the
+per-language policy templates.
+
 ## Responsibilities
 
 ### `development` owns
