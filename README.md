@@ -2,6 +2,87 @@
 
 A collection of plugins for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
+## Motivation
+
+This repo exists to bootstrap new projects in no time and ship features and
+applications that are high quality — both for the user experience and inside
+the code — and that are secure by default. Across all of it, the goal is to
+use Claude for maximum automation, pulling a human into the loop only when
+human judgment is genuinely required.
+
+I believe that in one or two years AI — and especially Claude — will be
+capable enough that human-in-the-loop will be needed even more rarely in a
+context like this. So this repo prepares for that now: build the seams,
+gates, and policies today so that as the model gets stronger, the share of
+work it can safely close out without a human grows automatically.
+
+### How the plugins implement this today
+
+What is shipped and aligned with the motivation:
+
+- **Bootstrap installs the full Zero Tolerance toolchain by default.**
+  `/development:bootstrap` doesn't ask which gates you want — ruff, mypy,
+  semgrep, Sonar, Snyk, CodeQL, the 90 % new-code coverage floor, branch
+  protection, and signed commits all land in one run. That is the
+  "fast bootstrap + quality + security baked in by default" half of the
+  motivation.
+- **Maintenance is policy-driven, not narration-driven.**
+  `/development:maintenance` is a JSON-dispatch contract to the language
+  plugin. Each per-tool agent fixes what it can, suppresses with a written
+  justification when the pattern is a false positive, and only escalates to
+  a human when a public-API change would be required. That matches the
+  "automate everything safely fixable, escalate only on judgment" half.
+- **Dependabot / Snyk triage auto-merges what is safe.**
+  `python-dependabot-snyk-triage` auto-approves and merges patch + minor
+  bumps once CI is green; deduplication keeps Snyk and Dependabot from
+  stepping on each other when both target the same package.
+- **Worktree isolation + local test verification.** Every agent that
+  modifies code runs the project's test suite *locally* in its worktree
+  before declaring success. CI is the secondary safety net, not the primary
+  verification loop — exactly the shape that makes raising automation safe
+  as models improve.
+- **The Approver design.** The planned-but-not-yet-shipped expression of
+  the motivation's "movable seam": today the Approver runs alongside
+  humans, tomorrow it can take on more of the approval surface without an
+  architecture change. Two distinct GitHub Apps, in-repo policy file,
+  author allowlist, per-type criteria. See "Claude Approver (planned)"
+  below.
+
+### Current gaps
+
+Honest list of where the implementation does not yet match the motivation.
+Each gap has a tracking issue, and that issue is responsible for updating
+this section when it lands.
+
+1. **The Approver is designed, not shipped.** It is the load-bearing piece
+   of the motivation's bet on growing automation, and right now it's a
+   design doc only. Tracked:
+   [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89)
+   (implementation),
+   [#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88)
+   (documentation).
+2. **Coverage is a number, not a judgment.** The gate today is mechanical
+   (≥ 90 % new-code coverage); a coverage-farming PR can clear it. The
+   Approver's Phase 3 includes test-quality detection that closes this
+   gap. Tracked under
+   [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89).
+3. **Maintenance language parity.** Only Python has the full triage +
+   worktree + autonomous-fix pipeline. Swift is review-only; Java,
+   JavaScript / Angular, PowerShell, zsh, Go, and Rust are not yet
+   implemented. This is intentional sequencing — Python is the proving
+   ground for the dispatch contract; the other languages follow once the
+   Python loop is solid. Tracked:
+   [#170](https://github.com/timo-jakob/timos-claude-code-plugins/issues/170).
+4. **macOS + Homebrew lock-in.** `/development:bootstrap`'s automation
+   scripts assume macOS + Homebrew. The generated `SETUP.md` is
+   platform-agnostic but the one-shot bootstrap isn't. Tracked:
+   [#171](https://github.com/timo-jakob/timos-claude-code-plugins/issues/171).
+5. **Topic plugins are aspirational.** `development-container`,
+   `development-kubernetes`, and `development-terraform` are described in
+   `ARCHITECTURE.md` but not implemented. Security-by-default really wants
+   the container plugin (Trivy, SBOM, distroless) shipped. Tracked:
+   [#172](https://github.com/timo-jakob/timos-claude-code-plugins/issues/172).
+
 ## Plugins
 
 ### development
