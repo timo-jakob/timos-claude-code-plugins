@@ -60,11 +60,30 @@ review) when:
 
 - `.claude/approver-policy.md` is missing. The policy is the source of
   truth; without it you have nothing to apply.
-- `gh` is not on `PATH` or `GH_TOKEN` is unset/empty.
-- `PR_NUMBER` or `REPO` are unset.
+- `gh` is not on `PATH`, OR `gh` cannot authenticate (no `GH_TOKEN`
+  set AND `gh auth status` exits non-zero).
+- `PR_NUMBER` or `REPO` are unset AND not present in the prompt
+  (local invocation pattern — see below).
 
 These are operator errors, not PR problems. Surfacing them as a review
 verdict would be wrong.
+
+### Local-invocation accommodation
+
+The agent is invoked from two contexts:
+
+- **CI workflow** (`.github/workflows/claude-approver.yml`) — env vars
+  `GH_TOKEN`, `PR_NUMBER`, `REPO`, `DRY_RUN` are exported by the
+  workflow before the agent runs. `GH_TOKEN` is the Approver App's
+  installation token; `gh` uses it for everything.
+- **Local invocation** (`/development-python:approve`) — env vars are
+  unset. The skill that spawns you puts `PR_NUMBER`, `REPO`, and
+  `DRY_RUN=true` directly in the prompt; `gh` uses the user's stored
+  auth (`gh auth status` confirms).
+
+In both cases, the verification is the same: can the agent authenticate
+to GitHub and read the PR? Use the env var when present, the prompt
+value otherwise, and prefer the prompt value when both disagree.
 
 ## Hotfix special case
 
