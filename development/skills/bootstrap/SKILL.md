@@ -26,6 +26,14 @@ Supported flags:
   (GPG or SSH) on the default branch. Off by default because every
   contributor must register a signing key. When set, the orchestrator
   invokes `branch-protection.sh --require-signed-commits true` in Step 4b.
+- `--claude-approver true|false` — install the two Claude GitHub Apps
+  (Claude Approver + Claude Maintenance) on this repo and store the
+  per-repo secrets + variables the Approver workflow needs. Defaults to
+  `false`. Requires the Apps to be registered on this machine first via
+  `scripts/register-claude-apps.sh` (the preflight in Step 4.5 will offer
+  to run it when missing). When `true`, also warn-and-skip on non-Python
+  projects until other language plugins ship their own Approver agents.
+  See `docs/CLAUDE-APPS.md` for the design and the Apps' permissions.
 
 ## Guiding Principles
 
@@ -619,8 +627,15 @@ anything missing:
 "<skill-base-dir>/scripts/preflight.sh" \
   --visibility "<public|private>" \
   --languages "<space-separated detected languages>" \
-  --has-dockerfile "<true|false>"
+  --has-dockerfile "<true|false>" \
+  --claude-approver "<true|false>"
 ```
+
+Pass `--claude-approver true` whenever the orchestrator was invoked with
+`--claude-approver true` (so the preflight can verify the two Claude
+GitHub Apps are registered locally and offer to run `register-claude-apps.sh`
+when they aren't). When the orchestrator was invoked without the flag, pass
+`false` or omit it.
 
 The script will:
 1. Refuse to run on non-macOS hosts.
@@ -632,6 +647,9 @@ The script will:
 5. Verify `gh auth status`; offer to run `gh auth login` if not authenticated.
 6. For private path: verify Docker daemon is running; offer to launch
    Docker.app if not.
+7. When `--claude-approver true`: verify `python3` is present, verify both
+   Claude Apps are registered locally (apps.json + Keychain entries), and
+   offer to run `register-claude-apps.sh` when missing.
 
 If preflight fails (user declines installs, or non-macOS host), skip Step 4.5
 entirely and go straight to Step 5 (manual checklist).
@@ -649,7 +667,8 @@ If preflight passed, ask the user whether to run the path-specific automation.
   --default-branch "<DEFAULT_BRANCH>" \
   --has-dockerfile "<true|false>" \
   --has-codeql "true" \
-  --codeql-languages "<space-separated languages, e.g. 'python typescript'>"
+  --codeql-languages "<space-separated languages, e.g. 'python typescript'>" \
+  --claude-approver "<true|false>"
 ```
 
 `--codeql-languages` must be passed whenever `--has-codeql=true`. CodeQL's
@@ -678,7 +697,8 @@ This walks the user through:
   --project-key "<PROJECT_KEY>" \
   --project-name "<PROJECT_NAME>" \
   --default-branch "<DEFAULT_BRANCH>" \
-  --has-dockerfile "<true|false>"
+  --has-dockerfile "<true|false>" \
+  --claude-approver "<true|false>"
 ```
 
 This handles:
@@ -698,6 +718,48 @@ This handles:
 
 If the user declines automation at any step, fall back to the manual
 instructions in `SETUP.md` for the remaining steps.
+
+### `--claude-approver true` extension
+
+When the orchestrator was invoked with `--claude-approver true`, both
+automate scripts run an additional Claude Apps install step **after
+branch protection and before printing the summary** (no extra flag plumbing
+needed by the orchestrator — the scripts pick up the flag passed at the
+top). The step delegates to:
+
+```bash
+"<skill-base-dir>/scripts/install-claude-apps.sh"
+```
+
+which (idempotent):
+- Reads App IDs from `~/.config/claude-plugins/apps.json` and private keys
+  from macOS Keychain (populated by `register-claude-apps.sh` in Phase 0).
+- Opens `https://github.com/apps/<slug>/installations/new` per App so the
+  user installs both Apps on the current repo.
+- Captures `ANTHROPIC_API_KEY` from the environment, or prompts.
+- Stores per-repo variables (`CLAUDE_APPROVER_APP_ID`,
+  `CLAUDE_MAINTENANCE_APP_ID`, `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` defaulting
+  to the machine-only list) and secrets (`CLAUDE_APPROVER_PRIVATE_KEY`,
+  `CLAUDE_MAINTENANCE_PRIVATE_KEY`, `ANTHROPIC_API_KEY` — all in Actions
+  AND Dependabot scopes via `gh_secret_set_both`).
+
+**Non-Python warning.** If `--claude-approver true` is set but the detected
+language list does not include `python`, warn the user that the Approver
+agent only ships for Python today and the flag will be a no-op:
+
+> `--claude-approver true` requested but no Python detected in this repo.
+> The Approver currently ships only for Python (#89); the secrets and Apps
+> would be installed but no workflow would consume them. Re-run without
+> the flag to skip, or wait for the language-specific Approver agent to
+> ship.
+
+Offer the user to drop the flag and continue, or abort. Do not silently
+install Apps that would never be invoked.
+
+**Forward pointer.** Phase 1 ships the credentials only. The Approver
+workflow + policy template + PR description template arrive in **Phase 2**
+of #89; the `python-approver` agent itself in Phase 3. Until then, the
+secrets and variables installed here sit unused but ready.
 
 ## Step 5: Print the Manual-Setup Checklist
 

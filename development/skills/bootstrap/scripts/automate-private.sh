@@ -27,6 +27,7 @@ PROJECT_NAME=""
 DEFAULT_BRANCH="main"
 HAS_DOCKERFILE="false"
 SONAR_HOST="http://localhost:9000"
+CLAUDE_APPROVER="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --default-branch) DEFAULT_BRANCH="$2"; shift 2 ;;
     --has-dockerfile) HAS_DOCKERFILE="$2"; shift 2 ;;
     --sonar-host)     SONAR_HOST="$2"; shift 2 ;;   # override for non-localhost
+    --claude-approver) CLAUDE_APPROVER="$2"; shift 2 ;;
     *) die "Unknown argument: $1" ;;
   esac
 done
@@ -248,6 +250,17 @@ if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; th
     --has-dockerfile "$HAS_DOCKERFILE" \
     --has-codeql "false" \
     --default-branch "$DEFAULT_BRANCH"
+fi
+
+# --- 8.5 Claude Apps install -------------------------------------------------
+# Phase 1 of #89. Installs the two GitHub Apps registered locally by
+# register-claude-apps.sh onto this repo and stores the per-repo secrets +
+# variables the Approver workflow (Phase 2) and the Maintenance bot identity
+# will need at runtime.
+if [[ "$CLAUDE_APPROVER" == "true" ]]; then
+  echo
+  info "═══ Claude Apps install ═══"
+  "$SCRIPT_DIR/install-claude-apps.sh"
 fi
 
 # --- 9. Summary --------------------------------------------------------------

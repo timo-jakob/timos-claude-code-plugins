@@ -28,6 +28,7 @@ DEFAULT_BRANCH="main"
 HAS_DOCKERFILE="false"
 HAS_CODEQL="false"
 CODEQL_LANGUAGES=""
+CLAUDE_APPROVER="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     --has-dockerfile) HAS_DOCKERFILE="$2"; shift 2 ;;
     --has-codeql)     HAS_CODEQL="$2"; shift 2 ;;
     --codeql-languages) CODEQL_LANGUAGES="$2"; shift 2 ;;
+    --claude-approver)  CLAUDE_APPROVER="$2"; shift 2 ;;
     *) die "Unknown argument: $1" ;;
   esac
 done
@@ -333,6 +335,17 @@ if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; th
     --has-codeql "$HAS_CODEQL" \
     --codeql-languages "$CODEQL_LANGUAGES" \
     --default-branch "$DEFAULT_BRANCH"
+fi
+
+# --- Claude Apps install ------------------------------------------------------
+# Phase 1 of #89. Installs the two GitHub Apps registered locally by
+# register-claude-apps.sh onto this repo and stores the per-repo secrets +
+# variables the Approver workflow (Phase 2) and the Maintenance bot identity
+# will need at runtime.
+if [[ "$CLAUDE_APPROVER" == "true" ]]; then
+  echo
+  info "═══ Claude Apps install ═══"
+  "$SCRIPT_DIR/install-claude-apps.sh"
 fi
 
 # --- Summary ------------------------------------------------------------------
