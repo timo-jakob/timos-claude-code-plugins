@@ -527,6 +527,52 @@ For each detected language, merge in the appropriate config from
 - Coverage tooling note in `sonar-project.properties` (paths, report format)
 - Pre-commit hook entries (already merged into `.pre-commit-config.yaml`)
 
+### 3e. Claude Approver artifacts (when `--claude-approver true`)
+
+When the orchestrator was invoked with `--claude-approver true` **and**
+Python is in the detected languages list, render the two Approver-specific
+files:
+
+| Template | Target path in repo | Placeholders to substitute |
+|---|---|---|
+| `templates/common/.github/workflows/claude-approver.yml.tmpl` | `.github/workflows/claude-approver.yml` | `{{CLAUDE_PLUGINS_REPO}}`, `{{CLAUDE_PLUGINS_REF}}` |
+| `templates/languages/python/approver-policy.md.tmpl` | `.claude/approver-policy.md` | (none) |
+
+Default substitutions:
+
+- `{{CLAUDE_PLUGINS_REPO}}` → `timo-jakob/timos-claude-code-plugins` (the
+  canonical plugin family). Users who fork the family can override after
+  bootstrap by hand-editing the generated workflow.
+- `{{CLAUDE_PLUGINS_REF}}` → `main`. A pinned release tag is preferable
+  once the family ships versioned releases; until then `main` is the
+  working answer.
+
+The workflow file applies the standard idempotency rules below. The
+policy file (`.claude/approver-policy.md`) is the source of truth for
+the Approver's per-PR-type criteria — if it already exists at bootstrap
+time, default to **skip** and tell the user that policy changes go through
+the normal code-review process (a policy-change PR is evaluated by the
+*previous* version of the policy).
+
+Also confirm the existing `.github/PULL_REQUEST_TEMPLATE.md` (rendered in
+3a) carries the `## Type` and `## Risk` sections that the Approver reads.
+The shipped template already has them; if a user-customised template
+exists and is missing either section, surface a finding via the
+`bootstrap-idempotency-reviewer` agent rather than overwriting.
+
+**Non-Python skip.** If `--claude-approver true` was set but Python is
+NOT in the detected languages list, do **not** render either Approver
+file. Warn the user:
+
+> `--claude-approver true` was requested, but no Python is detected in
+> this repo. The Claude Approver currently ships only for Python (#89);
+> the workflow and policy file would be no-ops. Re-run without the flag,
+> or wait for the language-specific Approver agent to ship.
+
+Offer to drop the flag and continue, or abort. The Step 4.5 install path
+also skips when there's no Approver workflow to consume the App
+credentials.
+
 ### Idempotency rules (apply for every file write)
 
 For each target file path:
@@ -545,6 +591,13 @@ files **on disk**:
 - Workflow `needs:` and `steps.<id>.outputs.*` references resolve.
 - Sonar properties are sane (keys set, coverage paths plausible).
 - If `pre-commit` is installed locally, validates the config.
+- When `.github/workflows/claude-approver.yml` was rendered (3e):
+  - The workflow YAML parses.
+  - No `{{CLAUDE_PLUGINS_*}}` placeholders remain (i.e. the substitution
+    ran).
+  - `.claude/approver-policy.md` has the load-bearing sections
+    (`## Type detection`, `## Baseline criteria`, `## Per-type criteria`,
+    `## Confidence calibration`).
 
 If the agent returns `Verdict: BLOCK`, show errors to the user. Offer to:
 - Re-run Step 3 (regenerate the offending files), or
