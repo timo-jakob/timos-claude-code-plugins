@@ -277,12 +277,14 @@ jobs:
       # ============================================================
       # Run the Approver agent.
       # The agent reads .claude/approver-policy.md from the checked-out
-      # PR, evaluates the diff + check runs, and posts the review using
-      # the App token in GH_TOKEN. Its stdout is the human-readable
-      # summary; the hidden JSON block (for /development:maintenance
-      # re-ingest) is appended by the agent itself.
-      # TODO (Phase 3): finalise the exact invocation against the
-      # python-approver agent's contract once it ships.
+      # PR, evaluates the diff + check runs, fetches griffe-findings.json
+      # from the api-stability workflow (when present), runs cheap local
+      # checks, builds a risk register, calibrates confidence, and posts
+      # the review using the App token in GH_TOKEN. Its stdout is the
+      # human-readable summary; the hidden JSON block for
+      # /development:maintenance re-ingest is appended by the agent
+      # itself. See development-python/agents/python-approver.md for the
+      # full contract.
       # ============================================================
       - name: Run Claude Approver
         env:
