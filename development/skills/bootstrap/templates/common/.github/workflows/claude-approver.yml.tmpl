@@ -1,0 +1,301 @@
+# Claude Approver — the final synthesis layer for PR approval.
+#
+# Runs only when every other gate is already green. Asks two questions a
+# checker can't:
+#   - Risk: given everything is green, what could still go wrong?
+#   - Confidence: how sure am I that this PR does what it claims?
+#
+# Verdict: APPROVE / REQUEST_CHANGES (with hidden JSON the maintenance
+# pipeline re-ingests) / COMMENT-with-reservations.
+#
+# Identities provisioned by /development:bootstrap --claude-approver true
+# (which calls register-claude-apps.sh + install-claude-apps.sh):
+#   vars.CLAUDE_APPROVER_APP_ID              App that posts the review
+#   secrets.CLAUDE_APPROVER_PRIVATE_KEY      Its private key (PEM)
+#   vars.CLAUDE_APPROVER_AUTHOR_ALLOWLIST    JSON array of allowed PR authors
+#   secrets.ANTHROPIC_API_KEY                For invoking the python-approver agent
+#
+# See development/skills/bootstrap/docs/CLAUDE-APPS.md in the plugin family
+# for the design and the manual fallback flow.
+
+name: Claude Approver
+
+on:
+  # Primary trigger: CI completed, so we have a final green/red state.
+  check_suite:
+    types: [completed]
+
+  # Manual re-trigger via a PR comment: "/approve" or "/approve --dry-run".
+  issue_comment:
+    types: [created]
+
+  # Re-evaluate when other reviewers act — e.g., a human dismisses our
+  # REQUEST_CHANGES after the author pushed a fix.
+  pull_request_review:
+    types: [submitted, dismissed]
+
+# Default permissions are read-only — the App token (minted in-job) is
+# what actually posts the review. GITHUB_TOKEN never gets pull_requests:write.
+permissions:
+  contents: read
+
+# Debounce per PR so two evaluators don't race on the same SHA.
+concurrency:
+  group: claude-approver-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # One linear chain of gates. Each gate either passes or exits 78 (neutral).
+    # When debugging, the failing step IS the failing gate.
+    steps:
+
+      # ============================================================
+      # Gate 1: resolve PR number from the trigger
+      # ============================================================
+      - name: Resolve PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          # Event payloads exposed as env (not embedded in the script body)
+          # to keep user-content out of shell expansion — injection-safe.
+          CHECK_SUITE_PRS: ${{ toJSON(github.event.check_suite.pull_requests) }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ISSUE_IS_PR: ${{ github.event.issue.pull_request != null }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_REVIEW_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+          dry_run=""
+          case "$EVENT_NAME" in
+            check_suite)
+              number=$(printf '%s' "$CHECK_SUITE_PRS" | jq -r '.[0].number // empty')
+              if [ -z "$number" ]; then
+                echo "::notice::check_suite has no associated PR; exiting neutral."
+                exit 78
+              fi
+              ;;
+            issue_comment)
+              if [ "$ISSUE_IS_PR" != "true" ]; then
+                echo "::notice::Comment is on a plain issue, not a PR."
+                exit 78
+              fi
+              if ! printf '%s' "$COMMENT_BODY" | grep -qE '^/approve(\s+--dry-run)?\s*$'; then
+                echo "::notice::Comment is not /approve."
+                exit 78
+              fi
+              number="$ISSUE_NUMBER"
+              if printf '%s' "$COMMENT_BODY" | grep -qE -- '--dry-run'; then
+                dry_run="true"
+              fi
+              ;;
+            pull_request_review)
+              number="$PR_REVIEW_NUMBER"
+              ;;
+            *)
+              echo "::notice::Unrecognised event $EVENT_NAME."
+              exit 78 ;;
+          esac
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+
+      # ============================================================
+      # Gate 2: anti-rubber-stamp — PR author must not be the Approver
+      # ============================================================
+      - name: Anti-rubber-stamp gate
+        id: author
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -e
+          author=$(gh pr view "$PR_NUMBER" --json author --jq .author.login)
+          if [ "$author" = "claude-approver[bot]" ]; then
+            echo "::notice::PR author is the Approver itself — refusing self-approval."
+            exit 78
+          fi
+          echo "login=$author" >> "$GITHUB_OUTPUT"
+
+      # ============================================================
+      # Gate 3: author allowlist — Approver only evaluates allowed authors
+      # ============================================================
+      - name: Author allowlist gate
+        env:
+          ALLOWLIST: ${{ vars.CLAUDE_APPROVER_AUTHOR_ALLOWLIST }}
+          AUTHOR: ${{ steps.author.outputs.login }}
+        run: |
+          set -e
+          if [ -z "$ALLOWLIST" ]; then
+            echo "::error::CLAUDE_APPROVER_AUTHOR_ALLOWLIST variable is unset; install-claude-apps.sh should have set it."
+            exit 1
+          fi
+          allowed=$(printf '%s' "$ALLOWLIST" | jq --arg a "$AUTHOR" 'any(. == $a or . == "*")')
+          if [ "$allowed" != "true" ]; then
+            echo "::notice::Author '$AUTHOR' not on allowlist: $ALLOWLIST"
+            exit 78
+          fi
+
+      # ============================================================
+      # Gate 4: PR state (not draft, OPEN)
+      # ============================================================
+      - name: PR state gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -e
+          state=$(gh pr view "$PR_NUMBER" --json isDraft,state)
+          if [ "$(printf '%s' "$state" | jq -r .isDraft)" = "true" ]; then
+            echo "::notice::PR is draft."; exit 78
+          fi
+          if [ "$(printf '%s' "$state" | jq -r .state)" != "OPEN" ]; then
+            echo "::notice::PR not OPEN."; exit 78
+          fi
+
+      # ============================================================
+      # Gate 5: all-green check runs + HEAD SHA freeze
+      # Every required check on the PR's head SHA must be SUCCESS, then we
+      # verify the head SHA hasn't moved during evaluation — protects
+      # against the race where a push lands between the gate eval and the
+      # review post.
+      # ============================================================
+      - name: All-green check gate
+        id: green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          head_sha=$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)
+
+          runs=$(gh api "repos/$REPO/commits/$head_sha/check-runs" --paginate \
+                 --jq '.check_runs[] | {name: .name, status: .status, conclusion: .conclusion}' \
+                 | jq -s .)
+          status=$(gh api "repos/$REPO/commits/$head_sha/status" \
+                   --jq '{state: .state}')
+
+          pending=$(printf '%s' "$runs" | jq 'map(select(.status != "completed")) | length')
+          if [ "$pending" -gt 0 ]; then
+            echo "::notice::$pending check(s) still in progress on $head_sha."
+            exit 78
+          fi
+
+          # Allow success + skipped + neutral; everything else is red.
+          bad=$(printf '%s' "$runs" \
+                | jq 'map(select(.conclusion != "success"
+                                 and .conclusion != "neutral"
+                                 and .conclusion != "skipped")) | length')
+          if [ "$bad" -gt 0 ]; then
+            echo "::notice::Some checks are not green on $head_sha:"
+            printf '%s' "$runs" | jq '.[] | select(.conclusion != "success"
+                                                    and .conclusion != "neutral"
+                                                    and .conclusion != "skipped")'
+            exit 78
+          fi
+
+          # Legacy commit-status API (third-party check posters): treat
+          # 'success' as green; 'pending' / 'failure' / 'error' as not green.
+          # Empty status set is fine — many repos no longer use this API.
+          status_state=$(printf '%s' "$status" | jq -r .state)
+          if [ "$status_state" != "success" ] && [ "$status_state" != "" ] && [ "$status_state" != "null" ]; then
+            echo "::notice::Combined commit status is '$status_state', not 'success'."
+            exit 78
+          fi
+
+          # Final race check: head SHA must still be the SHA we evaluated.
+          current_sha=$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)
+          if [ "$head_sha" != "$current_sha" ]; then
+            echo "::notice::Head SHA moved during gate eval ($head_sha → $current_sha); exiting neutral."
+            exit 78
+          fi
+
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "::notice::All checks green on $head_sha — proceeding to Approver."
+
+      # ============================================================
+      # Mint App token — actions/create-github-app-token auto-discovers
+      # the installation ID for this repo from the App ID + private key.
+      # ============================================================
+      - name: Mint Approver App token
+        id: app_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CLAUDE_APPROVER_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APPROVER_PRIVATE_KEY }}
+
+      # ============================================================
+      # Checkout PR HEAD (with App token so any pushes from the agent
+      # would be attributable to claude-approver[bot] — though the agent
+      # is review-only and never pushes).
+      # ============================================================
+      - name: Checkout PR HEAD
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.green.outputs.head_sha }}
+          token: ${{ steps.app_token.outputs.token }}
+          fetch-depth: 0
+
+      # ============================================================
+      # Pull in the Claude plugin family so the python-approver agent
+      # is loadable. The bootstrap renders the repo + ref from
+      # {{CLAUDE_PLUGINS_REPO}} / {{CLAUDE_PLUGINS_REF}}; defaults pin
+      # the canonical fork.
+      # ============================================================
+      - name: Checkout Claude plugin family
+        uses: actions/checkout@v6
+        with:
+          repository: "{{CLAUDE_PLUGINS_REPO}}"
+          ref: "{{CLAUDE_PLUGINS_REF}}"
+          path: .claude-plugins
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # Install Claude Code CLI.
+      # TODO (Phase 3): pin to a specific Claude Code version once the
+      # CLI ships versioned releases; finalise the install URL against
+      # what `python-approver` testing actually uses.
+      # ============================================================
+      - name: Install Claude Code
+        run: |
+          set -e
+          curl -fsSL https://claude.ai/install.sh | bash
+          # Add common install locations to PATH; first match wins.
+          for d in "$HOME/.local/bin" "$HOME/.claude/bin" "$HOME/.npm-global/bin"; do
+            if [ -x "$d/claude" ]; then
+              echo "$d" >> "$GITHUB_PATH"
+              break
+            fi
+          done
+          # Sanity check.
+          PATH="$HOME/.local/bin:$HOME/.claude/bin:$HOME/.npm-global/bin:$PATH" \
+            claude --version || { echo "::error::claude CLI install failed"; exit 1; }
+
+      # ============================================================
+      # Run the Approver agent.
+      # The agent reads .claude/approver-policy.md from the checked-out
+      # PR, evaluates the diff + check runs, and posts the review using
+      # the App token in GH_TOKEN. Its stdout is the human-readable
+      # summary; the hidden JSON block (for /development:maintenance
+      # re-ingest) is appended by the agent itself.
+      # TODO (Phase 3): finalise the exact invocation against the
+      # python-approver agent's contract once it ships.
+      # ============================================================
+      - name: Run Claude Approver
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ steps.pr.outputs.dry_run }}
+        run: |
+          set -e
+          claude --print \
+            --plugin-dir ".claude-plugins/development" \
+            --plugin-dir ".claude-plugins/development-python" \
+            --agent python-approver \
+            -- \
+            "Review PR #${PR_NUMBER} in ${REPO}. Dry-run: ${DRY_RUN:-false}."
