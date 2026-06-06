@@ -22,14 +22,16 @@ VISIBILITY=""
 LANGUAGES=""
 HAS_DOCKERFILE="false"
 ASSUME_YES="false"
+CLAUDE_APPROVER="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --visibility)     VISIBILITY="$2"; shift 2 ;;
-    --languages)      LANGUAGES="$2"; shift 2 ;;
-    --has-dockerfile) HAS_DOCKERFILE="$2"; shift 2 ;;
-    --assume-yes)     ASSUME_YES="true"; shift ;;
-    *)                die "Unknown argument: $1" ;;
+    --visibility)      VISIBILITY="$2"; shift 2 ;;
+    --languages)       LANGUAGES="$2"; shift 2 ;;
+    --has-dockerfile)  HAS_DOCKERFILE="$2"; shift 2 ;;
+    --assume-yes)      ASSUME_YES="true"; shift ;;
+    --claude-approver) CLAUDE_APPROVER="$2"; shift 2 ;;
+    *)                 die "Unknown argument: $1" ;;
   esac
 done
 
@@ -268,6 +270,43 @@ EOF
       esac
       ;;
   esac
+fi
+
+# --- Claude Apps preflight (when --claude-approver true) ---------------------
+# Verifies the two Claude GitHub Apps are registered locally
+# (apps.json + Keychain entries). When missing, offers to run
+# register-claude-apps.sh now so bootstrap doesn't fail mid-flow.
+if [[ "$CLAUDE_APPROVER" == "true" ]]; then
+  echo
+  info "Claude Apps preflight (—claude-approver true)…"
+
+  command -v python3 >/dev/null 2>&1 \
+    || die "python3 required for the Claude Apps manifest flow. Install via Xcode Command Line Tools (xcode-select --install) or 'brew install python'."
+
+  CLAUDE_APPS_CONFIG="${HOME}/.config/claude-plugins/apps.json"
+  apps_ready=true
+  for app in claude-approver claude-maintenance; do
+    key="${app//-/_}"
+    if [[ ! -f "$CLAUDE_APPS_CONFIG" ]] \
+       || ! jq -e --arg key "$key" '.[$key].app_id' "$CLAUDE_APPS_CONFIG" >/dev/null 2>&1; then
+      apps_ready=false; break
+    fi
+    if ! security find-generic-password -s "claude-plugins.${app}" -a "private-key" -w >/dev/null 2>&1; then
+      apps_ready=false; break
+    fi
+  done
+
+  if $apps_ready; then
+    ok "Both Claude Apps registered locally (apps.json + Keychain)"
+  else
+    warn "Claude Apps not yet registered on this machine."
+    warn "  Bootstrap will need both Apps before --claude-approver true can install them on the repo."
+    if [[ "$ASSUME_YES" == "true" ]] || ask_yn "Run register-claude-apps.sh now?"; then
+      "$SCRIPT_DIR/register-claude-apps.sh"
+    else
+      die "Aborted. Run $SCRIPT_DIR/register-claude-apps.sh, then re-run preflight + bootstrap."
+    fi
+  fi
 fi
 
 echo
