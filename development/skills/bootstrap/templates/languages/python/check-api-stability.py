@@ -89,6 +89,25 @@ def title_breaking(title: str) -> bool:
     return bool(_TITLE_BREAKING.match(title or ""))
 
 
+# Each breaking-change finding emitted by `griffe check -f oneline` is a
+# line of the form:
+#     <path>: <kind>: <message>
+# where any of the three may contain spaces. Be defensive — if griffe's
+# format drifts, fall back to capturing the whole line as the detail.
+_GRIFFE_ONELINE_RE = re.compile(
+    r"""
+    ^
+    \s*(?P<path>[^:]+?)\s*  # path up to the first colon
+    :\s*
+    (?P<kind>[^:]+?)\s*     # kind up to the second colon
+    :\s*
+    (?P<detail>.+?)         # rest is the message
+    \s*$
+    """,
+    re.VERBOSE,
+)
+
+
 def run_griffe_check(old_ref: str, new_ref: str, package_name: str) -> list[dict]:
     """
     Invoke `griffe check` between `old_ref` and `new_ref`. Returns a list
@@ -98,6 +117,11 @@ def run_griffe_check(old_ref: str, new_ref: str, package_name: str) -> list[dict
       0 = no breaking changes
       1 = breaking changes found
       anything else = tool error
+
+    We use `-f oneline` (one finding per line) rather than JSON because
+    griffe's `--format` only supports `oneline | verbose | markdown |
+    github` — `json` is not a valid value and produces a usage error.
+    See #203.
     """
     cmd = [
         "griffe",
@@ -107,8 +131,8 @@ def run_griffe_check(old_ref: str, new_ref: str, package_name: str) -> list[dict
         old_ref,
         "-b",
         new_ref,
-        "--format",
-        "json",
+        "-f",
+        "oneline",
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -137,47 +161,33 @@ def run_griffe_check(old_ref: str, new_ref: str, package_name: str) -> list[dict
     if not out:
         return []
 
-    try:
-        raw = json.loads(out)
-    except json.JSONDecodeError as e:
-        return [
-            {
-                "kind": "parse_error",
-                "path": "",
-                "detail": f"could not parse griffe JSON output: {e}",
-                "severity": "critical",
-            }
-        ]
-
-    # griffe's JSON shape may differ across versions; be defensive.
-    if isinstance(raw, dict):
-        raw = raw.get("results") or raw.get("findings") or []
-    if not isinstance(raw, list):
-        return [
-            {
-                "kind": "parse_error",
-                "path": "",
-                "detail": f"unexpected griffe output shape: {type(raw).__name__}",
-                "severity": "critical",
-            }
-        ]
-
     findings: list[dict] = []
-    for item in raw:
-        if not isinstance(item, dict):
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
             continue
-        findings.append(
-            {
-                "kind": str(item.get("kind") or item.get("type") or "unknown"),
-                "path": str(item.get("obj_path") or item.get("path") or "?"),
-                "detail": str(
-                    item.get("message")
-                    or item.get("description")
-                    or item
-                ),
-                "severity": "high",
-            }
-        )
+        m = _GRIFFE_ONELINE_RE.match(line)
+        if m:
+            findings.append(
+                {
+                    "kind": m.group("kind"),
+                    "path": m.group("path"),
+                    "detail": m.group("detail"),
+                    "severity": "high",
+                }
+            )
+        else:
+            # Format drift fallback: griffe changed its oneline shape.
+            # Capture the whole line so the Approver still sees the
+            # breaking-change content, even if path/kind aren't parsed.
+            findings.append(
+                {
+                    "kind": "breaking_change",
+                    "path": "?",
+                    "detail": line,
+                    "severity": "high",
+                }
+            )
     return findings
 
 

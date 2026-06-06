@@ -140,9 +140,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
+          # `gh pr view` needs to know which repo. No checkout has run yet
+          # at this point in the job — `gh` would otherwise look for a
+          # local .git directory and exit with "fatal: not a git repository".
+          # See #203.
+          REPO: ${{ github.repository }}
         run: |
           set -e
-          author=$(gh pr view "$PR_NUMBER" --json author --jq .author.login)
+          author=$(gh pr view "$PR_NUMBER" -R "$REPO" --json author --jq .author.login)
           if [ "$author" = "claude-approver[bot]" ]; then
             echo "::notice::PR author is the Approver itself — refusing self-approval."
             exit 78
@@ -175,9 +180,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
         run: |
           set -e
-          state=$(gh pr view "$PR_NUMBER" --json isDraft,state)
+          # `-R "$REPO"` is needed because no checkout has run yet — without
+          # it, gh tries to resolve the repo from a local git context that
+          # doesn't exist. See #203.
+          state=$(gh pr view "$PR_NUMBER" -R "$REPO" --json isDraft,state)
           if [ "$(printf '%s' "$state" | jq -r .isDraft)" = "true" ]; then
             echo "::notice::PR is draft."; exit 78
           fi
@@ -200,7 +209,9 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -e
-          head_sha=$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)
+          # `-R "$REPO"` is needed because no checkout has run yet — see #203.
+          # The `gh api repos/...` calls below already use $REPO in the path.
+          head_sha=$(gh pr view "$PR_NUMBER" -R "$REPO" --json headRefOid --jq .headRefOid)
 
           runs=$(gh api "repos/$REPO/commits/$head_sha/check-runs" --paginate \
                  --jq '.check_runs[] | {name: .name, status: .status, conclusion: .conclusion}' \
@@ -237,7 +248,7 @@ jobs:
           fi
 
           # Final race check: head SHA must still be the SHA we evaluated.
-          current_sha=$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)
+          current_sha=$(gh pr view "$PR_NUMBER" -R "$REPO" --json headRefOid --jq .headRefOid)
           if [ "$head_sha" != "$current_sha" ]; then
             echo "::notice::Head SHA moved during gate eval ($head_sha → $current_sha); exiting neutral."
             exit 78
