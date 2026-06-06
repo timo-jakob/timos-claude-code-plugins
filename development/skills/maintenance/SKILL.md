@@ -325,12 +325,24 @@ trimmed in the wild — and that downstream code reads — include:
 And every other schema field. Trimming silently changes routing
 because downstream agents parse fields the orchestrator never read.
 
-**On payload size: trust the Skill tool.** A 200–300 KB inline
-payload is handled cleanly. The "this is too big to dispatch inline"
-intuition that triggers trimming is wrong at every scale this
-project produces. If a payload genuinely grew multi-MB in routine
-use, that would be a quality bug on the gather script (filed and
-fixed there) — never a licence to drop fields silently in dispatch.
+**On payload size.** Both observed incidents (~70 KB and smaller)
+were well below any actual Skill-tool limit — the trimming was a
+behavioural error, not a capacity workaround. Inline payloads up
+to ~200 KB are handled cleanly today, which covers every payload
+this project has produced against the current test bed.
+
+That ceiling is real, not infinite. Above ~200 KB, the right
+answer is **not** to trim and **not** to summarise to fit — it is
+to halt with `human_action_required` naming the payload size and
+citing [#178](https://github.com/timo-jakob/timos-claude-code-plugins/issues/178),
+where the file-based handover contract (orchestrator writes the
+payload to a temp file, dispatcher reads from disk) is being
+designed as the architecturally proper fix. Until that ships,
+~200 KB is the practical inline ceiling; never drop fields
+silently as a workaround for hitting it. If a payload routinely
+grows multi-MB, also file a quality bug against the gather script
+— it should not produce that much. But "feels big" is never enough
+to justify trimming.
 
 **Self-check before each dispatch.** The JSON string you are about
 to pass as `args=` should be character-for-character identical to
