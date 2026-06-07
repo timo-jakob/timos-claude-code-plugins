@@ -50,11 +50,23 @@ if ! [[ "$app_id" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-if ! pem=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "private-key" -w 2>/dev/null); then
+if ! raw=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "private-key" -w 2>/dev/null); then
   print -u2 -- "Private key for claude-maintenance not in Keychain."
   print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.sh --reset claude-maintenance"
   print -u2 -- "  Then re-run register-claude-apps.sh to re-mint the key."
   exit 1
+fi
+# macOS `security find-generic-password -w` returns the stored value
+# hex-encoded when it contains newlines. PEM private keys are multi-line
+# by definition, so retrievals come back as a long hex string instead of
+# the original bytes. Detect pure-hex retrievals and decode. The check is
+# conservative — PEMs contain `-` `=` and newlines, none of which appear
+# in hex output, so a stored PEM can never look like the hex form. See
+# #208.
+if [[ "$raw" =~ ^[0-9a-fA-F]+$ ]]; then
+  pem=$(printf '%s' "$raw" | xxd -r -p)
+else
+  pem="$raw"
 fi
 
 command -v gh >/dev/null 2>&1 || { print -u2 -- "gh CLI not on PATH."; exit 1; }
