@@ -34,11 +34,11 @@ Your prompt contains:
 - `cve_reference` — optional; the Snyk advisory ID or CVE when
   `source == "snyk_prs"` and the bump is security-motivated
 - `pr_number` — the GitHub PR number that triggered this major upgrade,
-  from either Dependabot or Snyk.
-  After a successful local migration, your output should recommend
-  closing this PR (the user can do so manually, or via `gh pr close`).
-  Local migration with proper tests + LSP-driven call-site updates is a
-  more complete result than Dependabot's "bumped the pin" PR.
+  from either Dependabot or Snyk. After a successful local migration,
+  surface this number in `superseded_prs` (see Output). The orchestrator
+  closes it automatically after opening the replacement PR — a local
+  migration with proper tests + LSP-driven call-site updates supersedes
+  the vendor's "bumped the pin" PR.
 - `release_notes_url` — optional; the dispatcher's best guess at the
   canonical release notes / migration guide URL. For dependabot-sourced
   bumps the Dependabot PR body usually links to it — check there too.
@@ -165,8 +165,7 @@ full briefing on what was attempted and what they need to decide.
       "tests_passed": true,
       "remediation_passes": 0,
       "worktree_branch": "<branch>",
-      "supersedes_dependabot_pr": <PR number when source == 'dependabot', else null>,
-      "post_merge_recommendation": "<when supersedes_dependabot_pr is set:> After merging this worktree branch into your working branch, close Dependabot PR #<N> via 'gh pr close <N>' with a comment like 'Superseded by local major-upgrade with full migration + tests.' Leaving it open will conflict with the migration applied here."
+      "superseded_prs": [<input pr_number>]
     }
   ],
   "actions_requiring_review": [
@@ -175,6 +174,12 @@ full briefing on what was attempted and what they need to decide.
   "unable_to_fix": []
 }
 ```
+
+`superseded_prs` is the machine-actionable list of GitHub PR numbers the
+orchestrator should close after opening the replacement PR. For a
+successful run, this is `[pr_number]` (the input PR). Leave empty `[]`
+only if the upgrade failed and you're escalating — never list a PR
+whose work didn't actually land.
 
 ## Constraints
 
