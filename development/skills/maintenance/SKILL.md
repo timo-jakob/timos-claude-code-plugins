@@ -33,6 +33,13 @@ Supported flags in `$ARGUMENTS`:
   only spawns the agent(s) for the chosen tool. Other agents are
   skipped entirely — no work, no missing-tool recommendation.
   Combinable with `--dry-run` and `--no-merge`.
+- `--track-as-issues` — after the run completes, create / update /
+  close GitHub tracking issues for each scanner tool's remaining
+  findings. One issue per tool (`ruff`, `semgrep`, `code_scanning_alerts`,
+  `sonarcloud`); labels `maintenance` + `tool:<name>`; idempotent on
+  `(repo, tool)`. Skipped for PR-based tools (`dependabot`, `snyk_prs`)
+  since their findings are already first-class PRs. See Phase 10 below
+  for the contract. Off by default; opt in per run.
 
 Anything else: surface the input to the user as "unrecognized
 arguments" and stop.
@@ -1201,6 +1208,50 @@ Worktree branches available for manual review (no PRs opened):
 
 Keep the tone factual. If everything was clean, say so: "No issues
 found by the configured tools; project is in good shape."
+
+## Phase 10 — track findings as GitHub issues (opt-in)
+
+**Run only when `--track-as-issues` was passed in Phase 0.** Otherwise
+skip this phase entirely.
+
+For each language's `findings-<lang>.json`, invoke the tracker:
+
+```bash
+"<skill-base-dir>/scripts/track-debt-issues.zsh" \
+  --findings "/tmp/findings-<lang>.json" \
+  --repo "<repo-path>"
+```
+
+The script handles the GitHub side end-to-end: ensures the labels
+exist (`maintenance`, `tool:<name>`), finds existing tracking issues
+by label combo, and acts based on the current finding count:
+
+| Finding count | Existing issue? | Action |
+|---|---|---|
+| > 0 | yes | Edit body (title + checklist refresh) |
+| > 0 | no  | Create new issue |
+| 0   | yes | Close with "All <tool> findings resolved" comment |
+| 0   | no  | No-op |
+
+One tracking issue per scanner tool (`ruff`, `semgrep`,
+`code_scanning_alerts`, `sonarcloud`). Within each issue's body,
+findings are grouped by the tool's natural sub-category: `tool` for
+code scanning (CodeQL / Scorecard), `type` for SonarCloud
+(BUG / VULNERABILITY / CODE_SMELL / SECURITY_HOTSPOT), severity for
+semgrep, none for ruff (flat).
+
+Body is capped at the top 50 findings (per-group cap is
+`50 / num_groups` so one giant group can't eat the cap). The
+remainder is summarized with a `+ N more — see source tool` footer.
+
+PR-based tools (`dependabot`, `snyk_prs`) are **intentionally
+excluded** — their findings are already first-class PRs and
+duplicating them as checklist items in an issue creates two states
+to keep in sync.
+
+Print the tracker's stdout (one line per tool — `created` / `updated` /
+`closed` / `no-op`) into the run summary so the user sees what
+changed on the issues side.
 
 ## What you will NOT do
 
