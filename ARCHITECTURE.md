@@ -392,25 +392,56 @@ After install, re-run /development:maintenance.
 Other detected languages still get processed. The user can opt to act
 on partial results.
 
-## JSON schema (v1)
+## JSON schema (v2)
 
 The contract between `development` and any `development-<lang>`.
 
 **Stability stance.** Treated as stable now. While we're the only
-consumer of these plugins, we may revise v1 in place if a real need
+consumer of these plugins, we may revise v2 in place if a real need
 surfaces — change the schema, update all language plugins in the same
-PR set, no version bump required. The moment a third party installs
-any of these plugins, v1 freezes and any incompatible change becomes
-v2 (language plugins declare supported versions in their `SKILL.md`
+PR set, no minor-version bump required. The moment a third party installs
+any of these plugins, v2 freezes and any incompatible change becomes
+v3 (language plugins declare supported versions in their `SKILL.md`
 so `development` picks the highest common). Until then, this section
 is the canonical reference and lives here, not in a versioned schema
 file.
 
+**v1 → v2 transition (2026-06).** The wire shape of the payload did
+not change between v1 and v2 — only the **handover mechanism**. v1
+passed the payload as an inline JSON string in the Skill tool's
+`args=`. v2 passes a path to a temp file the orchestrator wrote (see
+*Handover* below). The bump exists so dispatcher and orchestrator fail
+loudly on mismatch instead of silently truncating large payloads.
+
+### Handover (`args=` is a file path, not inline JSON)
+
+The orchestrator writes the payload to a `mktemp` file via
+`development/skills/maintenance/scripts/write-payload.zsh` and passes
+the absolute path as the Skill tool's `args=`. The dispatcher reads
+the file from disk, parses, and proceeds.
+
+```
+payload_file=$(echo "$payload_json" | <skill-base-dir>/scripts/write-payload.zsh)
+Skill(skill="development-<lang>:maintenance", args="$payload_file")
+rm -f "$payload_file"
+```
+
+The orchestrator owns the temp file's lifecycle: write before
+dispatch, delete after the Skill call returns (success or failure).
+On hard crash, the file is left in `$TMPDIR` for the OS to reap.
+
+This decouples payload size from any Skill-tool inline limit — a
+maintenance run on a project with 200+ Dependabot PRs (~6 MB
+payload) is the same code path as one with three patches.
+
 ### Request (`development` → `development-<lang>`)
+
+The wire shape below is identical to v1; only `schema_version` and
+the delivery mechanism changed.
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "repo": {
     "path": "/abs/path/to/repo",
     "default_branch": "main",
@@ -476,9 +507,14 @@ from `findings_by_tool`).
 
 ### Response (`development-<lang>` → `development`)
 
+The response is **returned inline** as the Skill tool's result string,
+not via a file. Response payloads stay small (a planning artifact,
+not raw findings), so the file-handover one-way only applies to the
+request side.
+
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "plan": [
     {
       "group_id": 1,

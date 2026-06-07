@@ -313,11 +313,11 @@ pytest-cov not installed). Surface them in the final summary.
 ## Phase 4 — construct one payload per supported language
 
 For each `lang` in `supported`, build the JSON payload per ARCHITECTURE.md
-schema v1:
+schema v2:
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "repo": {
     "path": "<cwd>",
     "default_branch": "<from detect-stack>",
@@ -387,14 +387,37 @@ languages, and stop. Nothing is dispatched or merged.
 ## Phase 6 — dispatch per supported language to plan
 
 For each `lang` in `supported`, invoke the matching language plugin via
-the Skill tool:
+the Skill tool. **The payload is handed over via a temp file**, not
+inline — see ARCHITECTURE.md § "JSON schema (v2)" for the contract.
+
+```bash
+# 1. Write the payload to a temp file. The helper sets 0600 perms
+#    and prints the absolute path on stdout.
+payload_file=$(print -r -- "$payload_json" \
+  | "<skill-base-dir>/scripts/write-payload.zsh")
+```
 
 ```
+# 2. Dispatch. args= is the path to the file just written.
 Skill(
   skill="development-<lang>:maintenance",
-  args="<the JSON payload as a single-line string>"
+  args="$payload_file"
 )
 ```
+
+```bash
+# 3. After the Skill tool returns (success or failure), delete the
+#    temp file. On hard crash the OS reaps it from $TMPDIR.
+rm -f "$payload_file"
+```
+
+`<skill-base-dir>` is the maintenance skill's directory (the same
+placeholder used for `mint-maintenance-token.zsh` elsewhere in this
+file).
+
+The file-based handover decouples payload size from any Skill-tool
+inline limit. A maintenance run on a project with 200+ Dependabot PRs
+(~6 MB payload) is the same code path as one with three patches.
 
 ### No-trim contract — known recurring bug
 
@@ -441,26 +464,20 @@ because downstream agents parse fields the orchestrator never read.
 
 **On payload size.** Both observed incidents (~70 KB and smaller)
 were well below any actual Skill-tool limit — the trimming was a
-behavioural error, not a capacity workaround. Inline payloads up
-to ~200 KB are handled cleanly today, which covers every payload
-this project has produced against the current test bed.
+behavioural error, not a capacity workaround. With v2's file-based
+handover (above), payload size no longer enters the Skill-tool's
+input budget at all — the `args=` value is a ~80-byte path, regardless
+of whether the payload behind it is 5 KB or 5 MB. The previous
+"200 KB inline ceiling" + `human_action_required` escape valve is
+gone; do not reintroduce it.
 
-That ceiling is real, not infinite. Above ~200 KB, the right
-answer is **not** to trim and **not** to summarise to fit — it is
-to halt with `human_action_required` naming the payload size and
-citing [#178](https://github.com/timo-jakob/timos-claude-code-plugins/issues/178),
-where the file-based handover contract (orchestrator writes the
-payload to a temp file, dispatcher reads from disk) is being
-designed as the architecturally proper fix. Until that ships,
-~200 KB is the practical inline ceiling; never drop fields
-silently as a workaround for hitting it. If a payload routinely
-grows multi-MB, also file a quality bug against the gather script
-— it should not produce that much. But "feels big" is never enough
-to justify trimming.
+If a payload routinely grows multi-MB, file a quality bug against
+the gather script — it should not produce that much. But payload
+size is never a justification for trimming.
 
-**Self-check before each dispatch.** The JSON string you are about
-to pass as `args=` should be character-for-character identical to
-the payload you constructed in Phase 4. If you cannot say that with
+**Self-check before each dispatch.** The JSON contents written to
+the temp file should be character-for-character identical to the
+payload you constructed in Phase 4. If you cannot say that with
 certainty — because you "tidied up," "shortened," "deduplicated,"
 or "summarised" something — the contract is broken. Reconstruct the
 payload from `findings-<lang>.json` and dispatch again.
@@ -603,13 +620,21 @@ spawned with `isolation="worktree"`.
 
 5. **Now re-invoke the dispatcher** with the same payload that drove
    the first dispatch — coverage is now at Required on main, so the
-   second invocation lands on Phase B and returns the plan:
+   second invocation lands on Phase B and returns the plan. Use the
+   same three-step file-handover pattern as Phase 6:
 
+   ```bash
+   payload_file=$(print -r -- "$payload_json" \
+     | "<skill-base-dir>/scripts/write-payload.zsh")
+   ```
    ```
    Skill(
      skill="development-<lang>:maintenance",
-     args="<the original JSON payload, unchanged>"
+     args="$payload_file"
    )
+   ```
+   ```bash
+   rm -f "$payload_file"
    ```
 
    The new response will have `plan` and no `improver_result` (that

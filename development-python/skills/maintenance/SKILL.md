@@ -68,13 +68,18 @@ previous PR merges. This means each group's work runs off the latest
 
 **User input:** $ARGUMENTS
 
-## Input schema (v1)
+## Input schema (v2)
 
-`$ARGUMENTS` is a JSON object. Per ARCHITECTURE.md, it has the shape:
+`$ARGUMENTS` is the **absolute path to a JSON payload file** the
+orchestrator wrote via
+`development/skills/maintenance/scripts/write-payload.zsh`. Read the
+file and parse its contents as JSON. The decoded object has the shape
+below — wire-identical to v1; only the handover mechanism changed.
+See ARCHITECTURE.md § "JSON schema (v2)" for the rationale.
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "repo": { "path": "/abs/path", "default_branch": "main", "visibility": "public" },
   "language": "python",
   "language_meta": { "version": "3.13", "manifests": [...] },
@@ -125,25 +130,39 @@ section below).
 
 Before dispatching:
 
-1. Parse `$ARGUMENTS` as JSON. If it's empty, print this message and
-   stop:
+1. Read the payload. `$ARGUMENTS` is an **absolute path to a JSON
+   payload file** the orchestrator wrote. If it's empty, print this
+   message and stop:
 
    ```
    This plugin is a function of its JSON input. Invoke via:
 
      /development:maintenance
 
-   …which constructs the JSON payload by running detection + tool
-   gathering, then dispatches here. For testing, you can pass JSON
-   inline:
+   …which constructs the payload, writes it to a temp file via
+   `development/skills/maintenance/scripts/write-payload.zsh`, and
+   dispatches the file path here. For testing, write a payload to a
+   file and pass its path:
 
-     /development-python:maintenance {"schema_version":"1", ...}
+     /development-python:maintenance /tmp/payload.json
 
-   See ARCHITECTURE.md (top-level repo) for the full schema.
+   See ARCHITECTURE.md (top-level repo) § "JSON schema (v2)" for the
+   full schema and the file-handover contract.
    ```
 
-2. Confirm `schema_version == "1"`. If not, error: "Schema version
-   <X> unsupported; this plugin supports v1." Stop.
+   If the path does not exist on disk, error: "Payload file not
+   found: <X>. See ARCHITECTURE.md § 'JSON schema (v2)' for the
+   v2 file-handover contract." Stop.
+
+   Read the file's contents and parse as JSON. On parse failure,
+   error: "Payload file <X> is not valid JSON: <error>." Stop.
+
+2. Confirm `schema_version == "2"`. If `"1"`: error: "Schema v1 (inline
+   JSON handover) is no longer supported. Upgrade the `development`
+   plugin to >= 1.8.0, which uses the v2 file-handover contract. See
+   ARCHITECTURE.md § 'JSON schema (v2)'." Stop.
+   For any other value: error: "Schema version <X> unsupported; this
+   plugin supports v2." Stop.
 3. Confirm `language == "python"`. If not, error and stop — the
    orchestrator misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
@@ -177,7 +196,7 @@ Without coverage data there's no safety floor; halt and return:
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "actions_taken": [],
   "actions_requiring_review": [],
   "missing_tooling": [],
@@ -289,7 +308,7 @@ Three branches:
 3. **Any module in the affected set below Floor** → halt. Return:
    ```json
    {
-     "schema_version": "1",
+     "schema_version": "2",
      "actions_taken": [],
      "actions_requiring_review": [],
      "missing_tooling": [],
@@ -436,7 +455,7 @@ in the same assistant turn.
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "plan": [ /* the planner's full output array, unchanged */ ],
   "improver_result": {
     "worktree_branch": "<branch name returned by the improver agent>",
