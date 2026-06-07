@@ -28,7 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
+import subprocess  # for `git show` (version detection); griffe runs via its Python API
 import sys
 from pathlib import Path
 
@@ -89,105 +89,127 @@ def title_breaking(title: str) -> bool:
     return bool(_TITLE_BREAKING.match(title or ""))
 
 
-# Each breaking-change finding emitted by `griffe check -f oneline` is a
-# line of the form:
-#     <path>: <kind>: <message>
-# where any of the three may contain spaces. Be defensive — if griffe's
-# format drifts, fall back to capturing the whole line as the detail.
-_GRIFFE_ONELINE_RE = re.compile(
-    r"""
-    ^
-    \s*(?P<path>[^:]+?)\s*  # path up to the first colon
-    :\s*
-    (?P<kind>[^:]+?)\s*     # kind up to the second colon
-    :\s*
-    (?P<detail>.+?)         # rest is the message
-    \s*$
-    """,
-    re.VERBOSE,
-)
-
-
 def run_griffe_check(old_ref: str, new_ref: str, package_name: str) -> list[dict]:
     """
-    Invoke `griffe check` between `old_ref` and `new_ref`. Returns a list
-    of finding dicts. An empty list means no breaking changes.
+    Use griffe's Python API to find breaking changes between `old_ref`
+    and `new_ref`. Returns a list of finding dicts. An empty list means
+    no breaking changes.
 
-    `griffe check` exit codes (per its documented behaviour):
-      0 = no breaking changes
-      1 = breaking changes found
-      anything else = tool error
+    Uses the Python API (`griffe.load_git`, `griffe.load`, and
+    `griffe._internal.diff.find_breaking_changes`) rather than spawning
+    the griffe CLI. This is robust to griffe CLI changes — griffe 1.x
+    had `--format json`, griffe 2.x dropped it in favour of
+    `-f {oneline,verbose,markdown,github}`, and either could shift
+    again. The Python API stays stable across those releases.
 
-    We use `-f oneline` (one finding per line) rather than JSON because
-    griffe's `--format` only supports `oneline | verbose | markdown |
-    github` — `json` is not a valid value and produces a usage error.
-    See #203.
+    Ported from a working ai-doc-organizer fix (#207) where the
+    CLI-based version (-f oneline, #204) hit a tool_error in CI.
     """
-    cmd = [
-        "griffe",
-        "check",
-        package_name,
-        "-a",
-        old_ref,
-        "-b",
-        new_ref,
-        "-f",
-        "oneline",
-    ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-    except FileNotFoundError:
+        import griffe
+        from griffe._internal.diff import find_breaking_changes
+    except ImportError:
         return [
             {
                 "kind": "tool_missing",
                 "path": "",
-                "detail": "`griffe` not found on PATH.",
+                "detail": "`griffe` Python package not importable.",
                 "severity": "critical",
             }
         ]
 
-    if result.returncode not in (0, 1):
+    # Resolve search paths: prefer the conventional `src/` layout; fall
+    # back to repo root for flat packages.
+    repo_root = Path(".")
+    search_paths = (
+        [str(repo_root / "src")] if (repo_root / "src").is_dir() else [str(repo_root)]
+    )
+
+    # --- load the old ref via git ---------------------------------------
+    try:
+        old_package = griffe.load_git(
+            package_name,
+            ref=old_ref,
+            repo=str(repo_root),
+            search_paths=search_paths,
+            resolve_aliases=True,
+            resolve_external=None,
+        )
+    except Exception as exc:
         return [
             {
                 "kind": "tool_error",
                 "path": "",
-                "detail": (result.stderr or "")[:1000]
-                or "griffe returned an unexpected exit code",
+                "detail": f"griffe could not load old ref '{old_ref}': {exc}",
                 "severity": "critical",
             }
         ]
 
-    out = result.stdout.strip()
-    if not out:
-        return []
+    # --- load the new ref ------------------------------------------------
+    # When new_ref is HEAD, load from the worktree so uncommitted changes
+    # are included. Otherwise use load_git like the old ref.
+    if new_ref.upper() == "HEAD":
+        try:
+            new_package = griffe.load(
+                package_name,
+                search_paths=search_paths,
+                resolve_aliases=True,
+                resolve_external=None,
+            )
+        except Exception as exc:
+            return [
+                {
+                    "kind": "tool_error",
+                    "path": "",
+                    "detail": f"griffe could not load working tree: {exc}",
+                    "severity": "critical",
+                }
+            ]
+    else:
+        try:
+            new_package = griffe.load_git(
+                package_name,
+                ref=new_ref,
+                repo=str(repo_root),
+                search_paths=search_paths,
+                resolve_aliases=True,
+                resolve_external=None,
+            )
+        except Exception as exc:
+            return [
+                {
+                    "kind": "tool_error",
+                    "path": "",
+                    "detail": f"griffe could not load new ref '{new_ref}': {exc}",
+                    "severity": "critical",
+                }
+            ]
+
+    # --- diff -----------------------------------------------------------
+    try:
+        breakages = list(find_breaking_changes(old_package, new_package))
+    except Exception as exc:
+        return [
+            {
+                "kind": "tool_error",
+                "path": "",
+                "detail": f"griffe find_breaking_changes failed: {exc}",
+                "severity": "critical",
+            }
+        ]
 
     findings: list[dict] = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        m = _GRIFFE_ONELINE_RE.match(line)
-        if m:
-            findings.append(
-                {
-                    "kind": m.group("kind"),
-                    "path": m.group("path"),
-                    "detail": m.group("detail"),
-                    "severity": "high",
-                }
-            )
-        else:
-            # Format drift fallback: griffe changed its oneline shape.
-            # Capture the whole line so the Approver still sees the
-            # breaking-change content, even if path/kind aren't parsed.
-            findings.append(
-                {
-                    "kind": "breaking_change",
-                    "path": "?",
-                    "detail": line,
-                    "severity": "high",
-                }
-            )
+    for b in breakages:
+        as_dict = b.as_dict() if hasattr(b, "as_dict") else {}
+        kind = str(as_dict.get("kind") or getattr(b, "kind", "unknown"))
+        path = str(
+            as_dict.get("object_path")
+            or getattr(getattr(b, "obj", None), "path", "?")
+        )
+        detail = str(getattr(b, "details", "") or b)
+        findings.append(
+            {"kind": kind, "path": path, "detail": detail, "severity": "high"}
+        )
     return findings
 
 
