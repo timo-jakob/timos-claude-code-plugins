@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": "Renovate config — primary job is keeping the GitHub Action pins inside the bootstrap workflow *templates* current (issue #109). Renovate's stock github-actions manager already watches .github/workflows/*.yml in this repo; the customManager below extends that coverage to *.tmpl files under development/skills/bootstrap/templates/ where the action pins are baked into the workflow source we ship to downstream repos.",
+  "timezone": "Europe/Berlin",
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Renovate dependency dashboard",
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Extract GitHub Action `uses:` pins from bootstrap workflow templates (*.tmpl). Stock github-actions manager only scans .yml/.yaml, so the templates that downstream repos render into their own workflows are otherwise invisible to drift detection.",
+      "fileMatch": ["\\.tmpl$"],
+      "matchStrings": [
+        "uses:\\s+(?<depName>[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)(?:/[a-zA-Z0-9_./-]+)?@(?<currentValue>[a-zA-Z0-9._-]+)"
+      ],
+      "datasourceTemplate": "github-tags"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Batch every GitHub Action upgrade (both .yml and .tmpl) into one weekly PR so the user has a single review + merge for the whole action surface.",
+      "matchManagers": ["github-actions", "custom.regex"],
+      "groupName": "github-actions",
+      "groupSlug": "github-actions",
+      "commitMessageTopic": "GitHub Actions"
+    }
+  ]
+}
