@@ -106,10 +106,22 @@ app_slug_for() {
 }
 
 app_pem_for() {
-  security find-generic-password \
+  local raw
+  raw=$(security find-generic-password \
     -s "claude-plugins.$1" \
     -a "private-key" \
-    -w
+    -w)
+  # macOS `security find-generic-password -w` returns the stored value
+  # hex-encoded when it contains newlines. PEM private keys are
+  # multi-line, so we get hex back instead of the original PEM. Decode
+  # if the retrieval looks like pure hex; otherwise pass through. The
+  # check is conservative — PEMs contain `-` `=` newlines, none of
+  # which appear in hex output. See #208.
+  if [[ "$raw" =~ ^[0-9a-fA-F]+$ ]]; then
+    printf '%s' "$raw" | xxd -r -p
+  else
+    printf '%s' "$raw"
+  fi
 }
 
 # --- browser-based install ---------------------------------------------------
