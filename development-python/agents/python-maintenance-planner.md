@@ -122,7 +122,7 @@ Order groups by descending priority. Ties broken by:
 |---|---|
 | `ruff` | `python-ruff-fixer` |
 | `semgrep` | `python-semgrep-triage` |
-| `code_scanning` | **informational only** — no triage agent yet (see "Code Scanning informational handling" below) |
+| `code_scanning` | `python-code-scanning-triage` |
 | `sonarcloud` | `python-sonar-triage` |
 | `dependabot` patch/minor (pip) | `python-dependabot-snyk-triage` |
 | `dependabot` major (pip) | `python-major-upgrade` |
@@ -135,17 +135,6 @@ The legacy `snyk_code` / `snyk_oss` tool keys were retired in PR ε of
 #87 — Snyk Code SAST findings are replaced by `code_scanning` (CodeQL
 via GitHub Code Scanning, free, GitHub-native), and Snyk Open Source
 vulnerabilities are now consumed as PRs flowing through `snyk_prs`.
-
-### Code Scanning informational handling
-
-For `code_scanning` findings, emit a group with `agent: null` (or skip
-the group from the dispatchable plan) and put a summary into the
-planner's response under a separate `informational` array. The
-orchestrator's Phase 9 summary surfaces these to the user with a
-recommendation to review in the GitHub Code Scanning UI. Until a
-dedicated Code-Scanning-shaped triage agent ships, the pipeline does
-not auto-action SAST findings — they remain visible and counted, but
-no PRs are opened for them.
 
 **Python-interpreter docker bumps are a special case.** A
 `dependabot/docker/...` PR whose `headRefName` or `body` references
