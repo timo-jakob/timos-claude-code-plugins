@@ -724,10 +724,36 @@ For each entry in `response.plan`, in priority order:
    Do NOT silently create a `maint/...` branch from the dirty main
    workspace — that masks the underlying failure and breaks
    reproducibility for subsequent stages.
-4. **Push, open PR, run CI cycle** (same as Stage 0), titled per the
-   plan entry's `suggested_pr_title`.
-5. **After merge, sync local main**.
-6. Continue to the next group.
+4. **Push** the worktree branch to origin, **open the PR** against the
+   effective base branch (titled per the plan entry's
+   `suggested_pr_title`), and capture the new PR number.
+5. **Close superseded vendor PRs.** Inspect the agent's response for
+   any `actions_taken[].superseded_prs` entries (currently emitted by
+   `python-major-upgrade`; any future agent that opens a replacement
+   for a vendor PR uses the same field). For each PR number listed,
+   close it with a "Superseded by" comment referencing the
+   replacement:
+
+   ```bash
+   for superseded in <pr numbers from response>; do
+     GH_TOKEN="$maint_token" gh pr close "$superseded" \
+       --comment "Superseded by #<replacement_pr> — local major-upgrade with full audit + tests."
+   done
+   ```
+
+   Use the `claude-maintenance` App token (from earlier in this phase)
+   when available so the close attributes to `claude-maintenance[bot]`,
+   matching who opened the replacement. Without the token, fall back
+   to the user's `gh` auth.
+
+   Close **before** the CI cycle starts (next step), not after merge:
+   the vendor's PR list stays clean while the replacement waits in
+   review, and Dependabot stops rebasing the superseded PR. If the
+   replacement is later rejected, reopen the vendor PR with
+   `gh pr reopen <n>` — no data is lost.
+6. **Run the CI cycle** (same as Stage 0).
+7. **After merge, sync local main**.
+8. Continue to the next group.
 
 ### CI cycle (used by all stages)
 
