@@ -58,26 +58,27 @@ Honest list of where the implementation does not yet match the motivation.
 Each gap has a tracking issue, and that issue is responsible for updating
 this section when it lands.
 
-1. **Approver foundation shipped; closed-loop and adoption story
-   remain.** Phases 0–3 of
+1. **Approver shipped; live validation in progress.** Phases 0–5 of
    [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89)
+   plus [#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174)
    have merged — App registration, bootstrap install, workflow / policy
-   / PR templates, and the `python-approver` opus agent. The remaining
-   pieces are Phase 4 (`/development:maintenance` re-ingests the
-   Approver's hidden-JSON findings and re-dispatches triage agents),
-   Phase 5 (local `/approve` dry-run command), Phase 6 (end-to-end
-   validation against the `ai-doc-organizer` test bed — also where the
-   workflow's remaining Claude-Code-install detail gets validated), and
-   the comprehensive adoption documentation tracked in
-   [#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88).
-2. **Coverage is a number, not a judgment — addressed by Phase 3
-   test-quality detection.** Phase 3 of #89 ships the agent's
-   test-quality detection: it flags `assert True`-style filler,
-   assertions only on mock return values, tests that mock the unit
-   under test, and name-promises-behaviour-the-assertions-don't-verify
-   patterns. The full closed-loop story (gap → finding → maintenance
-   re-dispatch → fix) lands once Phase 4 ships under
-   [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89).
+   / PR templates, the `python-approver` opus agent, maintenance
+   re-ingest of the Approver's hidden-JSON findings, local `/approve`
+   dry-run, and the griffe-based API-stability gate. Adoption docs
+   shipped in [`development/skills/bootstrap/docs/APPROVER.md`](./development/skills/bootstrap/docs/APPROVER.md)
+   ([#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88)).
+   **Remaining:** Phase 6 — end-to-end validation against the
+   `ai-doc-organizer` test bed. The first bot PR after a fresh
+   bootstrap will exercise the workflow including the
+   Claude-Code-install detail.
+2. **Coverage is a number, not a judgment — addressed.** Phase 3 of
+   #89 shipped the agent's test-quality detection (`assert True`
+   filler, mock-return-only assertions, tests-mocking-the-unit,
+   name-promises-the-assertions-don't-verify); Phase 4 closed the loop
+   so `/development:maintenance` re-ingests test-quality findings and
+   dispatches `python-coverage-improver` to rewrite the offending
+   tests. Live validation that this works end-to-end is part of
+   Phase 6.
 3. **Maintenance language parity.** Only Python has the full triage +
    worktree + autonomous-fix pipeline. Swift is review-only; Java,
    JavaScript / Angular, PowerShell, zsh, Go, and Rust are not yet
@@ -189,25 +190,32 @@ safety net, not the primary verification loop.
 
 ## Claude Approver
 
-> **Status — Phases 0–3 shipped, 4–6 in progress.** The foundation is
-> in: the two GitHub App identities can be registered (`Phase 0`),
-> bootstrap installs them on a repo with the secrets + variables they
-> need (`Phase 1`), the workflow + Python policy + PR description
-> template render at bootstrap time (`Phase 2`), and the
-> `python-approver` opus agent that the workflow invokes is in
-> `development-python/agents/python-approver.md` with an operator-facing
-> runtime spec at
+> **Operator-facing adoption guide:**
+> [`development/skills/bootstrap/docs/APPROVER.md`](./development/skills/bootstrap/docs/APPROVER.md).
+> Start there if you want to use the Approver on your own project. The
+> section below is the design summary that explains *why* the Approver
+> works the way it does.
+>
+> **Status — Phases 0–5 + #174 shipped; Phase 6 (live validation) in
+> progress.** The two GitHub App identities can be registered
+> (`Phase 0`, #179), bootstrap installs them on a repo with the secrets
+> + variables they need (`Phase 1`, #180), the workflow + Python policy
+> + PR description template render at bootstrap time (`Phase 2`, #181),
+> the `python-approver` opus agent the workflow invokes is in
+> [`development-python/agents/python-approver.md`](./development-python/agents/python-approver.md)
+> with the operator-facing runtime spec at
 > [`development-python/docs/python-approver.md`](./development-python/docs/python-approver.md)
-> (`Phase 3`). The
+> (`Phase 3`, #183), `/development:maintenance` re-ingests the
+> Approver's hidden-JSON findings on the next run (`Phase 4`, #185),
+> and `/development-python:approve` runs the same agent locally for a
+> dry-run verdict (`Phase 5`, #186). The
 > [`api-stability`](./development-python/docs/api-stability.md) gate
 > (`griffe` + version-bump bypass, from
 > [#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174))
-> couples in via the artifact the agent reads. **Remaining:** Phase 4
-> (`/development:maintenance` re-ingests the Approver's hidden-JSON
-> findings), Phase 5 (local `/approve` dry-run), Phase 6 (end-to-end
-> validation against `ai-doc-organizer`, which also validates the
-> workflow's remaining Claude-Code-install detail), and #88
-> (comprehensive user-facing adoption guide). All tracked under
+> couples in via the artifact the agent reads. **Remaining:** Phase 6 is
+> live validation against the `ai-doc-organizer` test bed; the first
+> bot PR after merge will exercise the workflow end-to-end. All tracked
+> under
 > [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89)
 > and the meta-tracker
 > [#176](https://github.com/timo-jakob/timos-claude-code-plugins/issues/176).
