@@ -310,6 +310,33 @@ Pool all `notes` across all gather scripts; they describe why certain
 tools couldn't produce live findings (e.g., snyk auth missing,
 pytest-cov not installed). Surface them in the final summary.
 
+### Project-level findings — template drift
+
+After per-language gathers complete, run the template-drift detector
+**once** (it's project-level, not per-language):
+
+```bash
+template_drift=$("<skill-base-dir>/scripts/detect-template-drift.zsh" "$(pwd)")
+```
+
+The detector reads each tracked rendered file's
+`# claude-bootstrap: rendered from … sha256:<H>` marker (#213) and
+compares the recorded sha256 against the current template's sha256.
+Output is a JSON array of findings, possibly empty. Severities:
+
+| Severity | What it means |
+|---|---|
+| `drifted` | Marker present, template hash has moved upstream — re-bootstrap or patch to pick up fixes. |
+| `unknown_provenance` | File lacks a marker (rendered before #213 shipped, or hand-created). Can't verify drift. |
+| `template_missing` | Marker references a template path that no longer exists upstream (renamed/deleted). |
+| `malformed_marker` | Marker present but unparseable — corrupted by hand-edit. |
+
+These findings do **not** enter `findings_by_tool` and are **not**
+routed to any per-tool triage agent in v1. v1 is detect-only: surface
+the findings in Phase 9's summary and let the user decide between
+re-bootstrap, manual patch, or accepting the drift. Store
+`$template_drift` so Phase 9 can render it.
+
 ## Phase 4 — construct one payload per supported language
 
 For each `lang` in `supported`, build the JSON payload per ARCHITECTURE.md
@@ -1147,6 +1174,19 @@ Languages processed: <comma-separated list from supported>
     recommendation: <recommendation>
 
 --- end <lang> ---
+
+<If $template_drift array is non-empty:>
+🧬 Template drift (rendered config files vs current bootstrap templates):
+  <For each finding, one bullet:>
+  - <file> — <severity>: <message>
+    <if severity == "drifted">
+        marker: v<marker_version> sha256:<marker_hash[0:12]>…
+        current: v<current_version> sha256:<current_hash[0:12]>…
+        action: re-run /development:bootstrap to re-render, or
+                patch by hand against the upstream template.
+    <if severity == "unknown_provenance">
+        action: re-run /development:bootstrap to add a marker so drift
+                detection works on future runs.
 
 <If pooled notes are non-empty:>
 Notes from the gather step:
