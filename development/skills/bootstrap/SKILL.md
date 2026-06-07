@@ -639,6 +639,53 @@ If the agent returns `Verdict: BLOCK`, show errors to the user. Offer to:
 
 Do not proceed to Step 4 until the validator returns `PROCEED`.
 
+## Step 3.6: Stamp provenance markers on tracked files
+
+Once the validator returns `PROCEED`, stamp each tracked rendered file
+with a provenance marker. The marker captures which template the file
+was rendered from, the `development` plugin version at render time,
+and the template's sha256 at render time. `/development:maintenance`
+reads the marker on subsequent runs to detect upstream template drift
+(#213).
+
+For each tracked target path that you actually rendered above, run:
+
+```bash
+"<skill-base-dir>/scripts/stamp-marker.zsh" \
+  --repo "<repo-path>" \
+  --target "<target-relpath>" \
+  --template "<template-relpath>"
+```
+
+Pass the template path you used in Step 3 (e.g., `common/.github/workflows/claude-approver.yml.tmpl`
+— relative to `<skill-base-dir>/templates/`).
+
+Tracked target/template pairs (only stamp the targets that were
+actually rendered in 3a–3f):
+
+| Target | Template |
+|---|---|
+| `.github/dependabot.yml` | `common/.github/dependabot.yml.tmpl` |
+| `.github/workflows/claude-approver.yml` | `common/.github/workflows/claude-approver.yml.tmpl` (only when `--claude-approver true`) |
+| `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
+| `.github/workflows/codeql.yml` | `public/.github/workflows/codeql.yml.tmpl` OR `public/.github/workflows/codeql-noop.yml.tmpl` (whichever you rendered) |
+| `.github/workflows/quality-public.yml` | `public/.github/workflows/quality-public.yml.tmpl` OR `public/.github/workflows/quality-public-noop.yml.tmpl` |
+| `.github/workflows/quality-private.yml` | `private/.github/workflows/quality-private.yml.tmpl` OR `private/.github/workflows/quality-private-noop.yml.tmpl` |
+| `.github/workflows/scorecard.yml` | `public/.github/workflows/scorecard.yml.tmpl` |
+| `trivy.yaml` | `common/trivy.yaml.tmpl` |
+
+**Scaffold files are intentionally NOT stamped** — `CLAUDE.md`,
+`CONTRIBUTING.md`, `SETUP.md`, `SECURITY.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
+`.github/ISSUE_TEMPLATE/*`, `.gitignore`, `.editorconfig`, `LICENSE`,
+`sonar-project.properties`, `.snyk`, `.pre-commit-config.yaml`,
+`ruff.toml`, the Approver policy at `.claude/approver-policy.md`. The
+maintenance pipeline expects user customization on these and would
+emit noisy drift findings every run.
+
+The stamper is idempotent — running it a second time on an
+already-stamped file is a silent no-op. Safe to call unconditionally
+on every re-bootstrap.
+
 ## Step 4: Post-Write Actions (each with explicit confirmation)
 
 ### 4a. Install pre-commit hooks
