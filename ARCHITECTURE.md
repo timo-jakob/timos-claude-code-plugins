@@ -743,8 +743,11 @@ holds, with two refinements:
 
 The hard case. Flow:
 
-1. `python-snyk-triage` (sonnet) identifies the major-version CVE finding;
-   dispatcher routes it to `python-major-upgrade` (opus).
+1. `python-dependabot-snyk-triage` (sonnet) classifies the Snyk Fix-PR
+   or Dependabot PR as a major bump; dispatcher routes it to
+   `python-major-upgrade` (opus). (For CVEs surfaced through Code
+   Scanning / CodeQL rather than a PR, `python-code-scanning-triage`
+   defers to the existing PR flow via `actions_requiring_review`.)
 2. `python-major-upgrade` reads the official release notes (via WebFetch
    to PyPI / the project's CHANGELOG). Identifies breaking changes.
 3. Uses LSP to map breaking-change patterns to actual call sites in
