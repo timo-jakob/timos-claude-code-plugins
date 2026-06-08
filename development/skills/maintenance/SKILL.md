@@ -1143,6 +1143,16 @@ Languages processed: <comma-separated list from supported>
 <For each language in supported, a block:>
 --- <lang> ---
 
+<Render the cross-tool category inventory FIRST (#51) — system-health
+at-a-glance before the per-tool detail. Invoke:>
+
+  "<skill-base-dir>/scripts/categorize-findings.zsh" "/tmp/findings-<lang>.json"
+
+<and paste its stdout verbatim. The script omits the block entirely
+when all category totals are zero (clean run), so an empty result is
+expected and means "skip this section." Counts reflect findings as of
+run start; the 🚀 PRs section below shows what was tackled.>
+
 <If response.plan is non-empty (planner ran):>
 📋 Plan (M groups, N findings):
   1. [<tool>] <description>
