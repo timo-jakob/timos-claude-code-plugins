@@ -41,7 +41,12 @@ readonly KNOWN_APPS=(claude-approver claude-maintenance)
 # Approver only evaluates PRs from authors on this list. Bootstrap stores it
 # as a per-repo variable so the user can widen it later via the GitHub UI
 # (e.g., to ["*"] for human PRs) without editing this script.
-readonly DEFAULT_AUTHOR_ALLOWLIST='["dependabot[bot]","github-actions[bot]","claude-maintenance[bot]"]'
+#
+# The maintenance bot's entry is appended at runtime from the App's REAL
+# slug (#229): GitHub App slugs are globally unique, so registered apps get
+# owner-suffixed slugs like `claude-maintenance-<owner>` — the generic
+# `claude-maintenance[bot]` login never matches an actual PR author.
+readonly BASE_AUTHOR_ALLOWLIST='["dependabot[bot]","github-actions[bot]"]'
 
 readonly REGISTER_SCRIPT="${SCRIPT_DIR}/register-claude-apps.sh"
 
@@ -103,6 +108,58 @@ app_slug_for() {
   local key
   key=$(config_key_for "$1")
   jq -r --arg key "$key" '.[$key].slug // empty' "$CONFIG_FILE"
+}
+
+# Resolve an app's slug, falling back to a live GET /app lookup when
+# apps.json has an empty slug (the register --import path doesn't capture
+# it — #229). A successful lookup is backfilled into apps.json so the
+# fallback runs at most once per app per machine.
+app_slug_resolve() {
+  local app="$1" slug key
+  slug=$(app_slug_for "$app")
+  if [[ -n "$slug" ]]; then
+    print -- "$slug"
+    return 0
+  fi
+
+  info "apps.json has no slug for $app — resolving via GET /app…" >&2
+
+  # Mint a short-lived App JWT (same recipe as mint-maintenance-token.zsh)
+  # and ask GitHub which app this key belongs to.
+  local app_id pem header_b64 payload_b64 iat exp signing_input sig_b64 jwt tmp_pem
+  app_id=$(app_id_for "$app")
+  pem=$(app_pem_for "$app")
+  b64url() { base64 | tr '/+' '_-' | tr -d '=' | tr -d '\n' }
+  header_b64=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)
+  iat=$(($(date +%s) - 60))
+  exp=$(($(date +%s) + 300))
+  payload_b64=$(printf '{"iat":%d,"exp":%d,"iss":%s}' "$iat" "$exp" "$app_id" | b64url)
+  signing_input="${header_b64}.${payload_b64}"
+  tmp_pem=$(mktemp -t claude-apps-pem.XXXXXX)
+  trap 'rm -f "$tmp_pem"' EXIT
+  print -r -- "$pem" > "$tmp_pem"
+  sig_b64=$(printf '%s' "$signing_input" \
+    | openssl dgst -sha256 -sign "$tmp_pem" -binary | b64url)
+  rm -f "$tmp_pem"
+  jwt="${signing_input}.${sig_b64}"
+
+  slug=$(curl -sS \
+    -H "Authorization: Bearer $jwt" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "https://api.github.com/app" | jq -r '.slug // empty')
+
+  if [[ -z "$slug" ]]; then
+    return 1
+  fi
+
+  # Backfill apps.json so future runs skip the lookup.
+  key=$(config_key_for "$app")
+  jq --arg key "$key" --arg slug "$slug" '.[$key].slug = $slug' \
+    "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  ok "Resolved + backfilled slug for $app: $slug" >&2
+
+  print -- "$slug"
 }
 
 app_pem_for() {
@@ -270,8 +327,23 @@ main() {
   ok "Variable set: CLAUDE_APPROVER_APP_ID = $approver_id"
   gh variable set CLAUDE_MAINTENANCE_APP_ID --body "$maintenance_id"
   ok "Variable set: CLAUDE_MAINTENANCE_APP_ID = $maintenance_id"
-  gh variable set CLAUDE_APPROVER_AUTHOR_ALLOWLIST --body "$DEFAULT_AUTHOR_ALLOWLIST"
-  ok "Variable set: CLAUDE_APPROVER_AUTHOR_ALLOWLIST = $DEFAULT_AUTHOR_ALLOWLIST"
+
+  # Allowlist: base entries + the maintenance bot's REAL login (#229).
+  # The bot login is "<slug>[bot]" with the owner-suffixed slug, e.g.
+  # "claude-maintenance-timo-jakob[bot]" — never the generic name.
+  local maintenance_slug author_allowlist
+  if maintenance_slug=$(app_slug_resolve claude-maintenance); then
+    author_allowlist=$(jq -nc --argjson base "$BASE_AUTHOR_ALLOWLIST" \
+      --arg m "${maintenance_slug}[bot]" '$base + [$m]')
+  else
+    warn "Could not resolve the claude-maintenance App slug; allowlist will"
+    warn "not include the maintenance bot. Add \"<slug>[bot]\" to the"
+    warn "CLAUDE_APPROVER_AUTHOR_ALLOWLIST repo variable manually (the slug"
+    warn "is shown on https://github.com/settings/apps)."
+    author_allowlist="$BASE_AUTHOR_ALLOWLIST"
+  fi
+  gh variable set CLAUDE_APPROVER_AUTHOR_ALLOWLIST --body "$author_allowlist"
+  ok "Variable set: CLAUDE_APPROVER_AUTHOR_ALLOWLIST = $author_allowlist"
 
   # Secrets — stored in both Actions and Dependabot scopes via lib.sh helper.
   gh_secret_set_both CLAUDE_APPROVER_PRIVATE_KEY    "$approver_pem"

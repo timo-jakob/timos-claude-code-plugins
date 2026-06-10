@@ -151,10 +151,16 @@ jobs:
           # as 'app/<slug>' while the allowlist and the self-approval check
           # use the REST/webhook '<slug>[bot]' form. See #221.
           author=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .user.login)
-          if [ "$author" = "claude-approver[bot]" ]; then
-            echo "::notice::PR author is the Approver itself — refusing self-approval."
-            exit 78
-          fi
+          # Prefix match, not equality: App slugs are globally unique, so
+          # the registered Approver's real login is owner-suffixed, e.g.
+          # 'claude-approver-<owner>[bot]' — never the generic
+          # 'claude-approver[bot]'. See #229.
+          case "$author" in
+            claude-approver*"[bot]")
+              echo "::notice::PR author is the Approver itself — refusing self-approval."
+              exit 78
+              ;;
+          esac
           echo "login=$author" >> "$GITHUB_OUTPUT"
 
       # ============================================================
