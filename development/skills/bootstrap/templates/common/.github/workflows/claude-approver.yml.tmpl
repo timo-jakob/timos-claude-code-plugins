@@ -216,8 +216,14 @@ jobs:
           # The `gh api repos/...` calls below already use $REPO in the path.
           head_sha=$(gh pr view "$PR_NUMBER" -R "$REPO" --json headRefOid --jq .headRefOid)
 
+          # Exclude this workflow's own `approve` job from the green
+          # computation (#228). Without the filter the gate deadlocks on
+          # its own footprint: the current run is always in_progress on
+          # this SHA (pending > 0), and any earlier run on the SHA
+          # concluded failure (exit 78 records as failure), so the gate
+          # could never pass and the Approver never posted a verdict.
           runs=$(gh api "repos/$REPO/commits/$head_sha/check-runs" --paginate \
-                 --jq '.check_runs[] | {name: .name, status: .status, conclusion: .conclusion}' \
+                 --jq '.check_runs[] | select(.name != "approve") | {name: .name, status: .status, conclusion: .conclusion}' \
                  | jq -s .)
           status=$(gh api "repos/$REPO/commits/$head_sha/status" \
                    --jq '{state: .state}')
