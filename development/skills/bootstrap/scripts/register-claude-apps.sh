@@ -119,7 +119,13 @@ config_has_app() {
 }
 
 config_save_app() {
-  local app="$1" app_id="$2" slug="$3" owner_login="$4"
+  # client_id is optional (the --import flow has nothing to supply; the
+  # manifest-conversion flow returns it). Stored for #223 — the
+  # create-github-app-token v3 action prefers Client IDs, though the
+  # numeric App ID remains a valid JWT issuer, so nothing consumes this
+  # field yet; capturing it at registration costs nothing and spares a
+  # manual lookup if GitHub ever drops numeric-ID acceptance.
+  local app="$1" app_id="$2" slug="$3" owner_login="$4" client_id="${5:-}"
   ensure_config_dir
   local key
   key=$(config_key_for "$app")
@@ -130,11 +136,13 @@ config_save_app() {
   jq \
     --arg key         "$key" \
     --argjson app_id  "$app_id" \
+    --arg client_id   "$client_id" \
     --arg slug        "$slug" \
     --arg owner_login "$owner_login" \
     --arg now         "$now" \
     '.[$key] = {
        app_id:        $app_id,
+       client_id:     $client_id,
        slug:          $slug,
        owner_login:   $owner_login,
        owner_scope:   "user",
@@ -339,13 +347,14 @@ manifest_flow() {
   resp=$(gh api -X POST "/app-manifests/${got_code}/conversions") \
     || die "Code exchange failed. The code is single-use; re-run register-claude-apps.sh to retry."
 
-  local app_id slug pem
+  local app_id client_id slug pem
   # `print -r --` (raw) prevents zsh from interpreting `\n` escape sequences
   # inside the JSON response — without `-r`, the embedded PEM's `\n` becomes
   # a real newline before reaching jq, and jq rejects the resulting raw
   # newlines inside the string with "control characters … must be escaped".
   # See #195.
   app_id=$(print -r -- "$resp" | jq -r '.id')
+  client_id=$(print -r -- "$resp" | jq -r '.client_id // empty')
   slug=$(print -r -- "$resp" | jq -r '.slug')
   pem=$(print -r -- "$resp" | jq -r '.pem')
   [[ -n "$app_id" && "$app_id" != "null" ]] \
@@ -354,7 +363,7 @@ manifest_flow() {
     || die "Conversion response missing 'pem'."
 
   keychain_store_pem "$app" "$pem"
-  config_save_app    "$app" "$app_id" "$slug" "$github_login"
+  config_save_app    "$app" "$app_id" "$slug" "$github_login" "$client_id"
 
   ok "Registered: $(app_display_name "$app") (id=$app_id, slug=$slug)"
 }

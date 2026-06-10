@@ -142,6 +142,7 @@ Created with mode `0700` on the directory, `0600` on the file.
   "schema_version": 1,
   "claude_approver": {
     "app_id": 123456,
+    "client_id": "Iv1.abcdef0123456789",
     "slug": "claude-approver-timo-jakob",
     "owner_login": "timo-jakob",
     "owner_scope": "user",
@@ -149,6 +150,7 @@ Created with mode `0700` on the directory, `0600` on the file.
   },
   "claude_maintenance": {
     "app_id": 123457,
+    "client_id": "Iv1.9876543210fedcba",
     "slug": "claude-maintenance-timo-jakob",
     "owner_login": "timo-jakob",
     "owner_scope": "user",
@@ -157,8 +159,16 @@ Created with mode `0700` on the directory, `0600` on the file.
 }
 ```
 
-App IDs and slugs are not secrets. The file is mode `0600` anyway to
-keep all per-user config in one consistent posture.
+App IDs, Client IDs, and slugs are not secrets. The file is mode `0600`
+anyway to keep all per-user config in one consistent posture.
+
+`client_id` (#223) may be empty or absent on entries created by the
+`--import` flow or by older versions; `install-claude-apps.sh`
+backfills it (together with `slug`) from `GET /app` when it has to
+resolve a missing slug. Nothing consumes it yet — the numeric
+`app_id` remains a valid JWT issuer and a valid `client-id` input for
+`actions/create-github-app-token@v3` — it is captured so no manual
+lookup is needed if GitHub ever drops numeric-ID acceptance.
 
 ### Private keys: macOS Keychain
 
