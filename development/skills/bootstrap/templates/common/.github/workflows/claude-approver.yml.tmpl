@@ -426,7 +426,14 @@ jobs:
           DRY_RUN: ${{ needs.gate.outputs.dry_run }}
         run: |
           set -e
+          # --allowedTools is required (#236): headless `claude --print`
+          # gates Bash behind interactive approval by default, so without
+          # it every `gh` call inside the agent is denied and the review
+          # never posts. The runner is an ephemeral sandbox and GH_TOKEN
+          # is the repo-scoped App token, so auto-approving Bash here is
+          # appropriate; no Write/Edit — the agent is review-only.
           claude --print \
+            --allowedTools "Bash,Read,Grep,Glob" \
             --plugin-dir ".claude-plugins/development" \
             --plugin-dir ".claude-plugins/development-python" \
             --agent python-approver \
