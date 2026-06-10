@@ -1,12 +1,22 @@
 # Claude Approver — the final synthesis layer for PR approval.
 #
-# Runs only when every other gate is already green. Asks two questions a
-# checker can't:
+# Runs LAST: the all-green gate waits in-job for every other check on the
+# PR's head SHA to complete before evaluating (GitHub Actions has no
+# cross-workflow `needs:`, and App-posted checks like SonarCloud/Snyk
+# aren't workflows, so waiting is the only reliable ordering primitive —
+# see #232). Asks two questions a checker can't:
 #   - Risk: given everything is green, what could still go wrong?
 #   - Confidence: how sure am I that this PR does what it claims?
 #
 # Verdict: APPROVE / REQUEST_CHANGES (with hidden JSON the maintenance
 # pipeline re-ingests) / COMMENT-with-reservations.
+#
+# Two-stage pipeline (#232): the `approver-gate` job resolves the PR,
+# enforces the policy gates, and waits for all other checks to settle;
+# the `approve` job (needs: gate) mints the App token and runs the agent
+# only when the gate emits proceed=true. A policy skip ends the gate job
+# green with a ::notice:: and the approve job shows as "skipped" — a red
+# check now always means a real error, never "nothing to do yet".
 #
 # Identities provisioned by /development:bootstrap --claude-approver true
 # (which calls register-claude-apps.sh + install-claude-apps.sh):
@@ -28,10 +38,11 @@ on:
   # Backstop trigger: PR opened / pushed-to / un-drafted / reopened. Catches
   # the case where check_suite never fires — e.g. all required workflows
   # were paths-ignored on a doc-only PR, or every check resolved from cache
-  # before a suite was created. Gate 5 (all-green check gate) exits 78 if
-  # the PR isn't actually green yet, so the only cost of this trigger is a
-  # short noop run. Without it, all-green-on-open PRs sit unreviewed until
-  # someone manually posts /approve. See #198.
+  # before a suite was created. The gate job waits in-job for the other
+  # checks to settle, so this run usually IS the one that evaluates —
+  # later check_suite triggers just supersede it via the concurrency
+  # group. Without it, all-green-on-open PRs sit unreviewed until someone
+  # manually posts /approve. See #198, #232.
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
 
@@ -49,29 +60,49 @@ on:
 permissions:
   contents: read
 
-# Debounce per PR so two evaluators don't race on the same SHA.
+# Debounce per PR so two evaluators don't race on the same SHA. With the
+# gate job's wait loop (#232) this also keeps exactly one waiter alive:
+# each later trigger (a check_suite completing, a new push) cancels the
+# stale waiting run and starts a fresh one against the current state.
+# The check_suite arm is load-bearing (#232): its payload has no
+# github.event.pull_request, so without it those runs fell through to
+# the unique run_id and were never debounced — every completing suite
+# would have parked its own waiter and they would all have evaluated
+# at once when CI settled.
 concurrency:
-  group: claude-approver-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  group: claude-approver-${{ github.event.pull_request.number || github.event.issue.number || github.event.check_suite.pull_requests[0].number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  approve:
+  # ==============================================================
+  # Stage 1: policy gates + wait-for-CI. Always ends green unless a
+  # configuration is genuinely broken (e.g. allowlist variable unset).
+  # Each gate either passes (proceed=true cascades to the next step)
+  # or skips out with exit 0 and a ::notice:: explaining why — GitHub
+  # removed neutral exit codes, so the old `exit 78` recorded as a red
+  # failure and polluted every `gh pr checks` consumer (#232). When
+  # debugging, the step whose notice fired IS the gate that skipped.
+  # ==============================================================
+  gate:
+    name: approver-gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Covers the wait loop (up to ~30 min) plus the gate API calls.
+    timeout-minutes: 40
     # Entry-point gate for `/approve` PR comments. Anyone with read access
     # can post a PR comment; without this `if:`, a random commenter could
     # fire the workflow on any PR and burn API tokens before the in-job
-    # gates exit-78. For check_suite and pull_request_review triggers,
+    # gates skip out. For check_suite and pull_request_review triggers,
     # GitHub itself already requires actor permissions, so this gate is
     # scoped to issue_comment. See #190.
     if: >
       github.event_name != 'issue_comment' ||
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
                github.event.comment.author_association)
-    # The in-job gates below protect the verdict (anti-rubber-stamp,
-    # author allowlist, all-green checks). Each gate either passes or
-    # exits 78 (neutral). When debugging, the failing step IS the
-    # failing gate.
+    outputs:
+      number: ${{ steps.pr.outputs.number }}
+      dry_run: ${{ steps.pr.outputs.dry_run }}
+      head_sha: ${{ steps.green.outputs.head_sha }}
+      proceed: ${{ steps.green.outputs.proceed }}
     steps:
 
       # ============================================================
@@ -99,18 +130,18 @@ jobs:
             check_suite)
               number=$(printf '%s' "$CHECK_SUITE_PRS" | jq -r '.[0].number // empty')
               if [ -z "$number" ]; then
-                echo "::notice::check_suite has no associated PR; exiting neutral."
-                exit 78
+                echo "::notice::check_suite has no associated PR; skipping."
+                exit 0
               fi
               ;;
             issue_comment)
               if [ "$ISSUE_IS_PR" != "true" ]; then
                 echo "::notice::Comment is on a plain issue, not a PR."
-                exit 78
+                exit 0
               fi
               if ! printf '%s' "$COMMENT_BODY" | grep -qE '^/approve(\s+--dry-run)?\s*$'; then
                 echo "::notice::Comment is not /approve."
-                exit 78
+                exit 0
               fi
               number="$ISSUE_NUMBER"
               if printf '%s' "$COMMENT_BODY" | grep -qE -- '--dry-run'; then
@@ -121,22 +152,24 @@ jobs:
               # Both events expose github.event.pull_request.number. The
               # backstop `pull_request` trigger (#198) lands here when no
               # check_suite ever fires for the head SHA (cache-only runs,
-              # paths-ignored on doc-only PRs). Gate 5 below will exit 78
-              # if the PR isn't actually green yet.
+              # paths-ignored on doc-only PRs). Gate 5 below waits for the
+              # other checks and skips out if the PR ends up not green.
               number="$PULL_REQUEST_NUMBER"
               ;;
             *)
               echo "::notice::Unrecognised event $EVENT_NAME."
-              exit 78 ;;
+              exit 0 ;;
           esac
           echo "number=$number" >> "$GITHUB_OUTPUT"
           echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       # ============================================================
       # Gate 2: anti-rubber-stamp — PR author must not be the Approver
       # ============================================================
       - name: Anti-rubber-stamp gate
         id: author
+        if: steps.pr.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -158,15 +191,18 @@ jobs:
           case "$author" in
             claude-approver*"[bot]")
               echo "::notice::PR author is the Approver itself — refusing self-approval."
-              exit 78
+              exit 0
               ;;
           esac
           echo "login=$author" >> "$GITHUB_OUTPUT"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       # ============================================================
       # Gate 3: author allowlist — Approver only evaluates allowed authors
       # ============================================================
       - name: Author allowlist gate
+        id: allowlist
+        if: steps.author.outputs.proceed == 'true'
         env:
           ALLOWLIST: ${{ vars.CLAUDE_APPROVER_AUTHOR_ALLOWLIST }}
           AUTHOR: ${{ steps.author.outputs.login }}
@@ -179,13 +215,16 @@ jobs:
           allowed=$(printf '%s' "$ALLOWLIST" | jq --arg a "$AUTHOR" 'any(. == $a or . == "*")')
           if [ "$allowed" != "true" ]; then
             echo "::notice::Author '$AUTHOR' not on allowlist: $ALLOWLIST"
-            exit 78
+            exit 0
           fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       # ============================================================
       # Gate 4: PR state (not draft, OPEN)
       # ============================================================
       - name: PR state gate
+        id: state
+        if: steps.allowlist.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -197,21 +236,26 @@ jobs:
           # doesn't exist. See #203.
           state=$(gh pr view "$PR_NUMBER" -R "$REPO" --json isDraft,state)
           if [ "$(printf '%s' "$state" | jq -r .isDraft)" = "true" ]; then
-            echo "::notice::PR is draft."; exit 78
+            echo "::notice::PR is draft."; exit 0
           fi
           if [ "$(printf '%s' "$state" | jq -r .state)" != "OPEN" ]; then
-            echo "::notice::PR not OPEN."; exit 78
+            echo "::notice::PR not OPEN."; exit 0
           fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       # ============================================================
-      # Gate 5: all-green check runs + HEAD SHA freeze
-      # Every required check on the PR's head SHA must be SUCCESS, then we
-      # verify the head SHA hasn't moved during evaluation — protects
-      # against the race where a push lands between the gate eval and the
-      # review post.
+      # Gate 5: wait for every other check, then require all-green +
+      # HEAD SHA freeze. GitHub Actions has no cross-workflow ordering,
+      # so the Approver sequences itself (#232): poll the head SHA's
+      # check runs until everything else has completed (or a deadline
+      # passes), then demand green. This is what makes the Approver
+      # effectively run LAST. Finally verify the head SHA hasn't moved
+      # during evaluation — protects against the race where a push lands
+      # between the gate eval and the review post.
       # ============================================================
       - name: All-green check gate
         id: green
+        if: steps.state.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -222,23 +266,44 @@ jobs:
           # The `gh api repos/...` calls below already use $REPO in the path.
           head_sha=$(gh pr view "$PR_NUMBER" -R "$REPO" --json headRefOid --jq .headRefOid)
 
-          # Exclude this workflow's own `approve` job from the green
-          # computation (#228). Without the filter the gate deadlocks on
-          # its own footprint: the current run is always in_progress on
-          # this SHA (pending > 0), and any earlier run on the SHA
-          # concluded failure (exit 78 records as failure), so the gate
-          # could never pass and the Approver never posted a verdict.
-          runs=$(gh api "repos/$REPO/commits/$head_sha/check-runs" --paginate \
-                 --jq '.check_runs[] | select(.name != "approve") | {name: .name, status: .status, conclusion: .conclusion}' \
-                 | jq -s .)
-          status=$(gh api "repos/$REPO/commits/$head_sha/status" \
-                   --jq '{state: .state}')
+          # Wait for every other check on the head SHA to complete:
+          # 30-minute deadline, 30s poll. Giving up at the deadline is
+          # safe — cancel-in-progress on the concurrency group means each
+          # later trigger (the next check_suite completion) supersedes
+          # this waiter and re-evaluates from scratch.
+          deadline=$(( $(date +%s) + 1800 ))
+          while :; do
+            # Exclude this workflow's own jobs from the green computation
+            # (#228): the gate job is always in_progress on this SHA and
+            # the approve job is queued behind it, so counting either
+            # would deadlock the wait.
+            runs=$(gh api "repos/$REPO/commits/$head_sha/check-runs" --paginate \
+                   --jq '.check_runs[] | select(.name != "approve" and .name != "approver-gate") | {name: .name, status: .status, conclusion: .conclusion}' \
+                   | jq -s .)
+            # Legacy commit-status API (third-party check posters). The
+            # combined state reads 'pending' when zero statuses exist, so
+            # only treat it as in-flight when there are actual statuses.
+            status=$(gh api "repos/$REPO/commits/$head_sha/status" \
+                     --jq '{state: .state, total: .total_count}')
+            status_state=$(printf '%s' "$status" | jq -r .state)
+            status_total=$(printf '%s' "$status" | jq -r .total)
 
-          pending=$(printf '%s' "$runs" | jq 'map(select(.status != "completed")) | length')
-          if [ "$pending" -gt 0 ]; then
-            echo "::notice::$pending check(s) still in progress on $head_sha."
-            exit 78
-          fi
+            pending=$(printf '%s' "$runs" | jq 'map(select(.status != "completed")) | length')
+            if [ "$pending" -eq 0 ] && { [ "$status_total" -eq 0 ] || [ "$status_state" != "pending" ]; }; then
+              break
+            fi
+
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::notice::Still waiting on $pending check(s) (combined status: $status_state) after 30 minutes — giving up; the next trigger re-evaluates."
+              exit 0
+            fi
+
+            # If a push lands while we wait, the `synchronize` trigger
+            # cancels this run via the concurrency group — no need to
+            # re-resolve the head SHA inside the loop.
+            echo "Waiting: $pending check(s) in progress, combined status '$status_state' ($status_total status(es)) on $head_sha."
+            sleep 30
+          done
 
           # Allow success + skipped + neutral; everything else is red.
           bad=$(printf '%s' "$runs" \
@@ -246,31 +311,41 @@ jobs:
                                  and .conclusion != "neutral"
                                  and .conclusion != "skipped")) | length')
           if [ "$bad" -gt 0 ]; then
-            echo "::notice::Some checks are not green on $head_sha:"
+            echo "::notice::Some checks are not green on $head_sha — skipping (the failing checks tell the story; an approve verdict would add noise):"
             printf '%s' "$runs" | jq '.[] | select(.conclusion != "success"
                                                     and .conclusion != "neutral"
                                                     and .conclusion != "skipped")'
-            exit 78
+            exit 0
           fi
 
-          # Legacy commit-status API (third-party check posters): treat
-          # 'success' as green; 'pending' / 'failure' / 'error' as not green.
-          # Empty status set is fine — many repos no longer use this API.
-          status_state=$(printf '%s' "$status" | jq -r .state)
-          if [ "$status_state" != "success" ] && [ "$status_state" != "" ] && [ "$status_state" != "null" ]; then
+          # Legacy combined status must be green when statuses exist.
+          if [ "$status_total" -gt 0 ] && [ "$status_state" != "success" ]; then
             echo "::notice::Combined commit status is '$status_state', not 'success'."
-            exit 78
+            exit 0
           fi
 
           # Final race check: head SHA must still be the SHA we evaluated.
           current_sha=$(gh pr view "$PR_NUMBER" -R "$REPO" --json headRefOid --jq .headRefOid)
           if [ "$head_sha" != "$current_sha" ]; then
-            echo "::notice::Head SHA moved during gate eval ($head_sha → $current_sha); exiting neutral."
-            exit 78
+            echo "::notice::Head SHA moved during gate eval ($head_sha → $current_sha); skipping — the new push's triggers re-evaluate."
+            exit 0
           fi
 
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
           echo "::notice::All checks green on $head_sha — proceeding to Approver."
+
+  # ==============================================================
+  # Stage 2: run the Approver agent. Sequenced after the gate job via
+  # `needs:` — the GitHub Actions equivalent of a pipeline stage. Shows
+  # as "skipped" (not red) whenever the gate declined to proceed.
+  # ==============================================================
+  approve:
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
 
       # ============================================================
       # Mint App token — actions/create-github-app-token auto-discovers
@@ -291,7 +366,7 @@ jobs:
       - name: Checkout PR HEAD
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.green.outputs.head_sha }}
+          ref: ${{ needs.gate.outputs.head_sha }}
           token: ${{ steps.app_token.outputs.token }}
           fetch-depth: 0
 
@@ -346,9 +421,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_NUMBER: ${{ needs.gate.outputs.number }}
           REPO: ${{ github.repository }}
-          DRY_RUN: ${{ steps.pr.outputs.dry_run }}
+          DRY_RUN: ${{ needs.gate.outputs.dry_run }}
         run: |
           set -e
           claude --print \

@@ -211,24 +211,31 @@ Once the Approver is set up, the typical PR lifecycle is:
 
 1. **You (or a bot) open a PR.** The Approver workflow fires on
    `pull_request: opened` and every required check fires too.
-2. **The in-job gates short-circuit early** for PRs the Approver
-   shouldn't evaluate:
+2. **The `approver-gate` job short-circuits early** for PRs the
+   Approver shouldn't evaluate (each skip ends the gate job *green*
+   with a `::notice::` explaining why — GitHub records non-zero exits
+   as failures, so skips must not exit non-zero; see #232):
    - Comment trigger (`/approve`) with the comment author not in
-     `OWNER/MEMBER/COLLABORATOR` → exits 78 (the workflow logs *"Gate
-     1: comment not from a collaborator"*).
-   - PR author equals `claude-approver[bot]` → anti-rubber-stamp gate
-     exits 78.
-   - PR author not on `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` → exits 78.
-   - PR is draft, not OPEN, or has a moving head SHA → exits 78.
-3. **The all-green check gate** waits until every required check has
-   completed and resolved to `success | skipped | neutral`. If
-   anything is still in progress, the workflow exits 78 and re-fires
-   on the next `check_suite: completed`. If anything is red, it exits
-   78 (no point asking Claude when CI already said no).
-4. **When everything's green**, the workflow mints a 1-hour Approver
-   App installation token, checks out the PR HEAD, pulls in the plugin
+     `OWNER/MEMBER/COLLABORATOR` → skipped at the job-level `if:`.
+   - PR author matches `claude-approver*[bot]` → anti-rubber-stamp
+     gate skips.
+   - PR author not on `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` → skips.
+   - PR is draft, not OPEN, or has a moving head SHA → skips.
+3. **The all-green check gate waits in-job** — polling the head SHA's
+   check runs every 30s (30-minute deadline) until every other check
+   has completed, then requires `success | skipped | neutral` on all
+   of them. This is what makes the Approver effectively run **last**:
+   GitHub Actions has no cross-workflow ordering, so the gate
+   sequences itself (#232). If a check is red, the gate skips out
+   green (no point asking Claude when CI already said no — the
+   failing check tells the story). A new push cancels the waiting
+   run via the concurrency group and starts a fresh one.
+4. **When everything's green**, the gate emits `proceed=true` and the
+   `approve` job (chained via `needs:`) mints a 1-hour Approver App
+   installation token, checks out the PR HEAD, pulls in the plugin
    family at the pinned SHA, installs Claude Code CLI, and invokes
-   `python-approver` (opus model).
+   `python-approver` (opus model). When the gate declines, the
+   `approve` job shows as *skipped*, never red.
 5. **The agent posts the review** as `claude-approver[bot]` via `gh pr
    review --approve | --request-changes | --comment`. Branch
    protection sees a fresh review from a non-author identity and
@@ -440,7 +447,8 @@ variable that controls **which PR authors the Approver evaluates**.
 ```
 
 PRs from anyone else (including you) are skipped at Gate 3 — the
-workflow exits 78 without invoking the agent. The Approver is then
+gate job ends green without invoking the agent and the `approve` job
+shows as skipped. The Approver is then
 effectively just a robot for machine-authored PRs, and humans still
 get a normal human review process.
 
@@ -541,7 +549,7 @@ The most useful per-project customisation surfaces:
   fire on every push (e.g., only on `ready_for_review` to save token
   budget on early-WIP PRs), edit the `on:` block of
   `.github/workflows/claude-approver.yml`. The Gate 1 trigger-resolver
-  handles missing triggers gracefully (exits 78).
+  handles missing triggers gracefully (skips out green).
 - **Per-repo cost limits** — currently not enforced by the workflow.
   See [Cost](#cost-and-rate-limits) for how to estimate and bound.
 
@@ -566,8 +574,8 @@ What you generally **should not** customise without thinking carefully:
 
 At Anthropic's current Opus 4.7 pricing (~$15/M input, $75/M output),
 that's roughly **$0.30–$2.00 per evaluated PR.** Skipped PRs (gate
-exits 78 before agent invocation) cost ~$0 — just the workflow
-runner-minutes.
+declines before agent invocation) cost ~$0 in tokens — just the
+workflow runner-minutes, including the gate's wait-for-CI loop.
 
 **Estimating for your repo:** count machine-authored PRs per month
 (Dependabot is usually the dominant source). Multiply by $1 as a
