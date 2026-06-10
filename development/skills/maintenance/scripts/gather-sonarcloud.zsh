@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # gather-sonarcloud.zsh — fetch open SonarCloud findings (issues + hotspots)
-# for a given org+project and emit them as a flat normalized JSON array.
+# plus the main branch's Quality Gate verdict for a given org+project.
 #
 # Normalized per-finding shape (matches python-sonar-triage agent expectations):
 #   { type, severity, rule, component, line, message, key, security_category? }
@@ -9,18 +9,37 @@
 # Hotspots come from /api/hotspots/search?status=TO_REVIEW (separate endpoint
 # in the Sonar API). vulnerabilityProbability → severity mapping:
 #   HIGH→CRITICAL  MEDIUM→MAJOR  LOW→MINOR.
+# Quality Gate comes from /api/qualitygates/project_status (no branch param =
+# the project's main branch). QG fetch failure is non-fatal: findings are
+# still emitted with quality_gate: null.
+#
+# The API host defaults to SonarCloud but supports self-hosted SonarQube:
+# SONAR_HOST_URL env var → sonar.host.url in ./sonar-project.properties →
+# https://sonarcloud.io. (The caller runs this script with the target repo
+# as cwd, so the properties lookup is relative.)
 #
 # Token is resolved via sibling sonar-auth.zsh (env var → keychain → prompt).
 #
 # Usage:   gather-sonarcloud.zsh <org-key> <project-key>
-# stdout:  JSON array of normalized findings (or [] on failure)
+# stdout:  JSON object:
+#            { "findings":     [ ...normalized findings... ],
+#              "quality_gate": { "status": "OK|ERROR|WARN|NONE",
+#                                "conditions": [ ... ] } | null }
+#          (findings [] and quality_gate null on failure)
 # stderr:  progress + errors; final line is a one-liner suitable for surfacing
 #          as a user-facing note in the maintenance orchestrator's summary
 # Exit:    0 success | 1 unavailable (token / network / API) | 2 usage error
 
 setopt err_exit nounset pipefail
 
-readonly API_BASE='https://sonarcloud.io/api'
+# --- resolve API host (SonarCloud or self-hosted SonarQube) ------------------
+sonar_host="${SONAR_HOST_URL:-}"
+if [[ -z "$sonar_host" && -f sonar-project.properties ]]; then
+  sonar_host=$(grep -E '^[[:space:]]*sonar\.host\.url' sonar-project.properties \
+    | head -1 | cut -d= -f2- | tr -d ' \r' || true)
+fi
+[[ -z "$sonar_host" ]] && sonar_host='https://sonarcloud.io'
+readonly API_BASE="${sonar_host%/}/api"
 readonly PAGE_SIZE=500
 readonly MAX_PAGES=20  # safety cap (10,000 findings per endpoint)
 
@@ -60,7 +79,7 @@ if (( $# != 2 )); then
     "gather-sonarcloud.zsh expects <org-key> <project-key>" \
     "command line: $0" \
     "Pass both, e.g.: $0 timo-jakob-github timo-jakob_ai-doc-organizer"
-  print -- '[]'
+  print -- '{"findings": [], "quality_gate": null}'
   final_note "SonarCloud gather: usage error (missing org or project key)."
   exit 2
 fi
@@ -73,7 +92,7 @@ auth_stderr=$(mktemp); _tmpfiles+=("$auth_stderr")
 if ! token=$("$SCRIPT_DIR/sonar-auth.zsh" "$org" 2>"$auth_stderr"); then
   # sonar-auth's stderr already explains the situation
   cat "$auth_stderr" >&2
-  print -- '[]'
+  print -- '{"findings": [], "quality_gate": null}'
   final_note "SonarCloud token unavailable for org '$org'. Run $SCRIPT_DIR/sonar-auth.zsh $org from a terminal to set it up."
   exit 1
 fi
@@ -84,7 +103,7 @@ if [[ -z "$token" ]]; then
     "sonar-auth.zsh exited 0 but produced no token on stdout" \
     "$SCRIPT_DIR/sonar-auth.zsh $org" \
     "Re-run sonar-auth.zsh interactively to refresh the token"
-  print -- '[]'
+  print -- '{"findings": [], "quality_gate": null}'
   final_note "SonarCloud token resolution returned empty; see errors above."
   exit 1
 fi
@@ -152,7 +171,7 @@ fetch_all() {
 info "Fetching open issues..."
 if ! issues_raw=$(fetch_all '/issues/search' '.issues' \
        "componentKeys=${project}&organization=${org}&resolved=false"); then
-  print -- '[]'
+  print -- '{"findings": [], "quality_gate": null}'
   final_note "SonarCloud issues fetch failed; see errors above."
   exit 1
 fi
@@ -162,14 +181,42 @@ ok "Issues fetched: $issues_count"
 info "Fetching open hotspots..."
 if ! hotspots_raw=$(fetch_all '/hotspots/search' '.hotspots' \
        "projectKey=${project}&organization=${org}&status=TO_REVIEW"); then
-  print -- '[]'
+  print -- '{"findings": [], "quality_gate": null}'
   final_note "SonarCloud hotspots fetch failed; see errors above."
   exit 1
 fi
 hotspots_count=$(jq 'length' <<<"$hotspots_raw")
 ok "Hotspots fetched: $hotspots_count"
 
-# --- step 4: normalize ------------------------------------------------------
+# --- step 4: quality gate verdict (main branch) ------------------------------
+# Single REST call, no paging. Non-fatal: a failure here still emits the
+# findings gathered above, with quality_gate: null and a stderr warning.
+info "Fetching Quality Gate status..."
+quality_gate='null'
+qg_label="unavailable"
+qg_body=$(mktemp); _tmpfiles+=("$qg_body")
+if qg_http=$(command curl -sS -o "$qg_body" -w '%{http_code}' \
+     -H "Authorization: Bearer $token" \
+     "${API_BASE}/qualitygates/project_status?projectKey=${project}" 2>/dev/null) \
+   && [[ "$qg_http" == "200" ]]; then
+  if quality_gate=$(jq -c '.projectStatus | {status, conditions: (.conditions // [])}' "$qg_body" 2>/dev/null); then
+    qg_status=$(jq -r '.status' <<<"$quality_gate")
+    case "$qg_status" in
+      OK)    qg_label="PASS" ;;
+      ERROR) qg_label="FAIL" ;;
+      WARN)  qg_label="WARN" ;;
+      *)     qg_label="not computed" ;;
+    esac
+    ok "Quality Gate: $qg_label"
+  else
+    quality_gate='null'
+    warn "Quality Gate response unparseable; continuing without verdict"
+  fi
+else
+  warn "Quality Gate fetch failed (HTTP ${qg_http:-network error}); continuing without verdict"
+fi
+
+# --- step 5: normalize ------------------------------------------------------
 info "Normalizing findings..."
 
 # Strip "<projectKey>:" prefix from component → bare file path.
@@ -203,6 +250,7 @@ normalized=$(jq -n \
 total=$(jq 'length' <<<"$normalized")
 ok "Normalized $total findings ($issues_count issues + $hotspots_count hotspots)"
 
-print -r -- "$normalized"
-final_note "SonarCloud: gathered $total findings ($issues_count issues + $hotspots_count hotspots)."
+jq -n --argjson findings "$normalized" --argjson qg "$quality_gate" \
+  '{findings: $findings, quality_gate: $qg}'
+final_note "SonarCloud: gathered $total findings ($issues_count issues + $hotspots_count hotspots). Quality Gate (main): $qg_label."
 exit 0

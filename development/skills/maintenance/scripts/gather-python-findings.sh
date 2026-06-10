@@ -26,7 +26,11 @@
 #     "coverage": {
 #       "overall": 0..100|null,
 #       "by_module": { "src/x.py": 92, ... }
-#     }
+#     },
+#     "sonar_quality_gate": {        # main-branch Quality Gate verdict (#50);
+#       "status": "OK|ERROR|WARN|NONE",  # null when sonar isn't configured or
+#       "conditions": [ ... ]            # the fetch failed. User-facing only —
+#     }                                  # never copied into the dispatch payload.
 #   }
 #
 # Note (timos-claude-code-plugins#87): the legacy `snyk_code`/`snyk_oss`
@@ -175,11 +179,14 @@ if [[ "$has_code_scanning_config" == "true" ]]; then
   fi
 fi
 
-# sonarcloud — fetch live findings (open issues + TO_REVIEW hotspots) via the
-# SonarCloud REST API using gather-sonarcloud.zsh. Token resolution is handled
-# inside that helper (env var → macOS keychain → interactive prompt on TTY).
-# The helper prints a one-line summary as its FINAL stderr line; we surface
-# that to the user via notes[].
+# sonarcloud — fetch live findings (open issues + TO_REVIEW hotspots) plus
+# the main branch's Quality Gate verdict via the SonarCloud REST API using
+# gather-sonarcloud.zsh. The helper emits {findings, quality_gate}; findings
+# go to findings_by_tool.sonarcloud, the QG verdict to the top-level
+# sonar_quality_gate key. Token resolution is handled inside the helper
+# (env var → macOS keychain → interactive prompt on TTY). The helper prints
+# a one-line summary as its FINAL stderr line; we surface that via notes[].
+sonar_quality_gate="null"
 if [[ "$has_sonar_config" == "true" ]]; then
   sonar_org=$(grep -E '^[[:space:]]*sonar\.organization' sonar-project.properties 2>/dev/null \
     | head -1 | cut -d= -f2- | tr -d ' \r')
@@ -192,8 +199,9 @@ if [[ "$has_sonar_config" == "true" ]]; then
   else
     sonar_stderr=$(mktemp)
     if "$SCRIPT_DIR/gather-sonarcloud.zsh" "$sonar_org" "$sonar_project" \
-         > "$findings_dir/sonarcloud.json" 2>"$sonar_stderr"; then
-      :  # success — final-line note still picked up below
+         > "$findings_dir/sonarcloud_raw.json" 2>"$sonar_stderr"; then
+      jq '.findings // []' "$findings_dir/sonarcloud_raw.json" > "$findings_dir/sonarcloud.json"
+      sonar_quality_gate=$(jq -c '.quality_gate // null' "$findings_dir/sonarcloud_raw.json")
     else
       echo "[]" > "$findings_dir/sonarcloud.json"
     fi
@@ -302,6 +310,7 @@ jq -n \
   --argjson dependabot_findings   "$(emit_findings dependabot             "$has_dependabot_config")" \
   --argjson coverage_overall      "$coverage_overall" \
   --argjson coverage_by_module    "$coverage_by_module" \
+  --argjson sonar_quality_gate    "$sonar_quality_gate" \
   --argjson notes                 "$notes_json" '
 {
   tooling_configured: {
@@ -325,6 +334,7 @@ jq -n \
     overall:   $coverage_overall,
     by_module: $coverage_by_module
   },
+  sonar_quality_gate: $sonar_quality_gate,
   notes: $notes
 }
 '

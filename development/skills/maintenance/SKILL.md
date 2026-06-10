@@ -306,7 +306,11 @@ For each `lang` in `supported`:
 ```
 
 Each script outputs a JSON with `tooling_configured`, `findings_by_tool`,
-`coverage`, and `notes`. Collect them all.
+`coverage`, and `notes`. Collect them all. Python's gather additionally
+emits `sonar_quality_gate` (#50) — the main branch's Quality Gate verdict
+(`{status, conditions}`, or `null` when SonarCloud isn't configured or the
+fetch failed). It is user-facing state for Phase 9's summary only and is
+**never** copied into the dispatch payload.
 
 If a script exits non-zero or produces malformed JSON, that's an
 internal error — surface it to the user (with the script path + stderr)
@@ -1143,7 +1147,20 @@ Languages processed: <comma-separated list from supported>
 <For each language in supported, a block:>
 --- <lang> ---
 
-<Render the cross-tool category inventory FIRST (#51) — system-health
+<If findings-<lang>.json has a non-null .sonar_quality_gate (#50),
+render the verdict line FIRST — it's the broadest system-health
+signal. Map .status to the display word: OK→PASS, ERROR→FAIL,
+WARN→WARN, NONE→"not computed". When FAIL or WARN, list each
+condition whose .status != "OK" as a bullet:>
+
+Quality Gate (<default branch>): PASS|FAIL|WARN|not computed
+  - <metricKey>: actual <actualValue>, threshold <comparator> <errorThreshold>
+  ...
+
+<If .sonar_quality_gate is null or absent, omit the line entirely —
+the pooled notes already explain why the fetch didn't happen.>
+
+<Render the cross-tool category inventory next (#51) — system-health
 at-a-glance before the per-tool detail. Invoke:>
 
   "<skill-base-dir>/scripts/categorize-findings.zsh" "/tmp/findings-<lang>.json"
