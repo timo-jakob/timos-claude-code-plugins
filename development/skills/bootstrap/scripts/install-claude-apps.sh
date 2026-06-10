@@ -247,6 +247,18 @@ app_pem_for() {
 
 # --- doctor (--verify / --fix) — #234 -----------------------------------------
 
+# gh calls intermittently fail with transient HTTP 401s that pass on
+# retry (observed repeatedly while testing #234). Retry before giving
+# up so one API blip doesn't abort a half-finished fix.
+gh_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if "$@"; then return 0; fi
+    (( attempt < 3 )) && sleep 2
+  done
+  return 1
+}
+
 # Guided key regeneration — the one step GitHub has no API for. Leads the
 # user to the App settings page, picks the downloaded key up from
 # ~/Downloads automatically, validates it against the App, and stores it
@@ -344,11 +356,17 @@ cmd_verify() {
   [[ -f "$CONFIG_FILE" ]] \
     || die "No apps.json — run $REGISTER_SCRIPT first."
 
-  local secret_names
+  # Distinguish "could not list" from "secret missing": gh hiccups
+  # (transient 401s, rate limits) must not masquerade as missing secrets.
+  local secret_names="" secrets_listed=1
   secret_names=$(gh secret list --json name --jq '.[].name' 2>/dev/null) \
-    || secret_names=""
+    || { secrets_listed=0; warn "Could not list repo secrets (gh error) — skipping presence checks."; }
 
-  local problems=0 app display key pem fmt secret_name
+  # NOTE: every loop-used variable must be declared here, NOT inside the
+  # loop. zsh's `local name` (no assignment) on an already-declared local
+  # PRINTS the variable and its value — re-declaring `converted` per
+  # iteration leaked a private key to stdout during #234 testing.
+  local problems=0 app display key pem fmt secret_name converted=""
   for app in "${KNOWN_APPS[@]}"; do
     display=$(app_display_name "$app")
     key=$(config_key_for "$app")
@@ -390,7 +408,7 @@ cmd_verify() {
 
     # 4. Repo secret present?
     secret_name="CLAUDE_$(print -- "${app#claude-}" | tr '[:lower:]-' '[:upper:]_')_PRIVATE_KEY"
-    if ! print -r -- "$secret_names" | grep -qx "$secret_name"; then
+    if (( secrets_listed )) && ! print -r -- "$secret_names" | grep -qx "$secret_name"; then
       err "$display: repo secret $secret_name is missing."
       (( problems++ )) || true
     fi
@@ -399,11 +417,14 @@ cmd_verify() {
     #    normalized to PKCS#8. Secrets can't be read back, so re-setting
     #    is also the only safe answer to "is the stored one correct?".
     if [[ -n "$fix" ]]; then
-      local converted
       converted=$(pem_to_pkcs8 "$pem") \
         || { err "$display: PKCS#8 conversion failed."; (( problems++ )) || true; continue }
-      gh_secret_set_both "$secret_name" "$converted"
-      ok "$display: $secret_name re-set from the validated Keychain key (PKCS#8)."
+      if gh_retry gh_secret_set_both "$secret_name" "$converted"; then
+        ok "$display: $secret_name re-set from the validated Keychain key (PKCS#8)."
+      else
+        err "$display: failed to set $secret_name (gh kept erroring)."
+        (( problems++ )) || true
+      fi
     fi
   done
   print
@@ -434,6 +455,7 @@ cmd_verify() {
         ok "Re-run dispatched: gh run watch $mint_fail_run"
       fi
     else
+      (( problems++ )) || true
       warn "  Re-run with --fix to converge the secret, then re-run it:"
       warn "  gh run rerun $mint_fail_run --failed"
     fi
