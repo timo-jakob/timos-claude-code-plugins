@@ -1,5 +1,7 @@
-# CodeQL — GitHub-native SAST, free for public repos. Acts as a second-opinion
-# SAST alongside Sonar + Snyk Code.
+# CodeQL — GitHub-native SAST, free for public repos. The primary SAST
+# signal consumed by /development:maintenance via the Code Scanning API.
+# Sonar adds a second opinion. Snyk's GitHub App also posts a SAST PR
+# check (advisory only — not gathered by the maintenance pipeline).
 
 name: CodeQL
 

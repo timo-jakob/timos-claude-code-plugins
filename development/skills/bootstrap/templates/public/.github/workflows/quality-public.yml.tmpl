@@ -1,6 +1,10 @@
 # Quality + security pipeline for PUBLIC repositories.
 # Runs on github-hosted runners. Uses SonarCloud for static analysis +
-# coverage and Snyk for security (code + open source + container).
+# coverage. Snyk's GitHub App handles SAST + Open Source as PR-time
+# advisory checks (and Snyk's auto-Fix-PR flow for OSS — see SETUP.md
+# section 2.6). This workflow only runs the `image` channel: Snyk
+# container scan on the built Docker image, which the GitHub App can't
+# see.
 #
 # Image publishing: built image is scanned, then pushed to GitHub Container
 # Registry (ghcr.io/<owner>/<repo>) on merge to main + release events. The
