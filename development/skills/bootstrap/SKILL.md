@@ -733,6 +733,18 @@ The script applies a single protection rule that:
   can push to a protected branch; `SETUP.md` has the per-contributor
   setup recipe.
 
+It also PATCHes two repo-level merge settings (#226):
+- `allow_auto_merge: true` — the maintenance approval gate (plugins#224)
+  arms GitHub native auto-merge when no approving review has landed yet;
+  without this setting the arming fails and gated PRs degrade to
+  leave-open + escalate.
+- `delete_branch_on_merge: true` — head-branch cleanup for armed merges,
+  which happen later when no gh process is around to `--delete-branch`.
+
+In State D gap-fill mode, treat `github_state.merge_settings` from
+detect-stack with either field `false` (or the object `null`) as a gap
+that re-running `branch-protection.sh` closes.
+
 If the user does not yet have any commits with the workflows present, point out
 that the check names will not appear in the GitHub UI until at least one workflow
 run completes — branch protection rules referencing them are still valid, but

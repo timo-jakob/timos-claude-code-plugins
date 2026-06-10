@@ -136,6 +136,11 @@ $(printf '  • %s\n' "${checks[@]}")
 
 Plus: require PR before merging, require linear history, block force pushes,
 block deletions. See SETUP.md for the full list.
+
+Also enable in Settings → General → Pull Requests:
+  • Allow auto-merge                       (needed by the maintenance
+                                            approval gate, plugins#224)
+  • Automatically delete head branches     (branch cleanup for auto-merged PRs)
 EOF
     rm -f "$http_body"
     exit 0   # not a hard failure — user can do it by hand
@@ -149,6 +154,27 @@ EOF
 esac
 
 rm -f "$http_body"
+
+# --- repo merge settings (allow_auto_merge + delete_branch_on_merge) ---------
+# The maintenance pipeline's approval gate (plugins#224) arms GitHub native
+# auto-merge when no approving review has landed within the gate window;
+# arming requires the repo-level "Allow auto-merge" setting. And because gh
+# isn't running when GitHub later performs an armed merge, `--delete-branch`
+# can't act — head-branch cleanup for those merges needs
+# delete_branch_on_merge instead. Idempotent (PATCH sets absolute state).
+info "Enabling allow_auto_merge + delete_branch_on_merge on $REPO"
+ms_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: token $(gh auth token)" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -X PATCH \
+  "https://api.github.com/repos/$REPO" \
+  --data '{"allow_auto_merge":true,"delete_branch_on_merge":true}')
+case "$ms_status" in
+  200) ok "Repo merge settings applied (auto-merge allowed, head branches auto-deleted)" ;;
+  403) warn "Could not set repo merge settings (403 — admin needed). Enable manually: Settings → General → Pull Requests → 'Allow auto-merge' + 'Automatically delete head branches'." ;;
+  *)   warn "Repo merge-settings PATCH returned HTTP $ms_status — check Settings → General → Pull Requests manually." ;;
+esac
 
 # --- required_signatures (separate endpoint) ---------------------------------
 # GitHub's main protection PUT doesn't include the signature requirement; it
