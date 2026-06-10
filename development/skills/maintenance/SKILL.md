@@ -124,20 +124,21 @@ to ingest.
 
 For each open PR in the current repo (`gh pr list --state open --json
 number,headRefName,headRefOid,author`), fetch the most recent review
-by `claude-approver[bot]`:
+by the Approver bot:
 
 ```bash
 gh pr view <pr> --json reviews --jq \
-  '[.reviews[] | select(.author.login == "claude-approver[bot]" or .author.login == "app/claude-approver")] | sort_by(.submittedAt) | last'
+  '[.reviews[] | select(.author.login | test("^(app/)?claude-approver"))] | sort_by(.submittedAt) | last'
 ```
 
-(Both login forms are matched because gh's GraphQL-backed commands
-report App-bot authors as `app/<slug>` while REST/webhooks use
-`<slug>[bot]` — the mismatch that broke the Approver's author gate
-in #221.)
+(Prefix match, two ways: gh's GraphQL-backed commands report App-bot
+authors as `app/<slug>` while REST/webhooks use `<slug>[bot]` — the
+#221 mismatch — and the slug itself is owner-suffixed because App
+slugs are globally unique, e.g. `claude-approver-timo-jakob[bot]`,
+never the generic `claude-approver[bot]` — the #229 mismatch.)
 
 A PR is **Approver-flagged** when ALL hold:
-- A review by `claude-approver[bot]` exists.
+- A review by the Approver bot (login prefix `claude-approver`) exists.
 - Its `state` is `CHANGES_REQUESTED`.
 - Its `commit_id` equals the PR's current `headRefOid` (no push since
   the review).
@@ -608,14 +609,15 @@ Why this matters for the Approver loop:
 
 - The Approver's default author allowlist
   (`CLAUDE_APPROVER_AUTHOR_ALLOWLIST` per-repo variable) is
-  **machine-only** by default and includes `claude-maintenance[bot]`.
+  **machine-only** by default and includes the maintenance bot's real
+  owner-suffixed login (e.g. `claude-maintenance-<owner>[bot]`, #229).
   Without the identity switch, maintenance PRs would be authored by
   the user, the allowlist would reject them, and the Approver would
   not evaluate the PR at all — the entire Approver→maintenance loop
   would never start.
-- The Approver's anti-rubber-stamp gate (PR author ≠
-  `claude-approver[bot]`) fires correctly: `claude-maintenance[bot]`
-  and `claude-approver[bot]` are distinct App identities by design.
+- The Approver's anti-rubber-stamp gate (PR author has no
+  `claude-approver` prefix) fires correctly: the maintenance and
+  approver Apps are distinct identities by design.
 
 The installation token has a 1-hour lifetime. If a maintenance run
 takes longer than an hour and you need another `gh pr create`, re-mint
@@ -973,8 +975,9 @@ After pushing and opening the PR:
    final summary and **continue to the next stage**. Failure on one
    stage does not block later stages.
 5. **Approval gate — never merge without an approving review (#224).**
-   A maintenance merge requires an approving review from
-   `claude-approver[bot]` or a human on the PR's current state. You
+   A maintenance merge requires an approving review from the Approver
+   bot (`claude-approver-<owner>[bot]`) or a human on the PR's current
+   state. You
    must **never** satisfy this yourself: posting
    `gh pr review --approve` with the user's gh identity is
    self-approval with admin credentials and is forbidden (see "What
@@ -990,8 +993,9 @@ After pushing and opening the PR:
 
    - **`APPROVED`** → proceed to step 6 (merge).
    - **`CHANGES_REQUESTED`** → fetch the latest `CHANGES_REQUESTED`
-     review. If it is from the Approver (login `claude-approver[bot]`
-     or `app/claude-approver`) and carries the
+     review. If it is from the Approver (login matches
+     `^(app/)?claude-approver` — App slugs are owner-suffixed, #229)
+     and carries the
      `<!-- claude-approver:findings ... -->` block → **fix in-run**:
      run the Phase 2.5 re-ingest machinery scoped to this PR (parse
      the hidden JSON, group findings by `suggested_agent`, dispatch
@@ -1251,7 +1255,7 @@ run start; the 🚀 PRs section below shows what was tackled.>
 ⏳ Awaiting approval — not merged (N):
   - PR #<pr> ("<title>") — CI green, no approving review within the
     gate window. <Auto-merge armed: merges automatically once
-    claude-approver[bot] or a human approves.|Left open: repo has no
+    the Approver bot or a human approves.|Left open: repo has no
     required-review protection / auto-merge disabled — approve and
     merge manually.>
   - ...
@@ -1364,7 +1368,7 @@ changed on the issues side.
   flow), but never to a protected base.
 - **Approve any PR with the user's gh identity** — never run
   `gh pr review --approve` (or post any review) as the operator.
-  Approval comes from `claude-approver[bot]` or a human; your job
+  Approval comes from the Approver bot or a human; your job
   ends at the approval gate (#224). Satisfying branch protection
   with the user's own admin credentials is self-approval and
   defeats the review model.
