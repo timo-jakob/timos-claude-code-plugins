@@ -147,7 +147,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -e
-          author=$(gh pr view "$PR_NUMBER" -R "$REPO" --json author --jq .author.login)
+          # REST, not `gh pr view` (GraphQL): GraphQL reports App-bot authors
+          # as 'app/<slug>' while the allowlist and the self-approval check
+          # use the REST/webhook '<slug>[bot]' form. See #221.
+          author=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .user.login)
           if [ "$author" = "claude-approver[bot]" ]; then
             echo "::notice::PR author is the Approver itself — refusing self-approval."
             exit 78

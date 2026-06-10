@@ -128,8 +128,13 @@ by `claude-approver[bot]`:
 
 ```bash
 gh pr view <pr> --json reviews --jq \
-  '[.reviews[] | select(.author.login == "claude-approver[bot]")] | sort_by(.submittedAt) | last'
+  '[.reviews[] | select(.author.login == "claude-approver[bot]" or .author.login == "app/claude-approver")] | sort_by(.submittedAt) | last'
 ```
+
+(Both login forms are matched because gh's GraphQL-backed commands
+report App-bot authors as `app/<slug>` while REST/webhooks use
+`<slug>[bot]` — the mismatch that broke the Approver's author gate
+in #221.)
 
 A PR is **Approver-flagged** when ALL hold:
 - A review by `claude-approver[bot]` exists.
