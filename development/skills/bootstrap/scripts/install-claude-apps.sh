@@ -217,9 +217,17 @@ app_slug_resolve() {
     return 1
   fi
 
-  # Backfill apps.json so future runs skip the lookup.
+  # Backfill apps.json so future runs skip the lookup. GET /app also
+  # returns the Client ID — record it alongside the slug (#223): nothing
+  # consumes it yet (the numeric App ID stays a valid JWT issuer and
+  # create-github-app-token client-id value), but capturing it here
+  # spares a manual lookup if GitHub ever drops numeric-ID acceptance.
+  local client_id
+  client_id=$(print -r -- "$resp" | jq -r '.client_id // empty')
   key=$(config_key_for "$app")
-  jq --arg key "$key" --arg slug "$slug" '.[$key].slug = $slug' \
+  jq --arg key "$key" --arg slug "$slug" --arg cid "$client_id" \
+    '.[$key].slug = $slug
+     | if $cid != "" then .[$key].client_id = $cid else . end' \
     "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
   ok "Resolved + backfilled slug for $app: $slug" >&2
 

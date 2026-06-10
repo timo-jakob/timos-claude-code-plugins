@@ -349,13 +349,20 @@ jobs:
 
       # ============================================================
       # Mint App token — actions/create-github-app-token auto-discovers
-      # the installation ID for this repo from the App ID + private key.
+      # the installation ID for this repo from the client ID + private
+      # key. v3.1.0 deprecated `app-id` in favor of `client-id` (#223);
+      # GitHub's JWT auth accepts the numeric App ID as issuer, so the
+      # existing CLAUDE_APPROVER_APP_ID variable works unchanged —
+      # verified live on ai-doc-organizer. The private key must be
+      # PKCS#8: v3 is WebCrypto-based and rejects PKCS#1 with
+      # 'DataError: Invalid keyData' (install-claude-apps.sh normalizes
+      # on install — #234).
       # ============================================================
       - name: Mint Approver App token
         id: app_token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.CLAUDE_APPROVER_APP_ID }}
+          client-id: ${{ vars.CLAUDE_APPROVER_APP_ID }}
           private-key: ${{ secrets.CLAUDE_APPROVER_PRIVATE_KEY }}
 
       # ============================================================
