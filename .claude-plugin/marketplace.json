@@ -19,7 +19,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills.",
-      "version": "1.12.1",
+      "version": "1.13.0",
       "author": {
         "name": "Timo Jakob"
       },
@@ -29,7 +29,7 @@
     {
       "name": "development-python",
       "description": "Python maintenance dispatcher — fixes ruff / semgrep / Code Scanning / SonarCloud findings autonomously via per-tool agents in parallel worktrees, auto-bumps deps (patch + minor + major) with test-based verification. Favors autonomy over speed: expect tens-of-thousands of tokens per run.",
-      "version": "1.10.0",
+      "version": "1.11.0",
       "author": {
         "name": "Timo Jakob"
       },

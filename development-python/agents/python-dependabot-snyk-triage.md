@@ -1,6 +1,6 @@
 ---
 name: python-dependabot-snyk-triage
-description: Review vendor-opened PRs (Dependabot AND Snyk auto-Fix/Upgrade PRs) that the dispatcher has classified as either "auto-merge-if-green" (pip + github-actions patch/minor with verifiable safety, or Snyk security fixes) or "human-review" (Docker base images, github-actions majors, unknown ecosystems). Auto-merges the green-CI safe ones; passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-python:maintenance.
+description: Review vendor-opened PRs (Dependabot AND Snyk auto-Fix/Upgrade PRs) that the dispatcher has classified as either "auto-merge-if-green" (pip + github-actions patch/minor with verifiable safety, or Snyk security fixes) or "human-review" (Docker base images, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-python:maintenance.
 model: sonnet
 tools: Bash, Read, Grep, WebFetch
 ---
@@ -84,7 +84,7 @@ Your prompt contains:
   "configured": false,
   "missing_tool_recommendation": {
     "summary": "Neither Dependabot nor Snyk auto-Fix-PRs are configured for this project.",
-    "what_it_provides": "Vendor-opened dependency PRs — Dependabot for version updates grouped by ecosystem (pip, github-actions, docker), and Snyk auto-Fix-PRs for security vulnerabilities with known fixes. Patch + minor PRs are auto-merged when CI is green; majors arrive as standalone PRs for human review.",
+    "what_it_provides": "Vendor-opened dependency PRs — Dependabot for version updates grouped by ecosystem (pip, github-actions, docker), and Snyk auto-Fix-PRs for security vulnerabilities with known fixes. Patch + minor PRs are merged when CI is green and an approving review exists (auto-merge armed otherwise); majors arrive as standalone PRs for human review.",
     "how_to_add": "Run /development:bootstrap (it generates .github/dependabot.yml AND prints SETUP.md section 2.6 for the one-time Snyk auto-Fix-PR enablement). For just Dependabot: create .github/dependabot.yml with one updates entry per ecosystem."
   },
   "actions_taken": [],
@@ -232,22 +232,41 @@ Patch bumps skip this step.
 
 | Bump | CI | Release notes | Action |
 |---|---|---|---|
-| patch | green | n/a | **auto-approve + merge** |
-| minor | green | clean | **auto-approve + merge** |
+| patch | green | n/a | **merge if approved, else arm auto-merge** |
+| minor | green | clean | **merge if approved, else arm auto-merge** |
 | minor | green | breaking-change flag | defer to `actions_requiring_review` |
 | any | red | n/a | defer with failing-check name |
 | any | pending | n/a | `unable_to_fix` |
 
-#### Step B4 — apply (auto-merge case)
+#### Step B4 — apply (merge case)
 
-For auto-approve + merge:
+**Never post an approval yourself** — `gh pr review --approve` with
+the operator's gh identity is self-approval and is forbidden
+(timos-claude-code-plugins#224). Approval comes from
+`claude-approver[bot]` (it fires on `check_suite: completed`) or a
+human. You only act on the decision that already exists:
 
 ```bash
-gh pr review <number> --approve --body "Auto-approved by /development-python:maintenance: <ecosystem> <bump-level> bump with green CI; no breaking changes flagged in release notes."
-gh pr merge <number> --squash --delete-branch
+gh pr view <number> --json reviewDecision --jq '.reviewDecision // "NONE"'
 ```
 
-If `gh pr merge` fails (branch protection blocks it without an admin review): note it and route to `actions_requiring_review` with the failure message — the user can merge with admin override.
+- **`APPROVED`** → merge now:
+  `gh pr merge <number> --squash --delete-branch`
+  → report as `pr_merged`.
+- **`REVIEW_REQUIRED`** → arm GitHub's native auto-merge and move on
+  (do not poll — you have a batch of PRs and the Approver runs on its
+  own cadence):
+  `gh pr merge <number> --auto --squash --delete-branch`
+  → report as `pr_automerge_armed`. If arming fails (repo setting
+  "Allow auto-merge" is off), route to `actions_requiring_review`:
+  "CI green and safe; approve and merge manually".
+- **`CHANGES_REQUESTED`** → route to `actions_requiring_review` with
+  a pointer to the rejecting review — do not merge, do not dismiss.
+- **`NONE`** → the repo has no review-requiring branch protection, so
+  arming auto-merge would merge instantly with zero approvals. Check
+  `gh pr view <number> --json latestReviews --jq '[.latestReviews[] | select(.state == "APPROVED")] | length'`:
+  non-zero → merge now; zero → route to `actions_requiring_review`
+  as awaiting approval.
 
 ## Output
 
@@ -260,13 +279,19 @@ If `gh pr merge` fails (branch protection blocks it without an admin review): no
       "type": "pr_merged",
       "source": "dependabot",
       "pr_number": 42,
-      "summary": "approved + squash-merged: bump cryptography from 41.0.0 to 41.0.7 (pip patch, green CI)"
+      "summary": "squash-merged (already approved by claude-approver[bot]): bump cryptography from 41.0.0 to 41.0.7 (pip patch, green CI)"
     },
     {
       "type": "pr_merged",
       "source": "snyk",
       "pr_number": 99,
-      "summary": "approved + squash-merged: [Snyk] Security upgrade jinja2 from 3.1.0 to 3.1.6 (pip patch, green CI)"
+      "summary": "squash-merged (already approved by claude-approver[bot]): [Snyk] Security upgrade jinja2 from 3.1.0 to 3.1.6 (pip patch, green CI)"
+    },
+    {
+      "type": "pr_automerge_armed",
+      "source": "dependabot",
+      "pr_number": 43,
+      "summary": "auto-merge armed: bump pytest from 8.3.0 to 8.3.2 (pip patch, green CI) — merges once claude-approver[bot] or a human approves"
     }
   ],
   "actions_requiring_review": [
@@ -309,7 +334,8 @@ multi-PR-per-package cases).
 ## Constraints
 
 - **Do not commit or push** — Dependabot and Snyk PRs live on GitHub;
-  your actions happen via `gh` (approve, merge). Local working tree is
+  your actions happen via `gh` (merge / arm auto-merge — never
+  approve). Local working tree is
   untouched.
 - **Do not modify the PR's diff** — if the bump conflicts with something,
   the right action is to comment on the PR and defer to human, not to
