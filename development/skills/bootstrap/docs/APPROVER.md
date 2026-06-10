@@ -604,6 +604,29 @@ the workflow trigger to fire only on `ready_for_review` instead of
 
 ## Troubleshooting
 
+### `DataError: Invalid keyData` at "Mint Approver App token"
+
+The private key in the repo secret is in **PKCS#1** format (`BEGIN RSA
+PRIVATE KEY`). GitHub generates App keys that way, and
+`actions/create-github-app-token@v1` accepted it — but v3+ of that
+action (WebCrypto-based) only reads **PKCS#8** (`BEGIN PRIVATE KEY`)
+and fails with exactly this error. The key is not broken; it's the
+wrong container format.
+
+Run the doctor (#234):
+
+```sh
+development/skills/bootstrap/scripts/install-claude-apps.sh --verify --fix
+```
+
+It validates the Keychain key cryptographically against the App
+(JWT → `GET /app` must return the registered App ID — this also
+catches truncated keys and keys from the wrong App), re-sets the repo
+secret normalized to PKCS#8, and offers to re-run the failed workflow
+run. Only if the local key itself is missing or invalid does it walk
+you through generating a fresh one in the App settings UI (the one
+step GitHub has no API for).
+
 ### "Gate 1: comment not from a collaborator" — workflow exits early
 
 The `/approve` comment trigger requires the comment author to have
