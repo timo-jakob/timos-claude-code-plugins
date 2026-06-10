@@ -25,6 +25,9 @@
 #   branch_protection.required_signatures  bool | null  (null = couldn't probe;
 #                                                       false = rule exists but
 #                                                       signed-commits is off)
+#   merge_settings.allow_auto_merge        bool      (repo setting; needed by the
+#   merge_settings.delete_branch_on_merge  bool       maintenance approval gate #224;
+#                                                     merge_settings = null when unreadable)
 #   secrets.names                          []string  (configured Actions secrets)
 #   sonar_project_exists                   bool | null  (null = unknown / private / no project key)
 #
@@ -318,6 +321,16 @@ if [[ "$has_github_remote" == "true" ]] \
   esac
   rm -f "$bp_tmp"
 
+  # --- repo merge settings (#226) ---
+  # The maintenance approval gate (plugins#224) arms GitHub native auto-merge,
+  # which needs allow_auto_merge; delete_branch_on_merge handles head-branch
+  # cleanup for those armed merges. branch-protection.sh sets both; probe them
+  # so the State D gap-fill can see when they're missing. null = couldn't read.
+  merge_settings=$(gh api "repos/$github_repo" \
+    --jq '{allow_auto_merge: (.allow_auto_merge // false), delete_branch_on_merge: (.delete_branch_on_merge // false)}' \
+    2>/dev/null || echo "null")
+  [[ -z "$merge_settings" ]] && merge_settings="null"
+
   # --- secrets (Actions scope) ---
   secrets_names=$(gh secret list --repo "$github_repo" --json name --jq '[.[].name]' 2>/dev/null || echo "[]")
   [[ -z "$secrets_names" ]] && secrets_names="[]"
@@ -340,8 +353,8 @@ if [[ "$has_github_remote" == "true" ]] \
     fi
   fi
 
-  github_state=$(printf '{"branch_protection":%s,"secrets":{"names":%s},"sonar_project_exists":%s}' \
-    "$bp_json" "$secrets_names" "$sonar_exists")
+  github_state=$(printf '{"branch_protection":%s,"merge_settings":%s,"secrets":{"names":%s},"sonar_project_exists":%s}' \
+    "$bp_json" "$merge_settings" "$secrets_names" "$sonar_exists")
 fi
 
 # --- emit --------------------------------------------------------------------
