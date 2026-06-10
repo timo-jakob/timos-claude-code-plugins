@@ -64,8 +64,13 @@ permissions:
 # gate job's wait loop (#232) this also keeps exactly one waiter alive:
 # each later trigger (a check_suite completing, a new push) cancels the
 # stale waiting run and starts a fresh one against the current state.
+# The check_suite arm is load-bearing (#232): its payload has no
+# github.event.pull_request, so without it those runs fell through to
+# the unique run_id and were never debounced — every completing suite
+# would have parked its own waiter and they would all have evaluated
+# at once when CI settled.
 concurrency:
-  group: claude-approver-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  group: claude-approver-${{ github.event.pull_request.number || github.event.issue.number || github.event.check_suite.pull_requests[0].number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
