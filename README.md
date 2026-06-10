@@ -32,9 +32,11 @@ What is shipped and aligned with the motivation:
   justification when the pattern is a false positive, and only escalates to
   a human when a public-API change would be required. That matches the
   "automate everything safely fixable, escalate only on judgment" half.
-- **Dependabot / Snyk triage auto-merges what is safe.**
-  `python-dependabot-snyk-triage` auto-approves and merges patch + minor
-  bumps once CI is green; deduplication keeps Snyk and Dependabot from
+- **Dependabot / Snyk triage merges what is safe — once approved.**
+  `python-dependabot-snyk-triage` merges patch + minor bumps when CI is
+  green and an approving review exists (from `claude-approver[bot]` or a
+  human); otherwise it arms GitHub's native auto-merge. It never posts
+  approvals itself (#224). Deduplication keeps Snyk and Dependabot from
   stepping on each other when both target the same package.
 - **Worktree isolation + local test verification.** Every agent that
   modifies code runs the project's test suite *locally* in its worktree
@@ -282,9 +284,11 @@ Default: `dependabot[bot]`, `github-actions[bot]`, `claude-maintenance[bot]`.
 Override per-repo via the `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` repo variable
 (set to `["*"]` to opt into reviewing human-authored PRs).
 
-It supplements, rather than replaces, `python-dependabot-snyk-triage`'s
-auto-merge for safe patch + minor Dependabot PRs — when triage defers a PR
-or CI is red, the Approver picks it up once everything turns green.
+It is the approving half of `python-dependabot-snyk-triage`'s merge flow
+for safe patch + minor Dependabot PRs — triage never approves, so its
+merges (immediate or via armed auto-merge) wait on the Approver's or a
+human's review; when triage defers a PR or CI is red, the Approver picks
+it up once everything turns green.
 
 ### PR type taxonomy
 

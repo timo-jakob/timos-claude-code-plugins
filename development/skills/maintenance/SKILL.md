@@ -784,7 +784,7 @@ For each entry in `response.plan`, in priority order:
    the worktree path. The Claude Code runtime returns both alongside
    the agent's response because you passed `isolation`. **Capture
    both** — the branch is what you push, the path is what you
-   `git worktree remove` post-merge (step 5 in the CI cycle below).
+   `git worktree remove` post-merge (step 6 in the CI cycle below).
 
    **If the agent comes back without a worktree branch and the main
    workspace has uncommitted changes, that's a contract violation,
@@ -833,7 +833,7 @@ After pushing and opening the PR:
    ```
    (Or poll `gh pr checks --json` until no check is in `PENDING` or
    `QUEUED` state.)
-2. **If all checks pass** → proceed to step 5 below.
+2. **If all checks pass** → proceed to step 5 (approval gate) below.
 3. **If any check fails**, distinguish **new** from **pre-existing**
    failures before spending tokens on `python-ci-fixer`.
 
@@ -908,8 +908,8 @@ After pushing and opening the PR:
    - **All remaining (non-same-tool) failures pre-existing** AND **no
      same-tool failures** → log the pre-existing names ("pre-existing
      on `<base_branch>`: `<list>`"), treat them as a noop for merge
-     gating, proceed to step 5 (merge). Record in the run summary so
-     the user knows they're still red.
+     gating, proceed to step 5 (approval gate). Record in the run
+     summary so the user knows they're still red.
    - **At least one same-tool failure** OR **at least one new
      non-same-tool failure** → spawn `python-ci-fixer` for that
      combined set. Pass two things in its prompt:
@@ -957,8 +957,9 @@ After pushing and opening the PR:
      failure was classified out of scope (a different tool's check
      failing, or a generic check pointing at files outside this PR's
      diff). **This PR is safe to merge** — skip further fixer
-     invocations for that check, proceed to step 5. Record the
-     out-of-scope failures so they appear in the run summary.
+     invocations for that check, proceed to step 5 (approval gate).
+     Record the out-of-scope failures so they appear in the run
+     summary.
    - `resolved: false` → fixer couldn't resolve an in-scope failure;
      `escalation_recommendation` says why. Re-monitor only if a fix
      commit was made; otherwise count this attempt.
@@ -971,7 +972,66 @@ After pushing and opening the PR:
    not merge** — record the PR in `actions_requiring_review` for the
    final summary and **continue to the next stage**. Failure on one
    stage does not block later stages.
-5. **Remove the local worktree first, then merge the PR.** Order
+5. **Approval gate — never merge without an approving review (#224).**
+   A maintenance merge requires an approving review from
+   `claude-approver[bot]` or a human on the PR's current state. You
+   must **never** satisfy this yourself: posting
+   `gh pr review --approve` with the user's gh identity is
+   self-approval with admin credentials and is forbidden (see "What
+   you will NOT do"). The Approver workflow fires on
+   `check_suite: completed`, so once CI is green its verdict typically
+   lands within a few minutes.
+
+   Poll the review decision (30s interval, 10-minute budget):
+
+   ```bash
+   gh pr view "<pr_number>" --json reviewDecision --jq '.reviewDecision // "NONE"'
+   ```
+
+   - **`APPROVED`** → proceed to step 6 (merge).
+   - **`CHANGES_REQUESTED`** → fetch the latest `CHANGES_REQUESTED`
+     review. If it is from the Approver (login `claude-approver[bot]`
+     or `app/claude-approver`) and carries the
+     `<!-- claude-approver:findings ... -->` block → **fix in-run**:
+     run the Phase 2.5 re-ingest machinery scoped to this PR (parse
+     the hidden JSON, group findings by `suggested_agent`, dispatch
+     the agents against this stage's still-attached worktree, push).
+     CI re-runs, the Approver re-evaluates, and you re-enter this
+     gate. **Maximum 2 rejection-fix rounds per PR** (independent of
+     the 3-CI-fix cap); after that, record in
+     `actions_requiring_review` with the Approver's findings and move
+     to the next stage. If the rejection is from a **human**, escalate
+     immediately — that's their call, not yours to litigate.
+   - **`NONE` on the first poll** → the repo has no review-requiring
+     branch protection, so `reviewDecision` will never flip. Check for
+     an explicit approval instead:
+     `gh pr view "<pr_number>" --json latestReviews --jq '[.latestReviews[] | select(.state == "APPROVED")] | length'`.
+     Non-zero → proceed to step 6. Zero → do **NOT** arm auto-merge
+     (with no review requirement it would merge instantly, bypassing
+     approval); leave the PR open, record as awaiting approval, and
+     continue to the next stage.
+   - **`REVIEW_REQUIRED` still at timeout** (Approver slow, gates
+     exit-78'd, or Approver not installed on this repo) → **arm
+     GitHub's native auto-merge and move on**: remove the worktree
+     first (same ordering rule as step 6), then
+
+     ```bash
+     gh pr merge "<pr_number>" --auto --squash --delete-branch
+     ```
+
+     The PR merges by itself the moment an approving review lands.
+     Record the stage outcome as `automerge_armed` for the Phase 9
+     summary. If arming fails (repo setting "Allow auto-merge" is
+     off), leave the PR open and record it in
+     `actions_requiring_review` as awaiting approval.
+
+   A stage that ends `automerge_armed` or awaiting-approval did
+   **not** merge: skip steps 6–8 for it, and the next stage builds
+   against `<base_branch>` without this stage's changes — the same
+   sequencing consequence as an escalated stage, and acceptable for
+   the same reason (stages are independent tool groups).
+
+6. **Remove the local worktree first, then merge the PR.** Order
    matters: `gh pr merge --delete-branch` tries to delete the local
    branch ref, which fails with *"cannot delete branch X used by
    worktree at Y"* if the worktree is still attached. The merge + the
@@ -1007,13 +1067,13 @@ After pushing and opening the PR:
    step and just call `gh pr merge`; the local-branch delete will
    then succeed because there's no worktree holding the ref.
 
-6. **Sync local main** so the next stage starts from the updated tree:
+7. **Sync local main** so the next stage starts from the updated tree:
    ```bash
    git -C "<repo.path>" switch "<base_branch>"
    git -C "<repo.path>" pull --ff-only origin "<base_branch>"
    ```
 
-7. **Re-run the state pre-flight from Phase 3.** A merge — especially
+8. **Re-run the state pre-flight from Phase 3.** A merge — especially
    of a runtime-version-bumping PR — can change the project's
    declared configuration, leaving local state (venv, toolchain cache,
    etc.) inconsistent. Without this re-check, subsequent stages'
@@ -1187,6 +1247,15 @@ run start; the 🚀 PRs section below shows what was tackled.>
   - #<pr> [group 1: <tool>] <title> — <merged|escalated after 3 CI fixes>
   - ...
 
+<If any stage or vendor PR ended automerge_armed / awaiting approval (#224):>
+⏳ Awaiting approval — not merged (N):
+  - PR #<pr> ("<title>") — CI green, no approving review within the
+    gate window. <Auto-merge armed: merges automatically once
+    claude-approver[bot] or a human approves.|Left open: repo has no
+    required-review protection / auto-merge disabled — approve and
+    merge manually.>
+  - ...
+
 ? Missing tooling (N):
   - <tool>: <summary>
     <how to add>
@@ -1293,6 +1362,12 @@ changed on the issues side.
   change reaches `main` through a PR with passing CI. The CI fixer
   may push additional commits to an open PR's branch (that's the
   flow), but never to a protected base.
+- **Approve any PR with the user's gh identity** — never run
+  `gh pr review --approve` (or post any review) as the operator.
+  Approval comes from `claude-approver[bot]` or a human; your job
+  ends at the approval gate (#224). Satisfying branch protection
+  with the user's own admin credentials is self-approval and
+  defeats the review model.
 - **Run more than 3 CI-fix iterations per PR** — after 3, escalate
   via the summary and move on to the next stage. The user reviews
   the failing PR manually.

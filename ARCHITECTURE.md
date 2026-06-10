@@ -578,16 +578,28 @@ The orchestrator processes the plan **sequentially in priority order**:
 
 1. If `improver_result` is present, promote it to a PR first
    (Stage 0): push, open, monitor CI, optionally invoke
-   `python-ci-fixer` up to 3 times on failure, merge, sync local main.
+   `python-ci-fixer` up to 3 times on failure, pass the approval
+   gate, merge, sync local main.
 2. For each entry in `plan`, in order: spawn `plan[i].agent` with
    `isolation="worktree"` off the latest base; the runtime returns a
-   worktree branch; push, open a PR, run the same CI cycle, merge,
-   sync. Only then move to `plan[i+1]`.
+   worktree branch; push, open a PR, run the same CI cycle, pass the
+   approval gate, merge, sync. Only then move to `plan[i+1]`.
+
+**The approval gate (#224):** a maintenance merge requires an
+approving review from `claude-approver[bot]` or a human — the
+pipeline never posts approvals with the operator's identity. After
+CI green the orchestrator polls `reviewDecision` (10-minute budget);
+an Approver `REQUEST_CHANGES` triggers an in-run re-ingest fix round
+(max 2 per PR), and a timeout arms GitHub's native auto-merge so the
+PR merges whenever an approval eventually lands. The same rule
+applies to vendor PRs in `python-dependabot-snyk-triage` (merge only
+if already approved; otherwise arm auto-merge).
 
 This serialization means each group's work runs against the latest
 post-merge state. There is no local merging, no topological ordering of
 worktree branches, and no rebasing. The pipeline ends when every
-group has either merged or escalated.
+group has either merged, armed auto-merge awaiting approval, or
+escalated.
 
 `missing_tooling` lists tools the project hasn't configured. The
 dispatcher builds it directly from `tooling_configured` (entries with
