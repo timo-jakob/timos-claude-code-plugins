@@ -307,6 +307,102 @@ else
   notes+=("reference_checking: not a plugin repo; skipped.")
 fi
 
+# --- findings: structure_validation ------------------------------------------
+# Validate the universal plugin DIRECTORY LAYOUT (not frontmatter — that's
+# skill_validation's job): every plugin dir has .claude-plugin/plugin.json with
+# the required fields and a name matching the dir; skills live at
+# skills/<name>/SKILL.md and agents at flat agents/<name>.md; the marketplace
+# entry's source points at the dir. python3 walks the tree and emits findings.
+local has_structure_validation="false"
+local structure_findings="[]"
+
+if (( ${#_plugin_dirs} )); then
+  has_structure_validation="true"
+  structure_findings=$(python3 <<'PY'
+import os, json, glob
+findings = []
+mp = {}
+mp_path = ".claude-plugin/marketplace.json"
+if os.path.isfile(mp_path):
+    try:
+        for p in json.load(open(mp_path)).get("plugins", []):
+            mp[p.get("name")] = p
+    except Exception:
+        pass
+
+def add(t, path, sev, msg, fix, files):
+    findings.append({
+        "id": "structure:" + t + ":" + path, "tool": "structure_validation",
+        "type": t, "severity": sev, "path": path,
+        "message": msg, "fix": fix, "files": files})
+
+tops = [d for d in os.listdir(".") if os.path.isdir(d) and not d.startswith(".")]
+for d in sorted(tops):
+    pj = os.path.join(d, ".claude-plugin", "plugin.json")
+    has_skills = os.path.isdir(os.path.join(d, "skills"))
+    has_agents = os.path.isdir(os.path.join(d, "agents"))
+    if not os.path.isfile(pj):
+        if has_skills or has_agents:
+            add("missing_plugin_json", d, "high",
+                "%s/ has skills/ or agents/ but no .claude-plugin/plugin.json" % d,
+                "add %s/.claude-plugin/plugin.json, or move the skills/agents if this isn't a plugin" % d,
+                [d])
+        continue
+    try:
+        data = json.load(open(pj))
+    except Exception as e:
+        add("malformed_plugin_json", pj, "blocker",
+            "%s is not valid JSON: %s" % (pj, e), "fix the JSON syntax", [pj])
+        continue
+    for f in ("name", "description", "version"):
+        if not data.get(f):
+            add("missing_plugin_field", pj, "high",
+                "%s is missing required field '%s'" % (pj, f),
+                "add '%s' to %s" % (f, pj), [pj])
+    name = data.get("name")
+    if name and name != d:
+        add("plugin_name_mismatch", pj, "high",
+            "%s name '%s' does not match its directory '%s'" % (pj, name, d),
+            "set name to '%s' (or rename the directory) — note this is the published plugin identity" % d,
+            [pj])
+    if mp and name in mp:
+        src = mp[name].get("source")
+        if src != "./%s" % d:
+            add("marketplace_source_mismatch", mp_path, "high",
+                "marketplace.json source for '%s' is '%s', expected './%s'" % (name, src, d),
+                "set the '%s' entry source to './%s'" % (name, d), [mp_path])
+    for s in sorted(glob.glob("%s/skills/*" % d)):
+        if os.path.isfile(s):
+            add("skill_layout", s, "high",
+                "%s is a file; a skill must be skills/<name>/SKILL.md" % s,
+                "move it to %s/SKILL.md" % os.path.splitext(s)[0], [s])
+        elif os.path.isdir(s) and not os.path.isfile(os.path.join(s, "SKILL.md")):
+            add("skill_layout", s, "high",
+                "%s/ has no SKILL.md" % s, "add %s/SKILL.md" % s, [s])
+    for a in sorted(glob.glob("%s/agents/*" % d)):
+        if os.path.isdir(a):
+            add("agent_layout", a, "medium",
+                "%s is a directory; agents must be flat agents/<name>.md files" % a,
+                "flatten it to a single agents/<name>.md", [a])
+        elif not a.endswith(".md"):
+            add("agent_layout", a, "medium",
+                "%s is not a .md file" % a, "agents/ should contain only <name>.md files", [a])
+
+print(json.dumps(findings))
+PY
+)
+  if ! jq -e . >/dev/null 2>&1 <<< "$structure_findings"; then
+    structure_findings="[]"
+    notes+=("structure_validation: scan failed (python3 error); reported no findings.")
+  else
+    local stn
+    stn=$(jq 'length' <<< "$structure_findings")
+    notes+=("structure_validation: $stn directory-layout finding(s).")
+  fi
+else
+  notes+=("structure_validation: not a plugin repo; skipped.")
+fi
+
 # --- emit --------------------------------------------------------------------
 local notes_json
 notes_json=$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s .)
@@ -318,18 +414,22 @@ jq -n \
   --argjson skill_findings    "$skill_findings" \
   --argjson ref_check_cfg     "$has_reference_checking" \
   --argjson ref_findings      "$reference_findings" \
+  --argjson struct_cfg        "$has_structure_validation" \
+  --argjson struct_findings   "$structure_findings" \
   --argjson notes             "$notes_json" '
 {
   tooling_configured: {
     plugin_version_check: $version_check_cfg,
     skill_validation:     $skill_val_cfg,
-    reference_checking:   $ref_check_cfg
+    reference_checking:   $ref_check_cfg,
+    structure_validation: $struct_cfg
   },
   findings_by_tool: (
     {} +
     (if $version_check_cfg then {plugin_version_check: $version_findings} else {} end) +
     (if $skill_val_cfg     then {skill_validation:     $skill_findings}  else {} end) +
-    (if $ref_check_cfg     then {reference_checking:   $ref_findings}    else {} end)
+    (if $ref_check_cfg     then {reference_checking:   $ref_findings}    else {} end) +
+    (if $struct_cfg        then {structure_validation: $struct_findings} else {} end)
   ),
   coverage: null,
   notes: $notes
