@@ -294,7 +294,8 @@ per-language policy templates.
 ### `development` owns
 
 - Generic skills: `bootstrap`, `commit-message`, `git-branch-naming`,
-  `cleanup`, future `maintenance` orchestrator.
+  `cleanup`, the `maintenance` orchestrator (layout under "Dispatch
+  model" below).
 - Shared scripts that operate on detected state without language
   knowledge: `detect-stack.sh`, `merge-gitignore.sh`,
   `branch-protection.sh`, `preflight.sh`, the `automate-*.sh` family.
@@ -392,6 +393,33 @@ After install, re-run /development:maintenance.
 
 Other detected languages still get processed. The user can opt to act
 on partial results.
+
+### Maintenance skill layout (orchestrator + reference docs)
+
+`development:maintenance` is one slim, invocable `SKILL.md` (Phases 0–10,
+the imperative procedure) plus a `reference/` directory holding the *why*:
+
+```
+development/skills/maintenance/
+  SKILL.md         # imperative orchestrator: flags, detect, dispatch,
+                   #   the per-stage PR cycle, summary, issue tracking
+  reference/
+    pr-cycle.md    # Phase 8 rationale: identity switch, isolation invariant,
+                   #   per-tool override, `-f -f`, post-merge state re-check
+    gather.md      # Phases 3–4/6: no-trim contract incidents, drift severities
+    report.md      # Phase 9: Snyk channel-naming table, cross-link examples
+  scripts/         # gather-/verify-<lang>, write-payload, token mint, …
+```
+
+**Convention (mirrors `bootstrap`'s `docs/`):** executable procedure —
+steps, commands, `Agent(...)` shapes, decision branches, and the lookup
+tables the orchestrator *follows* — stays inline in `SKILL.md`. The
+reasoning behind the non-obvious steps (incident history, why-this-order,
+exhaustive disambiguation tables) lives in `reference/*.md`, cited inline
+as "see `reference/<file>.md` § <heading>". The happy path never depends
+on reading a reference doc, so a missed read can't break a phase — the docs
+are there when a step's intent is unclear or an edge case fires. This keeps
+the orchestrator scannable without losing the hard-won rationale (#249).
 
 ## JSON schema (v2)
 
@@ -516,6 +544,7 @@ request side.
 ```json
 {
   "schema_version": "2",
+  "ci_fixer_agent": "python-ci-fixer",
   "plan": [
     {
       "group_id": 1,
@@ -525,6 +554,7 @@ request side.
       "files": ["src/aido/webui/mutation_routes.py", "..."],
       "rationale": "all sonarcloud findings handled together by python-sonar-triage",
       "agent": "python-sonar-triage",
+      "isolation": true,
       "suggested_pr_title": "fix(sonar): triage all 16 SonarCloud findings",
       "priority_score": 0.91
     }
@@ -572,19 +602,72 @@ agents (e.g. a pip-major Dependabot PR or Snyk Fix PR goes to
 
 Each group carries: source tool, included finding IDs, affected files,
 rationale, **the agent the orchestrator will spawn for this group's
-PR**, a suggested PR title, and a priority score. Plans are
-language-local — each language plugin produces its own.
+PR**, an `isolation` flag, an optional `pre_dispatch_hook`, a suggested
+PR title, and a priority score. Plans are language-local — each
+language plugin produces its own.
+
+**`plan[].isolation`** (boolean, default `true` when absent) tells the
+orchestrator whether to spawn the group's agent with
+`isolation="worktree"`. It is `true` for every agent that edits local
+files (the overwhelming majority) and `false` for agents that act on
+GitHub PRs via `gh` rather than the working tree (e.g.
+`python-dependabot-snyk-triage`). This is how the orchestrator decides
+isolation **from the contract**, never by matching an agent name — a
+prerequisite for a second language plugin, whose vendor-PR agent has a
+different name but the same `isolation: false` semantics.
+
+**`ci_fixer_agent`** (top-level, required) names the language plugin's
+CI-fix agent — the one the orchestrator spawns in Phase 8's CI cycle
+when a PR's checks fail (`python-ci-fixer` for `development-python`).
+It is the same constant on every dispatcher response, **including the
+Phase A `improver_result`-only response**, because Stage 0's CI cycle
+needs it before any `plan` exists. The orchestrator reads this field
+rather than hardcoding a per-language fixer name.
+
+**`plan[].pre_dispatch_hook`** (optional, per-group) lets a language
+plugin ask the orchestrator to run an environment check *before* it
+spawns the group's agent — the case where the agent depends on
+something the orchestrator can only provision interactively (a subagent
+can't prompt the user). The orchestrator dispatches on the hook's
+`type` and stays language-agnostic; all specifics (script path, target,
+the agent-prompt field to set, the user-facing label) come from the
+hook. The one `type` defined in v2 is **`runtime_availability`**:
+
+```json
+"pre_dispatch_hook": {
+  "type": "runtime_availability",
+  "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+  "target": "3.14",
+  "prompt_field": "local_verification_mode",
+  "modes": { "available": "auto", "unavailable": "skip" },
+  "label": "Python 3.14 interpreter"
+}
+```
+
+The orchestrator runs `<plugin-base-dir>/<script> detect <target>`
+(exit 0 = available, exit 1 = missing); on missing it offers
+install / self-install / skip via `AskUserQuestion`, running
+`<script> install <target>` for the install path. It then spawns the
+agent with `<prompt_field>` set to `modes.available` or
+`modes.unavailable` accordingly. This replaces the previous
+orchestrator code that hardcoded the `python-runtime-upgrade` agent
+name, its helper-script path, and the `local_verification_mode` field —
+so a second language plugin's runtime bump reuses the same protocol
+with its own script + label. An unrecognized `type` is skipped and
+surfaced as a quality bug (forward-compatibility: an older orchestrator
+ignores hook types it doesn't implement rather than failing the run).
 
 The orchestrator processes the plan **sequentially in priority order**:
 
 1. If `improver_result` is present, promote it to a PR first
-   (Stage 0): push, open, monitor CI, optionally invoke
-   `python-ci-fixer` up to 3 times on failure, pass the approval
+   (Stage 0): push, open, monitor CI, optionally invoke the CI-fix
+   agent (`ci_fixer_agent`) up to 3 times on failure, pass the approval
    gate, merge, sync local main.
-2. For each entry in `plan`, in order: spawn `plan[i].agent` with
-   `isolation="worktree"` off the latest base; the runtime returns a
-   worktree branch; push, open a PR, run the same CI cycle, pass the
-   approval gate, merge, sync. Only then move to `plan[i+1]`.
+2. For each entry in `plan`, in order: spawn `plan[i].agent` (with
+   `isolation="worktree"` when `plan[i].isolation` is `true`/absent,
+   without it when `false`) off the latest base; a worktree group
+   returns a worktree branch; push, open a PR, run the same CI cycle,
+   pass the approval gate, merge, sync. Only then move to `plan[i+1]`.
 
 **The approval gate (#224):** a maintenance merge requires an
 approving review from `claude-approver[bot]` or a human — the
@@ -593,8 +676,9 @@ CI green the orchestrator polls `reviewDecision` (10-minute budget);
 an Approver `REQUEST_CHANGES` triggers an in-run re-ingest fix round
 (max 2 per PR), and a timeout arms GitHub's native auto-merge so the
 PR merges whenever an approval eventually lands. The same rule
-applies to vendor PRs in `python-dependabot-snyk-triage` (merge only
-if already approved; otherwise arm auto-merge).
+applies to vendor PRs handled by an `isolation: false` group (in
+`development-python`, `python-dependabot-snyk-triage`): merge only
+if already approved; otherwise arm auto-merge.
 
 This serialization means each group's work runs against the latest
 post-merge state. There is no local merging, no topological ordering of

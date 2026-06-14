@@ -33,6 +33,20 @@ Supported flags in `$ARGUMENTS`:
   only spawns the agent(s) for the chosen tool. Other agents are
   skipped entirely — no work, no missing-tool recommendation.
   Combinable with `--dry-run` and `--no-merge`.
+- `--concern=<name>` — scope dispatch to a whole **concern** (a named
+  group of tools); the coarse-grained sibling of `--tool`. `<name>` must
+  be one of:
+  - `security` → `snyk_prs`, `code_scanning`, `semgrep`
+  - `dependencies` → `dependabot`
+  - `codequality` → `sonarcloud`, `ruff`
+
+  It expands to that tool set and scopes dispatch exactly like `--tool`,
+  just to several tools at once — the gather phase still runs for
+  everything, only dispatch is narrowed. Combinable with `--dry-run` and
+  `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
+  other). The three concerns partition all six tools, so
+  `--concern=security` + `--concern=dependencies` + `--concern=codequality`
+  together cover the same set as an unscoped run.
 - `--track-as-issues` — after the run completes, create / update /
   close GitHub tracking issues for each scanner tool's remaining
   findings. One issue per tool (`ruff`, `semgrep`, `code_scanning_alerts`,
@@ -48,6 +62,14 @@ When `--tool=<name>` is set, validate `<name>` against the known set
 above before proceeding. On a mismatch, halt with: "Unknown --tool
 '<name>'; supported: ruff, semgrep, code_scanning, snyk_prs,
 sonarcloud, dependabot."
+
+When `--concern=<name>` is set, validate `<name>` against `security`,
+`dependencies`, `codequality`. On a mismatch, halt with: "Unknown
+--concern '<name>'; supported: security, dependencies, codequality."
+Expand it to its tool set (above) and carry that set forward as the
+dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
+exactly as it does for `--tool`. If **both** `--tool` and `--concern`
+are passed, halt with: "Pass --tool or --concern, not both."
 
 ## Phase 1 — detect
 
@@ -336,23 +358,14 @@ After per-language gathers complete, run the template-drift detector
 template_drift=$("<skill-base-dir>/scripts/detect-template-drift.zsh" "$(pwd)")
 ```
 
-The detector reads each tracked rendered file's
-`# claude-bootstrap: rendered from … sha256:<H>` marker (#213) and
-compares the recorded sha256 against the current template's sha256.
-Output is a JSON array of findings, possibly empty. Severities:
-
-| Severity | What it means |
-|---|---|
-| `drifted` | Marker present, template hash has moved upstream — re-bootstrap or patch to pick up fixes. |
-| `unknown_provenance` | File lacks a marker (rendered before #213 shipped, or hand-created). Can't verify drift. |
-| `template_missing` | Marker references a template path that no longer exists upstream (renamed/deleted). |
-| `malformed_marker` | Marker present but unparseable — corrupted by hand-edit. |
-
-These findings do **not** enter `findings_by_tool` and are **not**
-routed to any per-tool triage agent in v1. v1 is detect-only: surface
-the findings in Phase 9's summary and let the user decide between
-re-bootstrap, manual patch, or accepting the drift. Store
-`$template_drift` so Phase 9 can render it.
+It emits a JSON array of findings (possibly empty), each with a
+severity: `drifted`, `unknown_provenance`, `template_missing`, or
+`malformed_marker` (detector mechanics + severity meanings in
+`reference/gather.md` § Template-drift severities). In v1 these are
+**detect-only** — they do not enter `findings_by_tool` or route to any
+triage agent. Store `$template_drift` and surface it in Phase 9's
+summary; the user decides between re-bootstrap, manual patch, or
+accepting the drift.
 
 ## Phase 4 — construct one payload per supported language
 
@@ -387,12 +400,20 @@ schema v2:
 }
 ```
 
-When `--tool=<name>` was passed in Phase 0, also add the optional
-`dispatch_filter` field to the payload (omit it entirely otherwise):
+When `--tool=<name>` **or** `--concern=<name>` was passed in Phase 0,
+also add the optional `dispatch_filter` field to the payload (omit it
+entirely otherwise):
 
 ```json
-"dispatch_filter": { "only_tools": ["<name>"] }
+"dispatch_filter": { "only_tools": ["<tool>", "..."] }
 ```
+
+`only_tools` is the scoped tool set: a single-element list for `--tool`,
+or the concern's expanded tool set for `--concern` (e.g.
+`["snyk_prs", "code_scanning", "semgrep"]` for `--concern=security`).
+The field shape is identical either way — the language plugin already
+treats `only_tools` as a set, so no plugin change is needed to support
+multi-tool scoping.
 
 This is what the language plugin reads to know it should skip every
 other agent. The gather output is unchanged — only dispatch is scoped.
@@ -416,11 +437,11 @@ don't exist.
 because there are "many"; do not truncate
 `findings_by_tool.dependabot[].body` because it contains 10 KB+ of
 release notes; do not flatten or summarise any nested value. The full
-**no-trim contract** — including the two real incidents that motivated
-it — is documented in Phase 6. Construction is where the trimming
-most commonly enters; if the payload you build here already has
-fields shortened, Phase 6's contract is broken before dispatch even
-starts.
+**no-trim contract** is the rule in Phase 6 (the two real incidents
+that motivated it are in `reference/gather.md`). Construction is where
+the trimming most commonly enters; if the payload you build here
+already has fields shortened, Phase 6's contract is broken before
+dispatch even starts.
 
 ## Phase 5 — `--dry-run`?
 
@@ -465,66 +486,26 @@ inline limit. A maintenance run on a project with 200+ Dependabot PRs
 
 ### No-trim contract — known recurring bug
 
-Payload trimming by the orchestrator has been observed in **two real
-maintenance runs**, despite the previous version of this section
-already saying "pass the payload as-is." The prose below is the
-strengthened replacement; the earlier wording was not enough to
-prevent the trimming.
+**Pass the payload as-is.** Do not trim, summarise, drop fields,
+sample, flatten, or restructure any value before the `Skill(...)`
+call — not `coverage.by_module` (every module, even 80+), not the full
+`findings_by_tool.dependabot[].body` / `snyk_prs[].body` (even 10 KB of
+release notes), not `code_scanning_alerts[]`, not any other field.
+Downstream agents parse fields the orchestrator never reads, so
+trimming silently changes routing.
 
-The two incidents:
+**Self-check before each dispatch:** the JSON written to the temp file
+must be character-for-character identical to the payload you built in
+Phase 4. If you "tidied up," "shortened," "deduplicated," or
+"summarised" anything, the contract is broken — reconstruct from
+`findings-<lang>.json` and dispatch again.
 
-- **2026-06-05** — scoped `--tool=dependabot` run. The orchestrator
-  dropped entries from `coverage.by_module` because it judged the
-  payload "had lots of entries." The dispatcher's safety net halted
-  with `human_action_required` citing missing coverage data; the
-  orchestrator caught itself mid-narration and re-dispatched with the
-  full payload.
-- **2026-06-06** — full run. The orchestrator truncated
-  `findings_by_tool.dependabot[].body` because it judged "10 KB+
-  release notes per PR pushed the payload to ~70 KB." The triage
-  agent's `gh` refetch silently compensated — that is **lucky, not
-  correct**. Pre-spawn routing decisions that depend on body content
-  would have routed wrong.
-
-**The rule, with no judgement attached: pass the payload as-is.** Do
-not trim, summarise, drop fields, sample, flatten, or restructure
-any value before the `Skill(...)` call. The fields that have been
-trimmed in the wild — and that downstream code reads — include:
-
-- `coverage.by_module` — every module, every row. Eighty-plus
-  modules is normal; do not sample because there are "many."
-- `findings_by_tool.dependabot[].body` — the full body, even when
-  it's 10 KB of release notes. The triage agent reads it for
-  grouped-PR member lists, release-notes breaking-change flags, and
-  Dependabot compatibility scores.
-- `findings_by_tool.snyk_prs[].body` — same rule, same reasons.
-- `findings_by_tool.code_scanning_alerts[]` — every alert, every
-  field; `python-major-upgrade` and a future runtime-upgrade agent
-  consume fields the orchestrator does not see used in the immediate
-  dispatch.
-
-And every other schema field. Trimming silently changes routing
-because downstream agents parse fields the orchestrator never read.
-
-**On payload size.** Both observed incidents (~70 KB and smaller)
-were well below any actual Skill-tool limit — the trimming was a
-behavioural error, not a capacity workaround. With v2's file-based
-handover (above), payload size no longer enters the Skill-tool's
-input budget at all — the `args=` value is a ~80-byte path, regardless
-of whether the payload behind it is 5 KB or 5 MB. The previous
-"200 KB inline ceiling" + `human_action_required` escape valve is
-gone; do not reintroduce it.
-
-If a payload routinely grows multi-MB, file a quality bug against
-the gather script — it should not produce that much. But payload
-size is never a justification for trimming.
-
-**Self-check before each dispatch.** The JSON contents written to
-the temp file should be character-for-character identical to the
-payload you constructed in Phase 4. If you cannot say that with
-certainty — because you "tidied up," "shortened," "deduplicated,"
-or "summarised" something — the contract is broken. Reconstruct the
-payload from `findings-<lang>.json` and dispatch again.
+This rule is incident-driven (the orchestrator trimmed payloads in
+**two real runs**) and payload size is never a justification — v2's
+file-handover makes the `args=` value an ~80-byte path regardless of
+payload size, so the old "200 KB inline ceiling" escape valve is gone;
+do not reintroduce it. See `reference/gather.md` § No-trim contract for
+the two incidents and the per-field detail of what downstream reads.
 
 The dispatcher's internal Phase A / Phase B sequencing — when it spawns
 the coverage-improver, when it runs the planner, what payload validation
@@ -559,7 +540,13 @@ each group's PR cycle (push → CI → merge → sync) completes before the
 next group starts off the just-merged main. The one exception is the
 coverage-improver itself, which the dispatcher spawns during Phase A.
 
-Capture each response, keyed by language.
+Capture each response, keyed by language. Also read
+`response.ci_fixer_agent` — the language plugin's CI-fix agent, spawned
+by Phase 8's CI cycle when a PR's checks fail. It is present in **every**
+response shape (including the Phase A `improver_result`-only response),
+so it is available before any `plan` exists — Stage 0's CI cycle needs
+it. Never substitute a hardcoded fixer name; use the one the dispatcher
+returned.
 
 If a `Skill(...)` invocation fails (plugin not actually registered
 despite the gather script existing — shouldn't happen but defend
@@ -574,6 +561,13 @@ recommendations through to the user-facing summary and **skip all
 remaining phases for that language**. Other languages still proceed.
 
 ## Phase 8 — per-stage PR cycle
+
+> The steps below are the imperative procedure. The *why* behind the
+> non-obvious ones — the identity switch, the isolation invariant, the
+> per-tool override, `-f -f`, the post-merge state re-check, and more —
+> lives in [`reference/pr-cycle.md`](reference/pr-cycle.md), cited inline
+> as "see `reference/pr-cycle.md` § …". You don't need it to run the happy
+> path; reach for it when a step's intent is unclear or an edge case fires.
 
 Replaces the old "merge worktree branches locally" with a remote-first
 flow: each stage (coverage improvement + each planner group) becomes
@@ -605,19 +599,10 @@ maint_token=$("<skill-base-dir>/scripts/mint-maintenance-token.zsh")
 GH_TOKEN="$maint_token" gh pr create --base ... --head ... --title ... --body ...
 ```
 
-Why this matters for the Approver loop:
-
-- The Approver's default author allowlist
-  (`CLAUDE_APPROVER_AUTHOR_ALLOWLIST` per-repo variable) is
-  **machine-only** by default and includes the maintenance bot's real
-  owner-suffixed login (e.g. `claude-maintenance-<owner>[bot]`, #229).
-  Without the identity switch, maintenance PRs would be authored by
-  the user, the allowlist would reject them, and the Approver would
-  not evaluate the PR at all — the entire Approver→maintenance loop
-  would never start.
-- The Approver's anti-rubber-stamp gate (PR author has no
-  `claude-approver` prefix) fires correctly: the maintenance and
-  approver Apps are distinct identities by design.
+This identity switch is what lets the Approver evaluate maintenance PRs
+at all — its author allowlist is machine-only and its anti-rubber-stamp
+gate requires a non-`claude-approver` author. See `reference/pr-cycle.md`
+§ Why the identity switch matters for the Approver loop.
 
 The installation token has a 1-hour lifetime. If a maintenance run
 takes longer than an hour and you need another `gh pr create`, re-mint
@@ -700,16 +685,18 @@ For each entry in `response.plan`, in priority order:
    after all prior merges (initially `worktree.base_branch`; updated
    after each merge by the sync step).
 
-2. **Spawn the group's agent with `isolation="worktree"`.** This is
-   the single most load-bearing parameter in the call. **Omitting it
-   silently breaks the entire per-group-PR invariant**: the agent
-   then edits the main workspace instead of a fresh worktree branch,
-   its changes land on `main`'s working tree, and you (the
-   orchestrator) end up creating a branch + commit ad-hoc after the
-   fact — exactly the failure mode this phase exists to prevent.
+2. **Spawn the group's agent.** Whether the agent runs in a worktree
+   is governed by **`plan[i].isolation`** from the dispatcher's plan
+   (boolean; treat absent as `true`). You decide isolation **from the
+   contract, never by matching an agent name** — see ARCHITECTURE.md
+   § "JSON schema (v2)".
 
-   **Always pass `isolation="worktree"`, every group, no exceptions
-   for work agents.** Use this exact call shape:
+   **`plan[i].isolation` is `true` (or absent) → pass
+   `isolation="worktree"`.** This is load-bearing: omitting it for a
+   file-editing group breaks the per-group-PR invariant (the agent
+   edits the main workspace instead of a worktree branch). See
+   `reference/pr-cycle.md` § Why isolation is load-bearing. Use this
+   exact call shape:
 
    ```
    Agent(
@@ -732,55 +719,81 @@ For each entry in `response.plan`, in priority order:
    )
    ```
 
-   Only exception: `python-dependabot-snyk-triage` is spawned WITHOUT
-   `isolation` (it acts on GitHub PRs via `gh`, not local files).
-   See the dispatcher SKILL for the full case list.
+   **`plan[i].isolation` is `false` → spawn WITHOUT `isolation`.** The
+   group's agent acts on GitHub PRs via `gh`, not on local files, so it
+   needs no worktree (in `development-python` this is
+   `python-dependabot-snyk-triage`; a second language plugin's
+   vendor-PR agent carries the same `isolation: false` and is handled
+   identically). It returns no worktree branch — steps 3–7 below that
+   push/merge a worktree branch do not apply; follow the dispatcher
+   SKILL's case list for what such an agent reports back.
 
-   **Pre-flight for `python-runtime-upgrade` groups.** Before spawning
-   this agent, the orchestrator must check whether the target runtime
-   is locally available — the agent's cascade depends on it, and
-   subagents can't prompt the user interactively, so this decision must
-   happen here.
+   **Pre-dispatch hook (when `plan[i].pre_dispatch_hook` is present).**
+   Some groups need an environment check before their agent is spawned —
+   e.g. a runtime-upgrade agent's cascade depends on the target
+   interpreter being installed locally, and subagents can't prompt the
+   user interactively, so the decision must happen here. The orchestrator
+   has **no language knowledge**: it runs the hook the plan attached,
+   dispatching on the hook's `type`, and passes the outcome to the agent
+   via the field the hook names. When `pre_dispatch_hook` is absent, skip
+   straight to step 3.
 
-   Interpreter detection + install is **plugin-owned** (the orchestrator
-   has no language-specific knowledge). For Python, invoke the
-   development-python plugin's helper script:
+   The only hook `type` defined in v2 is **`runtime_availability`**:
 
-   ```bash
-   "<plugin-base-dir>/development-python/scripts/pre-dispatch-runtime-upgrade.sh" \
-     detect "<to_version>"
+   ```json
+   "pre_dispatch_hook": {
+     "type": "runtime_availability",
+     "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+     "target": "3.14",
+     "prompt_field": "local_verification_mode",
+     "modes": { "available": "auto", "unavailable": "skip" },
+     "label": "Python 3.14 interpreter"
+   }
    ```
 
-   The script extracts `<to_version>` from the plan entry (e.g. `3.14`
-   from a `python:3.14-slim-bookworm` PR), probes the standard install
-   locations, and prints a JSON result on stdout. Exit 0 if the runtime
-   is found, exit 1 if missing.
+   `script` is relative to `<plugin-base-dir>` and the planner has
+   already extracted `target` (e.g. `3.14` from a
+   `python:3.14-slim-bookworm` PR). Run its `detect` subcommand:
 
-   - **Found** (exit 0) → spawn the agent with `local_verification_mode:
-     "auto"` and proceed normally (the agent runs the 3-pass cascade).
-   - **Missing** (exit 1) → **ask the user** via `AskUserQuestion` with
-     exactly these three options:
+   ```bash
+   "<plugin-base-dir>/<pre_dispatch_hook.script>" detect "<pre_dispatch_hook.target>"
+   ```
 
-     1. **"Install the runtime now"** — orchestrator runs the script's
-        `install <to_version>` subcommand, then re-runs `detect`. If
+   The script probes the standard install locations and prints a JSON
+   result on stdout. Exit 0 = the runtime is available, exit 1 = missing.
+
+   - **Available** (exit 0) → spawn the agent, adding
+     `<prompt_field>: <modes.available>` to its prompt, and proceed
+     normally.
+   - **Missing** (exit 1) → **ask the user** via `AskUserQuestion`,
+     naming `<label>` in the question, with exactly these three options:
+
+     1. **"Install <label> now"** — orchestrator runs the script's
+        `install <target>` subcommand, then re-runs `detect`. If
         re-detect still fails, surface the install error and re-ask the
         user (don't silently fall through to skip).
      2. **"I'll install it myself"** — pause, point the user at the
         plugin's installation guidance, then ask a follow-up
         `AskUserQuestion` "Ready to continue?" with options
-        ["Yes, re-check", "Cancel — skip local verify"]. On "Yes,
-        re-check", re-run the `detect` subcommand; loop at most once,
-        then fall through to skip.
-     3. **"Skip local verification"** — spawn the agent with
-        `local_verification_mode: "skip"`. The agent edits + commits
-        the Dockerfile + `requires-python` only; CI does the real
-        verification.
+        ["Yes, re-check", "Cancel — skip"]. On "Yes, re-check", re-run
+        the `detect` subcommand; loop at most once, then fall through to
+        skip.
+     3. **"Skip"** — spawn the agent with
+        `<prompt_field>: <modes.unavailable>`. The agent makes only the
+        changes it can without local verification (for the runtime
+        upgrade: the Dockerfile + `requires-python` edits only); CI does
+        the real verification.
 
-   The agent's prompt gains one extra field:
+   The agent's prompt gains one extra field, named by the hook:
 
    ```
-   local_verification_mode: "auto" | "skip"
+   <pre_dispatch_hook.prompt_field>: <modes.available> | <modes.unavailable>
    ```
+
+   If `pre_dispatch_hook.type` is unrecognized, skip the hook, spawn the
+   agent without the extra field, and record it in the Phase 9 summary as
+   a quality bug — the plan referenced a hook protocol this orchestrator
+   version doesn't implement.
 
 3. **Wait for the agent** → receive **both** the worktree branch and
    the worktree path. The Claude Code runtime returns both alongside
@@ -788,12 +801,11 @@ For each entry in `response.plan`, in priority order:
    both** — the branch is what you push, the path is what you
    `git worktree remove` post-merge (step 6 in the CI cycle below).
 
-   **If the agent comes back without a worktree branch and the main
-   workspace has uncommitted changes, that's a contract violation,
-   not a graceful path.** Surface it in the summary as a quality bug.
-   Do NOT silently create a `maint/...` branch from the dirty main
-   workspace — that masks the underlying failure and breaks
-   reproducibility for subsequent stages.
+   **If the agent returns no worktree branch but the main workspace is
+   dirty, that's a contract violation** — surface it as a quality bug;
+   do NOT bridge it by creating a `maint/...` branch from the dirty
+   workspace. See `reference/pr-cycle.md` § Worktree-branch contract
+   violations.
 4. **Push** the worktree branch to origin, **open the PR** against the
    effective base branch (titled per the plan entry's
    `suggested_pr_title`), and capture the new PR number.
@@ -816,11 +828,10 @@ For each entry in `response.plan`, in priority order:
    matching who opened the replacement. Without the token, fall back
    to the user's `gh` auth.
 
-   Close **before** the CI cycle starts (next step), not after merge:
-   the vendor's PR list stays clean while the replacement waits in
-   review, and Dependabot stops rebasing the superseded PR. If the
-   replacement is later rejected, reopen the vendor PR with
-   `gh pr reopen <n>` — no data is lost.
+   Close **before** the CI cycle starts (next step), not after merge,
+   and reopen with `gh pr reopen <n>` if the replacement is later
+   rejected. See `reference/pr-cycle.md` § Why close superseded vendor
+   PRs before the CI cycle.
 6. **Run the CI cycle** (same as Stage 0).
 7. **After merge, sync local main**.
 8. Continue to the next group.
@@ -837,12 +848,12 @@ After pushing and opening the PR:
    `QUEUED` state.)
 2. **If all checks pass** → proceed to step 5 (approval gate) below.
 3. **If any check fails**, distinguish **new** from **pre-existing**
-   failures before spending tokens on `python-ci-fixer`.
+   failures before spending tokens on the CI-fix agent
+   (`<response.ci_fixer_agent>`, captured in Phase 6).
 
-   A failure that's already failing on `<base_branch>` is not caused
-   by this PR — it belongs on the project's main, not on a maintenance
-   PR that didn't touch its cause. Spawning the fixer on it wastes
-   tokens and can produce confusing "fixes" that don't apply.
+   A failure already red on `<base_branch>` isn't caused by this PR —
+   classifying first avoids wasting fixer tokens on it (see
+   `reference/pr-cycle.md` § New vs pre-existing failures).
 
    Run the classification:
 
@@ -864,46 +875,18 @@ After pushing and opening the PR:
    comm -12 /tmp/pr_fail.json /tmp/base_fail.json > /tmp/preexisting_fail.json
    ```
 
-   (`gh` returns JSON arrays; `comm` needs sorted line-delimited input.
-   `jq -r '.[]'` between the two converts JSON arrays to lines if the
-   piping is awkward — adapt as needed for the shell. The intent is
-   the set diff, not the exact incantation.)
+   (The intent is the set diff, not the exact incantation — see
+   `reference/pr-cycle.md` § New vs pre-existing failures for the
+   `gh`/`comm`/`jq` shell notes.)
 
    **Per-tool override (conservative).** Before treating any check as
-   pre-existing, **promote any check that matches THIS PR's own tool
-   back into the "investigate" bucket**. The PR's tool is
-   `plan[i].tool` for the current group (or `coverage` for the
-   improver Stage 0 PR). A same-tool failure on the PR is never
-   trusted as "pre-existing" because the work agent was responsible
-   for resolving the tool's findings completely — under the planner's
-   one-group-per-agent rule, there are no "other groups" of the same
-   tool to absorb the blame. The failure means either:
-
-   - the agent's fix didn't actually land (incomplete commit, bad
-     patch), or
-   - a finding the agent intentionally left in `actions_requiring_review`
-     is now blocking CI.
-
-   In both cases the right move is to investigate, not silently merge.
-   `python-ci-fixer` will dig into the log and either fix the
-   remaining failures or escalate with an actionable recommendation.
-
-   Tool → check-name correspondence is judgment-based; use substring
-   match on the tool key (case-insensitive). Examples:
-
-   - PR is a sonar group → `plan[i].tool == "sonarcloud"`. A failing
-     `sonarcloud` (or `sonar-quality-gate`, etc.) check is this PR's
-     own tool — keep in the new-failures bucket. A failing `image`
-     (Snyk container) check is a different tool — eligible for
-     pre-existing-skip.
-   - PR is a `snyk_prs` or `dependabot` group → `plan[i].tool` is
-     `"snyk_prs"` or `"dependabot"`. A failing CI check that matches
-     the same vendor's other PR signals (e.g. another Snyk App check)
-     is this PR's own tool. A failing `code-scanning`/`codeql` check
-     is a different tool — eligible for pre-existing-skip.
-   - Stage 0 (coverage improver) → treat the project's coverage gate
-     check (typically Sonar's QG "new code coverage") as the PR's
-     own tool; everything else is eligible for skip.
+   pre-existing, **promote any check matching THIS PR's own tool back
+   into the "investigate" bucket** — the PR's tool is `plan[i].tool`
+   (or `coverage` for the Stage 0 improver PR), matched against check
+   names by case-insensitive substring. A same-tool failure is never
+   trusted as "pre-existing". See `reference/pr-cycle.md` § Per-tool
+   override for the reasoning and worked examples (sonar / snyk_prs /
+   dependabot / Stage 0).
 
    After applying this override:
 
@@ -913,8 +896,8 @@ After pushing and opening the PR:
      gating, proceed to step 5 (approval gate). Record in the run
      summary so the user knows they're still red.
    - **At least one same-tool failure** OR **at least one new
-     non-same-tool failure** → spawn `python-ci-fixer` for that
-     combined set. Pass two things in its prompt:
+     non-same-tool failure** → spawn `<response.ci_fixer_agent>` for
+     that combined set. Pass two things in its prompt:
 
      - `failing_checks: <list>` — the names from the combined bucket
        above (truly-pre-existing failures are NOT in this list).
@@ -947,8 +930,9 @@ After pushing and opening the PR:
      other tools' checks are out of scope (escalated). Same-tool
      scope is exhaustive — `pr_scope.findings` is informational
      context for the fixer (what the work agent intended to address),
-     not a filter for narrowing scope further. See
-     `python-ci-fixer.md` step 3 for the full decision table.
+     not a filter for narrowing scope further. See the CI-fix agent's
+     own doc for the full decision table (for `development-python`,
+     `python-ci-fixer.md` step 3).
 
 4. **Process the fixer's response.** The fixer returns JSON
    distinguishing three outcomes:
@@ -1047,15 +1031,10 @@ After pushing and opening the PR:
    # <worktree_path> is what the Agent runtime returned alongside the
    # branch name in step 3 — capture both, use both here.
    #
-   # IMPORTANT: use -f -f (double force), not --force / -f.
-   # Claude Code's Agent runtime locks every worktree it creates
-   # (lock reason: "claude agent agent-<id>"). The lock survives even
-   # after the originating claude process exits, so single -f errors
-   # out with "cannot remove a locked working tree". -f -f overrides
-   # the lock AND any uncommitted state. Without this, the remove
-   # silently fails, the local branch stays attached to the worktree,
-   # gh pr merge --delete-branch fails to delete the local ref, and
-   # the worktree accumulates across runs.
+   # IMPORTANT: -f -f (double force), not single -f — agent worktrees
+   # are locked by the runtime and the lock survives process exit, so
+   # single -f fails with "cannot remove a locked working tree". See
+   # reference/pr-cycle.md § Why `-f -f` (double force) on worktree removal.
    git -C "<repo.path>" worktree remove "<worktree_path>" -f -f
 
    # Now gh can cleanly delete the merged branch from both ends.
@@ -1078,13 +1057,10 @@ After pushing and opening the PR:
    ```
 
 8. **Re-run the state pre-flight from Phase 3.** A merge — especially
-   of a runtime-version-bumping PR — can change the project's
-   declared configuration, leaving local state (venv, toolchain cache,
-   etc.) inconsistent. Without this re-check, subsequent stages'
-   agents run their verification against state that no longer matches
-   what's on `main`, producing false-positive errors and missed
-   regressions (the live test on ai-doc-organizer's Stage 7 surfaced
-   exactly this for the Python venv case after a 3.13 → 3.14 merge).
+   of a runtime-version-bumping PR — can leave local state (venv,
+   toolchain cache, etc.) inconsistent with the new `main`, so later
+   stages would verify against stale state. See `reference/pr-cycle.md`
+   § Why re-run the state pre-flight after each merge.
 
    Invoke the same per-language helper from Phase 3:
 
@@ -1139,17 +1115,10 @@ name, bug type, version pin, etc.). If you find one, append
 `(see #<n>)` to the advisory line so the user isn't pointed at
 investigation work that's already filed.
 
-Examples of the kind of match worth surfacing:
-
-- An advisory about a ruff py314 bug → matches an issue titled
-  "Re-enable ruff format once upstream py314 except-tuple bug is
-  fixed" → emit `(see #38)`.
-- An advisory about a Snyk container CVE → matches an issue titled
-  "Suppress Debian base-image CVEs in .snyk" → emit `(see #N)`.
-
 Be conservative — only cross-link when the topical match is
 unambiguous. A wrong `(see #N)` is worse than no link. If you're
-unsure, omit the link.
+unsure, omit the link. (Worked examples in `reference/report.md`
+§ Cross-linking known issues.)
 
 The same applies for the **plugin repo's** issues
 (`timo-jakob/timos-claude-code-plugins`) when the advisory is about
@@ -1158,39 +1127,18 @@ a known agent quirk) — use `gh issue list --repo <plugin-repo>`.
 
 ### Snyk channel naming
 
-The Render template below mentions Snyk channels in its pre-existing-failures
-section. These rules govern *how to name the channel* when emitting a line —
-they are guidance for you, not output.
-
-Snyk surfaces findings through *three* independent channels, and run-note
-prose has historically confused them. Disambiguate before naming:
-
-| Check / job name shape | Channel | Notes |
-|---|---|---|
-| `security/snyk (<org>)`, `code/snyk (<org>)`, `open-source/snyk (<org>)` | Snyk **GitHub App** (integration PR checks, posted from app.snyk.io) | Primary SAST + OSS signal for projects with the App installed. |
-| `image` job in the workflow (running `snyk container test`) | CI workflow job | Scans the freshly-built container image, which the GitHub App cannot see. |
-| `snyk-code`, `snyk-open-source` jobs in the workflow (running `snyk code test` / `snyk test --all-projects`) | CI workflow jobs | When present, they duplicate the GitHub App's SAST + OSS signal AND burn private-test quota. If they appear in a failure list, suggest replacing them with the GitHub App. |
-
-When a `security/snyk (<org>)` check fails with state `ERROR` (not
-`FAILURE`), it is almost always an **infrastructure** condition (most
-commonly the org's monthly private-test quota is exhausted), not a
-finding on the PR's diff. Phrase it that way:
-
-> security/snyk (<org>): ERROR state from the Snyk GitHub App's
-> integration check — typically quota exhaustion on the org's monthly
-> private-test budget. Top up the plan or wait for the monthly reset.
-
-Do **not** describe such a failing check as a "legacy CI job to
-remove" — the GitHub App's PR check is the canonical signal, not
-legacy. Check the actual workflow file before suggesting removals.
-
-If the maintenance gather's per-language Snyk script emitted a summary
-into `notes[]` of the form `Snyk findings via REST API (no quota
-consumed): X code, Y OSS. Projects scanned: ...`, include that note
-verbatim in the "Notes from the gather step" section of the Render
-output — it tells the user the maintenance pipeline did NOT burn quota
-this run, which is load-bearing diagnostic when the GitHub App's check
-is erroring.
+When the Render template's pre-existing-failures section names a Snyk
+channel, disambiguate the **three** independent Snyk channels — the Snyk
+GitHub App PR checks (`security/snyk (<org>)` etc.), the workflow `image`
+job (`snyk container test`), and any legacy in-workflow `snyk-code` /
+`snyk-open-source` jobs. Phrase a `security/snyk (<org>)` **ERROR** state
+as an infrastructure/quota condition, not a finding on the diff (never
+call it a "legacy job to remove" — check the workflow first). And surface
+any `Snyk findings via REST API (no quota consumed): …` gather note
+verbatim in the "Notes from the gather step" section. Full channel table,
+the exact ERROR phrasing, and the no-quota-note rule live in
+`reference/report.md` § Snyk channel naming — guidance for you, not
+output.
 
 ### Render
 
@@ -1207,6 +1155,10 @@ Languages processed: <comma-separated list from supported>
 ⚠ Scoped to single tool: <name>
   Other tools were gathered but not dispatched. Re-run without --tool
   to process them.
+<If --concern=<name> was set:>
+⚠ Scoped to concern: <name> (tools: <comma-separated expanded set>)
+  Tools outside this concern were gathered but not dispatched. Re-run
+  without --concern (or with the other concerns) to process them.
 
 <If unsupported is non-empty:>
 ⚠ Languages detected but not yet supported:

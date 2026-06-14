@@ -173,6 +173,7 @@ Emit a single JSON object. **No prose, no preamble, no trailing text.**
       "files": ["src/aido/webui/mutation_routes.py", "src/aido/cli.py", "..."],
       "rationale": "all sonarcloud findings handled together by python-sonar-triage",
       "agent": "python-sonar-triage",
+      "isolation": true,
       "suggested_pr_title": "fix(sonar): triage all 16 SonarCloud findings",
       "priority_score": 0.91
     },
@@ -184,6 +185,7 @@ Emit a single JSON object. **No prose, no preamble, no trailing text.**
       "files": [],
       "rationale": "patch upgrade routes to python-dependabot-snyk-triage",
       "agent": "python-dependabot-snyk-triage",
+      "isolation": false,
       "suggested_pr_title": "fix(deps): merge Snyk Fix PR for jinja2",
       "priority_score": 0.81
     }
@@ -204,6 +206,35 @@ Emit a single JSON object. **No prose, no preamble, no trailing text.**
   etc.). With the one-group-per-agent rule the rationale is mostly
   mechanical, but stating it explicitly makes the plan self-documenting.
 - `priority_score` — the group's score, rounded to 2 decimals.
+- `isolation` — boolean telling the orchestrator whether to spawn the
+  group's agent in a worktree. Set `false` **only** for
+  `python-dependabot-snyk-triage` groups (the agent acts on GitHub PRs
+  via `gh`, not on local files, so it needs no worktree). Every other
+  agent edits local files — set `true`. The orchestrator reads this
+  field instead of matching on the agent name; see ARCHITECTURE.md
+  § "JSON schema (v2)".
+- `pre_dispatch_hook` — **only on `python-runtime-upgrade` groups**;
+  omit it on every other group. It tells the orchestrator to verify the
+  target interpreter is installed locally before spawning the agent (the
+  agent's cascade needs it, and subagents can't prompt the user). Emit
+  the `runtime_availability` shape, filling `target` with the Python
+  version this group upgrades to (the `Z.W` from `python:Z.W-...`):
+
+  ```json
+  "pre_dispatch_hook": {
+    "type": "runtime_availability",
+    "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+    "target": "3.14",
+    "prompt_field": "local_verification_mode",
+    "modes": { "available": "auto", "unavailable": "skip" },
+    "label": "Python 3.14 interpreter"
+  }
+  ```
+
+  The orchestrator runs the protocol generically and passes the outcome
+  to the agent as `local_verification_mode` (`auto` when the interpreter
+  is present or installed, `skip` when the user declines). See
+  ARCHITECTURE.md § "JSON schema (v2)".
 - `suggested_pr_title` — follows conventional commit style; lowercase,
   no trailing period. Used both as the agent's commit message subject
   and as the PR title in Phase 8.
