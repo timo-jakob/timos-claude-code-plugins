@@ -19,7 +19,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills.",
-      "version": "1.18.3",
+      "version": "1.18.4",
       "author": {
         "name": "Timo Jakob"
       },
@@ -38,8 +38,8 @@
     },
     {
       "name": "development-claude-plugin",
-      "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test) and a maintenance dispatcher that validates plugin conventions and composes alongside the language plugin. Validators: version sync (claude-plugin-version-sync) and SKILL.md/agent frontmatter (claude-plugin-skill-validator). More (orphaned references, directory structure) follow.",
-      "version": "1.2.0",
+      "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test) and a maintenance dispatcher that validates plugin conventions and composes alongside the language plugin. Validators: version sync, SKILL.md/agent frontmatter, and orphaned skill/agent references. Directory-structure validation follows.",
+      "version": "1.3.0",
       "author": {
         "name": "Timo Jakob"
       },

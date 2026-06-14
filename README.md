@@ -198,11 +198,11 @@ Topic plugin for projects that **are** Claude Code plugins (marker: a
 dispatches to both when a repo matches (this repo is a Claude plugin; a plugin
 repo that is also Python gets both dispatchers).
 
-**What's built:** the test harness, plus the maintenance dispatcher with two
+**What's built:** the test harness, plus the maintenance dispatcher with three
 validators — `claude-plugin-version-sync` (`plugin.json` ↔ `marketplace.json`
-version drift) and `claude-plugin-skill-validator` (SKILL.md / agent frontmatter
-contract). Further validators (`-reference-checker`, `-structure-validator`) land
-in follow-up slices — see
+version drift), `claude-plugin-skill-validator` (SKILL.md / agent frontmatter
+contract), and `claude-plugin-reference-checker` (orphaned slash-command / agent
+references). The `-structure-validator` lands in a follow-up slice — see
 [issue #217](https://github.com/timo-jakob/timos-claude-code-plugins/issues/217).
 
 **Skills:**
@@ -218,6 +218,7 @@ in follow-up slices — see
 |-------|-------|-------|
 | claude-plugin-version-sync | haiku | Syncs `marketplace.json` version entries to each plugin's `plugin.json` (the source of truth); escalates add/remove-entry decisions to human review |
 | claude-plugin-skill-validator | sonnet | Triages SKILL.md / agent frontmatter findings (missing/invalid `name`/`description`/`model`/`tools`, empty body); fixes name-to-location mismatches, escalates authored-content gaps |
+| claude-plugin-reference-checker | sonnet | Triages orphaned `/<plugin>:<skill>` and agent references; fixes clear typos of a defined name, escalates removed-target / planned-work cases |
 
 > ⚠️ **Cost**: a full maintenance run as a test is a real autonomous
 > child session (tens of thousands of tokens). Narrow `--task` to one

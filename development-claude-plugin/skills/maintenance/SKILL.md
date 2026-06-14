@@ -51,10 +51,12 @@ slices):
 |---|---|---|
 | `plugin_version_check` | `claude-plugin-version-sync` (haiku) | mechanical, low-risk |
 | `skill_validation`     | `claude-plugin-skill-validator` (sonnet) | triage / judgment |
+| `reference_checking`   | `claude-plugin-reference-checker` (sonnet) | triage / judgment |
 
 ```bash
 jq '{version: (.findings_by_tool.plugin_version_check // []),
-     skills:  (.findings_by_tool.skill_validation // [])}' "$ARGUMENTS"
+     skills:  (.findings_by_tool.skill_validation // []),
+     refs:    (.findings_by_tool.reference_checking // [])}' "$ARGUMENTS"
 ```
 
 Respect `dispatch_filter` if present: only build groups for tools listed in
@@ -66,12 +68,13 @@ that's correct; the language plugin handles those.)
 
 For each handled tool with a **non-empty** finding list (and allowed by any
 `dispatch_filter`), emit **one group** — at most one per tool. Order the groups
-**low-risk-mechanical first**: `plugin_version_check` (a deterministic JSON edit)
-before `skill_validation` (frontmatter triage). Number `group_id` sequentially
-across the groups you actually emit (1, 2, …); skip a tool entirely when it has
-no findings. A dedicated `claude-plugin-maintenance-planner` takes over
-ordering/grouping once there are enough validators to need real ranking; with two
-tools a fixed order suffices.
+**low-risk-mechanical first**, then the triage validators:
+`plugin_version_check` (deterministic JSON edit) → `skill_validation` (frontmatter
+triage) → `reference_checking` (cross-reference triage). Number `group_id`
+sequentially across the groups you actually emit (1, 2, 3, …); skip a tool
+entirely when it has no findings. A dedicated `claude-plugin-maintenance-planner`
+takes over ordering/grouping only if grouping ever grows beyond one-group-per-tool;
+the current fixed order suffices.
 
 Group for `plugin_version_check`:
 
@@ -107,8 +110,25 @@ Group for `skill_validation`:
 }
 ```
 
-`isolation: true` for both — the agents edit files (`marketplace.json`,
-frontmatter), so they run in worktrees.
+Group for `reference_checking`:
+
+```json
+{
+  "group_id": 3,
+  "tool": "reference_checking",
+  "description": "Triage <N> orphaned skill/agent reference(s)",
+  "findings": ["<finding id>", "..."],
+  "files": ["<unique files across the findings>"],
+  "rationale": "orphaned references triaged together by claude-plugin-reference-checker",
+  "agent": "claude-plugin-reference-checker",
+  "isolation": true,
+  "suggested_pr_title": "fix(plugin-ref): correct orphaned skill/agent references",
+  "priority_score": 0.5
+}
+```
+
+`isolation: true` for all — the agents edit files (`marketplace.json`,
+frontmatter, reference tokens), so they run in worktrees.
 
 ## Step 4 — return the response
 
