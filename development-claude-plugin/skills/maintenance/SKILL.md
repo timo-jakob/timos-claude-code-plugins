@@ -5,8 +5,9 @@ description: >
   /development:maintenance as a v2 JSON payload (a file path in $ARGUMENTS),
   validates it, and returns a plan that routes each finding group to a validation
   agent. A TOPIC plugin: it composes alongside the language plugin, not instead of
-  it. No coverage pre-flight (plugins aren't code with tests) — a single
-  invocation returns the plan. The per-group work agents are the orchestrator's
+  it. No language *coverage* gate (there's no app test suite) — but a plugin's
+  scripts ARE code; a script-quality gate (lint + behavioral tests) is planned
+  (#263). A single invocation returns the plan. The per-group work agents are the orchestrator's
   job, not the dispatcher's. Pure function of its JSON input; does not run its own
   detection or validation. See ARCHITECTURE.md for the schema and dispatch contract.
 disable-model-invocation: false
@@ -19,9 +20,12 @@ of finding groups, each routed to the agent that fixes that category. You do
 **not** run detection, gather, or validation yourself, and you do **not** spawn
 the work agents — Phase 8 of the orchestrator does, one PR per group.
 
-Unlike a language plugin, you have **no coverage pre-flight and no Phase A/B
-dance** — plugins are markdown + config, not code with a test suite. One
-invocation, one `plan` response.
+Unlike a language plugin, you have **no language coverage gate and no Phase A/B
+dance** — there's no application test suite to measure. That does **not** mean a
+plugin repo is untestable: its scripts (`*.zsh`, `*.sh`, helper code) are real
+code, and a `claude-plugin-script-quality` validator (lint + behavioral tests,
+some Docker-isolated) is planned — see #263 (and the primary/auxiliary model it
+describes). For now this dispatcher is a single invocation returning one `plan`.
 
 **Input:** `$ARGUMENTS` is the absolute path to a JSON file. Read it.
 
