@@ -45,6 +45,14 @@ authoring session  ──spawns──▶  judge subagent  ──launches──�
   The harness clones it locally (`git clone --local`) into a temp dir so the run
   is **non-destructive and repeatable** — your real working copy is never
   touched, and the clone is deleted afterward.
+  - **The clone reflects the target's committed HEAD, not its uncommitted
+    working tree.** A `git clone --local` copies committed state only. So a test
+    can legitimately surface artifacts an interactive run wouldn't — e.g. a build
+    output that the target ignores via an *uncommitted* `.gitignore` edit will
+    show as untracked in the clone, because the clone's `.gitignore` is the
+    committed one. This is faithful behaviour, not a bug: if you want the test to
+    match your live tree, commit the relevant `.gitignore` (or config) change in
+    the target first.
 - **Verdict:** structured `PASS`/`FAIL` plus which skills/agents fired, which
   tools ran, what files changed in the clone, whether the local plugin
   demonstrably loaded, and a short digest.
