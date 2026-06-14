@@ -44,12 +44,17 @@ and stop.
 
 ## Step 2 — read the findings
 
-The tools this plugin handles live under `findings_by_tool`. In v1 there is one:
+The tools this plugin handles live under `findings_by_tool` (more land in later
+slices):
 
-- `plugin_version_check` → routed to `claude-plugin-version-sync`
+| Tool | Routed to | Character |
+|---|---|---|
+| `plugin_version_check` | `claude-plugin-version-sync` (haiku) | mechanical, low-risk |
+| `skill_validation`     | `claude-plugin-skill-validator` (sonnet) | triage / judgment |
 
 ```bash
-jq '.findings_by_tool.plugin_version_check // []' "$ARGUMENTS"
+jq '{version: (.findings_by_tool.plugin_version_check // []),
+     skills:  (.findings_by_tool.skill_validation // [])}' "$ARGUMENTS"
 ```
 
 Respect `dispatch_filter` if present: only build groups for tools listed in
@@ -60,11 +65,15 @@ that's correct; the language plugin handles those.)
 ## Step 3 — build the plan
 
 For each handled tool with a **non-empty** finding list (and allowed by any
-`dispatch_filter`), emit one group. v1 has a single tool, so this is at most one
-group — no cross-tool ranking is needed yet (the
-`claude-plugin-maintenance-planner` arrives when a second validator lands).
+`dispatch_filter`), emit **one group** — at most one per tool. Order the groups
+**low-risk-mechanical first**: `plugin_version_check` (a deterministic JSON edit)
+before `skill_validation` (frontmatter triage). Number `group_id` sequentially
+across the groups you actually emit (1, 2, …); skip a tool entirely when it has
+no findings. A dedicated `claude-plugin-maintenance-planner` takes over
+ordering/grouping once there are enough validators to need real ranking; with two
+tools a fixed order suffices.
 
-A group for `plugin_version_check`:
+Group for `plugin_version_check`:
 
 ```json
 {
@@ -81,8 +90,25 @@ A group for `plugin_version_check`:
 }
 ```
 
-`isolation: true` — the agent edits files (`marketplace.json`), so it runs in a
-worktree.
+Group for `skill_validation`:
+
+```json
+{
+  "group_id": 2,
+  "tool": "skill_validation",
+  "description": "Triage <N> SKILL.md / agent frontmatter finding(s)",
+  "findings": ["<finding id>", "..."],
+  "files": ["<unique files across the findings>"],
+  "rationale": "frontmatter-contract findings triaged together by claude-plugin-skill-validator",
+  "agent": "claude-plugin-skill-validator",
+  "isolation": true,
+  "suggested_pr_title": "fix(plugin-skill): align frontmatter to the file contract",
+  "priority_score": 0.6
+}
+```
+
+`isolation: true` for both — the agents edit files (`marketplace.json`,
+frontmatter), so they run in worktrees.
 
 ## Step 4 — return the response
 
