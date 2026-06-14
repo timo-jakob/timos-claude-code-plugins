@@ -192,20 +192,30 @@ safety net, not the primary verification loop.
 
 ### development-claude-plugin
 
-Topic plugin for projects that **are** Claude Code plugins (marker:
-`.claude-plugin/plugin.json`). It composes with language plugins rather
-than replacing them — this repo is both a Claude plugin *and* Python.
+Topic plugin for projects that **are** Claude Code plugins (marker: a
+`.claude-plugin/` dir with `plugin.json` or `marketplace.json`). It composes
+*alongside* language plugins rather than replacing them — `/development:maintenance`
+dispatches to both when a repo matches (this repo is a Claude plugin; a plugin
+repo that is also Python gets both dispatchers).
 
-**v1 ships the test harness only.** The maintenance dispatcher and
-validation agents (`claude-plugin-version-sync`, `-skill-validator`,
-`-reference-checker`, `-structure-validator`) land after issue #249's
-language-leakage fix — see [issue #217](https://github.com/timo-jakob/timos-claude-code-plugins/issues/217).
+**What's built:** the test harness, plus the maintenance dispatcher with its
+first validator — `claude-plugin-version-sync` (`plugin.json` ↔ `marketplace.json`
+version drift). Further validators (`-skill-validator`, `-reference-checker`,
+`-structure-validator`) land in follow-up slices — see
+[issue #217](https://github.com/timo-jakob/timos-claude-code-plugins/issues/217).
 
 **Skills:**
 
 | Skill | Command | Description |
 |-------|---------|-------------|
 | Test harness | `/development-claude-plugin:test [--target <path>] [--task "<prompt>"] [--expect "<text>"]` | Exercises a plugin's real behaviour end-to-end. A fresh-context judge subagent drives a *separate* headless `claude` session — local plugins loaded via `--plugin-dir`, run against an isolated clone of the target repo — and returns a structured `PASS`/`FAIL` verdict plus a transcript digest, without flooding the authoring context. See [`docs/test-harness.md`](./development-claude-plugin/docs/test-harness.md). |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher. Validates plugin conventions and returns a plan routing each finding group to a validator agent. No coverage pre-flight. v1 validates `plugin.json` ↔ `marketplace.json` version sync. |
+
+**Agents:**
+
+| Agent | Model | Focus |
+|-------|-------|-------|
+| claude-plugin-version-sync | haiku | Syncs `marketplace.json` version entries to each plugin's `plugin.json` (the source of truth); escalates add/remove-entry decisions to human review |
 
 > ⚠️ **Cost**: a full maintenance run as a test is a real autonomous
 > child session (tens of thousands of tokens). Narrow `--task` to one

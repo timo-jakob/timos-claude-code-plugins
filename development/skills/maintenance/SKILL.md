@@ -115,15 +115,40 @@ Partition `languages` into:
 - **`unsupported`** — detected BUT no gather script (i.e., no
   development-<lang> plugin built yet)
 
-If `supported` is empty (every detected language is unsupported), halt
-with a message listing the detected languages and pointing the user at
-the README's Plugins section for current per-language status. Don't
-proceed — there's nothing this run can do.
-
 If `supported` is non-empty but `unsupported` is also non-empty,
 proceed with the supported set; remember `unsupported` to include in
 the final summary as an informational note ("Detected <X>, <Y> but
 their plugins are not built yet — only <Z> findings were processed").
+
+### Topics (cross-language concerns)
+
+Topic plugins dispatch **alongside** languages — a repo can be Python *and* a
+Claude plugin, and both get processed. They're gated by gather-script presence
+just like languages, but triggered by a **topic marker** rather than a language
+manifest. Known topics:
+
+| Topic | Marker (present in repo) | Gather script |
+|---|---|---|
+| `claude-plugin` | a `.claude-plugin/` dir holding `plugin.json` (an individual plugin) **or** `marketplace.json` (a marketplace of plugins, like this repo) | `gather-claude-plugin-findings.zsh` |
+
+For each known topic whose marker is present, check for its gather script:
+
+```bash
+test -x "<skill-base-dir>/scripts/gather-<topic>-findings.zsh"
+```
+
+Partition into **`supported_topics`** (marker present AND gather script exists)
+and **`unsupported_topics`** (marker present, no gather script yet). Note topic
+gather scripts are zsh (`.zsh`); the language ones are bash (`.sh`).
+
+### Proceed / halt
+
+If **both** `supported` (languages) and `supported_topics` are empty, halt with
+a message listing what was detected and pointing the user at the README's
+Plugins section. Otherwise proceed with whatever is supported, and carry any
+`unsupported` languages / `unsupported_topics` into the Phase 9 summary as
+informational notes ("Detected <X> but its plugin isn't built yet — not
+processed").
 
 ## Phase 2.5 — Approver feedback ingestion (when Claude Apps registered)
 
@@ -349,6 +374,20 @@ Pool all `notes` across all gather scripts; they describe why certain
 tools couldn't produce live findings (e.g., snyk auth missing,
 pytest-cov not installed). Surface them in the final summary.
 
+### Run the topic gather scripts
+
+Topics have no language toolchain state and no test suite, so they get **no
+state pre-flight and no coverage**. For each `topic` in `supported_topics`:
+
+```bash
+"<skill-base-dir>/scripts/gather-<topic>-findings.zsh" "$(pwd)" > "/tmp/findings-<topic>.json"
+```
+
+Same output contract as the language gathers — `tooling_configured`,
+`findings_by_tool`, `notes` — except `coverage` is always `null`. Collect them,
+pool their `notes` with the rest, and treat a non-zero exit or malformed JSON
+the same way (surface it, skip that topic).
+
 ### Project-level findings — template drift
 
 After per-language gathers complete, run the template-drift detector
@@ -443,11 +482,33 @@ the trimming most commonly enters; if the payload you build here
 already has fields shortened, Phase 6's contract is broken before
 dispatch even starts.
 
+### Topic payloads
+
+Build a payload per `topic` in `supported_topics` the same way, with these
+differences:
+
+- `language`: the **topic name** (e.g. `"claude-plugin"`) — it identifies the
+  dispatch target; topic dispatchers don't branch on it.
+- `language_meta`: `{ "version": null, "manifests": ["<the topic marker file>"] }`.
+- `coverage`: `null` (the topic gather already emits `null`).
+- `tooling_configured` / `findings_by_tool`: straight from `findings-<topic>.json`.
+- `policy`, `worktree`: same as language payloads.
+- `dispatch_filter`: **omit for topics.** `--tool` / `--concern` scope the
+  *language* tool set (ruff, semgrep, …) and don't name topic tools, so a scoped
+  run would hand a topic dispatcher a filter excluding all its tools. Rather than
+  dispatch a guaranteed-empty plan, **skip topic dispatch entirely when `--tool`
+  or `--concern` is set**, and note it in the Phase 9 summary ("topic checks
+  skipped under --tool / --concern").
+
+The same no-trim construction discipline applies.
+
 ## Phase 5 — `--dry-run`?
 
 If `--dry-run`: print each payload (pretty-formatted via `jq .`)
-labeled by language, print the pooled notes, list any unsupported
-languages, and stop. Nothing is dispatched or merged.
+labeled by language **and topic**, print the pooled notes, list any
+unsupported languages / topics, and stop. Nothing is dispatched or merged.
+(Topic payloads are built and printed too, unless `--tool` / `--concern`
+scoped the run — in which case note that topic checks were skipped.)
 
 ## Phase 6 — dispatch per supported language to plan
 
@@ -552,6 +613,34 @@ If a `Skill(...)` invocation fails (plugin not actually registered
 despite the gather script existing — shouldn't happen but defend
 anyway), treat that language as if it were `unsupported` for this run
 and continue with the rest.
+
+### Dispatch to topic plugins
+
+After (or alongside) the language dispatches, dispatch each `topic` in
+`supported_topics` **identically** — same file-handover, same no-trim contract,
+same `Skill(...)`-is-a-step rule:
+
+```
+Skill(
+  skill="development-<topic>:maintenance",
+  args="$payload_file"
+)
+```
+
+Topic dispatchers share the response contract, with two simplifications:
+
+- **Never an `improver_result`.** Topics have no coverage pre-flight, so a topic
+  response is always a `plan` (possibly empty) + `missing_tooling`, or
+  `human_action_required`. There is no Stage-0 improver dance for topics.
+- **`ci_fixer_agent` may be `null`.** A topic plugin can decline to provide a
+  CI-fixer in v1. Capture it as for languages, but if it is `null` and a topic
+  PR's CI fails in Phase 8, **escalate to the user** (carry it into the Phase 9
+  summary as a `human_action_required`-style note) instead of spawning a fixer —
+  never substitute a hardcoded one.
+
+A topic's `plan` groups join the **same Phase 8 queue** as language groups and
+are processed by the same sequential per-stage PR cycle. An empty topic `plan`
+just means "this topic is clean — nothing to do"; record it and move on.
 
 ## Phase 7 — handle `human_action_required` early-outs
 
@@ -896,8 +985,12 @@ After pushing and opening the PR:
      gating, proceed to step 5 (approval gate). Record in the run
      summary so the user knows they're still red.
    - **At least one same-tool failure** OR **at least one new
-     non-same-tool failure** → spawn `<response.ci_fixer_agent>` for
-     that combined set. Pass two things in its prompt:
+     non-same-tool failure** → if `response.ci_fixer_agent` is `null`
+     (a topic group whose plugin declined a CI-fixer in v1), **escalate
+     this PR to the user** instead of fixing: leave it open, record it
+     in the Phase 9 summary as needing manual attention, and move to the
+     next stage without merging. Otherwise spawn `<response.ci_fixer_agent>`
+     for that combined set. Pass two things in its prompt:
 
      - `failing_checks: <list>` — the names from the combined bucket
        above (truly-pre-existing failures are NOT in this list).
@@ -1151,6 +1244,7 @@ its own block so it's clear which plugin produced what.
 Project:       <repo path>
 Branch:        <user's current branch>
 Languages processed: <comma-separated list from supported>
+Topics processed:    <comma-separated list from supported_topics, or "none">
 <If --tool=<name> was set:>
 ⚠ Scoped to single tool: <name>
   Other tools were gathered but not dispatched. Re-run without --tool
@@ -1164,6 +1258,14 @@ Languages processed: <comma-separated list from supported>
 ⚠ Languages detected but not yet supported:
   - <lang>: no development-<lang> plugin built yet — see README's
     Plugins section for current per-language status.
+
+<If unsupported_topics is non-empty:>
+⚠ Topics detected but not yet supported:
+  - <topic>: marker present but no gather-<topic>-findings.zsh yet.
+
+<If topic dispatch was skipped because --tool/--concern scoped the run:>
+ℹ Topic checks skipped under --tool / --concern (those flags scope the
+  language tool set). Re-run without scoping to process topic findings.
 
 <For each language in supported, a block:>
 --- <lang> ---

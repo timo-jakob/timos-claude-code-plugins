@@ -1,7 +1,7 @@
 {
   "name": "development-claude-plugin",
-  "description": "Plugin family for projects that ARE Claude Code plugins. v1 ships a test harness (/development-claude-plugin:test) that exercises plugin functionality against a real reference project via a fresh-context subagent driving a headless child `claude` session, returning a structured PASS/FAIL verdict without polluting the authoring context. Maintenance dispatcher and validation agents (version-sync, skill-validator, reference-checker, structure-validator) follow once issue #249's language-leakage fix lands.",
-  "version": "1.0.0",
+  "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test) and a maintenance dispatcher (a topic plugin: composes alongside the language plugin via /development:maintenance). v1 validator: plugin.json <-> marketplace.json version sync, fixed by the claude-plugin-version-sync agent. Further validators (skill-structure, orphaned references, directory structure) follow.",
+  "version": "1.1.0",
   "author": {
     "name": "Timo Jakob"
   },
