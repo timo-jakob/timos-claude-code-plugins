@@ -198,20 +198,21 @@ Topic plugin for projects that **are** Claude Code plugins (marker: a
 dispatches to both when a repo matches (this repo is a Claude plugin; a plugin
 repo that is also Python gets both dispatchers).
 
-**What's built:** the test harness, plus the maintenance dispatcher with its four
+**What's built:** the test harness, plus the maintenance dispatcher with its five
 validators — `claude-plugin-version-sync` (`plugin.json` ↔ `marketplace.json`
 version drift), `claude-plugin-skill-validator` (SKILL.md / agent frontmatter
 contract), `claude-plugin-reference-checker` (orphaned slash-command / agent
-references), and `claude-plugin-structure-validator` (plugin directory layout). A
-script-quality validator and the primary/auxiliary model are designed in
-[#263](https://github.com/timo-jakob/timos-claude-code-plugins/issues/263).
+references), `claude-plugin-structure-validator` (plugin directory layout), and
+`claude-plugin-script-quality` (shell-script lint — shellcheck / `zsh -n` /
+shebang consistency). Behavioral script tests and the primary/auxiliary model are
+designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issues/263).
 
 **Skills:**
 
 | Skill | Command | Description |
 |-------|---------|-------------|
 | Test harness | `/development-claude-plugin:test [--target <path>] [--task "<prompt>"] [--expect "<text>"]` | Exercises a plugin's real behaviour end-to-end. A fresh-context judge subagent drives a *separate* headless `claude` session — local plugins loaded via `--plugin-dir`, run against an isolated clone of the target repo — and returns a structured `PASS`/`FAIL` verdict plus a transcript digest, without flooding the authoring context. See [`docs/test-harness.md`](./development-claude-plugin/docs/test-harness.md). |
-| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher. Validates plugin conventions and returns a plan routing each finding group to a validator agent. No language coverage gate (a script-quality gate is planned, [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issues/263)). Validates version sync, SKILL.md/agent frontmatter, orphaned references, and directory layout. |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher. Validates plugin conventions and returns a plan routing each finding group to a validator agent. No language coverage gate (a script-quality gate is planned, [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issues/263)). Validates version sync, SKILL.md/agent frontmatter, orphaned references, directory layout, and shell-script quality. |
 
 **Agents:**
 
@@ -221,6 +222,7 @@ script-quality validator and the primary/auxiliary model are designed in
 | claude-plugin-skill-validator | sonnet | Triages SKILL.md / agent frontmatter findings (missing/invalid `name`/`description`/`model`/`tools`, empty body); fixes name-to-location mismatches, escalates authored-content gaps |
 | claude-plugin-reference-checker | sonnet | Triages orphaned `/<plugin>:<skill>` and agent references; fixes clear typos of a defined name, escalates removed-target / planned-work cases |
 | claude-plugin-structure-validator | sonnet | Triages plugin directory-layout findings (missing/misnamed `plugin.json`, wrong `skills/`-`agents/` layout, marketplace `source` mismatch); fixes source paths, escalates file moves / identity renames |
+| claude-plugin-script-quality | sonnet | Triages shell-script lint (shellcheck error/warning, `zsh -n` syntax, shebang/extension mismatch); applies verified safe fixes + justified suppressions, escalates renames and behavior-changing rewrites |
 
 > ⚠️ **Cost**: a full maintenance run as a test is a real autonomous
 > child session (tens of thousands of tokens). Narrow `--task` to one

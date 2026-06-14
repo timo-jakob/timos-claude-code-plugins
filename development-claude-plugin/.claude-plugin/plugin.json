@@ -1,7 +1,7 @@
 {
   "name": "development-claude-plugin",
-  "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test) and a maintenance dispatcher (a topic plugin: composes alongside the language plugin via /development:maintenance). Validators: version sync (claude-plugin-version-sync), SKILL.md/agent frontmatter (claude-plugin-skill-validator), orphaned skill/agent references (claude-plugin-reference-checker), and directory layout (claude-plugin-structure-validator).",
-  "version": "1.4.0",
+  "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test) and a maintenance dispatcher (a topic plugin: composes alongside the language plugin via /development:maintenance). Validators: version sync (claude-plugin-version-sync), SKILL.md/agent frontmatter (claude-plugin-skill-validator), orphaned skill/agent references (claude-plugin-reference-checker), directory layout (claude-plugin-structure-validator), and shell-script quality (claude-plugin-script-quality: shellcheck / zsh -n / shebang consistency).",
+  "version": "1.5.0",
   "author": {
     "name": "Timo Jakob"
   },

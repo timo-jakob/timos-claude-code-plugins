@@ -403,6 +403,105 @@ else
   notes+=("structure_validation: not a plugin repo; skipped.")
 fi
 
+# --- findings: script_quality ------------------------------------------------
+# A plugin repo's scripts are real code (see #263). Lint them: shebang/extension
+# consistency, shellcheck on bash/sh, `zsh -n` syntax on zsh. (Behavioral
+# bats/Docker tests and YAML/markdown lint are separate — #263 / #260.) python3
+# orchestrates the subprocesses and emits findings. Precision tuning: shellcheck
+# reports only error+warning (info/style dropped); SC1071 is dropped because the
+# shebang check covers it. The triage agent dismisses any residual false
+# positives (e.g. SC2154 from a source file shellcheck can't follow).
+local has_script_quality="false"
+local script_findings="[]"
+
+if (( ${#_plugin_dirs} )); then
+  has_script_quality="true"
+  script_findings=$(python3 <<'PY'
+import os, json, glob, shutil, subprocess
+def shebang(p):
+    try:
+        with open(p, encoding="utf-8") as f:
+            line = f.readline().rstrip("\n")
+        return line if line.startswith("#!") else ""
+    except Exception:
+        return ""
+is_zsh  = lambda s: "zsh" in s
+is_bash = lambda s: ("bash" in s) or s.endswith("/sh") or s.endswith(" sh")
+
+files = [p for p in glob.glob("**/*", recursive=True)
+         if os.path.isfile(p) and not p.startswith(".git/")
+         and p.rsplit(".", 1)[-1] in ("sh", "bash", "zsh")]
+bash_files, zsh_files = [], []
+findings = []
+for p in sorted(files):
+    ext, sb = p.rsplit(".", 1)[-1], shebang(p)
+    if ext in ("sh", "bash"):
+        if is_zsh(sb):
+            findings.append({
+                "id": "script:shebang:" + p, "tool": "script_quality",
+                "type": "shebang_extension_mismatch", "severity": "medium",
+                "file": p, "shebang": sb,
+                "message": "%s has a zsh shebang (%s) but a .%s extension" % (p, sb, ext),
+                "fix": "rename it to .zsh and update any callers (it can't be shellcheck-linted as bash)",
+                "files": [p]})
+            zsh_files.append(p)
+        else:
+            bash_files.append(p)
+    else:  # .zsh
+        if sb and is_bash(sb):
+            findings.append({
+                "id": "script:shebang:" + p, "tool": "script_quality",
+                "type": "shebang_extension_mismatch", "severity": "medium",
+                "file": p, "shebang": sb,
+                "message": "%s has a .zsh extension but a bash/sh shebang (%s)" % (p, sb),
+                "fix": "use a zsh shebang, or rename to .sh", "files": [p]})
+        zsh_files.append(p)
+
+# shellcheck on genuine bash/sh files; keep error+warning, drop SC1071
+if shutil.which("shellcheck") and bash_files:
+    out = subprocess.run(["shellcheck", "-f", "json"] + bash_files,
+                         capture_output=True, text=True).stdout
+    try:
+        for c in json.loads(out):
+            if c.get("level") not in ("error", "warning") or c.get("code") == 1071:
+                continue
+            findings.append({
+                "id": "script:sc:%s:%s:%s" % (c["file"], c["line"], c["code"]),
+                "tool": "script_quality", "type": "shellcheck",
+                "severity": "high" if c["level"] == "error" else "medium",
+                "file": c["file"], "line": c["line"], "code": "SC%s" % c["code"],
+                "level": c["level"], "message": c.get("message", ""),
+                "fix": "address SC%s (or justify with a shellcheck disable directive if a false positive)" % c["code"],
+                "files": [c["file"]]})
+    except Exception:
+        pass
+
+# zsh -n syntax check on zsh files
+for p in zsh_files:
+    r = subprocess.run(["zsh", "-n", p], capture_output=True, text=True)
+    if r.returncode != 0:
+        findings.append({
+            "id": "script:zshsyntax:" + p, "tool": "script_quality",
+            "type": "zsh_syntax", "severity": "high", "file": p,
+            "message": "zsh -n reported a syntax error in %s: %s" % (p, r.stderr.strip()[:300]),
+            "fix": "fix the zsh syntax error", "files": [p]})
+
+print(json.dumps(findings))
+PY
+)
+  if ! jq -e . >/dev/null 2>&1 <<< "$script_findings"; then
+    script_findings="[]"
+    notes+=("script_quality: scan failed (python3 error); reported no findings.")
+  else
+    local sqn
+    sqn=$(jq 'length' <<< "$script_findings")
+    notes+=("script_quality: $sqn shell-script finding(s) (shellcheck error+warning, zsh -n, shebang/extension).")
+    command -v shellcheck >/dev/null 2>&1 || notes+=("script_quality: shellcheck not on PATH; bash/sh linting skipped (install: brew install shellcheck).")
+  fi
+else
+  notes+=("script_quality: not a plugin repo; skipped.")
+fi
+
 # --- emit --------------------------------------------------------------------
 local notes_json
 notes_json=$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s .)
@@ -416,20 +515,24 @@ jq -n \
   --argjson ref_findings      "$reference_findings" \
   --argjson struct_cfg        "$has_structure_validation" \
   --argjson struct_findings   "$structure_findings" \
+  --argjson script_cfg        "$has_script_quality" \
+  --argjson script_findings   "$script_findings" \
   --argjson notes             "$notes_json" '
 {
   tooling_configured: {
     plugin_version_check: $version_check_cfg,
     skill_validation:     $skill_val_cfg,
     reference_checking:   $ref_check_cfg,
-    structure_validation: $struct_cfg
+    structure_validation: $struct_cfg,
+    script_quality:       $script_cfg
   },
   findings_by_tool: (
     {} +
     (if $version_check_cfg then {plugin_version_check: $version_findings} else {} end) +
     (if $skill_val_cfg     then {skill_validation:     $skill_findings}  else {} end) +
     (if $ref_check_cfg     then {reference_checking:   $ref_findings}    else {} end) +
-    (if $struct_cfg        then {structure_validation: $struct_findings} else {} end)
+    (if $struct_cfg        then {structure_validation: $struct_findings} else {} end) +
+    (if $script_cfg        then {script_quality:       $script_findings} else {} end)
   ),
   coverage: null,
   notes: $notes
