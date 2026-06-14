@@ -190,6 +190,28 @@ All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
 safety net, not the primary verification loop.
 
+### development-claude-plugin
+
+Topic plugin for projects that **are** Claude Code plugins (marker:
+`.claude-plugin/plugin.json`). It composes with language plugins rather
+than replacing them — this repo is both a Claude plugin *and* Python.
+
+**v1 ships the test harness only.** The maintenance dispatcher and
+validation agents (`claude-plugin-version-sync`, `-skill-validator`,
+`-reference-checker`, `-structure-validator`) land after issue #249's
+language-leakage fix — see [issue #217](https://github.com/timo-jakob/timos-claude-code-plugins/issues/217).
+
+**Skills:**
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| Test harness | `/development-claude-plugin:test [--target <path>] [--task "<prompt>"] [--expect "<text>"]` | Exercises a plugin's real behaviour end-to-end. A fresh-context judge subagent drives a *separate* headless `claude` session — local plugins loaded via `--plugin-dir`, run against an isolated clone of the target repo — and returns a structured `PASS`/`FAIL` verdict plus a transcript digest, without flooding the authoring context. See [`docs/test-harness.md`](./development-claude-plugin/docs/test-harness.md). |
+
+> ⚠️ **Cost**: a full maintenance run as a test is a real autonomous
+> child session (tens of thousands of tokens). Narrow `--task` to one
+> tool + `--dry-run` for cheap iteration, or use the no-arg plumbing
+> smoke test to verify plugin loading first.
+
 ## Claude Approver
 
 > **Operator-facing adoption guide:**
