@@ -128,6 +128,104 @@ else
   notes+=("plugin_version_check: no .claude-plugin/marketplace.json found; skipped.")
 fi
 
+# --- findings: skill_validation ----------------------------------------------
+# Validate the YAML frontmatter contract of every SKILL.md and agent .md across
+# all plugins. SKILL.md (skills/<name>/SKILL.md) requires name + description and
+# `name` must match <name>. Agent files (agents/<name>.md) additionally require
+# model (haiku|sonnet|opus) + tools, and `name` must match the filename.
+local has_skill_validation="false"
+local skill_findings="[]"
+
+local -a md_targets
+md_targets=( */skills/*/SKILL.md(N) */agents/*.md(N) )
+
+if (( ${#md_targets} )); then
+  has_skill_validation="true"
+  local sf="$(mktemp)"
+  print -- "[]" > "$sf"
+  add_skill_finding() {
+    jq --argjson f "$1" '. + [$f]' "$sf" > "$sf.tmp" && mv "$sf.tmp" "$sf"
+  }
+
+  local file kind expected fm body name_val model_val key
+  for file in "${md_targets[@]}"; do
+    if [[ "$file" == */agents/*.md ]]; then
+      kind="agent"; expected="${file:t:r}"      # filename without .md
+    else
+      kind="skill"; expected="${file:h:t}"      # skills/<name>/SKILL.md -> <name>
+    fi
+
+    # frontmatter must be present (file starts with ---)
+    if [[ "$(head -1 "$file")" != "---" ]]; then
+      add_skill_finding "$(jq -n --arg file "$file" --arg kind "$kind" '{
+        id: ("skill:" + $file), tool: "skill_validation", type: "missing_frontmatter",
+        severity: "blocker", file: $file, kind: $kind, field: null,
+        message: ("\($kind) file \($file) has no YAML frontmatter (must start with ---)"),
+        fix: "add a --- frontmatter block with the required keys",
+        files: [$file] }')"
+      continue
+    fi
+
+    fm=$(awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f{print}' "$file")
+    body=$(awk '$0=="---"{c++; next} c>=2{print}' "$file")
+
+    local -a required=(name description)
+    [[ "$kind" == "agent" ]] && required+=(model tools)
+    for key in "${required[@]}"; do
+      if ! grep -qE "^${key}:" <<< "$fm"; then
+        add_skill_finding "$(jq -n --arg file "$file" --arg kind "$kind" --arg key "$key" '{
+          id: ("skill:" + $file + ":" + $key), tool: "skill_validation", type: "missing_field",
+          severity: "high", file: $file, kind: $kind, field: $key,
+          message: ("\($kind) \($file) is missing required frontmatter key “\($key)”"),
+          fix: ("add “\($key):” to the frontmatter"),
+          files: [$file] }')"
+      fi
+    done
+
+    name_val=$(grep -E '^name:' <<< "$fm" | head -1 | sed -E 's/^name:[[:space:]]*//; s/[[:space:]]*$//')
+    if [[ -n "$name_val" && "$name_val" != "$expected" ]]; then
+      add_skill_finding "$(jq -n --arg file "$file" --arg kind "$kind" --arg got "$name_val" --arg want "$expected" '{
+        id: ("skill:" + $file + ":name"), tool: "skill_validation", type: "name_mismatch",
+        severity: "high", file: $file, kind: $kind, field: "name",
+        message: ("\($kind) \($file): frontmatter name “\($got)” does not match its location (“\($want)” expected)"),
+        fix: ("set name: \($want) (or move the file to match the name)"),
+        files: [$file] }')"
+    fi
+
+    if [[ "$kind" == "agent" ]]; then
+      model_val=$(grep -E '^model:' <<< "$fm" | head -1 | sed -E 's/^model:[[:space:]]*//; s/[[:space:]]*$//')
+      case "$model_val" in
+        ""|haiku|sonnet|opus) ;;   # empty already reported as missing_field
+        *)
+          add_skill_finding "$(jq -n --arg file "$file" --arg got "$model_val" '{
+            id: ("skill:" + $file + ":model"), tool: "skill_validation", type: "invalid_model",
+            severity: "medium", file: $file, kind: "agent", field: "model",
+            message: ("agent \($file): model “\($got)” is not one of haiku|sonnet|opus"),
+            fix: "set model to haiku, sonnet, or opus",
+            files: [$file] }')"
+          ;;
+      esac
+    fi
+
+    if [[ -z "${body//[[:space:]]/}" ]]; then
+      add_skill_finding "$(jq -n --arg file "$file" --arg kind "$kind" '{
+        id: ("skill:" + $file + ":body"), tool: "skill_validation", type: "empty_body",
+        severity: "high", file: $file, kind: $kind, field: null,
+        message: ("\($kind) \($file) has frontmatter but an empty body"),
+        fix: "add the instruction/agent body after the frontmatter",
+        files: [$file] }')"
+    fi
+  done
+
+  skill_findings="$(cat "$sf")"
+  rm -f "$sf" "$sf.tmp"
+  local sn
+  sn=$(jq 'length' <<< "$skill_findings")
+  notes+=("skill_validation: $sn finding(s) across ${#md_targets} SKILL.md/agent file(s).")
+else
+  notes+=("skill_validation: no SKILL.md or agent files found; skipped.")
+fi
+
 # --- emit --------------------------------------------------------------------
 local notes_json
 notes_json=$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s .)
@@ -135,14 +233,18 @@ notes_json=$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s .)
 jq -n \
   --argjson version_check_cfg "$has_version_check" \
   --argjson version_findings  "$version_findings" \
+  --argjson skill_val_cfg     "$has_skill_validation" \
+  --argjson skill_findings    "$skill_findings" \
   --argjson notes             "$notes_json" '
 {
   tooling_configured: {
-    plugin_version_check: $version_check_cfg
+    plugin_version_check: $version_check_cfg,
+    skill_validation:     $skill_val_cfg
   },
   findings_by_tool: (
     {} +
-    (if $version_check_cfg then {plugin_version_check: $version_findings} else {} end)
+    (if $version_check_cfg then {plugin_version_check: $version_findings} else {} end) +
+    (if $skill_val_cfg     then {skill_validation:     $skill_findings}  else {} end)
   ),
   coverage: null,
   notes: $notes
