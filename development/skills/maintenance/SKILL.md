@@ -581,6 +581,13 @@ remaining phases for that language**. Other languages still proceed.
 
 ## Phase 8 — per-stage PR cycle
 
+> The steps below are the imperative procedure. The *why* behind the
+> non-obvious ones — the identity switch, the isolation invariant, the
+> per-tool override, `-f -f`, the post-merge state re-check, and more —
+> lives in [`reference/pr-cycle.md`](reference/pr-cycle.md), cited inline
+> as "see `reference/pr-cycle.md` § …". You don't need it to run the happy
+> path; reach for it when a step's intent is unclear or an edge case fires.
+
 Replaces the old "merge worktree branches locally" with a remote-first
 flow: each stage (coverage improvement + each planner group) becomes
 its own PR. PRs are processed **sequentially** — the next stage only
@@ -611,19 +618,10 @@ maint_token=$("<skill-base-dir>/scripts/mint-maintenance-token.zsh")
 GH_TOKEN="$maint_token" gh pr create --base ... --head ... --title ... --body ...
 ```
 
-Why this matters for the Approver loop:
-
-- The Approver's default author allowlist
-  (`CLAUDE_APPROVER_AUTHOR_ALLOWLIST` per-repo variable) is
-  **machine-only** by default and includes the maintenance bot's real
-  owner-suffixed login (e.g. `claude-maintenance-<owner>[bot]`, #229).
-  Without the identity switch, maintenance PRs would be authored by
-  the user, the allowlist would reject them, and the Approver would
-  not evaluate the PR at all — the entire Approver→maintenance loop
-  would never start.
-- The Approver's anti-rubber-stamp gate (PR author has no
-  `claude-approver` prefix) fires correctly: the maintenance and
-  approver Apps are distinct identities by design.
+This identity switch is what lets the Approver evaluate maintenance PRs
+at all — its author allowlist is machine-only and its anti-rubber-stamp
+gate requires a non-`claude-approver` author. See `reference/pr-cycle.md`
+§ Why the identity switch matters for the Approver loop.
 
 The installation token has a 1-hour lifetime. If a maintenance run
 takes longer than an hour and you need another `gh pr create`, re-mint
@@ -713,14 +711,11 @@ For each entry in `response.plan`, in priority order:
    § "JSON schema (v2)".
 
    **`plan[i].isolation` is `true` (or absent) → pass
-   `isolation="worktree"`.** This is the single most load-bearing
-   parameter in the call for a file-editing group. **Omitting it
-   silently breaks the entire per-group-PR invariant**: the agent then
-   edits the main workspace instead of a fresh worktree branch, its
-   changes land on `main`'s working tree, and you (the orchestrator)
-   end up creating a branch + commit ad-hoc after the fact — exactly
-   the failure mode this phase exists to prevent. Use this exact call
-   shape:
+   `isolation="worktree"`.** This is load-bearing: omitting it for a
+   file-editing group breaks the per-group-PR invariant (the agent
+   edits the main workspace instead of a worktree branch). See
+   `reference/pr-cycle.md` § Why isolation is load-bearing. Use this
+   exact call shape:
 
    ```
    Agent(
@@ -825,12 +820,11 @@ For each entry in `response.plan`, in priority order:
    both** — the branch is what you push, the path is what you
    `git worktree remove` post-merge (step 6 in the CI cycle below).
 
-   **If the agent comes back without a worktree branch and the main
-   workspace has uncommitted changes, that's a contract violation,
-   not a graceful path.** Surface it in the summary as a quality bug.
-   Do NOT silently create a `maint/...` branch from the dirty main
-   workspace — that masks the underlying failure and breaks
-   reproducibility for subsequent stages.
+   **If the agent returns no worktree branch but the main workspace is
+   dirty, that's a contract violation** — surface it as a quality bug;
+   do NOT bridge it by creating a `maint/...` branch from the dirty
+   workspace. See `reference/pr-cycle.md` § Worktree-branch contract
+   violations.
 4. **Push** the worktree branch to origin, **open the PR** against the
    effective base branch (titled per the plan entry's
    `suggested_pr_title`), and capture the new PR number.
@@ -853,11 +847,10 @@ For each entry in `response.plan`, in priority order:
    matching who opened the replacement. Without the token, fall back
    to the user's `gh` auth.
 
-   Close **before** the CI cycle starts (next step), not after merge:
-   the vendor's PR list stays clean while the replacement waits in
-   review, and Dependabot stops rebasing the superseded PR. If the
-   replacement is later rejected, reopen the vendor PR with
-   `gh pr reopen <n>` — no data is lost.
+   Close **before** the CI cycle starts (next step), not after merge,
+   and reopen with `gh pr reopen <n>` if the replacement is later
+   rejected. See `reference/pr-cycle.md` § Why close superseded vendor
+   PRs before the CI cycle.
 6. **Run the CI cycle** (same as Stage 0).
 7. **After merge, sync local main**.
 8. Continue to the next group.
@@ -877,10 +870,9 @@ After pushing and opening the PR:
    failures before spending tokens on the CI-fix agent
    (`<response.ci_fixer_agent>`, captured in Phase 6).
 
-   A failure that's already failing on `<base_branch>` is not caused
-   by this PR — it belongs on the project's main, not on a maintenance
-   PR that didn't touch its cause. Spawning the fixer on it wastes
-   tokens and can produce confusing "fixes" that don't apply.
+   A failure already red on `<base_branch>` isn't caused by this PR —
+   classifying first avoids wasting fixer tokens on it (see
+   `reference/pr-cycle.md` § New vs pre-existing failures).
 
    Run the classification:
 
@@ -902,46 +894,18 @@ After pushing and opening the PR:
    comm -12 /tmp/pr_fail.json /tmp/base_fail.json > /tmp/preexisting_fail.json
    ```
 
-   (`gh` returns JSON arrays; `comm` needs sorted line-delimited input.
-   `jq -r '.[]'` between the two converts JSON arrays to lines if the
-   piping is awkward — adapt as needed for the shell. The intent is
-   the set diff, not the exact incantation.)
+   (The intent is the set diff, not the exact incantation — see
+   `reference/pr-cycle.md` § New vs pre-existing failures for the
+   `gh`/`comm`/`jq` shell notes.)
 
    **Per-tool override (conservative).** Before treating any check as
-   pre-existing, **promote any check that matches THIS PR's own tool
-   back into the "investigate" bucket**. The PR's tool is
-   `plan[i].tool` for the current group (or `coverage` for the
-   improver Stage 0 PR). A same-tool failure on the PR is never
-   trusted as "pre-existing" because the work agent was responsible
-   for resolving the tool's findings completely — under the planner's
-   one-group-per-agent rule, there are no "other groups" of the same
-   tool to absorb the blame. The failure means either:
-
-   - the agent's fix didn't actually land (incomplete commit, bad
-     patch), or
-   - a finding the agent intentionally left in `actions_requiring_review`
-     is now blocking CI.
-
-   In both cases the right move is to investigate, not silently merge.
-   The CI-fix agent will dig into the log and either fix the remaining
-   failures or escalate with an actionable recommendation.
-
-   Tool → check-name correspondence is judgment-based; use substring
-   match on the tool key (case-insensitive). Examples:
-
-   - PR is a sonar group → `plan[i].tool == "sonarcloud"`. A failing
-     `sonarcloud` (or `sonar-quality-gate`, etc.) check is this PR's
-     own tool — keep in the new-failures bucket. A failing `image`
-     (Snyk container) check is a different tool — eligible for
-     pre-existing-skip.
-   - PR is a `snyk_prs` or `dependabot` group → `plan[i].tool` is
-     `"snyk_prs"` or `"dependabot"`. A failing CI check that matches
-     the same vendor's other PR signals (e.g. another Snyk App check)
-     is this PR's own tool. A failing `code-scanning`/`codeql` check
-     is a different tool — eligible for pre-existing-skip.
-   - Stage 0 (coverage improver) → treat the project's coverage gate
-     check (typically Sonar's QG "new code coverage") as the PR's
-     own tool; everything else is eligible for skip.
+   pre-existing, **promote any check matching THIS PR's own tool back
+   into the "investigate" bucket** — the PR's tool is `plan[i].tool`
+   (or `coverage` for the Stage 0 improver PR), matched against check
+   names by case-insensitive substring. A same-tool failure is never
+   trusted as "pre-existing". See `reference/pr-cycle.md` § Per-tool
+   override for the reasoning and worked examples (sonar / snyk_prs /
+   dependabot / Stage 0).
 
    After applying this override:
 
@@ -1086,15 +1050,10 @@ After pushing and opening the PR:
    # <worktree_path> is what the Agent runtime returned alongside the
    # branch name in step 3 — capture both, use both here.
    #
-   # IMPORTANT: use -f -f (double force), not --force / -f.
-   # Claude Code's Agent runtime locks every worktree it creates
-   # (lock reason: "claude agent agent-<id>"). The lock survives even
-   # after the originating claude process exits, so single -f errors
-   # out with "cannot remove a locked working tree". -f -f overrides
-   # the lock AND any uncommitted state. Without this, the remove
-   # silently fails, the local branch stays attached to the worktree,
-   # gh pr merge --delete-branch fails to delete the local ref, and
-   # the worktree accumulates across runs.
+   # IMPORTANT: -f -f (double force), not single -f — agent worktrees
+   # are locked by the runtime and the lock survives process exit, so
+   # single -f fails with "cannot remove a locked working tree". See
+   # reference/pr-cycle.md § Why `-f -f` (double force) on worktree removal.
    git -C "<repo.path>" worktree remove "<worktree_path>" -f -f
 
    # Now gh can cleanly delete the merged branch from both ends.
@@ -1117,13 +1076,10 @@ After pushing and opening the PR:
    ```
 
 8. **Re-run the state pre-flight from Phase 3.** A merge — especially
-   of a runtime-version-bumping PR — can change the project's
-   declared configuration, leaving local state (venv, toolchain cache,
-   etc.) inconsistent. Without this re-check, subsequent stages'
-   agents run their verification against state that no longer matches
-   what's on `main`, producing false-positive errors and missed
-   regressions (the live test on ai-doc-organizer's Stage 7 surfaced
-   exactly this for the Python venv case after a 3.13 → 3.14 merge).
+   of a runtime-version-bumping PR — can leave local state (venv,
+   toolchain cache, etc.) inconsistent with the new `main`, so later
+   stages would verify against stale state. See `reference/pr-cycle.md`
+   § Why re-run the state pre-flight after each merge.
 
    Invoke the same per-language helper from Phase 3:
 
