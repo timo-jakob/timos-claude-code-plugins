@@ -336,23 +336,14 @@ After per-language gathers complete, run the template-drift detector
 template_drift=$("<skill-base-dir>/scripts/detect-template-drift.zsh" "$(pwd)")
 ```
 
-The detector reads each tracked rendered file's
-`# claude-bootstrap: rendered from … sha256:<H>` marker (#213) and
-compares the recorded sha256 against the current template's sha256.
-Output is a JSON array of findings, possibly empty. Severities:
-
-| Severity | What it means |
-|---|---|
-| `drifted` | Marker present, template hash has moved upstream — re-bootstrap or patch to pick up fixes. |
-| `unknown_provenance` | File lacks a marker (rendered before #213 shipped, or hand-created). Can't verify drift. |
-| `template_missing` | Marker references a template path that no longer exists upstream (renamed/deleted). |
-| `malformed_marker` | Marker present but unparseable — corrupted by hand-edit. |
-
-These findings do **not** enter `findings_by_tool` and are **not**
-routed to any per-tool triage agent in v1. v1 is detect-only: surface
-the findings in Phase 9's summary and let the user decide between
-re-bootstrap, manual patch, or accepting the drift. Store
-`$template_drift` so Phase 9 can render it.
+It emits a JSON array of findings (possibly empty), each with a
+severity: `drifted`, `unknown_provenance`, `template_missing`, or
+`malformed_marker` (detector mechanics + severity meanings in
+`reference/gather.md` § Template-drift severities). In v1 these are
+**detect-only** — they do not enter `findings_by_tool` or route to any
+triage agent. Store `$template_drift` and surface it in Phase 9's
+summary; the user decides between re-bootstrap, manual patch, or
+accepting the drift.
 
 ## Phase 4 — construct one payload per supported language
 
@@ -416,11 +407,11 @@ don't exist.
 because there are "many"; do not truncate
 `findings_by_tool.dependabot[].body` because it contains 10 KB+ of
 release notes; do not flatten or summarise any nested value. The full
-**no-trim contract** — including the two real incidents that motivated
-it — is documented in Phase 6. Construction is where the trimming
-most commonly enters; if the payload you build here already has
-fields shortened, Phase 6's contract is broken before dispatch even
-starts.
+**no-trim contract** is the rule in Phase 6 (the two real incidents
+that motivated it are in `reference/gather.md`). Construction is where
+the trimming most commonly enters; if the payload you build here
+already has fields shortened, Phase 6's contract is broken before
+dispatch even starts.
 
 ## Phase 5 — `--dry-run`?
 
@@ -465,66 +456,26 @@ inline limit. A maintenance run on a project with 200+ Dependabot PRs
 
 ### No-trim contract — known recurring bug
 
-Payload trimming by the orchestrator has been observed in **two real
-maintenance runs**, despite the previous version of this section
-already saying "pass the payload as-is." The prose below is the
-strengthened replacement; the earlier wording was not enough to
-prevent the trimming.
+**Pass the payload as-is.** Do not trim, summarise, drop fields,
+sample, flatten, or restructure any value before the `Skill(...)`
+call — not `coverage.by_module` (every module, even 80+), not the full
+`findings_by_tool.dependabot[].body` / `snyk_prs[].body` (even 10 KB of
+release notes), not `code_scanning_alerts[]`, not any other field.
+Downstream agents parse fields the orchestrator never reads, so
+trimming silently changes routing.
 
-The two incidents:
+**Self-check before each dispatch:** the JSON written to the temp file
+must be character-for-character identical to the payload you built in
+Phase 4. If you "tidied up," "shortened," "deduplicated," or
+"summarised" anything, the contract is broken — reconstruct from
+`findings-<lang>.json` and dispatch again.
 
-- **2026-06-05** — scoped `--tool=dependabot` run. The orchestrator
-  dropped entries from `coverage.by_module` because it judged the
-  payload "had lots of entries." The dispatcher's safety net halted
-  with `human_action_required` citing missing coverage data; the
-  orchestrator caught itself mid-narration and re-dispatched with the
-  full payload.
-- **2026-06-06** — full run. The orchestrator truncated
-  `findings_by_tool.dependabot[].body` because it judged "10 KB+
-  release notes per PR pushed the payload to ~70 KB." The triage
-  agent's `gh` refetch silently compensated — that is **lucky, not
-  correct**. Pre-spawn routing decisions that depend on body content
-  would have routed wrong.
-
-**The rule, with no judgement attached: pass the payload as-is.** Do
-not trim, summarise, drop fields, sample, flatten, or restructure
-any value before the `Skill(...)` call. The fields that have been
-trimmed in the wild — and that downstream code reads — include:
-
-- `coverage.by_module` — every module, every row. Eighty-plus
-  modules is normal; do not sample because there are "many."
-- `findings_by_tool.dependabot[].body` — the full body, even when
-  it's 10 KB of release notes. The triage agent reads it for
-  grouped-PR member lists, release-notes breaking-change flags, and
-  Dependabot compatibility scores.
-- `findings_by_tool.snyk_prs[].body` — same rule, same reasons.
-- `findings_by_tool.code_scanning_alerts[]` — every alert, every
-  field; `python-major-upgrade` and a future runtime-upgrade agent
-  consume fields the orchestrator does not see used in the immediate
-  dispatch.
-
-And every other schema field. Trimming silently changes routing
-because downstream agents parse fields the orchestrator never read.
-
-**On payload size.** Both observed incidents (~70 KB and smaller)
-were well below any actual Skill-tool limit — the trimming was a
-behavioural error, not a capacity workaround. With v2's file-based
-handover (above), payload size no longer enters the Skill-tool's
-input budget at all — the `args=` value is a ~80-byte path, regardless
-of whether the payload behind it is 5 KB or 5 MB. The previous
-"200 KB inline ceiling" + `human_action_required` escape valve is
-gone; do not reintroduce it.
-
-If a payload routinely grows multi-MB, file a quality bug against
-the gather script — it should not produce that much. But payload
-size is never a justification for trimming.
-
-**Self-check before each dispatch.** The JSON contents written to
-the temp file should be character-for-character identical to the
-payload you constructed in Phase 4. If you cannot say that with
-certainty — because you "tidied up," "shortened," "deduplicated,"
-or "summarised" something — the contract is broken. Reconstruct the
-payload from `findings-<lang>.json` and dispatch again.
+This rule is incident-driven (the orchestrator trimmed payloads in
+**two real runs**) and payload size is never a justification — v2's
+file-handover makes the `args=` value an ~80-byte path regardless of
+payload size, so the old "200 KB inline ceiling" escape valve is gone;
+do not reintroduce it. See `reference/gather.md` § No-trim contract for
+the two incidents and the per-field detail of what downstream reads.
 
 The dispatcher's internal Phase A / Phase B sequencing — when it spawns
 the coverage-improver, when it runs the planner, what payload validation
