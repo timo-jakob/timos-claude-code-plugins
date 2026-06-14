@@ -247,18 +247,45 @@ fi
 
 # --- coverage ----------------------------------------------------------------
 # Run pytest with --cov; produce coverage.json; parse per-module percentages.
-# If neither pytest nor pytest-cov is available, leave coverage null + add
-# notes explaining what to install.
+#
+# A coverage number is only trustworthy when the suite runs in the project's
+# OWN environment and pytest completes normally. So we record HOW the
+# measurement was taken (interpreter source + pytest exit) and a reliability
+# verdict, and we WITHHOLD the number (null) when it cannot be trusted — a
+# confident wrong figure is worse than none. Downstream must treat a null
+# overall / empty by_module as "coverage unknown", never as 0%.
 coverage_overall="null"
 coverage_by_module="{}"
+coverage_source="none"
+coverage_pytest_exit="null"
+coverage_reliable="false"
+coverage_reason="pytest is not available (checked PATH and .venv/, venv/, env/); coverage was not measured."
 
 if [[ -n "$PYTEST_BIN" && -n "$PY_BIN" ]]; then
-  # pytest-cov needs to be importable from the same env. Check using the
-  # interpreter we'll actually run.
+  coverage_source="$PY_SOURCE"
+  # pytest-cov needs to be importable from the interpreter we'll actually run.
   if "$PY_BIN" -c 'import pytest_cov' >/dev/null 2>&1; then
-    "$PYTEST_BIN" --cov --cov-report=json --cov-report= -q --no-header \
-      > /dev/null 2>&1 || true
-    if [[ -f "coverage.json" ]]; then
+    # Capture pytest's exit status — do NOT discard it. Non-zero means tests
+    # failed (1) or, worse, collection/internal errors (>=2) left the coverage
+    # data partial. The `|| pytest_exit=$?` form captures the code without
+    # letting `set -e` abort on the (expected) non-zero exit.
+    pytest_exit=0
+    "$PYTEST_BIN" --cov --cov-report=json --cov-report= -q --no-header > /dev/null 2>&1 \
+      || pytest_exit=$?
+    coverage_pytest_exit="$pytest_exit"
+
+    if [[ ! -f "coverage.json" ]]; then
+      coverage_reason="pytest ran (exit $pytest_exit) via $coverage_source but produced no coverage.json; coverage could not be measured."
+    elif [[ "$coverage_source" == "system" ]]; then
+      # No project venv found — the system interpreter almost certainly lacks
+      # the project's dependencies, so any number is misleading. Withhold it.
+      coverage_reason="measured with the system interpreter ($PY_BIN); no project venv at .venv/venv/env, so project dependencies may be missing and the figure is not trustworthy. Activate the project venv and re-run."
+    elif (( pytest_exit >= 2 )); then
+      # 2=interrupted, 3=internal error, 4=usage error, 5=no tests collected.
+      coverage_reason="pytest terminated abnormally (exit $pytest_exit) under $coverage_source; coverage.json is partial. Figure withheld."
+    else
+      # exit 0 (all passed) or 1 (some failed) under a project venv: the lines
+      # still executed, so the coverage figure itself is valid.
       coverage_overall=$(jq '.totals.percent_covered // null' coverage.json)
       coverage_by_module=$(jq '
         .files
@@ -266,17 +293,21 @@ if [[ -n "$PYTEST_BIN" && -n "$PY_BIN" ]]; then
         | map({ key: .key, value: (.value.summary.percent_covered // 0) })
         | from_entries
       ' coverage.json)
-      [[ "$PY_SOURCE" != "system" ]] && \
-        notes+=("coverage gathered using $PY_SOURCE/bin/pytest (project-local venv).")
+      coverage_reliable="true"
+      coverage_reason="measured with $coverage_source/bin/pytest (exit $pytest_exit)."
+      if (( pytest_exit == 1 )); then
+        notes+=("pytest reported test failures (exit 1) during coverage measurement; the coverage figure is valid but the suite is currently red.")
+      fi
     fi
   else
-    notes+=("pytest found at $PYTEST_BIN but pytest-cov is not importable from that interpreter; install with '$PY_BIN -m pip install pytest-cov'.")
+    coverage_reason="pytest found at $PYTEST_BIN but pytest-cov is not importable from $PY_BIN; install with '$PY_BIN -m pip install pytest-cov'. Coverage not measured."
   fi
 elif [[ -n "$PYTEST_BIN" && -z "$PY_BIN" ]]; then
-  notes+=("pytest found but no usable python3 — coverage gathering skipped.")
-else
-  notes+=("pytest is not available (checked PATH and .venv/, venv/, env/); coverage gathering skipped. Activate your project venv or install pytest globally.")
+  coverage_reason="pytest found but no usable python3 — coverage was not measured."
 fi
+
+# Emit one provenance note ALWAYS, so the figure's trust level is never silent.
+notes+=("coverage measurement: source=$coverage_source, pytest_exit=$coverage_pytest_exit, reliable=$coverage_reliable — $coverage_reason")
 
 # --- emit --------------------------------------------------------------------
 # Build the final JSON. jq lets us compose without manual string escaping.
@@ -310,6 +341,10 @@ jq -n \
   --argjson dependabot_findings   "$(emit_findings dependabot             "$has_dependabot_config")" \
   --argjson coverage_overall      "$coverage_overall" \
   --argjson coverage_by_module    "$coverage_by_module" \
+  --arg     coverage_source       "$coverage_source" \
+  --argjson coverage_pytest_exit  "$coverage_pytest_exit" \
+  --argjson coverage_reliable     "$coverage_reliable" \
+  --arg     coverage_reason       "$coverage_reason" \
   --argjson sonar_quality_gate    "$sonar_quality_gate" \
   --argjson notes                 "$notes_json" '
 {
@@ -332,7 +367,13 @@ jq -n \
   ),
   coverage: {
     overall:   $coverage_overall,
-    by_module: $coverage_by_module
+    by_module: $coverage_by_module,
+    measurement: {
+      source:      $coverage_source,
+      pytest_exit: $coverage_pytest_exit,
+      reliable:    $coverage_reliable,
+      reason:      $coverage_reason
+    }
   },
   sonar_quality_gate: $sonar_quality_gate,
   notes: $notes
