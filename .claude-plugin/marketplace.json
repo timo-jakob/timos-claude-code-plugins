@@ -35,6 +35,16 @@
       },
       "source": "./development-python",
       "category": "development"
+    },
+    {
+      "name": "development-claude-plugin",
+      "description": "Plugin family for projects that ARE Claude Code plugins. v1 ships a test harness (/development-claude-plugin:test) that exercises plugin functionality against a real reference project via a fresh-context subagent driving a headless child `claude` session, returning a structured PASS/FAIL verdict. Maintenance dispatcher and validation agents follow once #249 lands.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Timo Jakob"
+      },
+      "source": "./development-claude-plugin",
+      "category": "development"
     }
   ]
 }
