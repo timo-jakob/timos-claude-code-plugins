@@ -226,6 +226,87 @@ else
   notes+=("skill_validation: no SKILL.md or agent files found; skipped.")
 fi
 
+# --- findings: reference_checking --------------------------------------------
+# Detect family skill/command and agent references that don't resolve to a
+# definition in this repo (you renamed/removed a skill or agent and a caller
+# still points at the old name). Precision-first: only LITERAL slash-command
+# references to OUR plugins are checked, and only agent references in structured
+# contexts (subagent_type / agentType / "agent":). Templated refs (`<lang>`) and
+# Claude Code built-in subagent types are skipped. The regex/set work is done in
+# python3 (far cleaner than shell for this), emitting the findings array.
+local has_reference_checking="false"
+local reference_findings="[]"
+
+local -a _plugin_dirs
+_plugin_dirs=( */.claude-plugin/plugin.json(N) )
+
+if (( ${#_plugin_dirs} )); then
+  has_reference_checking="true"
+  reference_findings=$(python3 <<'PY'
+import os, re, json, glob
+plugins = {d for d in os.listdir(".")
+           if os.path.isfile(os.path.join(d, ".claude-plugin", "plugin.json"))}
+commands = set()
+for skill in glob.glob("*/skills/*/SKILL.md"):
+    p = skill.split(os.sep)            # [plugin, skills, name, SKILL.md]
+    commands.add("/%s:%s" % (p[0], p[2]))
+agents = {os.path.splitext(os.path.basename(a))[0] for a in glob.glob("*/agents/*.md")}
+# Claude Code built-in subagent types — never flagged as orphans.
+builtins = {"general-purpose", "Explore", "Plan", "claude",
+            "statusline-setup", "output-style-setup", "code-reviewer",
+            "claude-code-guide"}
+
+cmd_re   = re.compile(r'/(development[a-z-]*):([a-z][a-z0-9-]*)')
+agent_re = re.compile(r'(?:subagent_type|agentType|"agent")\s*[:=]\s*[\'"]([a-z][a-z0-9-]+)[\'"]')
+
+cmd_refs, agent_refs = {}, {}
+for md in glob.glob("**/*.md", recursive=True):
+    try:
+        text = open(md, encoding="utf-8").read()
+    except Exception:
+        continue
+    for m in cmd_re.finditer(text):
+        cmd_refs.setdefault("/%s:%s" % (m.group(1), m.group(2)), set()).add(md)
+    for m in agent_re.finditer(text):
+        agent_refs.setdefault(m.group(1), set()).add(md)
+
+findings = []
+for ref, files in sorted(cmd_refs.items()):
+    plug = ref[1:].split(":")[0]
+    # only check references to OUR plugins; external/future plugins are skipped
+    if plug in plugins and ref not in commands:
+        findings.append({
+            "id": "ref:cmd:" + ref, "tool": "reference_checking",
+            "type": "orphan_command", "severity": "medium",
+            "reference": ref, "kind": "command",
+            "message": "reference to %s but plugin '%s' defines no such skill" % (ref, plug),
+            "fix": "create the skill, correct the reference, or remove it (if it points at planned work, say so explicitly)",
+            "files": sorted(files)})
+for name, files in sorted(agent_refs.items()):
+    if name not in agents and name not in builtins:
+        findings.append({
+            "id": "ref:agent:" + name, "tool": "reference_checking",
+            "type": "orphan_agent", "severity": "high",
+            "reference": name, "kind": "agent",
+            "message": "reference to agent '%s' but no agents/%s.md defines it" % (name, name),
+            "fix": "create the agent, correct the reference, or remove it",
+            "files": sorted(files)})
+print(json.dumps(findings))
+PY
+)
+  # Guard: if python failed, fall back to empty rather than break the payload.
+  if ! jq -e . >/dev/null 2>&1 <<< "$reference_findings"; then
+    reference_findings="[]"
+    notes+=("reference_checking: scan failed (python3 error); reported no findings.")
+  else
+    local rn
+    rn=$(jq 'length' <<< "$reference_findings")
+    notes+=("reference_checking: $rn orphan reference(s) (family commands/agents that don't resolve).")
+  fi
+else
+  notes+=("reference_checking: not a plugin repo; skipped.")
+fi
+
 # --- emit --------------------------------------------------------------------
 local notes_json
 notes_json=$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s .)
@@ -235,16 +316,20 @@ jq -n \
   --argjson version_findings  "$version_findings" \
   --argjson skill_val_cfg     "$has_skill_validation" \
   --argjson skill_findings    "$skill_findings" \
+  --argjson ref_check_cfg     "$has_reference_checking" \
+  --argjson ref_findings      "$reference_findings" \
   --argjson notes             "$notes_json" '
 {
   tooling_configured: {
     plugin_version_check: $version_check_cfg,
-    skill_validation:     $skill_val_cfg
+    skill_validation:     $skill_val_cfg,
+    reference_checking:   $ref_check_cfg
   },
   findings_by_tool: (
     {} +
     (if $version_check_cfg then {plugin_version_check: $version_findings} else {} end) +
-    (if $skill_val_cfg     then {skill_validation:     $skill_findings}  else {} end)
+    (if $skill_val_cfg     then {skill_validation:     $skill_findings}  else {} end) +
+    (if $ref_check_cfg     then {reference_checking:   $ref_findings}    else {} end)
   ),
   coverage: null,
   notes: $notes
