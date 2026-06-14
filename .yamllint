@@ -3,6 +3,17 @@
 ---
 extends: default
 
+# Also lint the bootstrap workflow/config TEMPLATES (*.yml.tmpl / *.yaml.tmpl).
+# They become a new repo's files, so they must pass the same rules — otherwise a
+# freshly-bootstrapped repo fails its very first YAML check. Their {{PLACEHOLDER}}
+# tokens sit in valid YAML positions, so they lint as-is.
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+  - '.yamllint'
+  - '*.yaml.tmpl'
+  - '*.yml.tmpl'
+
 rules:
   # Workflows have long `run:` lines and URLs; 80 is too tight.
   line-length:
