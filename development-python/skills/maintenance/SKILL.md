@@ -103,6 +103,12 @@ See ARCHITECTURE.md § "JSON schema (v2)" for the rationale.
     "by_module": {
       "src/aido/store/persons.py": 92,
       "src/aido/cli.py": 67
+    },
+    "measurement": {
+      "source": ".venv",
+      "pytest_exit": 0,
+      "reliable": true,
+      "reason": "measured with .venv/bin/pytest (exit 0)."
     }
   },
   "policy": {
@@ -187,12 +193,17 @@ Before dispatching:
 Before spawning any work agent, check whether the project's coverage
 clears the bar for the planned changes.
 
-### Step 1 — coverage data must exist
+### Step 1 — coverage data must exist *and be trustworthy*
 
-If `coverage.by_module` is empty `{}` or `coverage.overall` is `null`,
-the gather step couldn't produce coverage data (most commonly because
-pytest or pytest-cov isn't available in the project's environment).
-Without coverage data there's no safety floor; halt and return:
+If `coverage.by_module` is empty `{}`, `coverage.overall` is `null`,
+**or** `coverage.measurement.reliable` is `false`, there is no
+trustworthy coverage figure. The gather step withholds the number
+rather than emit a confident-but-wrong one (e.g. measured with the
+system interpreter because no project venv was found, so project
+dependencies were missing; or pytest terminated abnormally leaving
+partial data). `coverage.measurement.reason` states the exact cause.
+Without trustworthy coverage there's no safety floor; halt and return
+(echo the reason so the human sees it):
 
 ```json
 {
@@ -201,8 +212,8 @@ Without coverage data there's no safety floor; halt and return:
   "actions_requiring_review": [],
   "missing_tooling": [],
   "human_action_required": [{
-    "reason": "Coverage data is unavailable — maintenance requires measurable per-module coverage as the safety floor for autonomous changes.",
-    "recommendation": "Check the gather-step notes in the orchestrator's output for the exact cause (typically: pytest-cov not installed in the project venv). Install the missing piece (the note includes the exact command), then re-run /development:maintenance."
+    "reason": "Coverage is unavailable or untrustworthy — maintenance requires a reliable per-module coverage measurement as the safety floor for autonomous changes. Cause (from coverage.measurement.reason): <echo it here>.",
+    "recommendation": "Fix per coverage.measurement.reason (also in the gather-step notes). Most often: activate the project venv (.venv / venv / env) so pytest runs with the project's dependencies, or install pytest-cov there. Then re-run /development:maintenance."
   }],
   "unable_to_fix": []
 }

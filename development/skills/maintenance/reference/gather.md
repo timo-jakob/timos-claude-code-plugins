@@ -70,3 +70,49 @@ In v1 these findings are **detect-only**: they do not enter `findings_by_tool`
 and are not routed to any per-tool triage agent. The orchestrator surfaces them
 in Phase 9's summary and lets the user decide between re-bootstrap, manual
 patch, or accepting the drift.
+
+## Coverage measurement reliability
+
+A coverage number drives the dispatcher's safety floor (Floor/Required gating)
+and whether `python-coverage-improver` is spawned. A wrong number is therefore
+not a cosmetic bug — it produces wrong autonomous decisions. So the gather step
+treats coverage as a *measurement with a provenance*, not a bare figure.
+
+**Incident — 2026-06-14.** A `--dry-run` against an isolated `git clone` of the
+test-bed project reported **46.89%** where the real project was at **98.01%**.
+Root cause: the clone had no `.venv` (it's gitignored, so `git clone` never
+copies it), so `gather-python-findings.sh` silently fell back to the **system**
+interpreter, ran the suite without the project's dependencies, tests errored,
+and a partial `coverage.json` was emitted — with no signal it was untrustworthy.
+Two latent defects, both fixed:
+
+- The "how coverage was gathered" note fired *only* for a venv, so a system-
+  interpreter run looked identical to a real one.
+- `pytest --cov … || true` discarded pytest's exit code, so a run whose tests
+  errored still produced a reported number. Environment-independent — it bites
+  even with the correct venv if the suite has a collection error.
+
+**The contract now.** `gather-python-findings.sh` emits a structured verdict
+alongside the figure:
+
+```json
+"coverage": {
+  "overall":   85,            // null when not reliably measured
+  "by_module": { ... },       // {} when not reliably measured
+  "measurement": {
+    "source":      ".venv",   // ".venv" | "venv" | "env" | "system" | "none"
+    "pytest_exit": 0,         // captured, not discarded; null if pytest didn't run
+    "reliable":    true,      // false ⇒ overall/by_module are withheld
+    "reason":      "measured with .venv/bin/pytest (exit 0)."
+  }
+}
+```
+
+Reliability rule: **reliable only when a project venv ran AND pytest exited 0 or
+1** (lines still execute when a test merely fails). System-interpreter runs
+(`source == "system"`) and abnormal exits (`>= 2`: interrupted / internal error
+/ no tests collected) are **not** reliable — the figure is withheld (`overall:
+null`, `by_module: {}`) and `reason` explains why. The dispatcher's coverage
+pre-flight Step 1 halts with `human_action_required` on `reliable == false` (or
+null/empty), echoing `reason`. Never present an unverified number as
+authoritative — no figure beats a confident wrong one.
