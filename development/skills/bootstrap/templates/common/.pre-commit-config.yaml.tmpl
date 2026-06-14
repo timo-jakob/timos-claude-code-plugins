@@ -19,6 +19,15 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
+  # --- YAML lint -------------------------------------------------------------
+  # Style + correctness for all YAML, using the repo's .yamllint config
+  # (line-length 120, GitHub Actions `on:` allowed). Complements check-yaml,
+  # which only validates syntax.
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+
   # --- secret scanning -------------------------------------------------------
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
