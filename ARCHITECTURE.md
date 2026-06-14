@@ -293,7 +293,8 @@ per-language policy templates.
 ### `development` owns
 
 - Generic skills: `bootstrap`, `commit-message`, `git-branch-naming`,
-  `cleanup`, future `maintenance` orchestrator.
+  `cleanup`, the `maintenance` orchestrator (layout under "Dispatch
+  model" below).
 - Shared scripts that operate on detected state without language
   knowledge: `detect-stack.sh`, `merge-gitignore.sh`,
   `branch-protection.sh`, `preflight.sh`, the `automate-*.sh` family.
@@ -391,6 +392,33 @@ After install, re-run /development:maintenance.
 
 Other detected languages still get processed. The user can opt to act
 on partial results.
+
+### Maintenance skill layout (orchestrator + reference docs)
+
+`development:maintenance` is one slim, invocable `SKILL.md` (Phases 0–10,
+the imperative procedure) plus a `reference/` directory holding the *why*:
+
+```
+development/skills/maintenance/
+  SKILL.md         # imperative orchestrator: flags, detect, dispatch,
+                   #   the per-stage PR cycle, summary, issue tracking
+  reference/
+    pr-cycle.md    # Phase 8 rationale: identity switch, isolation invariant,
+                   #   per-tool override, `-f -f`, post-merge state re-check
+    gather.md      # Phases 3–4/6: no-trim contract incidents, drift severities
+    report.md      # Phase 9: Snyk channel-naming table, cross-link examples
+  scripts/         # gather-/verify-<lang>, write-payload, token mint, …
+```
+
+**Convention (mirrors `bootstrap`'s `docs/`):** executable procedure —
+steps, commands, `Agent(...)` shapes, decision branches, and the lookup
+tables the orchestrator *follows* — stays inline in `SKILL.md`. The
+reasoning behind the non-obvious steps (incident history, why-this-order,
+exhaustive disambiguation tables) lives in `reference/*.md`, cited inline
+as "see `reference/<file>.md` § <heading>". The happy path never depends
+on reading a reference doc, so a missed read can't break a phase — the docs
+are there when a step's intent is unclear or an edge case fires. This keeps
+the orchestrator scannable without losing the hard-won rationale (#249).
 
 ## JSON schema (v2)
 
