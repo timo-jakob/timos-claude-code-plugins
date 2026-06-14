@@ -1,0 +1,28 @@
+name: yamllint
+
+# Lints the repo's YAML (workflows, configs, templates) against .yamllint.
+# Part of #263 / #260 — a plugin repo's YAML is config-as-code and should be
+# validated. Runs natively on the runner.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '.yamllint'
+      - '.github/workflows/yamllint.yml'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yamllint
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends yamllint
+      - name: Lint YAML
+        run: yamllint .
