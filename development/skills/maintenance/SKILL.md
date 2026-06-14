@@ -559,7 +559,13 @@ each group's PR cycle (push → CI → merge → sync) completes before the
 next group starts off the just-merged main. The one exception is the
 coverage-improver itself, which the dispatcher spawns during Phase A.
 
-Capture each response, keyed by language.
+Capture each response, keyed by language. Also read
+`response.ci_fixer_agent` — the language plugin's CI-fix agent, spawned
+by Phase 8's CI cycle when a PR's checks fail. It is present in **every**
+response shape (including the Phase A `improver_result`-only response),
+so it is available before any `plan` exists — Stage 0's CI cycle needs
+it. Never substitute a hardcoded fixer name; use the one the dispatcher
+returned.
 
 If a `Skill(...)` invocation fails (plugin not actually registered
 despite the gather script existing — shouldn't happen but defend
@@ -700,16 +706,21 @@ For each entry in `response.plan`, in priority order:
    after all prior merges (initially `worktree.base_branch`; updated
    after each merge by the sync step).
 
-2. **Spawn the group's agent with `isolation="worktree"`.** This is
-   the single most load-bearing parameter in the call. **Omitting it
-   silently breaks the entire per-group-PR invariant**: the agent
-   then edits the main workspace instead of a fresh worktree branch,
-   its changes land on `main`'s working tree, and you (the
-   orchestrator) end up creating a branch + commit ad-hoc after the
-   fact — exactly the failure mode this phase exists to prevent.
+2. **Spawn the group's agent.** Whether the agent runs in a worktree
+   is governed by **`plan[i].isolation`** from the dispatcher's plan
+   (boolean; treat absent as `true`). You decide isolation **from the
+   contract, never by matching an agent name** — see ARCHITECTURE.md
+   § "JSON schema (v2)".
 
-   **Always pass `isolation="worktree"`, every group, no exceptions
-   for work agents.** Use this exact call shape:
+   **`plan[i].isolation` is `true` (or absent) → pass
+   `isolation="worktree"`.** This is the single most load-bearing
+   parameter in the call for a file-editing group. **Omitting it
+   silently breaks the entire per-group-PR invariant**: the agent then
+   edits the main workspace instead of a fresh worktree branch, its
+   changes land on `main`'s working tree, and you (the orchestrator)
+   end up creating a branch + commit ad-hoc after the fact — exactly
+   the failure mode this phase exists to prevent. Use this exact call
+   shape:
 
    ```
    Agent(
@@ -732,9 +743,14 @@ For each entry in `response.plan`, in priority order:
    )
    ```
 
-   Only exception: `python-dependabot-snyk-triage` is spawned WITHOUT
-   `isolation` (it acts on GitHub PRs via `gh`, not local files).
-   See the dispatcher SKILL for the full case list.
+   **`plan[i].isolation` is `false` → spawn WITHOUT `isolation`.** The
+   group's agent acts on GitHub PRs via `gh`, not on local files, so it
+   needs no worktree (in `development-python` this is
+   `python-dependabot-snyk-triage`; a second language plugin's
+   vendor-PR agent carries the same `isolation: false` and is handled
+   identically). It returns no worktree branch — steps 3–7 below that
+   push/merge a worktree branch do not apply; follow the dispatcher
+   SKILL's case list for what such an agent reports back.
 
    **Pre-flight for `python-runtime-upgrade` groups.** Before spawning
    this agent, the orchestrator must check whether the target runtime
@@ -837,7 +853,8 @@ After pushing and opening the PR:
    `QUEUED` state.)
 2. **If all checks pass** → proceed to step 5 (approval gate) below.
 3. **If any check fails**, distinguish **new** from **pre-existing**
-   failures before spending tokens on `python-ci-fixer`.
+   failures before spending tokens on the CI-fix agent
+   (`<response.ci_fixer_agent>`, captured in Phase 6).
 
    A failure that's already failing on `<base_branch>` is not caused
    by this PR — it belongs on the project's main, not on a maintenance
@@ -885,8 +902,8 @@ After pushing and opening the PR:
      is now blocking CI.
 
    In both cases the right move is to investigate, not silently merge.
-   `python-ci-fixer` will dig into the log and either fix the
-   remaining failures or escalate with an actionable recommendation.
+   The CI-fix agent will dig into the log and either fix the remaining
+   failures or escalate with an actionable recommendation.
 
    Tool → check-name correspondence is judgment-based; use substring
    match on the tool key (case-insensitive). Examples:
@@ -913,8 +930,8 @@ After pushing and opening the PR:
      gating, proceed to step 5 (approval gate). Record in the run
      summary so the user knows they're still red.
    - **At least one same-tool failure** OR **at least one new
-     non-same-tool failure** → spawn `python-ci-fixer` for that
-     combined set. Pass two things in its prompt:
+     non-same-tool failure** → spawn `<response.ci_fixer_agent>` for
+     that combined set. Pass two things in its prompt:
 
      - `failing_checks: <list>` — the names from the combined bucket
        above (truly-pre-existing failures are NOT in this list).
@@ -947,8 +964,9 @@ After pushing and opening the PR:
      other tools' checks are out of scope (escalated). Same-tool
      scope is exhaustive — `pr_scope.findings` is informational
      context for the fixer (what the work agent intended to address),
-     not a filter for narrowing scope further. See
-     `python-ci-fixer.md` step 3 for the full decision table.
+     not a filter for narrowing scope further. See the CI-fix agent's
+     own doc for the full decision table (for `development-python`,
+     `python-ci-fixer.md` step 3).
 
 4. **Process the fixer's response.** The fixer returns JSON
    distinguishing three outcomes:
