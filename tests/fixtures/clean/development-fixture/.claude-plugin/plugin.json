@@ -1,0 +1,9 @@
+{
+  "name": "development-fixture",
+  "description": "A fixture plugin used by the script behavioral tests.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Test Fixture"
+  },
+  "license": "MIT"
+}

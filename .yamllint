@@ -1,0 +1,29 @@
+# yamllint config for this repo. Extends the default ruleset with relaxations
+# that fit GitHub Actions workflows and our other YAML (see #260 / #263).
+---
+extends: default
+
+# Also lint the bootstrap workflow/config TEMPLATES (*.yml.tmpl / *.yaml.tmpl).
+# They become a new repo's files, so they must pass the same rules — otherwise a
+# freshly-bootstrapped repo fails its very first YAML check. Their {{PLACEHOLDER}}
+# tokens sit in valid YAML positions, so they lint as-is.
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+  - '.yamllint'
+  - '*.yaml.tmpl'
+  - '*.yml.tmpl'
+
+rules:
+  # 80 is too tight for workflows; 120 is the enforced limit (error).
+  line-length:
+    max: 120
+  # GitHub Actions' `on:` key is valid; don't flag it as a "truthy" value.
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+  # Workflow / config files conventionally omit the `---` document start.
+  document-start: disable
+  # Bootstrap templates use deliberate `# --- TAG-START/END ---` section markers
+  # at list-item indent; a section-end marker necessarily follows deeper-nested
+  # content, which this purely-cosmetic rule can't accept. Off by design.
+  comments-indentation: disable

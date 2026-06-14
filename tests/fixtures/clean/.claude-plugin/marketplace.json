@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "fixture-marketplace",
+  "description": "A self-contained fixture plugin repo for behavioral tests.",
+  "owner": {
+    "name": "Test Fixture"
+  },
+  "plugins": [
+    {
+      "name": "development-fixture",
+      "description": "A fixture plugin used by the script behavioral tests.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Test Fixture"
+      },
+      "source": "./development-fixture",
+      "category": "development"
+    }
+  ]
+}
