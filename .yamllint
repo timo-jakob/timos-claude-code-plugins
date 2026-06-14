@@ -15,12 +15,15 @@ yaml-files:
   - '*.yml.tmpl'
 
 rules:
-  # Workflows have long `run:` lines and URLs; 80 is too tight.
+  # 80 is too tight for workflows; 120 is the enforced limit (error).
   line-length:
     max: 120
-    level: warning
   # GitHub Actions' `on:` key is valid; don't flag it as a "truthy" value.
   truthy:
     allowed-values: ['true', 'false', 'on', 'off']
   # Workflow / config files conventionally omit the `---` document start.
   document-start: disable
+  # Bootstrap templates use deliberate `# --- TAG-START/END ---` section markers
+  # at list-item indent; a section-end marker necessarily follows deeper-nested
+  # content, which this purely-cosmetic rule can't accept. Off by design.
+  comments-indentation: disable
