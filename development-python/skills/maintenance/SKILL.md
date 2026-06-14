@@ -456,6 +456,7 @@ in the same assistant turn.
 ```json
 {
   "schema_version": "2",
+  "ci_fixer_agent": "python-ci-fixer",
   "plan": [ /* the planner's full output array, unchanged */ ],
   "improver_result": {
     "worktree_branch": "<branch name returned by the improver agent>",
@@ -469,6 +470,11 @@ in the same assistant turn.
 }
 ```
 
+- `ci_fixer_agent` is **required** and always `"python-ci-fixer"` for
+  this plugin — the orchestrator spawns it in Phase 8's CI cycle when a
+  PR's checks fail. Emit it on **every** response, including the Phase A
+  `improver_result`-only response (Stage 0's CI cycle needs it before any
+  `plan` exists). See ARCHITECTURE.md § "JSON schema (v2)".
 - `improver_result` is **omitted entirely** when the improver did not
   run (Step 2c branch 1 — all modules already at or above Required).
 - `plan` is **required** (may be empty when there are no findings).

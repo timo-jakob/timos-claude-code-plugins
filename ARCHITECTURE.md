@@ -515,6 +515,7 @@ request side.
 ```json
 {
   "schema_version": "2",
+  "ci_fixer_agent": "python-ci-fixer",
   "plan": [
     {
       "group_id": 1,
@@ -524,6 +525,7 @@ request side.
       "files": ["src/aido/webui/mutation_routes.py", "..."],
       "rationale": "all sonarcloud findings handled together by python-sonar-triage",
       "agent": "python-sonar-triage",
+      "isolation": true,
       "suggested_pr_title": "fix(sonar): triage all 16 SonarCloud findings",
       "priority_score": 0.91
     }
@@ -571,19 +573,38 @@ agents (e.g. a pip-major Dependabot PR or Snyk Fix PR goes to
 
 Each group carries: source tool, included finding IDs, affected files,
 rationale, **the agent the orchestrator will spawn for this group's
-PR**, a suggested PR title, and a priority score. Plans are
-language-local — each language plugin produces its own.
+PR**, an `isolation` flag, a suggested PR title, and a priority score.
+Plans are language-local — each language plugin produces its own.
+
+**`plan[].isolation`** (boolean, default `true` when absent) tells the
+orchestrator whether to spawn the group's agent with
+`isolation="worktree"`. It is `true` for every agent that edits local
+files (the overwhelming majority) and `false` for agents that act on
+GitHub PRs via `gh` rather than the working tree (e.g.
+`python-dependabot-snyk-triage`). This is how the orchestrator decides
+isolation **from the contract**, never by matching an agent name — a
+prerequisite for a second language plugin, whose vendor-PR agent has a
+different name but the same `isolation: false` semantics.
+
+**`ci_fixer_agent`** (top-level, required) names the language plugin's
+CI-fix agent — the one the orchestrator spawns in Phase 8's CI cycle
+when a PR's checks fail (`python-ci-fixer` for `development-python`).
+It is the same constant on every dispatcher response, **including the
+Phase A `improver_result`-only response**, because Stage 0's CI cycle
+needs it before any `plan` exists. The orchestrator reads this field
+rather than hardcoding a per-language fixer name.
 
 The orchestrator processes the plan **sequentially in priority order**:
 
 1. If `improver_result` is present, promote it to a PR first
-   (Stage 0): push, open, monitor CI, optionally invoke
-   `python-ci-fixer` up to 3 times on failure, pass the approval
+   (Stage 0): push, open, monitor CI, optionally invoke the CI-fix
+   agent (`ci_fixer_agent`) up to 3 times on failure, pass the approval
    gate, merge, sync local main.
-2. For each entry in `plan`, in order: spawn `plan[i].agent` with
-   `isolation="worktree"` off the latest base; the runtime returns a
-   worktree branch; push, open a PR, run the same CI cycle, pass the
-   approval gate, merge, sync. Only then move to `plan[i+1]`.
+2. For each entry in `plan`, in order: spawn `plan[i].agent` (with
+   `isolation="worktree"` when `plan[i].isolation` is `true`/absent,
+   without it when `false`) off the latest base; a worktree group
+   returns a worktree branch; push, open a PR, run the same CI cycle,
+   pass the approval gate, merge, sync. Only then move to `plan[i+1]`.
 
 **The approval gate (#224):** a maintenance merge requires an
 approving review from `claude-approver[bot]` or a human — the
@@ -592,8 +613,9 @@ CI green the orchestrator polls `reviewDecision` (10-minute budget);
 an Approver `REQUEST_CHANGES` triggers an in-run re-ingest fix round
 (max 2 per PR), and a timeout arms GitHub's native auto-merge so the
 PR merges whenever an approval eventually lands. The same rule
-applies to vendor PRs in `python-dependabot-snyk-triage` (merge only
-if already approved; otherwise arm auto-merge).
+applies to vendor PRs handled by an `isolation: false` group (in
+`development-python`, `python-dependabot-snyk-triage`): merge only
+if already approved; otherwise arm auto-merge.
 
 This serialization means each group's work runs against the latest
 post-merge state. There is no local merging, no topological ordering of
