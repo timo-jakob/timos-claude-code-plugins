@@ -53,12 +53,14 @@ slices):
 | `skill_validation`     | `claude-plugin-skill-validator` (sonnet) | triage / judgment |
 | `reference_checking`   | `claude-plugin-reference-checker` (sonnet) | triage / judgment |
 | `structure_validation` | `claude-plugin-structure-validator` (sonnet) | triage / judgment |
+| `script_quality`       | `claude-plugin-script-quality` (sonnet) | triage / judgment |
 
 ```bash
 jq '{version: (.findings_by_tool.plugin_version_check // []),
      skills:  (.findings_by_tool.skill_validation // []),
      refs:    (.findings_by_tool.reference_checking // []),
-     struct:  (.findings_by_tool.structure_validation // [])}' "$ARGUMENTS"
+     struct:  (.findings_by_tool.structure_validation // []),
+     scripts: (.findings_by_tool.script_quality // [])}' "$ARGUMENTS"
 ```
 
 Respect `dispatch_filter` if present: only build groups for tools listed in
@@ -73,10 +75,11 @@ For each handled tool with a **non-empty** finding list (and allowed by any
 **low-risk-mechanical first**, then the triage validators:
 `plugin_version_check` (deterministic JSON edit) → `skill_validation` (frontmatter
 triage) → `reference_checking` (cross-reference triage) → `structure_validation`
-(directory-layout triage). Number `group_id` sequentially across the groups you
-actually emit (1, 2, 3, 4); skip a tool entirely when it has no findings. A
-dedicated `claude-plugin-maintenance-planner` takes over ordering/grouping only if
-grouping ever grows beyond one-group-per-tool; the current fixed order suffices.
+(directory-layout triage) → `script_quality` (shell-script lint triage). Number
+`group_id` sequentially across the groups you actually emit (1, 2, 3, 4, 5); skip
+a tool entirely when it has no findings. A dedicated
+`claude-plugin-maintenance-planner` takes over ordering/grouping only if grouping
+ever grows beyond one-group-per-tool; the current fixed order suffices.
 
 Group for `plugin_version_check`:
 
@@ -146,8 +149,25 @@ Group for `structure_validation`:
 }
 ```
 
+Group for `script_quality`:
+
+```json
+{
+  "group_id": 5,
+  "tool": "script_quality",
+  "description": "Triage <N> shell-script lint finding(s)",
+  "findings": ["<finding id>", "..."],
+  "files": ["<unique files across the findings>"],
+  "rationale": "shellcheck / zsh -n / shebang findings triaged together by claude-plugin-script-quality",
+  "agent": "claude-plugin-script-quality",
+  "isolation": true,
+  "suggested_pr_title": "fix(plugin-script): resolve shell-script lint findings",
+  "priority_score": 0.3
+}
+```
+
 `isolation: true` for all — the agents edit files (`marketplace.json`,
-frontmatter, reference tokens, layout), so they run in worktrees.
+frontmatter, reference tokens, layout, scripts), so they run in worktrees.
 
 ## Step 4 — return the response
 
