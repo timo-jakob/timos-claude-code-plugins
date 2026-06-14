@@ -573,8 +573,9 @@ agents (e.g. a pip-major Dependabot PR or Snyk Fix PR goes to
 
 Each group carries: source tool, included finding IDs, affected files,
 rationale, **the agent the orchestrator will spawn for this group's
-PR**, an `isolation` flag, a suggested PR title, and a priority score.
-Plans are language-local — each language plugin produces its own.
+PR**, an `isolation` flag, an optional `pre_dispatch_hook`, a suggested
+PR title, and a priority score. Plans are language-local — each
+language plugin produces its own.
 
 **`plan[].isolation`** (boolean, default `true` when absent) tells the
 orchestrator whether to spawn the group's agent with
@@ -593,6 +594,39 @@ It is the same constant on every dispatcher response, **including the
 Phase A `improver_result`-only response**, because Stage 0's CI cycle
 needs it before any `plan` exists. The orchestrator reads this field
 rather than hardcoding a per-language fixer name.
+
+**`plan[].pre_dispatch_hook`** (optional, per-group) lets a language
+plugin ask the orchestrator to run an environment check *before* it
+spawns the group's agent — the case where the agent depends on
+something the orchestrator can only provision interactively (a subagent
+can't prompt the user). The orchestrator dispatches on the hook's
+`type` and stays language-agnostic; all specifics (script path, target,
+the agent-prompt field to set, the user-facing label) come from the
+hook. The one `type` defined in v2 is **`runtime_availability`**:
+
+```json
+"pre_dispatch_hook": {
+  "type": "runtime_availability",
+  "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+  "target": "3.14",
+  "prompt_field": "local_verification_mode",
+  "modes": { "available": "auto", "unavailable": "skip" },
+  "label": "Python 3.14 interpreter"
+}
+```
+
+The orchestrator runs `<plugin-base-dir>/<script> detect <target>`
+(exit 0 = available, exit 1 = missing); on missing it offers
+install / self-install / skip via `AskUserQuestion`, running
+`<script> install <target>` for the install path. It then spawns the
+agent with `<prompt_field>` set to `modes.available` or
+`modes.unavailable` accordingly. This replaces the previous
+orchestrator code that hardcoded the `python-runtime-upgrade` agent
+name, its helper-script path, and the `local_verification_mode` field —
+so a second language plugin's runtime bump reuses the same protocol
+with its own script + label. An unrecognized `type` is skipped and
+surfaced as a quality bug (forward-compatibility: an older orchestrator
+ignores hook types it doesn't implement rather than failing the run).
 
 The orchestrator processes the plan **sequentially in priority order**:
 
