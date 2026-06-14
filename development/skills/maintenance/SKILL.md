@@ -33,6 +33,20 @@ Supported flags in `$ARGUMENTS`:
   only spawns the agent(s) for the chosen tool. Other agents are
   skipped entirely — no work, no missing-tool recommendation.
   Combinable with `--dry-run` and `--no-merge`.
+- `--concern=<name>` — scope dispatch to a whole **concern** (a named
+  group of tools); the coarse-grained sibling of `--tool`. `<name>` must
+  be one of:
+  - `security` → `snyk_prs`, `code_scanning`, `semgrep`
+  - `dependencies` → `dependabot`
+  - `codequality` → `sonarcloud`, `ruff`
+
+  It expands to that tool set and scopes dispatch exactly like `--tool`,
+  just to several tools at once — the gather phase still runs for
+  everything, only dispatch is narrowed. Combinable with `--dry-run` and
+  `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
+  other). The three concerns partition all six tools, so
+  `--concern=security` + `--concern=dependencies` + `--concern=codequality`
+  together cover the same set as an unscoped run.
 - `--track-as-issues` — after the run completes, create / update /
   close GitHub tracking issues for each scanner tool's remaining
   findings. One issue per tool (`ruff`, `semgrep`, `code_scanning_alerts`,
@@ -48,6 +62,14 @@ When `--tool=<name>` is set, validate `<name>` against the known set
 above before proceeding. On a mismatch, halt with: "Unknown --tool
 '<name>'; supported: ruff, semgrep, code_scanning, snyk_prs,
 sonarcloud, dependabot."
+
+When `--concern=<name>` is set, validate `<name>` against `security`,
+`dependencies`, `codequality`. On a mismatch, halt with: "Unknown
+--concern '<name>'; supported: security, dependencies, codequality."
+Expand it to its tool set (above) and carry that set forward as the
+dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
+exactly as it does for `--tool`. If **both** `--tool` and `--concern`
+are passed, halt with: "Pass --tool or --concern, not both."
 
 ## Phase 1 — detect
 
@@ -378,12 +400,20 @@ schema v2:
 }
 ```
 
-When `--tool=<name>` was passed in Phase 0, also add the optional
-`dispatch_filter` field to the payload (omit it entirely otherwise):
+When `--tool=<name>` **or** `--concern=<name>` was passed in Phase 0,
+also add the optional `dispatch_filter` field to the payload (omit it
+entirely otherwise):
 
 ```json
-"dispatch_filter": { "only_tools": ["<name>"] }
+"dispatch_filter": { "only_tools": ["<tool>", "..."] }
 ```
+
+`only_tools` is the scoped tool set: a single-element list for `--tool`,
+or the concern's expanded tool set for `--concern` (e.g.
+`["snyk_prs", "code_scanning", "semgrep"]` for `--concern=security`).
+The field shape is identical either way — the language plugin already
+treats `only_tools` as a set, so no plugin change is needed to support
+multi-tool scoping.
 
 This is what the language plugin reads to know it should skip every
 other agent. The gather output is unchanged — only dispatch is scoped.
@@ -1125,6 +1155,10 @@ Languages processed: <comma-separated list from supported>
 ⚠ Scoped to single tool: <name>
   Other tools were gathered but not dispatched. Re-run without --tool
   to process them.
+<If --concern=<name> was set:>
+⚠ Scoped to concern: <name> (tools: <comma-separated expanded set>)
+  Tools outside this concern were gathered but not dispatched. Re-run
+  without --concern (or with the other concerns) to process them.
 
 <If unsupported is non-empty:>
 ⚠ Languages detected but not yet supported:
