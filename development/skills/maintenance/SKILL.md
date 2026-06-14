@@ -752,51 +752,72 @@ For each entry in `response.plan`, in priority order:
    push/merge a worktree branch do not apply; follow the dispatcher
    SKILL's case list for what such an agent reports back.
 
-   **Pre-flight for `python-runtime-upgrade` groups.** Before spawning
-   this agent, the orchestrator must check whether the target runtime
-   is locally available — the agent's cascade depends on it, and
-   subagents can't prompt the user interactively, so this decision must
-   happen here.
+   **Pre-dispatch hook (when `plan[i].pre_dispatch_hook` is present).**
+   Some groups need an environment check before their agent is spawned —
+   e.g. a runtime-upgrade agent's cascade depends on the target
+   interpreter being installed locally, and subagents can't prompt the
+   user interactively, so the decision must happen here. The orchestrator
+   has **no language knowledge**: it runs the hook the plan attached,
+   dispatching on the hook's `type`, and passes the outcome to the agent
+   via the field the hook names. When `pre_dispatch_hook` is absent, skip
+   straight to step 3.
 
-   Interpreter detection + install is **plugin-owned** (the orchestrator
-   has no language-specific knowledge). For Python, invoke the
-   development-python plugin's helper script:
+   The only hook `type` defined in v2 is **`runtime_availability`**:
 
-   ```bash
-   "<plugin-base-dir>/development-python/scripts/pre-dispatch-runtime-upgrade.sh" \
-     detect "<to_version>"
+   ```json
+   "pre_dispatch_hook": {
+     "type": "runtime_availability",
+     "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+     "target": "3.14",
+     "prompt_field": "local_verification_mode",
+     "modes": { "available": "auto", "unavailable": "skip" },
+     "label": "Python 3.14 interpreter"
+   }
    ```
 
-   The script extracts `<to_version>` from the plan entry (e.g. `3.14`
-   from a `python:3.14-slim-bookworm` PR), probes the standard install
-   locations, and prints a JSON result on stdout. Exit 0 if the runtime
-   is found, exit 1 if missing.
+   `script` is relative to `<plugin-base-dir>` and the planner has
+   already extracted `target` (e.g. `3.14` from a
+   `python:3.14-slim-bookworm` PR). Run its `detect` subcommand:
 
-   - **Found** (exit 0) → spawn the agent with `local_verification_mode:
-     "auto"` and proceed normally (the agent runs the 3-pass cascade).
-   - **Missing** (exit 1) → **ask the user** via `AskUserQuestion` with
-     exactly these three options:
+   ```bash
+   "<plugin-base-dir>/<pre_dispatch_hook.script>" detect "<pre_dispatch_hook.target>"
+   ```
 
-     1. **"Install the runtime now"** — orchestrator runs the script's
-        `install <to_version>` subcommand, then re-runs `detect`. If
+   The script probes the standard install locations and prints a JSON
+   result on stdout. Exit 0 = the runtime is available, exit 1 = missing.
+
+   - **Available** (exit 0) → spawn the agent, adding
+     `<prompt_field>: <modes.available>` to its prompt, and proceed
+     normally.
+   - **Missing** (exit 1) → **ask the user** via `AskUserQuestion`,
+     naming `<label>` in the question, with exactly these three options:
+
+     1. **"Install <label> now"** — orchestrator runs the script's
+        `install <target>` subcommand, then re-runs `detect`. If
         re-detect still fails, surface the install error and re-ask the
         user (don't silently fall through to skip).
      2. **"I'll install it myself"** — pause, point the user at the
         plugin's installation guidance, then ask a follow-up
         `AskUserQuestion` "Ready to continue?" with options
-        ["Yes, re-check", "Cancel — skip local verify"]. On "Yes,
-        re-check", re-run the `detect` subcommand; loop at most once,
-        then fall through to skip.
-     3. **"Skip local verification"** — spawn the agent with
-        `local_verification_mode: "skip"`. The agent edits + commits
-        the Dockerfile + `requires-python` only; CI does the real
-        verification.
+        ["Yes, re-check", "Cancel — skip"]. On "Yes, re-check", re-run
+        the `detect` subcommand; loop at most once, then fall through to
+        skip.
+     3. **"Skip"** — spawn the agent with
+        `<prompt_field>: <modes.unavailable>`. The agent makes only the
+        changes it can without local verification (for the runtime
+        upgrade: the Dockerfile + `requires-python` edits only); CI does
+        the real verification.
 
-   The agent's prompt gains one extra field:
+   The agent's prompt gains one extra field, named by the hook:
 
    ```
-   local_verification_mode: "auto" | "skip"
+   <pre_dispatch_hook.prompt_field>: <modes.available> | <modes.unavailable>
    ```
+
+   If `pre_dispatch_hook.type` is unrecognized, skip the hook, spawn the
+   agent without the extra field, and record it in the Phase 9 summary as
+   a quality bug — the plan referenced a hook protocol this orchestrator
+   version doesn't implement.
 
 3. **Wait for the agent** → receive **both** the worktree branch and
    the worktree path. The Claude Code runtime returns both alongside

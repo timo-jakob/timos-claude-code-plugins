@@ -213,6 +213,28 @@ Emit a single JSON object. **No prose, no preamble, no trailing text.**
   agent edits local files — set `true`. The orchestrator reads this
   field instead of matching on the agent name; see ARCHITECTURE.md
   § "JSON schema (v2)".
+- `pre_dispatch_hook` — **only on `python-runtime-upgrade` groups**;
+  omit it on every other group. It tells the orchestrator to verify the
+  target interpreter is installed locally before spawning the agent (the
+  agent's cascade needs it, and subagents can't prompt the user). Emit
+  the `runtime_availability` shape, filling `target` with the Python
+  version this group upgrades to (the `Z.W` from `python:Z.W-...`):
+
+  ```json
+  "pre_dispatch_hook": {
+    "type": "runtime_availability",
+    "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+    "target": "3.14",
+    "prompt_field": "local_verification_mode",
+    "modes": { "available": "auto", "unavailable": "skip" },
+    "label": "Python 3.14 interpreter"
+  }
+  ```
+
+  The orchestrator runs the protocol generically and passes the outcome
+  to the agent as `local_verification_mode` (`auto` when the interpreter
+  is present or installed, `skip` when the user declines). See
+  ARCHITECTURE.md § "JSON schema (v2)".
 - `suggested_pr_title` — follows conventional commit style; lowercase,
   no trailing period. Used both as the agent's commit message subject
   and as the PR title in Phase 8.
