@@ -52,11 +52,13 @@ slices):
 | `plugin_version_check` | `claude-plugin-version-sync` (haiku) | mechanical, low-risk |
 | `skill_validation`     | `claude-plugin-skill-validator` (sonnet) | triage / judgment |
 | `reference_checking`   | `claude-plugin-reference-checker` (sonnet) | triage / judgment |
+| `structure_validation` | `claude-plugin-structure-validator` (sonnet) | triage / judgment |
 
 ```bash
 jq '{version: (.findings_by_tool.plugin_version_check // []),
      skills:  (.findings_by_tool.skill_validation // []),
-     refs:    (.findings_by_tool.reference_checking // [])}' "$ARGUMENTS"
+     refs:    (.findings_by_tool.reference_checking // []),
+     struct:  (.findings_by_tool.structure_validation // [])}' "$ARGUMENTS"
 ```
 
 Respect `dispatch_filter` if present: only build groups for tools listed in
@@ -70,11 +72,11 @@ For each handled tool with a **non-empty** finding list (and allowed by any
 `dispatch_filter`), emit **one group** — at most one per tool. Order the groups
 **low-risk-mechanical first**, then the triage validators:
 `plugin_version_check` (deterministic JSON edit) → `skill_validation` (frontmatter
-triage) → `reference_checking` (cross-reference triage). Number `group_id`
-sequentially across the groups you actually emit (1, 2, 3, …); skip a tool
-entirely when it has no findings. A dedicated `claude-plugin-maintenance-planner`
-takes over ordering/grouping only if grouping ever grows beyond one-group-per-tool;
-the current fixed order suffices.
+triage) → `reference_checking` (cross-reference triage) → `structure_validation`
+(directory-layout triage). Number `group_id` sequentially across the groups you
+actually emit (1, 2, 3, 4); skip a tool entirely when it has no findings. A
+dedicated `claude-plugin-maintenance-planner` takes over ordering/grouping only if
+grouping ever grows beyond one-group-per-tool; the current fixed order suffices.
 
 Group for `plugin_version_check`:
 
@@ -127,8 +129,25 @@ Group for `reference_checking`:
 }
 ```
 
+Group for `structure_validation`:
+
+```json
+{
+  "group_id": 4,
+  "tool": "structure_validation",
+  "description": "Triage <N> plugin directory-layout finding(s)",
+  "findings": ["<finding id>", "..."],
+  "files": ["<unique files across the findings>"],
+  "rationale": "directory-layout findings triaged together by claude-plugin-structure-validator",
+  "agent": "claude-plugin-structure-validator",
+  "isolation": true,
+  "suggested_pr_title": "fix(plugin-structure): correct plugin directory layout",
+  "priority_score": 0.4
+}
+```
+
 `isolation: true` for all — the agents edit files (`marketplace.json`,
-frontmatter, reference tokens), so they run in worktrees.
+frontmatter, reference tokens, layout), so they run in worktrees.
 
 ## Step 4 — return the response
 
