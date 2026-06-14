@@ -407,6 +407,7 @@ Copy from `templates/common/`:
 - `CLAUDE.md` (shift-left agent guidance — append a section if one already exists)
 - `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore` — see `.gitignore` merging below)
 - `.editorconfig` (cross-editor whitespace + encoding settings)
+- `.yamllint` (YAML lint config — line-length 120, GitHub Actions `on:` allowed; used by the `yamllint` pre-commit hook and any YAML CI). Static copy, no substitution.
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)

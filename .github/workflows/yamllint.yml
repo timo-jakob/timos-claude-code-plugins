@@ -9,7 +9,9 @@ on:
     paths:
       - '**/*.yml'
       - '**/*.yaml'
-      - '.yamllint'
+      - '**/*.yml.tmpl'
+      - '**/*.yaml.tmpl'
+      - '**/.yamllint'
       - '.github/workflows/yamllint.yml'
   push:
     branches: [main]

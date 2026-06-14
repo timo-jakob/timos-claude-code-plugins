@@ -1,0 +1,17 @@
+# yamllint config. Extends the default ruleset with relaxations that fit
+# GitHub Actions workflows and typical project YAML. Enforced locally via the
+# pre-commit `yamllint` hook and in CI.
+---
+extends: default
+
+rules:
+  # 80 is too tight for workflows; 120 is the enforced limit (error).
+  line-length:
+    max: 120
+  # GitHub Actions' `on:` key is valid; don't flag it as a "truthy" value.
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+  # Workflow / config files conventionally omit the `---` document start.
+  document-start: disable
+  # Cosmetic; conflicts with common section-marker comment conventions. Off.
+  comments-indentation: disable
