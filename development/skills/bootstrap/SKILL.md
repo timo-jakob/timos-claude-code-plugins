@@ -304,6 +304,7 @@ text replacement before writing:
 | `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated detected languages |
+| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`). Determine: **(1)** if `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(2)** else if exactly one language was detected → that language; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`python_version` field) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `python_version.replace('.', '')`. |
@@ -408,6 +409,7 @@ Copy from `templates/common/`:
 - `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore` — see `.gitignore` merging below)
 - `.editorconfig` (cross-editor whitespace + encoding settings)
 - `.yamllint` (YAML lint config — line-length 120, GitHub Actions `on:` allowed; used by the `yamllint` pre-commit hook and any YAML CI). Static copy, no substitution.
+- `.maintenance.yml` (render `.maintenance.yml.tmpl` — substitute `{{PRIMARY}}`). Declares the repo's primary type so `/development:maintenance` treats it as primary and everything else as auxiliary (see ARCHITECTURE.md "Primary / auxiliary model").
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
@@ -677,9 +679,10 @@ actually rendered in 3a–3f):
 
 **Scaffold files are intentionally NOT stamped** — `CLAUDE.md`,
 `CONTRIBUTING.md`, `SETUP.md`, `SECURITY.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
-`.github/ISSUE_TEMPLATE/*`, `.gitignore`, `.editorconfig`, `LICENSE`,
-`sonar-project.properties`, `.snyk`, `.pre-commit-config.yaml`,
-`ruff.toml`, the Approver policy at `.claude/approver-policy.md`. The
+`.github/ISSUE_TEMPLATE/*`, `.gitignore`, `.editorconfig`, `.yamllint`,
+`.maintenance.yml`, `LICENSE`, `sonar-project.properties`, `.snyk`,
+`.pre-commit-config.yaml`, `ruff.toml`, the Approver policy at
+`.claude/approver-policy.md`. The
 maintenance pipeline expects user customization on these and would
 emit noisy drift findings every run.
 
