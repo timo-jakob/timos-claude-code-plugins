@@ -120,11 +120,14 @@ the canonical example of a one-line catch-up release.
 
 The bootstrap skill generates projects from pinned templates — GitHub Actions
 versions, pre-commit hook revs, Docker image tags, brew formulas, language
-runtime versions. **Dependabot can't update these because they live in
-`.tmpl` files**, not real workflow files.
+runtime versions. **GitHub Action `uses:` pins are now tracked automatically
+by Renovate** — the custom regex manager in `renovate.json` watches the `.tmpl`
+files and raises PRs (see #110), so they're no longer part of this manual pass.
+Everything else still lives in `.tmpl` files that neither Dependabot nor any
+Renovate manager scans, so the rest of this checklist stays manual.
 
 The pragmatic solution is a manual refresh, roughly **once per quarter**.
-Run through this checklist; expect ~20 minutes end-to-end.
+Run through this checklist; expect ~10–15 minutes end-to-end.
 
 A newly-bootstrapped project will pick up the latest versions for *its own*
 files via its own Dependabot config, so template drift only affects the
@@ -170,27 +173,20 @@ grep -E '"[a-z-]+"' development/skills/bootstrap/scripts/preflight.sh | grep -v 
 
 Capture the output in a scratch file. You'll compare it to upstream below.
 
-## Step 2 — Refresh GitHub Actions versions
+## Step 2 — GitHub Actions versions (now automated by Renovate)
 
-For each `uses: <owner>/<repo>@<version>` found in Step 1:
+You no longer refresh these by hand. Renovate's custom regex manager watches the
+`uses: <owner>/<repo>@<version>` pins in the `.tmpl` templates and opens a
+batched **github-actions** PR (majors split into their own PR — templates are
+configured major-only, since they float on major tags). Your job is to
+**review and merge** those PRs; for a major bump, read the release notes first.
 
-```sh
-# Latest release tag for a given action
-gh api repos/<owner>/<repo>/releases/latest --jq '.tag_name'
-```
+Renovate only covers GitHub Action `uses:` pins — the remaining steps below
+(pre-commit revs, Docker tags, runtime strings, brew formulas) it doesn't see,
+so those stay manual.
 
-Compare. If the upstream major version is newer, **read the release notes
-before bumping** — major versions can have breaking changes. Apply with:
-
-```sh
-# Find-and-replace, single file at a time so you can review
-git grep -l "uses: <owner>/<repo>@<old>" -- '*.tmpl' | xargs sed -i '' "s|uses: <owner>/<repo>@<old>|uses: <owner>/<repo>@<new>|g"
-```
-
-(macOS `sed -i ''`; on Linux drop the empty string.)
-
-Actions to pay particular attention to (most likely to ship breaking
-changes between majors):
+Actions to pay particular attention to when reviewing a major bump (most likely
+to ship breaking changes between majors):
 
 | Action | Major bumps usually need |
 | --- | --- |
@@ -314,10 +310,12 @@ existing bootstrap-* review agents if the changes are significant.
 
 ## What this checklist explicitly skips
 
-- **Renovate / Dependabot integration** — discussed and declined. Renovate
-  would solve the technical problem cleanly but adds a third-party bot
-  (Mend, Inc.) and creates inconsistency with the Dependabot we generate
-  for bootstrapped projects.
+- **Renovate in the bootstrap templates** — deliberately not done. Renovate now
+  runs on *this* repo to track the GitHub Action pins inside the `.tmpl`
+  templates (the gap Dependabot can't cover — see #110), but we do **not** swap
+  Dependabot for Renovate in the templates we ship downstream. Bootstrapped
+  projects have standard manifests Dependabot handles well, without imposing a
+  third-party bot (Mend, Inc.). Renovate here, Dependabot everywhere we ship.
 - **Self-hosted updater workflow** — possible but adds ~150 lines of
   code to maintain. The manual cadence is cheaper at our throughput.
 - **Automated runtime-version policy** — `python-version` and friends are
