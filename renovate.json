@@ -13,7 +13,7 @@
     {
       "customType": "regex",
       "description": "Extract GitHub Action `uses:` pins from bootstrap workflow templates (*.tmpl). Stock github-actions manager only scans .yml/.yaml, so the templates that downstream repos render into their own workflows are otherwise invisible to drift detection.",
-      "fileMatch": ["\\.tmpl$"],
+      "managerFilePatterns": ["/\\.tmpl$/"],
       "matchStrings": [
         "uses:\\s+(?<depName>[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)(?:/[a-zA-Z0-9_./-]+)?@(?<currentValue>[a-zA-Z0-9._-]+)"
       ],
@@ -27,6 +27,12 @@
       "groupName": "github-actions",
       "groupSlug": "github-actions",
       "commitMessageTopic": "GitHub Actions"
+    },
+    {
+      "description": "Templates (custom.regex) intentionally float on MAJOR action tags (e.g. @v6) so downstream repos auto-resolve patches at workflow runtime — the template source needs no churn for minor/patch bumps. Only surface MAJOR bumps for templates (a real adopt-the-new-major decision); suppress pin/minor/patch/digest noise. Real workflows (github-actions manager) are unaffected and still get every update type.",
+      "matchManagers": ["custom.regex"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "enabled": false
     }
   ]
 }
