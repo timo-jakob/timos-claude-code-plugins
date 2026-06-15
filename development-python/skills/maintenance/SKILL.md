@@ -300,7 +300,7 @@ the bump itself, not in fragile call sites.
 #### Step 2c — apply per-action-class thresholds
 
 | Action | Required | Floor |
-|---|---|---|
+| --- | --- | --- |
 | Major-version dep upgrade | 90% | 70% |
 | Everything else | 80% | 60% |
 

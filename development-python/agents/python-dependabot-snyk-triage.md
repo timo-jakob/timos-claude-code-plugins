@@ -110,7 +110,7 @@ this dedup pass **before** the per-PR decision tree below.
 Parse `title` for the package + target version:
 
 | Source | Title pattern | Extraction |
-|---|---|---|
+| --- | --- | --- |
 | `dependabot` | `Bump <pkg> from <old> to <new>` | `pkg` after "Bump "; `new` after " to " |
 | `snyk` (Fix PR) | `[Snyk] <type>: upgrade <pkg> from <old> to <new>` | `pkg` after "upgrade "; `new` after " to " |
 | `snyk` (Upgrade PR) | `[Snyk] Upgrade <pkg> from <old> to <new>` | same as Fix PR |
@@ -235,7 +235,7 @@ Patch bumps skip this step.
 #### Step B3 — decide
 
 | Bump | CI | Release notes | Action |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | patch | green | n/a | **merge if approved, else arm auto-merge** |
 | minor | green | clean | **merge if approved, else arm auto-merge** |
 | minor | green | breaking-change flag | defer to `actions_requiring_review` |

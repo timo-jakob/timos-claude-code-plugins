@@ -69,7 +69,7 @@ anything outside that table, default to `human-review`.
 #### Tier A rules — safe to auto-fix
 
 | Rule ID | What it flags | Mechanical fix |
-|---|---|---|
+| --- | --- | --- |
 | `PinnedDependenciesID` *(Scorecard, on `uses:` lines only)* | A GitHub Action referenced by tag (`@v6`) instead of commit SHA | Resolve the tag to its SHA via `gh api repos/<owner>/<repo>/git/refs/tags/<tag>`, replace with `uses: <action>@<sha>  # <tag>`. Keep the tag as a trailing comment so a human can read the intent. **Do NOT** auto-pin pip commands or Docker `FROM` lines — those need hashes files or digest references, which are not single-line mechanical fixes. |
 | `py/unused-global-variable` | Module-level variable assigned but never read | Remove the assignment. If the name appears in `__all__`, also remove from `__all__`. If LSP `find references` shows external use (e.g. dynamically imported), **escalate to human-review** — do not delete. |
 | `py/unused-local-variable` | Function-local variable assigned but never read | Same posture as the global variant, scoped to the function. If the variable is used as a placeholder in tuple-unpacking (`a, _, c = ...`), rename to `_` if it isn't already. |
@@ -162,7 +162,7 @@ surfaces it in the Phase 9 maintenance run summary.
 Rules in this category:
 
 | Rule ID | What it means | Why no code action |
-|---|---|---|
+| --- | --- | --- |
 | `MaintainedID` | Repo created less than 90 days ago, or insufficient recent commits | Time/activity policy; not a code property |
 | `CodeReviewID` | Insufficient number of approved-changeset PRs in recent history | Process policy |
 | `FuzzingID` | No fuzzing harness detected | Infrastructure addition, not a triage action |

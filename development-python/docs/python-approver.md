@@ -31,7 +31,7 @@ it is not a checker.
 The workflow exports these env vars before invoking the agent:
 
 | Variable | Source | Used for |
-|---|---|---|
+| --- | --- | --- |
 | `GH_TOKEN` | Claude Approver App installation token | All `gh` mutations attribute to `claude-approver[bot]` |
 | `ANTHROPIC_API_KEY` | Repo secret | Model invocation |
 | `PR_NUMBER` | The PR number | Every `gh` call |
@@ -154,7 +154,7 @@ The relationship between the gate's bypass and the Approver's per-type
 rules is deliberate:
 
 | Layer | When breaking changes are allowed | What it checks |
-|---|---|---|
+| --- | --- | --- |
 | Gate (CI) | Major version bumped OR title has `!` | Binary: was the break declared? |
 | Approver (this agent) | Depends on PR type — `feat!:` allows it, `refactor:` does not | Type-aware: does this kind of PR even have permission to break? |
 
@@ -237,7 +237,7 @@ Determines which triage agent `/development:maintenance` dispatches
 when re-ingesting findings in Phase 4 of #89:
 
 | Category | Suggested agent | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | `test_quality` | `python-coverage-improver` | Same skill writes meaningful tests as fixes bad ones |
 | `coverage` | `python-coverage-improver` | Direct match |
 | `baseline` (Sonar findings) | `python-sonar-triage` | Category matches scanner |

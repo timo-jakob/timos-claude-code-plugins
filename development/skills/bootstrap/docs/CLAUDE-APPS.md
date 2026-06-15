@@ -8,7 +8,7 @@ the resulting credentials into `/development:bootstrap` per-repo.
 ## The two App identities
 
 | Identity | GitHub App slug pattern | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | **Claude Approver** | `claude-approver-<github-login>` | Posts pull-request reviews (`APPROVE` / `REQUEST_CHANGES` / commenting). Its `pull_request_review` calls satisfy branch protection's one-approval requirement. |
 | **Claude Maintenance** | `claude-maintenance-<github-login>` | Opens pull requests + pushes commits on behalf of `/development:maintenance`. Distinct identity so the Approver's anti-rubber-stamp gate (*PR author ≠ Approver identity*) fires correctly on machine-authored PRs. |
 
@@ -29,7 +29,7 @@ on would add a delivery destination we don't use.
 ### Claude Approver
 
 | Scope | Level | Why |
-|---|---|---|
+| --- | --- | --- |
 | `pull_requests` | write | Post reviews. |
 | `contents` | read | Read the PR diff. |
 | `issues` | read | Read the linked issue body for `feat:` PRs (per the Approver's per-PR-type criteria). |
@@ -40,7 +40,7 @@ on would add a delivery destination we don't use.
 ### Claude Maintenance
 
 | Scope | Level | Why |
-|---|---|---|
+| --- | --- | --- |
 | `contents` | write | Push commits and create branches. |
 | `pull_requests` | write | Open and edit PRs. |
 | `issues` | write | Close issues from PR descriptions (`Closes #N` is the convention codified in repo memory). |

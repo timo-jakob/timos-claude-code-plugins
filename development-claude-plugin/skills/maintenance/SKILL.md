@@ -54,12 +54,12 @@ The tools this plugin handles live under `findings_by_tool` (more land in later
 slices):
 
 | Tool | Routed to | Character |
-|---|---|---|
+| --- | --- | --- |
 | `plugin_version_check` | `claude-plugin-version-sync` (haiku) | mechanical, low-risk |
-| `skill_validation`     | `claude-plugin-skill-validator` (sonnet) | triage / judgment |
-| `reference_checking`   | `claude-plugin-reference-checker` (sonnet) | triage / judgment |
+| `skill_validation` | `claude-plugin-skill-validator` (sonnet) | triage / judgment |
+| `reference_checking` | `claude-plugin-reference-checker` (sonnet) | triage / judgment |
 | `structure_validation` | `claude-plugin-structure-validator` (sonnet) | triage / judgment |
-| `script_quality`       | `claude-plugin-script-quality` (sonnet) | triage / judgment |
+| `script_quality` | `claude-plugin-script-quality` (sonnet) | triage / judgment |
 
 ```bash
 jq '{version: (.findings_by_tool.plugin_version_check // []),

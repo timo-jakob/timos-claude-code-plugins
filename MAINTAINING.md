@@ -193,7 +193,7 @@ Actions to pay particular attention to (most likely to ship breaking
 changes between majors):
 
 | Action | Major bumps usually need |
-|---|---|
+| --- | --- |
 | `actions/checkout` | Node version bumps — usually safe |
 | `actions/setup-*` | Verify the cache key format hasn't changed |
 | `docker/build-push-action` | Read release notes — output and input names change |
@@ -231,7 +231,7 @@ sometimes produce surprise warnings; that's a feature, not a bug.
 Look for `image: <name>:<tag>` in the templates. Current pins:
 
 | Image | Where | Refresh policy |
-|---|---|---|
+| --- | --- | --- |
 | `sonarqube:community` | `templates/private/infra/sonarqube/docker-compose.yml.tmpl` | Stable tag; pulls latest on `docker compose pull`. No template change needed unless SonarQube introduces a breaking change. |
 | `postgres:16-alpine` | same | Bump major (16 → 17) once per Postgres release cycle (~yearly). Test that SonarQube CE still works against it. |
 | `cyclonedx/cyclonedx-cli:latest` | quality workflows | `:latest` is intentional — we want fresh CycloneDX validation. No bump needed. |

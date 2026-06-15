@@ -24,7 +24,7 @@ has historically confused them. Disambiguate before naming a channel in the
 Render template's pre-existing-failures section:
 
 | Check / job name shape | Channel | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `security/snyk (<org>)`, `code/snyk (<org>)`, `open-source/snyk (<org>)` | Snyk **GitHub App** (integration PR checks, posted from app.snyk.io) | Primary SAST + OSS signal for projects with the App installed. |
 | `image` job in the workflow (running `snyk container test`) | CI workflow job | Scans the freshly-built container image, which the GitHub App cannot see. |
 | `snyk-code`, `snyk-open-source` jobs in the workflow (running `snyk code test` / `snyk test --all-projects`) | CI workflow jobs | When present, they duplicate the GitHub App's SAST + OSS signal AND burn private-test quota. If they appear in a failure list, suggest replacing them with the GitHub App. |

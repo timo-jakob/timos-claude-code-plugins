@@ -107,7 +107,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 **Skills:**
 
 | Skill | Command | Description |
-|-------|---------|-------------|
+| ------- | --------- | ------------- |
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see Requirements below). |
 | Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the v1 JSON payload, dispatches to the language plugin (currently only `development-python`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
@@ -116,7 +116,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 **Agents:**
 
 | Agent | Model | Focus |
-|-------|-------|-------|
+| ------- | ------- | ------- |
 | Commit Message | sonnet | Generates clear commit messages from diffs, ignoring formatting/linting noise |
 | Bootstrap Security Reviewer | opus | Reviews planned workflows for GH Actions permissions, secret refs, self-hosted runner safety, scan-before-push gates |
 | Bootstrap Config Consistency | sonnet | Cross-references Sonar keys, workflow job IDs ↔ branch-protection contexts, language fragments ↔ detected languages |
@@ -131,13 +131,13 @@ Swift-specific development tooling — code review and formatting/linting.
 **Skills:**
 
 | Skill | Command | Description |
-|-------|---------|-------------|
+| ------- | --------- | ------------- |
 | Review | `/development-swift:review [paths]` | Spawns 6 specialized agents in parallel to analyze bugs, security, performance, Swift 6 compliance, code quality, and test coverage |
 
 **Agents:**
 
 | Agent | Model | Focus |
-|-------|-------|-------|
+| ------- | ------- | ------- |
 | Bug Hunter | opus | Logic errors, nil crashes, race conditions, stability |
 | Security Reviewer | sonnet | Secrets, injection, insecure storage, ATS, keychain |
 | Performance Reviewer | sonnet | Retain cycles, allocations, O(n²), main thread blocking |
@@ -170,13 +170,13 @@ constructs the input and dispatches here.
 **Skills:**
 
 | Skill | Command | Description |
-|-------|---------|-------------|
+| ------- | --------- | ------------- |
 | Maintenance dispatcher | `/development-python:maintenance <json>` | Parses input, runs coverage pre-flight, spawns per-tool agents in parallel worktrees, aggregates results. Standalone invocation prints usage and stops. |
 
 **Agents:**
 
 | Agent | Model | Focus |
-|-------|-------|-------|
+| ------- | ------- | ------- |
 | python-ruff-fixer | haiku | `ruff check --fix` (safe) + `ruff format` + `--unsafe-fixes` with test verification |
 | python-semgrep-triage | sonnet | Per-finding: fix (refactor) / suppress (`# nosemgrep` + reason); LSP-driven scope check; only escalates when public API changes |
 | python-code-scanning-triage | sonnet | CodeQL + Scorecard alerts: pins GH Actions to commit SHAs (Scorecard `PinnedDependenciesID`), removes unused globals / ineffectual statements (CodeQL `py/unused-*`); defers dataflow rules (`py/path-injection`, `py/sql-injection`, etc.) to human-review with concrete recommendations; surfaces process-policy findings (`MaintainedID`, `CodeReviewID`) as informational. Replaces deprecated `python-snyk-triage` per #87. |
@@ -210,14 +210,14 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 **Skills:**
 
 | Skill | Command | Description |
-|-------|---------|-------------|
+| ------- | --------- | ------------- |
 | Test harness | `/development-claude-plugin:test [--target <path>] [--task "<prompt>"] [--expect "<text>"]` | Exercises a plugin's real behaviour end-to-end. A fresh-context judge subagent drives a *separate* headless `claude` session — local plugins loaded via `--plugin-dir`, run against an isolated clone of the target repo — and returns a structured `PASS`/`FAIL` verdict plus a transcript digest, without flooding the authoring context. See [`docs/test-harness.md`](./development-claude-plugin/docs/test-harness.md). |
 | Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher. Validates plugin conventions and returns a plan routing each finding group to a validator agent. No language coverage gate (a script-quality gate is planned, [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issues/263)). Validates version sync, SKILL.md/agent frontmatter, orphaned references, directory layout, and shell-script quality. |
 
 **Agents:**
 
 | Agent | Model | Focus |
-|-------|-------|-------|
+| ------- | ------- | ------- |
 | claude-plugin-version-sync | haiku | Syncs `marketplace.json` version entries to each plugin's `plugin.json` (the source of truth); escalates add/remove-entry decisions to human review |
 | claude-plugin-skill-validator | sonnet | Triages SKILL.md / agent frontmatter findings (missing/invalid `name`/`description`/`model`/`tools`, empty body); fixes name-to-location mismatches, escalates authored-content gaps |
 | claude-plugin-reference-checker | sonnet | Triages orphaned `/<plugin>:<skill>` and agent references; fixes clear typos of a defined name, escalates removed-target / planned-work cases |
@@ -337,7 +337,7 @@ Detection: conventional-commit prefix in PR title (primary), diff heuristic
 (fallback), author hint (tiebreaker). Ambiguity is itself a finding.
 
 | Prefix | Type | Headline risk |
-|---|---|---|
+| --- | --- | --- |
 | `feat:` | New feature | Implementation matches the story; tests are meaningful, not coverage farming |
 | `fix:` | Bug fix | Regression test exists; root cause addressed, not the symptom |
 | `refactor:` | Behavior preserved | No public-API change; coverage holds; diff is atomic |
