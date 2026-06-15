@@ -41,6 +41,26 @@ repos:
       - id: semgrep
         args: ["--config=auto", "--error", "--quiet"]
 
+  # --- CLAUDE-PLUGIN-START ---------------------------------------------------
+  # Plugin-repo lint: a Claude plugin repo is mostly shell scripts + markdown.
+  # Lint those before commit (the YAML hook above covers workflows/configs; the
+  # maintenance pipeline's script_quality validator additionally runs `zsh -n`
+  # on .zsh, which shellcheck can't parse).
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.10.0-1
+    hooks:
+      - id: shfmt
+        args: ["-d"]
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.44.0
+    hooks:
+      - id: markdownlint
+  # --- CLAUDE-PLUGIN-END -----------------------------------------------------
+
   # --- TYPESCRIPT-START ------------------------------------------------------
   - repo: https://github.com/pre-commit/mirrors-eslint
     rev: v10.4.0
