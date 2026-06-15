@@ -235,6 +235,29 @@ rotation is non-disruptive:
 Old keys keep working until they're revoked, so there is no
 narrow rollover window.
 
+## Writer identity for plugin repos (`/development:open-pr`)
+
+A Claude-plugin repo is the origin of every other repo, so it has **no
+AI Approver** — a human reviews. But GitHub blocks you from approving a
+PR you authored, so Claude's PRs in these repos must be authored by a
+*machine* identity that you can then approve.
+
+That writer is the **Claude Maintenance App, reused** — it already has
+`contents:write` + `pull_requests:write` and a local token-minting path
+(`mint-maintenance-token.zsh` → Keychain key → 1-hour installation
+token), so no new App is registered. Install it on a plugin repo with:
+
+```bash
+install-claude-apps.sh --writer-only   # Maintenance App only; no Approver, no ANTHROPIC_API_KEY, no repo secrets
+```
+
+Then `/development:open-pr` mints the writer token, pushes the branch as
+the bot, opens the PR as `claude-maintenance-<login>[bot]`, and arms
+squash auto-merge with branch deletion. You review and approve; GitHub
+merges it. The repo's merge settings (squash-only, `allow_auto_merge`,
+`delete_branch_on_merge`) are configured by `branch-protection.sh`
+during bootstrap.
+
 ## Testing the registration flow
 
 End-to-end testing genuinely creates GitHub Apps under your account,
