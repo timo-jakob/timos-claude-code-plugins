@@ -937,6 +937,29 @@ workflow + policy template + PR description template arrive in **Phase 2**
 of #89; the `python-approver` agent itself in Phase 3. Until then, the
 secrets and variables installed here sit unused but ready.
 
+### `--claude-plugin true` extension — install the WRITER App
+
+When `--claude-plugin true` was set, the repo is **human-only approval** (no
+Approver — §3e was skipped). Instead, install just the **writer** (the Claude
+Maintenance App) so Claude's PRs are bot-authored and the human can approve them.
+After branch protection, delegate to:
+
+```bash
+"<skill-base-dir>/scripts/install-claude-apps.sh" --writer-only
+```
+
+which installs **only** the Maintenance App on the repo (no Approver, no
+`ANTHROPIC_API_KEY`, no repo secrets — `/development:open-pr` mints the writer
+token locally from the Keychain). Mutually exclusive with `--claude-approver`:
+if both flags were passed, the Approver was already dropped (§3e), and only this
+writer install runs.
+
+The result: `/development:open-pr` opens PRs authored by
+`claude-maintenance-<owner>[bot]`; the human approves; squash auto-merge +
+branch deletion (the repo settings Step 4b configured). If the Maintenance App
+isn't registered yet, the Step 4.5 preflight offers `register-claude-apps.sh`
+first.
+
 ## Step 5: Print the Manual-Setup Checklist
 
 Print a clear, ordered checklist of everything the user **still** has to do
