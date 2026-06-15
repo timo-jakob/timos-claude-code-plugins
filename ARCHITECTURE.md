@@ -87,6 +87,42 @@ would defer to language plugins for the application's entrypoints, and
 own only the k8s-manifest concerns (resource limits, probes, network
 policy, security contexts).
 
+### Primary / auxiliary model
+
+Every repo has exactly one **primary type** — its reason to exist — and zero or
+more **auxiliary** languages/topics (supporting material). Maintenance treats
+them differently:
+
+- **Primary** gets the full, opinionated pipeline with its app-grade gates
+  (coverage floor, dependency upgrades, …).
+- **Auxiliary** gets a *fit-for-purpose* treatment: mechanical / lint-level
+  checks only — **not** primary-grade gates. Running a Python app's 90%-coverage
+  pipeline over a plugin repo's three helper scripts is a category error; this
+  prevents it.
+
+This **generalizes the language-first principle above**: there a *language* gets
+first crack at a *topic*; here the **primary** (which may itself be a topic, e.g.
+`claude-plugin`) gets the full treatment and the rest is auxiliary. Language-first
+is the special case where the primary is a language and the auxiliary is a topic.
+
+**Declared, not inferred.** The primary is set by `/development:bootstrap` in a
+repo-root `.maintenance.yml`:
+
+```yaml
+primary: claude-plugin   # a language (python) or a topic (claude-plugin)
+```
+
+No file ⇒ no distinction: every detected stack is treated as primary (the
+pre-model behavior). The model is opt-in and backward-compatible.
+
+**Mechanism.** The orchestrator reads `.maintenance.yml` and tags each dispatch
+via the payload's `dispatch_mode` (`"primary"` | `"auxiliary"`). The language /
+topic plugin honors it — *auxiliary* means **delegate with a policy override**
+(run the plugin's mechanical fixers, skip its app-grade gates), **not
+re-implement** the auxiliary's linting inside the primary. E.g. `development-python`
+in auxiliary mode runs `python-ruff-fixer` only — no coverage pre-flight, no
+dependency upgrades.
+
 ### Why we split
 
 - **Modularity** — A Python-only project doesn't need Swift skills
@@ -477,6 +513,7 @@ the delivery mechanism changed.
     "visibility": "public"
   },
   "language": "python",
+  "dispatch_mode": "primary",
   "language_meta": {
     "version": "3.13",
     "manifests": ["pyproject.toml", "requirements.txt"]
@@ -523,6 +560,16 @@ other agent is skipped entirely (no work, no missing-tool
 recommendation). The gather output remains complete; the filter is
 purely a dispatch concern. When `dispatch_filter` is absent the
 default "always spawn every agent" rule applies.
+
+**`dispatch_mode`** is `"primary"` | `"auxiliary"` (see § "Primary /
+auxiliary model"). The orchestrator sets it from the repo's
+`.maintenance.yml` declaration: the declared primary stack gets
+`"primary"`, every other detected stack gets `"auxiliary"`. Defaults to
+`"primary"` when there is no declaration, so existing runs are
+unaffected. In `"auxiliary"` mode a language plugin runs only its
+mechanical fixers and **skips its app-grade gates** (coverage
+pre-flight, dependency upgrades) — a policy override, not a separate
+code path per tool.
 
 **`tooling_configured` covers tools the language plugin cares about,
 including ones that aren't set up for this project.** When

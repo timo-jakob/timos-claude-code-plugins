@@ -23,6 +23,30 @@ Your role is now narrower, and it splits into **two distinct phases**
 the orchestrator invokes you for. You don't need to detect which
 phase: branch on the data in the payload.
 
+### Auxiliary mode — check `dispatch_mode` FIRST
+
+Before anything else, read `payload.dispatch_mode`. When it is `"auxiliary"`,
+this Python is the repo's **supporting tooling**, not its product (e.g. helper
+scripts in a `claude-plugin`-primary repo). Imposing app-grade gates on it is a
+category error (see ARCHITECTURE.md § "Primary / auxiliary model"). So:
+
+- **Skip the coverage pre-flight entirely** — no Phase A, no
+  `python-coverage-improver`, no coverage gate. Coverage isn't load-bearing for
+  supporting code.
+- **Exclude dependency work** — no `dependabot` / `snyk_prs` / major or runtime
+  upgrades; auxiliary dependencies aren't the product.
+- **Plan only the mechanical lint/format fix:** if `ruff` is configured and has
+  findings, return a single group routed to `python-ruff-fixer` (mechanical,
+  `safe_fixes_only`). In v1 the security/quality triagers (semgrep, sonarcloud,
+  code_scanning) are also skipped in auxiliary mode — a future `.maintenance.yml`
+  per-type policy can widen this.
+- Return `plan` (the ruff group, or `[]` when ruff is clean/absent) +
+  `ci_fixer_agent` + `missing_tooling`. **Never** `improver_result`. List the
+  skipped tools in a note so the run summary is honest.
+
+When `dispatch_mode` is `"primary"` or absent, proceed with the full Phase A/B
+flow below, unchanged.
+
 **Phase A — coverage improver (when needed):**
 
 1. Validate the payload.
