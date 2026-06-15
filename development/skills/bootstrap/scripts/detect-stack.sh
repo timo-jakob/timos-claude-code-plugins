@@ -152,8 +152,11 @@ EOF
   # Fallback: grep for "requires-python" if Python's tomllib path didn't
   # yield anything (older python3 on host, malformed file, etc.).
   if [[ -z "$python_version" && -f "$pyproject" ]]; then
+    # `|| true`: a no-match grep exits 1, which under `set -euo pipefail`
+    # (pipefail) would abort the script before the 3.12 fallback below — the
+    # common case of a pyproject.toml without `requires-python`.
     python_version="$(grep -E '^[[:space:]]*requires-python' "$pyproject" 2>/dev/null \
-      | grep -oE '[0-9]+\.[0-9]+' | head -n1)"
+      | grep -oE '[0-9]+\.[0-9]+' | head -n1 || true)"
   fi
 
   # Sensible default — current stable interpreter at time of writing.

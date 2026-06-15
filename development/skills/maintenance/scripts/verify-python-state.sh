@@ -47,13 +47,15 @@ project_py=""
 if [[ -n "$target_py" ]]; then
   project_py="$target_py"
 else
+  # `|| true` on both: a no-match grep exits 1, which under `set -euo pipefail`
+  # would abort before the empty-result paths handle "no pin found" gracefully.
   if [[ -f Dockerfile ]]; then
     project_py=$(grep -E '^FROM[[:space:]]+python:' Dockerfile 2>/dev/null \
-                 | head -1 | sed -E 's|.*python:([0-9]+\.[0-9]+).*|\1|')
+                 | head -1 | sed -E 's|.*python:([0-9]+\.[0-9]+).*|\1|' || true)
   fi
   if [[ -z "$project_py" && -f pyproject.toml ]]; then
     project_py=$(grep -E '^[[:space:]]*requires-python' pyproject.toml 2>/dev/null \
-                 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+                 | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)
   fi
 fi
 

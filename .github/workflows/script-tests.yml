@@ -10,6 +10,7 @@ on:
     paths:
       - 'tests/**'
       - 'development/skills/maintenance/scripts/**'
+      - 'development/skills/bootstrap/scripts/**'
       - 'scripts/**'
       - 'development-claude-plugin/**'
       - '.github/workflows/script-tests.yml'
