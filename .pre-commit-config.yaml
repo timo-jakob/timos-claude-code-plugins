@@ -65,11 +65,11 @@ repos:
         files: \.zsh$
 
   # --- markdown lint ---------------------------------------------------------
-  # See .markdownlint.json — MD013 enforces a 120-char line length on prose
-  # (code blocks + tables exempt, to match yamllint). MD033 (inline HTML),
-  # MD040 (code-fence language), MD041 (first-line heading) and MD060 (table
-  # pipe spacing) remain disabled pending their own PRs; structural rules
-  # (heading levels, blank lines, list markers) stay on.
+  # See .markdownlint.jsonc — all rules enforced except two documented
+  # exceptions: MD013 is tuned to a 120-char line length (code blocks + tables
+  # exempt, matching yamllint), and MD041 (first-line heading) is off because
+  # plugin docs are frontmatter-led, not H1-led. Rationale is inline in the
+  # config.
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.44.0
     hooks:
