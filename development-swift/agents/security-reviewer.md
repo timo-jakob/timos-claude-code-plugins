@@ -66,7 +66,7 @@ that could expose user data or compromise application integrity.
 
 For each finding, report:
 
-```
+```text
 ### [CRITICAL|WARNING|SUGGESTION] Title
 
 **File:** path/to/file.swift:lineNumber

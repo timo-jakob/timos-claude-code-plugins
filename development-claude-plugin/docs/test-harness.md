@@ -19,7 +19,7 @@ develop in. The harness solves that with a **two-layer design**.
 
 ## The two layers
 
-```
+```text
 authoring session  ──spawns──▶  judge subagent  ──launches──▶  headless child `claude -p`
 (you, editing the                (fresh context,                (system under test:
  plugin)                          firewall + judge)               local plugins loaded,
@@ -59,7 +59,7 @@ authoring session  ──spawns──▶  judge subagent  ──launches──�
 
 ## Invocation
 
-```
+```bash
 /development-claude-plugin:test \
   --target /Users/timo/repositories/ai-doc-organizer \
   --task "/development:maintenance --dry-run --tool ruff" \

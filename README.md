@@ -472,7 +472,7 @@ claude --plugin-dir ./development --plugin-dir ./development-swift --plugin-dir 
 
 Then use the slash commands:
 
-```
+```bash
 # Development workflow
 /development:commit              # format, lint, generate message, commit
 /development:commit "Fix auth"   # format, lint, commit with given message

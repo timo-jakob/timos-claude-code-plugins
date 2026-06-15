@@ -55,7 +55,7 @@ Before committing, make sure changes are not committed directly to `main`.
    user's original changes and any formatting/linting fixes.
 2. Create the commit using the message from Step 2 (or the user-provided message). Use a HEREDOC to pass the message:
 
-   ```
+   ```bash
    git commit -m "$(cat <<'EOF'
    <commit message here>
    EOF

@@ -40,7 +40,7 @@ The workflow exports these env vars before invoking the agent:
 
 The agent's prompt itself is a short string:
 
-```
+```text
 Review PR #<N> in <owner>/<repo>. Dry-run: <true|false>.
 ```
 

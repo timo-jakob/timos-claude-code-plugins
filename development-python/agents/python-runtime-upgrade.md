@@ -112,7 +112,7 @@ may have several `FROM python:...` lines — update them all.
 
 ### 2. Fetch the `whatsnew` doc for the target version
 
-```
+```text
 WebFetch("https://docs.python.org/3/whatsnew/<to_version>.html",
          prompt="List the removed APIs, deprecated modules, and notable
                  behavior changes for Python <to_version>. Especially
@@ -216,7 +216,7 @@ fi
 
 If `$PY` is set, run the **install + iterate** loop (up to 3 passes):
 
-```
+```text
 PASS 1
   Fresh venv against <to_version>:
     "$PY" -m venv .venv-runtime-upgrade-check

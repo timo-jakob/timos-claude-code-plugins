@@ -225,7 +225,7 @@ value or a guessed default.
 
 Before writing anything, present a clear summary:
 
-```
+```text
 Bootstrap plan:
   Visibility:       <public | private>
   Languages:        <swift, typescript, ...>
@@ -349,7 +349,7 @@ Just call it out.
 If the user provided an email in Q6, substitute the following block (4-space indented to fit the existing markdown list
 level):
 
-```
+```text
    Email **<email-from-Q6>**. For sensitive material, include the line
    "Please respond via a private channel" in your subject so we route the
    reply appropriately.
@@ -357,7 +357,7 @@ level):
 
 If the user left Q6 blank, substitute this block instead:
 
-```
+```text
    No email channel is configured for this project. If you cannot reach us
    through GitHub Security Advisories, open a public issue *only* with the
    description "request to contact maintainers privately about a security
@@ -406,7 +406,7 @@ block stays readable.
 Wrap the helper's output in a short header comment so a future reader
 knows where the appended entries came from:
 
-```
+```text
 # <blank line>
 # --- added by /development:bootstrap (Python fragment, deduped) ---
 <helper output here>
@@ -1009,7 +1009,7 @@ manually — i.e., only the steps that automation didn't cover (or that the user
 declined). If automation in Step 4.5 ran end-to-end, this checklist may be very
 short ("push a branch and open a PR"). Reference `SETUP.md` for full details. Example for public path:
 
-```
+```text
 NEXT STEPS:
 1. Create a SonarCloud account → import this repo → copy SONAR_TOKEN.
 2. Sign up for Snyk → copy SNYK_TOKEN.

@@ -29,7 +29,7 @@ Your prompt contains:
 - `modules_to_improve` — list of file paths with their current coverage
   and the target threshold:
 
-  ```
+  ```json
   [
     {"path": "src/aido/store/persons.py", "current": 67, "target": 90},
     {"path": "src/aido/cli.py", "current": 72, "target": 80}

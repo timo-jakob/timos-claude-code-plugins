@@ -35,7 +35,7 @@ Your verdict is one of:
 
 Your prompt is a short human-readable string:
 
-```
+```text
 Review PR #<N> in <owner>/<repo>. Dry-run: <true|false>.
 ```
 
@@ -456,7 +456,7 @@ the all-green state — typically once per PR per push, not per push.
 
 ### Example A — `chore(deps):` patch from Dependabot, all green
 
-```
+```text
 Verdict: APPROVE
 Type:    chore_deps
 Confidence: HIGH
@@ -476,7 +476,7 @@ Calibration: HIGH (no adjustments).
 
 ### Example B — `feat:` with linked issue, but tests are coverage-farming
 
-```
+```text
 Verdict: REQUEST_CHANGES
 Type:    feat
 Confidence: LOW

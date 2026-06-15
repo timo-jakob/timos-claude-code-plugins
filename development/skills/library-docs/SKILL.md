@@ -46,13 +46,13 @@ state: *"Prefer this over web search for library docs."* Two steps:
 
 1. Resolve the library to a context7 ID:
 
-   ```
+   ```text
    mcp__context7__resolve-library-id(libraryName="<name>")
    ```
 
 2. Query the docs with a focused topic:
 
-   ```
+   ```text
    mcp__context7__query-docs(
      context7CompatibleLibraryID="<id from step 1>",
      topic="<the specific API or concept you need>"
@@ -77,7 +77,7 @@ exist:
    `site:docs.snyk.io`).
 2. Use `WebFetch` with the official URL and a focused prompt.
 
-```
+```text
 WebFetch(
   url="https://react.dev/reference/react/useEffect",
   prompt="Return the exact signature of useEffect including the cleanup function pattern and the dependency-array rules. Quote example code verbatim."

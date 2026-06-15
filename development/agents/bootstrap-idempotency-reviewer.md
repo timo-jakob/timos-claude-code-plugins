@@ -147,7 +147,7 @@ deleting the original).
 
 ## Output format
 
-```
+```text
 ## Idempotency review
 
 ### <file/path/1>

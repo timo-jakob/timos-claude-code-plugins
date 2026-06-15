@@ -164,7 +164,7 @@ Before dispatching:
    payload file** the orchestrator wrote. If it's empty, print this
    message and stop:
 
-   ```
+   ```text
    This plugin is a function of its JSON input. Invoke via:
 
      /development:maintenance
@@ -313,7 +313,7 @@ Three branches:
    land on a fresh branch off `worktree.base_branch`, not in the user's
    working tree:
 
-   ```
+   ```text
    Agent(
      subagent_type="python-coverage-improver",
      description="Raise coverage on under-covered affected modules",
@@ -408,7 +408,7 @@ any improver work has already been merged into main by the orchestrator
 by the time the planner is invoked. Pass the original
 `worktree.base_branch` through.
 
-```
+```text
 Agent(
   subagent_type="python-maintenance-planner",
   description="Plan the order + grouping of findings for dispatch",
@@ -447,7 +447,7 @@ The planner returns:
 Immediately after the planner returns and BEFORE spawning any work
 agent, print a scannable summary to the conversation:
 
-```
+```text
 === Maintenance plan ===
 
 <M> groups, <N> findings, target ~<M> PRs
