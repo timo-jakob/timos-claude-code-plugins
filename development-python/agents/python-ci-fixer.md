@@ -110,7 +110,7 @@ from that tool is in scope when the PR's tool matches.
 Cross-reference each failing check against `pr_scope.tool`:
 
 | Failure shape | Classification | Action |
-|---|---|---|
+| --- | --- | --- |
 | Failing check is for **this PR's tool** (name substring-matches `pr_scope.tool`) | **in scope** — every flagged finding belongs to the agent that owns this tool | Fix (step 4) |
 | Failing check is for a **different tool** | **out of scope** — that tool has its own agent | Escalate, do NOT fix |
 | Generic project check (pytest / ruff / mypy / coverage) referencing files **in the PR's diff** | **in scope** — cross-tool damage caused by this PR's edits | Fix (step 4) |

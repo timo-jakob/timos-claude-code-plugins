@@ -52,14 +52,14 @@ hotfix/csrf-token-missing
 
 ## Branch Types
 
-| Type       | When to use                                                     |
-|------------|-----------------------------------------------------------------|
-| `feat`     | New features or user-facing functionality                       |
-| `fix`      | Bug fixes in non-production code                                |
-| `hotfix`   | Urgent fixes to production; typically branched from `main`      |
-| `chore`    | Dependency updates, CI/CD changes, tooling, build system        |
-| `refactor` | Code restructuring with no functional change                    |
-| `docs`     | Documentation only changes                                      |
+| Type | When to use |
+| ------------ | ----------------------------------------------------------------- |
+| `feat` | New features or user-facing functionality |
+| `fix` | Bug fixes in non-production code |
+| `hotfix` | Urgent fixes to production; typically branched from `main` |
+| `chore` | Dependency updates, CI/CD changes, tooling, build system |
+| `refactor` | Code restructuring with no functional change |
+| `docs` | Documentation only changes |
 
 **When in doubt between `feat` and `refactor`**: if the user will notice the change, use `feat`. If only the code
 changes, use `refactor`.
@@ -76,16 +76,16 @@ changes, use `refactor`.
 
 ### Good vs Bad
 
-| ✅ Good                          | ❌ Bad                                    |
-|----------------------------------|-------------------------------------------|
-| `feat/23-add-user-avatars`       | `feat/23-AddUserAvatars`                  |
-| `feat/add-user-avatars`          | `feat/23_add_user_avatars`                |
-| `fix/99-login-redirect-loop`     | `fix/99_login_redirect_loop`              |
-| `fix/login-redirect-loop`        | `fix/login redirect loop`                 |
-| `chore/14-bump-jest-29`          | `chore/14-updated-jest-version-to-29`     |
-| `chore/bump-jest-29`             | `chore/bumping-jest-to-version-29-stable` |
-| `refactor/67-split-auth-module`  | `67-split-auth-module` (missing type)     |
-| `hotfix/fix-xss-in-comments`     | `hotfix-fix-xss` (wrong separator)        |
+| ✅ Good | ❌ Bad |
+| ---------------------------------- | ------------------------------------------- |
+| `feat/23-add-user-avatars` | `feat/23-AddUserAvatars` |
+| `feat/add-user-avatars` | `feat/23_add_user_avatars` |
+| `fix/99-login-redirect-loop` | `fix/99_login_redirect_loop` |
+| `fix/login-redirect-loop` | `fix/login redirect loop` |
+| `chore/14-bump-jest-29` | `chore/14-updated-jest-version-to-29` |
+| `chore/bump-jest-29` | `chore/bumping-jest-to-version-29-stable` |
+| `refactor/67-split-auth-module` | `67-split-auth-module` (missing type) |
+| `hotfix/fix-xss-in-comments` | `hotfix-fix-xss` (wrong separator) |
 
 ---
 

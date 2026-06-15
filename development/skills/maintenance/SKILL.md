@@ -154,7 +154,7 @@ just like languages, but triggered by a **topic marker** rather than a language
 manifest. Known topics:
 
 | Topic | Marker (present in repo) | Gather script |
-|---|---|---|
+| --- | --- | --- |
 | `claude-plugin` | a `.claude-plugin/` dir holding `plugin.json` (an individual plugin) **or** `marketplace.json` (a marketplace of plugins, like this repo) | `gather-claude-plugin-findings.zsh` |
 
 For each known topic whose marker is present, check for its gather script:
@@ -326,7 +326,7 @@ The script's exit code drives the orchestrator's next move. Don't
 parse stdout/stderr to guess intent; trust the exit code.
 
 | Exit code | Meaning | What you do |
-|---|---|---|
+| --- | --- | --- |
 | `0`, no stdout | State is fine, no action needed | Proceed to the gather script |
 | `0`, stdout is JSON `{"recovered": true, ...}` | State was rebuilt successfully (e.g., venv recreated, deps reinstalled) | Proceed to the gather script. Include the JSON in the run summary so the user knows their local env changed. |
 | `1`, message on stderr | User must intervene; cannot recover autonomously (typically: a tool isn't installed) | **Halt the run.** Forward the stderr message to the user verbatim. |
@@ -1427,11 +1427,11 @@ exist (`maintenance`, `tool:<name>`), finds existing tracking issues
 by label combo, and acts based on the current finding count:
 
 | Finding count | Existing issue? | Action |
-|---|---|---|
+| --- | --- | --- |
 | > 0 | yes | Edit body (title + checklist refresh) |
-| > 0 | no  | Create new issue |
-| 0   | yes | Close with "All `<tool>` findings resolved" comment |
-| 0   | no  | No-op |
+| > 0 | no | Create new issue |
+| 0 | yes | Close with "All `<tool>` findings resolved" comment |
+| 0 | no | No-op |
 
 One tracking issue per scanner tool (`ruff`, `semgrep`,
 `code_scanning_alerts`, `sonarcloud`). Within each issue's body,

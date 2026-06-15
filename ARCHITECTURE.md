@@ -24,7 +24,7 @@ they need; nothing forces installation of the full family.
 There are **three categories** of plugin:
 
 | Category | Purpose | Dispatched when | Examples |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, …) | `development-python`, `development-javascript`, `development-swift` |
 | **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, …) | `development-container`, `development-claude-plugin`, future: `development-kubernetes`, `development-terraform` |
@@ -62,7 +62,7 @@ genuinely language-agnostic or what the language plugin couldn't reach.
 Concrete example — container images:
 
 | Language | Canonical container path (owned by the language plugin) |
-|---|---|
+| --- | --- |
 | Java / Kotlin | Spring Boot's `bootBuildImage`, Cloud Native Buildpacks |
 | Python | Multi-stage with `distroless/python3` final |
 | Go | Single-stage `distroless/static` (Go binaries are static) |
@@ -240,7 +240,7 @@ in CI** and runs on every PR that touches a contract artifact. The
 detector is matched to the surface type:
 
 | Surface | Detector |
-|---|---|
+| --- | --- |
 | REST / OpenAPI | `oasdiff` / `openapi-diff` |
 | gRPC / Protobuf | `buf breaking` |
 | GraphQL | `graphql-inspector` |
@@ -755,7 +755,7 @@ tools: Read, Edit, Bash
 Pick by task character, not by importance:
 
 | Model | When | Examples |
-|---|---|---|
+| --- | --- | --- |
 | **haiku** | Mechanical, deterministic transforms; no judgment | Apply `ruff check --fix`; bump pinned versions; remove unused imports |
 | **sonnet** | Context-aware work; reads surrounding code to decide what fix is appropriate | Triage a Snyk finding (suppress vs fix); choose between refactor patterns; pick a `# nosemgrep` annotation; CI-failure triage |
 | **opus** | High-stakes judgment; security-critical or architectural; cross-codebase migration | Decide if a vulnerability is exploitable; review whether a `# noqa` is justified; migrate a major dep version; apply a Python interpreter upgrade and structured-escalate when deps aren't ready |
@@ -869,7 +869,7 @@ This means **coverage of the touched code must be high enough that
 Two thresholds, per action class:
 
 | Action class | Required coverage | Floor |
-|---|---|---|
+| --- | --- | --- |
 | Major-version dep upgrade | 90% (matches the Zero Tolerance standard, enforced by the bootstrap-generated `coverage-floor` CI step) | 70% |
 | All other changes (refactors, patch/minor bumps, sonar/semgrep/snyk fixes) | 80% | 60% |
 
@@ -877,7 +877,7 @@ Three branches per planned change, evaluated against the touched
 modules' coverage (not whole-project coverage):
 
 | Module coverage | Behavior |
-|---|---|
+| --- | --- |
 | ≥ Required | Proceed with the change. |
 | Floor ≤ coverage < Required | Agent runs `python-coverage-improver` first to bring affected modules up to Required, then makes the change. Adds tests only; never modifies production code under test. |
 | < Floor | Refuse. Surface a `missing_tooling`-shaped recommendation pointing at the standalone `/development-python:improve-test-coverage` skill (issue #35). The user invests in coverage deliberately, then re-runs maintenance. |

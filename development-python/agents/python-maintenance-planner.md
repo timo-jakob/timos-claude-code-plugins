@@ -120,7 +120,7 @@ Order groups by descending priority. Ties broken by:
 ### 5. Map tool → agent (per the dispatcher's routing)
 
 | Source tool | Agent for this group |
-|---|---|
+| --- | --- |
 | `ruff` | `python-ruff-fixer` |
 | `semgrep` | `python-semgrep-triage` |
 | `code_scanning` | `python-code-scanning-triage` |

@@ -23,7 +23,7 @@ runner is already disposable; Docker is only for local isolation).
 ## Layout
 
 | Path | What |
-|---|---|
+| --- | --- |
 | `Dockerfile` | Disposable image (zsh, bats, jq, shellcheck, python3, git) |
 | `run-script-tests.zsh` | Runner — Docker by default, `--local` for host bats |
 | `fixtures/clean/` | A self-contained, finding-free mini plugin repo (a `development-fixture` plugin) |

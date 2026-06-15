@@ -60,7 +60,7 @@ and compares the recorded sha256 against the current template's sha256. It
 emits a JSON array of findings (possibly empty), each carrying one severity:
 
 | Severity | What it means |
-|---|---|
+| --- | --- |
 | `drifted` | Marker present, template hash has moved upstream — re-bootstrap or patch to pick up fixes. |
 | `unknown_provenance` | File lacks a marker (rendered before #213 shipped, or hand-created). Can't verify drift. |
 | `template_missing` | Marker references a template path that no longer exists upstream (renamed/deleted). |

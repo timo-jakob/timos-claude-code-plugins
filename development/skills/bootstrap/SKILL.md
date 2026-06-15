@@ -200,7 +200,7 @@ Ask each only if the detection didn't already answer it. Use the canonical
 wording so behavior stays consistent:
 
 | Q | When to ask | Canonical wording | Effect |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Q1: Create GitHub repo now?** | State A, or State B without a GitHub remote | "Do you want me to create a GitHub repo for this and connect it as `origin` now?" | If yes → Q2 + Q3 + run `gh repo create <name> --<vis> --source=. --remote=origin`. If no → Q3 only. |
 | **Q2: Repo name** | Only if Q1=yes | "What should the GitHub repo be named? (default: `<current-directory-name>`)" | Used in `gh repo create`. |
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the toolchain path — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the path for the rest of the skill. |
@@ -273,7 +273,7 @@ after placeholder substitution, but not yet written to disk).
 Spawn all three in a single assistant turn with multiple `Task` tool calls:
 
 | Agent | Model | What it reviews |
-|---|---|---|
+| --- | --- | --- |
 | `bootstrap-security-reviewer` | opus | GH Actions permissions, secret references, runner-event safety, scan-gates-push, unpinned third-party actions |
 | `bootstrap-config-consistency` | sonnet | Cross-references: Sonar keys, workflow job IDs ↔ branch-protection contexts, secret refs ↔ SETUP.md, language fragment ↔ detected languages |
 | `bootstrap-idempotency-reviewer` | sonnet | For each existing file conflicting with a template, recommends skip/overwrite/merge |
@@ -316,7 +316,7 @@ Use the templates in `<skill-base-dir>/templates/`. Fill placeholders by simple
 text replacement before writing:
 
 | Placeholder | Value |
-|---|---|
+| --- | --- |
 | `{{PROJECT_NAME}}` | display name — repo name from `gh repo view --json name` or the directory name. Use in titles, prose ("Contributing to X", "vulnerability in X"), and Sonar's `sonar.projectName`. |
 | `{{PROJECT_SLUG}}` | `<owner>/<repo>` — full GitHub path. Use in URL contexts (`ghcr.io/<slug>`, `github.com/<slug>/security/advisories/new`, `scorecard.dev/viewer/?uri=github.com/<slug>`, cosign `--certificate-identity-regexp`). From `gh repo view --json nameWithOwner` or `<github_repo>` field of `detect-stack.sh`. |
 | `{{PROJECT_KEY}}` | for Sonar — usually `<github-org>_<repo>` (SonarCloud convention) or `<repo>` (SonarQube) |
@@ -372,7 +372,7 @@ and `# --- TAG-END ---` markers (including the surrounding comment lines).
 Strip blocks where the tag does not apply:
 
 | Tag | Keep when |
-|---|---|
+| --- | --- |
 | `TYPESCRIPT` | typescript detected |
 | `PYTHON` | python detected |
 | `GO` | go detected |
@@ -498,7 +498,7 @@ The `image` job (build → Trivy scan → conditional GHCR push) is only kept if
 The generated `image` job follows a single shape regardless of public/private:
 
 | Step | Always | On merge to `main` / release |
-|---|---|---|
+| --- | --- | --- |
 | Build image with Buildx | ✓ | ✓ |
 | Compute tags via `docker/metadata-action` (semver + `sha-<7>` + `latest`) | ✓ | ✓ |
 | Scan (Snyk container on public / Trivy image on private) | ✓ | ✓ |
@@ -587,7 +587,7 @@ Python is in the detected languages list, render the two Approver-specific
 files:
 
 | Template | Target path in repo | Placeholders to substitute |
-|---|---|---|
+| --- | --- | --- |
 | `templates/common/.github/workflows/claude-approver.yml.tmpl` | `.github/workflows/claude-approver.yml` | `{{CLAUDE_PLUGINS_REPO}}`, `{{CLAUDE_PLUGINS_REF}}` |
 | `templates/languages/python/approver-policy.md.tmpl` | `.claude/approver-policy.md` | (none) |
 
@@ -649,7 +649,7 @@ the language plugin per the language-first principle in
 `ARCHITECTURE.md`.
 
 | Language | Plugin spec file | Renders when |
-|---|---|---|
+| --- | --- | --- |
 | Python | `development-python/docs/api-stability.md` | `pyproject.toml` has a `[project]` table with `name` |
 | *(future)* TypeScript / Go / Rust / Swift | *(per the plugin once it ships)* | … |
 
@@ -722,7 +722,7 @@ Tracked target/template pairs (only stamp the targets that were
 actually rendered in 3a–3f):
 
 | Target | Template |
-|---|---|
+| --- | --- |
 | `.github/dependabot.yml` | `common/.github/dependabot.yml.tmpl` |
 | `.github/workflows/claude-approver.yml` | `common/.github/workflows/claude-approver.yml.tmpl` (only when `--claude-approver true`) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |

@@ -43,7 +43,7 @@ The workflow has already passed every gate, checked out PR HEAD, and
 exported these environment variables:
 
 | Variable | Source |
-|---|---|
+| --- | --- |
 | `GH_TOKEN` | Claude Approver App installation token (so any `gh` mutation attributes to `claude-approver[bot]`) |
 | `ANTHROPIC_API_KEY` | For the model invocation itself |
 | `PR_NUMBER` | The PR number |
@@ -237,7 +237,7 @@ Read the test bodies of added or modified test files in the diff. Flag
 patterns that pass coverage gates without actually verifying behaviour:
 
 | Pattern | Why it's a finding |
-|---|---|
+| --- | --- |
 | `assert True`, `assert 1`, `pass` as the only body | Doesn't verify anything. |
 | Assertions only on mock return values (`mock.return_value = X; assert call() == X`) | Verifies the mock, not the code under test. |
 | Tests that mock the very unit they're testing | Verifies the mock, not the unit. |
@@ -361,7 +361,7 @@ triage agent that should fix it on the next maintenance run. Map per
 the finding category:
 
 | Category | Suggested agent |
-|---|---|
+| --- | --- |
 | `test_quality` | `python-coverage-improver` (it writes meaningful tests; the same skill applies to fixing bad ones) |
 | `api_stability` | `null` (no auto-fix; the author needs to decide on intent) |
 | `feat_no_linked_issue` | `null` |

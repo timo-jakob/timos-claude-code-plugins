@@ -30,7 +30,7 @@ plugin owns the templates directory regardless of language); this spec
 just names them.
 
 | Template (in this plugin family) | Target path in repo | Placeholders |
-|---|---|---|
+| --- | --- | --- |
 | `development/skills/bootstrap/templates/common/.github/workflows/api-stability.yml.tmpl` | `.github/workflows/api-stability.yml` | `{{DEFAULT_BRANCH}}`, `{{PYTHON_VERSION}}` |
 | `development/skills/bootstrap/templates/languages/python/check-api-stability.py` | `.github/scripts/check-api-stability.py` | (none) |
 

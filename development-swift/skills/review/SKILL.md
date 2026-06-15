@@ -18,14 +18,14 @@ Each agent is defined in the `agents/` directory and already knows what to look 
 
 Launch these 6 agents in one message:
 
-| Agent              | Model  |
-|--------------------|--------|
-| bug-hunter         | opus   |
-| security-reviewer  | sonnet |
+| Agent | Model |
+| -------------------- | -------- |
+| bug-hunter | opus |
+| security-reviewer | sonnet |
 | performance-reviewer | sonnet |
-| swift6-compliance  | sonnet |
-| code-quality       | sonnet |
-| test-reviewer      | sonnet |
+| swift6-compliance | sonnet |
+| code-quality | sonnet |
+| test-reviewer | sonnet |
 
 For each agent, use `subagent_type: general-purpose` and pass this prompt:
 

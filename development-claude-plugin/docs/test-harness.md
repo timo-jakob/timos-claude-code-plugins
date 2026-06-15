@@ -72,7 +72,7 @@ listing its slash commands, which verifies the `--plugin-dir` wiring end-to-end
 without spending a full maintenance run.
 
 | Argument | Default | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `--target <path>` | `…/ai-doc-organizer` | Real repo to clone and run against |
 | `--task "<prompt>"` | plumbing smoke test | What the child session should do |
 | `--expect "<text>"` | none | Plain-language PASS criteria for the judge |

@@ -277,7 +277,7 @@ sections the Approver expects:
 Each section serves the Approver concretely:
 
 | Section | What the Approver does with it |
-|---|---|
+| --- | --- |
 | `## Type` | Drives type detection (primary signal). Wrong / missing type caps confidence at `LOW`. |
 | `## Summary` | Read by the model as part of intent matching. |
 | `## Linked issue` | For `feat:`, the linked issue body is the user-story the implementation is judged against. Missing on `feat:` is a finding. |
@@ -292,7 +292,7 @@ section.
 ## PR types — quick reference
 
 | Prefix | Type | Most common failure mode |
-|---|---|---|
+| --- | --- | --- |
 | `feat:` | New feature | Tests look like coverage-farming (assertions only on mocks); implementation doesn't match the linked issue's story |
 | `fix:` | Bug fix | No regression test; fix narrows error handling without addressing root cause |
 | `refactor:` | Behaviour-preserving | Public API actually changed (caught by api-stability gate); coverage dropped |
@@ -872,7 +872,7 @@ they'll be added here.
 ## Reference docs
 
 | Document | What it covers |
-|---|---|
+| --- | --- |
 | [README *Claude Approver* section](../../../README.md#claude-approver) | Design summary + ship-status table |
 | [`CLAUDE-APPS.md`](./CLAUDE-APPS.md) | The two App identities, permissions, manifest flow, manual fallback, key rotation |
 | [`../../../development-python/docs/python-approver.md`](../../../development-python/docs/python-approver.md) | Agent runtime spec — what env it gets, the 13-step procedure, the JSON schema, hard-fail conditions, refusal patterns |
