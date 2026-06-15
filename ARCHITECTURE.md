@@ -452,7 +452,7 @@ steps, commands, `Agent(...)` shapes, decision branches, and the lookup
 tables the orchestrator *follows* — stays inline in `SKILL.md`. The
 reasoning behind the non-obvious steps (incident history, why-this-order,
 exhaustive disambiguation tables) lives in `reference/*.md`, cited inline
-as "see `reference/<file>.md` § <heading>". The happy path never depends
+as "see `reference/<file>.md` § `<heading>`". The happy path never depends
 on reading a reference doc, so a missed read can't break a phase — the docs
 are there when a step's intent is unclear or an edge case fires. This keeps
 the orchestrator scannable without losing the hard-won rationale (#249).

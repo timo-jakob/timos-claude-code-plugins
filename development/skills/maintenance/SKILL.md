@@ -60,12 +60,12 @@ arguments" and stop.
 
 When `--tool=<name>` is set, validate `<name>` against the known set
 above before proceeding. On a mismatch, halt with: "Unknown --tool
-'<name>'; supported: ruff, semgrep, code_scanning, snyk_prs,
+'`<name>`'; supported: ruff, semgrep, code_scanning, snyk_prs,
 sonarcloud, dependabot."
 
 When `--concern=<name>` is set, validate `<name>` against `security`,
 `dependencies`, `codequality`. On a mismatch, halt with: "Unknown
---concern '<name>'; supported: security, dependencies, codequality."
+--concern '`<name>`'; supported: security, dependencies, codequality."
 Expand it to its tool set (above) and carry that set forward as the
 dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
 exactly as it does for `--tool`. If **both** `--tool` and `--concern`
@@ -139,12 +139,12 @@ Partition `languages` into:
 
 - **`supported`** — detected AND a matching gather script exists
 - **`unsupported`** — detected BUT no gather script (i.e., no
-  development-<lang> plugin built yet)
+  `development-<lang>` plugin built yet)
 
 If `supported` is non-empty but `unsupported` is also non-empty,
 proceed with the supported set; remember `unsupported` to include in
-the final summary as an informational note ("Detected <X>, <Y> but
-their plugins are not built yet — only <Z> findings were processed").
+the final summary as an informational note ("Detected `<X>`, `<Y>` but
+their plugins are not built yet — only `<Z>` findings were processed").
 
 ### Topics (cross-language concerns)
 
@@ -173,7 +173,7 @@ If **both** `supported` (languages) and `supported_topics` are empty, halt with
 a message listing what was detected and pointing the user at the README's
 Plugins section. Otherwise proceed with whatever is supported, and carry any
 `unsupported` languages / `unsupported_topics` into the Phase 9 summary as
-informational notes ("Detected <X> but its plugin isn't built yet — not
+informational notes ("Detected `<X>` but its plugin isn't built yet — not
 processed").
 
 ## Phase 2.5 — Approver feedback ingestion (when Claude Apps registered)
@@ -895,7 +895,7 @@ For each entry in `response.plan`, in priority order:
    - **Missing** (exit 1) → **ask the user** via `AskUserQuestion`,
      naming `<label>` in the question, with exactly these three options:
 
-     1. **"Install <label> now"** — orchestrator runs the script's
+     1. **"Install `<label>` now"** — orchestrator runs the script's
         `install <target>` subcommand, then re-runs `detect`. If
         re-detect still fails, surface the install error and re-ask the
         user (don't silently fall through to skip).
@@ -1430,7 +1430,7 @@ by label combo, and acts based on the current finding count:
 |---|---|---|
 | > 0 | yes | Edit body (title + checklist refresh) |
 | > 0 | no  | Create new issue |
-| 0   | yes | Close with "All <tool> findings resolved" comment |
+| 0   | yes | Close with "All `<tool>` findings resolved" comment |
 | 0   | no  | No-op |
 
 One tracking issue per scanner tool (`ruff`, `semgrep`,

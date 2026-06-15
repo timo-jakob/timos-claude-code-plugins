@@ -121,7 +121,7 @@ flow. Stop and ask for input wherever marked; do not guess.
 `git_initialized=true`, `has_github_remote=false`. Files may or may not exist.
 
 1. If `git remote -v` shows a non-GitHub remote (GitLab, Bitbucket, etc.) →
-   inform the user: **"Your remote points at <host>. The workflows I generate
+   inform the user: **"Your remote points at `<host>`. The workflows I generate
    target GitHub Actions, which won't run there. Add a GitHub remote anyway,
    or stop?"** If they want to stop, do so.
 2. Continue to **shared questions** below.

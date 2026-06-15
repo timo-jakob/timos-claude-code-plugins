@@ -181,17 +181,17 @@ Before dispatching:
    ```
 
    If the path does not exist on disk, error: "Payload file not
-   found: <X>. See ARCHITECTURE.md § 'JSON schema (v2)' for the
+   found: `<X>`. See ARCHITECTURE.md § 'JSON schema (v2)' for the
    v2 file-handover contract." Stop.
 
    Read the file's contents and parse as JSON. On parse failure,
-   error: "Payload file <X> is not valid JSON: <error>." Stop.
+   error: "Payload file `<X>` is not valid JSON: `<error>`." Stop.
 
 2. Confirm `schema_version == "2"`. If `"1"`: error: "Schema v1 (inline
    JSON handover) is no longer supported. Upgrade the `development`
    plugin to >= 1.8.0, which uses the v2 file-handover contract. See
    ARCHITECTURE.md § 'JSON schema (v2)'." Stop.
-   For any other value: error: "Schema version <X> unsupported; this
+   For any other value: error: "Schema version `<X>` unsupported; this
    plugin supports v2." Stop.
 3. Confirm `language == "python"`. If not, error and stop — the
    orchestrator misrouted.
@@ -203,11 +203,11 @@ Before dispatching:
    orchestrator never sees groups outside the filter.
    - Each name in `dispatch_filter.only_tools` must be one of: `ruff`,
      `semgrep`, `code_scanning`, `snyk_prs`, `sonarcloud`, `dependabot`.
-     Unknown names halt with: "Unknown tool '<X>' in
+     Unknown names halt with: "Unknown tool '`<X>`' in
      dispatch_filter.only_tools; supported: ruff, semgrep,
      code_scanning, snyk_prs, sonarcloud, dependabot."
    - Each name with `tooling_configured.<name> == false` halts with:
-     "Cannot scope to <X>: not configured for this project. Set it up
+     "Cannot scope to `<X>`: not configured for this project. Set it up
      first via /development:bootstrap, or drop `--tool=<X>`." A missing
      tool can't be tested in isolation — there are no findings to act
      on.
