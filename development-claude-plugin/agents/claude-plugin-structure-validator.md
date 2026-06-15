@@ -56,6 +56,7 @@ deliberate authoring decision.
 2. Apply `marketplace_source_mismatch` fixes via `Edit`.
 3. Collect the rest into `actions_requiring_review`.
 4. Commit only if you changed files:
+
    ```bash
    git add -A
    git commit -m "fix(plugin-structure): correct marketplace source path(s)"

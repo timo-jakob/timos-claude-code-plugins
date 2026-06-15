@@ -30,41 +30,44 @@ set -euo pipefail
 target_py=""
 repo=""
 for arg in "$@"; do
-  case "$arg" in
-    --target-py=*) target_py="${arg#*=}" ;;
-    --*)           echo "unknown flag: $arg" >&2; exit 1 ;;
-    *)             repo="$arg" ;;
-  esac
+	case "$arg" in
+	--target-py=*) target_py="${arg#*=}" ;;
+	--*)
+		echo "unknown flag: $arg" >&2
+		exit 1
+		;;
+	*) repo="$arg" ;;
+	esac
 done
 [[ -n "$repo" && -d "$repo" ]] || {
-  echo "usage: $0 [--target-py=X.Y] <repo_path>" >&2
-  exit 1
+	echo "usage: $0 [--target-py=X.Y] <repo_path>" >&2
+	exit 1
 }
 cd "$repo"
 
 # --- resolve project_py (auto-detect mode) -----------------------------------
 project_py=""
 if [[ -n "$target_py" ]]; then
-  project_py="$target_py"
+	project_py="$target_py"
 else
-  # `|| true` on both: a no-match grep exits 1, which under `set -euo pipefail`
-  # would abort before the empty-result paths handle "no pin found" gracefully.
-  if [[ -f Dockerfile ]]; then
-    project_py=$(grep -E '^FROM[[:space:]]+python:' Dockerfile 2>/dev/null \
-                 | head -1 | sed -E 's|.*python:([0-9]+\.[0-9]+).*|\1|' || true)
-  fi
-  if [[ -z "$project_py" && -f pyproject.toml ]]; then
-    project_py=$(grep -E '^[[:space:]]*requires-python' pyproject.toml 2>/dev/null \
-                 | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)
-  fi
+	# `|| true` on both: a no-match grep exits 1, which under `set -euo pipefail`
+	# would abort before the empty-result paths handle "no pin found" gracefully.
+	if [[ -f Dockerfile ]]; then
+		project_py=$(grep -E '^FROM[[:space:]]+python:' Dockerfile 2>/dev/null |
+			head -1 | sed -E 's|.*python:([0-9]+\.[0-9]+).*|\1|' || true)
+	fi
+	if [[ -z "$project_py" && -f pyproject.toml ]]; then
+		project_py=$(grep -E '^[[:space:]]*requires-python' pyproject.toml 2>/dev/null |
+			grep -oE '[0-9]+\.[0-9]+' | head -1 || true)
+	fi
 fi
 
 # --- resolve venv_py ---------------------------------------------------------
 venv_py=""
 if [[ -x .venv/bin/python ]]; then
-  venv_py=$(.venv/bin/python -c \
-    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" \
-    2>/dev/null || true)
+	venv_py=$(.venv/bin/python -c \
+		"import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" \
+		2>/dev/null || true)
 fi
 
 # --- early-exit cases (no action needed) -------------------------------------
@@ -77,7 +80,7 @@ fi
 
 # --- R.1: target interpreter must be on PATH ---------------------------------
 if ! command -v "python$project_py" >/dev/null 2>&1; then
-  cat >&2 <<EOF
+	cat >&2 <<EOF
 Project declares Python $project_py but local .venv is on Python ${venv_py:-(none)},
 and python$project_py is not on PATH. Install it first:
 
@@ -85,7 +88,7 @@ and python$project_py is not on PATH. Install it first:
 
 Then re-run /development:maintenance.
 EOF
-  exit 1
+	exit 1
 fi
 
 # --- R.2: recreate the venv + install ----------------------------------------
@@ -97,19 +100,19 @@ rm -rf .venv
 install_log=$(mktemp)
 trap 'rm -f "$install_log"' EXIT
 
-if .venv/bin/pip install -e ".[dev]" > "$install_log" 2>&1; then
-  cat "$install_log" >&2
-  jq -n --arg from "${venv_py:-none}" --arg to "$project_py" \
-    '{recovered: true, from_py: $from, to_py: $to}'
-  exit 0
+if .venv/bin/pip install -e ".[dev]" >"$install_log" 2>&1; then
+	cat "$install_log" >&2
+	jq -n --arg from "${venv_py:-none}" --arg to "$project_py" \
+		'{recovered: true, from_py: $from, to_py: $to}'
+	exit 0
 fi
 
 # --- R.2 failed: surface for R.4 handling ------------------------------------
 cat "$install_log" >&2
 log_excerpt=$(tail -30 "$install_log")
 jq -n \
-  --arg pp "$project_py" \
-  --arg vp "${venv_py:-none}" \
-  --arg log "$log_excerpt" \
-  '{recreate_failed: true, project_py: $pp, venv_py: $vp, install_log_excerpt: $log}'
+	--arg pp "$project_py" \
+	--arg vp "${venv_py:-none}" \
+	--arg log "$log_excerpt" \
+	'{recreate_failed: true, project_py: $pp, venv_py: $vp, install_log_excerpt: $log}'
 exit 2

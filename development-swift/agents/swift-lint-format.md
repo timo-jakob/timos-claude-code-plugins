@@ -35,6 +35,7 @@ Re-run `swiftlint lint` on the target files. If any issues remain, fix them. Rep
 ### 5. Report
 
 Summarize what was done:
+
 - Files formatted by SwiftFormat
 - Lint issues fixed (count and brief description)
 - Any issues that could not be auto-resolved (explain why)

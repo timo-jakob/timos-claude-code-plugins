@@ -17,6 +17,7 @@ after verifying CI; pass human-review ones through to the output with
 the dispatcher's stated reason.
 
 PR sources you may see:
+
 - **Dependabot** — `headRefName` starts with `dependabot/<ecosystem>/`.
   Covers patch/minor version updates by default; security updates too
   if enabled in the repo.
@@ -37,12 +38,14 @@ error and surface in `actions_requiring_review`.
 ## Inputs
 
 Your prompt contains:
+
 - `repo_path` — absolute path to the project root
 - `configured` — boolean (true if either `tooling_configured.dependabot`
   or `tooling_configured.snyk_prs` is true)
 - `findings` — array of **pre-classified** vendor PR records (only when
   `configured == true`). The dispatcher has already parsed each PR's
   source + ecosystem + bump level + decided how to handle it:
+
   ```json
   {
     "number": 123,
@@ -58,6 +61,7 @@ Your prompt contains:
   ```
 
   Snyk PR record (same shape, different `source` + `headRefName`):
+
   ```json
   {
     "number": 99,

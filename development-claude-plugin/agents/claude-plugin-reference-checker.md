@@ -62,6 +62,7 @@ reference) — that's a separate, deliberate decision.
 2. Apply typo fixes via `Edit` (change only the reference token).
 3. Collect the rest into `actions_requiring_review`.
 4. Commit only if you changed files:
+
    ```bash
    git add -A
    git commit -m "fix(plugin-ref): correct orphaned skill/agent reference(s)"

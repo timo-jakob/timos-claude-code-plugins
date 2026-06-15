@@ -15,11 +15,13 @@ description: >
 Branches follow one of two formats depending on whether a GitHub Issue exists:
 
 **With issue number** (preferred when a GitHub Issue exists):
+
 ```
 <type>/<issue-number>-<short-description>
 ```
 
 **Without issue number** (for informal/exploratory work):
+
 ```
 <type>/<short-description>
 ```
@@ -99,6 +101,7 @@ hotfix/csrf-token-missing
 ## Protected Branches
 
 Never create branches directly named:
+
 - `main`
 - `develop`
 - `release/*`
@@ -117,6 +120,7 @@ When asked to start work on a task or create a branch:
 3. **Derive a short description** from the task or issue title (apply the rules above)
 4. **Propose the branch name** to the user before creating it
 5. **Create and switch to** the branch:
+
    ```bash
    # With issue
    git switch -c feat/42-add-oauth-login

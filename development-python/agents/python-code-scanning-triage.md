@@ -120,6 +120,7 @@ following categories all default here:
   description.
 
 For each, include:
+
 - The `html_url` so the human can read the full taint trace in the
   Code Scanning UI.
 - A concrete fix suggestion in `recommendation` (e.g. "validate

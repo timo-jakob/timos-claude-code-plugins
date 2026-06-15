@@ -62,6 +62,7 @@ Record in `actions_requiring_review` with a recommendation:
 2. Apply safe fixes + justified disables; **re-verify** after each.
 3. Collect risky/coordinated items into `actions_requiring_review`.
 4. Commit only if you changed files:
+
    ```bash
    git add -A
    git commit -m "fix(plugin-script): resolve shellcheck/zsh-n findings (safe fixes + justified suppressions)"

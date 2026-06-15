@@ -341,6 +341,7 @@ Three branches:
    Phase A bullet for the orchestrator-side loop that re-invokes you
    after the improver's PR merges.
 3. **Any module in the affected set below Floor** → halt. Return:
+
    ```json
    {
      "schema_version": "2",

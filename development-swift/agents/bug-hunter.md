@@ -14,6 +14,7 @@ Systematically analyze Swift source code to find bugs, logic errors, and stabili
 ## What You Look For
 
 ### Logic Errors
+
 - Incorrect boolean conditions, inverted logic, missing edge cases
 - Wrong operator usage (`==` vs `===`, `&&` vs `||`)
 - Off-by-one errors in loops, ranges, and array indexing
@@ -21,6 +22,7 @@ Systematically analyze Swift source code to find bugs, logic errors, and stabili
 - Early returns that skip necessary cleanup
 
 ### Nil & Optional Mishandling
+
 - Force unwraps (`!`) on values that could be nil
 - Implicitly unwrapped optionals (`String!`) used unsafely
 - Optional chaining that silently drops failures where errors should propagate
@@ -28,6 +30,7 @@ Systematically analyze Swift source code to find bugs, logic errors, and stabili
 - `try!` and `fatalError` in non-development code paths
 
 ### Concurrency & Race Conditions
+
 - Shared mutable state accessed from multiple threads/tasks without synchronization
 - Data races from missing actor isolation
 - Deadlock patterns (nested locks, async calls within synchronous locks)
@@ -35,12 +38,14 @@ Systematically analyze Swift source code to find bugs, logic errors, and stabili
 - Incorrect use of `nonisolated` that breaks thread safety
 
 ### State Management
+
 - Stale state from captured values in long-lived closures
 - Inconsistent state mutations (partial updates that leave objects in invalid states)
 - Missing state reset on navigation/lifecycle events
 - Published properties mutated off the main actor
 
 ### Error Handling
+
 - Swallowed errors (empty catch blocks, ignored Result.failure)
 - Catch clauses that match too broadly and hide specific errors
 - Thrown errors that lose context (re-throwing without wrapping)
@@ -59,6 +64,7 @@ For each finding, report:
 ```
 
 **Severity guide:**
+
 - **CRITICAL:** Will cause crashes, data loss, or security issues in production
 - **WARNING:** Likely to cause incorrect behavior under certain conditions
 - **SUGGESTION:** Defensive improvement that prevents future bugs

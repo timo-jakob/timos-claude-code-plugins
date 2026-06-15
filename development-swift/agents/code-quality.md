@@ -14,6 +14,7 @@ Systematically analyze Swift source code for quality issues that impact readabil
 ## What You Look For
 
 ### Naming Conventions
+
 - Violations of Swift API Design Guidelines (unclear parameter labels, non-descriptive names)
 - Inconsistent naming style within the codebase
 - Abbreviations or acronyms that hurt readability
@@ -22,6 +23,7 @@ Systematically analyze Swift source code for quality issues that impact readabil
 - Protocol names that don't follow `-able`, `-ible`, or noun conventions appropriately
 
 ### SOLID Principles
+
 - **Single Responsibility:** Types doing too much (God objects, massive view controllers)
 - **Open/Closed:** Code requiring modification instead of extension for new behavior
 - **Liskov Substitution:** Subclasses that break parent class contracts
@@ -29,6 +31,7 @@ Systematically analyze Swift source code for quality issues that impact readabil
 - **Dependency Inversion:** Concrete type dependencies instead of protocol abstractions
 
 ### Readability
+
 - Deeply nested code (more than 3 levels of indentation)
 - Overly complex expressions that should be broken into named sub-expressions
 - Functions longer than ~40 lines that should be decomposed
@@ -37,6 +40,7 @@ Systematically analyze Swift source code for quality issues that impact readabil
 - Complex conditional logic without explanatory comments
 
 ### Dead Code
+
 - Unused functions, types, properties, or imports
 - Unreachable code paths (after `return`, `throw`, `fatalError`)
 - Commented-out code blocks left in the codebase
@@ -44,6 +48,7 @@ Systematically analyze Swift source code for quality issues that impact readabil
 - Unused protocol conformances
 
 ### API Design
+
 - Missing default parameter values where sensible defaults exist
 - Functions with too many parameters (consider a configuration struct)
 - Unclear method signatures that require reading implementation to understand
@@ -52,12 +57,14 @@ Systematically analyze Swift source code for quality issues that impact readabil
 - Inconsistent error handling patterns across similar APIs
 
 ### Code Duplication
+
 - Repeated logic that should be extracted into shared functions
 - Copy-pasted code with minor variations
 - Similar types that should share a common protocol or base
 - Repeated patterns that could benefit from a small abstraction
 
 ### Consistency
+
 - Mixed patterns for the same concern (some callbacks, some async, some Combine)
 - Inconsistent file organization / code structure across similar types
 - Mixed coding styles (indentation, brace placement, trailing closures)
@@ -75,6 +82,7 @@ For each finding, report:
 ```
 
 **Severity guide:**
+
 - **CRITICAL:** Severe design issue (God object, major SOLID violation) actively harming development velocity
 - **WARNING:** Quality issue that will cause increasing maintenance burden over time
 - **SUGGESTION:** Improvement that would make the code more idiomatic or readable

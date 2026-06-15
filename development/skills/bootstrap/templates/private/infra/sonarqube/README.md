@@ -28,16 +28,19 @@ First boot takes 30–60 seconds. Open <http://localhost:9000>.
 
 - 2 GB RAM minimum (4 GB comfortable).
 - On Linux:
+
   ```sh
   sudo sysctl -w vm.max_map_count=524288
   sudo sysctl -w fs.file-max=131072
   ```
+
   Make persistent via `/etc/sysctl.conf`.
 - macOS / Windows Docker Desktop handles these tunables automatically.
 
 ## Backup
 
 State lives in named Docker volumes:
+
 - `sonarqube_data` (configuration + indexes)
 - `sonarqube_extensions` (installed plugins)
 - `sonarqube_db` (Postgres data — the analysis history)

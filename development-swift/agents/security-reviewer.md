@@ -14,12 +14,14 @@ Systematically analyze Swift source code to find security vulnerabilities, insec
 ## What You Look For
 
 ### Hardcoded Secrets
+
 - API keys, tokens, passwords, or credentials in source code
 - Hardcoded encryption keys or initialization vectors
 - Client secrets for OAuth flows embedded in the binary
 - Firebase/AWS/Azure configuration with overly permissive credentials
 
 ### Injection Vulnerabilities
+
 - SQL injection via string interpolation in database queries
 - JavaScript injection in WKWebView via `evaluateJavaScript`
 - Command injection through `Process` or `NSTask`
@@ -27,6 +29,7 @@ Systematically analyze Swift source code to find security vulnerabilities, insec
 - Deep link / URL scheme parameter injection
 
 ### Insecure Data Storage
+
 - Sensitive data stored in `UserDefaults` instead of Keychain
 - PII written to unencrypted files or Core Data without data protection
 - Sensitive data in `NSCache` or memory without clearing on background
@@ -34,6 +37,7 @@ Systematically analyze Swift source code to find security vulnerabilities, insec
 - Logging sensitive data (passwords, tokens, PII) to console or analytics
 
 ### Network Security
+
 - HTTP connections without App Transport Security exceptions justified
 - Disabled or custom certificate validation (`URLAuthenticationChallenge` misuse)
 - Certificate pinning bypass or missing pinning for sensitive endpoints
@@ -41,6 +45,7 @@ Systematically analyze Swift source code to find security vulnerabilities, insec
 - Insecure WebSocket connections
 
 ### Cryptography
+
 - Use of deprecated algorithms (MD5, SHA1 for security purposes, DES, RC4)
 - Hardcoded IVs or predictable random number generation
 - ECB mode encryption
@@ -48,6 +53,7 @@ Systematically analyze Swift source code to find security vulnerabilities, insec
 - Custom crypto implementations instead of Apple CryptoKit
 
 ### Privacy
+
 - Excessive permissions requested without justification
 - Missing privacy manifest entries (PrivacyInfo.xcprivacy)
 - Tracking without ATT (App Tracking Transparency) consent
@@ -67,6 +73,7 @@ For each finding, report:
 ```
 
 **Severity guide:**
+
 - **CRITICAL:** Directly exploitable vulnerability that could compromise user data or app integrity
 - **WARNING:** Security weakness that increases attack surface or violates best practices
 - **SUGGESTION:** Hardening measure that improves security posture

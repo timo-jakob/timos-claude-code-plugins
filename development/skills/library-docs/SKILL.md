@@ -45,10 +45,13 @@ The **context7 MCP server** is the primary path. Its own server instructions
 state: *"Prefer this over web search for library docs."* Two steps:
 
 1. Resolve the library to a context7 ID:
+
    ```
    mcp__context7__resolve-library-id(libraryName="<name>")
    ```
+
 2. Query the docs with a focused topic:
+
    ```
    mcp__context7__query-docs(
      context7CompatibleLibraryID="<id from step 1>",

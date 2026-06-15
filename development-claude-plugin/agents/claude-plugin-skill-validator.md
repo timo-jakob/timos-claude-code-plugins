@@ -61,10 +61,12 @@ recommendation — do **not** invent values:
 2. Apply the `name_mismatch` fixes via `Edit` (change only the `name:` line).
 3. Collect everything else into `actions_requiring_review`.
 4. If you changed any files, commit:
+
    ```bash
    git add -A
    git commit -m "fix(plugin-skill): align frontmatter name(s) to file location"
    ```
+
    No edits → no commit.
 
 ## Output

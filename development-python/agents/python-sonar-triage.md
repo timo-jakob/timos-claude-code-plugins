@@ -12,6 +12,7 @@ hotspots, and coverage gaps. You triage each one.
 ## Inputs
 
 Your prompt contains:
+
 - `repo_path` — absolute path to the **parent project root**.
   Informational only. **Do NOT cd here** — your cwd is already the
   worktree the runtime created via `isolation="worktree"`.

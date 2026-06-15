@@ -12,6 +12,7 @@ decision in your worktree.
 ## Inputs
 
 Your prompt contains:
+
 - `repo_path` — absolute path to the **parent project root**.
   Informational only. **Do NOT cd here** — your cwd is already the
   worktree the runtime created via `isolation="worktree"`.
@@ -52,6 +53,7 @@ Examples:
   — refactor f-string SQL to **adjacent-string-literal** named constants
   (Python concatenates adjacent string literals at compile time, no
   runtime `+`). Pattern documented in ai-doc-organizer commits. Example:
+
   ```python
   # before
   rows = conn.execute(f"SELECT {_COLS} FROM persons WHERE active = ?", (1,))
@@ -59,6 +61,7 @@ Examples:
   _SQL_LIST_PERSONS_ACTIVE = "SELECT id, slug, name FROM persons WHERE active = ?"
   rows = conn.execute(_SQL_LIST_PERSONS_ACTIVE, (1,))
   ```
+
   If the SET clause is dynamic (kwargs-driven UPDATE), keep concat with
   `# noqa: S608` + a `# nosemgrep: <rule-id>` annotation explaining why.
 
@@ -72,10 +75,12 @@ Examples:
 
 - `app.config["TESTING"] = True` in a test fixture — Flask's documented
   test-client setup. Suppress with:
+
   ```python
   # nosemgrep: python.flask.security.audit.hardcoded-config.avoid_hardcoded_config_TESTING
   app.config["TESTING"] = True  # required by Flask's test client; this is a test fixture
   ```
+
   The inline `# nosemgrep:` comment goes on the line **before** the code
   it suppresses. Always include the full rule ID and a one-sentence
   justification in the trailing comment.

@@ -10,6 +10,6 @@ cwd=$(echo "$input" | jq -r '.cwd // ""')
 
 # Only run when a gh pr merge succeeded
 if [[ "$cmd" =~ gh[[:space:]]+pr[[:space:]]+merge ]] && [[ "$exit_code" == "0" ]]; then
-  cd "$cwd"
-  exec "$(dirname "$0")/cleanup.sh"
+	cd "$cwd" || exit 1
+	exec "$(dirname "$0")/cleanup.sh"
 fi

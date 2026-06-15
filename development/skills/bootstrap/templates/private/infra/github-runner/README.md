@@ -1,7 +1,7 @@
 # Self-hosted GitHub Actions runner
 
 A self-hosted runner lets your CI workflow reach a local SonarQube instance
-(http://localhost:9000) that GitHub-hosted runners can't see.
+(<http://localhost:9000>) that GitHub-hosted runners can't see.
 
 ## Safety constraint
 
@@ -29,6 +29,7 @@ who opens a fork PR could execute arbitrary code on your runner host.
 3. Install as a service so it survives reboots:
 
    **macOS:**
+
    ```sh
    ./svc.sh install
    ./svc.sh start
@@ -36,6 +37,7 @@ who opens a fork PR could execute arbitrary code on your runner host.
    ```
 
    **Linux:**
+
    ```sh
    sudo ./svc.sh install
    sudo ./svc.sh start

@@ -12,6 +12,7 @@ report. No judgment, no triage — just apply the fixes ruff can apply.
 ## Inputs
 
 Your prompt contains:
+
 - `repo_path` — absolute path to the **parent project root**.
   Informational only — useful for absolute file references in your
   output JSON. **Do NOT cd here.** The runtime put you in your

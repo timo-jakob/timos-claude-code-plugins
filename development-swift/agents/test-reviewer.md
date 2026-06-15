@@ -14,6 +14,7 @@ Systematically analyze Swift source code and its associated tests to find gaps i
 ## What You Look For
 
 ### Coverage Gaps
+
 - Critical business logic without corresponding tests
 - Error paths and edge cases not covered by tests
 - Public API entry points without test verification
@@ -22,6 +23,7 @@ Systematically analyze Swift source code and its associated tests to find gaps i
 - Model validation logic without boundary condition tests
 
 ### Assertion Quality
+
 - `XCTAssertTrue`/`XCTAssertFalse` on complex conditions instead of specific assertions
 - Missing assertion messages that make failures hard to diagnose
 - Assertions that only check happy path, ignoring error conditions
@@ -30,6 +32,7 @@ Systematically analyze Swift source code and its associated tests to find gaps i
 - Tests that verify implementation details rather than behavior
 
 ### Test Structure
+
 - Tests not following Arrange-Act-Assert (AAA) or Given-When-Then pattern
 - Setup/teardown logic duplicated across tests instead of using `setUp`/`tearDown`
 - Tests doing too much — verifying multiple behaviors in a single test
@@ -37,6 +40,7 @@ Systematically analyze Swift source code and its associated tests to find gaps i
 - Missing test organization (no logical grouping of related tests)
 
 ### Mock & Stub Usage
+
 - Over-mocking that makes tests tightly coupled to implementation
 - Mocks that don't verify interactions (call counts, parameter values)
 - Real network/file system calls in unit tests (should be mocked)
@@ -44,6 +48,7 @@ Systematically analyze Swift source code and its associated tests to find gaps i
 - Shared mutable mock state between tests causing order-dependent failures
 
 ### Flaky Test Patterns
+
 - Time-dependent tests (`Date()`, `DispatchTime.now()`) without time injection
 - Tests relying on execution order or shared global state
 - Async tests with hardcoded timeouts or sleep instead of expectations
@@ -51,12 +56,14 @@ Systematically analyze Swift source code and its associated tests to find gaps i
 - Non-deterministic tests (random data without seeded generators)
 
 ### Swift Testing Framework
+
 - Opportunities to use `@Test` and `#expect` from Swift Testing instead of XCTest
 - Parameterized test opportunities using `@Test(arguments:)`
 - Trait-based test organization opportunities
 - Modern assertion patterns available in Swift Testing
 
 ### Integration & Snapshot Tests
+
 - Complex UI without snapshot tests for visual regression
 - Multi-component interactions without integration tests
 - API client code without contract/integration tests
@@ -75,6 +82,7 @@ For each finding, report:
 ```
 
 **Severity guide:**
+
 - **CRITICAL:** Critical business logic completely untested, or tests that provide false confidence (always pass)
 - **WARNING:** Significant coverage gap or test quality issue that reduces confidence in the test suite
 - **SUGGESTION:** Improvement that would strengthen test quality or coverage
