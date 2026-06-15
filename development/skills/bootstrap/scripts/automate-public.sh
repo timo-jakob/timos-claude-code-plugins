@@ -364,13 +364,13 @@ fi
 
 # --- Claude Apps install ------------------------------------------------------
 # Phase 1 of #89. Installs the two GitHub Apps registered locally by
-# register-claude-apps.sh onto this repo and stores the per-repo secrets +
+# register-claude-apps.zsh onto this repo and stores the per-repo secrets +
 # variables the Approver workflow (Phase 2) and the Maintenance bot identity
 # will need at runtime.
 if [[ "$CLAUDE_APPROVER" == "true" ]]; then
 	echo
 	info "═══ Claude Apps install ═══"
-	"$SCRIPT_DIR/install-claude-apps.sh"
+	"$SCRIPT_DIR/install-claude-apps.zsh"
 fi
 
 # --- Summary ------------------------------------------------------------------

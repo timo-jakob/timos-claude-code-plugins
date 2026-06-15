@@ -85,7 +85,7 @@ Record in `actions_requiring_review` with a recommendation:
   ],
   "actions_requiring_review": [
     {
-      "finding_id": "script:shebang:development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+      "finding_id": "script:shebang:development-python/scripts/pre-dispatch-runtime-upgrade.zsh",
       "type": "shebang_extension_mismatch",
       "reason": "it's a zsh script named .sh; renaming to .zsh requires updating every caller of that path.",
       "recommendation": "rename to pre-dispatch-runtime-upgrade.zsh and update its callers (grep found: <list>)"

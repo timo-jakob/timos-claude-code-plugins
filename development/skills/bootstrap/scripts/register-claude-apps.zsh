@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# register-claude-apps.sh — register the two Claude GitHub Apps
+# register-claude-apps.zsh — register the two Claude GitHub Apps
 # (claude-approver + claude-maintenance) under the current user's account
 # via the GitHub App Manifest flow, and persist the resulting credentials
 # locally so /development:bootstrap can install them per-repo later.
@@ -345,7 +345,7 @@ manifest_flow() {
   info "  Exchanging the temporary code for App credentials…"
   local resp
   resp=$(gh api -X POST "/app-manifests/${got_code}/conversions") \
-    || die "Code exchange failed. The code is single-use; re-run register-claude-apps.sh to retry."
+    || die "Code exchange failed. The code is single-use; re-run register-claude-apps.zsh to retry."
 
   local app_id client_id slug pem
   # `print -r --` (raw) prevents zsh from interpreting `\n` escape sequences
@@ -426,26 +426,26 @@ list_apps() {
 
 print_usage() {
   cat <<EOF
-register-claude-apps.sh — register the two Claude GitHub Apps locally
+register-claude-apps.zsh — register the two Claude GitHub Apps locally
 
 Usage:
-  register-claude-apps.sh
+  register-claude-apps.zsh
       Register any missing Apps via the manifest flow.
 
-  register-claude-apps.sh --list
+  register-claude-apps.zsh --list
       Print current registration status.
 
-  register-claude-apps.sh --print-manifest <app>
+  register-claude-apps.zsh --print-manifest <app>
       Emit the manifest JSON for inspection. No network calls.
 
-  register-claude-apps.sh --import <app> --app-id <id> --pem <path>
+  register-claude-apps.zsh --import <app> --app-id <id> --pem <path>
       Import credentials obtained via the manual fallback flow
       (see CLAUDE-APPS.md).
 
-  register-claude-apps.sh --reset <app>
+  register-claude-apps.zsh --reset <app>
       Remove the config entry + Keychain key for <app>.
 
-  register-claude-apps.sh --help
+  register-claude-apps.zsh --help
       Show this help.
 
 <app> is one of: ${KNOWN_APPS[*]}

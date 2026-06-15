@@ -410,12 +410,12 @@ different trigger on top of it.
 
 1. **Per-org (one-time)** — register both GitHub Apps (Claude Approver +
    Claude Maintenance); capture App IDs and private keys. The
-   `development/skills/bootstrap/scripts/register-claude-apps.sh` script
+   `development/skills/bootstrap/scripts/register-claude-apps.zsh` script
    walks the manifest flow; see
    [`development/skills/bootstrap/docs/CLAUDE-APPS.md`](./development/skills/bootstrap/docs/CLAUDE-APPS.md)
    for the design and the manual fallback.
 2. **Per-repo** — `/development:bootstrap --claude-approver true`. Bootstrap
-   stores credentials (via `install-claude-apps.sh`), installs the Apps on
+   stores credentials (via `install-claude-apps.zsh`), installs the Apps on
    the repo, generates the workflow + policy + PR template.
 3. **Per-policy** — amend `.claude/approver-policy.md` as your team's norms
    evolve. Changes go through normal PR review.

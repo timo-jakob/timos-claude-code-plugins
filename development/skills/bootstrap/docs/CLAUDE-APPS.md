@@ -2,7 +2,7 @@
 
 Reference for the two GitHub App identities the Claude Approver
 infrastructure depends on. Phase 0 of #89 ships the registration
-script (`register-claude-apps.sh`) and this document; Phase 1 wires
+script (`register-claude-apps.zsh`) and this document; Phase 1 wires
 the resulting credentials into `/development:bootstrap` per-repo.
 
 ## The two App identities
@@ -61,7 +61,7 @@ Explicitly **not granted**:
 
 ### Manifest flow (primary)
 
-`register-claude-apps.sh` uses the [GitHub App Manifest
+`register-claude-apps.zsh` uses the [GitHub App Manifest
 flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest):
 
 1. The script generates a manifest JSON describing each App
@@ -111,7 +111,7 @@ manual flow:
 9. Hand the credentials to the script:
 
    ```sh
-   register-claude-apps.sh --import claude-approver \
+   register-claude-apps.zsh --import claude-approver \
      --app-id 123456 --pem ~/Downloads/claude-approver.private-key.pem
    ```
 
@@ -163,7 +163,7 @@ App IDs, Client IDs, and slugs are not secrets. The file is mode `0600`
 anyway to keep all per-user config in one consistent posture.
 
 `client_id` (#223) may be empty or absent on entries created by the
-`--import` flow or by older versions; `install-claude-apps.sh`
+`--import` flow or by older versions; `install-claude-apps.zsh`
 backfills it (together with `slug`) from `GET /app` when it has to
 resolve a missing slug. Nothing consumes it yet — the numeric
 `app_id` remains a valid JWT issuer and a valid `client-id` input for
@@ -222,7 +222,7 @@ GitHub Apps can have multiple active private keys at once, so
 rotation is non-disruptive:
 
 1. Generate a new key in the App's settings page.
-2. Run `register-claude-apps.sh --rotate <name> --pem <new-pem-path>`.
+2. Run `register-claude-apps.zsh --rotate <name> --pem <new-pem-path>`.
    The script replaces the Keychain entry and updates `registered_at`.
 3. Re-run `/development:bootstrap --claude-approver true` on every
    repo using the App (or extend bootstrap's Phase 1 with a `--rotate`
@@ -248,7 +248,7 @@ That writer is the **Claude Maintenance App, reused** — it already has
 token), so no new App is registered. Install it on a plugin repo with:
 
 ```bash
-install-claude-apps.sh --writer-only   # Maintenance App only; no Approver, no ANTHROPIC_API_KEY, no repo secrets
+install-claude-apps.zsh --writer-only   # Maintenance App only; no Approver, no ANTHROPIC_API_KEY, no repo secrets
 ```
 
 Then `/development:open-pr` mints the writer token, pushes the branch as
@@ -264,12 +264,12 @@ End-to-end testing genuinely creates GitHub Apps under your account,
 so it has side effects. The script supports a few non-destructive
 testing modes:
 
-- `register-claude-apps.sh --print-manifest claude-approver` — emits
+- `register-claude-apps.zsh --print-manifest claude-approver` — emits
   the manifest JSON for inspection without making any HTTP calls or
   opening any browser tab.
-- `register-claude-apps.sh --list` — prints whichever Apps are
+- `register-claude-apps.zsh --list` — prints whichever Apps are
   registered locally with their IDs and slugs; no network calls.
-- `register-claude-apps.sh --dry-run` — runs the manifest flow up to
+- `register-claude-apps.zsh --dry-run` — runs the manifest flow up to
   but not including the browser open + listener spawn, printing what
   it *would* do. Useful for verifying state.
 

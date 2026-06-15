@@ -9,9 +9,9 @@
 # evaluates maintenance-opened PRs.
 #
 # Prerequisites:
-#   - register-claude-apps.sh has been run on this machine (claude-maintenance
+#   - register-claude-apps.zsh has been run on this machine (claude-maintenance
 #     entry in ~/.config/claude-plugins/apps.json + PEM in Keychain).
-#   - install-claude-apps.sh has been run on the current repo (the App is
+#   - install-claude-apps.zsh has been run on the current repo (the App is
 #     installed on this repo so the installation-discovery succeeds).
 #   - Run from inside the target repo's working tree.
 #
@@ -35,14 +35,14 @@ readonly KEYCHAIN_SERVICE="claude-plugins.claude-maintenance"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
   print -u2 -- "claude-plugins not registered: $CONFIG_FILE missing."
-  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.sh"
+  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.zsh"
   exit 1
 fi
 
 app_id=$(jq -r '.claude_maintenance.app_id // empty' "$CONFIG_FILE")
 if [[ -z "$app_id" ]]; then
   print -u2 -- "claude-maintenance not registered (no entry in $CONFIG_FILE)."
-  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.sh"
+  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.zsh"
   exit 1
 fi
 if ! [[ "$app_id" =~ ^[0-9]+$ ]]; then
@@ -52,8 +52,8 @@ fi
 
 if ! raw=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "private-key" -w 2>/dev/null); then
   print -u2 -- "Private key for claude-maintenance not in Keychain."
-  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.sh --reset claude-maintenance"
-  print -u2 -- "  Then re-run register-claude-apps.sh to re-mint the key."
+  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.zsh --reset claude-maintenance"
+  print -u2 -- "  Then re-run register-claude-apps.zsh to re-mint the key."
   exit 1
 fi
 # macOS `security find-generic-password -w` returns the stored value
