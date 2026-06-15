@@ -96,6 +96,32 @@ Extract for use in later phases: `repo` (path = cwd from script),
 `default_branch`, `visibility`, `python_version` (when applicable),
 `languages` (the array — could be one or more).
 
+### Read the maintenance declaration (primary / auxiliary)
+
+Read the optional repo-root `.maintenance.yml`. It declares the repo's
+**primary** stack (its reason to exist) — set by `/development:bootstrap`, never
+inferred. Read the `primary` scalar dependency-free (don't assume `yq`):
+
+```bash
+primary=$(grep -E '^[[:space:]]*primary:' .maintenance.yml 2>/dev/null | head -1 \
+  | sed -E 's/^[[:space:]]*primary:[[:space:]]*//; s/[[:space:]]*(#.*)?$//; s/^["'\'']//; s/["'\'']$//')
+```
+
+This sets each dispatch's **mode** (carried in Phase 4's payload as
+`dispatch_mode`):
+
+- **`primary` present** → the matching language/topic dispatches in **full**
+  mode (`dispatch_mode: "primary"`); every *other* detected language/topic
+  dispatches in **auxiliary** mode (`dispatch_mode: "auxiliary"` —
+  mechanical/lint-level only, no app-grade gates).
+- **absent / empty** → backward-compatible: no primary/auxiliary distinction;
+  **every** target dispatches as `primary` (full), exactly as before.
+
+`primary` names a language (`python`) or a topic (`claude-plugin`). If it isn't
+in the detected+supported set, treat all targets as `primary` and note the stale
+declaration in the Phase 9 summary. See ARCHITECTURE.md § "Primary / auxiliary
+model" for the rationale.
+
 ## Phase 2 — discover which languages we can act on
 
 Maintenance support is gated by **gather script presence**. For each
@@ -420,6 +446,7 @@ schema v2:
     "visibility": "<from detect-stack, or 'unknown'>"
   },
   "language": "<lang>",
+  "dispatch_mode": "<'primary' if <lang> == the declared primary (or no declaration); else 'auxiliary'>",
   "language_meta": {
     "version": "<lang-appropriate version from detect-stack, or a sensible default>",
     "manifests": [/* lang-appropriate manifest files that exist */]
@@ -489,6 +516,8 @@ differences:
 
 - `language`: the **topic name** (e.g. `"claude-plugin"`) — it identifies the
   dispatch target; topic dispatchers don't branch on it.
+- `dispatch_mode`: `"primary"` if this topic == the declared `primary` (or no
+  declaration); else `"auxiliary"` — same rule as language payloads (Phase 1).
 - `language_meta`: `{ "version": null, "manifests": ["<the topic marker file>"] }`.
 - `coverage`: `null` (the topic gather already emits `null`).
 - `tooling_configured` / `findings_by_tool`: straight from `findings-<topic>.json`.

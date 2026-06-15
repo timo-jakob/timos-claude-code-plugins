@@ -29,6 +29,12 @@ describes). For now this dispatcher is a single invocation returning one `plan`.
 
 **Input:** `$ARGUMENTS` is the absolute path to a JSON file. Read it.
 
+**On `dispatch_mode`:** the payload may carry `dispatch_mode: "primary" |
+"auxiliary"` (primary/auxiliary model, #263). Every claude-plugin validator is
+already mechanical/lint-level (version sync, frontmatter, references, layout,
+script lint) — there are no app-grade gates to drop — so this dispatcher behaves
+the same in either mode. Accept the field; it does not change the plan.
+
 ## Step 1 — read and validate the payload
 
 ```bash
