@@ -307,7 +307,8 @@ Block on all three agents finishing. Aggregate their reports:
    `merge`, or `delete` with the user before applying. **Default to
    keep-both for replace-candidates unless the user explicitly chose merge
    or delete** — least-destructive option. Example confirmation:
-   *"Found `test.yml` with: Python 3.13, `apt-get install tesseract-ocr poppler-utils`, `timeout-minutes: 20`. Delete it, fold these into the new `quality-public.yml`, or keep both?"*
+   *"Found `test.yml` with: Python 3.13, `apt-get install tesseract-ocr poppler-utils`, `timeout-minutes: 20`. Delete
+   it, fold these into the new `quality-public.yml`, or keep both?"*
 
 ## Step 3: Generate Files
 
@@ -345,7 +346,8 @@ Just call it out.
 
 ### `{{SECURITY_CONTACT_BLOCK}}` substitution
 
-If the user provided an email in Q6, substitute the following block (4-space indented to fit the existing markdown list level):
+If the user provided an email in Q6, substitute the following block (4-space indented to fit the existing markdown list
+level):
 
 ```
    Email **<email-from-Q6>**. For sensitive material, include the line
@@ -418,22 +420,32 @@ the first arg and it emits the fragment unchanged).
 
 Copy from `templates/common/`:
 
-- `.pre-commit-config.yaml` (merge language-specific hooks based on detected languages; keep the `CLAUDE_PLUGIN` block only when `--claude-plugin true`)
+- `.pre-commit-config.yaml` (merge language-specific hooks based on detected languages; keep the `CLAUDE_PLUGIN` block
+  only when `--claude-plugin true`)
 - **Dependency updates — pick ONE:**
   - default → `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem).
-  - `--claude-plugin true` → copy `renovate.json` instead (static, no substitution) and **do NOT render `.github/dependabot.yml`**. A plugin repo is templates, not production dependency manifests; Renovate's github-actions manager (plus the `.tmpl` customManager in the config) covers its real moving surface.
-- `.github/workflows/gitleaks.yml` (static copy — secret-scanning CI for **every** repo; defense in depth behind the gitleaks pre-commit hook. Note: repos owned by a GitHub Organization need a `GITLEAKS_LICENSE` repo secret — see the workflow comment.)
-- `.gitleaks.toml` (static copy — gitleaks config used by **both** the pre-commit hook and the CI workflow; allowlists documented false positives like `curl -u "$VAR"` examples in `SETUP.md`).
+  - `--claude-plugin true` → copy `renovate.json` instead (static, no substitution) and **do NOT render
+    `.github/dependabot.yml`**. A plugin repo is templates, not production dependency manifests; Renovate's
+    github-actions manager (plus the `.tmpl` customManager in the config) covers its real moving surface.
+- `.github/workflows/gitleaks.yml` (static copy — secret-scanning CI for **every** repo; defense in depth behind the
+  gitleaks pre-commit hook. Note: repos owned by a GitHub Organization need a `GITLEAKS_LICENSE` repo secret — see the
+  workflow comment.)
+- `.gitleaks.toml` (static copy — gitleaks config used by **both** the pre-commit hook and the CI workflow; allowlists
+  documented false positives like `curl -u "$VAR"` examples in `SETUP.md`).
 - `.github/ISSUE_TEMPLATE/bug.yml`
 - `.github/ISSUE_TEMPLATE/feature.yml`
 - `.github/PULL_REQUEST_TEMPLATE.md`
 - `CONTRIBUTING.md`
 - `SETUP.md` (manual steps the user must do after bootstrap)
 - `CLAUDE.md` (shift-left agent guidance — append a section if one already exists)
-- `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore` — see `.gitignore` merging below)
+- `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore` — see `.gitignore` merging
+  below)
 - `.editorconfig` (cross-editor whitespace + encoding settings)
-- `.yamllint` (YAML lint config — line-length 120, GitHub Actions `on:` allowed; used by the `yamllint` pre-commit hook and any YAML CI). Static copy, no substitution.
-- `.maintenance.yml` (render `.maintenance.yml.tmpl` — substitute `{{PRIMARY}}`). Declares the repo's primary type so `/development:maintenance` treats it as primary and everything else as auxiliary (see ARCHITECTURE.md "Primary / auxiliary model").
+- `.yamllint` (YAML lint config — line-length 120, GitHub Actions `on:` allowed; used by the `yamllint` pre-commit
+  hook and any YAML CI). Static copy, no substitution.
+- `.maintenance.yml` (render `.maintenance.yml.tmpl` — substitute `{{PRIMARY}}`). Declares the repo's primary type so
+  `/development:maintenance` treats it as primary and everything else as auxiliary (see ARCHITECTURE.md "Primary /
+  auxiliary model").
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
@@ -446,7 +458,8 @@ Copy from `templates/public/`:
 - `.github/workflows/quality-public-noop.yml` (doc-only PR companion — see below)
 - `.github/workflows/codeql.yml`
 - `.github/workflows/codeql-noop.yml` (doc-only PR companion for CodeQL)
-- `.github/workflows/scorecard.yml` (OpenSSF Scorecard — weekly supply-chain health check; public-only because the score is publicly visible)
+- `.github/workflows/scorecard.yml` (OpenSSF Scorecard — weekly supply-chain health check; public-only because the
+  score is publicly visible)
 - `sonar-project.properties`
 - `.snyk`
 
@@ -467,7 +480,8 @@ unmergeable forever because GitHub leaves a required check in the
 Copy from `templates/private/`:
 
 - `.github/workflows/quality-private.yml` (runs on `self-hosted`)
-- `.github/workflows/quality-private-noop.yml` (doc-only PR companion — runs on `self-hosted` too so it also catches runner-down failures on doc PRs)
+- `.github/workflows/quality-private-noop.yml` (doc-only PR companion — runs on `self-hosted` too so it also catches
+  runner-down failures on doc PRs)
 - `sonar-project.properties`
 - `infra/sonarqube/docker-compose.yml`
 - `infra/sonarqube/README.md`

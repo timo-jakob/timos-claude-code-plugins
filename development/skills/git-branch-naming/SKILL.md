@@ -61,7 +61,8 @@ hotfix/csrf-token-missing
 | `refactor` | Code restructuring with no functional change                    |
 | `docs`     | Documentation only changes                                      |
 
-**When in doubt between `feat` and `refactor`**: if the user will notice the change, use `feat`. If only the code changes, use `refactor`.
+**When in doubt between `feat` and `refactor`**: if the user will notice the change, use `feat`. If only the code
+changes, use `refactor`.
 
 ---
 
@@ -92,7 +93,8 @@ hotfix/csrf-token-missing
 
 - Issue numbers reference **GitHub Issues** in the repository
 - Use the numeric ID as it appears in GitHub (e.g. `#42` → use `42`)
-- **When to include**: if the user mentions an issue number, or if the work is clearly tracked in GitHub, always include it
+- **When to include**: if the user mentions an issue number, or if the work is clearly tracked in GitHub, always
+  include it
 - **When to omit**: exploratory spikes, quick experiments, local-only work, or when the user explicitly has no issue
 - **Never invent** an issue number — if unsure whether one exists, ask the user once
 
@@ -116,7 +118,8 @@ These are managed through PRs only.
 When asked to start work on a task or create a branch:
 
 1. **Identify the type** — ask if ambiguous
-2. **Check for an issue number** — if the user mentions one, use it; if not, ask once: *"Is there a GitHub Issue for this? If so, what's the number?"*; if they say no or don't know, proceed without one
+2. **Check for an issue number** — if the user mentions one, use it; if not, ask once: *"Is there a GitHub Issue for
+   this? If so, what's the number?"*; if they say no or don't know, proceed without one
 3. **Derive a short description** from the task or issue title (apply the rules above)
 4. **Propose the branch name** to the user before creating it
 5. **Create and switch to** the branch:
@@ -129,4 +132,5 @@ When asked to start work on a task or create a branch:
    git switch -c feat/add-oauth-login
    ```
 
-If the user provides a branch name that violates these rules, point out the violation and suggest a corrected name before proceeding.
+If the user provides a branch name that violates these rules, point out the violation and suggest a corrected name
+before proceeding.

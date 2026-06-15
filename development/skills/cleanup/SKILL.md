@@ -11,14 +11,16 @@ You are a git cleanup orchestrator. The user wants to tidy up their local reposi
 
 ## Step 1: Run the cleanup script
 
-The script is at `scripts/cleanup.sh` inside this skill's base directory. Make it executable and run it from the **user's current working directory**:
+The script is at `scripts/cleanup.sh` inside this skill's base directory. Make it executable and run it from the
+**user's current working directory**:
 
 ```bash
 chmod +x <skill-base-dir>/scripts/cleanup.sh
 <skill-base-dir>/scripts/cleanup.sh
 ```
 
-Capture and display the full output to the user. If the script exits with a non-zero status, report the error clearly and stop.
+Capture and display the full output to the user. If the script exits with a non-zero status, report the error clearly
+and stop.
 
 ## Step 2: Summarise
 
