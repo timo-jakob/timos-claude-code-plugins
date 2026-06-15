@@ -47,7 +47,7 @@ What is shipped and aligned with the motivation:
   GitHub Apps, in-repo policy file, author allowlist, per-type
   criteria, hidden-JSON re-ingest into `/development:maintenance`.
   Phases 0–3 are shipped (App registration, bootstrap install, workflow
-  + policy + PR templates, the `python-approver` opus agent); Phases
+  - policy + PR templates, the `python-approver` opus agent); Phases
   4–6 (maintenance re-ingest, local `/approve`, end-to-end validation)
   remain. The Python library-exports API-stability gate (`griffe` +
   version-bump bypass) is also shipped and couples into the Approver's
@@ -240,8 +240,9 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 > **Status — Phases 0–5 + #174 shipped; Phase 6 (live validation) in
 > progress.** The two GitHub App identities can be registered
 > (`Phase 0`, #179), bootstrap installs them on a repo with the secrets
-> + variables they need (`Phase 1`, #180), the workflow + Python policy
-> + PR description template render at bootstrap time (`Phase 2`, #181),
+>
+> - variables they need (`Phase 1`, #180), the workflow + Python policy
+> - PR description template render at bootstrap time (`Phase 2`, #181),
 > the `python-approver` opus agent the workflow invokes is in
 > [`development-python/agents/python-approver.md`](./development-python/agents/python-approver.md)
 > with the operator-facing runtime spec at
@@ -281,6 +282,7 @@ and asks two judgment questions a checker can't:
   with the quality the project expects?
 
 Verdict is one of:
+
 - `APPROVE` — confidence HIGH and risk register has no load-bearing entries.
 - `REQUEST_CHANGES` — at least one criterion failed OR confidence below HIGH.
   Findings are emitted both as human-readable markdown *and* a hidden
@@ -361,6 +363,7 @@ code review. A policy-change PR is evaluated by the *previous* policy; the
 new policy applies to PRs opened after it merges.
 
 Policy file content:
+
 - Type detection rules (primary / fallback / tiebreaker)
 - Baseline criteria (apply to every type)
 - Per-type must-have criteria
@@ -443,6 +446,7 @@ documented in the generated `SETUP.md` remains usable on any platform if you
 install the equivalent tools by hand.
 
 Additional runtime dependencies:
+
 - `gh` CLI authenticated (`gh auth login`) — for repo metadata, secret storage,
   branch protection, and self-hosted runner registration.
 - Docker (private-repo bootstrap only) — runs SonarQube CE locally via

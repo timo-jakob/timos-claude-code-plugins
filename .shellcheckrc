@@ -1,0 +1,6 @@
+# Follow `# shellcheck source=...` directives (default is off) and resolve
+# them relative to each script's own directory, so sourced libs (e.g.
+# lib.sh) are read and their cross-function globals are seen — clears
+# spurious SC2154 on $_http_status, $_docker_status, etc.
+external-sources=true
+source-path=SCRIPTDIR

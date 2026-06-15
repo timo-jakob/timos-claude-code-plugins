@@ -18,6 +18,7 @@ procedure — only the input shape and output recommendations differ.
 ## Inputs
 
 Your prompt contains:
+
 - `repo_path` — absolute path to the **parent project root** (e.g.,
   `/Users/timo/repositories/<repo-name>`). Informational only —
   use it for absolute file references in your output JSON. **Do
@@ -67,31 +68,31 @@ Your prompt contains:
 
 ### Phase 2 — map breaking changes to call sites
 
-5. For each breaking-change item, use LSP to find call sites in the
+1. For each breaking-change item, use LSP to find call sites in the
    repo:
    - find-references for renamed/removed symbols
    - find-references on the package's public API surface in general
      if the changes are pervasive
-6. Build a list: `{breaking_change} → {affected_file:line}` mappings.
+2. Build a list: `{breaking_change} → {affected_file:line}` mappings.
 
 ### Phase 3 — apply the migration
 
-7. Bump the version in `pyproject.toml` / `requirements.txt`. Respect
+1. Bump the version in `pyproject.toml` / `requirements.txt`. Respect
    the existing pinning style.
-8. For each affected call site:
+2. For each affected call site:
    - Apply the documented migration pattern (rename, replace, adjust).
    - Read enough surrounding context to make the change correct, not
      just textually substitute.
-9. Re-run LSP `find-references` to confirm no remaining old-symbol
+3. Re-run LSP `find-references` to confirm no remaining old-symbol
    uses.
 
 ### Phase 4 — verify
 
-10. Install the new version in the worktree:
+1. Install the new version in the worktree:
     - `pip install -e ".[dev]"` (re-resolves with new pin) or
     - `pip install <package>==<target_version>` if a flat
       requirements.txt
-11. **Run tests:**
+2. **Run tests:**
     - `pytest --tb=short 2>&1 | tail -100` (longer tail than other
       agents — major upgrades produce more noise)
 
@@ -101,22 +102,22 @@ If tests pass on the first try: great, success.
 
 If tests fail:
 
-12. **Remediation pass 1:** read the failure carefully. Common causes:
+1. **Remediation pass 1:** read the failure carefully. Common causes:
     - A breaking change the release notes mentioned but you didn't catch
       → re-scan the notes for the relevant section
     - A subtle behavioral change not flagged as "breaking" (e.g., a
       default value changed) → check the changelog more carefully
     - A test that was depending on a quirk that's now fixed → update
       the test to match the new (correct) behavior
-13. Apply the remediation, re-run tests.
-14. **Remediation pass 2:** if still failing, try once more. Read the
+2. Apply the remediation, re-run tests.
+3. **Remediation pass 2:** if still failing, try once more. Read the
     release notes for any sections you skimmed; check the package's
     GitHub issues for the version (sometimes there are known migration
     pitfalls posted there).
-15. **Remediation pass 3:** last try. If you have a specific
+4. **Remediation pass 3:** last try. If you have a specific
     hypothesis about what's still wrong, test it.
 
-16. **Commit your work before returning** (only when tests pass).
+5. **Commit your work before returning** (only when tests pass).
     If tests still fail, skip the commit and go to the escalation
     block below — do NOT commit a broken state. If `git
     status --porcelain` is empty, also skip. Otherwise:
@@ -136,6 +137,7 @@ If tests fail:
 
 If 3 passes still don't get tests green → escalate. Return
 `actions_requiring_review` with:
+
 - The release notes URL you used
 - The breaking changes you identified
 - Migration patterns you applied

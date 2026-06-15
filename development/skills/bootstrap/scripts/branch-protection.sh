@@ -31,15 +31,33 @@ DEFAULT_BRANCH="main"
 REQUIRE_SIGNED_COMMITS="false"
 
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --visibility)              VISIBILITY="$2"; shift 2 ;;
-    --has-dockerfile)          HAS_DOCKERFILE="$2"; shift 2 ;;
-    --has-codeql)              HAS_CODEQL="$2"; shift 2 ;;
-    --codeql-languages)        CODEQL_LANGUAGES="$2"; shift 2 ;;
-    --default-branch)          DEFAULT_BRANCH="$2"; shift 2 ;;
-    --require-signed-commits)  REQUIRE_SIGNED_COMMITS="$2"; shift 2 ;;
-    *)                         die "Unknown argument: $1" ;;
-  esac
+	case "$1" in
+	--visibility)
+		VISIBILITY="$2"
+		shift 2
+		;;
+	--has-dockerfile)
+		HAS_DOCKERFILE="$2"
+		shift 2
+		;;
+	--has-codeql)
+		HAS_CODEQL="$2"
+		shift 2
+		;;
+	--codeql-languages)
+		CODEQL_LANGUAGES="$2"
+		shift 2
+		;;
+	--default-branch)
+		DEFAULT_BRANCH="$2"
+		shift 2
+		;;
+	--require-signed-commits)
+		REQUIRE_SIGNED_COMMITS="$2"
+		shift 2
+		;;
+	*) die "Unknown argument: $1" ;;
+	esac
 done
 
 [[ "$VISIBILITY" =~ ^(public|private)$ ]] || die "--visibility must be public or private"
@@ -52,43 +70,43 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 checks=("test-and-coverage" "semgrep" "pre-commit")
 
 case "$VISIBILITY" in
-  public)
-    # Note: `snyk-code` and `snyk-open-source` are NOT workflow jobs in the
-    # current public template. Snyk runs via the GitHub integration, which
-    # reports a single `security/snyk` check on the PR rather than per-rule
-    # GitHub Actions status checks — see quality-public.yml.tmpl's `# ---
-    # Snyk source-code + open-source scans ---` comment block. Listing
-    # them here would produce a permanent stuck-on-expected state.
-    checks+=("sonarcloud" "license-fs")
-    [[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
-    if [[ "$HAS_CODEQL" == "true" ]]; then
-      # CodeQL's `analyze` job is a matrix over `language`, so GitHub
-      # reports one check per language as `analyze (<lang>)`. The bare
-      # `analyze` context never resolves to a real check — must be
-      # language-suffixed.
-      if [[ -n "$CODEQL_LANGUAGES" ]]; then
-        for lang in $CODEQL_LANGUAGES; do
-          checks+=("analyze ($lang)")
-        done
-      else
-        warn "--has-codeql=true but --codeql-languages was not provided."
-        warn "Skipping CodeQL contexts — without language list, the bare"
-        warn "'analyze' context would never resolve. Pass --codeql-languages"
-        warn "\"python typescript ...\" (space-separated) to enable them."
-      fi
-    fi
-    ;;
-  private)
-    checks+=("sonarqube" "trivy-fs" "license-fs")
-    [[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
-    ;;
+public)
+	# Note: `snyk-code` and `snyk-open-source` are NOT workflow jobs in the
+	# current public template. Snyk runs via the GitHub integration, which
+	# reports a single `security/snyk` check on the PR rather than per-rule
+	# GitHub Actions status checks — see quality-public.yml.tmpl's `# ---
+	# Snyk source-code + open-source scans ---` comment block. Listing
+	# them here would produce a permanent stuck-on-expected state.
+	checks+=("sonarcloud" "license-fs")
+	[[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
+	if [[ "$HAS_CODEQL" == "true" ]]; then
+		# CodeQL's `analyze` job is a matrix over `language`, so GitHub
+		# reports one check per language as `analyze (<lang>)`. The bare
+		# `analyze` context never resolves to a real check — must be
+		# language-suffixed.
+		if [[ -n "$CODEQL_LANGUAGES" ]]; then
+			for lang in $CODEQL_LANGUAGES; do
+				checks+=("analyze ($lang)")
+			done
+		else
+			warn "--has-codeql=true but --codeql-languages was not provided."
+			warn "Skipping CodeQL contexts — without language list, the bare"
+			warn "'analyze' context would never resolve. Pass --codeql-languages"
+			warn "\"python typescript ...\" (space-separated) to enable them."
+		fi
+	fi
+	;;
+private)
+	checks+=("sonarqube" "trivy-fs" "license-fs")
+	[[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
+	;;
 esac
 
 # --- assemble JSON payload ----------------------------------------------------
 contexts_json=$(printf '%s\n' "${checks[@]}" | jq -R . | jq -s .)
 payload=$(jq -n \
-  --argjson contexts "$contexts_json" \
-  '{
+	--argjson contexts "$contexts_json" \
+	'{
     required_status_checks: {
       strict: true,
       contexts: $contexts
@@ -107,26 +125,26 @@ payload=$(jq -n \
   }')
 
 info "Applying branch protection on $REPO@$DEFAULT_BRANCH"
-dim  "Required checks:"
+dim "Required checks:"
 printf '  • %s\n' "${checks[@]}"
 
 # --- PUT --------------------------------------------------------------------
 http_body=$(mktemp)
 http_status=$(curl -sS -o "$http_body" -w '%{http_code}' \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: token $(gh auth token)" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  -X PUT \
-  "https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection" \
-  --data "$payload")
+	-H "Accept: application/vnd.github+json" \
+	-H "Authorization: token $(gh auth token)" \
+	-H "X-GitHub-Api-Version: 2022-11-28" \
+	-X PUT \
+	"https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection" \
+	--data "$payload")
 
 case "$http_status" in
-  200)
-    ok "Branch protection applied"
-    ;;
-  403)
-    warn "403 — your account does not have admin permission on $REPO"
-    cat <<EOF
+200)
+	ok "Branch protection applied"
+	;;
+403)
+	warn "403 — your account does not have admin permission on $REPO"
+	cat <<EOF
 
 You'll need to apply branch protection manually. In GitHub:
   Settings → Branches → Add rule → Branch name pattern: $DEFAULT_BRANCH
@@ -142,15 +160,15 @@ Also enable in Settings → General → Pull Requests:
                                             approval gate, plugins#224)
   • Automatically delete head branches     (branch cleanup for auto-merged PRs)
 EOF
-    rm -f "$http_body"
-    exit 0   # not a hard failure — user can do it by hand
-    ;;
-  *)
-    err "Branch protection failed (HTTP $http_status):"
-    cat "$http_body" >&2
-    rm -f "$http_body"
-    exit 1
-    ;;
+	rm -f "$http_body"
+	exit 0 # not a hard failure — user can do it by hand
+	;;
+*)
+	err "Branch protection failed (HTTP $http_status):"
+	cat "$http_body" >&2
+	rm -f "$http_body"
+	exit 1
+	;;
 esac
 
 rm -f "$http_body"
@@ -169,16 +187,16 @@ rm -f "$http_body"
 # for hand-merges. Idempotent (PATCH sets absolute state).
 info "Setting repo merge settings on $REPO (auto-merge + delete-branch + squash-only)"
 ms_status=$(curl -sS -o /dev/null -w '%{http_code}' \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: token $(gh auth token)" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  -X PATCH \
-  "https://api.github.com/repos/$REPO" \
-  --data '{"allow_auto_merge":true,"delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false}')
+	-H "Accept: application/vnd.github+json" \
+	-H "Authorization: token $(gh auth token)" \
+	-H "X-GitHub-Api-Version: 2022-11-28" \
+	-X PATCH \
+	"https://api.github.com/repos/$REPO" \
+	--data '{"allow_auto_merge":true,"delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false}')
 case "$ms_status" in
-  200) ok "Repo merge settings applied (auto-merge, head-branch delete, squash-only)" ;;
-  403) warn "Could not set repo merge settings (403 — admin needed). Enable manually: Settings → General → Pull Requests → 'Allow auto-merge' + 'Automatically delete head branches'." ;;
-  *)   warn "Repo merge-settings PATCH returned HTTP $ms_status — check Settings → General → Pull Requests manually." ;;
+200) ok "Repo merge settings applied (auto-merge, head-branch delete, squash-only)" ;;
+403) warn "Could not set repo merge settings (403 — admin needed). Enable manually: Settings → General → Pull Requests → 'Allow auto-merge' + 'Automatically delete head branches'." ;;
+*) warn "Repo merge-settings PATCH returned HTTP $ms_status — check Settings → General → Pull Requests manually." ;;
 esac
 
 # --- required_signatures (separate endpoint) ---------------------------------
@@ -186,26 +204,26 @@ esac
 # lives on its own endpoint. POST to enable, DELETE to disable. We call the
 # matching verb either way so re-runs leave the rule in the requested state.
 if [[ "$REQUIRE_SIGNED_COMMITS" == "true" ]]; then
-  info "Enabling required_signatures on $REPO@$DEFAULT_BRANCH"
-  sig_status=$(curl -sS -o /dev/null -w '%{http_code}' \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: token $(gh auth token)" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    -X POST \
-    "https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures")
-  case "$sig_status" in
-    200|201) ok "Signed commits required on $DEFAULT_BRANCH" ;;
-    403)     warn "Could not enable required_signatures (403 — admin needed). Enable manually: Settings → Branches → Edit rule → 'Require signed commits'." ;;
-    *)       warn "required_signatures returned HTTP $sig_status — check Settings → Branches manually." ;;
-  esac
-  warn "Every contributor must register a GPG or SSH signing key in their GitHub account before they can push to $DEFAULT_BRANCH. See SETUP.md."
+	info "Enabling required_signatures on $REPO@$DEFAULT_BRANCH"
+	sig_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+		-H "Accept: application/vnd.github+json" \
+		-H "Authorization: token $(gh auth token)" \
+		-H "X-GitHub-Api-Version: 2022-11-28" \
+		-X POST \
+		"https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures")
+	case "$sig_status" in
+	200 | 201) ok "Signed commits required on $DEFAULT_BRANCH" ;;
+	403) warn "Could not enable required_signatures (403 — admin needed). Enable manually: Settings → Branches → Edit rule → 'Require signed commits'." ;;
+	*) warn "required_signatures returned HTTP $sig_status — check Settings → Branches manually." ;;
+	esac
+	warn "Every contributor must register a GPG or SSH signing key in their GitHub account before they can push to $DEFAULT_BRANCH. See SETUP.md."
 else
-  # Disable explicitly so re-runs without the flag clear any previously-set
-  # requirement. 404 is fine (means it was already off).
-  curl -sS -o /dev/null \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: token $(gh auth token)" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    -X DELETE \
-    "https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures" || true
+	# Disable explicitly so re-runs without the flag clear any previously-set
+	# requirement. 404 is fine (means it was already off).
+	curl -sS -o /dev/null \
+		-H "Accept: application/vnd.github+json" \
+		-H "Authorization: token $(gh auth token)" \
+		-H "X-GitHub-Api-Version: 2022-11-28" \
+		-X DELETE \
+		"https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures" || true
 fi

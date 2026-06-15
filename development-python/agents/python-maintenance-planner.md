@@ -111,6 +111,7 @@ For single-finding groups (a major upgrade), the priority is that
 finding's own score.
 
 Order groups by descending priority. Ties broken by:
+
 1. Group size descending (a tool with 16 findings outranks a major
    upgrade with 1, when their max priorities are equal — more value
    per PR).
@@ -131,8 +132,8 @@ Order groups by descending priority. Ties broken by:
 | `snyk_prs` patch/minor (pip, from `snyk-fix-…` / `snyk-upgrade-…` branches) | `python-dependabot-snyk-triage` |
 | `snyk_prs` major (pip) | `python-major-upgrade` |
 
-The legacy `snyk_code` / `snyk_oss` tool keys were retired in PR ε of
-#87 — Snyk Code SAST findings are replaced by `code_scanning` (CodeQL
+The legacy `snyk_code` / `snyk_oss` tool keys were retired in PR ε of #87
+— Snyk Code SAST findings are replaced by `code_scanning` (CodeQL
 via GitHub Code Scanning, free, GitHub-native), and Snyk Open Source
 vulnerabilities are now consumed as PRs flowing through `snyk_prs`.
 

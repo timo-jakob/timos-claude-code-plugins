@@ -20,6 +20,7 @@ quality + security surroundings for a project.
 **User input:** $ARGUMENTS
 
 Supported flags:
+
 - `--review` — run the opt-in senior-review agent (Step 6) after the bootstrap
   completes. Adds an opus pass for high-stakes first bootstraps.
 - `--signed-commits` — additionally enforce cryptographically signed commits
@@ -78,6 +79,7 @@ chmod +x <skill-base-dir>/scripts/detect-stack.sh
 ```
 
 The script reports:
+
 - `git_initialized` — is this a git repo
 - `has_github_remote` — is there an `origin` pointing at github.com
 - `visibility` — `public`, `private`, or `unknown` (via `gh repo view`)
@@ -97,7 +99,7 @@ The script reports:
 
   Empty `{}` when `has_github_remote=false` or `gh` is not authenticated.
   This block is the load-bearing input for distinguishing "files present
-  + Step 4 done" from "files present + Step 4 never ran" — see State D
+  - Step 4 done" from "files present + Step 4 never ran" — see State D
   handling below.
 
 ### Decision tree (handle these in order — each step builds on the prior)
@@ -209,6 +211,7 @@ wording so behavior stays consistent:
 ### After the decision tree
 
 You now have, with certainty:
+
 - A git repository (either pre-existing or just initialized).
 - A visibility (`public` or `private`).
 - Optionally, a GitHub remote (created or pre-existing).
@@ -277,6 +280,7 @@ Spawn all three in a single assistant turn with multiple `Task` tool calls:
 
 Inputs to each agent are provided **in the agent's prompt**, not on disk
 (files aren't written yet):
+
 - Security reviewer: full text of each planned workflow file + the planned
   permission blocks + the runner choice (`ubuntu-latest` vs `self-hosted`).
 - Consistency reviewer: full text of `sonar-project.properties`, the planned
@@ -413,6 +417,7 @@ the first arg and it emits the fragment unchanged).
 ### 3a. Common artifacts (both paths)
 
 Copy from `templates/common/`:
+
 - `.pre-commit-config.yaml` (merge language-specific hooks based on detected languages; keep the `CLAUDE_PLUGIN` block only when `--claude-plugin true`)
 - **Dependency updates — pick ONE:**
   - default → `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem).
@@ -436,6 +441,7 @@ Copy from `templates/common/`:
 ### 3b. Public path (SonarCloud + Snyk)
 
 Copy from `templates/public/`:
+
 - `.github/workflows/quality-public.yml`
 - `.github/workflows/quality-public-noop.yml` (doc-only PR companion — see below)
 - `.github/workflows/codeql.yml`
@@ -459,6 +465,7 @@ unmergeable forever because GitHub leaves a required check in the
 ### 3c. Private path (SonarQube + Trivy)
 
 Copy from `templates/private/`:
+
 - `.github/workflows/quality-private.yml` (runs on `self-hosted`)
 - `.github/workflows/quality-private-noop.yml` (doc-only PR companion — runs on `self-hosted` too so it also catches runner-down failures on doc PRs)
 - `sonar-project.properties`
@@ -485,6 +492,7 @@ The generated `image` job follows a single shape regardless of public/private:
 | Push to `ghcr.io/<owner>/<repo>` | | ✓ |
 
 Behaviour summary:
+
 - Scan **always** runs — even on PRs — so contributors know if their image is
   broken before merge.
 - Push **only** runs on `push` to the default branch and `release: published`.
@@ -514,6 +522,7 @@ Behaviour summary:
 ### CI trigger surface
 
 All workflows use:
+
 ```yaml
 on:
   pull_request:    { branches: ["main"], paths-ignore: [docs + license] }
@@ -545,6 +554,7 @@ the CI job makes it enforced.
 
 For each detected language, merge in the appropriate config from
 `templates/languages/<language>/`:
+
 - Linter config (e.g., `.eslintrc.json`, `ruff.toml`, `.golangci.yml`)
 - Coverage tooling note in `sonar-project.properties` (paths, report format)
 - Pre-commit hook entries (already merged into `.pre-commit-config.yaml`)
@@ -574,9 +584,11 @@ Default substitutions:
   bootstrap by hand-editing the generated workflow.
 - `{{CLAUDE_PLUGINS_REF}}` → the **current commit SHA** of the plugin
   family's `main` branch, resolved at render time:
+
   ```bash
   git ls-remote https://github.com/timo-jakob/timos-claude-code-plugins main | awk '{print $1}'
   ```
+
   Pin the literal SHA into the workflow, not the moving `main` ref.
   Why: a breaking change in the plugin family's `main` would otherwise
   silently break every downstream Approver workflow with no commit in
@@ -636,6 +648,7 @@ the Approver's per-type criteria.
 ### Idempotency rules (apply for every file write)
 
 For each target file path:
+
 1. If file does not exist → write the template as-is.
 2. If file exists and content matches the template → skip silently.
 3. If file exists and differs → show the user a diff, ask: overwrite, skip, or
@@ -646,6 +659,7 @@ For each target file path:
 
 Run the `bootstrap-validator` agent (haiku — fast, cheap). It checks the
 files **on disk**:
+
 - All YAML and JSON parse.
 - No `{{...}}` placeholders remain.
 - Workflow `needs:` and `steps.<id>.outputs.*` references resolve.
@@ -663,6 +677,7 @@ files **on disk**:
   `development-python/docs/api-stability.md`.
 
 If the agent returns `Verdict: BLOCK`, show errors to the user. Offer to:
+
 - Re-run Step 3 (regenerate the offending files), or
 - Manually fix individual files and re-run the validator.
 
@@ -719,10 +734,13 @@ on every re-bootstrap.
 ## Step 4: Post-Write Actions (each with explicit confirmation)
 
 ### 4a. Install pre-commit hooks
+
 If `pre-commit` is installed on the user's machine, run:
+
 ```bash
 "<skill-base-dir>/scripts/install-precommit-hooks.sh"
 ```
+
 This installs the default `pre-commit` git hook AND every additional
 hook type referenced by `stages:` entries in the rendered
 `.pre-commit-config.yaml` (e.g., `pre-push` for the coverage-floor
@@ -738,6 +756,7 @@ script is idempotent, and a refresh that adds a new stage won't fire
 on push until the corresponding hook type is installed.
 
 ### 4b. Branch protection on `main`
+
 Confirm with the user, then call the helper script:
 
 ```bash
@@ -751,6 +770,7 @@ Confirm with the user, then call the helper script:
 ```
 
 The script applies a single protection rule that:
+
 - Requires PR before merge.
 - Requires status checks — the script computes the exact contexts from
   the flags above (visibility, has-dockerfile, has-codeql, codeql-languages),
@@ -764,6 +784,7 @@ The script applies a single protection rule that:
   setup recipe.
 
 It also PATCHes two repo-level merge settings (#226):
+
 - `allow_auto_merge: true` — the maintenance approval gate (plugins#224)
   arms GitHub native auto-merge when no approving review has landed yet;
   without this setting the arming fails and gated PRs degrade to
@@ -785,6 +806,7 @@ retry. Print the equivalent manual setup instructions from `SETUP.md` and
 continue.
 
 ### 4c. Initial commit
+
 Offer to commit the generated files using the `/development:commit` flow with a
 suggested message like `Bootstrap project with quality and security toolchain`.
 Do not push.
@@ -814,6 +836,7 @@ when they aren't). When the orchestrator was invoked without the flag, pass
 `false` or omit it.
 
 The script will:
+
 1. Refuse to run on non-macOS hosts.
 2. Refuse to run without Homebrew.
 3. List missing tools (`gh`, `jq`, `pre-commit`, `gitleaks`, `semgrep`,
@@ -835,6 +858,7 @@ entirely and go straight to Step 5 (manual checklist).
 If preflight passed, ask the user whether to run the path-specific automation.
 
 **Public path:**
+
 ```bash
 "<skill-base-dir>/scripts/automate-public.sh" \
   --project-key "<PROJECT_KEY>" \
@@ -854,6 +878,7 @@ the right required-status-check contexts and CodeQL checks would never
 register as required.
 
 This walks the user through:
+
 - Opening SonarCloud, signing in via GitHub, importing the repo (one-time
   human step — the only browser action required).
 - Pasting their SonarCloud user token.
@@ -868,6 +893,7 @@ This walks the user through:
 - Applying branch protection.
 
 **Private path:**
+
 ```bash
 "<skill-base-dir>/scripts/automate-private.sh" \
   --project-key "<PROJECT_KEY>" \
@@ -878,6 +904,7 @@ This walks the user through:
 ```
 
 This handles:
+
 - `docker compose up -d` on the generated `infra/sonarqube/docker-compose.yml`.
 - Waiting for SonarQube to become healthy (`/api/system/status` polling).
 - Generating a random admin password, storing it in the macOS Keychain
@@ -908,6 +935,7 @@ top). The step delegates to:
 ```
 
 which (idempotent):
+
 - Reads App IDs from `~/.config/claude-plugins/apps.json` and private keys
   from macOS Keychain (populated by `register-claude-apps.sh` in Phase 0).
 - Opens `https://github.com/apps/<slug>/installations/new` per App so the
@@ -986,6 +1014,7 @@ NEXT STEPS:
 ```
 
 For private path the checklist additionally includes:
+
 - Start SonarQube: `cd infra/sonarqube && docker compose up -d`
 - Register self-hosted runner (see `infra/github-runner/README.md`).
 - Mint SonarQube project token, store as `SONAR_TOKEN` secret.

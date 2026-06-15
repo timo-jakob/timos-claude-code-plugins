@@ -31,21 +31,45 @@ CODEQL_LANGUAGES=""
 CLAUDE_APPROVER="false"
 
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --project-key)    PROJECT_KEY="$2"; shift 2 ;;
-    --org-key)        ORG_KEY="$2"; shift 2 ;;
-    --project-name)   PROJECT_NAME="$2"; shift 2 ;;
-    --default-branch) DEFAULT_BRANCH="$2"; shift 2 ;;
-    --has-dockerfile) HAS_DOCKERFILE="$2"; shift 2 ;;
-    --has-codeql)     HAS_CODEQL="$2"; shift 2 ;;
-    --codeql-languages) CODEQL_LANGUAGES="$2"; shift 2 ;;
-    --claude-approver)  CLAUDE_APPROVER="$2"; shift 2 ;;
-    *) die "Unknown argument: $1" ;;
-  esac
+	case "$1" in
+	--project-key)
+		PROJECT_KEY="$2"
+		shift 2
+		;;
+	--org-key)
+		ORG_KEY="$2"
+		shift 2
+		;;
+	--project-name)
+		PROJECT_NAME="$2"
+		shift 2
+		;;
+	--default-branch)
+		DEFAULT_BRANCH="$2"
+		shift 2
+		;;
+	--has-dockerfile)
+		HAS_DOCKERFILE="$2"
+		shift 2
+		;;
+	--has-codeql)
+		HAS_CODEQL="$2"
+		shift 2
+		;;
+	--codeql-languages)
+		CODEQL_LANGUAGES="$2"
+		shift 2
+		;;
+	--claude-approver)
+		CLAUDE_APPROVER="$2"
+		shift 2
+		;;
+	*) die "Unknown argument: $1" ;;
+	esac
 done
 
-[[ -n "$PROJECT_KEY"  ]] || die "--project-key required"
-[[ -n "$ORG_KEY"      ]] || die "--org-key required"
+[[ -n "$PROJECT_KEY" ]] || die "--project-key required"
+[[ -n "$ORG_KEY" ]] || die "--org-key required"
 [[ -n "$PROJECT_NAME" ]] || die "--project-name required"
 
 # Tools the public-path automation directly invokes. Fail-fast with a
@@ -102,23 +126,23 @@ resolved_org=$(printf '%s' "$orgs_resp" | jq -r --arg owner "$ORG_KEY" '
 ')
 
 if [[ -z "$resolved_org" ]]; then
-  available=$(printf '%s' "$orgs_resp" | jq -r '.organizations[].key' | paste -sd, -)
-  die "No SonarCloud org matches '$ORG_KEY' or '${ORG_KEY}-github'. Available orgs for this user: ${available:-<none>}. Re-run automate-public.sh with --org-key=<the correct slug>."
+	available=$(printf '%s' "$orgs_resp" | jq -r '.organizations[].key' | paste -sd, -)
+	die "No SonarCloud org matches '$ORG_KEY' or '${ORG_KEY}-github'. Available orgs for this user: ${available:-<none>}. Re-run automate-public.sh with --org-key=<the correct slug>."
 fi
 
 if [[ "$resolved_org" != "$ORG_KEY" ]]; then
-  warn "GitHub owner is '$ORG_KEY' but SonarCloud org slug is '$resolved_org' — using the resolved slug."
-  # Patch sonar-project.properties in place so the workflow uses the right slug.
-  if [[ -f "$REPO_ROOT/sonar-project.properties" ]]; then
-    # Portable sed -i: use a backup extension then remove the backup.
-    sed -i.bak "s|^sonar\.organization=.*|sonar.organization=$resolved_org|" \
-      "$REPO_ROOT/sonar-project.properties"
-    rm -f "$REPO_ROOT/sonar-project.properties.bak"
-    ok "Patched sonar-project.properties: sonar.organization=$resolved_org"
-  fi
-  ORG_KEY="$resolved_org"
+	warn "GitHub owner is '$ORG_KEY' but SonarCloud org slug is '$resolved_org' — using the resolved slug."
+	# Patch sonar-project.properties in place so the workflow uses the right slug.
+	if [[ -f "$REPO_ROOT/sonar-project.properties" ]]; then
+		# Portable sed -i: use a backup extension then remove the backup.
+		sed -i.bak "s|^sonar\.organization=.*|sonar.organization=$resolved_org|" \
+			"$REPO_ROOT/sonar-project.properties"
+		rm -f "$REPO_ROOT/sonar-project.properties.bak"
+		ok "Patched sonar-project.properties: sonar.organization=$resolved_org"
+	fi
+	ORG_KEY="$resolved_org"
 else
-  ok "Org slug matches: $ORG_KEY"
+	ok "Org slug matches: $ORG_KEY"
 fi
 
 # Project may already exist (auto-created by the SonarCloud import flow).
@@ -127,9 +151,9 @@ fi
 # --- Quality Gate -------------------------------------------------------------
 create_zero_tolerance_gate "$SONAR_HOST" "$ORG_KEY"
 if [[ "${_gate_created:-false}" == "true" ]]; then
-  assign_gate_to_project "$SONAR_HOST" "$ORG_KEY" "$PROJECT_KEY" "Zero Tolerance"
+	assign_gate_to_project "$SONAR_HOST" "$ORG_KEY" "$PROJECT_KEY" "Zero Tolerance"
 else
-  dim "  (Default 'Sonar way' gate is already assigned to new projects — no further action)"
+	dim "  (Default 'Sonar way' gate is already assigned to new projects — no further action)"
 fi
 
 # --- Store SONAR_TOKEN as GitHub secret (both scopes) -------------------------
@@ -143,9 +167,9 @@ info "═══ Snyk setup ═══"
 
 # Use token-based auth, not OAuth — GitHub Actions can't run OAuth refresh.
 if snyk config get api >/dev/null 2>&1 && [[ -n "$(snyk config get api 2>/dev/null)" ]]; then
-  ok "Snyk already authenticated"
+	ok "Snyk already authenticated"
 else
-  cat <<EOF
+	cat <<EOF
 
 I'll run 'snyk auth --auth-type=token'. Your browser will open. Approve the
 request. The CLI will then write a long-lived API token to:
@@ -155,8 +179,8 @@ We need the token-mode (not OAuth) because GitHub Actions can't refresh OAuth
 tokens — a static API token is what the workflow uses.
 
 EOF
-  ask_yn "Run 'snyk auth --auth-type=token' now?" || die "Snyk auth declined"
-  snyk auth --auth-type=token
+	ask_yn "Run 'snyk auth --auth-type=token' now?" || die "Snyk auth declined"
+	snyk auth --auth-type=token
 fi
 
 SNYK_TOKEN=$(snyk config get api 2>/dev/null || true)
@@ -188,18 +212,19 @@ ok "SNYK_TOKEN set (Actions + Dependabot)"
 # Small helper: hit the Snyk REST API with the user's token.
 SNYK_API='https://api.snyk.io/v1'
 snyk_api() {
-  local method="$1" path="$2"; shift 2
-  curl -sS -X "$method" \
-    -H "Authorization: token $SNYK_TOKEN" \
-    -H "Content-Type: application/json" \
-    -w '\nHTTP_STATUS=%{http_code}\n' \
-    "$SNYK_API$path" "$@"
+	local method="$1" path="$2"
+	shift 2
+	curl -sS -X "$method" \
+		-H "Authorization: token $SNYK_TOKEN" \
+		-H "Content-Type: application/json" \
+		-w '\nHTTP_STATUS=%{http_code}\n' \
+		"$SNYK_API$path" "$@"
 }
 
 # Discover the org (prefer the user's CLI default, else the first org listed).
 SNYK_ORG_SLUG=$(snyk config get org 2>/dev/null | tr -d '[:space:]' || true)
 if [[ -z "$SNYK_ORG_SLUG" ]]; then
-  SNYK_ORG_SLUG=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d' | jq -r '.orgs[0].slug // empty')
+	SNYK_ORG_SLUG=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d' | jq -r '.orgs[0].slug // empty')
 fi
 [[ -n "$SNYK_ORG_SLUG" ]] || die "Could not discover Snyk org (check 'snyk config get org' or your token's org assignments)"
 
@@ -210,27 +235,27 @@ ok "Snyk org: $SNYK_ORG_SLUG (id=$SNYK_ORG_ID)"
 
 # Detect the GitHub integration on this org.
 detect_github_integration() {
-  local resp
-  resp=$(snyk_api GET "/org/$SNYK_ORG_ID/integrations" | sed '/^HTTP_STATUS=/d')
-  printf '%s' "$resp" | jq -r '.github // empty'
+	local resp
+	resp=$(snyk_api GET "/org/$SNYK_ORG_ID/integrations" | sed '/^HTTP_STATUS=/d')
+	printf '%s' "$resp" | jq -r '.github // empty'
 }
 
 GH_INT_ID=$(detect_github_integration)
 attempt=1
 while [[ -z "$GH_INT_ID" && $attempt -le 3 ]]; do
-  warn "Snyk's GitHub integration isn't connected for org '$SNYK_ORG_SLUG' (attempt $attempt of 3)."
-  info "Opening Snyk's integrations page. In the browser:"
-  info "  1. Find the GitHub integration."
-  info "  2. Click 'Connect' (or 'Add integration → GitHub')."
-  info "  3. Complete the OAuth flow."
-  info "  4. Come back here and confirm."
-  echo
-  open "https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations" 2>/dev/null \
-    || warn "Could not auto-open the browser. Visit: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
-  echo
-  ask_yn "Done setting up the GitHub integration?" || true
-  GH_INT_ID=$(detect_github_integration)
-  attempt=$((attempt + 1))
+	warn "Snyk's GitHub integration isn't connected for org '$SNYK_ORG_SLUG' (attempt $attempt of 3)."
+	info "Opening Snyk's integrations page. In the browser:"
+	info "  1. Find the GitHub integration."
+	info "  2. Click 'Connect' (or 'Add integration → GitHub')."
+	info "  3. Complete the OAuth flow."
+	info "  4. Come back here and confirm."
+	echo
+	open "https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations" 2>/dev/null ||
+		warn "Could not auto-open the browser. Visit: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
+	echo
+	ask_yn "Done setting up the GitHub integration?" || true
+	GH_INT_ID=$(detect_github_integration)
+	attempt=$((attempt + 1))
 done
 [[ -n "$GH_INT_ID" ]] || die "Snyk GitHub integration still missing after 3 attempts. Set it up manually at https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations and re-run /development:bootstrap."
 ok "Snyk GitHub integration: $GH_INT_ID"
@@ -245,25 +270,25 @@ gh_branch=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
 
 info "Importing $gh_repo into Snyk via the GitHub integration…"
 import_body=$(jq -n \
-  --arg owner  "$gh_owner" \
-  --arg name   "$gh_name" \
-  --arg branch "$gh_branch" \
-  '{ target: { owner: $owner, name: $name, branch: $branch } }')
+	--arg owner "$gh_owner" \
+	--arg name "$gh_name" \
+	--arg branch "$gh_branch" \
+	'{ target: { owner: $owner, name: $name, branch: $branch } }')
 
 import_resp=$(snyk_api POST "/org/$SNYK_ORG_ID/integrations/$GH_INT_ID/import" --data "$import_body")
 import_status=$(printf '%s' "$import_resp" | sed -n 's/^HTTP_STATUS=//p')
 case "$import_status" in
-  201|202)
-    ok "Import job accepted by Snyk (HTTP $import_status). The project appears at app.snyk.io within ~1 minute."
-    ;;
-  409)
-    ok "Project was already imported (HTTP 409). Snyk will continue monitoring it."
-    ;;
-  *)
-    warn "Unexpected response from Snyk import (HTTP $import_status). Response body:"
-    printf '%s\n' "$import_resp" | sed '/^HTTP_STATUS=/d' | head -10
-    warn "The integration is set up; you can import manually via 'Import GitHub Projects' on the Snyk integrations page."
-    ;;
+201 | 202)
+	ok "Import job accepted by Snyk (HTTP $import_status). The project appears at app.snyk.io within ~1 minute."
+	;;
+409)
+	ok "Project was already imported (HTTP 409). Snyk will continue monitoring it."
+	;;
+*)
+	warn "Unexpected response from Snyk import (HTTP $import_status). Response body:"
+	printf '%s\n' "$import_resp" | sed '/^HTTP_STATUS=/d' | head -10
+	warn "The integration is set up; you can import manually via 'Import GitHub Projects' on the Snyk integrations page."
+	;;
 esac
 
 # --- Snyk auto-Fix-PRs (manual UI step on free plans) ------------------------
@@ -296,45 +321,45 @@ GH_REPO_FULL=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 
 info "Enabling Dependabot alerts…"
 if gh api --silent -X PUT "repos/$GH_REPO_FULL/vulnerability-alerts" 2>/dev/null; then
-  ok "Dependabot alerts enabled"
+	ok "Dependabot alerts enabled"
 else
-  warn "Dependabot alerts: enable call returned non-zero (likely already enabled)"
+	warn "Dependabot alerts: enable call returned non-zero (likely already enabled)"
 fi
 
 info "Enabling Dependabot automated security fixes…"
 if gh api --silent -X PUT "repos/$GH_REPO_FULL/automated-security-fixes" 2>/dev/null; then
-  ok "Dependabot automated security fixes enabled"
+	ok "Dependabot automated security fixes enabled"
 else
-  warn "Automated security fixes: enable call returned non-zero (likely already enabled)"
+	warn "Automated security fixes: enable call returned non-zero (likely already enabled)"
 fi
 
 info "Enabling secret scanning + push protection…"
 if gh api -X PATCH "repos/$GH_REPO_FULL" \
-    -F 'security_and_analysis[secret_scanning][status]=enabled' \
-    -F 'security_and_analysis[secret_scanning_push_protection][status]=enabled' \
-    --silent 2>/dev/null; then
-  ok "Secret scanning + push protection enabled"
+	-F 'security_and_analysis[secret_scanning][status]=enabled' \
+	-F 'security_and_analysis[secret_scanning_push_protection][status]=enabled' \
+	--silent 2>/dev/null; then
+	ok "Secret scanning + push protection enabled"
 else
-  warn "Secret scanning: enable call returned non-zero (private repos require GHAS — fine on public)"
+	warn "Secret scanning: enable call returned non-zero (private repos require GHAS — fine on public)"
 fi
 
 info "Enabling Private Vulnerability Reporting…"
 if gh api --silent -X PUT "repos/$GH_REPO_FULL/private-vulnerability-reporting" 2>/dev/null; then
-  ok "Private Vulnerability Reporting enabled"
+	ok "Private Vulnerability Reporting enabled"
 else
-  warn "PVR: enable call returned non-zero (likely already enabled)"
+	warn "PVR: enable call returned non-zero (likely already enabled)"
 fi
 
 # --- Branch protection --------------------------------------------------------
 echo
 info "═══ Branch protection ═══"
 if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; then
-  "$SCRIPT_DIR/branch-protection.sh" \
-    --visibility public \
-    --has-dockerfile "$HAS_DOCKERFILE" \
-    --has-codeql "$HAS_CODEQL" \
-    --codeql-languages "$CODEQL_LANGUAGES" \
-    --default-branch "$DEFAULT_BRANCH"
+	"$SCRIPT_DIR/branch-protection.sh" \
+		--visibility public \
+		--has-dockerfile "$HAS_DOCKERFILE" \
+		--has-codeql "$HAS_CODEQL" \
+		--codeql-languages "$CODEQL_LANGUAGES" \
+		--default-branch "$DEFAULT_BRANCH"
 fi
 
 # --- Claude Apps install ------------------------------------------------------
@@ -343,9 +368,9 @@ fi
 # variables the Approver workflow (Phase 2) and the Maintenance bot identity
 # will need at runtime.
 if [[ "$CLAUDE_APPROVER" == "true" ]]; then
-  echo
-  info "═══ Claude Apps install ═══"
-  "$SCRIPT_DIR/install-claude-apps.sh"
+	echo
+	info "═══ Claude Apps install ═══"
+	"$SCRIPT_DIR/install-claude-apps.sh"
 fi
 
 # --- Summary ------------------------------------------------------------------
@@ -353,11 +378,11 @@ echo
 ok "Public-path automation complete"
 
 if [[ "${_gate_created:-false}" == "true" && "${_gate_assigned:-false}" == "true" ]]; then
-  gate_summary="Zero Tolerance custom gate (created + assigned)"
+	gate_summary="Zero Tolerance custom gate (created + assigned)"
 elif [[ "${_gate_created:-false}" == "true" ]]; then
-  gate_summary="Zero Tolerance gate exists but unassigned (Free-plan paywall) — Sonar way active; coverage-floor CI step enforces 90%"
+	gate_summary="Zero Tolerance gate exists but unassigned (Free-plan paywall) — Sonar way active; coverage-floor CI step enforces 90%"
 else
-  gate_summary="Sonar way (Free-plan fallback; see warning above) — coverage-floor CI step enforces 90%"
+	gate_summary="Sonar way (Free-plan fallback; see warning above) — coverage-floor CI step enforces 90%"
 fi
 
 cat <<EOF

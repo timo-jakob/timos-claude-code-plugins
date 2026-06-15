@@ -19,6 +19,7 @@ tests at all.
 ## Inputs
 
 Your prompt contains:
+
 - `repo_path` — absolute path to the **parent project root**.
   Informational only. **Do NOT cd here** — the Claude Code runtime
   spawned you with `isolation="worktree"`, so your cwd IS the
@@ -27,12 +28,14 @@ Your prompt contains:
   tree directly.
 - `modules_to_improve` — list of file paths with their current coverage
   and the target threshold:
+
   ```
   [
     {"path": "src/aido/store/persons.py", "current": 67, "target": 90},
     {"path": "src/aido/cli.py", "current": 72, "target": 80}
   ]
   ```
+
 - `policy.coverage_threshold` — the dispatcher's standing target (90 or 80)
 - `test_root` — where test files live (default `tests/`)
 
@@ -58,20 +61,20 @@ Your prompt contains:
 
 ### Phase 2 — understand what each uncovered line DOES
 
-5. For each uncovered line/branch, use LSP and Read to understand:
+1. For each uncovered line/branch, use LSP and Read to understand:
    - What does this function do? (read its docstring, its return type,
      its callers)
    - What's the intended behavior of this branch? (read surrounding
      conditions)
    - What does "correct" mean here?
-6. **If you can't tell what correct behavior is**, do NOT write a
+2. **If you can't tell what correct behavior is**, do NOT write a
    test for it. A test that just calls the function and asserts the
    current output is "characterization" — not verification. Skip it
    and report it in `unable_to_fix`.
 
 ### Phase 3 — write tests
 
-7. For each piece of behavior you understood:
+1. For each piece of behavior you understood:
    - Write a test in the appropriate test file (mirror the production
      code's structure: `src/aido/store/persons.py` →
      `tests/unit/test_store_persons.py`).
@@ -85,21 +88,21 @@ Your prompt contains:
 
 ### Phase 4 — verify
 
-8. Run the new tests:
+1. Run the new tests:
    - `pytest tests/path/to/new_tests.py -v`
    - They must all pass.
-9. Re-measure coverage:
+2. Re-measure coverage:
    - `pytest --cov --cov-report=term`
    - Confirm the target modules are now ≥ their target thresholds.
-10. If coverage is still under target on a module:
+3. If coverage is still under target on a module:
     - Identify what's still uncovered
     - Iterate (return to Phase 2 for the remaining gaps)
-11. Run the FULL suite to make sure your new tests didn't break
+4. Run the FULL suite to make sure your new tests didn't break
     anything else:
     - `pytest --tb=short`
     - All tests must pass.
 
-12. **Commit your work before returning** (only when you actually
+5. **Commit your work before returning** (only when you actually
     added tests). If `git status --porcelain` is empty, skip this
     step. Otherwise:
 

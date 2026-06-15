@@ -883,6 +883,7 @@ modules' coverage (not whole-project coverage):
 | < Floor | Refuse. Surface a `missing_tooling`-shaped recommendation pointing at the standalone `/development-python:improve-test-coverage` skill (issue #35). The user invests in coverage deliberately, then re-runs maintenance. |
 
 **Exception**: pure-mechanical agents skip the coverage check:
+
 - `ruff check --fix` without `--unsafe-fixes` (ruff has formally
   verified these are behavior-preserving)
 - `ruff format` (whitespace + line-breaks only)
@@ -995,6 +996,7 @@ setopt err_exit nounset pipefail
 ```
 
 Why zsh:
+
 - macOS ships bash 3.2 (from 2007) as `/bin/bash`; Apple won't update
   it for GPLv3 reasons. `#!/usr/bin/env bash` resolves to whatever's
   first on PATH, so contributors without Homebrew bash silently land

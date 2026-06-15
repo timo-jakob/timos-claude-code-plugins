@@ -47,12 +47,14 @@ Before committing, make sure changes are not committed directly to `main`.
 
 1. Stage all relevant changes using `git add` on specific files (use `git status` to identify them). Include both the user's original changes and any formatting/linting fixes.
 2. Create the commit using the message from Step 2 (or the user-provided message). Use a HEREDOC to pass the message:
+
    ```
    git commit -m "$(cat <<'EOF'
    <commit message here>
    EOF
    )"
    ```
+
 3. Run `git log --oneline -1` and `git status` to confirm the commit succeeded.
 4. Show the user the commit hash, message, and the branch it was committed to.
 

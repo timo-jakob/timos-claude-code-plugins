@@ -154,6 +154,7 @@ GitHub with no local record. Recover by:
 1. Visiting `https://github.com/settings/apps/<app-slug>`.
 2. Generating a private key (downloads a `.pem`).
 3. Importing it manually:
+
    ```sh
    register-claude-apps.sh --import claude-approver \
      --app-id <ID> --pem <path-to-pem>
@@ -362,8 +363,8 @@ before pushing. Run the agent locally:
 ```
 
 The skill spawns the same `python-approver` agent the CI workflow
-uses, with `DRY_RUN=true` in the prompt. The agent's verdict (markdown
-+ hidden JSON block) prints to stdout. **Nothing is posted to
+uses, with `DRY_RUN=true` in the prompt. The agent's verdict (markdown -
+hidden JSON block) prints to stdout. **Nothing is posted to
 GitHub.**
 
 Useful for:
@@ -388,6 +389,7 @@ halves:
 1. **Human-readable markdown** with the verdict, findings, risk
    register, and calibration trace.
 2. **A hidden HTML-comment JSON block** at the bottom:
+
    ```html
    <!-- claude-approver:findings
    {
@@ -631,8 +633,7 @@ step GitHub has no API for).
 
 The `/approve` comment trigger requires the comment author to have
 `OWNER`, `MEMBER`, or `COLLABORATOR` association on the repo. External
-contributors' comments don't fire the workflow (by design — see
-#192/#190).
+contributors' comments don't fire the workflow (by design — see #192/#190).
 
 If a legitimate maintainer hits this, check their account is added as
 a repo collaborator with write access.

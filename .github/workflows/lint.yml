@@ -1,0 +1,37 @@
+name: lint
+
+# Runs the repo's pre-commit lint suite (yamllint, shellcheck, shfmt, zsh -n,
+# markdownlint, plus the universal hygiene hooks) on every PR. Single source of
+# truth is .pre-commit-config.yaml — this workflow just runs it in CI so the
+# `lint` check can gate merges. gitleaks is skipped here; it has its own
+# workflow. Runs unconditionally (no path filter) so it is safe to require.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install zsh (for the zsh -n hook)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Install pre-commit
+        run: pip install pre-commit
+      - name: Run lint hooks
+        env:
+          SKIP: gitleaks
+        run: pre-commit run --all-files --show-diff-on-failure

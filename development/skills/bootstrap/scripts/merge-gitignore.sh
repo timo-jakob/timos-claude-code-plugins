@@ -29,20 +29,20 @@ existing="${1:-}"
 fragment="${2:-}"
 
 [[ -n "$existing" && -n "$fragment" ]] || {
-  echo "usage: $0 <existing-gitignore> <fragment-file>" >&2
-  exit 2
+	echo "usage: $0 <existing-gitignore> <fragment-file>" >&2
+	exit 2
 }
 
 [[ -f "$fragment" ]] || {
-  echo "fragment file not found: $fragment" >&2
-  exit 2
+	echo "fragment file not found: $fragment" >&2
+	exit 2
 }
 
 # If there's no existing file (empty repo, fresh init), nothing to dedupe
 # against — just emit the fragment as-is.
 if [[ ! -f "$existing" ]]; then
-  cat "$fragment"
-  exit 0
+	cat "$fragment"
+	exit 0
 fi
 
 # Two-file awk pass: collect existing patterns from $1, then stream $2

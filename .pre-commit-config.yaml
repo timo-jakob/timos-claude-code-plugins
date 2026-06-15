@@ -1,0 +1,96 @@
+# Pre-commit hooks for timos-claude-code-plugins — a Claude-plugin repo whose
+# scripts ARE code (shell) and whose docs are markdown, so we lint both.
+#
+# Install:  pip install pre-commit && pre-commit install
+# Run all:  pre-commit run --all-files
+#
+# CI mirror: .github/workflows/lint.yml runs `pre-commit run --all-files`
+# (skipping gitleaks, which has its own workflow) and is a required check.
+#
+# shellcheck/shfmt are scoped to real bash: four .sh files carry a zsh shebang
+# (a known rename-to-.zsh follow-up) and are excluded here; the zsh-syntax hook
+# below validates them and every .zsh file with `zsh -n` instead.
+
+repos:
+  # --- universal hooks -------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      # Private-key detection is handled by gitleaks (below + its own CI
+      # workflow) with a tuned .gitleaks.toml allowlist; a second detector
+      # here would only duplicate that allowlist and false-positive on docs
+      # that show PEM headers.
+
+  # --- YAML lint (repo .yamllint: line-length 120, GH Actions `on:` allowed) --
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+
+  # --- secret scanning (shift-left; CI runs gitleaks in its own workflow) -----
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # --- shell: shellcheck + shfmt on bash; zsh -n on zsh -----------------------
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning"]
+        # Bash only: .zsh is checked with `zsh -n` below (shellcheck SC1071s
+        # on it) and .bats is exercised by the test suite.
+        files: \.sh$
+        exclude: |
+          (?x)^(
+            development-python/scripts/pre-dispatch-runtime-upgrade\.sh|
+            development/skills/bootstrap/scripts/install-claude-apps\.sh|
+            development/skills/bootstrap/scripts/install-precommit-hooks\.sh|
+            development/skills/bootstrap/scripts/register-claude-apps\.sh
+          )$
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.10.0-1
+    hooks:
+      - id: shfmt
+        args: ["-d"]
+        # Bash only (see shellcheck note): skip .zsh and .bats.
+        files: \.sh$
+        exclude: |
+          (?x)^(
+            development-python/scripts/pre-dispatch-runtime-upgrade\.sh|
+            development/skills/bootstrap/scripts/install-claude-apps\.sh|
+            development/skills/bootstrap/scripts/install-precommit-hooks\.sh|
+            development/skills/bootstrap/scripts/register-claude-apps\.sh
+          )$
+  - repo: local
+    hooks:
+      - id: zsh-syntax
+        name: zsh -n syntax check (.zsh + zsh-shebang .sh)
+        entry: bash -c 'for f in "$@"; do zsh -n "$f" || exit 1; done' --
+        language: system
+        files: |
+          (?x)(
+            \.zsh$|
+            ^development-python/scripts/pre-dispatch-runtime-upgrade\.sh$|
+            ^development/skills/bootstrap/scripts/install-claude-apps\.sh$|
+            ^development/skills/bootstrap/scripts/install-precommit-hooks\.sh$|
+            ^development/skills/bootstrap/scripts/register-claude-apps\.sh$
+          )
+
+  # --- markdown lint (relaxed: prose/style rules off, structure on) -----------
+  # See .markdownlint.json — MD013 (line-length), MD033 (inline HTML), MD040
+  # (code-fence language), MD041 (first-line heading) and MD060 (table pipe
+  # spacing) are disabled; structural rules (heading levels, blank lines,
+  # list markers) stay on.
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.44.0
+    hooks:
+      - id: markdownlint

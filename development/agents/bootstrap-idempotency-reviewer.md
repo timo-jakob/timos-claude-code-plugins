@@ -27,6 +27,7 @@ template's new content).
 ## Inputs
 
 Your prompt contains a list of files. For each, you're given:
+
 - The file path
 - The current content (what the user has on disk)
 - The proposed template content (what bootstrap would write — for context
@@ -54,6 +55,7 @@ references. It does NOT mean whitespace, comment rewording, key
 reordering, or formatting differences.
 
 Examples of substantive template additions:
+
 - A new `## Quality Gate` section with a thresholds table.
 - A new `coverage-floor` hook entry in `repos:`.
 - A new `Coverage floor — 90% on new code` workflow step.
