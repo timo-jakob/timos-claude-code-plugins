@@ -75,7 +75,7 @@ health of the codebase.
 
 For each finding, report:
 
-```
+```text
 ### [CRITICAL|WARNING|SUGGESTION] Title
 
 **File:** path/to/file.swift:lineNumber

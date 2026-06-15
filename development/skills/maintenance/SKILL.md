@@ -239,7 +239,7 @@ null` are unfixable by automation; record them in the Phase 9 summary's
 For each agent group, spawn the agent with `isolation="worktree"`
 **and the PR's head SHA as worktree base**:
 
-```
+```text
 Agent(
   subagent_type="<finding.suggested_agent>",
   description="Fix Approver findings on PR #<n>",
@@ -344,7 +344,7 @@ script's JSON payload identifies the blockers; surface them via
 `AskUserQuestion` with three options that work for any language's
 state model:
 
-```
+```text
 Question: "Local <lang> state can't be reconciled with main's declared
            configuration:
              - <blocker 1 from script JSON>
@@ -554,7 +554,7 @@ payload_file=$(print -r -- "$payload_json" \
   | "<skill-base-dir>/scripts/write-payload.zsh")
 ```
 
-```
+```text
 # 2. Dispatch. args= is the path to the file just written.
 Skill(
   skill="development-<lang>:maintenance",
@@ -651,7 +651,7 @@ After (or alongside) the language dispatches, dispatch each `topic` in
 `supported_topics` **identically** — same file-handover, same no-trim contract,
 same `Skill(...)`-is-a-step rule:
 
-```
+```text
 Skill(
   skill="development-<topic>:maintenance",
   args="$payload_file"
@@ -783,7 +783,7 @@ spawned with `isolation="worktree"`.
      | "<skill-base-dir>/scripts/write-payload.zsh")
    ```
 
-   ```
+   ```text
    Skill(
      skill="development-<lang>:maintenance",
      args="$payload_file"
@@ -825,7 +825,7 @@ For each entry in `response.plan`, in priority order:
    `reference/pr-cycle.md` § Why isolation is load-bearing. Use this
    exact call shape:
 
-   ```
+   ```text
    Agent(
      subagent_type="<plan[i].agent>",
      description="<plan[i].description>",
@@ -913,7 +913,7 @@ For each entry in `response.plan`, in priority order:
 
    The agent's prompt gains one extra field, named by the hook:
 
-   ```
+   ```text
    <pre_dispatch_hook.prompt_field>: <modes.available> | <modes.unavailable>
    ```
 
@@ -1279,7 +1279,7 @@ output.
 Render a user-facing summary. Each language's results are reported in
 its own block so it's clear which plugin produced what.
 
-```
+```text
 === Maintenance summary ===
 
 Project:       <repo path>

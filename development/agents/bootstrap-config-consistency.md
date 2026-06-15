@@ -70,7 +70,7 @@ Walk through every cross-reference and verify both sides agree:
 
 Return findings grouped by severity:
 
-```
+```text
 ## Consistency review
 
 ### Mismatches (block write)
@@ -88,7 +88,7 @@ Return findings grouped by severity:
 
 If you find no issues:
 
-```
+```text
 ## Consistency review
 
 All cross-references match. Bootstrap output is internally consistent.

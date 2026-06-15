@@ -56,7 +56,7 @@ Claude Code stops serving stale content. But the cache is only ONE of
 TWO local copies of your plugin source. The other is the marketplaces
 clone:
 
-```
+```text
 ~/.claude/plugins/marketplaces/<marketplace>/
 ```
 

@@ -48,7 +48,7 @@ the orchestrator should re-run bootstrap rather than fix individually.
 
 ## Output format
 
-```
+```text
 ## Validation report
 
 ### Errors (block commit)
@@ -63,7 +63,7 @@ the orchestrator should re-run bootstrap rather than fix individually.
 
 If everything is clean:
 
-```
+```text
 ## Validation report
 
 All generated files parse and cross-references resolve.

@@ -60,7 +60,7 @@ this as a PR if you were the maintainer.
 
 A short, opinionated review. Three sections:
 
-```
+```text
 ## Senior review
 
 ### Strengths

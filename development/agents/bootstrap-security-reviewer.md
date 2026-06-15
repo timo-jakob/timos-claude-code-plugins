@@ -59,7 +59,7 @@ Treat these as P2 — note in passing:
 
 Return a structured report. Be concise:
 
-```
+```text
 ## Security review
 
 ### P0 — must fix before write
@@ -77,7 +77,7 @@ Return a structured report. Be concise:
 
 If you find no issues, return:
 
-```
+```text
 ## Security review
 
 No P0 or P1 findings. Bootstrap output looks safe to write.

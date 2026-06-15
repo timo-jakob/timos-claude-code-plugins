@@ -27,13 +27,13 @@ describes only the real, substantive change the developer made.
 
 **Single-line (most commits):**
 
-```
+```text
 Add user authentication with biometric fallback
 ```
 
 **With body (complex changes):**
 
-```
+```text
 Refactor networking layer to use async/await
 
 Replace completion handler-based API client with structured concurrency.

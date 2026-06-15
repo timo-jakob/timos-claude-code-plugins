@@ -57,7 +57,7 @@ incorrect behavior, or data corruption.
 
 For each finding, report:
 
-```
+```text
 ### [CRITICAL|WARNING|SUGGESTION] Title
 
 **File:** path/to/file.swift:lineNumber

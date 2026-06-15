@@ -111,7 +111,7 @@ Spawn **one** subagent (Task tool, `general-purpose` type). It runs with a clean
 context and does all the noisy work. Give it this prompt, with the placeholders
 filled from the steps above:
 
-```
+```text
 You are the JUDGE for a plugin integration test. Run the system under test in a
 separate headless Claude session, then return a STRUCTURED VERDICT. Do not dump
 the raw transcript back — only the structured block below.

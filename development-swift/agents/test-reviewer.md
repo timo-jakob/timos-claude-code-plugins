@@ -75,7 +75,7 @@ and opportunities to improve test quality and reliability.
 
 For each finding, report:
 
-```
+```text
 ### [CRITICAL|WARNING|SUGGESTION] Title
 
 **File:** path/to/file.swift:lineNumber (or the file that lacks tests)

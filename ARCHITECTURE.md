@@ -7,7 +7,7 @@ conventions change; otherwise individual PR descriptions are enough.
 
 ## Plugin family
 
-```
+```text
 development              ← generic, language-agnostic (orchestrator)
 development-swift        ← language: Swift
 development-python       ← language: Python
@@ -381,7 +381,7 @@ per-language policy templates.
 `development:maintenance` (and any future orchestrator) follows a
 **pure-function** dispatch contract:
 
-```
+```text
 1. development runs detection + tool gathering.
 2. For each detected language L, development packages findings as a
    JSON payload (schema below) and invokes `/development-<L>:maintenance`.
@@ -420,7 +420,7 @@ a new language plugin doesn't require duplicating PR-cycle logic.
 If the slash command is not registered (the language plugin isn't
 installed), `development` catches that, prints a clear message:
 
-```
+```text
 This project uses Python.
 Required plugin: development-python  (not installed).
 Install with: claude plugin install timo-jakob/timos-claude-code-plugins/development-python
@@ -435,7 +435,7 @@ on partial results.
 `development:maintenance` is one slim, invocable `SKILL.md` (Phases 0–10,
 the imperative procedure) plus a `reference/` directory holding the *why*:
 
-```
+```text
 development/skills/maintenance/
   SKILL.md         # imperative orchestrator: flags, detect, dispatch,
                    #   the per-stage PR cycle, summary, issue tracking
@@ -485,7 +485,7 @@ The orchestrator writes the payload to a `mktemp` file via
 the absolute path as the Skill tool's `args=`. The dispatcher reads
 the file from disk, parses, and proceeds.
 
-```
+```bash
 payload_file=$(echo "$payload_json" | <skill-base-dir>/scripts/write-payload.zsh)
 Skill(skill="development-<lang>:maintenance", args="$payload_file")
 rm -f "$payload_file"
@@ -781,7 +781,7 @@ The maintenance pipeline runs work agents **sequentially**, one per
 planner group, with a full PR cycle between groups. The orchestrator
 spawns the agent listed on each plan entry off the latest base:
 
-```
+```text
 # group 1
 Agent(subagent_type="python-sonar-triage",
       isolation="worktree",

@@ -29,7 +29,7 @@ Launch these 6 agents in one message:
 
 For each agent, use `subagent_type: general-purpose` and pass this prompt:
 
-```
+```text
 Review scope: {the review scope}
 
 Analyze all Swift code in scope following your instructions. Report every finding using the reporting format defined in your agent definition.
@@ -43,7 +43,7 @@ Wait for all 6 background agents to complete. Read each agent's output.
 
 Combine all findings into a single, well-organized review report with this structure:
 
-```
+```text
 # Code Review Summary
 
 ## Overview

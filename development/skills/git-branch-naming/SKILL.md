@@ -16,13 +16,13 @@ Branches follow one of two formats depending on whether a GitHub Issue exists:
 
 **With issue number** (preferred when a GitHub Issue exists):
 
-```
+```text
 <type>/<issue-number>-<short-description>
 ```
 
 **Without issue number** (for informal/exploratory work):
 
-```
+```text
 <type>/<short-description>
 ```
 
@@ -30,7 +30,7 @@ The `type` is always required. The issue number is optional but strongly preferr
 
 ### Examples
 
-```
+```text
 # With GitHub Issue
 feat/42-add-oauth-login
 fix/87-null-pointer-on-empty-cart

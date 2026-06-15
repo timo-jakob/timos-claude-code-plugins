@@ -51,7 +51,7 @@ Parse `$ARGUMENTS`:
 - **Empty** → try `gh pr view --json number --jq .number` to find a
   PR for the current branch. If none, halt:
 
-  ```
+  ```text
   No PR provided and no open PR is associated with the current
   branch. Either push the branch and open a PR first, or pass an
   explicit PR number: /development-python:approve 123
@@ -71,7 +71,7 @@ gathers PR context via `gh`, runs the same 13-step procedure as in CI,
 and returns the rendered review body (markdown + hidden JSON block)
 **without posting it**.
 
-```
+```text
 Agent(
   subagent_type="python-approver",
   description="Local dry-run review of PR #<n>",
@@ -104,7 +104,7 @@ receive).
 
 Add a brief banner at the top so it's obvious this was a dry-run:
 
-```
+```text
 =================================================================
 LOCAL DRY-RUN — no review was posted to GitHub.
 PR: <owner>/<repo>#<n>
