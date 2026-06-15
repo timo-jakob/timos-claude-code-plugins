@@ -490,10 +490,12 @@ cmd_verify() {
 
 walk_browser_install() {
   local app="$1" repo_nwo="$2" slug
-  slug=$(app_slug_for "$app")
+  # Resolve the slug (live GET /app + apps.json backfill) when the --import
+  # registration path stored it empty — the same fallback the secret-storage
+  # step uses. Only drop to the manual hunt when even the live lookup fails.
+  slug=$(app_slug_resolve "$app") || slug=""
   if [[ -z "$slug" ]]; then
-    # --import path stores empty slug. Fall back to the App management page.
-    warn "Slug missing in apps.json for $(app_display_name "$app")."
+    warn "Could not resolve the slug for $(app_display_name "$app")."
     warn "  Find the App at https://github.com/settings/apps and click Install."
     print
     # `read -p` is bash-only; in zsh `-p` means "read from coprocess". Use
