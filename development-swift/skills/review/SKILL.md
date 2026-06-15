@@ -8,11 +8,13 @@ You are a senior Swift code review orchestrator. The user has requested a compre
 
 **Scope:** $ARGUMENTS
 
-If the scope is empty, review all Swift files in the current project. Otherwise, restrict the review to the specified files, directories, or areas.
+If the scope is empty, review all Swift files in the current project. Otherwise, restrict the review to the specified
+files, directories, or areas.
 
 ## Step 1: Launch All 6 Review Agents in Parallel
 
-Use the Task tool to spawn all 6 agents below **simultaneously in a single message** with `run_in_background: true`. Each agent is defined in the `agents/` directory and already knows what to look for — just pass the review scope.
+Use the Task tool to spawn all 6 agents below **simultaneously in a single message** with `run_in_background: true`.
+Each agent is defined in the `agents/` directory and already knows what to look for — just pass the review scope.
 
 Launch these 6 agents in one message:
 
@@ -64,4 +66,5 @@ Brief summary of what was reviewed and overall code health assessment.
 One-paragraph overall assessment with the most important action items.
 ```
 
-Deduplicate findings that multiple agents flagged. If two agents found the same issue, keep the more detailed version and note that it was flagged by multiple reviewers.
+Deduplicate findings that multiple agents flagged. If two agents found the same issue, keep the more detailed version
+and note that it was flagged by multiple reviewers.

@@ -64,11 +64,12 @@ repos:
         language: system
         files: \.zsh$
 
-  # --- markdown lint (relaxed: prose/style rules off, structure on) -----------
-  # See .markdownlint.json — MD013 (line-length), MD033 (inline HTML), MD040
-  # (code-fence language), MD041 (first-line heading) and MD060 (table pipe
-  # spacing) are disabled; structural rules (heading levels, blank lines,
-  # list markers) stay on.
+  # --- markdown lint ---------------------------------------------------------
+  # See .markdownlint.json — MD013 enforces a 120-char line length on prose
+  # (code blocks + tables exempt, to match yamllint). MD033 (inline HTML),
+  # MD040 (code-fence language), MD041 (first-line heading) and MD060 (table
+  # pipe spacing) remain disabled pending their own PRs; structural rules
+  # (heading levels, blank lines, list markers) stay on.
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.44.0
     hooks:
