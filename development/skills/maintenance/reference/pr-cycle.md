@@ -107,7 +107,7 @@ tool key (case-insensitive). Examples:
 
 Use `-f -f` (double force), not `--force` / single `-f`. Claude Code's Agent
 runtime locks every worktree it creates (lock reason: "claude agent
-agent-<id>"). The lock survives even after the originating claude process
+`agent-<id>`"). The lock survives even after the originating claude process
 exits, so single `-f` errors out with "cannot remove a locked working tree".
 `-f -f` overrides the lock AND any uncommitted state. Without this, the remove
 silently fails, the local branch stays attached to the worktree,

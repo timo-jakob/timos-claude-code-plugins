@@ -34,7 +34,7 @@ it is almost always an **infrastructure** condition (most commonly the org's
 monthly private-test quota is exhausted), not a finding on the PR's diff.
 Phrase it that way:
 
-> security/snyk (<org>): ERROR state from the Snyk GitHub App's integration
+> security/snyk (`<org>`): ERROR state from the Snyk GitHub App's integration
 > check — typically quota exhaustion on the org's monthly private-test budget.
 > Top up the plan or wait for the monthly reset.
 
