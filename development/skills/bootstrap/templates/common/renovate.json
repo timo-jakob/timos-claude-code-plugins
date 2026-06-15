@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": "Renovate keeps dependencies current for this Claude Code plugin repo. A plugin repo is mostly templates + markdown, so the main moving surface is GitHub Action pins (in .github/workflows/*.yml and, when the repo ships bootstrap templates, in *.tmpl). Renovate replaces Dependabot here (templates aren't production dependency manifests).",
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Renovate dependency dashboard",
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Extract GitHub Action `uses:` pins from *.tmpl files. The stock github-actions manager only scans .yml/.yaml, so action pins baked into templates a plugin repo ships are otherwise invisible to drift detection. Harmless when the repo has no templates.",
+      "fileMatch": ["\\.tmpl$"],
+      "matchStrings": [
+        "uses:\\s+(?<depName>[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)(?:/[a-zA-Z0-9_./-]+)?@(?<currentValue>[a-zA-Z0-9._-]+)"
+      ],
+      "datasourceTemplate": "github-tags"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Batch every GitHub Action upgrade (both .yml and .tmpl) into one weekly PR for a single review + merge.",
+      "matchManagers": ["github-actions", "custom.regex"],
+      "groupName": "github-actions",
+      "groupSlug": "github-actions",
+      "commitMessageTopic": "GitHub Actions"
+    }
+  ]
+}

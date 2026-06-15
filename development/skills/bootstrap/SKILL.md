@@ -33,6 +33,20 @@ Supported flags:
   `scripts/register-claude-apps.sh` (the preflight in Step 4.5 will offer
   to run it when missing). When `true`, also warn-and-skip on non-Python
   projects until other language plugins ship their own Approver agents.
+- `--claude-plugin true|false` — bootstrap this repo as a **Claude Code plugin
+  repository** (a marketplace of plugins, not an application). Defaults to
+  `false`. When `true`:
+  - sets `primary: claude-plugin` in `.maintenance.yml` (overrides `{{PRIMARY}}`
+    inference);
+  - uses **Renovate** instead of Dependabot — plugin repos are templates, not
+    production dependency manifests (renders `renovate.json`, **skips**
+    `.github/dependabot.yml`);
+  - installs the **plugin-repo lint** pre-commit hooks (shellcheck / shfmt /
+    markdownlint) — the `CLAUDE_PLUGIN` block in `.pre-commit-config.yaml`;
+  - **does NOT install the Approver.** A plugin repo is the origin of every other
+    repo and requires **human-only** approval (no AI auto-approval). If
+    `--claude-approver true` is also passed, warn and **skip the Approver** — the
+    two are mutually exclusive for a plugin repo.
   See `docs/CLAUDE-APPS.md` for the design and the Apps' permissions.
 
 ## Guiding Principles
@@ -304,7 +318,7 @@ text replacement before writing:
 | `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated detected languages |
-| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`). Determine: **(1)** if `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(2)** else if exactly one language was detected → that language; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
+| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`). Determine: **(0)** if `--claude-plugin true` → `claude-plugin` (the flag is the explicit declaration); **(1)** else if `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(2)** else if exactly one language was detected → that language; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`python_version` field) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `python_version.replace('.', '')`. |
@@ -359,6 +373,7 @@ Strip blocks where the tag does not apply:
 | `SWIFT` | swift detected |
 | `DOCKER` | Dockerfile detected |
 | `PRIVATE` | visibility == private |
+| `CLAUDE_PLUGIN` | `--claude-plugin true` |
 
 If a tag does not apply, delete the START line, the END line, and everything
 between them.
@@ -398,8 +413,10 @@ the first arg and it emits the fragment unchanged).
 ### 3a. Common artifacts (both paths)
 
 Copy from `templates/common/`:
-- `.pre-commit-config.yaml` (merge language-specific hooks based on detected languages)
-- `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem)
+- `.pre-commit-config.yaml` (merge language-specific hooks based on detected languages; keep the `CLAUDE_PLUGIN` block only when `--claude-plugin true`)
+- **Dependency updates — pick ONE:**
+  - default → `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem).
+  - `--claude-plugin true` → copy `renovate.json` instead (static, no substitution) and **do NOT render `.github/dependabot.yml`**. A plugin repo is templates, not production dependency manifests; Renovate's github-actions manager (plus the `.tmpl` customManager in the config) covers its real moving surface.
 - `.github/ISSUE_TEMPLATE/bug.yml`
 - `.github/ISSUE_TEMPLATE/feature.yml`
 - `.github/PULL_REQUEST_TEMPLATE.md`
@@ -531,6 +548,13 @@ For each detected language, merge in the appropriate config from
 - Pre-commit hook entries (already merged into `.pre-commit-config.yaml`)
 
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
+
+**Plugin-repo exclusion:** if `--claude-plugin true` was set, **skip this section
+entirely** — render no Approver workflow or policy, even if `--claude-approver
+true` was also passed. A plugin repo is the origin of every other repo and is
+**human-only approval** (no AI auto-approval); warn the user that the Approver
+flag was ignored because of `--claude-plugin`. Set up human approval the normal
+way (Step 4b branch protection requires 1 review; no Approver bot to satisfy it).
 
 When the orchestrator was invoked with `--claude-approver true` **and**
 Python is in the detected languages list, render the two Approver-specific
@@ -680,8 +704,8 @@ actually rendered in 3a–3f):
 **Scaffold files are intentionally NOT stamped** — `CLAUDE.md`,
 `CONTRIBUTING.md`, `SETUP.md`, `SECURITY.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
 `.github/ISSUE_TEMPLATE/*`, `.gitignore`, `.editorconfig`, `.yamllint`,
-`.maintenance.yml`, `LICENSE`, `sonar-project.properties`, `.snyk`,
-`.pre-commit-config.yaml`, `ruff.toml`, the Approver policy at
+`.maintenance.yml`, `renovate.json`, `LICENSE`, `sonar-project.properties`,
+`.snyk`, `.pre-commit-config.yaml`, `ruff.toml`, the Approver policy at
 `.claude/approver-policy.md`. The
 maintenance pipeline expects user customization on these and would
 emit noisy drift findings every run.
