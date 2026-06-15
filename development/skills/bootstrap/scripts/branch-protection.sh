@@ -155,23 +155,28 @@ esac
 
 rm -f "$http_body"
 
-# --- repo merge settings (allow_auto_merge + delete_branch_on_merge) ---------
+# --- repo merge settings (auto-merge + delete-branch + squash-only) ----------
 # The maintenance pipeline's approval gate (plugins#224) arms GitHub native
 # auto-merge when no approving review has landed within the gate window;
 # arming requires the repo-level "Allow auto-merge" setting. And because gh
 # isn't running when GitHub later performs an armed merge, `--delete-branch`
 # can't act — head-branch cleanup for those merges needs
-# delete_branch_on_merge instead. Idempotent (PATCH sets absolute state).
-info "Enabling allow_auto_merge + delete_branch_on_merge on $REPO"
+# delete_branch_on_merge instead.
+#
+# Squash-only: the whole family uses `gh pr merge --squash` (linear history is
+# enforced in branch protection), but nothing stopped a manual UI merge-commit
+# or rebase. Disable both at the repo level so the squash convention holds even
+# for hand-merges. Idempotent (PATCH sets absolute state).
+info "Setting repo merge settings on $REPO (auto-merge + delete-branch + squash-only)"
 ms_status=$(curl -sS -o /dev/null -w '%{http_code}' \
   -H "Accept: application/vnd.github+json" \
   -H "Authorization: token $(gh auth token)" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
   -X PATCH \
   "https://api.github.com/repos/$REPO" \
-  --data '{"allow_auto_merge":true,"delete_branch_on_merge":true}')
+  --data '{"allow_auto_merge":true,"delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false}')
 case "$ms_status" in
-  200) ok "Repo merge settings applied (auto-merge allowed, head branches auto-deleted)" ;;
+  200) ok "Repo merge settings applied (auto-merge, head-branch delete, squash-only)" ;;
   403) warn "Could not set repo merge settings (403 — admin needed). Enable manually: Settings → General → Pull Requests → 'Allow auto-merge' + 'Automatically delete head branches'." ;;
   *)   warn "Repo merge-settings PATCH returned HTTP $ms_status — check Settings → General → Pull Requests manually." ;;
 esac
