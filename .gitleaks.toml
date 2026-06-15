@@ -1,0 +1,18 @@
+# gitleaks config — extends the default ruleset and allowlists documented false
+# positives (example commands + example data, not real secrets). Keep narrow:
+# every entry here is a place gitleaks must NOT look, so justify each one.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Example/documentation patterns that aren't real secrets."
+regexes = [
+  # `curl -u "$VAR:"` in the SonarCloud automation scripts and SETUP.md examples.
+  # A shell variable reference is never a literal credential.
+  '''\$\{?[A-Za-z_][A-Za-z0-9_]*\}?''',
+]
+paths = [
+  # Agent docs carry example JSON — e.g. SonarCloud finding keys like
+  # "key": "AZ5enl4..." — which are issue identifiers, not API keys.
+  '''development-python/agents/python-ci-fixer\.md''',
+]

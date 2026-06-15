@@ -417,6 +417,8 @@ Copy from `templates/common/`:
 - **Dependency updates — pick ONE:**
   - default → `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem).
   - `--claude-plugin true` → copy `renovate.json` instead (static, no substitution) and **do NOT render `.github/dependabot.yml`**. A plugin repo is templates, not production dependency manifests; Renovate's github-actions manager (plus the `.tmpl` customManager in the config) covers its real moving surface.
+- `.github/workflows/gitleaks.yml` (static copy — secret-scanning CI for **every** repo; defense in depth behind the gitleaks pre-commit hook. Note: repos owned by a GitHub Organization need a `GITLEAKS_LICENSE` repo secret — see the workflow comment.)
+- `.gitleaks.toml` (static copy — gitleaks config used by **both** the pre-commit hook and the CI workflow; allowlists documented false positives like `curl -u "$VAR"` examples in `SETUP.md`).
 - `.github/ISSUE_TEMPLATE/bug.yml`
 - `.github/ISSUE_TEMPLATE/feature.yml`
 - `.github/PULL_REQUEST_TEMPLATE.md`
@@ -704,7 +706,7 @@ actually rendered in 3a–3f):
 **Scaffold files are intentionally NOT stamped** — `CLAUDE.md`,
 `CONTRIBUTING.md`, `SETUP.md`, `SECURITY.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
 `.github/ISSUE_TEMPLATE/*`, `.gitignore`, `.editorconfig`, `.yamllint`,
-`.maintenance.yml`, `renovate.json`, `LICENSE`, `sonar-project.properties`,
+`.maintenance.yml`, `renovate.json`, `.gitleaks.toml`, `LICENSE`, `sonar-project.properties`,
 `.snyk`, `.pre-commit-config.yaml`, `ruff.toml`, the Approver policy at
 `.claude/approver-policy.md`. The
 maintenance pipeline expects user customization on these and would
