@@ -252,7 +252,12 @@ candidate_paths+=(".gitignore" "LICENSE")
 
 # Dedupe (some files like sonar-project.properties exist in both public/ and
 # private/ scope — we'd otherwise list it twice).
-mapfile -t candidate_paths < <(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++')
+# NOTE: `mapfile`/`readarray` is bash 4+; this script runs on macOS's stock bash
+# 3.2, so we use the array-from-command-substitution form instead. The candidate
+# paths are known config filenames from `find` (no spaces), so the intentional
+# word-splitting is safe.
+# shellcheck disable=SC2207
+candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 
 artifacts_json="{"
 first=1
