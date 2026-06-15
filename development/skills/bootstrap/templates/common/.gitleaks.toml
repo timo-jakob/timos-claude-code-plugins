@@ -1,0 +1,15 @@
+# gitleaks config — extends the default ruleset and allowlists documented false
+# positives. Used by both the gitleaks pre-commit hook and the gitleaks CI
+# workflow. Keep narrow: every entry is a place gitleaks must NOT look.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Example/documentation patterns that aren't real secrets."
+regexes = [
+  # `curl -u "$VAR:"` (e.g. the SonarCloud examples in SETUP.md). A shell
+  # variable reference is never a literal credential.
+  '''\$\{?[A-Za-z_][A-Za-z0-9_]*\}?''',
+]
+# Add `paths = ['''regex''']` here for any repo-specific docs that carry example
+# data gitleaks misreads (e.g. fixtures, sample JSON).

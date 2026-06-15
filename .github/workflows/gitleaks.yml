@@ -1,0 +1,25 @@
+name: gitleaks
+
+# Secret scanning in CI — defense in depth behind the gitleaks pre-commit hook
+# (#260: "no repo should contain secrets"). pre-commit can be bypassed; CI can't.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so gitleaks scans every commit on the PR
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE is required only for repos owned by a GitHub
+          # Organization; personal repos (public or private) are free.
