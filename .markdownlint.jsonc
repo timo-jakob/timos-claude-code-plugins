@@ -1,0 +1,20 @@
+// markdownlint config for timos-claude-code-plugins.
+// Every rule is enforced by default; there are exactly two deliberate,
+// permanent exceptions documented inline below. (JSONC — comments require the
+// .jsonc extension; markdownlint discovers it the same as .markdownlint.json.)
+{
+  "default": true,
+
+  // Line length capped at 120 to match the repo's yamllint limit. Code blocks
+  // and tables are exempt: command/JSON examples and table rows can't be
+  // wrapped without breaking them.
+  "MD013": { "line_length": 120, "code_blocks": false, "tables": false },
+
+  // first-line-heading — DISABLED ON PURPOSE (not pending work). This repo's
+  // SKILL.md and agent .md files open with YAML frontmatter (name / description
+  // / model / tools) followed by body prose, never a top-level "# Heading".
+  // That's the Claude Code plugin doc convention, so MD041 doesn't fit here;
+  // enforcing it would mean bolting an H1 onto ~42 frontmatter-led files for no
+  // reader benefit. Every other markdownlint rule is on.
+  "MD041": false
+}
