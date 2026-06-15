@@ -73,13 +73,17 @@ config_key_for() { print -- "${1//-/_}" }
 # --- preflight ---------------------------------------------------------------
 
 verify_register_run() {
+  # Optional app subset (e.g. just claude-maintenance for --writer-only);
+  # defaults to all KNOWN_APPS.
+  local check_apps=("$@")
+  (( ${#check_apps} )) || check_apps=("${KNOWN_APPS[@]}")
   if [[ ! -f "$CONFIG_FILE" ]]; then
     err "register-claude-apps.sh has not been run yet on this machine."
     err "  Run: $REGISTER_SCRIPT"
     exit 1
   fi
   local app key
-  for app in "${KNOWN_APPS[@]}"; do
+  for app in "${check_apps[@]}"; do
     key=$(config_key_for "$app")
     if ! jq -e --arg key "$key" '.[$key].app_id' "$CONFIG_FILE" >/dev/null 2>&1; then
       err "$(app_display_name "$app") not registered locally."
@@ -548,6 +552,12 @@ identities need.
 Usage:
   install-claude-apps.sh                  Walk the install for both Apps on
                                            the current repo (interactive).
+  install-claude-apps.sh --writer-only    Install ONLY the Maintenance App (the
+                                           writer) — for Claude-plugin repos,
+                                           where a human approves (no Approver)
+                                           and PRs come from the writer bot via
+                                           /development:open-pr. No repo secrets
+                                           (the token is minted locally).
   install-claude-apps.sh --verify         Doctor: validate the local keys
                                            (parseable + cryptographically
                                            matching their App via GET /app),
@@ -593,6 +603,7 @@ EOF
 # --- main --------------------------------------------------------------------
 
 main() {
+  local writer_only=""
   case "${1:-}" in
     --help|-h)
       print_usage
@@ -611,6 +622,9 @@ main() {
       cmd_verify "$fix"
       return
       ;;
+    --writer-only)
+      writer_only=1
+      ;;
     "")
       ;;
     *)
@@ -624,13 +638,38 @@ main() {
   require_macos
   require_tools gh jq openssl
 
-  verify_register_run
+  # writer-only installs just the Maintenance App (the writer); full install
+  # needs both Apps registered.
+  if [[ -n "$writer_only" ]]; then
+    verify_register_run claude-maintenance
+  else
+    verify_register_run
+  fi
 
   local repo_info owner name repo_nwo
   repo_info=$(get_repo_info)
   owner=$(print -- "$repo_info" | jq -r .owner.login)
   name=$(print  -- "$repo_info" | jq -r .name)
   repo_nwo="${owner}/${name}"
+
+  # --- writer-only path (plugin repos) ----------------------------------------
+  # Install ONLY the Maintenance App as the writer. No Approver (plugin repos are
+  # human-only approval), and no per-repo secrets/variables: /development:open-pr
+  # mints the writer token LOCALLY from the Keychain key, so nothing in this repo
+  # or its CI needs the private key.
+  if [[ -n "$writer_only" ]]; then
+    info "═══ Claude writer-App install (writer-only): $repo_nwo ═══"
+    print
+    walk_browser_install claude-maintenance "$repo_nwo"
+    print
+    ok "Claude writer App (Claude Maintenance) installed on $repo_nwo."
+    print -- "  /development:open-pr now opens PRs authored by"
+    print -- "  claude-maintenance-${owner}[bot] — you approve, squash auto-merge."
+    print -- "  No Approver is installed (plugin repos are human-only approval)."
+    print -- "  The writer token is minted locally from your Keychain; this repo"
+    print -- "  needs no secrets."
+    return 0
+  fi
 
   info "═══ Claude Apps install: $repo_nwo ═══"
   print
