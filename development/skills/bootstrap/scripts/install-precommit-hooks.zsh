@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# install-precommit-hooks.sh — install every git hook type referenced
+# install-precommit-hooks.zsh — install every git hook type referenced
 # by `.pre-commit-config.yaml`'s `stages:` entries. `pre-commit install`
 # alone installs only the default `pre-commit` type, so a config that
 # defines `stages: [pre-push]` (like the coverage-floor hook added in
@@ -9,7 +9,7 @@
 # refresh.
 #
 # Usage: run from the repo root.
-#   install-precommit-hooks.sh
+#   install-precommit-hooks.zsh
 
 setopt err_exit nounset pipefail
 

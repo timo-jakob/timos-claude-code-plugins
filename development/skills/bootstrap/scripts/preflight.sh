@@ -290,7 +290,7 @@ fi
 # --- Claude Apps preflight (when --claude-approver true) ---------------------
 # Verifies the two Claude GitHub Apps are registered locally
 # (apps.json + Keychain entries). When missing, offers to run
-# register-claude-apps.sh now so bootstrap doesn't fail mid-flow.
+# register-claude-apps.zsh now so bootstrap doesn't fail mid-flow.
 if [[ "$CLAUDE_APPROVER" == "true" ]]; then
 	echo
 	info "Claude Apps preflight (—claude-approver true)…"
@@ -318,10 +318,10 @@ if [[ "$CLAUDE_APPROVER" == "true" ]]; then
 	else
 		warn "Claude Apps not yet registered on this machine."
 		warn "  Bootstrap will need both Apps before --claude-approver true can install them on the repo."
-		if [[ "$ASSUME_YES" == "true" ]] || ask_yn "Run register-claude-apps.sh now?"; then
-			"$SCRIPT_DIR/register-claude-apps.sh"
+		if [[ "$ASSUME_YES" == "true" ]] || ask_yn "Run register-claude-apps.zsh now?"; then
+			"$SCRIPT_DIR/register-claude-apps.zsh"
 		else
-			die "Aborted. Run $SCRIPT_DIR/register-claude-apps.sh, then re-run preflight + bootstrap."
+			die "Aborted. Run $SCRIPT_DIR/register-claude-apps.zsh, then re-run preflight + bootstrap."
 		fi
 	fi
 fi

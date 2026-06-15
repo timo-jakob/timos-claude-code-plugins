@@ -1,10 +1,10 @@
 #!/usr/bin/env zsh
-# install-claude-apps.sh — install both Claude GitHub Apps on the current
+# install-claude-apps.zsh — install both Claude GitHub Apps on the current
 # repo and store the per-repo secrets + variables the Approver workflow
 # (Phase 2) and the Maintenance bot identity will need at runtime.
 #
 # Prerequisites:
-#   - register-claude-apps.sh has been run (apps.json entries + Keychain
+#   - register-claude-apps.zsh has been run (apps.json entries + Keychain
 #     keys for both claude-approver and claude-maintenance exist)
 #   - gh CLI authenticated against the repo's hosting account
 #   - the script is run from inside the target repo's working tree
@@ -56,7 +56,7 @@ readonly KNOWN_APPS=(claude-approver claude-maintenance)
 # `claude-maintenance[bot]` login never matches an actual PR author.
 readonly BASE_AUTHOR_ALLOWLIST='["dependabot[bot]","github-actions[bot]"]'
 
-readonly REGISTER_SCRIPT="${SCRIPT_DIR}/register-claude-apps.sh"
+readonly REGISTER_SCRIPT="${SCRIPT_DIR}/register-claude-apps.zsh"
 
 # --- helpers ------------------------------------------------------------------
 
@@ -78,7 +78,7 @@ verify_register_run() {
   local check_apps=("$@")
   (( ${#check_apps} )) || check_apps=("${KNOWN_APPS[@]}")
   if [[ ! -f "$CONFIG_FILE" ]]; then
-    err "register-claude-apps.sh has not been run yet on this machine."
+    err "register-claude-apps.zsh has not been run yet on this machine."
     err "  Run: $REGISTER_SCRIPT"
     exit 1
   fi
@@ -191,7 +191,7 @@ prepare_pem() {
   if ! pem_validate_for_app "$app" "$pem"; then
     err "The Keychain key for $(app_display_name "$app") does not authenticate as App ID $(app_id_for "$app")."
     err "It is unparseable, truncated, or belongs to a different App."
-    err "Run: install-claude-apps.sh --verify --fix   (guided key regeneration)"
+    err "Run: install-claude-apps.zsh --verify --fix   (guided key regeneration)"
     return 1
   fi
   pem_to_pkcs8 "$pem" \
@@ -481,7 +481,7 @@ cmd_verify() {
   elif [[ -n "$fix" ]]; then
     ok "Doctor finished — $problems problem(s) found and addressed above."
   else
-    warn "$problems problem(s) found. Re-run with: install-claude-apps.sh --verify --fix"
+    warn "$problems problem(s) found. Re-run with: install-claude-apps.zsh --verify --fix"
     return 1
   fi
 }
@@ -547,20 +547,20 @@ resolve_anthropic_key() {
 
 print_usage() {
   cat <<EOF
-install-claude-apps.sh — install both Claude GitHub Apps on the current repo
+install-claude-apps.zsh — install both Claude GitHub Apps on the current repo
 and store the per-repo secrets + variables the Approver and Maintenance
 identities need.
 
 Usage:
-  install-claude-apps.sh                  Walk the install for both Apps on
+  install-claude-apps.zsh                  Walk the install for both Apps on
                                            the current repo (interactive).
-  install-claude-apps.sh --writer-only    Install ONLY the Maintenance App (the
+  install-claude-apps.zsh --writer-only    Install ONLY the Maintenance App (the
                                            writer) — for Claude-plugin repos,
                                            where a human approves (no Approver)
                                            and PRs come from the writer bot via
                                            /development:open-pr. No repo secrets
                                            (the token is minted locally).
-  install-claude-apps.sh --verify         Doctor: validate the local keys
+  install-claude-apps.zsh --verify         Doctor: validate the local keys
                                            (parseable + cryptographically
                                            matching their App via GET /app),
                                            check repo secrets/variables, and
@@ -568,7 +568,7 @@ Usage:
                                            failed token-mint steps (= the
                                            stored secret is wrong, not just
                                            missing). Read-only.
-  install-claude-apps.sh --verify --fix   Doctor + converge: re-set secrets
+  install-claude-apps.zsh --verify --fix   Doctor + converge: re-set secrets
                                            from the validated Keychain keys
                                            (normalized to PKCS#8), fix
                                            variable drift, offer to re-run a
@@ -577,10 +577,10 @@ Usage:
                                            Keychain key itself is missing or
                                            invalid (the one step GitHub has
                                            no API for).
-  install-claude-apps.sh --help           Show this help.
+  install-claude-apps.zsh --help           Show this help.
 
 Prerequisites:
-  - register-claude-apps.sh has been run on this machine.
+  - register-claude-apps.zsh has been run on this machine.
   - gh CLI authenticated against the repo's hosting account.
   - Run from inside the target repo's working tree.
 

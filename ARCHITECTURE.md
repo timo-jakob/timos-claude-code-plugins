@@ -683,7 +683,7 @@ hook. The one `type` defined in v2 is **`runtime_availability`**:
 ```json
 "pre_dispatch_hook": {
   "type": "runtime_availability",
-  "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+  "script": "development-python/scripts/pre-dispatch-runtime-upgrade.zsh",
   "target": "3.14",
   "prompt_field": "local_verification_mode",
   "modes": { "available": "auto", "unavailable": "skip" },

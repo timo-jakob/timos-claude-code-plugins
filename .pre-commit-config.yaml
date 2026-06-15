@@ -7,9 +7,9 @@
 # CI mirror: .github/workflows/lint.yml runs `pre-commit run --all-files`
 # (skipping gitleaks, which has its own workflow) and is a required check.
 #
-# shellcheck/shfmt are scoped to real bash: four .sh files carry a zsh shebang
-# (a known rename-to-.zsh follow-up) and are excluded here; the zsh-syntax hook
-# below validates them and every .zsh file with `zsh -n` instead.
+# shellcheck/shfmt run on .sh (all bash); .zsh scripts are syntax-checked with
+# `zsh -n` (shellcheck can't parse zsh). Extension matches the shebang for every
+# script, so no per-file exceptions are needed.
 
 repos:
   # --- universal hooks -------------------------------------------------------
@@ -46,16 +46,9 @@ repos:
     hooks:
       - id: shellcheck
         args: ["--severity=warning"]
-        # Bash only: .zsh is checked with `zsh -n` below (shellcheck SC1071s
-        # on it) and .bats is exercised by the test suite.
+        # Bash only (.sh): .zsh is checked with `zsh -n` below (shellcheck
+        # SC1071s on it) and .bats is exercised by the test suite.
         files: \.sh$
-        exclude: |
-          (?x)^(
-            development-python/scripts/pre-dispatch-runtime-upgrade\.sh|
-            development/skills/bootstrap/scripts/install-claude-apps\.sh|
-            development/skills/bootstrap/scripts/install-precommit-hooks\.sh|
-            development/skills/bootstrap/scripts/register-claude-apps\.sh
-          )$
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.10.0-1
     hooks:
@@ -63,27 +56,13 @@ repos:
         args: ["-d"]
         # Bash only (see shellcheck note): skip .zsh and .bats.
         files: \.sh$
-        exclude: |
-          (?x)^(
-            development-python/scripts/pre-dispatch-runtime-upgrade\.sh|
-            development/skills/bootstrap/scripts/install-claude-apps\.sh|
-            development/skills/bootstrap/scripts/install-precommit-hooks\.sh|
-            development/skills/bootstrap/scripts/register-claude-apps\.sh
-          )$
   - repo: local
     hooks:
       - id: zsh-syntax
-        name: zsh -n syntax check (.zsh + zsh-shebang .sh)
+        name: zsh -n syntax check (.zsh)
         entry: bash -c 'for f in "$@"; do zsh -n "$f" || exit 1; done' --
         language: system
-        files: |
-          (?x)(
-            \.zsh$|
-            ^development-python/scripts/pre-dispatch-runtime-upgrade\.sh$|
-            ^development/skills/bootstrap/scripts/install-claude-apps\.sh$|
-            ^development/skills/bootstrap/scripts/install-precommit-hooks\.sh$|
-            ^development/skills/bootstrap/scripts/register-claude-apps\.sh$
-          )
+        files: \.zsh$
 
   # --- markdown lint (relaxed: prose/style rules off, structure on) -----------
   # See .markdownlint.json — MD013 (line-length), MD033 (inline HTML), MD040

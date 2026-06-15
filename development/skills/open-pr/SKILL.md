@@ -44,7 +44,7 @@ TOKEN=$("<skill-base-dir>/../maintenance/scripts/mint-maintenance-token.zsh" 2>/
   tell the user the writer App isn't set up here (so the PR will be authored by
   *them* and they'll need to merge it themselves — admin-merge, since they can't
   approve their own PR), point them at the install path
-  (`install-claude-apps.sh --writer-only` once it ships, or the browser App-install),
+  (`install-claude-apps.zsh --writer-only` once it ships, or the browser App-install),
   then open the PR the normal way: `gh pr create ...` (as the user) and **stop**
   (don't arm auto-merge — there's no approver-able author). Report which path ran.
 

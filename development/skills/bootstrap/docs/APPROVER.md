@@ -119,7 +119,7 @@ Apps onto the new repo.
 To register them, run:
 
 ```sh
-~/.claude/plugins/cache/timos-claude-code-plugins/development/<version>/skills/bootstrap/scripts/register-claude-apps.sh
+~/.claude/plugins/cache/timos-claude-code-plugins/development/<version>/skills/bootstrap/scripts/register-claude-apps.zsh
 ```
 
 The script:
@@ -156,7 +156,7 @@ GitHub with no local record. Recover by:
 3. Importing it manually:
 
    ```sh
-   register-claude-apps.sh --import claude-approver \
+   register-claude-apps.zsh --import claude-approver \
      --app-id <ID> --pem <path-to-pem>
    ```
 
@@ -618,7 +618,7 @@ wrong container format.
 Run the doctor (#234):
 
 ```sh
-development/skills/bootstrap/scripts/install-claude-apps.sh --verify --fix
+development/skills/bootstrap/scripts/install-claude-apps.zsh --verify --fix
 ```
 
 It validates the Keychain key cryptographically against the App
@@ -675,7 +675,7 @@ which condition:
 The agent **deliberately doesn't post a verdict in these cases** —
 they're operator errors, not PR problems.
 
-### "Code exchange failed" during `register-claude-apps.sh`
+### "Code exchange failed" during `register-claude-apps.zsh`
 
 This was a real bug in 1.7.10 and earlier (#195) — `print --`
 corrupted the PEM in the conversion response. Fixed in 1.7.10.
@@ -879,5 +879,5 @@ they'll be added here.
 | [`../../../development-python/docs/api-stability.md`](../../../development-python/docs/api-stability.md) | Griffe-based API-stability gate — the artifact the Approver reads in step 4 |
 | [`../../../development-python/skills/approve/SKILL.md`](../../../development-python/skills/approve/SKILL.md) | Local dry-run skill — how `/development-python:approve` invokes the agent |
 | [Bootstrap `SKILL.md` Step 3e](../SKILL.md) | What gets rendered into the target repo at bootstrap time |
-| [Bootstrap `SKILL.md` Step 4.5 *Claude Apps install*](../SKILL.md) | What `install-claude-apps.sh` does at bootstrap time |
+| [Bootstrap `SKILL.md` Step 4.5 *Claude Apps install*](../SKILL.md) | What `install-claude-apps.zsh` does at bootstrap time |
 | [Maintenance `SKILL.md` Phase 2.5](../../maintenance/SKILL.md) | Approver feedback ingestion — the closed loop |

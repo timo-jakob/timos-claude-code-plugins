@@ -19,7 +19,7 @@
 # check now always means a real error, never "nothing to do yet".
 #
 # Identities provisioned by /development:bootstrap --claude-approver true
-# (which calls register-claude-apps.sh + install-claude-apps.sh):
+# (which calls register-claude-apps.zsh + install-claude-apps.zsh):
 #   vars.CLAUDE_APPROVER_APP_ID              App that posts the review
 #   secrets.CLAUDE_APPROVER_PRIVATE_KEY      Its private key (PEM)
 #   vars.CLAUDE_APPROVER_AUTHOR_ALLOWLIST    JSON array of allowed PR authors
@@ -213,7 +213,7 @@ jobs:
           set -e
           if [ -z "$ALLOWLIST" ]; then
             echo "::error::CLAUDE_APPROVER_AUTHOR_ALLOWLIST variable is unset;" \
-              "install-claude-apps.sh should have set it."
+              "install-claude-apps.zsh should have set it."
             exit 1
           fi
           allowed=$(printf '%s' "$ALLOWLIST" | jq --arg a "$AUTHOR" 'any(. == $a or . == "*")')
@@ -365,7 +365,7 @@ jobs:
       # existing CLAUDE_APPROVER_APP_ID variable works unchanged —
       # verified live on ai-doc-organizer. The private key must be
       # PKCS#8: v3 is WebCrypto-based and rejects PKCS#1 with
-      # 'DataError: Invalid keyData' (install-claude-apps.sh normalizes
+      # 'DataError: Invalid keyData' (install-claude-apps.zsh normalizes
       # on install — #234).
       # ============================================================
       - name: Mint Approver App token

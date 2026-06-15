@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# pre-dispatch-runtime-upgrade.sh — language-specific pre-flight for
+# pre-dispatch-runtime-upgrade.zsh — language-specific pre-flight for
 # `python-runtime-upgrade` agent runs.
 #
 # Owned by the development-python plugin. Invoked by the
@@ -22,8 +22,8 @@
 #     Re-run `detect` afterwards to confirm.
 #
 # Usage:
-#   pre-dispatch-runtime-upgrade.sh detect  3.14
-#   pre-dispatch-runtime-upgrade.sh install 3.14
+#   pre-dispatch-runtime-upgrade.zsh detect  3.14
+#   pre-dispatch-runtime-upgrade.zsh install 3.14
 
 set -e
 

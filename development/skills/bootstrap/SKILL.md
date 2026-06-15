@@ -31,7 +31,7 @@ Supported flags:
   (Claude Approver + Claude Maintenance) on this repo and store the
   per-repo secrets + variables the Approver workflow needs. Defaults to
   `false`. Requires the Apps to be registered on this machine first via
-  `scripts/register-claude-apps.sh` (the preflight in Step 4.5 will offer
+  `scripts/register-claude-apps.zsh` (the preflight in Step 4.5 will offer
   to run it when missing). When `true`, also warn-and-skip on non-Python
   projects until other language plugins ship their own Approver agents.
 - `--claude-plugin true|false` — bootstrap this repo as a **Claude Code plugin
@@ -738,7 +738,7 @@ on every re-bootstrap.
 If `pre-commit` is installed on the user's machine, run:
 
 ```bash
-"<skill-base-dir>/scripts/install-precommit-hooks.sh"
+"<skill-base-dir>/scripts/install-precommit-hooks.zsh"
 ```
 
 This installs the default `pre-commit` git hook AND every additional
@@ -831,7 +831,7 @@ anything missing:
 
 Pass `--claude-approver true` whenever the orchestrator was invoked with
 `--claude-approver true` (so the preflight can verify the two Claude
-GitHub Apps are registered locally and offer to run `register-claude-apps.sh`
+GitHub Apps are registered locally and offer to run `register-claude-apps.zsh`
 when they aren't). When the orchestrator was invoked without the flag, pass
 `false` or omit it.
 
@@ -848,7 +848,7 @@ The script will:
    Docker.app if not.
 7. When `--claude-approver true`: verify `python3` is present, verify both
    Claude Apps are registered locally (apps.json + Keychain entries), and
-   offer to run `register-claude-apps.sh` when missing.
+   offer to run `register-claude-apps.zsh` when missing.
 
 If preflight fails (user declines installs, or non-macOS host), skip Step 4.5
 entirely and go straight to Step 5 (manual checklist).
@@ -931,13 +931,13 @@ needed by the orchestrator — the scripts pick up the flag passed at the
 top). The step delegates to:
 
 ```bash
-"<skill-base-dir>/scripts/install-claude-apps.sh"
+"<skill-base-dir>/scripts/install-claude-apps.zsh"
 ```
 
 which (idempotent):
 
 - Reads App IDs from `~/.config/claude-plugins/apps.json` and private keys
-  from macOS Keychain (populated by `register-claude-apps.sh` in Phase 0).
+  from macOS Keychain (populated by `register-claude-apps.zsh` in Phase 0).
 - Opens `https://github.com/apps/<slug>/installations/new` per App so the
   user installs both Apps on the current repo.
 - Captures `ANTHROPIC_API_KEY` from the environment, or prompts.
@@ -973,7 +973,7 @@ Maintenance App) so Claude's PRs are bot-authored and the human can approve them
 After branch protection, delegate to:
 
 ```bash
-"<skill-base-dir>/scripts/install-claude-apps.sh" --writer-only
+"<skill-base-dir>/scripts/install-claude-apps.zsh" --writer-only
 ```
 
 which installs **only** the Maintenance App on the repo (no Approver, no
@@ -985,7 +985,7 @@ writer install runs.
 The result: `/development:open-pr` opens PRs authored by
 `claude-maintenance-<owner>[bot]`; the human approves; squash auto-merge +
 branch deletion (the repo settings Step 4b configured). If the Maintenance App
-isn't registered yet, the Step 4.5 preflight offers `register-claude-apps.sh`
+isn't registered yet, the Step 4.5 preflight offers `register-claude-apps.zsh`
 first.
 
 ## Step 5: Print the Manual-Setup Checklist

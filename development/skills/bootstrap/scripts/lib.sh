@@ -69,8 +69,8 @@ ask_str() {
 # `open <file-or-url>` on macOS uses the Launch-Services default-app registry,
 # which can be empty (no default handler for .html) or wrong (e.g. an IDE
 # claimed text/html). In both cases the call fails non-zero and downstream
-# scripts (e.g. register-claude-apps.sh's auto-submit HTML page,
-# install-claude-apps.sh's App-install URLs) silently hang waiting for a
+# scripts (e.g. register-claude-apps.zsh's auto-submit HTML page,
+# install-claude-apps.zsh's App-install URLs) silently hang waiting for a
 # request that never comes.
 #
 # This helper tries common browsers in order and falls back to the default.

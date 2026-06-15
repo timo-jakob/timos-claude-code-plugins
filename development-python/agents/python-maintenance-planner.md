@@ -224,7 +224,7 @@ Emit a single JSON object. **No prose, no preamble, no trailing text.**
   ```json
   "pre_dispatch_hook": {
     "type": "runtime_availability",
-    "script": "development-python/scripts/pre-dispatch-runtime-upgrade.sh",
+    "script": "development-python/scripts/pre-dispatch-runtime-upgrade.zsh",
     "target": "3.14",
     "prompt_field": "local_verification_mode",
     "modes": { "available": "auto", "unavailable": "skip" },
