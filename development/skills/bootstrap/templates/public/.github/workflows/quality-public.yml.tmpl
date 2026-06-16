@@ -183,22 +183,35 @@ jobs:
           SONAR_HOST_URL: https://sonarcloud.io
 
   # --- Snyk source-code + open-source scans -----------------------------------
-  # NOT a CI job. These checks come from the **Snyk GitHub integration**:
+  # NOT a CI job. Snyk runs via the **Snyk GitHub integration** (App), never
+  # against SNYK_TOKEN in CI — a `snyk test`/`snyk code test` job would be
+  # redundant with the integration and double-count the monthly test quota.
   #
-  #   Snyk → Org Settings → GitHub → Pull request status checks
-  #     Open Source security and licenses → Enable
-  #     Code analysis                     → Enable
+  # Two integration features (configured in the Snyk Web UI — see SETUP.md
+  # §2.5–2.6) do the work, and they are deliberately split:
   #
-  # Once enabled, every PR gets a `security/snyk` GitHub status check that
-  # runs Open Source + Code analysis, posts inline comments, and (with a PAT
-  # configured) opens auto-fix PRs for upgradeable dependencies.
+  #   1. Pull request status checks
+  #      Snyk → Settings → Integrations → GitHub → Pull request status checks
+  #        Open Source security and licenses → DISABLE
+  #            Third-party CVEs surface and change independently of our code —
+  #            a clean release goes vulnerable the moment a new CVE lands — so
+  #            they must NOT gate a build. They're handled out-of-band: daily
+  #            Snyk monitoring → auto-fix PRs → the maintenance pipeline, plus
+  #            Dependabot. (Leaving this ON yields the `security/snyk` check.)
+  #        Code analysis                     → ENABLE
+  #            SAST on our OWN code is a fair PR gate, kept ON as defense in
+  #            depth alongside CodeQL (two engines beat one). Yields the
+  #            `code/snyk` check on net-new code vulnerabilities.
   #
-  # Running these as CI jobs against SNYK_TOKEN is REDUNDANT with the
-  # integration's PR checks and counts twice against your monthly test
-  # quota. The bootstrap (`automate-public.sh`) imports the project via the
-  # integration so the PR checks fire from day one. The `image` job below
-  # stays as a CI job because the integration only scans the Dockerfile
-  # statically — it doesn't build the image and inspect installed packages.
+  #   2. Continuous monitoring + Automatic Fix PRs
+  #      Daily re-test of the imported target; when a vulnerable dependency has
+  #      a known fix, Snyk opens a `snyk-fix-*` PR that the maintenance pipeline
+  #      triages alongside Dependabot. This — NOT the PR status checks — is what
+  #      produces fix PRs.
+  #
+  # The `image` job below stays a CI job because the integration only scans the
+  # Dockerfile statically — it doesn't build the image and inspect installed
+  # packages.
 
   # --- License compliance (dependencies) ------------------------------------
   # Uses Trivy as an open-source license scanner. Catches deps shipping

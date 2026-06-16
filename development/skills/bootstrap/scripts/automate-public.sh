@@ -308,6 +308,16 @@ info "  3. Toggle 'Automatic Fix PRs' ON; set max open PRs to 5."
 info "  4. Leave 'Automatic Upgrade PRs' OFF (Dependabot handles upgrades)."
 info "See SETUP.md section 2.6 for the full recipe."
 
+echo
+info "═══ Manual step: configure Snyk PR status checks ═══"
+info "Third-party CVEs change without our code changing, so they must not"
+info "gate a build — handle them via daily monitoring + auto-Fix-PRs instead."
+info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
+info "  2. GitHub integration → 'Pull request status checks'."
+info "  3. 'Open Source security and licenses' → DISABLE (drops security/snyk)."
+info "  4. 'Code analysis' → ENABLE (keeps code/snyk — SAST on our own code)."
+info "See SETUP.md section 2.5 for the rationale."
+
 # --- GitHub Security & Quality features --------------------------------------
 # All four are free on public repos. Each `gh api` call is idempotent — running
 # this against a repo where the feature is already on returns the same success.
