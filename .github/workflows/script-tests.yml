@@ -4,6 +4,11 @@ name: script-tests
 # Runs natively on the disposable runner (the Docker image in tests/Dockerfile is
 # only for local isolation). Triggered when the scripts under test, the tests, or
 # this workflow change.
+#
+# Runs on BOTH ubuntu (bash 5) and macOS (Apple's stock /bin/bash 3.2). macOS is
+# the primary platform for bootstrap/maintenance, and a whole class of bash-4-isms
+# (e.g. `mapfile`, which broke detect-stack.sh in #292) pass on bash 5 but abort
+# on 3.2. The macOS lane closes that gap. See #293.
 
 on:
   pull_request:
@@ -22,12 +27,28 @@ permissions:
 
 jobs:
   bats:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-      - name: Install test dependencies
+      - name: Install test dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends bats jq shellcheck zsh python3
+      - name: Install test dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core jq shellcheck
       - name: Run shell-script behavioral tests
-        run: bats tests
+        run: |
+          # On macOS, force the bash scripts onto Apple's stock /bin/bash 3.2 —
+          # the version users actually have — by putting /bin first on PATH, so
+          # the tests' `bash <script>` calls resolve to 3.2. Homebrew's bash 5 and
+          # the brew-installed tools (jq, bats) stay available later in PATH, and
+          # `zsh` resolves to the system /bin/zsh.
+          if [ "$RUNNER_OS" = "macOS" ]; then export PATH="/bin:$PATH"; fi
+          echo "bash for scripts under test: $(bash --version | head -1)"
+          bats tests
