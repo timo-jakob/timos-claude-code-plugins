@@ -165,12 +165,23 @@ informational signal, not a per-PR gate. Improvements should happen
 through normal PRs that address whichever specific checks are red (the
 Code scanning view shows each failing check with a fix recommendation).
 
-### 2.5 Sign up for Snyk
+### 2.5 Sign up for Snyk, import the repo, configure PR checks
 
 1. Go to [snyk.io](https://snyk.io), sign in with GitHub.
 2. Account Settings → Auth Token → copy.
 3. Add as repo secret `SNYK_TOKEN`.
-4. (Optional) Import the repo in Snyk's UI to enable PR comments.
+4. Import this repo as a Snyk target (Add project → GitHub → select the repo).
+   Import while the repo is **public** so its tests count as unlimited
+   public-project tests, not against the private-test quota.
+5. Configure **Pull request status checks**
+   (Settings → Integrations → GitHub → Pull request status checks):
+   - **Open Source security and licenses → DISABLE.** Third-party CVEs change
+     without our code changing (a clean release goes vulnerable when a new CVE
+     lands), so they must not gate a build. They're handled by daily
+     monitoring → auto-fix PRs → the maintenance pipeline (§2.6), plus
+     Dependabot. Disabling removes the `security/snyk` check.
+   - **Code analysis → ENABLE.** SAST on our own code is a fair PR gate, kept
+     on as defense in depth alongside CodeQL. Yields the `code/snyk` check.
 
 ### 2.6 Enable Snyk auto-Fix-PRs (manual UI step)
 
@@ -184,6 +195,9 @@ is a one-time manual step in the Snyk Web UI on free plans:
 4. Set **Max open PRs** to `5` (default; raise later if PRs queue up).
 5. Leave **Automatic Upgrade PRs** OFF — Dependabot handles non-security
    version upgrades.
+6. On the imported project (Project → Settings), set the **test frequency**
+   to **Daily**. This re-tests for new CVEs without a code change — the
+   mechanism that replaces the disabled `security/snyk` PR check (§2.5).
 
 After this, when Snyk detects a vulnerable dependency with a known fix,
 it opens a PR with branch name starting `snyk-fix-…`. The maintenance
