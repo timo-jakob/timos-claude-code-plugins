@@ -11,10 +11,12 @@ conventions change; otherwise individual PR descriptions are enough.
 development              ← generic, language-agnostic (orchestrator)
 development-swift        ← language: Swift
 development-python       ← language: Python
+development-java         ← language: Java (Gradle); composes with development-spring
 development-javascript   ← language: JavaScript + TypeScript (combined)
 development-…            ← future: go, rust, …
 development-container    ← topic: containers / OCI images
 development-claude-plugin ← topic: projects that ARE Claude Code plugins
+development-spring       ← topic: Spring framework (composes with development-java)
 development-…            ← future topics: kubernetes, terraform, …
 ```
 
@@ -26,7 +28,7 @@ There are **three categories** of plugin:
 | Category | Purpose | Dispatched when | Examples |
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
-| **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, …) | `development-python`, `development-javascript`, `development-swift` |
+| **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift` |
 | **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, …) | `development-container`, `development-claude-plugin`, future: `development-kubernetes`, `development-terraform` |
 
 Language plugins and topic plugins share the **same dispatch contract**
