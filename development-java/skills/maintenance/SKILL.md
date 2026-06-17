@@ -79,10 +79,12 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "java",
   "dispatch_mode": "primary",
   "language_meta": { "version": "21", "manifests": ["build.gradle", "settings.gradle"] },
-  "tooling_configured": { "format_lint": true, "sonarcloud": true },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true },
   "findings_by_tool": {
-    "format_lint": [ /* spotless findings */ ],
-    "sonarcloud":  [ /* normalized sonar findings: type, severity, rule, component, line, message, key */ ]
+    "format_lint":          [ /* spotless findings */ ],
+    "sonarcloud":           [ /* normalized sonar findings: type, severity, rule, component, line, message, key */ ],
+    "code_scanning_alerts": [ /* CodeQL + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ],
+    "semgrep":              [ /* semgrep results */ ]
   },
   "coverage": {
     "overall": 84,
@@ -100,10 +102,11 @@ not set up for this project. `findings_by_tool` only contains keys for
 configured tools (zero findings → `[]`; unconfigured → absent).
 `dispatch_filter` is optional — added only when the user passed `--tool`.
 
-> **Tool universe (this slice).** `development-java` supports `format_lint`
-> (Spotless) and `sonarcloud`, with coverage measured via JaCoCo. The
-> universe grows per slice of the #296 epic (semgrep, code_scanning,
-> dependabot). Validate and route against the supported set only.
+> **Tool universe (so far).** `development-java` supports `format_lint`
+> (Spotless), `sonarcloud`, `code_scanning` (CodeQL + Scorecard), and
+> `semgrep`, with coverage measured via JaCoCo. The universe grows per slice
+> of the #296 epic (`dependabot` next). Validate and route against the
+> supported set only.
 
 ## Validation
 
@@ -130,11 +133,12 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 3. Confirm `language == "java"`. If not, error — the orchestrator misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). Each name in
-   `only_tools` must be a supported tool: `format_lint`, `sonarcloud`.
-   Unknown names halt with: "Unknown tool '`<X>`' in
-   dispatch_filter.only_tools; supported: format_lint, sonarcloud." Each
-   name with `tooling_configured.<name> == false` halts with: "Cannot
-   scope to `<X>`: not configured for this project. Set it up first via
+   `only_tools` must be a supported tool: `format_lint`, `sonarcloud`,
+   `code_scanning`, `semgrep`. Unknown names halt with: "Unknown tool
+   '`<X>`' in dispatch_filter.only_tools; supported: format_lint,
+   sonarcloud, code_scanning, semgrep." Each name with
+   `tooling_configured.<name> == false` halts with: "Cannot scope to
+   `<X>`: not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
 
 ## Coverage pre-flight
@@ -173,10 +177,15 @@ behavior-preserving, so coverage isn't load-bearing for it.
 
 ### Step 2 — when coverage data IS present
 
-Determine the **affected-classes set**: the `component` file path of every
-`sonarcloud` finding (and any future file-path tool). The agent edits those
-files, so they're the classes at risk. When `dispatch_filter.only_tools` is
-set, restrict this to the filtered tools.
+Determine the **affected-classes set**: the file path of every
+non-mechanical finding that names one — `sonarcloud.component`,
+`semgrep` location, and `code_scanning_alerts.file`. The agent edits those
+files, so they're the classes at risk. Two exemptions contribute nothing to
+the set: `format_lint` (pure-mechanical, behavior-preserving) and the
+file-less `code_scanning` findings (Scorecard repo-policy alerts, and the
+Tier A action-pinning fixes that edit `.github/workflows/*.yml`, not Java
+source). When `dispatch_filter.only_tools` is set, restrict this to the
+filtered tools.
 
 #### Step 2c — apply thresholds
 
@@ -321,8 +330,11 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
   }
   ```
 
-  (`format_lint`'s entry mirrors the Spotless recommendation in
-  `java-format-lint-fixer.md`.)
+  Each tool's `summary` / `what_it_provides` / `how_to_add` copy lives in
+  its agent file's `missing_tool_recommendation` block (`format_lint` →
+  `java-format-lint-fixer.md`, `code_scanning` →
+  `java-code-scanning-triage.md`, `semgrep` → `java-semgrep-triage.md`);
+  reuse it verbatim.
 
 `actions_taken`, `actions_requiring_review`, and `unable_to_fix` are
 **not** the dispatcher's responsibility — they're produced by the per-group

@@ -34,12 +34,14 @@ Your prompt contains:
 
 ### 2. Compute per-finding priority score (0–1, higher = more urgent)
 
-- **Severity component:**
-  - `BLOCKER` → 1.0
-  - `CRITICAL` → 0.85
-  - `MAJOR` → 0.6
-  - `MINOR` → 0.35
-  - `INFO` → 0.1
+- **Severity component** (normalize each tool's scale, case-insensitively):
+  - Sonar: `BLOCKER` → 1.0, `CRITICAL` → 0.85, `MAJOR` → 0.6,
+    `MINOR` → 0.35, `INFO` → 0.1.
+  - Code Scanning (CodeQL/Scorecard): `critical` → 0.85, `high` → 0.7,
+    `medium` → 0.5, `low` → 0.3, `warning` → 0.2, `note`/`null` → 0.1.
+  - semgrep: `ERROR` → 0.7, `WARNING` → 0.4, `INFO` → 0.1.
+  - Unmapped / missing severity → 0.3 (a sensible mid-low default so a
+    finding is never dropped to zero priority just for an unknown scale).
 
 - **Churn component (0–1):** for each finding's `component`, run
 
@@ -78,10 +80,10 @@ internal sub-batching for token efficiency on its own.
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
-> **Tool universe so far (#296 epic): `format_lint` + `sonarcloud`.** The
-> grouping + ordering machinery below is the full mirror of the Python
-> planner so that adding `code_scanning`, `semgrep`, and `dependabot` in
-> later slices is a routing-table edit, not a rewrite.
+> **Tool universe so far (#296 epic): `format_lint`, `sonarcloud`,
+> `code_scanning`, `semgrep`.** The grouping + ordering machinery below is
+> the full mirror of the Python planner so that adding `dependabot` in a
+> later slice is a routing-table edit, not a rewrite.
 
 ### 4. Group priority + ordering
 
@@ -98,6 +100,8 @@ Order groups by descending priority. Ties broken by:
 | --- | --- | --- |
 | `format_lint` | `java-format-lint-fixer` | `true` |
 | `sonarcloud` | `java-sonar-triage` | `true` |
+| `code_scanning` | `java-code-scanning-triage` | `true` |
+| `semgrep` | `java-semgrep-triage` | `true` |
 
 Every agent in this slice edits local files, so `isolation` is `true`.
 (Future GitHub-PR-acting agents like a dependabot triager will set

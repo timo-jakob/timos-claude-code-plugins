@@ -9,12 +9,16 @@
 # Output (stdout, JSON):
 #   {
 #     "tooling_configured": {
-#       "format_lint": true|false,  # Spotless (google-java-format) via Gradle
-#       "sonarcloud":  true|false   # SonarCloud / self-hosted SonarQube
+#       "format_lint":   true|false,  # Spotless (google-java-format) via Gradle
+#       "sonarcloud":    true|false,  # SonarCloud / self-hosted SonarQube
+#       "code_scanning": true|false,  # GitHub Code Scanning (CodeQL + Scorecard)
+#       "semgrep":       true|false   # semgrep (--config=auto)
 #     },
 #     "findings_by_tool": {
-#       "format_lint": [ ... or omitted if not configured ... ],
-#       "sonarcloud":  [ ... normalized Sonar findings ... ]
+#       "format_lint":          [ ... or omitted if not configured ... ],
+#       "sonarcloud":           [ ... normalized Sonar findings ... ],
+#       "code_scanning_alerts": [ ... CodeQL + Scorecard alerts ... ],
+#       "semgrep":              [ ... semgrep results array ... ]
 #     },
 #     "coverage": {                 # measured via JaCoCo (gradle jacocoTestReport)
 #       "overall": 0..100|null,     # null = withheld (untrustworthy / unmeasured)
@@ -27,9 +31,9 @@
 #
 # SCOPE (issue #306, #296 Java/Gradle epic). Tool universe so far:
 #   - format_lint (Spotless)        — first slice
-#   - sonarcloud + JaCoCo coverage  — this slice
-# semgrep, code_scanning, and dependabot land in later slices, each alongside
-# its triage agent.
+#   - sonarcloud + JaCoCo coverage  — second slice
+#   - code_scanning + semgrep       — this slice
+# dependabot (vendor PR triage) lands in a later slice, alongside its agent.
 #
 # Failure modes are graceful: a configured tool that can't run (no JDK, gradle
 # wrapper absent, daemon error, missing token) is reported as
@@ -84,6 +88,21 @@ has_jacoco_config="false"
 if grep -rqE 'jacoco' \
 	--include='build.gradle' --include='build.gradle.kts' . 2>/dev/null; then
 	has_jacoco_config="true"
+fi
+
+# Code Scanning: assume configured when a CodeQL workflow is present (bootstrap
+# generates .github/workflows/codeql.yml). The helper still tries the API and
+# returns [] gracefully if it's disabled at the repo-settings level.
+has_code_scanning_config="false"
+if ls .github/workflows/codeql*.yml >/dev/null 2>&1; then
+	has_code_scanning_config="true"
+fi
+
+# Semgrep: configured when a semgrep hook (pre-commit) or CI job is wired.
+has_semgrep_config="false"
+if grep -qE 'returntocorp/semgrep|semgrep/semgrep' .pre-commit-config.yaml 2>/dev/null ||
+	grep -qE 'semgrep ci|returntocorp/semgrep|semgrep/semgrep' .github/workflows/*.yml 2>/dev/null; then
+	has_semgrep_config="true"
 fi
 
 # --- findings_by_tool --------------------------------------------------------
@@ -168,6 +187,46 @@ if [[ "$has_sonar_config" == "true" ]]; then
 	fi
 fi
 
+# code_scanning — GitHub Code Scanning alerts (CodeQL java pack + Scorecard),
+# via the language-agnostic gather-github-security.zsh helper (gh API; free,
+# no quota burn). Alert shape is identical across languages — only the CodeQL
+# rule IDs differ (java/sql-injection, etc.).
+if [[ "$has_code_scanning_config" == "true" ]]; then
+	cs_stderr=$(mktemp)
+	cs_helper="$SCRIPT_DIR/gather-github-security.zsh"
+	if [[ ! -x "$cs_helper" ]]; then
+		echo "[]" >"$findings_dir/code_scanning_alerts.json"
+		notes+=("Code Scanning gather: helper script not found or not executable at $cs_helper. Update your plugin install (cd to the marketplace dir, 'git pull').")
+	else
+		if "$cs_helper" "$repo" >"$findings_dir/cs_api.json" 2>"$cs_stderr"; then
+			jq '.code_scanning_alerts' "$findings_dir/cs_api.json" >"$findings_dir/code_scanning_alerts.json"
+			cs_exit_label="ok"
+		else
+			echo "[]" >"$findings_dir/code_scanning_alerts.json"
+			cs_exit_label="failed"
+		fi
+		cs_stderr_content=$(tr '\n' ' ' <"$cs_stderr" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+		if [[ -n "$cs_stderr_content" ]]; then
+			notes+=("Code Scanning gather ($cs_exit_label): $cs_stderr_content")
+		fi
+		rm -f "$cs_stderr"
+	fi
+fi
+
+# semgrep — local run (--config=auto covers Java). `--error` makes it exit
+# non-zero on findings, which we tolerate; normalize to just the results array.
+if [[ "$has_semgrep_config" == "true" ]]; then
+	if command -v semgrep >/dev/null 2>&1; then
+		semgrep --config=auto --json --quiet --error --metrics=off . \
+			>"$findings_dir/semgrep_raw.json" 2>/dev/null || true
+		[[ -s "$findings_dir/semgrep_raw.json" ]] || echo '{"results":[]}' >"$findings_dir/semgrep_raw.json"
+		jq '.results // []' "$findings_dir/semgrep_raw.json" >"$findings_dir/semgrep.json"
+	else
+		echo "[]" >"$findings_dir/semgrep.json"
+		notes+=("semgrep is configured but the 'semgrep' binary is not on PATH; install with 'brew install semgrep' or 'pip install semgrep'.")
+	fi
+fi
+
 # --- coverage (JaCoCo) -------------------------------------------------------
 # Run the test suite + JaCoCo report, parse per-source-file LINE coverage. A
 # figure is only trustworthy when Gradle completes normally (exit 0 = green, or
@@ -239,8 +298,12 @@ notes_json=$(printf '%s\n' "${notes[@]+"${notes[@]}"}" | jq -R . | jq -s . 2>/de
 jq -n \
 	--argjson format_lint_cfg "$has_format_lint_config" \
 	--argjson sonar_cfg "$has_sonar_config" \
+	--argjson code_scanning_cfg "$has_code_scanning_config" \
+	--argjson semgrep_cfg "$has_semgrep_config" \
 	--argjson format_lint_findings "$(emit_findings format_lint "$has_format_lint_config")" \
 	--argjson sonar_findings "$(emit_findings sonarcloud "$has_sonar_config")" \
+	--argjson cs_findings "$(emit_findings code_scanning_alerts "$has_code_scanning_config")" \
+	--argjson semgrep_findings "$(emit_findings semgrep "$has_semgrep_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--arg coverage_source "$coverage_source" \
@@ -251,13 +314,17 @@ jq -n \
 	--argjson notes "$notes_json" '
 {
   tooling_configured: {
-    format_lint: $format_lint_cfg,
-    sonarcloud:  $sonar_cfg
+    format_lint:   $format_lint_cfg,
+    sonarcloud:    $sonar_cfg,
+    code_scanning: $code_scanning_cfg,
+    semgrep:       $semgrep_cfg
   },
   findings_by_tool: (
     {} +
-    (if $format_lint_findings != null then {format_lint: $format_lint_findings} else {} end) +
-    (if $sonar_findings       != null then {sonarcloud:  $sonar_findings}       else {} end)
+    (if $format_lint_findings != null then {format_lint:          $format_lint_findings} else {} end) +
+    (if $sonar_findings       != null then {sonarcloud:           $sonar_findings}       else {} end) +
+    (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end) +
+    (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,

@@ -49,6 +49,15 @@ setup() {
   [ "$status" -eq 2 ]
 }
 
+@test "gather-java: bare project -> all tools report not-configured" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  for tool in format_lint sonarcloud code_scanning semgrep; do
+    [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
+  done
+}
+
 @test "gather-java: no sonar-project.properties -> sonarcloud not configured" {
   printf 'plugins { java }\n' > "$WORK/build.gradle"
   run bash "$GATHER" "$WORK"
