@@ -35,8 +35,10 @@ auxiliary model"). So:
 - **Plan only the mechanical format/lint fix:** if `format_lint` is configured
   and has findings, return a single group routed to `java-format-lint-fixer`
   (mechanical, behavior-preserving). In auxiliary mode the non-mechanical
-  triagers (sonarcloud) are skipped — list them in a note so the summary is
-  honest.
+  triagers (`sonarcloud`, `code_scanning`, `semgrep`) **and all dependency
+  work** (`dependabot`, `snyk_prs`, major upgrades) are skipped — auxiliary
+  dependencies aren't the product. List the skipped tools in a note so the
+  summary is honest.
 - Return `plan` + `ci_fixer_agent` + `missing_tooling`. **Never**
   `improver_result`.
 
@@ -79,12 +81,14 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "java",
   "dispatch_mode": "primary",
   "language_meta": { "version": "21", "manifests": ["build.gradle", "settings.gradle"] },
-  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true, "dependabot": true, "snyk_prs": true },
   "findings_by_tool": {
     "format_lint":          [ /* spotless findings */ ],
     "sonarcloud":           [ /* normalized sonar findings: type, severity, rule, component, line, message, key */ ],
     "code_scanning_alerts": [ /* CodeQL + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ],
-    "semgrep":              [ /* semgrep results */ ]
+    "semgrep":              [ /* semgrep results */ ],
+    "dependabot":           [ /* open Dependabot PR records: number, title, body, headRefName */ ],
+    "snyk_prs":             [ /* open Snyk PR records: number, title, body, headRefName */ ]
   },
   "coverage": {
     "overall": 84,
@@ -103,10 +107,11 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 `dispatch_filter` is optional — added only when the user passed `--tool`.
 
 > **Tool universe (so far).** `development-java` supports `format_lint`
-> (Spotless), `sonarcloud`, `code_scanning` (CodeQL + Scorecard), and
-> `semgrep`, with coverage measured via JaCoCo. The universe grows per slice
-> of the #296 epic (`dependabot` next). Validate and route against the
-> supported set only.
+> (Spotless), `sonarcloud`, `code_scanning` (CodeQL + Scorecard), `semgrep`,
+> and vendor-PR handling (`dependabot` + `snyk_prs` → triage or
+> `java-major-upgrade`), with coverage measured via JaCoCo. The JDK
+> runtime-upgrade special case is a later slice (#308). Validate and route
+> against the supported set only.
 
 ## Validation
 
@@ -134,11 +139,11 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). Each name in
    `only_tools` must be a supported tool: `format_lint`, `sonarcloud`,
-   `code_scanning`, `semgrep`. Unknown names halt with: "Unknown tool
-   '`<X>`' in dispatch_filter.only_tools; supported: format_lint,
-   sonarcloud, code_scanning, semgrep." Each name with
-   `tooling_configured.<name> == false` halts with: "Cannot scope to
-   `<X>`: not configured for this project. Set it up first via
+   `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`. Unknown names halt
+   with: "Unknown tool '`<X>`' in dispatch_filter.only_tools; supported:
+   format_lint, sonarcloud, code_scanning, semgrep, dependabot, snyk_prs."
+   Each name with `tooling_configured.<name> == false` halts with: "Cannot
+   scope to `<X>`: not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
 
 ## Coverage pre-flight
@@ -187,11 +192,23 @@ Tier A action-pinning fixes that edit `.github/workflows/*.yml`, not Java
 source). When `dispatch_filter.only_tools` is set, restrict this to the
 filtered tools.
 
+#### Step 2b — major dep upgrades (the no-file-path case)
+
+A `gradle`-major upgrade (a `java-major-upgrade` group from § 5a) carries
+no per-finding file path — the agent discovers affected call sites at
+runtime via LSP. So the conservative affected-set for a major upgrade is
+**every class in `coverage.by_module`** (any class could use the upgraded
+library). Scan the whole module set against the **major-work thresholds**
+below. Patch/minor vendor PRs skip this — they don't change a library's
+API surface, and `java-dependabot-snyk-triage` acts on the GitHub PR, not
+local files, so module coverage isn't load-bearing for them.
+
 #### Step 2c — apply thresholds
 
 | Action | Required | Floor |
 | --- | --- | --- |
-| Sonar refactor (everything non-mechanical) | 80% | 60% |
+| Major-version dep upgrade (`java-major-upgrade`) | 90% | 70% |
+| Sonar / semgrep / code_scanning refactor (non-mechanical) | 80% | 60% |
 
 Three branches:
 
@@ -236,7 +253,27 @@ Three branches:
    }
    ```
 
-Pure-mechanical `format_lint` is exempt from this check and always plannable.
+#### Step 2d — partial halt vs full halt
+
+If the floor check fails **only** for a major upgrade (Step 2b's
+project-wide scan), but the other work categories have all their
+explicit-file-path classes above the floor, **proceed with the non-major
+work and skip the major upgrade(s)** — surface them in
+`human_action_required`:
+
+```json
+{
+  "reason": "Skipped <N> major dep upgrade(s) — project-wide coverage floor of 70% not met (lowest: <class> at <X>%).",
+  "recommendation": "Bring <class> coverage up to 70% (preferably 90% for major-upgrade work) before re-running. The patch/minor PRs and static-analysis findings were processed normally."
+}
+```
+
+This avoids the all-or-nothing trap where one weakly-tested class blocks
+every other autonomous fix.
+
+Pure-mechanical `format_lint` is exempt from this check and always
+plannable. Patch/minor vendor PRs are exempt too — `java-dependabot-snyk-triage`
+acts on GitHub PRs, not local source.
 
 ## Planning step (Phase B)
 
@@ -333,8 +370,9 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
   Each tool's `summary` / `what_it_provides` / `how_to_add` copy lives in
   its agent file's `missing_tool_recommendation` block (`format_lint` →
   `java-format-lint-fixer.md`, `code_scanning` →
-  `java-code-scanning-triage.md`, `semgrep` → `java-semgrep-triage.md`);
-  reuse it verbatim.
+  `java-code-scanning-triage.md`, `semgrep` → `java-semgrep-triage.md`,
+  `dependabot` + `snyk_prs` → `java-dependabot-snyk-triage.md`'s
+  `vendor_prs` block); reuse it verbatim.
 
 `actions_taken`, `actions_requiring_review`, and `unable_to_fix` are
 **not** the dispatcher's responsibility — they're produced by the per-group

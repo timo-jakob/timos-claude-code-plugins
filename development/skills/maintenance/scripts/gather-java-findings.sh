@@ -12,13 +12,17 @@
 #       "format_lint":   true|false,  # Spotless (google-java-format) via Gradle
 #       "sonarcloud":    true|false,  # SonarCloud / self-hosted SonarQube
 #       "code_scanning": true|false,  # GitHub Code Scanning (CodeQL + Scorecard)
-#       "semgrep":       true|false   # semgrep (--config=auto)
+#       "semgrep":       true|false,  # semgrep (--config=auto)
+#       "dependabot":    true|false,  # open Dependabot PRs
+#       "snyk_prs":      true|false   # open Snyk auto-Fix/Upgrade PRs
 #     },
 #     "findings_by_tool": {
 #       "format_lint":          [ ... or omitted if not configured ... ],
 #       "sonarcloud":           [ ... normalized Sonar findings ... ],
 #       "code_scanning_alerts": [ ... CodeQL + Scorecard alerts ... ],
-#       "semgrep":              [ ... semgrep results array ... ]
+#       "semgrep":              [ ... semgrep results array ... ],
+#       "dependabot":           [ ... open Dependabot PR records ... ],
+#       "snyk_prs":             [ ... open Snyk PR records ... ]
 #     },
 #     "coverage": {                 # measured via JaCoCo (gradle jacocoTestReport)
 #       "overall": 0..100|null,     # null = withheld (untrustworthy / unmeasured)
@@ -32,8 +36,11 @@
 # SCOPE (issue #306, #296 Java/Gradle epic). Tool universe so far:
 #   - format_lint (Spotless)        — first slice
 #   - sonarcloud + JaCoCo coverage  — second slice
-#   - code_scanning + semgrep       — this slice
-# dependabot (vendor PR triage) lands in a later slice, alongside its agent.
+#   - code_scanning + semgrep       — third slice
+#   - dependabot + snyk_prs         — this slice (vendor PR triage + majors)
+# The JDK runtime-upgrade special case (docker base-image bumps that are the
+# JDK itself) is deferred to a later slice (#308); docker bumps currently route
+# to human-review.
 #
 # Failure modes are graceful: a configured tool that can't run (no JDK, gradle
 # wrapper absent, daemon error, missing token) is reported as
@@ -103,6 +110,18 @@ has_semgrep_config="false"
 if grep -qE 'returntocorp/semgrep|semgrep/semgrep' .pre-commit-config.yaml 2>/dev/null ||
 	grep -qE 'semgrep ci|returntocorp/semgrep|semgrep/semgrep' .github/workflows/*.yml 2>/dev/null; then
 	has_semgrep_config="true"
+fi
+
+# Dependabot: configured when .github/dependabot.yml exists.
+has_dependabot_config="false"
+if [[ -f ".github/dependabot.yml" ]]; then
+	has_dependabot_config="true"
+fi
+
+# Snyk auto-Fix/Upgrade PRs: configured when a .snyk policy file is present.
+has_snyk_prs_config="false"
+if [[ -f ".snyk" ]]; then
+	has_snyk_prs_config="true"
 fi
 
 # --- findings_by_tool --------------------------------------------------------
@@ -227,6 +246,37 @@ if [[ "$has_semgrep_config" == "true" ]]; then
 	fi
 fi
 
+# dependabot — open PRs authored by dependabot[bot]. Raw PR records; the
+# planner classifies ecosystem (gradle / github-actions / docker) + bump level
+# and routes. Requires gh authenticated.
+if [[ "$has_dependabot_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		gh pr list --author "app/dependabot" --state open --json number,title,body,headRefName \
+			>"$findings_dir/dependabot.json" 2>/dev/null || echo "[]" >"$findings_dir/dependabot.json"
+	else
+		echo "[]" >"$findings_dir/dependabot.json"
+		notes+=("dependabot is configured but 'gh' is not available/authenticated; can't list open Dependabot PRs.")
+	fi
+fi
+
+# snyk_prs — open PRs whose head branch starts with snyk-fix- or snyk-upgrade-
+# (opened by Snyk's GitHub App). Treated alongside Dependabot PRs by
+# java-dependabot-snyk-triage.
+if [[ "$has_snyk_prs_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		{
+			gh pr list --state open --search "head:snyk-fix-" \
+				--json number,title,body,headRefName 2>/dev/null || echo "[]"
+			gh pr list --state open --search "head:snyk-upgrade-" \
+				--json number,title,body,headRefName 2>/dev/null || echo "[]"
+		} | jq -s 'add // []' >"$findings_dir/snyk_prs.json" 2>/dev/null ||
+			echo "[]" >"$findings_dir/snyk_prs.json"
+	else
+		echo "[]" >"$findings_dir/snyk_prs.json"
+		notes+=(".snyk file present but 'gh' is not available/authenticated; can't list open Snyk PRs.")
+	fi
+fi
+
 # --- coverage (JaCoCo) -------------------------------------------------------
 # Run the test suite + JaCoCo report, parse per-source-file LINE coverage. A
 # figure is only trustworthy when Gradle completes normally (exit 0 = green, or
@@ -300,10 +350,14 @@ jq -n \
 	--argjson sonar_cfg "$has_sonar_config" \
 	--argjson code_scanning_cfg "$has_code_scanning_config" \
 	--argjson semgrep_cfg "$has_semgrep_config" \
+	--argjson dependabot_cfg "$has_dependabot_config" \
+	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
 	--argjson format_lint_findings "$(emit_findings format_lint "$has_format_lint_config")" \
 	--argjson sonar_findings "$(emit_findings sonarcloud "$has_sonar_config")" \
 	--argjson cs_findings "$(emit_findings code_scanning_alerts "$has_code_scanning_config")" \
 	--argjson semgrep_findings "$(emit_findings semgrep "$has_semgrep_config")" \
+	--argjson dependabot_findings "$(emit_findings dependabot "$has_dependabot_config")" \
+	--argjson snyk_prs_findings "$(emit_findings snyk_prs "$has_snyk_prs_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--arg coverage_source "$coverage_source" \
@@ -317,14 +371,18 @@ jq -n \
     format_lint:   $format_lint_cfg,
     sonarcloud:    $sonar_cfg,
     code_scanning: $code_scanning_cfg,
-    semgrep:       $semgrep_cfg
+    semgrep:       $semgrep_cfg,
+    dependabot:    $dependabot_cfg,
+    snyk_prs:      $snyk_prs_cfg
   },
   findings_by_tool: (
     {} +
     (if $format_lint_findings != null then {format_lint:          $format_lint_findings} else {} end) +
     (if $sonar_findings       != null then {sonarcloud:           $sonar_findings}       else {} end) +
     (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end) +
-    (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end)
+    (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end) +
+    (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
+    (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,

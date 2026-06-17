@@ -23,8 +23,11 @@ Your prompt contains:
   `dispatch_filter.only_tools`). Each finding has at minimum: `type`,
   `severity`, `rule`, `component`, `line`, `message`, `key`, and an extra
   `_tool` field added by the dispatcher so you know which tool sourced it.
-- `coverage.by_module` — per-file coverage percentages (may be empty this
-  slice; coverage gathering for Java lands later)
+  **Vendor-PR findings** (`_tool` = `dependabot` / `snyk_prs`) instead
+  carry `number`, `title`, `body`, `headRefName` — see § 5a to classify
+  and route them.
+- `coverage.by_module` — per-file coverage percentages (empty when JaCoCo
+  isn't configured; the floor then gates only non-mechanical work)
 - `policy.priority_window_days` — churn window in days (default 30)
 - `worktree.base_branch` — branch to log from for churn
 
@@ -77,13 +80,18 @@ tool, single-instance agent)** carrying ALL of that tool's findings, even
 when they span different rules, files, or severities. The agent handles
 internal sub-batching for token efficiency on its own.
 
+**The two exceptions are `dependabot` and `snyk_prs`** — a single tool's
+PRs can dispatch to two different agents (the triager vs the major-upgrade
+agent), so they split per § 5a. A single group still never spans multiple
+agents.
+
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
 > **Tool universe so far (#296 epic): `format_lint`, `sonarcloud`,
-> `code_scanning`, `semgrep`.** The grouping + ordering machinery below is
-> the full mirror of the Python planner so that adding `dependabot` in a
-> later slice is a routing-table edit, not a rewrite.
+> `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`.** Most tools are
+> one-group-per-tool; `dependabot` and `snyk_prs` are the exception — they
+> split by ecosystem + bump level (see § 5a).
 
 ### 4. Group priority + ordering
 
@@ -102,12 +110,56 @@ Order groups by descending priority. Ties broken by:
 | `sonarcloud` | `java-sonar-triage` | `true` |
 | `code_scanning` | `java-code-scanning-triage` | `true` |
 | `semgrep` | `java-semgrep-triage` | `true` |
+| `dependabot` / `snyk_prs` — gradle/github-actions patch+minor | `java-dependabot-snyk-triage` | `false` |
+| `dependabot` / `snyk_prs` — gradle major (incl. 0.x major-equiv) | `java-major-upgrade` (one PR per bump) | `true` |
+| `dependabot` / `snyk_prs` — docker, github-actions major, unknown | `java-dependabot-snyk-triage` (human-review) | `false` |
 
-Every agent in this slice edits local files, so `isolation` is `true`.
-(Future GitHub-PR-acting agents like a dependabot triager will set
-`isolation: false`, mirroring the Python side.) A single group never
-spans multiple agents; when a future tool's findings would dispatch to
-multiple agents, those become distinct groups per agent.
+The static-analysis agents edit local files (`isolation: true`).
+`java-dependabot-snyk-triage` acts on GitHub PRs via `gh`, not local
+files, so its group is `isolation: false`. `java-major-upgrade` does
+local migration work, so `isolation: true`. A single group never spans
+multiple agents.
+
+### 5a. Vendor-PR classification (`dependabot` + `snyk_prs`)
+
+These two tools carry raw GitHub PR records (`number`, `title`, `body`,
+`headRefName`). Classify each into `source` / `ecosystem` / `bump_level`
+/ `routing`, then split into groups per the routing table above.
+
+- **`source`** — `dependabot` when `_tool == "dependabot"` (or
+  `headRefName` starts `dependabot/`); `snyk` when `headRefName` starts
+  `snyk-fix-` / `snyk-upgrade-`.
+- **`ecosystem`** — for Dependabot, the segment after `dependabot/` in
+  `headRefName` (`gradle`, `github-actions`, `docker`); for Snyk, default
+  `gradle` (Snyk OSS for Java). Anything unrecognized → `unknown`.
+- **`bump_level`** — parse the version pair from `title` (`Bump <pkg>
+  from <old> to <new>`, or `[Snyk] … upgrade <pkg> from <old> to <new>`)
+  and compare semver: a change in the first non-zero component is
+  `major` (a `0.x → 0.y` minor bump is a `major-equiv` — treat as major
+  for routing, since pre-1.0 minors can break APIs); second component →
+  `minor`; third → `patch`. A grouped PR (`Bump the <group> group with N
+  updates`) can't be cleanly parsed — set `bump_level: "grouped"` and
+  treat as the **highest** level any member implies (default `minor`
+  unless the body shows a major).
+- **`routing`** —
+  - `gradle` / `github-actions` **patch or minor** → `auto-merge-if-green`
+    → the shared `java-dependabot-snyk-triage` group.
+  - `gradle` **major / major-equiv** → its **own** `java-major-upgrade`
+    group (one PR per bump), carrying `package` (the `group:artifact`),
+    `current_version`, `target_version`, `source`, `pr_number`, and the
+    `release_notes_url` if the body links one.
+  - `docker` (any level), `github-actions` **major**, `unknown` ecosystem
+    → `human-review`, with a `routing_reason`, in the
+    `java-dependabot-snyk-triage` group. (Docker base-image bumps include
+    the JDK image; the dedicated `java-runtime-upgrade` handler is a later
+    slice — #308 — so they stay human-review for now.)
+
+**Grouping:** one `java-dependabot-snyk-triage` group carries ALL the
+`auto-merge-if-green` + `human-review` PRs (mixed sources OK — the agent
+reads each record's `source`/`routing`). Each `gradle`-major PR becomes
+its **own** `java-major-upgrade` group. Each plan entry's `findings`
+holds the classified PR record(s); `java-major-upgrade` groups carry
+exactly one.
 
 ## Output
 
