@@ -23,7 +23,7 @@
 #   vars.CLAUDE_APPROVER_APP_ID              App that posts the review
 #   secrets.CLAUDE_APPROVER_PRIVATE_KEY      Its private key (PEM)
 #   vars.CLAUDE_APPROVER_AUTHOR_ALLOWLIST    JSON array of allowed PR authors
-#   secrets.ANTHROPIC_API_KEY                For invoking the python-approver agent
+#   secrets.ANTHROPIC_API_KEY                For invoking the {{APPROVER_LANG}}-approver agent
 #
 # See development/skills/bootstrap/docs/CLAUDE-APPS.md in the plugin family
 # for the design and the manual fallback flow.
@@ -388,8 +388,8 @@ jobs:
           fetch-depth: 0
 
       # ============================================================
-      # Pull in the Claude plugin family so the python-approver agent
-      # is loadable. The bootstrap renders the repo + ref from
+      # Pull in the Claude plugin family so the {{APPROVER_LANG}}-approver
+      # agent is loadable. The bootstrap renders the repo + ref from
       # {{CLAUDE_PLUGINS_REPO}} / {{CLAUDE_PLUGINS_REF}}; defaults pin
       # the canonical fork.
       # ============================================================
@@ -405,7 +405,7 @@ jobs:
       # Install Claude Code CLI.
       # TODO (Phase 3): pin to a specific Claude Code version once the
       # CLI ships versioned releases; finalise the install URL against
-      # what `python-approver` testing actually uses.
+      # what the approver agent's testing actually uses.
       # ============================================================
       - name: Install Claude Code
         run: |
@@ -425,14 +425,14 @@ jobs:
       # ============================================================
       # Run the Approver agent.
       # The agent reads .claude/approver-policy.md from the checked-out
-      # PR, evaluates the diff + check runs, fetches griffe-findings.json
-      # from the api-stability workflow (when present), runs cheap local
-      # checks, builds a risk register, calibrates confidence, and posts
-      # the review using the App token in GH_TOKEN. Its stdout is the
-      # human-readable summary; the hidden JSON block for
-      # /development:maintenance re-ingest is appended by the agent
-      # itself. See development-python/agents/python-approver.md for the
-      # full contract.
+      # PR, evaluates the diff + check runs, fetches any API-stability
+      # artifact (when present), runs cheap local checks, builds a risk
+      # register, calibrates confidence, and posts the review using the
+      # App token in GH_TOKEN. Its stdout is the human-readable summary;
+      # the hidden JSON block for /development:maintenance re-ingest is
+      # appended by the agent itself. See
+      # development-{{APPROVER_LANG}}/agents/{{APPROVER_LANG}}-approver.md
+      # for the full contract.
       # ============================================================
       - name: Run Claude Approver
         env:
@@ -452,7 +452,7 @@ jobs:
           claude --print \
             --allowedTools "Bash,Read,Grep,Glob" \
             --plugin-dir ".claude-plugins/development" \
-            --plugin-dir ".claude-plugins/development-python" \
-            --agent python-approver \
+            --plugin-dir ".claude-plugins/development-{{APPROVER_LANG}}" \
+            --agent {{APPROVER_LANG}}-approver \
             -- \
             "Review PR #${PR_NUMBER} in ${REPO}. Dry-run: ${DRY_RUN:-false}."
