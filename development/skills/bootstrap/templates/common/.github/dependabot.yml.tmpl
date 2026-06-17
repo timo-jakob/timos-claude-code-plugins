@@ -53,6 +53,17 @@ updates:
         update-types: ["minor", "patch"]
   # --- SWIFT-END -------------------------------------------------------------
 
+  # --- JAVA-START ------------------------------------------------------------
+  # Tracks Gradle dependencies (build.gradle(.kts), gradle/libs.versions.toml).
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      gradle-minor-patch:
+        update-types: ["minor", "patch"]
+  # --- JAVA-END --------------------------------------------------------------
+
   # --- DOCKER-START ----------------------------------------------------------
   # Tracks the FROM line(s) in your Dockerfile(s). Without this, a CVE in
   # `python:3.12-slim` or `node:20-alpine` lingers indefinitely because

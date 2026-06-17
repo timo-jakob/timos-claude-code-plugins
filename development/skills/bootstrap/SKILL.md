@@ -346,6 +346,45 @@ surface a TODO to the user during Step 5 (manual checklist):
 Do not modify the user's `pyproject.toml` automatically — that's their file.
 Just call it out.
 
+### Java-specific recommendation (when applicable)
+
+If `java` is in the detected languages, the generated Gradle CI
+(`./gradlew build jacocoTestReport`) and the pre-commit Spotless +
+coverage-floor hooks **assume the project's `build.gradle(.kts)` applies
+the Spotless and JaCoCo plugins** — config that lives in the build script,
+which bootstrap does **not** edit. Surface this TODO during Step 5 (gate
+it on what's missing: check `language_meta.java.has_cov` for JaCoCo, and
+whether the gather/detection saw a `spotless` marker):
+
+> ☕ **Wire Spotless + JaCoCo into your `build.gradle(.kts)`.** The
+> generated CI + pre-commit hooks depend on them:
+>
+> ```groovy
+> plugins {
+>     id 'com.diffplug.spotless' version '7.0.2'
+>     id 'jacoco'
+> }
+> spotless {
+>     java { googleJavaFormat() }
+>     // For Kotlin DSL / Kotlin sources, also: kotlin { ktlint() }
+> }
+> jacocoTestReport {
+>     dependsOn test
+>     reports { xml.required = true }   // required by Sonar + diff-cover
+> }
+> tasks.test { finalizedBy jacocoTestReport }
+> ```
+>
+> **Optional — Gradle dependency locking** (the "built-in" half of
+> dependency hygiene, alongside the Snyk App): add
+> `dependencyLocking { lockAllConfigurations() }` and run
+> `./gradlew dependencies --write-locks` to commit a `gradle.lockfile`, so
+> dependency resolution is reproducible and a surprise transitive bump
+> shows up as a lockfile diff in review.
+
+Do not modify `build.gradle(.kts)` automatically — that's their file. Just
+call it out, with the snippet.
+
 ### `{{SECURITY_CONTACT_BLOCK}}` substitution
 
 If the user provided an email in Q6, substitute the following block (4-space indented to fit the existing markdown list
