@@ -193,6 +193,27 @@ loop closes without further user intervention.
 exist — the Approver isn't set up on this machine, there's nothing
 to ingest.
 
+### `--dry-run` — detect only, never dispatch or push
+
+`--dry-run` promises no remote side effects (Phase 0: "gather
+everything … print the payload instead of dispatching"). The **Dispatch**
+subsection below force-pushes fixes to PR branches and re-triggers CI —
+exactly the kind of mutation dry-run forbids. So under `--dry-run`:
+
+- **Run the read-only Detection + JSON parsing below** (those are pure
+  `gh` reads — no mutation), then **stop before Dispatch**. Do **not**
+  spawn agents, create worktrees, or push.
+- Collect what you *would* have fixed into the Phase 9 dry-run report:
+  the flagged PR numbers, and for each its findings grouped by
+  `suggested_agent` (and the `suggested_agent: null` ones in the
+  "needs human attention" bucket, same as a live run). See Phase 9's
+  *"Approver backlog (dry-run)"* block.
+- Then continue to Phase 3 as usual (gather still runs; the live-run
+  reasons to proceed to Phase 3 hold under dry-run too).
+
+The rest of this phase (Detection, JSON parsing, Dispatch, Identity,
+Skip conditions) describes the **live** run.
+
 ### Detection
 
 For each open PR in the current repo (`gh pr list --state open --json
@@ -328,7 +349,7 @@ parse stdout/stderr to guess intent; trust the exit code.
 | Exit code | Meaning | What you do |
 | --- | --- | --- |
 | `0`, no stdout | State is fine, no action needed | Proceed to the gather script |
-| `0`, stdout is JSON `{"recovered": true, ...}` | State was rebuilt successfully (e.g., venv recreated, deps reinstalled) | Proceed to the gather script. Include the JSON in the run summary so the user knows their local env changed. |
+| `0`, stdout is JSON `{"recovered": true, ...}` | State was rebuilt successfully (e.g., venv recreated, deps reinstalled) | Proceed to the gather script. Include the JSON in the run summary so the user knows their local env changed. This is a **local-only** change (no remote mutation) and is therefore acceptable under `--dry-run` too — surface it in the dry-run summary's notes exactly the same way, so the user knows dry-run touched their local env. |
 | `1`, message on stderr | User must intervene; cannot recover autonomously (typically: a tool isn't installed) | **Halt the run.** Forward the stderr message to the user verbatim. |
 | `2`, stdout JSON `{"recreate_failed": true, ...}` (or other "tried, failed" shapes) | Recovery attempt failed mid-flight; user needs to choose | Invoke the **R.4 fallback** below: surface the JSON details via `AskUserQuestion` and act on the choice. |
 
@@ -1358,6 +1379,23 @@ Topics processed:    <comma-separated list from supported_topics, or "none">
 <If topic dispatch was skipped because --tool/--concern scoped the run:>
 ℹ Topic checks skipped under --tool / --concern (those flags scope the
   language tool set). Re-run without scoping to process topic findings.
+
+<If --dry-run AND Phase 2.5 ran its read-only detection (apps.json
+present). Report the Approver backlog that a live run WOULD have
+pushed fixes for — detected, never dispatched:>
+🔎 Approver backlog (dry-run — detected, not dispatched):
+  <If any flagged PRs were found:>
+  - PR #<pr>: <N> finding(s) a live run would dispatch:
+      → <agent>: <count> finding(s) (<comma-separated finding titles>)
+      ...
+  ...
+  <For findings with suggested_agent: null, the same "needs human
+  attention" list a live run produces, but flagged as not acted on:>
+  - PR #<pr>: <N> finding(s) need human attention (suggested_agent: null):
+      - <title> — <detail>
+  ...
+  <If apps.json present but no PRs were Approver-flagged:>
+  No Approver-flagged PRs — nothing a live run would push.
 
 <For each language in supported, a block:>
 --- <lang> ---
