@@ -14,13 +14,16 @@
 #       "code_scanning":  true|false,   # GitHub Code Scanning (CodeQL etc.)
 #       "snyk_prs":       true|false,   # Snyk auto-Fix/Upgrade PRs
 #       "sonarcloud":     true|false,
-#       "dependabot":     true|false
+#       "dependabot":     true|false,
+#       "container_scan": true|false   # Snyk container/base-image CVEs (#299)
 #     },
 #     "findings_by_tool": {
 #       "ruff":                 [ ... or omitted if not configured ... ],
 #       "code_scanning_alerts": [ ... SAST alerts from gh code-scanning ... ],
 #       "snyk_prs":             [ ... Snyk-opened PRs (snyk-fix-*/snyk-upgrade-*) ... ],
 #       "dependabot":           [ ... Dependabot-opened PRs ... ],
+#       "container_scan":       [ ... base-image CVEs harvested from the CI
+#                                     snyk-container-scan artifact (#299) ... ],
 #       ...
 #     },
 #     "coverage": {
@@ -119,6 +122,18 @@ if [[ -f ".snyk" ]]; then
 	has_snyk_prs_config="true"
 fi
 
+# Container scan: configured when there's a Dockerfile to scan AND a .snyk
+# policy file (the marker that Snyk container scanning is wired). Keyed on
+# both — .snyk alone is the snyk_prs marker and would mis-advertise this on
+# Docker-less repos. Findings are harvested from the latest default-branch
+# `snyk-container-scan` CI artifact, never scanned locally (no Docker build,
+# no quota burn). See #299.
+has_container_scan_config="false"
+if [[ -f ".snyk" ]] &&
+	find . -maxdepth 3 -name Dockerfile -not -path '*/.git/*' -print -quit 2>/dev/null | grep -q .; then
+	has_container_scan_config="true"
+fi
+
 # --- findings_by_tool --------------------------------------------------------
 # Each block writes JSON to a temp file, or "[]" if the tool can't produce
 # anything. We compose the final structure at the end via jq.
@@ -179,6 +194,32 @@ if [[ "$has_code_scanning_config" == "true" ]]; then
 			notes+=("Code Scanning gather ($cs_exit_label): $cs_stderr_content")
 		fi
 		rm -f "$cs_stderr"
+	fi
+fi
+
+# Container CVEs (Snyk base-image scan) — harvested from the latest
+# default-branch `snyk-container-scan` CI artifact (#299), not scanned
+# locally. GitHub-native + free-plan-safe, mirroring the Code Scanning gather.
+if [[ "$has_container_scan_config" == "true" ]]; then
+	csc_stderr=$(mktemp)
+	csc_helper="$SCRIPT_DIR/gather-container-scan.zsh"
+	if [[ ! -x "$csc_helper" ]]; then
+		echo "[]" >"$findings_dir/container_scan.json"
+		notes+=("Container scan gather: helper script not found or not executable at $csc_helper. Update your plugin install (cd to the marketplace dir, 'git pull').")
+	else
+		if "$csc_helper" "$repo" \
+			>"$findings_dir/csc_api.json" 2>"$csc_stderr"; then
+			jq '.container_scan' "$findings_dir/csc_api.json" >"$findings_dir/container_scan.json"
+			csc_exit_label="ok"
+		else
+			echo "[]" >"$findings_dir/container_scan.json"
+			csc_exit_label="failed"
+		fi
+		csc_stderr_content=$(tr '\n' ' ' <"$csc_stderr" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+		if [[ -n "$csc_stderr_content" ]]; then
+			notes+=("Container scan gather ($csc_exit_label): $csc_stderr_content")
+		fi
+		rm -f "$csc_stderr"
 	fi
 fi
 
@@ -336,12 +377,14 @@ jq -n \
 	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
 	--argjson sonar_cfg "$has_sonar_config" \
 	--argjson dependabot_cfg "$has_dependabot_config" \
+	--argjson container_scan_cfg "$has_container_scan_config" \
 	--argjson ruff_findings "$(emit_findings ruff "$has_ruff_config")" \
 	--argjson semgrep_findings "$(emit_findings semgrep "$has_semgrep_config")" \
 	--argjson cs_findings "$(emit_findings code_scanning_alerts "$has_code_scanning_config")" \
 	--argjson snyk_prs_findings "$(emit_findings snyk_prs "$has_snyk_prs_config")" \
 	--argjson sonar_findings "$(emit_findings sonarcloud "$has_sonar_config")" \
 	--argjson dependabot_findings "$(emit_findings dependabot "$has_dependabot_config")" \
+	--argjson container_scan_findings "$(emit_findings container_scan "$has_container_scan_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--arg coverage_source "$coverage_source" \
@@ -357,16 +400,18 @@ jq -n \
     code_scanning:  $code_scanning_cfg,
     snyk_prs:       $snyk_prs_cfg,
     sonarcloud:     $sonar_cfg,
-    dependabot:     $dependabot_cfg
+    dependabot:     $dependabot_cfg,
+    container_scan: $container_scan_cfg
   },
   findings_by_tool: (
     {} +
-    (if $ruff_findings         != null then {ruff:                 $ruff_findings}         else {} end) +
-    (if $semgrep_findings      != null then {semgrep:              $semgrep_findings}      else {} end) +
-    (if $cs_findings           != null then {code_scanning_alerts: $cs_findings}           else {} end) +
-    (if $snyk_prs_findings     != null then {snyk_prs:             $snyk_prs_findings}     else {} end) +
-    (if $sonar_findings        != null then {sonarcloud:           $sonar_findings}        else {} end) +
-    (if $dependabot_findings   != null then {dependabot:           $dependabot_findings}   else {} end)
+    (if $ruff_findings           != null then {ruff:                 $ruff_findings}           else {} end) +
+    (if $semgrep_findings        != null then {semgrep:              $semgrep_findings}        else {} end) +
+    (if $cs_findings             != null then {code_scanning_alerts: $cs_findings}             else {} end) +
+    (if $snyk_prs_findings       != null then {snyk_prs:             $snyk_prs_findings}       else {} end) +
+    (if $sonar_findings          != null then {sonarcloud:           $sonar_findings}          else {} end) +
+    (if $dependabot_findings     != null then {dependabot:           $dependabot_findings}     else {} end) +
+    (if $container_scan_findings != null then {container_scan:       $container_scan_findings} else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,

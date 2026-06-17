@@ -112,7 +112,8 @@ See ARCHITECTURE.md § "JSON schema (v2)" for the rationale.
     "code_scanning": true,
     "snyk_prs": true,
     "sonarcloud": true,
-    "dependabot": true
+    "dependabot": true,
+    "container_scan": true
   },
   "findings_by_tool": {
     "ruff":                 [...],
@@ -120,7 +121,8 @@ See ARCHITECTURE.md § "JSON schema (v2)" for the rationale.
     "code_scanning_alerts": [...],
     "snyk_prs":             [...],
     "sonarcloud":           [...],
-    "dependabot":           [...]
+    "dependabot":           [...],
+    "container_scan":       [...]
   },
   "coverage": {
     "overall": 85,
@@ -202,10 +204,10 @@ Before dispatching:
    (and therefore restricts which groups exist at all); the
    orchestrator never sees groups outside the filter.
    - Each name in `dispatch_filter.only_tools` must be one of: `ruff`,
-     `semgrep`, `code_scanning`, `snyk_prs`, `sonarcloud`, `dependabot`.
-     Unknown names halt with: "Unknown tool '`<X>`' in
+     `semgrep`, `code_scanning`, `snyk_prs`, `sonarcloud`, `dependabot`,
+     `container_scan`. Unknown names halt with: "Unknown tool '`<X>`' in
      dispatch_filter.only_tools; supported: ruff, semgrep,
-     code_scanning, snyk_prs, sonarcloud, dependabot."
+     code_scanning, snyk_prs, sonarcloud, dependabot, container_scan."
    - Each name with `tooling_configured.<name> == false` halts with:
      "Cannot scope to `<X>`: not configured for this project. Set it up
      first via /development:bootstrap, or drop `--tool=<X>`." A missing
@@ -272,6 +274,9 @@ For each finding in `ruff`, `semgrep`, `code_scanning`, `sonarcloud`,
 collect the `file_path` field (or `file` for `code_scanning_alerts`).
 The agent will edit only those files (plus possibly their direct
 dependents if a refactor is needed), so these are the modules at risk.
+(`container_scan` carries no Python `file_path` — it edits `Dockerfile` /
+`.snyk` — so it contributes nothing here and is exempt from the floor; see
+Step 2c's pure-mechanical note.)
 
 #### Step 2b — for major dep upgrades (the no-file-path case)
 
@@ -363,7 +368,10 @@ module(s) with no data.
 
 Pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
 format) skip this check — they're behavior-preserving by ruff's own
-guarantee. Other agents respect it.
+guarantee. `container_scan` is likewise exempt: its agent edits
+`Dockerfile` and `.snyk`, never Python source, so module coverage isn't
+load-bearing — an unrelated low-coverage module must not block a security
+ignore or an apt pin. Other agents respect it.
 
 #### Step 2d — partial halt vs full halt
 

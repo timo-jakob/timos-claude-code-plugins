@@ -1,0 +1,47 @@
+{
+  "vulnerabilities": [
+    {
+      "id": "SNYK-DEBIAN12-SQLITE3-1000001",
+      "identifiers": { "CVE": ["CVE-2025-1111"] },
+      "title": "Integer Overflow in sqlite3",
+      "severity": "high",
+      "packageName": "sqlite3/libsqlite3-0",
+      "version": "3.40.1-2",
+      "isUpgradable": false,
+      "isPatchable": false,
+      "nearestFixedInVersion": "",
+      "fixedIn": [],
+      "from": ["python:3.14-slim-bookworm", "sqlite3", "libsqlite3-0"],
+      "dockerfileInstruction": null
+    },
+    {
+      "id": "SNYK-DEBIAN12-SQLITE3-1000001",
+      "identifiers": { "CVE": ["CVE-2025-1111"] },
+      "title": "Integer Overflow in sqlite3",
+      "severity": "high",
+      "packageName": "sqlite3/libsqlite3-0",
+      "version": "3.40.1-2",
+      "isUpgradable": false,
+      "isPatchable": false,
+      "nearestFixedInVersion": "",
+      "fixedIn": [],
+      "from": ["python:3.14-slim-bookworm", "git", "libsqlite3-0"],
+      "dockerfileInstruction": null
+    },
+    {
+      "id": "SNYK-DEBIAN12-CURL-2000002",
+      "identifiers": { "CVE": ["CVE-2025-2222"] },
+      "title": "Improper Certificate Validation in curl",
+      "severity": "high",
+      "packageName": "curl",
+      "version": "7.88.1-10",
+      "isUpgradable": true,
+      "isPatchable": false,
+      "nearestFixedInVersion": "7.88.1-10+deb12u5",
+      "fixedIn": ["7.88.1-10+deb12u5"],
+      "from": ["python:3.14-slim-bookworm", "curl"],
+      "dockerfileInstruction": "RUN apt-get install -y curl"
+    }
+  ],
+  "ok": false
+}

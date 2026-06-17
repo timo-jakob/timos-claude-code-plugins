@@ -21,7 +21,8 @@
 #
 #   Bugs            ← sonarcloud[type=BUG], semgrep[severity=ERROR]
 #   Vulnerabilities ← sonarcloud[type=VULNERABILITY],
-#                     code_scanning_alerts[tool=CodeQL]
+#                     code_scanning_alerts[tool=CodeQL],
+#                     container_scan (all — Snyk base-image CVEs, #299)
 #   Code smells     ← sonarcloud[type=CODE_SMELL],
 #                     ruff (all),
 #                     semgrep[severity!=ERROR]
@@ -67,8 +68,9 @@ counts=$(jq -r '
       semgrep:  ((.findings_by_tool.semgrep    // []) | map(select(((.extra.severity // .severity // "") | ascii_upcase) == "ERROR")) | length)
     },
     vulnerabilities: {
-      sonar:    ((.findings_by_tool.sonarcloud // []) | map(select(.type == "VULNERABILITY")) | length),
-      codeql:   ((.findings_by_tool.code_scanning_alerts // []) | map(select(.tool == "CodeQL")) | length)
+      sonar:     ((.findings_by_tool.sonarcloud // []) | map(select(.type == "VULNERABILITY")) | length),
+      codeql:    ((.findings_by_tool.code_scanning_alerts // []) | map(select(.tool == "CodeQL")) | length),
+      container: ((.findings_by_tool.container_scan // []) | length)
     },
     code_smells: {
       sonar:    ((.findings_by_tool.sonarcloud // []) | map(select(.type == "CODE_SMELL")) | length),
