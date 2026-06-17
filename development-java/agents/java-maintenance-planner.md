@@ -78,10 +78,10 @@ internal sub-batching for token efficiency on its own.
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
-> **This slice (#306) supports one tool, `format_lint`.** The grouping +
-> ordering machinery below is the full mirror of the Python planner so
-> that adding `sonarcloud`, `code_scanning`, `semgrep`, and `dependabot`
-> in later slices is a routing-table edit, not a rewrite.
+> **Tool universe so far (#296 epic): `format_lint` + `sonarcloud`.** The
+> grouping + ordering machinery below is the full mirror of the Python
+> planner so that adding `code_scanning`, `semgrep`, and `dependabot` in
+> later slices is a routing-table edit, not a rewrite.
 
 ### 4. Group priority + ordering
 
@@ -97,6 +97,7 @@ Order groups by descending priority. Ties broken by:
 | Source tool | Agent for this group | `isolation` |
 | --- | --- | --- |
 | `format_lint` | `java-format-lint-fixer` | `true` |
+| `sonarcloud` | `java-sonar-triage` | `true` |
 
 Every agent in this slice edits local files, so `isolation` is `true`.
 (Future GitHub-PR-acting agents like a dependabot triager will set

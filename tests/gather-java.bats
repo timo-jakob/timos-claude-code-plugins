@@ -48,3 +48,47 @@ setup() {
   run bash "$GATHER" "$BATS_TEST_TMPDIR/does-not-exist"
   [ "$status" -eq 2 ]
 }
+
+@test "gather-java: no sonar-project.properties -> sonarcloud not configured" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.sonarcloud <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool.sonarcloud // "absent"' <<<"$output")" = "absent" ]
+}
+
+@test "gather-java: no JaCoCo -> coverage withheld with a JaCoCo reason" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.coverage.overall // "null"' <<<"$output")" = "null" ]
+  [ "$(jq -r .coverage.measurement.reliable <<<"$output")" = "false" ]
+  echo "$output" | jq -e '.coverage.measurement.reason | test("JaCoCo")' >/dev/null
+}
+
+# --- parse-jacoco.py unit checks --------------------------------------------
+
+@test "parse-jacoco: aggregates LINE coverage, resolves on-disk source paths" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-jacoco.py"
+  mkdir -p "$WORK/src/main/java/com/example"
+  printf 'class Foo {}\n' > "$WORK/src/main/java/com/example/Foo.java"
+  cat > "$WORK/report.xml" <<'EOF'
+<report name="demo"><package name="com/example">
+<sourcefile name="Foo.java"><counter type="LINE" missed="2" covered="8"/></sourcefile>
+<sourcefile name="Bar.java"><counter type="LINE" missed="5" covered="5"/></sourcefile>
+</package></report>
+EOF
+  out=$(cd "$WORK" && python3 "$PARSE" report.xml)
+  # Numeric comparison — jq renders the value as 65.0, not 65.
+  [ "$(jq '.overall == 65' <<<"$out")" = "true" ]
+  # Foo resolves to its real source path; Bar (no file on disk) keeps the JaCoCo path.
+  [ "$(jq '.by_module["src/main/java/com/example/Foo.java"] == 80' <<<"$out")" = "true" ]
+  [ "$(jq '.by_module["com/example/Bar.java"] == 50' <<<"$out")" = "true" ]
+}
+
+@test "parse-jacoco: empty report -> overall null" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-jacoco.py"
+  printf '<report name="empty"></report>\n' > "$WORK/empty.xml"
+  out=$(cd "$WORK" && python3 "$PARSE" empty.xml)
+  [ "$(jq -r .overall <<<"$out")" = "null" ]
+}
