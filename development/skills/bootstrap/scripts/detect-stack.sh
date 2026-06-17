@@ -20,12 +20,17 @@
 # detected languages get an entry. The maintenance skill copies the dispatched
 # language's `version` into the request payload; bootstrap reads `has_cov` /
 # `build_system` directly:
-#   language_meta.python.version       string  ("3.13", "3.12", ...)
-#   language_meta.python.has_cov       bool    (pytest-cov in dev deps already)
-#   language_meta.java.version         string  ("21", "17", ...; default LTS 21)
-#   language_meta.java.build_system    "gradle" | "maven" | ""  (Gradle-first;
-#                                       Maven is recorded but unsupported, #296)
-#   language_meta.java.has_cov         bool    (JaCoCo present in the build)
+#   language_meta.python.version         string  ("3.13", "3.12", ...)
+#   language_meta.python.version_source  "parsed" | "default"  (parsed from a
+#                                         manifest vs guessed fallback, #258)
+#   language_meta.python.has_cov         bool    (pytest-cov in dev deps already)
+#   language_meta.java.version           string  ("21", "17", ...; default LTS 21)
+#   language_meta.java.version_source    "parsed" | "default"  ("default" means
+#                                         the build declared no toolchain — the
+#                                         version is a guess, not a real pin)
+#   language_meta.java.build_system      "gradle" | "maven" | ""  (Gradle-first;
+#                                         Maven is recorded but unsupported, #296)
+#   language_meta.java.has_cov           bool    (JaCoCo present in the build)
 #
 # github_state shape (added 2026-06-04 per issue #90 — keeps detection
 # honest about GitHub-side configuration the on-disk artifacts don't see):
@@ -134,6 +139,7 @@ languages_json+="]"
 # emit defaults ("3.12" / false) when Python isn't detected so the
 # orchestrator doesn't have to special-case the JSON shape.
 python_version=""
+python_version_source="default"
 has_pytest_cov="false"
 
 python_in_langs="false"
@@ -175,7 +181,14 @@ EOF
 	fi
 
 	# Sensible default — current stable interpreter at time of writing.
-	[[ -z "$python_version" ]] && python_version="3.12"
+	# Track whether the version was parsed from a manifest or guessed, so
+	# downstream can distinguish a real pin from a fallback (#258 reliability).
+	if [[ -n "$python_version" ]]; then
+		python_version_source="parsed"
+	else
+		python_version="3.12"
+		python_version_source="default"
+	fi
 
 	# pytest-cov detection: search pyproject dev extras + requirements files.
 	if [[ -f "$pyproject" ]] && command -v python3 >/dev/null 2>&1; then
@@ -217,6 +230,7 @@ fi
 # `JavaLanguageVersion.of(N)`, Gradle source/targetCompatibility, `.java-version`,
 # then Maven compiler properties; default to the current LTS.
 java_version=""
+java_version_source="default"
 java_build_system=""
 has_jacoco="false"
 
@@ -272,8 +286,16 @@ if [[ "$java_in_langs" == "true" ]]; then
 		java_version="$(grep -hoE '<(maven\.compiler\.release|java\.version|maven\.compiler\.source)>[0-9]+' $pom_files 2>/dev/null |
 			grep -oE '[0-9]+' | head -n1 || true)"
 	fi
-	# Default to the current LTS at time of writing.
-	[[ -z "$java_version" ]] && java_version="21"
+	# Default to the current LTS at time of writing. Track parsed-vs-guessed
+	# (#258 reliability) — the build SHOULD declare its toolchain, and the
+	# maintainer's forward-compat matrix (deploy on LTS, probe newer non-LTS)
+	# needs to know the real declared version, not a fallback.
+	if [[ -n "$java_version" ]]; then
+		java_version_source="parsed"
+	else
+		java_version="21"
+		java_version_source="default"
+	fi
 
 	# --- jacoco (coverage analog of pytest-cov) ---
 	# shellcheck disable=SC2086
@@ -292,13 +314,13 @@ language_meta_json="{"
 lm_first=1
 if [[ "$python_in_langs" == "true" ]]; then
 	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
-	language_meta_json+="$(printf '"python":{"version":%s,"has_cov":%s}' \
-		"$(json_str "$python_version")" "$(json_bool "$has_pytest_cov")")"
+	language_meta_json+="$(printf '"python":{"version":%s,"version_source":%s,"has_cov":%s}' \
+		"$(json_str "$python_version")" "$(json_str "$python_version_source")" "$(json_bool "$has_pytest_cov")")"
 fi
 if [[ "$java_in_langs" == "true" ]]; then
 	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
-	language_meta_json+="$(printf '"java":{"version":%s,"build_system":%s,"has_cov":%s}' \
-		"$(json_str "$java_version")" "$(json_str "$java_build_system")" "$(json_bool "$has_jacoco")")"
+	language_meta_json+="$(printf '"java":{"version":%s,"version_source":%s,"build_system":%s,"has_cov":%s}' \
+		"$(json_str "$java_version")" "$(json_str "$java_version_source")" "$(json_str "$java_build_system")" "$(json_bool "$has_jacoco")")"
 fi
 language_meta_json+="}"
 

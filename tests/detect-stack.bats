@@ -26,6 +26,7 @@ setup() {
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.12" ]
+  [ "$(jq -r .language_meta.python.version_source <<<"$out")" = "default" ]
   [ "$(jq -r '.languages | index("python")' <<<"$out")" != "null" ]
 }
 
@@ -34,6 +35,7 @@ setup() {
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.13" ]
+  [ "$(jq -r .language_meta.python.version_source <<<"$out")" = "parsed" ]
 }
 
 @test "detect-stack: pyproject WITH pytest-cov -> language_meta.python.has_cov true" {
@@ -60,6 +62,7 @@ setup() {
   [ "$rc" -eq 0 ]
   [ "$(jq -r '.languages | index("java")' <<<"$out")" != "null" ]
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+  [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "parsed" ]
   [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
   [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "true" ]
 }
@@ -69,15 +72,17 @@ setup() {
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "17" ]
+  [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "parsed" ]
   [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
   [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "false" ]
 }
 
-@test "detect-stack: gradle without any version marker -> default LTS 21" {
+@test "detect-stack: gradle without any version marker -> default LTS 21, source=default" {
   printf 'plugins {\n  java\n}\n' > build.gradle.kts
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+  [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "default" ]
 }
 
 @test "detect-stack: maven pom -> build_system maven, jacoco-maven-plugin detected" {
