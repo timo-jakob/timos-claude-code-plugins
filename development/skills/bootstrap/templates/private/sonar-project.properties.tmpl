@@ -7,7 +7,7 @@ sonar.projectName={{PROJECT_NAME}}
 sonar.sources=.
 sonar.exclusions=**/node_modules/**,**/vendor/**,**/dist/**,**/.build/**,**/build/**,**/coverage/**,**/*.generated.*
 sonar.tests=.
-sonar.test.inclusions=**/*.test.*,**/*_test.*,**/test_*.*,**/tests/**,**/__tests__/**,**/*Tests.swift
+sonar.test.inclusions=**/*.test.*,**/*_test.*,**/test_*.*,**/tests/**,**/__tests__/**,**/*Tests.swift,**/src/test/**
 
 # --- TYPESCRIPT-START ---
 sonar.javascript.lcov.reportPaths=coverage/lcov.info
@@ -27,6 +27,13 @@ sonar.go.coverage.reportPaths=coverage.out
 # --- SWIFT-START --------
 sonar.swift.coverage.reportPaths=coverage.lcov
 # --- SWIFT-END ----------
+# --- JAVA-START ---------
+sonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml
+# Sonar's Java analyzer needs compiled bytecode to resolve types; point it at
+# the Gradle output (`gradle build` produces these in CI before the scan).
+sonar.java.binaries=build/classes
+sonar.java.test.binaries=build/classes
+# --- JAVA-END -----------
 
 sonar.scm.provider=git
 

@@ -83,7 +83,7 @@ The script reports:
 - `git_initialized` — is this a git repo
 - `has_github_remote` — is there an `origin` pointing at github.com
 - `visibility` — `public`, `private`, or `unknown` (via `gh repo view`)
-- `languages` — array of detected languages (`swift`, `typescript`, `python`, `go`)
+- `languages` — array of detected languages (`swift`, `typescript`, `python`, `go`, `java`)
 - `has_dockerfile` — whether a Dockerfile exists at the repo root or in common locations
 - `existing_artifacts` — map of well-known config files already present, so we
   can skip or diff them
@@ -204,7 +204,7 @@ wording so behavior stays consistent:
 | **Q1: Create GitHub repo now?** | State A, or State B without a GitHub remote | "Do you want me to create a GitHub repo for this and connect it as `origin` now?" | If yes → Q2 + Q3 + run `gh repo create <name> --<vis> --source=. --remote=origin`. If no → Q3 only. |
 | **Q2: Repo name** | Only if Q1=yes | "What should the GitHub repo be named? (default: `<current-directory-name>`)" | Used in `gh repo create`. |
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the toolchain path — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the path for the rest of the skill. |
-| **Q4: Languages** | Whenever detected `languages=[]` | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / typescript / python / go — choose one or more)" | Selects per-language fragments and CodeQL matrix. |
+| **Q4: Languages** | Whenever detected `languages=[]` | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / typescript / python / go / java — choose one or more)" | Selects per-language fragments and CodeQL matrix. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
 
@@ -327,7 +327,8 @@ text replacement before writing:
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`language_meta.python.version`) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `language_meta.python.version.replace('.', '')`. |
-| `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
+| `{{JAVA_VERSION}}` | from `detect-stack.sh` (`language_meta.java.version`) — the JDK major (e.g. `21`, `17`). Defaults to the current LTS `21` when Java isn't detected or the build declares no toolchain (`language_meta.java.version_source == "default"`). Used in `setup-java`'s `java-version`. Substitute as-is. |
+| `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
 | `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
 
 ### Python-specific recommendation (when applicable)

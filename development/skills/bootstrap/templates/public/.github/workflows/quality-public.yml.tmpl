@@ -150,6 +150,44 @@ jobs:
         run: echo "Configure a macOS job for Swift coverage."
       # --- SWIFT-END -------------------------------------------------------
 
+      # --- JAVA-START ------------------------------------------------------
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "{{JAVA_VERSION}}"
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Build + test + coverage (Java)
+        # `gradle build` runs the full `check` (incl. Spotless when applied)
+        # plus tests; jacocoTestReport emits the XML that SonarCloud and
+        # diff-cover consume. The wrapper (./gradlew) pins the Gradle version.
+        run: ./gradlew --no-daemon build jacocoTestReport
+
+      # Coverage floor — 90% on new code, the load-bearing enforcer on
+      # SonarCloud free (mirrors the Python diff-cover gate). diff-cover reads
+      # the JaCoCo XML directly. PR-only — push to default has no "new code".
+      - name: Install diff-cover (Java — coverage floor)
+        if: github.event_name == 'pull_request'
+        run: pipx install 'diff-cover>=9'
+      - name: Fetch base ref for diff-cover (Java)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --prune --depth=100 origin \
+            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+      - name: Coverage floor — 90% on new code (Java)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          diff-cover build/reports/jacoco/test/jacocoTestReport.xml \
+            --compare-branch="origin/${BASE_REF}" \
+            --fail-under=90 \
+            --show-uncovered
+      # --- JAVA-END --------------------------------------------------------
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
@@ -159,6 +197,7 @@ jobs:
             coverage.out
             coverage.lcov
             coverage/lcov.info
+            build/reports/jacoco/test/jacocoTestReport.xml
           if-no-files-found: ignore
 
   # --- SonarCloud -----------------------------------------------------------
