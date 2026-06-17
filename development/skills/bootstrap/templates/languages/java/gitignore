@@ -1,0 +1,23 @@
+# Java / Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/**/build/
+*.class
+bin/
+out/
+
+# JaCoCo / reports
+**/build/reports/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# OS / tooling
+*.log
