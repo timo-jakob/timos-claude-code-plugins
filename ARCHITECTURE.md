@@ -556,6 +556,19 @@ Tool-native finding objects retain their original shape — we don't
 normalize. Each language plugin already knows the shape of its own
 tools' output; adding a translation layer is duplicate work.
 
+**`language_meta` in this payload is the dispatched language's slice**
+of detect-stack's nested `language_meta` registry. detect-stack emits
+`language_meta` keyed by every detected language — e.g.
+`{"python": {"version": "3.13", "version_source": "parsed", "has_cov":
+true}, "java": {"version": "21", "version_source": "default",
+"build_system": "gradle", "has_cov": false}}` — and the orchestrator
+copies the dispatched language's `version` into this payload, adding the
+`manifests` it found. Detection-only fields (`version_source`,
+`has_cov`, `build_system`) stay in detect-stack output for the bootstrap
+skill and are not forwarded here. `version_source` is `"parsed"` |
+`"default"` — `"default"` flags a version that fell back to the LTS
+guess because the build declared no toolchain (#258 reliability).
+
 **`dispatch_filter` is optional** and added by the orchestrator only
 when the user passed `--tool=<name>` (a testing aid). When present,
 the language plugin scopes dispatch to the listed tools only — every

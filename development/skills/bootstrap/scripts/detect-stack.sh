@@ -8,12 +8,29 @@
 #   github_repo           string  (owner/repo or "")
 #   default_branch        string  ("" if not detectable)
 #   visibility            "public" | "private" | "unknown"
-#   languages             []string  subset of [swift, typescript, python, go]
+#   languages             []string  subset of [swift, typescript, python, go, java]
 #   has_dockerfile        bool
-#   python_version        string   ("3.13", "3.12", ...; "" if not Python)
-#   has_pytest_cov        bool     (true if pytest-cov is in dev deps already)
+#   language_meta         object   per-language detection metadata — see shape below
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #   github_state          object   GitHub-side state — see github_state shape below
+#
+# language_meta shape (added 2026-06-17 per issue #305 — nests what used to be
+# the flat python_version / has_pytest_cov keys, keyed by language, so a second
+# language (Java) can carry its own metadata without flat-key sprawl). Only
+# detected languages get an entry. The maintenance skill copies the dispatched
+# language's `version` into the request payload; bootstrap reads `has_cov` /
+# `build_system` directly:
+#   language_meta.python.version         string  ("3.13", "3.12", ...)
+#   language_meta.python.version_source  "parsed" | "default"  (parsed from a
+#                                         manifest vs guessed fallback, #258)
+#   language_meta.python.has_cov         bool    (pytest-cov in dev deps already)
+#   language_meta.java.version           string  ("21", "17", ...; default LTS 21)
+#   language_meta.java.version_source    "parsed" | "default"  ("default" means
+#                                         the build declared no toolchain — the
+#                                         version is a guess, not a real pin)
+#   language_meta.java.build_system      "gradle" | "maven" | ""  (Gradle-first;
+#                                         Maven is recorded but unsupported, #296)
+#   language_meta.java.has_cov           bool    (JaCoCo present in the build)
 #
 # github_state shape (added 2026-06-04 per issue #90 — keeps detection
 # honest about GitHub-side configuration the on-disk artifacts don't see):
@@ -108,6 +125,7 @@ langs=()
 [[ -n "$(detect_lang typescript package.json tsconfig.json)" ]] && langs+=("typescript")
 [[ -n "$(detect_lang python pyproject.toml requirements.txt setup.py)" ]] && langs+=("python")
 [[ -n "$(detect_lang go go.mod)" ]] && langs+=("go")
+[[ -n "$(detect_lang java build.gradle 'build.gradle.kts' settings.gradle 'settings.gradle.kts' pom.xml)" ]] && langs+=("java")
 
 languages_json="["
 for i in "${!langs[@]}"; do
@@ -121,6 +139,7 @@ languages_json+="]"
 # emit defaults ("3.12" / false) when Python isn't detected so the
 # orchestrator doesn't have to special-case the JSON shape.
 python_version=""
+python_version_source="default"
 has_pytest_cov="false"
 
 python_in_langs="false"
@@ -162,7 +181,14 @@ EOF
 	fi
 
 	# Sensible default — current stable interpreter at time of writing.
-	[[ -z "$python_version" ]] && python_version="3.12"
+	# Track whether the version was parsed from a manifest or guessed, so
+	# downstream can distinguish a real pin from a fallback (#258 reliability).
+	if [[ -n "$python_version" ]]; then
+		python_version_source="parsed"
+	else
+		python_version="3.12"
+		python_version_source="default"
+	fi
 
 	# pytest-cov detection: search pyproject dev extras + requirements files.
 	if [[ -f "$pyproject" ]] && command -v python3 >/dev/null 2>&1; then
@@ -196,6 +222,107 @@ EOF
 		done
 	fi
 fi
+
+# --- java version + build system + jacoco -----------------------------------
+# Only meaningful when Java is detected. Gradle-first (#296): when both Gradle
+# and Maven markers exist, classify as gradle. Maven is recorded but
+# unsupported. Version sources, in priority order: Gradle toolchain
+# `JavaLanguageVersion.of(N)`, Gradle source/targetCompatibility, `.java-version`,
+# then Maven compiler properties; default to the current LTS.
+java_version=""
+java_version_source="default"
+java_build_system=""
+has_jacoco="false"
+
+java_in_langs="false"
+for l in ${langs[@]+"${langs[@]}"}; do
+	[[ "$l" == "java" ]] && java_in_langs="true"
+done
+
+if [[ "$java_in_langs" == "true" ]]; then
+	# Candidate build files (prune build-output + VCS dirs). Newline-separated;
+	# passed unquoted to grep below, which is safe for the conventional
+	# space-free Gradle/Maven filenames these globs match.
+	gradle_files="$(find "$cwd" \
+		-path '*/.git' -prune -o \
+		-path '*/.gradle' -prune -o \
+		-path '*/build' -prune -o \
+		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null)"
+	pom_files="$(find "$cwd" \
+		-path '*/.git' -prune -o \
+		-path '*/target' -prune -o \
+		-name 'pom.xml' -print 2>/dev/null)"
+
+	# Build system: Gradle wins when both are present.
+	gradle_settings="$(find "$cwd" \
+		-path '*/.git' -prune -o \
+		\( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit 2>/dev/null)"
+	if [[ -n "$gradle_files" || -n "$gradle_settings" ]]; then
+		java_build_system="gradle"
+	elif [[ -n "$pom_files" ]]; then
+		java_build_system="maven"
+	fi
+
+	# --- version (first match wins) ---
+	# 1) Gradle toolchain languageVersion = JavaLanguageVersion.of(N)
+	if [[ -z "$java_version" && -n "$gradle_files" ]]; then
+		# shellcheck disable=SC2086
+		java_version="$(grep -hoE 'JavaLanguageVersion\.of\([0-9]+\)' $gradle_files 2>/dev/null |
+			grep -oE '[0-9]+' | head -n1 || true)"
+	fi
+	# 2) Gradle source/targetCompatibility (JavaVersion.VERSION_N or numeric)
+	if [[ -z "$java_version" && -n "$gradle_files" ]]; then
+		# shellcheck disable=SC2086
+		java_version="$(grep -hoE '(source|target)Compatibility[^0-9]*[0-9]+' $gradle_files 2>/dev/null |
+			grep -oE '[0-9]+' | head -n1 || true)"
+	fi
+	# 3) .java-version (asdf / jenv)
+	if [[ -z "$java_version" && -f "$cwd/.java-version" ]]; then
+		java_version="$(grep -oE '[0-9]+' "$cwd/.java-version" 2>/dev/null | head -n1 || true)"
+	fi
+	# 4) Maven compiler properties
+	if [[ -z "$java_version" && -n "$pom_files" ]]; then
+		# shellcheck disable=SC2086
+		java_version="$(grep -hoE '<(maven\.compiler\.release|java\.version|maven\.compiler\.source)>[0-9]+' $pom_files 2>/dev/null |
+			grep -oE '[0-9]+' | head -n1 || true)"
+	fi
+	# Default to the current LTS at time of writing. Track parsed-vs-guessed
+	# (#258 reliability) — the build SHOULD declare its toolchain, and the
+	# maintainer's forward-compat matrix (deploy on LTS, probe newer non-LTS)
+	# needs to know the real declared version, not a fallback.
+	if [[ -n "$java_version" ]]; then
+		java_version_source="parsed"
+	else
+		java_version="21"
+		java_version_source="default"
+	fi
+
+	# --- jacoco (coverage analog of pytest-cov) ---
+	# shellcheck disable=SC2086
+	if [[ -n "$gradle_files" ]] && grep -qE 'jacoco' $gradle_files 2>/dev/null; then
+		has_jacoco="true"
+	elif [[ -n "$pom_files" ]] && grep -qE 'jacoco-maven-plugin' $pom_files 2>/dev/null; then
+		has_jacoco="true"
+	fi
+fi
+
+# --- language_meta (nested per-language detection metadata) ------------------
+# Replaces the former flat python_version / has_pytest_cov keys; keyed by
+# language so each carries its own metadata (issue #305). Only detected
+# languages get an entry.
+language_meta_json="{"
+lm_first=1
+if [[ "$python_in_langs" == "true" ]]; then
+	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
+	language_meta_json+="$(printf '"python":{"version":%s,"version_source":%s,"has_cov":%s}' \
+		"$(json_str "$python_version")" "$(json_str "$python_version_source")" "$(json_bool "$has_pytest_cov")")"
+fi
+if [[ "$java_in_langs" == "true" ]]; then
+	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
+	language_meta_json+="$(printf '"java":{"version":%s,"version_source":%s,"build_system":%s,"has_cov":%s}' \
+		"$(json_str "$java_version")" "$(json_str "$java_version_source")" "$(json_str "$java_build_system")" "$(json_bool "$has_jacoco")")"
+fi
+language_meta_json+="}"
 
 # --- dockerfile --------------------------------------------------------------
 has_dockerfile="false"
@@ -376,8 +503,7 @@ cat <<EOF
   "visibility": $(json_str "$visibility"),
   "languages": $languages_json,
   "has_dockerfile": $(json_bool "$has_dockerfile"),
-  "python_version": $(json_str "$python_version"),
-  "has_pytest_cov": $(json_bool "$has_pytest_cov"),
+  "language_meta": $language_meta_json,
   "existing_artifacts": $artifacts_json,
   "github_state": $github_state
 }
