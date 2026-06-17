@@ -53,7 +53,7 @@ setup() {
   printf 'plugins { java }\n' > "$WORK/build.gradle"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
-  for tool in format_lint sonarcloud code_scanning semgrep; do
+  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs; do
     [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
   done
 }
