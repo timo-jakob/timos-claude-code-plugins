@@ -301,10 +301,31 @@ jobs:
       - run: |
           # --policy-path makes Snyk read .snyk ignores for container scans
           # (it doesn't auto-discover the policy file in container mode).
+          # --json-file-output writes the full machine-readable report
+          # regardless of exit code, so the scan still gates the GHCR push
+          # below while also producing the artifact harvested next.
           snyk container test "${{ steps.pick.outputs.tag }}" \
-            --severity-threshold=high --file=Dockerfile --policy-path=.snyk
+            --severity-threshold=high --file=Dockerfile --policy-path=.snyk \
+            --json-file-output=snyk-container.json
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      # Harvest the container scan as a CI artifact so the maintenance
+      # pipeline (/development:maintenance) can ingest base-image CVEs and
+      # triage them — fix the safely-fixable, or propose a justified .snyk
+      # ignore with an expiry. Gated to push/release like the SBOM export
+      # below: the artifact describes the pushed image, and the gather only
+      # harvests default-branch push runs (anti-spoofing). `always()` so it
+      # still uploads when the scan step exited non-zero on findings — that
+      # is precisely when there are CVEs worth ingesting.
+      - name: Upload Snyk container scan (for maintenance ingestion)
+        if: always() && (github.event_name == 'push' || github.event_name == 'release')
+        uses: actions/upload-artifact@v7
+        with:
+          name: snyk-container-scan
+          path: snyk-container.json
+          if-no-files-found: error
+          retention-days: 90
 
       # NOTE: image-level license scan intentionally omitted. Trivy's
       # `restricted` classification flags every transitive Debian GPL/LGPL
