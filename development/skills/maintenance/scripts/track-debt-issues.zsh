@@ -56,8 +56,10 @@ fi
 cd "$repo_path"
 
 # Scanner tools to track. PR-based tools (dependabot, snyk_prs)
-# excluded — their findings are already PRs.
-typeset -a tracked_tools=( ruff semgrep code_scanning_alerts sonarcloud )
+# excluded — their findings are already PRs. container_scan is
+# scanner-class (Snyk base-image CVEs harvested from CI), so it gets a
+# tracking issue like the others (#299).
+typeset -a tracked_tools=( ruff semgrep code_scanning_alerts sonarcloud container_scan )
 
 ensure_label() {
   local name=$1 color=$2 desc=$3
@@ -170,6 +172,29 @@ render_body() {
               + (if (.extra.message // .message // "") != "" then " — \((.extra.message // .message) | gsub("\n"; " ") | gsub("\\s+"; " "))" else "" end)
           ] | join("\n")),
           (if $n > $per then "\n+ \($n - $per) more in this category — re-run \`semgrep\` locally for the full list." else "" end),
+          ""
+      '
+      ;;
+    container_scan)
+      # Group by severity (critical / high / medium / low).
+      filter='
+        .findings_by_tool.container_scan // []
+        | group_by(.severity // "unknown")
+        | sort_by(.[0].severity // "")
+        | (length) as $ngroups
+        | ($cap / (if $ngroups == 0 then 1 else $ngroups end) | floor) as $per
+        | .[]
+        | ((.[0].severity // "unknown") | ascii_upcase) as $header
+        | length as $n
+        | "### \($header) (\($n))",
+          "",
+          ([ .[0:$per][]
+            | "- [ ] **\(.id // "?")** — \(.package // "?")"
+              + (if (.version // "") != "" then " \(.version)" else "" end)
+              + (if .fixable then " — fix in \((.fixed_in // []) | join(", "))" else " — no upstream fix yet" end)
+              + (if (.url // "") != "" then " ([source](\(.url)))" else "" end)
+          ] | join("\n")),
+          (if $n > $per then "\n+ \($n - $per) more in this severity — see Snyk." else "" end),
           ""
       '
       ;;

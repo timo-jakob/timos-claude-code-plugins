@@ -524,7 +524,8 @@ the delivery mechanism changed.
     "code_scanning":  true,
     "snyk_prs":       true,
     "sonarcloud":     true,
-    "dependabot":     true
+    "dependabot":     true,
+    "container_scan": true
   },
   "findings_by_tool": {
     "ruff":                 [/* tool-native finding objects */],
@@ -532,7 +533,9 @@ the delivery mechanism changed.
     "code_scanning_alerts": [/* GitHub Code Scanning alerts (CodeQL etc.) */],
     "snyk_prs":             [/* open PRs with snyk-fix-* / snyk-upgrade-* head branches */],
     "sonarcloud":           [/* … */],
-    "dependabot":           [/* … */]
+    "dependabot":           [/* … */],
+    "container_scan":       [/* Snyk base-image CVEs, harvested from the CI
+                               snyk-container-scan artifact; deduped by id (#299) */]
   },
   "policy": {
     "coverage_threshold": 90,

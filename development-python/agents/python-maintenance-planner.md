@@ -131,6 +131,7 @@ Order groups by descending priority. Ties broken by:
 | `dependabot` (github-actions, docker non-Python, unknown) | `python-dependabot-snyk-triage` (human-review) |
 | `snyk_prs` patch/minor (pip, from `snyk-fix-…` / `snyk-upgrade-…` branches) | `python-dependabot-snyk-triage` |
 | `snyk_prs` major (pip) | `python-major-upgrade` |
+| `container_scan` (Snyk base-image CVEs) | `python-container-cve-triage` |
 
 The legacy `snyk_code` / `snyk_oss` tool keys were retired in PR ε of #87
 — Snyk Code SAST findings are replaced by `code_scanning` (CodeQL

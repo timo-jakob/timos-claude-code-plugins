@@ -28,7 +28,7 @@ Supported flags in `$ARGUMENTS`:
   for manual inspection + merge.
 - `--tool=<name>` — scope dispatch to a single tool (testing aid).
   `<name>` must be one of: `ruff`, `semgrep`, `code_scanning`,
-  `snyk_prs`, `sonarcloud`, `dependabot`. The gather phase still runs
+  `snyk_prs`, `sonarcloud`, `dependabot`, `container_scan`. The gather phase still runs
   for every tool (the payload stays complete), but the language plugin
   only spawns the agent(s) for the chosen tool. Other agents are
   skipped entirely — no work, no missing-tool recommendation.
@@ -36,7 +36,7 @@ Supported flags in `$ARGUMENTS`:
 - `--concern=<name>` — scope dispatch to a whole **concern** (a named
   group of tools); the coarse-grained sibling of `--tool`. `<name>` must
   be one of:
-  - `security` → `snyk_prs`, `code_scanning`, `semgrep`
+  - `security` → `snyk_prs`, `code_scanning`, `semgrep`, `container_scan`
   - `dependencies` → `dependabot`
   - `codequality` → `sonarcloud`, `ruff`
 
@@ -44,13 +44,13 @@ Supported flags in `$ARGUMENTS`:
   just to several tools at once — the gather phase still runs for
   everything, only dispatch is narrowed. Combinable with `--dry-run` and
   `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
-  other). The three concerns partition all six tools, so
+  other). The three concerns partition all seven tools, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
   together cover the same set as an unscoped run.
 - `--track-as-issues` — after the run completes, create / update /
   close GitHub tracking issues for each scanner tool's remaining
   findings. One issue per tool (`ruff`, `semgrep`, `code_scanning_alerts`,
-  `sonarcloud`); labels `maintenance` + `tool:<name>`; idempotent on
+  `sonarcloud`, `container_scan`); labels `maintenance` + `tool:<name>`; idempotent on
   `(repo, tool)`. Skipped for PR-based tools (`dependabot`, `snyk_prs`)
   since their findings are already first-class PRs. See Phase 10 below
   for the contract. Off by default; opt in per run.
@@ -61,7 +61,7 @@ arguments" and stop.
 When `--tool=<name>` is set, validate `<name>` against the known set
 above before proceeding. On a mismatch, halt with: "Unknown --tool
 '`<name>`'; supported: ruff, semgrep, code_scanning, snyk_prs,
-sonarcloud, dependabot."
+sonarcloud, dependabot, container_scan."
 
 When `--concern=<name>` is set, validate `<name>` against `security`,
 `dependencies`, `codequality`. On a mismatch, halt with: "Unknown
@@ -477,7 +477,7 @@ entirely otherwise):
 
 `only_tools` is the scoped tool set: a single-element list for `--tool`,
 or the concern's expanded tool set for `--concern` (e.g.
-`["snyk_prs", "code_scanning", "semgrep"]` for `--concern=security`).
+`["snyk_prs", "code_scanning", "semgrep", "container_scan"]` for `--concern=security`).
 The field shape is identical either way — the language plugin already
 treats `only_tools` as a set, so no plugin change is needed to support
 multi-tool scoping.
@@ -1267,7 +1267,11 @@ GitHub App PR checks (`security/snyk (<org>)` etc.), the workflow `image`
 job (`snyk container test`), and any legacy in-workflow `snyk-code` /
 `snyk-open-source` jobs. Phrase a `security/snyk (<org>)` **ERROR** state
 as an infrastructure/quota condition, not a finding on the diff (never
-call it a "legacy job to remove" — check the workflow first). And surface
+call it a "legacy job to remove" — check the workflow first). The `image`
+job channel now also feeds the `container_scan` finding source (harvested
+from its `snyk-container-scan` artifact, #299): a red `image` check and the
+`container_scan` findings describe the **same** base-image CVEs — attribute
+them to one channel, don't double-count. And surface
 any `Snyk findings via REST API (no quota consumed): …` gather note
 verbatim in the "Notes from the gather step" section. Full channel table,
 the exact ERROR phrasing, and the no-quota-note rule live in
@@ -1434,11 +1438,11 @@ by label combo, and acts based on the current finding count:
 | 0 | no | No-op |
 
 One tracking issue per scanner tool (`ruff`, `semgrep`,
-`code_scanning_alerts`, `sonarcloud`). Within each issue's body,
-findings are grouped by the tool's natural sub-category: `tool` for
+`code_scanning_alerts`, `sonarcloud`, `container_scan`). Within each issue's
+body, findings are grouped by the tool's natural sub-category: `tool` for
 code scanning (CodeQL / Scorecard), `type` for SonarCloud
 (BUG / VULNERABILITY / CODE_SMELL / SECURITY_HOTSPOT), severity for
-semgrep, none for ruff (flat).
+semgrep and `container_scan` (Snyk base-image CVEs), none for ruff (flat).
 
 Body is capped at the top 50 findings (per-group cap is
 `50 / num_groups` so one giant group can't eat the cap). The
