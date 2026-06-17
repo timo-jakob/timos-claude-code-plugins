@@ -124,6 +124,38 @@ repos:
         files: \.swift$
   # --- SWIFT-END -------------------------------------------------------------
 
+  # --- JAVA-START ------------------------------------------------------------
+  # Spotless (google-java-format) via the project's Gradle wrapper. Local hook
+  # because Spotless is a Gradle plugin, not a standalone binary; `spotlessApply`
+  # reformats Java (and Kotlin/Kotlin-DSL when the project's spotless config adds
+  # a ktlint() step). Slower than ruff (Gradle daemon), so scoped to changed
+  # sources. Requires the com.diffplug.spotless plugin in build.gradle(.kts) —
+  # see the Java setup recommendation in SETUP.md / the bootstrap summary.
+  - repo: local
+    hooks:
+      - id: spotless
+        name: Spotless (google-java-format)
+        entry: ./gradlew --no-daemon spotlessApply
+        language: system
+        files: \.(java|kt|kts)$
+        pass_filenames: false
+
+  # Coverage floor — local mirror of the CI `coverage-floor` step. Same
+  # diff-cover invocation on the JaCoCo XML, same 90%-on-new-code threshold.
+  # Stage is pre-push (compares against origin/{{DEFAULT_BRANCH}}). Contract:
+  # assumes a recent `./gradlew test jacocoTestReport` produced the XML.
+  - repo: local
+    hooks:
+      - id: coverage-floor-java
+        name: Coverage floor (90% on new code) — requires recent gradlew test jacocoTestReport
+        entry: diff-cover build/reports/jacoco/test/jacocoTestReport.xml --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90
+        language: python
+        additional_dependencies: ["diff-cover>=9"]
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+  # --- JAVA-END --------------------------------------------------------------
+
   # --- PRIVATE-START ---------------------------------------------------------
   # Trivy filesystem scan — kept private-only because public repos run Snyk in
   # CI, and Snyk locally requires authentication. Trivy is unauthenticated and
