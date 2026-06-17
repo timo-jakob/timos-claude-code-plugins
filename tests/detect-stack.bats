@@ -1,9 +1,15 @@
 #!/usr/bin/env bats
 #
-# Behavioral tests for the Python-version detection in detect-stack.sh and
-# verify-python-state.sh. Regression net for #271: a no-match `requires-python`
-# grep used to trip `set -euo pipefail` and abort before the 3.12 fallback, so
-# any Python project without a `requires-python` pin crashed detection.
+# Behavioral tests for the language detection in detect-stack.sh and
+# verify-python-state.sh.
+#
+# Python regression net for #271: a no-match `requires-python` grep used to trip
+# `set -euo pipefail` and abort before the 3.12 fallback, so any Python project
+# without a `requires-python` pin crashed detection.
+#
+# Java detection + the nested `language_meta` block were added in #305 (first
+# slice of the #296 Java/Gradle epic). The Python assertions read the migrated
+# `.language_meta.python.*` paths (formerly the flat `.python_version` key).
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -19,7 +25,7 @@ setup() {
   printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
-  [ "$(jq -r .python_version <<<"$out")" = "3.12" ]
+  [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.12" ]
   [ "$(jq -r '.languages | index("python")' <<<"$out")" != "null" ]
 }
 
@@ -27,13 +33,78 @@ setup() {
   printf '[project]\nname = "x"\nversion = "0.1.0"\nrequires-python = ">=3.13"\n' > pyproject.toml
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
-  [ "$(jq -r .python_version <<<"$out")" = "3.13" ]
+  [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.13" ]
+}
+
+@test "detect-stack: pyproject WITH pytest-cov -> language_meta.python.has_cov true" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.optional-dependencies]\ndev = ["pytest-cov>=5"]\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.python.has_cov <<<"$out")" = "true" ]
 }
 
 @test "detect-stack: no pyproject -> exit 0, python not detected" {
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   [ "$(jq -r '.languages | index("python")' <<<"$out")" = "null" ]
+  # No Python -> no python entry in language_meta.
+  [ "$(jq -r '.language_meta.python // "absent"' <<<"$out")" = "absent" ]
+}
+
+# --- Java / Gradle detection (#305) -----------------------------------------
+
+@test "detect-stack: gradle groovy toolchain + jacoco -> java 21, gradle, has_cov" {
+  printf 'plugins {\n  id "java"\n  id "jacoco"\n}\njava {\n  toolchain {\n    languageVersion = JavaLanguageVersion.of(21)\n  }\n}\n' > build.gradle
+  printf "rootProject.name = 'x'\n" > settings.gradle
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("java")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+  [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "true" ]
+}
+
+@test "detect-stack: gradle kts sourceCompatibility VERSION_17, no jacoco" {
+  printf 'plugins {\n  java\n}\njava {\n  sourceCompatibility = JavaVersion.VERSION_17\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "17" ]
+  [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "false" ]
+}
+
+@test "detect-stack: gradle without any version marker -> default LTS 21" {
+  printf 'plugins {\n  java\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+}
+
+@test "detect-stack: maven pom -> build_system maven, jacoco-maven-plugin detected" {
+  printf '<project><properties><maven.compiler.release>21</maven.compiler.release></properties><build><plugins><plugin><artifactId>jacoco-maven-plugin</artifactId></plugin></plugins></build></project>\n' > pom.xml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("java")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+  [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "maven" ]
+  [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "true" ]
+}
+
+@test "detect-stack: gradle wins when both gradle and maven markers present" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  printf '<project></project>\n' > pom.xml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+}
+
+@test "detect-stack: python + java coexist in language_meta" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\nrequires-python = ">=3.13"\n' > pyproject.toml
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.13" ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
 }
 
 @test "verify-python-state: pyproject WITHOUT requires-python -> exit 0 (no crash)" {

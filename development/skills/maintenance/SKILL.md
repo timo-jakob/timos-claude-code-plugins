@@ -88,12 +88,14 @@ Validate from `detect.json`:
   repo (worktree-based agents require it). Initialize with `git init`
   and re-run."
 - `languages` is non-empty — if not, halt: "No supported languages
-  detected (swift / typescript / python / go). If your project uses
+  detected (swift / typescript / python / go / java). If your project uses
   one of these, ensure manifest files (pyproject.toml, package.json,
-  etc.) are present."
+  build.gradle, etc.) are present."
 
 Extract for use in later phases: `repo` (path = cwd from script),
-`default_branch`, `visibility`, `python_version` (when applicable),
+`default_branch`, `visibility`, `language_meta` (the nested
+per-language block — e.g. `language_meta.python.version`,
+`language_meta.java.version`, when applicable),
 `languages` (the array — could be one or more).
 
 ### Read the maintenance declaration (primary / auxiliary)
@@ -508,9 +510,11 @@ other agent. The gather output is unchanged — only dispatch is scoped.
 
 The user's current branch from `git rev-parse --abbrev-ref HEAD`.
 
-`language_meta.version` — language-appropriate:
+`language_meta.version` — language-appropriate, sourced from
+detect-stack's nested `language_meta.<lang>` block:
 
-- python → `python_version` field from detect-stack (default `3.12`)
+- python → `language_meta.python.version` from detect-stack (default `3.12`)
+- java → `language_meta.java.version` from detect-stack (default LTS `21`)
 - (future) typescript → Node version from package.json `engines.node`
 - (future) go → Go version from `go.mod`
 - etc.
