@@ -47,6 +47,16 @@
       "category": "development"
     },
     {
+      "name": "development-spring",
+      "description": "Spring framework TOPIC plugin \u2014 composes alongside development-java for Java + Spring Boot repos. Audits Spring configuration via spring-config-advisor; reuses java-ci-fixer for CI. Incremental: config audit in v0.1; Jakarta migration, bootBuildImage, and the contract-first API drift gate land in later slices (#296).",
+      "version": "0.1.0",
+      "author": {
+        "name": "Timo Jakob"
+      },
+      "source": "./development-spring",
+      "category": "development"
+    },
+    {
       "name": "development-claude-plugin",
       "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test) and a maintenance dispatcher that validates plugin conventions and composes alongside the language plugin. Validators: version sync, SKILL.md/agent frontmatter, orphaned skill/agent references, directory layout, and shell-script quality (shellcheck / zsh -n).",
       "version": "1.5.5",
