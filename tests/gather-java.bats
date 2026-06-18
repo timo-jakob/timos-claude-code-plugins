@@ -53,7 +53,7 @@ setup() {
   printf 'plugins { java }\n' > "$WORK/build.gradle"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
-  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs grpc openapi; do
+  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs renovate grpc openapi; do
     [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
   done
 }
@@ -87,6 +87,33 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(jq -r .tooling_configured.openapi <<<"$output")" = "false" ]
   [ "$(jq -r '.findings_by_tool | has("openapi")' <<<"$output")" = "false" ]
+}
+
+@test "gather-java: no Renovate config -> renovate not configured" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.renovate <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool.renovate // "absent"' <<<"$output")" = "absent" ]
+}
+
+@test "gather-java: renovate.json present -> renovate configured" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf '{ "extends": ["config:recommended"] }\n' > "$WORK/renovate.json"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.renovate <<<"$output")" = "true" ]
+  # tooling_configured always carries the renovate key.
+  [ "$(jq -r '.tooling_configured | has("renovate")' <<<"$output")" = "true" ]
+}
+
+@test "gather-java: .github/renovate.json present -> renovate configured" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  mkdir -p "$WORK/.github"
+  printf '{ "extends": ["config:recommended"] }\n' > "$WORK/.github/renovate.json"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.renovate <<<"$output")" = "true" ]
 }
 
 @test "gather-java: no sonar-project.properties -> sonarcloud not configured" {

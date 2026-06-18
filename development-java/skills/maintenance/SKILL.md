@@ -36,7 +36,7 @@ auxiliary model"). So:
   and has findings, return a single group routed to `java-format-lint-fixer`
   (mechanical, behavior-preserving). In auxiliary mode the non-mechanical
   triagers (`sonarcloud`, `code_scanning`, `semgrep`) **and all dependency
-  work** (`dependabot`, `snyk_prs`, major upgrades) are skipped — auxiliary
+  work** (`dependabot`, `snyk_prs`, `renovate`, major upgrades) are skipped — auxiliary
   dependencies aren't the product. List the skipped tools in a note so the
   summary is honest.
 - Return `plan` + `ci_fixer_agent` + `missing_tooling`. **Never**
@@ -81,14 +81,15 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "java",
   "dispatch_mode": "primary",
   "language_meta": { "version": "21", "manifests": ["build.gradle", "settings.gradle"] },
-  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true, "dependabot": true, "snyk_prs": true },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true, "dependabot": true, "snyk_prs": true, "renovate": true },
   "findings_by_tool": {
     "format_lint":          [ /* spotless findings */ ],
     "sonarcloud":           [ /* normalized sonar findings: type, severity, rule, component, line, message, key */ ],
     "code_scanning_alerts": [ /* CodeQL + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ],
     "semgrep":              [ /* semgrep results */ ],
     "dependabot":           [ /* open Dependabot PR records: number, title, body, headRefName */ ],
-    "snyk_prs":             [ /* open Snyk PR records: number, title, body, headRefName */ ]
+    "snyk_prs":             [ /* open Snyk PR records: number, title, body, headRefName */ ],
+    "renovate":             [ /* open Renovate PR records: number, title, body, headRefName */ ]
   },
   "coverage": {
     "overall": 84,
@@ -108,7 +109,7 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 
 > **Tool universe (so far).** `development-java` supports `format_lint`
 > (Spotless), `sonarcloud`, `code_scanning` (CodeQL + Scorecard), `semgrep`,
-> vendor-PR handling (`dependabot` + `snyk_prs` → triage,
+> vendor-PR handling (`dependabot` + `snyk_prs` + `renovate` → triage,
 > `java-major-upgrade`, or `java-runtime-upgrade` for JDK base-image bumps),
 > `versioning` (a hardcoded `version` → `java-versioning-advisor`, which
 > recommends build-driven semver), `grpc` (a `.proto` contract →
@@ -144,10 +145,11 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). Each name in
    `only_tools` must be a supported tool: `format_lint`, `sonarcloud`,
-   `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`, `versioning`,
-   `grpc`, `openapi`. Unknown names halt with: "Unknown tool '`<X>`' in
-   dispatch_filter.only_tools; supported: format_lint, sonarcloud,
-   code_scanning, semgrep, dependabot, snyk_prs, versioning, grpc, openapi."
+   `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`, `renovate`,
+   `versioning`, `grpc`, `openapi`. Unknown names halt with: "Unknown tool
+   '`<X>`' in dispatch_filter.only_tools; supported: format_lint, sonarcloud,
+   code_scanning, semgrep, dependabot, snyk_prs, renovate, versioning, grpc,
+   openapi."
    Each name with
    `tooling_configured.<name> == false` halts with: "Cannot scope to `<X>`:
    not configured for this project. Set it up first via
@@ -403,7 +405,7 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
   its agent file's `missing_tool_recommendation` block (`format_lint` →
   `java-format-lint-fixer.md`, `code_scanning` →
   `java-code-scanning-triage.md`, `semgrep` → `java-semgrep-triage.md`,
-  `dependabot` + `snyk_prs` → `java-dependabot-snyk-triage.md`'s
+  `dependabot` + `snyk_prs` + `renovate` → `java-dependabot-snyk-triage.md`'s
   `vendor_prs` block); reuse it verbatim.
 
 `actions_taken`, `actions_requiring_review`, and `unable_to_fix` are

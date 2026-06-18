@@ -23,9 +23,9 @@ Your prompt contains:
   `dispatch_filter.only_tools`). Each finding has at minimum: `type`,
   `severity`, `rule`, `component`, `line`, `message`, `key`, and an extra
   `_tool` field added by the dispatcher so you know which tool sourced it.
-  **Vendor-PR findings** (`_tool` = `dependabot` / `snyk_prs`) instead
-  carry `number`, `title`, `body`, `headRefName` — see § 5a to classify
-  and route them.
+  **Vendor-PR findings** (`_tool` = `dependabot` / `snyk_prs` / `renovate`)
+  instead carry `number`, `title`, `body`, `headRefName` — see § 5a to
+  classify and route them.
 - `coverage.by_module` — per-file coverage percentages (empty when JaCoCo
   isn't configured; the floor then gates only non-mechanical work)
 - `policy.priority_window_days` — churn window in days (default 30)
@@ -80,19 +80,19 @@ tool, single-instance agent)** carrying ALL of that tool's findings, even
 when they span different rules, files, or severities. The agent handles
 internal sub-batching for token efficiency on its own.
 
-**The two exceptions are `dependabot` and `snyk_prs`** — a single tool's
-PRs can dispatch to two different agents (the triager vs the major-upgrade
-agent), so they split per § 5a. A single group still never spans multiple
-agents.
+**The three exceptions are the vendor-PR tools `dependabot`, `snyk_prs`,
+and `renovate`** — a single tool's PRs can dispatch to two different agents
+(the triager vs the major-upgrade agent), so they split per § 5a. A single
+group still never spans multiple agents.
 
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
 > **Tool universe so far (#296 epic): `format_lint`, `sonarcloud`,
-> `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`, `versioning`,
-> `grpc`, `openapi`.** Most tools are one-group-per-tool; `dependabot` and
-> `snyk_prs` are the exception — they split by ecosystem + bump level (see
-> § 5a).
+> `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`, `renovate`,
+> `versioning`, `grpc`, `openapi`.** Most tools are one-group-per-tool; the
+> vendor-PR tools `dependabot`, `snyk_prs`, and `renovate` are the
+> exception — they split by ecosystem + bump level (see § 5a).
 
 ### 4. Group priority + ordering
 
@@ -114,10 +114,10 @@ Order groups by descending priority. Ties broken by:
 | `versioning` | `java-versioning-advisor` | `true` |
 | `grpc` | `java-grpc-advisor` | `true` |
 | `openapi` | `java-openapi-advisor` | `true` |
-| `dependabot` / `snyk_prs` — gradle/github-actions patch+minor | `java-dependabot-snyk-triage` | `false` |
-| `dependabot` / `snyk_prs` — gradle major (incl. 0.x major-equiv) | `java-major-upgrade` (one PR per bump) | `true` |
-| `dependabot` — docker, **JDK base image** (eclipse-temurin / amazoncorretto / openjdk / …) | `java-runtime-upgrade` (one PR per bump) | `true` |
-| `dependabot` / `snyk_prs` — docker (non-JDK), github-actions major, unknown | `java-dependabot-snyk-triage` (human-review) | `false` |
+| `dependabot` / `snyk_prs` / `renovate` — gradle/github-actions patch+minor | `java-dependabot-snyk-triage` | `false` |
+| `dependabot` / `snyk_prs` / `renovate` — gradle major (incl. 0.x major-equiv) | `java-major-upgrade` (one PR per bump) | `true` |
+| `dependabot` / `renovate` — docker, **JDK base image** (eclipse-temurin / amazoncorretto / openjdk / …) | `java-runtime-upgrade` (one PR per bump) | `true` |
+| `dependabot` / `snyk_prs` / `renovate` — docker (non-JDK), github-actions major, unknown | `java-dependabot-snyk-triage` (human-review) | `false` |
 
 The static-analysis agents edit local files (`isolation: true`).
 `java-dependabot-snyk-triage` acts on GitHub PRs via `gh`, not local
@@ -125,27 +125,43 @@ files, so its group is `isolation: false`. `java-major-upgrade` does
 local migration work, so `isolation: true`. A single group never spans
 multiple agents.
 
-### 5a. Vendor-PR classification (`dependabot` + `snyk_prs`)
+### 5a. Vendor-PR classification (`dependabot` + `snyk_prs` + `renovate`)
 
-These two tools carry raw GitHub PR records (`number`, `title`, `body`,
+These three tools carry raw GitHub PR records (`number`, `title`, `body`,
 `headRefName`). Classify each into `source` / `ecosystem` / `bump_level`
 / `routing`, then split into groups per the routing table above.
 
 - **`source`** — `dependabot` when `_tool == "dependabot"` (or
   `headRefName` starts `dependabot/`); `snyk` when `headRefName` starts
-  `snyk-fix-` / `snyk-upgrade-`.
+  `snyk-fix-` / `snyk-upgrade-`; `renovate` when `_tool == "renovate"` (or
+  `headRefName` starts `renovate/`).
 - **`ecosystem`** — for Dependabot, the segment after `dependabot/` in
   `headRefName` (`gradle`, `github-actions`, `docker`); for Snyk, default
-  `gradle` (Snyk OSS for Java). Anything unrecognized → `unknown`.
-- **`bump_level`** — parse the version pair from `title` (`Bump <pkg>
-  from <old> to <new>`, or `[Snyk] … upgrade <pkg> from <old> to <new>`)
-  and compare semver: a change in the first non-zero component is
+  `gradle` (Snyk OSS for Java). For **Renovate** the branch doesn't encode
+  the manager the way Dependabot's does (`renovate/<slug>`), so infer:
+  `github-actions` when the dep is a workflow action (`actions/*`, or the
+  title/body names a `.github/workflows` action), `docker` when it's a
+  base image, otherwise `gradle` (Renovate's gradle manager — the default
+  for a Gradle project's dependencies/plugins). Anything unrecognized →
+  `unknown`.
+- **`bump_level`** — for **Dependabot / Snyk**, parse the version pair from
+  `title` (`Bump <pkg> from <old> to <new>`, or `[Snyk] … upgrade <pkg>
+  from <old> to <new>`). For **Renovate**, the title carries only the
+  **target** (`Update <pkg> to v<new>`) — read the PR **`body`** instead:
+  Renovate's update table has a **Change** column (`<old> -> <new>`) and an
+  **Update** column that already states `major` / `minor` / `patch`; use
+  those. If the body is unavailable/unparseable, compare the target against
+  the package's current version in the repo manifest; if that too is
+  unknown, treat as `minor` (conservative — minors route to
+  auto-merge-if-green, gated by green CI, never to an autonomous major).
+  Then compare semver: a change in the first non-zero component is
   `major` (a `0.x → 0.y` minor bump is a `major-equiv` — treat as major
   for routing, since pre-1.0 minors can break APIs); second component →
   `minor`; third → `patch`. A grouped PR (`Bump the <group> group with N
-  updates`) can't be cleanly parsed — set `bump_level: "grouped"` and
-  treat as the **highest** level any member implies (default `minor`
-  unless the body shows a major).
+  updates`, or a Renovate `Update <group> monorepo to ...`) can't be
+  cleanly parsed — set `bump_level: "grouped"` and treat as the
+  **highest** level any member implies (default `minor` unless the body
+  shows a major).
 - **`routing`** —
   - `gradle` / `github-actions` **patch or minor** → `auto-merge-if-green`
     → the shared `java-dependabot-snyk-triage` group.
@@ -154,7 +170,9 @@ These two tools carry raw GitHub PR records (`number`, `title`, `body`,
     `current_version`, `target_version`, `source`, `pr_number`, and the
     `release_notes_url` if the body links one.
     - **Exception — Spring Boot.** When the bumped `package` is
-      `org.springframework.boot` (the Spring Boot Gradle plugin / BOM),
+      `org.springframework.boot` (the Spring Boot Gradle plugin / BOM —
+      Renovate names it with the friendly title `Update spring boot to …`,
+      same package),
       **do NOT create a `java-major-upgrade` group** — `development-spring`
       owns Spring Boot version bumps (its `spring-boot-upgrade` agent does
       the config-property relocations + removed-API fixes a generic dep

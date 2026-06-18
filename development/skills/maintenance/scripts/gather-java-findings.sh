@@ -15,6 +15,7 @@
 #       "semgrep":       true|false,  # semgrep (--config=auto)
 #       "dependabot":    true|false,  # open Dependabot PRs
 #       "snyk_prs":      true|false,   # open Snyk auto-Fix/Upgrade PRs
+#       "renovate":      true|false,   # open Renovate PRs (third vendor source)
 #       "versioning":    true|false,   # build-driven vs hardcoded version
 #       "grpc":          true|false,   # gRPC/protobuf code-gen (.proto present)
 #       "openapi":       true|false   # non-Spring contract-first OpenAPI
@@ -26,6 +27,7 @@
 #       "semgrep":              [ ... semgrep results array ... ],
 #       "dependabot":           [ ... open Dependabot PR records ... ],
 #       "snyk_prs":             [ ... open Snyk PR records ... ],
+#       "renovate":             [ ... open Renovate PR records ... ],
 #       "versioning":           [ ... hardcoded-version findings ... ],
 #       "grpc":                 [ ... proto-audit finding ... ],
 #       "openapi":              [ ... contract-audit finding ... ]
@@ -43,7 +45,8 @@
 #   - format_lint (Spotless)        — first slice
 #   - sonarcloud + JaCoCo coverage  — second slice
 #   - code_scanning + semgrep       — third slice
-#   - dependabot + snyk_prs         — this slice (vendor PR triage + majors)
+#   - dependabot + snyk_prs         — vendor PR triage + majors
+#   - renovate                      — third vendor-PR source (#335)
 # The JDK runtime-upgrade special case (docker base-image bumps that are the
 # JDK itself) is deferred to a later slice (#308); docker bumps currently route
 # to human-review.
@@ -128,6 +131,16 @@ fi
 has_snyk_prs_config="false"
 if [[ -f ".snyk" ]]; then
 	has_snyk_prs_config="true"
+fi
+
+# Renovate: configured when a Renovate config file is present. A third
+# vendor-PR source alongside Dependabot + Snyk — many real Java/Gradle repos
+# use Renovate. Its open PRs feed the same java-dependabot-snyk-triage path.
+has_renovate_config="false"
+if [[ -f "renovate.json" || -f "renovate.json5" || -f ".github/renovate.json" ||
+	-f ".github/renovate.json5" || -f ".renovaterc" || -f ".renovaterc.json" ||
+	-f ".renovaterc.json5" || -f ".gitlab/renovate.json" ]]; then
+	has_renovate_config="true"
 fi
 
 # Versioning: the tool applies to any Gradle project — it polices whether the
@@ -317,6 +330,19 @@ if [[ "$has_snyk_prs_config" == "true" ]]; then
 	fi
 fi
 
+# renovate — open PRs authored by renovate[bot] (branch prefix renovate/).
+# A third vendor-PR source; java-maintenance-planner classifies ecosystem +
+# bump level from the Renovate title/branch and routes alongside Dependabot.
+if [[ "$has_renovate_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		gh pr list --author "app/renovate" --state open --json number,title,body,headRefName \
+			>"$findings_dir/renovate.json" 2>/dev/null || echo "[]" >"$findings_dir/renovate.json"
+	else
+		echo "[]" >"$findings_dir/renovate.json"
+		notes+=("renovate is configured but 'gh' is not available/authenticated; can't list open Renovate PRs.")
+	fi
+fi
+
 # versioning — flag a HARDCODED version (a manual-bump SemVer risk). The
 # java-versioning-advisor recommends build-driven versioning (nebula-release,
 # version derived from git tags) where the release bump is derived from
@@ -462,6 +488,7 @@ jq -n \
 	--argjson semgrep_cfg "$has_semgrep_config" \
 	--argjson dependabot_cfg "$has_dependabot_config" \
 	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
+	--argjson renovate_cfg "$has_renovate_config" \
 	--argjson versioning_cfg "$has_versioning_config" \
 	--argjson grpc_cfg "$has_grpc_config" \
 	--argjson openapi_cfg "$has_openapi_config" \
@@ -471,6 +498,7 @@ jq -n \
 	--argjson semgrep_findings "$(emit_findings semgrep "$has_semgrep_config")" \
 	--argjson dependabot_findings "$(emit_findings dependabot "$has_dependabot_config")" \
 	--argjson snyk_prs_findings "$(emit_findings snyk_prs "$has_snyk_prs_config")" \
+	--argjson renovate_findings "$(emit_findings renovate "$has_renovate_config")" \
 	--argjson versioning_findings "$(emit_findings versioning "$has_versioning_config")" \
 	--argjson grpc_findings "$(emit_findings grpc "$has_grpc_config")" \
 	--argjson openapi_findings "$(emit_findings openapi "$has_openapi_config")" \
@@ -490,6 +518,7 @@ jq -n \
     semgrep:       $semgrep_cfg,
     dependabot:    $dependabot_cfg,
     snyk_prs:      $snyk_prs_cfg,
+    renovate:      $renovate_cfg,
     versioning:    $versioning_cfg,
     grpc:          $grpc_cfg,
     openapi:       $openapi_cfg
@@ -502,6 +531,7 @@ jq -n \
     (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end) +
     (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
     (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end) +
+    (if $renovate_findings    != null then {renovate:             $renovate_findings}    else {} end) +
     (if $versioning_findings  != null then {versioning:           $versioning_findings}  else {} end) +
     (if $grpc_findings        != null then {grpc:                 $grpc_findings}        else {} end) +
     (if $openapi_findings     != null then {openapi:              $openapi_findings}     else {} end)

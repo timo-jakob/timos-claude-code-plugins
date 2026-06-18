@@ -94,26 +94,48 @@ fi
 # Reactive trigger. development-spring OWNS Spring Boot version bumps (the
 # config-property relocations + removed-API fixes a generic dep bump can't do);
 # development-java's planner DEFERS org.springframework.boot bumps here. We list
-# open Dependabot/Snyk PRs that bump org.springframework.boot to a new MAJOR or
-# MINOR (where the Boot configuration changelog matters). In practice patch +
-# minor gradle bumps are grouped (so only standalone majors surface here);
-# patch bumps stay with development-java's normal vendor-PR triage.
+# open Dependabot/Snyk/Renovate PRs that bump org.springframework.boot to a new
+# MAJOR or MINOR (where the Boot configuration changelog matters). In practice
+# patch + minor gradle bumps are grouped (so only standalone majors surface
+# here); patch bumps stay with development-java's normal vendor-PR triage.
 # The tool is "configured" for any Spring repo; findings are [] when gh can't
 # list PRs.
+#
+# Title formats differ by source:
+#   Dependabot / Snyk : "Bump org.springframework.boot ... from 4.0.1 to 4.1.0"
+#   Renovate          : "Update spring boot to v4.1.0" (target only, no "from",
+#                        and the friendly name "spring boot" not the coordinate)
+# For Renovate we read the current Boot version from the build file as the
+# "from" so the major/minor comparison still works.
 local has_boot_upgrade="true"
 local boot_findings="[]"
+# Current declared Boot version (plugin id or dependency-management import) —
+# used as the "from" for Renovate PRs whose title carries only the target.
+local cur_boot
+cur_boot="$(grep -rhE "springframework\.boot" \
+  --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null \
+  | grep -E "version|:[0-9]" \
+  | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+[[ -n "$cur_boot" ]] || cur_boot="0.0.0"
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   local raw
   raw="$( { gh pr list --author "app/dependabot" --state open \
               --json number,title,headRefName 2>/dev/null || print -- '[]'
             gh pr list --state open --search "head:snyk-" \
               --json number,title,headRefName 2>/dev/null || print -- '[]'
+            gh pr list --author "app/renovate" --state open \
+              --json number,title,headRefName 2>/dev/null || print -- '[]'
           } | jq -s 'add // []' )"
-  boot_findings="$(print -r -- "$raw" | jq '
+  boot_findings="$(print -r -- "$raw" | jq --arg cur "$cur_boot" '
     [ .[]
-      | select(.title | test("org\\.springframework\\.boot"))
-      | (.title | capture("from (?<from>[0-9]+(\\.[0-9]+)+) to (?<to>[0-9]+(\\.[0-9]+)+)")) as $v
-      | select($v != null)
+      # Match the coordinate (Dependabot/Snyk) OR the Renovate friendly name.
+      | select(.title | test("org\\.springframework\\.boot"; "i")
+                     or test("spring[ -]boot"; "i"))
+      # Prefer an explicit "from X to Y"; else Renovate "to vY" with cur as from.
+      | ( (.title | capture("from (?<from>[0-9]+(\\.[0-9]+)+) to (?<to>[0-9]+(\\.[0-9]+)+)"))
+          // ( (.title | capture("to v?(?<to>[0-9]+(\\.[0-9]+)+)"))
+               | { from: $cur, to: .to } ) ) as $v
+      | select($v != null and $v.to != null)
       | { from: $v.from, to: $v.to,
           fmaj: ($v.from | split(".")[0] | tonumber),
           tmaj: ($v.to   | split(".")[0] | tonumber),
@@ -125,7 +147,9 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
           package:"org.springframework.boot",
           from_version:.from, to_version:.to,
           pr_number:.number, title:.title, headRefName:.headRefName,
-          source:(if (.headRefName|startswith("snyk-")) then "snyk_prs" else "dependabot" end),
+          source:(if (.headRefName|startswith("snyk-")) then "snyk_prs"
+                  elif (.headRefName|startswith("renovate/")) then "renovate"
+                  else "dependabot" end),
           message:("Spring Boot " + .from + " -> " + .to + " (PR #" + (.number|tostring) + ") — apply the Boot migration (config relocations + removed-API fixes)."),
           key:("spring_boot_upgrade:" + (.number|tostring)) } ]')"
 else
