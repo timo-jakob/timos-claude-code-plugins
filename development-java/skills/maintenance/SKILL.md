@@ -111,10 +111,12 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 > vendor-PR handling (`dependabot` + `snyk_prs` → triage,
 > `java-major-upgrade`, or `java-runtime-upgrade` for JDK base-image bumps),
 > `versioning` (a hardcoded `version` → `java-versioning-advisor`, which
-> recommends build-driven semver), and `grpc` (a `.proto` contract →
-> `java-grpc-advisor`, which audits the protobuf/gRPC code-generation
-> wiring), with coverage measured via JaCoCo. Validate and route against the
-> supported set only.
+> recommends build-driven semver), `grpc` (a `.proto` contract →
+> `java-grpc-advisor`), and `openapi` (a committed OpenAPI spec in a
+> **non-Spring** repo → `java-openapi-advisor`, the `jaxrs-spec` generator;
+> Spring OpenAPI is `development-spring`'s `spring-api-advisor`), with
+> coverage measured via JaCoCo. Validate and route against the supported set
+> only.
 
 ## Validation
 
@@ -143,9 +145,10 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 5. **Validate `dispatch_filter`** (when present). Each name in
    `only_tools` must be a supported tool: `format_lint`, `sonarcloud`,
    `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`, `versioning`,
-   `grpc`. Unknown names halt with: "Unknown tool '`<X>`' in
+   `grpc`, `openapi`. Unknown names halt with: "Unknown tool '`<X>`' in
    dispatch_filter.only_tools; supported: format_lint, sonarcloud,
-   code_scanning, semgrep, dependabot, snyk_prs, versioning, grpc." Each name with
+   code_scanning, semgrep, dependabot, snyk_prs, versioning, grpc, openapi."
+   Each name with
    `tooling_configured.<name> == false` halts with: "Cannot scope to `<X>`:
    not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
@@ -194,10 +197,12 @@ to the set: `format_lint` (pure-mechanical, behavior-preserving); the
 file-less `code_scanning` findings (Scorecard repo-policy alerts, and the
 Tier A action-pinning fixes that edit `.github/workflows/*.yml`, not Java
 source); `versioning` (the advisor edits the build script's version
-config, never Java source under test); and `grpc` (the advisor edits the
-build script's protobuf/codegen wiring — generated stubs aren't source
-under test, and the advisor recommends excluding them from coverage). When
-`dispatch_filter.only_tools` is set, restrict this to the filtered tools.
+config, never Java source under test); `grpc` (the advisor edits the build
+script's protobuf/codegen wiring — generated stubs aren't source under
+test, and the advisor recommends excluding them from coverage); and
+`openapi` (likewise edits the build script's openapi-generator wiring, not
+source under test). When `dispatch_filter.only_tools` is set, restrict this
+to the filtered tools.
 
 #### Step 2b — major dep upgrades (the no-file-path case)
 

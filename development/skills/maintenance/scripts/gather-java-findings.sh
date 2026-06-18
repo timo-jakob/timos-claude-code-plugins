@@ -16,7 +16,8 @@
 #       "dependabot":    true|false,  # open Dependabot PRs
 #       "snyk_prs":      true|false,   # open Snyk auto-Fix/Upgrade PRs
 #       "versioning":    true|false,   # build-driven vs hardcoded version
-#       "grpc":          true|false   # gRPC/protobuf code-gen (.proto present)
+#       "grpc":          true|false,   # gRPC/protobuf code-gen (.proto present)
+#       "openapi":       true|false   # non-Spring contract-first OpenAPI
 #     },
 #     "findings_by_tool": {
 #       "format_lint":          [ ... or omitted if not configured ... ],
@@ -26,7 +27,8 @@
 #       "dependabot":           [ ... open Dependabot PR records ... ],
 #       "snyk_prs":             [ ... open Snyk PR records ... ],
 #       "versioning":           [ ... hardcoded-version findings ... ],
-#       "grpc":                 [ ... proto-audit finding ... ]
+#       "grpc":                 [ ... proto-audit finding ... ],
+#       "openapi":              [ ... contract-audit finding ... ]
 #     },
 #     "coverage": {                 # measured via JaCoCo (gradle jacocoTestReport)
 #       "overall": 0..100|null,     # null = withheld (untrustworthy / unmeasured)
@@ -144,6 +146,22 @@ has_grpc_config="false"
 if find . -path '*/build/*' -prune -o -path '*/.git/*' -prune -o \
 	-name '*.proto' -print -quit 2>/dev/null | grep -q .; then
 	has_grpc_config="true"
+fi
+
+# OpenAPI (NON-Spring): contract-first OpenAPI applies to non-Spring Java HTTP
+# services. Configured when a committed OpenAPI spec exists AND the repo is NOT
+# a Spring web app — Spring repos are handled by development-spring's
+# spring-api-advisor (the `spring` generator), so we defer to avoid
+# double-handling (mirrors the org.springframework.boot bump deferral). This
+# advisor uses the non-Spring `jaxrs-spec` generator.
+has_openapi_config="false"
+if find . -path '*/build/*' -prune -o -path '*/.git/*' -prune -o \
+	\( -iname 'openapi.yaml' -o -iname 'openapi.yml' -o -iname 'openapi.json' \) \
+	-print -quit 2>/dev/null | grep -q .; then
+	if ! grep -rqE 'spring-boot-starter-web(flux)?' \
+		--include='build.gradle' --include='build.gradle.kts' . 2>/dev/null; then
+		has_openapi_config="true"
+	fi
 fi
 
 # --- findings_by_tool --------------------------------------------------------
@@ -351,6 +369,24 @@ if [[ "$has_grpc_config" == "true" ]]; then
 	fi
 fi
 
+# openapi — emit one contract-audit finding (referencing the root build file)
+# when a committed OpenAPI spec exists in a non-Spring repo. The
+# java-openapi-advisor reads the build script and checks the openapi-generator
+# wiring (jaxrs-spec generator), recommending the setup when it's missing.
+if [[ "$has_openapi_config" == "true" ]]; then
+	echo "[]" >"$findings_dir/openapi.json"
+	oa_build="$(find . -maxdepth 2 -path '*/build/*' -prune -o \
+		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null | head -n1)"
+	if [[ -n "$oa_build" ]]; then
+		jq -n --arg c "${oa_build#./}" '[{
+			type: "config", severity: "MINOR", rule: "openapi:contract-audit",
+			component: $c, line: 0,
+			message: "Audit the contract-first OpenAPI wiring (non-Spring) — a committed OpenAPI spec as the authoritative HTTP surface, with openapi-generator producing JAX-RS (jaxrs-spec) interfaces the resources implement, so code/spec drift fails the build.",
+			key: ("openapi:contract-audit:" + $c)
+		}]' >"$findings_dir/openapi.json"
+	fi
+fi
+
 # --- coverage (JaCoCo) -------------------------------------------------------
 # Run the test suite + JaCoCo report, parse per-source-file LINE coverage. A
 # figure is only trustworthy when Gradle completes normally (exit 0 = green, or
@@ -428,6 +464,7 @@ jq -n \
 	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
 	--argjson versioning_cfg "$has_versioning_config" \
 	--argjson grpc_cfg "$has_grpc_config" \
+	--argjson openapi_cfg "$has_openapi_config" \
 	--argjson format_lint_findings "$(emit_findings format_lint "$has_format_lint_config")" \
 	--argjson sonar_findings "$(emit_findings sonarcloud "$has_sonar_config")" \
 	--argjson cs_findings "$(emit_findings code_scanning_alerts "$has_code_scanning_config")" \
@@ -436,6 +473,7 @@ jq -n \
 	--argjson snyk_prs_findings "$(emit_findings snyk_prs "$has_snyk_prs_config")" \
 	--argjson versioning_findings "$(emit_findings versioning "$has_versioning_config")" \
 	--argjson grpc_findings "$(emit_findings grpc "$has_grpc_config")" \
+	--argjson openapi_findings "$(emit_findings openapi "$has_openapi_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--arg coverage_source "$coverage_source" \
@@ -453,7 +491,8 @@ jq -n \
     dependabot:    $dependabot_cfg,
     snyk_prs:      $snyk_prs_cfg,
     versioning:    $versioning_cfg,
-    grpc:          $grpc_cfg
+    grpc:          $grpc_cfg,
+    openapi:       $openapi_cfg
   },
   findings_by_tool: (
     {} +
@@ -464,7 +503,8 @@ jq -n \
     (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
     (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end) +
     (if $versioning_findings  != null then {versioning:           $versioning_findings}  else {} end) +
-    (if $grpc_findings        != null then {grpc:                 $grpc_findings}        else {} end)
+    (if $grpc_findings        != null then {grpc:                 $grpc_findings}        else {} end) +
+    (if $openapi_findings     != null then {openapi:              $openapi_findings}     else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,

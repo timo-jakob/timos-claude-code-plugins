@@ -53,7 +53,7 @@ setup() {
   printf 'plugins { java }\n' > "$WORK/build.gradle"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
-  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs grpc; do
+  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs grpc openapi; do
     [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
   done
 }
@@ -67,6 +67,26 @@ setup() {
   [ "$(jq -r .tooling_configured.grpc <<<"$output")" = "true" ]
   [ "$(jq -r '.findings_by_tool.grpc | length' <<<"$output")" = "1" ]
   [ "$(jq -r '.findings_by_tool.grpc[0].rule' <<<"$output")" = "grpc:proto-audit" ]
+}
+
+@test "gather-java: OpenAPI spec in a non-Spring repo -> openapi configured + finding" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  mkdir -p "$WORK/src/main/resources"
+  printf 'openapi: 3.0.0\n' > "$WORK/src/main/resources/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.openapi <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.openapi[0].rule' <<<"$output")" = "openapi:contract-audit" ]
+}
+
+@test "gather-java: OpenAPI spec in a Spring repo -> openapi deferred (not configured)" {
+  printf 'plugins { java }\ndependencies { implementation "org.springframework.boot:spring-boot-starter-web" }\n' > "$WORK/build.gradle"
+  mkdir -p "$WORK/src/main/resources"
+  printf 'openapi: 3.0.0\n' > "$WORK/src/main/resources/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.openapi <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("openapi")' <<<"$output")" = "false" ]
 }
 
 @test "gather-java: no sonar-project.properties -> sonarcloud not configured" {
