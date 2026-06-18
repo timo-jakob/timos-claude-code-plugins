@@ -222,9 +222,20 @@ gather-script + dispatch contract).
 | java-runtime-upgrade | opus | JDK LTS bumps (Docker base image) — swaps the Gradle toolchain + wrapper, cascades JDK-sensitive deps |
 | java-coverage-improver | opus | Writes meaningful JUnit tests to raise JaCoCo coverage; never edits production code |
 | java-versioning-advisor | sonnet | Flags a hardcoded `version` (a SemVer risk); recommends build-driven versioning (nebula-release) |
+| java-grpc-advisor | sonnet | Audits gRPC/protobuf code generation — the `com.google.protobuf` Gradle plugin generating Java + gRPC stubs from the authoritative `.proto` contract; recommends excluding generated sources from coverage |
+| java-openapi-advisor | sonnet | Audits **non-Spring** contract-first OpenAPI — openapi-generator's `jaxrs-spec` (Jakarta REST) generator from a committed spec, so code/spec drift fails the build (the Spring case is `development-spring`'s `spring-api-advisor`) |
 | java-maintenance-planner | sonnet | Ranks + groups findings, routes each to its agent (defers `org.springframework.boot` bumps to `development-spring`) |
 | java-ci-fixer | sonnet | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
 | java-approver | opus | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`) |
+
+**API-style convention.** gRPC is the standard for **internal, inter-service
+communication** — efficient on the wire, low-latency, with bidirectional /
+parallel streaming. **Public endpoints for external users get REST APIs**
+(OpenAPI). The advisors are split to match: `java-grpc-advisor` governs the
+internal-comms contract (`.proto`), `java-openapi-advisor` (and, for Spring,
+`spring-api-advisor`) governs the public REST contract (OpenAPI) — and the
+gather routes a repo to exactly one OpenAPI advisor based on whether it's a
+Spring web app.
 
 **Build-driven semantic versioning:** `/development:bootstrap` emits a
 `release.yml` whose default `auto` scope runs `derive-release-scope.zsh` to

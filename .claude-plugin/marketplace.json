@@ -19,7 +19,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills.",
-      "version": "1.37.0",
+      "version": "1.38.0",
       "author": {
         "name": "Timo Jakob"
       },
@@ -39,7 +39,7 @@
     {
       "name": "development-java",
       "description": "Java/Gradle maintenance plugin \u2014 full-maintenance tier mirroring development-python. Dispatches per-tool agents (Spotless, SonarCloud, CodeQL/Scorecard, semgrep, Dependabot/Snyk PRs, Gradle major upgrades) in worktrees, with a JaCoCo coverage pre-flight; ships the java-approver reviewer + /development-java:approve. JDK runtime upgrades land in a later slice (#308).",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "author": {
         "name": "Timo Jakob"
       },
@@ -49,7 +49,7 @@
     {
       "name": "development-spring",
       "description": "Spring framework TOPIC plugin \u2014 composes alongside development-java for Java + Spring Boot 4+ repos (baseline Spring Framework 7 / Jakarta EE 11; older Boot lines out of scope). Audits Spring configuration via spring-config-advisor; reuses java-ci-fixer for CI. Incremental: config audit in v0.1; a Spring Boot version-upgrade agent, bootBuildImage, and the contract-first API drift gate land in later slices (#296).",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "author": {
         "name": "Timo Jakob"
       },

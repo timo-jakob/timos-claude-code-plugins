@@ -11,7 +11,15 @@ design is **contract-first**: a committed OpenAPI spec (e.g.
 definition** of the HTTP surface. The `org.openapi.generator` Gradle
 plugin generates Spring **interfaces + DTOs** from that spec into a
 generated-sources dir wired into compilation, and the app's
-`@RestController`s **implement** those generated `*Api` interfaces. Drift
+`@RestController`s **implement** those generated `*Api` interfaces.
+
+> **This is the Spring specialization** — you use openapi-generator's
+> `spring` generator (`generatorName = 'spring'`, `useSpringBoot3`/jakarta),
+> and you only run for Spring repos. The **non-Spring** Java OpenAPI case
+> (plain Java / JAX-RS, the `jaxrs-spec` generator) is `java-openapi-advisor`
+> in `development-java`; the gather routes a repo to exactly one of the two
+> based on whether `spring-boot-starter-web`/`-webflux` is present, so they
+> never double-handle. Drift
 between code and spec then fails the **build** — the generated interface
 won't match the controller — and that is the drift gate. The gather step
 emits one `api-audit` finding per build file. A grep sees the build file
