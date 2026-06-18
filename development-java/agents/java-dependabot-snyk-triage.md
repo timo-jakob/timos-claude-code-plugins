@@ -314,8 +314,8 @@ gh pr view <number> --json reviewDecision --jq '.reviewDecision // "NONE"'
       "tool": "vendor_prs",
       "source": "dependabot",
       "pr_number": 12,
-      "recommendation": "review and merge manually: bump eclipse-temurin from 21-jdk to 25-jdk",
-      "rationale": "JDK base-image bumps need manual review (and a future java-runtime-upgrade agent); even a minor tag change can shift runtime behavior"
+      "recommendation": "review and merge manually: bump postgres from 16-alpine to 17-alpine",
+      "rationale": "Non-JDK Docker base-image bump (a service/sidecar image) — needs manual review for runtime behavior changes. (JDK base-image bumps don't reach here — the planner routes those to java-runtime-upgrade.)"
     }
   ],
   "unable_to_fix": [
@@ -352,11 +352,13 @@ multi-PR-per-package cases).
   the code-side migration story; that's `java-major-upgrade`'s job. Any
   gradle-major PR reaching you is a dispatcher routing error — surface
   it in `actions_requiring_review`.
-- **Docker base-image bumps are always human-review.** The dispatcher
-  routes them to Path A; for Java these are often the JDK base image
-  (eclipse-temurin / amazoncorretto). A dedicated `java-runtime-upgrade`
-  agent for JDK LTS bumps is a future slice (#308); until it lands, all
-  docker bumps stay human-review.
+- **Non-JDK Docker base-image bumps are human-review.** The dispatcher
+  routes them to Path A. **JDK base-image bumps (eclipse-temurin /
+  amazoncorretto / openjdk / …) do NOT reach you** — the planner extracts
+  those into their own `java-runtime-upgrade` group (the JDK LTS migration
+  handler), the same way `gradle`-major bumps go to `java-major-upgrade`.
+  If a JDK base-image bump lands in your input, treat it as a dispatcher
+  routing error and surface it in `actions_requiring_review`.
 - **Read release notes carefully for minors.** Skim ≠ read. A minor
   bump that silently changes default values is the most common
   "I auto-merged this and it broke prod" trap. Spend the WebFetch
