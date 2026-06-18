@@ -382,6 +382,26 @@ whether the gather/detection saw a `spotless` marker):
 > dependency resolution is reproducible and a surprise transitive bump
 > shows up as a lockfile diff in review.
 
+If `java` is detected, the generated **`.github/workflows/release.yml`**
+(build-driven semantic versioning) assumes **nebula-release** is wired and
+that **no version is hardcoded** — surface this TODO too:
+
+> ☕ **Adopt build-driven versioning (nebula-release).** The generated
+> `release.yml` derives the version from git tags via the nebula plugin —
+> remove any hardcoded `version = '...'` and apply the plugin:
+>
+> ```groovy
+> plugins {
+>     id 'com.netflix.nebula.release' version '<latest>'  // or 'nebula.release'
+> }
+> // No `version = '...'` — nebula derives it from the last git tag.
+> ```
+>
+> Then run a release with `.github/workflows/release.yml` (manual dispatch,
+> pick patch/minor/major) — it runs `./gradlew final`, which tags the next
+> version. Locally, `./gradlew currentVersion` shows the derived version and
+> `./gradlew final -Prelease.scope=minor` cuts a release.
+
 Do not modify `build.gradle(.kts)` automatically — that's their file. Just
 call it out, with the snippet.
 
@@ -613,6 +633,13 @@ For each detected language, merge in the appropriate config from
 - Linter config (e.g., `.eslintrc.json`, `ruff.toml`, `.golangci.yml`)
 - Coverage tooling note in `sonar-project.properties` (paths, report format)
 - Pre-commit hook entries (already merged into `.pre-commit-config.yaml`)
+- **Java only:** render
+  `templates/languages/java/.github/workflows/release.yml.tmpl` →
+  `.github/workflows/release.yml` (substitute `{{JAVA_VERSION}}`) — the
+  build-driven semantic-versioning release workflow (nebula-release). Pair
+  it with the nebula versioning TODO in the Java-specific recommendation
+  above (the workflow assumes the plugin is applied + no hardcoded
+  `version`). Apply the standard idempotency rules (skip/diff if it exists).
 
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
 

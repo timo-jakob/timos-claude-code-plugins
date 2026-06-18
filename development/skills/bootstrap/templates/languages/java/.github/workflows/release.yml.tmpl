@@ -1,0 +1,62 @@
+# Release workflow — build-driven semantic versioning via nebula-release.
+#
+# The project version is DERIVED from git tags by the nebula.release Gradle
+# plugin (no `version = '...'` in build.gradle). This workflow computes the
+# next version from the last tag + the chosen semver scope, creates the tag,
+# and builds the release — no manual version bump.
+#
+# Prerequisite: the `nebula.release` plugin applied in build.gradle(.kts) and
+# NO hardcoded `version` (see the Java versioning recommendation in SETUP.md /
+# the /development:bootstrap summary). Run it manually and pick the scope.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Semver scope to bump from the last git tag"
+        type: choice
+        options: ["patch", "minor", "major"]
+        default: "patch"
+
+# nebula's `final` task pushes the release tag — the job needs write access.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # nebula derives the version from the FULL tag history.
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "{{JAVA_VERSION}}"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure git identity for the release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # `final` derives the next version (last tag + scope), tags it, and
+      # builds the release. SCOPE is funnelled through env: rather than inlined
+      # into run: so the github-context value isn't shell-injected (the same
+      # posture as the quality workflow's BASE_REF).
+      - name: Release (nebula final)
+        env:
+          SCOPE: ${{ inputs.scope }}
+        run: ./gradlew --no-daemon final -Prelease.scope="${SCOPE}"
