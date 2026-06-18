@@ -16,11 +16,15 @@ setopt err_exit nounset pipefail
 # project's Spring configuration files (application.yml/.yaml/.properties +
 # profile variants) and emits one `config-audit` finding per file. The
 # spring-config-advisor agent then READS each file (YAML-aware, which a grep
-# can't be) and triages + fixes: deprecated/relocated Spring Boot 3.x property
+# can't be) and triages + fixes: deprecated/relocated Spring Boot 4 property
 # keys, actuator endpoint over-exposure (`exposure.include: "*"`), and a few
 # best-practice gaps. Discovery lives here; the YAML-aware judgement lives in
-# the agent. Future slices add the Spring Boot 2->3 Jakarta migration,
-# bootBuildImage container generation, and the contract-first API drift gate.
+# the agent. (These projects target Spring Boot 4+ — the baseline is Spring
+# Framework 7 / Jakarta EE 11, so there is no javax->jakarta migration; older
+# Spring Boot lines are out of scope.) Future slices add a Spring Boot
+# version-upgrade agent (config relocations + removed-API fixes per the Boot
+# migration guide), bootBuildImage container generation, and the contract-first
+# API drift gate.
 #
 # Usage: gather-spring-findings.zsh <repo_path>
 # Output: JSON on stdout.
@@ -62,7 +66,7 @@ if [[ "$has_spring_config" == "true" ]]; then
     finding_objs+=("$(jq -n --arg c "${f#./}" \
       '{type:"config", severity:"MINOR", rule:"spring:config-audit",
         component:$c, line:0,
-        message:("Audit Spring configuration `" + $c + "` for deprecated/relocated Spring Boot 3.x property keys, actuator endpoint over-exposure, and best-practice gaps."),
+        message:("Audit Spring configuration `" + $c + "` for deprecated/relocated Spring Boot 4 property keys, actuator endpoint over-exposure, and best-practice gaps."),
         key:("spring_config:audit:" + $c)}')")
   done
 

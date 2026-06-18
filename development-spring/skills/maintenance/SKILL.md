@@ -68,8 +68,11 @@ contains keys for configured tools.
 
 > **Tool universe (this slice).** `development-spring` supports one tool:
 > `spring_config` (a Spring configuration audit → `spring-config-advisor`).
-> Later slices add the Spring Boot 2→3 Jakarta migration, `bootBuildImage`
-> container generation, and the contract-first API drift gate (#296).
+> **Scope: Spring Boot 4+** (baseline Spring Framework 7 / Jakarta EE 11) —
+> older Boot lines and the `javax`→`jakarta` migration are out of scope.
+> Later slices add a Spring Boot version-upgrade agent (config relocations
+> plus removed-API fixes), `bootBuildImage` container generation, and the
+> contract-first API drift gate (#296).
 
 ## Validation
 
