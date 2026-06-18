@@ -15,7 +15,8 @@
 #       "semgrep":       true|false,  # semgrep (--config=auto)
 #       "dependabot":    true|false,  # open Dependabot PRs
 #       "snyk_prs":      true|false,   # open Snyk auto-Fix/Upgrade PRs
-#       "versioning":    true|false   # build-driven vs hardcoded version
+#       "versioning":    true|false,   # build-driven vs hardcoded version
+#       "grpc":          true|false   # gRPC/protobuf code-gen (.proto present)
 #     },
 #     "findings_by_tool": {
 #       "format_lint":          [ ... or omitted if not configured ... ],
@@ -24,7 +25,8 @@
 #       "semgrep":              [ ... semgrep results array ... ],
 #       "dependabot":           [ ... open Dependabot PR records ... ],
 #       "snyk_prs":             [ ... open Snyk PR records ... ],
-#       "versioning":           [ ... hardcoded-version findings ... ]
+#       "versioning":           [ ... hardcoded-version findings ... ],
+#       "grpc":                 [ ... proto-audit finding ... ]
 #     },
 #     "coverage": {                 # measured via JaCoCo (gradle jacocoTestReport)
 #       "overall": 0..100|null,     # null = withheld (untrustworthy / unmeasured)
@@ -133,6 +135,15 @@ has_versioning_config="false"
 if find . -maxdepth 2 -path '*/build/*' -prune -o \
 	\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print -quit 2>/dev/null | grep -q .; then
 	has_versioning_config="true"
+fi
+
+# gRPC / protobuf: configured when .proto files exist (the authoritative API
+# contract). The java-grpc-advisor audits whether the com.google.protobuf
+# Gradle plugin is wired to generate Java + gRPC stubs from them.
+has_grpc_config="false"
+if find . -path '*/build/*' -prune -o -path '*/.git/*' -prune -o \
+	-name '*.proto' -print -quit 2>/dev/null | grep -q .; then
+	has_grpc_config="true"
 fi
 
 # --- findings_by_tool --------------------------------------------------------
@@ -322,6 +333,24 @@ if [[ "$has_versioning_config" == "true" ]]; then
 	fi
 fi
 
+# grpc — emit one proto-audit finding (referencing the root build file) when
+# .proto files exist. The java-grpc-advisor reads the build script and checks
+# the com.google.protobuf / protoc / gRPC wiring (a grep can't reliably judge
+# the multi-block plugin config), recommending the setup when it's missing.
+if [[ "$has_grpc_config" == "true" ]]; then
+	echo "[]" >"$findings_dir/grpc.json"
+	grpc_build="$(find . -maxdepth 2 -path '*/build/*' -prune -o \
+		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null | head -n1)"
+	if [[ -n "$grpc_build" ]]; then
+		jq -n --arg c "${grpc_build#./}" '[{
+			type: "config", severity: "MINOR", rule: "grpc:proto-audit",
+			component: $c, line: 0,
+			message: "Audit the gRPC/protobuf code-generation wiring — the com.google.protobuf Gradle plugin running protoc + the gRPC plugin to generate Java + gRPC stubs from the authoritative .proto contract, with generated sources on the compile path and excluded from coverage.",
+			key: ("grpc:proto-audit:" + $c)
+		}]' >"$findings_dir/grpc.json"
+	fi
+fi
+
 # --- coverage (JaCoCo) -------------------------------------------------------
 # Run the test suite + JaCoCo report, parse per-source-file LINE coverage. A
 # figure is only trustworthy when Gradle completes normally (exit 0 = green, or
@@ -398,6 +427,7 @@ jq -n \
 	--argjson dependabot_cfg "$has_dependabot_config" \
 	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
 	--argjson versioning_cfg "$has_versioning_config" \
+	--argjson grpc_cfg "$has_grpc_config" \
 	--argjson format_lint_findings "$(emit_findings format_lint "$has_format_lint_config")" \
 	--argjson sonar_findings "$(emit_findings sonarcloud "$has_sonar_config")" \
 	--argjson cs_findings "$(emit_findings code_scanning_alerts "$has_code_scanning_config")" \
@@ -405,6 +435,7 @@ jq -n \
 	--argjson dependabot_findings "$(emit_findings dependabot "$has_dependabot_config")" \
 	--argjson snyk_prs_findings "$(emit_findings snyk_prs "$has_snyk_prs_config")" \
 	--argjson versioning_findings "$(emit_findings versioning "$has_versioning_config")" \
+	--argjson grpc_findings "$(emit_findings grpc "$has_grpc_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--arg coverage_source "$coverage_source" \
@@ -421,7 +452,8 @@ jq -n \
     semgrep:       $semgrep_cfg,
     dependabot:    $dependabot_cfg,
     snyk_prs:      $snyk_prs_cfg,
-    versioning:    $versioning_cfg
+    versioning:    $versioning_cfg,
+    grpc:          $grpc_cfg
   },
   findings_by_tool: (
     {} +
@@ -431,7 +463,8 @@ jq -n \
     (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end) +
     (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
     (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end) +
-    (if $versioning_findings  != null then {versioning:           $versioning_findings}  else {} end)
+    (if $versioning_findings  != null then {versioning:           $versioning_findings}  else {} end) +
+    (if $grpc_findings        != null then {grpc:                 $grpc_findings}        else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,
