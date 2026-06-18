@@ -14,7 +14,8 @@
 #       "code_scanning": true|false,  # GitHub Code Scanning (CodeQL + Scorecard)
 #       "semgrep":       true|false,  # semgrep (--config=auto)
 #       "dependabot":    true|false,  # open Dependabot PRs
-#       "snyk_prs":      true|false   # open Snyk auto-Fix/Upgrade PRs
+#       "snyk_prs":      true|false,   # open Snyk auto-Fix/Upgrade PRs
+#       "versioning":    true|false   # build-driven vs hardcoded version
 #     },
 #     "findings_by_tool": {
 #       "format_lint":          [ ... or omitted if not configured ... ],
@@ -22,7 +23,8 @@
 #       "code_scanning_alerts": [ ... CodeQL + Scorecard alerts ... ],
 #       "semgrep":              [ ... semgrep results array ... ],
 #       "dependabot":           [ ... open Dependabot PR records ... ],
-#       "snyk_prs":             [ ... open Snyk PR records ... ]
+#       "snyk_prs":             [ ... open Snyk PR records ... ],
+#       "versioning":           [ ... hardcoded-version findings ... ]
 #     },
 #     "coverage": {                 # measured via JaCoCo (gradle jacocoTestReport)
 #       "overall": 0..100|null,     # null = withheld (untrustworthy / unmeasured)
@@ -122,6 +124,15 @@ fi
 has_snyk_prs_config="false"
 if [[ -f ".snyk" ]]; then
 	has_snyk_prs_config="true"
+fi
+
+# Versioning: the tool applies to any Gradle project — it polices whether the
+# version is build-driven (derived from git tags) vs hardcoded. "Configured"
+# whenever a Gradle build file exists; findings fire on a hardcoded version.
+has_versioning_config="false"
+if find . -maxdepth 2 -path '*/build/*' -prune -o \
+	\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print -quit 2>/dev/null | grep -q .; then
+	has_versioning_config="true"
 fi
 
 # --- findings_by_tool --------------------------------------------------------
@@ -277,6 +288,40 @@ if [[ "$has_snyk_prs_config" == "true" ]]; then
 	fi
 fi
 
+# versioning — flag a HARDCODED version (a manual-bump SemVer risk). The
+# java-versioning-advisor recommends build-driven versioning (nebula-release,
+# version derived from git tags) where the release bump is derived from
+# Conventional Commits. Match `version = '...'` / `version = "..."` in a Gradle
+# build script, and `version=...` in gradle.properties.
+if [[ "$has_versioning_config" == "true" ]]; then
+	ver_hits="$(grep -rnE "^[[:space:]]*version[[:space:]]*=[[:space:]]*['\"]" \
+		--include='build.gradle' --include='build.gradle.kts' . 2>/dev/null || true)"
+	if [[ -f "gradle.properties" ]]; then
+		gp_hits="$(grep -nE '^[[:space:]]*version[[:space:]]*=' gradle.properties 2>/dev/null |
+			sed 's#^#./gradle.properties:#' || true)"
+		ver_hits="$(printf '%s\n%s\n' "$ver_hits" "$gp_hits")"
+	fi
+	# Each hit: "<path>:<line>:<text>". Capture the grep'd lines first — a
+	# no-match grep exits 1, which under `set -euo pipefail` (pipefail) would
+	# abort the whole script if left mid-pipeline. `|| true` tolerates it.
+	echo "[]" >"$findings_dir/versioning.json"
+	ver_lines="$(printf '%s\n' "$ver_hits" | grep -E ':[0-9]+:' || true)"
+	if [[ -n "$ver_lines" ]]; then
+		printf '%s\n' "$ver_lines" |
+			while IFS= read -r hit; do
+				vfile="${hit%%:*}"
+				rest="${hit#*:}"
+				vline="${rest%%:*}"
+				jq -n --arg c "${vfile#./}" --argjson l "$vline" '{
+					type: "config", severity: "MINOR", rule: "versioning:hardcoded-version",
+					component: $c, line: $l,
+					message: "Hardcoded project version — a manual-bump SemVer risk. Adopt build-driven versioning (nebula-release derives the version from git tags; the release workflow derives the bump from Conventional Commits).",
+					key: ("versioning:hardcoded:" + $c + ":" + ($l|tostring))
+				}'
+			done | jq -s '.' >"$findings_dir/versioning.json"
+	fi
+fi
+
 # --- coverage (JaCoCo) -------------------------------------------------------
 # Run the test suite + JaCoCo report, parse per-source-file LINE coverage. A
 # figure is only trustworthy when Gradle completes normally (exit 0 = green, or
@@ -352,12 +397,14 @@ jq -n \
 	--argjson semgrep_cfg "$has_semgrep_config" \
 	--argjson dependabot_cfg "$has_dependabot_config" \
 	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
+	--argjson versioning_cfg "$has_versioning_config" \
 	--argjson format_lint_findings "$(emit_findings format_lint "$has_format_lint_config")" \
 	--argjson sonar_findings "$(emit_findings sonarcloud "$has_sonar_config")" \
 	--argjson cs_findings "$(emit_findings code_scanning_alerts "$has_code_scanning_config")" \
 	--argjson semgrep_findings "$(emit_findings semgrep "$has_semgrep_config")" \
 	--argjson dependabot_findings "$(emit_findings dependabot "$has_dependabot_config")" \
 	--argjson snyk_prs_findings "$(emit_findings snyk_prs "$has_snyk_prs_config")" \
+	--argjson versioning_findings "$(emit_findings versioning "$has_versioning_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--arg coverage_source "$coverage_source" \
@@ -373,7 +420,8 @@ jq -n \
     code_scanning: $code_scanning_cfg,
     semgrep:       $semgrep_cfg,
     dependabot:    $dependabot_cfg,
-    snyk_prs:      $snyk_prs_cfg
+    snyk_prs:      $snyk_prs_cfg,
+    versioning:    $versioning_cfg
   },
   findings_by_tool: (
     {} +
@@ -382,7 +430,8 @@ jq -n \
     (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end) +
     (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end) +
     (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
-    (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end)
+    (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end) +
+    (if $versioning_findings  != null then {versioning:           $versioning_findings}  else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,

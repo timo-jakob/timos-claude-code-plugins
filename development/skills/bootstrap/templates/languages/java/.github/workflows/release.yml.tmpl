@@ -5,9 +5,15 @@
 # next version from the last tag + the chosen semver scope, creates the tag,
 # and builds the release — no manual version bump.
 #
-# Prerequisite: the `nebula.release` plugin applied in build.gradle(.kts) and
-# NO hardcoded `version` (see the Java versioning recommendation in SETUP.md /
-# the /development:bootstrap summary). Run it manually and pick the scope.
+# The SemVer bump is DERIVED from the Conventional Commits since the last tag
+# (scope 'auto', the default) via scripts/derive-release-scope.zsh — so the
+# release obeys SemVer automatically, no manual guess. Override the scope only
+# to force a specific bump.
+#
+# Prerequisites: the `nebula.release` plugin applied in build.gradle(.kts) with
+# NO hardcoded `version`, and scripts/derive-release-scope.zsh present (both
+# shipped by /development:bootstrap — see the Java versioning recommendation in
+# SETUP.md / the bootstrap summary). Run it via the Actions tab.
 
 name: Release
 
@@ -15,10 +21,14 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "Semver scope to bump from the last git tag"
+        description: >
+          SemVer scope. 'auto' derives it from the Conventional Commits since
+          the last tag (breaking -> major, feat -> minor, else patch) — the
+          default, so releases obey SemVer automatically. Override only to
+          force a specific bump.
         type: choice
-        options: ["patch", "minor", "major"]
-        default: "patch"
+        options: ["auto", "patch", "minor", "major"]
+        default: "auto"
 
 # nebula's `final` task pushes the release tag — the job needs write access.
 permissions:
@@ -52,11 +62,33 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # Decide the SemVer bump. With 'auto' (the default) the scope is DERIVED
+      # from the Conventional Commits since the last tag, so the release obeys
+      # SemVer automatically — a breaking change cuts a major, a feat a minor,
+      # anything else a patch. An explicit choice overrides the derivation.
+      # INPUT_SCOPE goes through env: so the github-context value isn't
+      # shell-injected (same posture as the quality workflow's BASE_REF).
+      - name: Determine release scope (SemVer)
+        id: scope
+        env:
+          INPUT_SCOPE: ${{ inputs.scope }}
+        run: |
+          set -e
+          if [[ "$INPUT_SCOPE" == "auto" ]]; then
+            # The deriver is zsh (project scripting convention); install it on
+            # the Linux runner if needed.
+            command -v zsh >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq zsh; }
+            scope="$(zsh scripts/derive-release-scope.zsh)"
+            echo "Derived SemVer scope from conventional commits since the last tag: $scope"
+          else
+            scope="$INPUT_SCOPE"
+            echo "Operator-forced scope: $scope"
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
       # `final` derives the next version (last tag + scope), tags it, and
-      # builds the release. SCOPE is funnelled through env: rather than inlined
-      # into run: so the github-context value isn't shell-injected (the same
-      # posture as the quality workflow's BASE_REF).
+      # builds the release.
       - name: Release (nebula final)
         env:
-          SCOPE: ${{ inputs.scope }}
+          SCOPE: ${{ steps.scope.outputs.scope }}
         run: ./gradlew --no-daemon final -Prelease.scope="${SCOPE}"
