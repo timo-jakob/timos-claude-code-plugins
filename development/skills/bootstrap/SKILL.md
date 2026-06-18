@@ -635,11 +635,16 @@ For each detected language, merge in the appropriate config from
 - Pre-commit hook entries (already merged into `.pre-commit-config.yaml`)
 - **Java only:** render
   `templates/languages/java/.github/workflows/release.yml.tmpl` →
-  `.github/workflows/release.yml` (substitute `{{JAVA_VERSION}}`) — the
-  build-driven semantic-versioning release workflow (nebula-release). Pair
-  it with the nebula versioning TODO in the Java-specific recommendation
-  above (the workflow assumes the plugin is applied + no hardcoded
-  `version`). Apply the standard idempotency rules (skip/diff if it exists).
+  `.github/workflows/release.yml` (substitute `{{JAVA_VERSION}}`) **and copy**
+  `templates/languages/java/scripts/derive-release-scope.zsh` →
+  `scripts/derive-release-scope.zsh` (verbatim, `chmod +x`; no substitution) —
+  the build-driven semantic-versioning release workflow (nebula-release) plus
+  its SemVer-scope deriver. The workflow's default `auto` scope runs the
+  script to derive `major`/`minor`/`patch` from the Conventional Commits since
+  the last tag, so releases **obey SemVer automatically**. Pair them with the
+  nebula versioning TODO in the Java-specific recommendation above (the
+  workflow assumes the plugin is applied + no hardcoded `version`). Apply the
+  standard idempotency rules (skip/diff if either exists).
 
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
 

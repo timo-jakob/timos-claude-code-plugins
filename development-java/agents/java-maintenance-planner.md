@@ -89,9 +89,9 @@ Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
 > **Tool universe so far (#296 epic): `format_lint`, `sonarcloud`,
-> `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`.** Most tools are
-> one-group-per-tool; `dependabot` and `snyk_prs` are the exception — they
-> split by ecosystem + bump level (see § 5a).
+> `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`, `versioning`.** Most
+> tools are one-group-per-tool; `dependabot` and `snyk_prs` are the
+> exception — they split by ecosystem + bump level (see § 5a).
 
 ### 4. Group priority + ordering
 
@@ -110,6 +110,7 @@ Order groups by descending priority. Ties broken by:
 | `sonarcloud` | `java-sonar-triage` | `true` |
 | `code_scanning` | `java-code-scanning-triage` | `true` |
 | `semgrep` | `java-semgrep-triage` | `true` |
+| `versioning` | `java-versioning-advisor` | `true` |
 | `dependabot` / `snyk_prs` — gradle/github-actions patch+minor | `java-dependabot-snyk-triage` | `false` |
 | `dependabot` / `snyk_prs` — gradle major (incl. 0.x major-equiv) | `java-major-upgrade` (one PR per bump) | `true` |
 | `dependabot` — docker, **JDK base image** (eclipse-temurin / amazoncorretto / openjdk / …) | `java-runtime-upgrade` (one PR per bump) | `true` |

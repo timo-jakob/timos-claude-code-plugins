@@ -108,10 +108,11 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 
 > **Tool universe (so far).** `development-java` supports `format_lint`
 > (Spotless), `sonarcloud`, `code_scanning` (CodeQL + Scorecard), `semgrep`,
-> and vendor-PR handling (`dependabot` + `snyk_prs` → triage,
+> vendor-PR handling (`dependabot` + `snyk_prs` → triage,
 > `java-major-upgrade`, or `java-runtime-upgrade` for JDK base-image bumps),
-> with coverage measured via JaCoCo. Validate and route against the
-> supported set only.
+> and `versioning` (a hardcoded `version` → `java-versioning-advisor`, which
+> recommends build-driven semver), with coverage measured via JaCoCo.
+> Validate and route against the supported set only.
 
 ## Validation
 
@@ -139,11 +140,12 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). Each name in
    `only_tools` must be a supported tool: `format_lint`, `sonarcloud`,
-   `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`. Unknown names halt
-   with: "Unknown tool '`<X>`' in dispatch_filter.only_tools; supported:
-   format_lint, sonarcloud, code_scanning, semgrep, dependabot, snyk_prs."
-   Each name with `tooling_configured.<name> == false` halts with: "Cannot
-   scope to `<X>`: not configured for this project. Set it up first via
+   `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`, `versioning`.
+   Unknown names halt with: "Unknown tool '`<X>`' in
+   dispatch_filter.only_tools; supported: format_lint, sonarcloud,
+   code_scanning, semgrep, dependabot, snyk_prs, versioning." Each name with
+   `tooling_configured.<name> == false` halts with: "Cannot scope to `<X>`:
+   not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
 
 ## Coverage pre-flight
@@ -185,12 +187,13 @@ behavior-preserving, so coverage isn't load-bearing for it.
 Determine the **affected-classes set**: the file path of every
 non-mechanical finding that names one — `sonarcloud.component`,
 `semgrep` location, and `code_scanning_alerts.file`. The agent edits those
-files, so they're the classes at risk. Two exemptions contribute nothing to
-the set: `format_lint` (pure-mechanical, behavior-preserving) and the
+files, so they're the classes at risk. These exemptions contribute nothing
+to the set: `format_lint` (pure-mechanical, behavior-preserving); the
 file-less `code_scanning` findings (Scorecard repo-policy alerts, and the
 Tier A action-pinning fixes that edit `.github/workflows/*.yml`, not Java
-source). When `dispatch_filter.only_tools` is set, restrict this to the
-filtered tools.
+source); and `versioning` (the advisor edits the build script's version
+config, never Java source under test). When `dispatch_filter.only_tools`
+is set, restrict this to the filtered tools.
 
 #### Step 2b — major dep upgrades (the no-file-path case)
 
