@@ -149,6 +149,18 @@ These two tools carry raw GitHub PR records (`number`, `title`, `body`,
     group (one PR per bump), carrying `package` (the `group:artifact`),
     `current_version`, `target_version`, `source`, `pr_number`, and the
     `release_notes_url` if the body links one.
+    - **Exception — Spring Boot.** When the bumped `package` is
+      `org.springframework.boot` (the Spring Boot Gradle plugin / BOM),
+      **do NOT create a `java-major-upgrade` group** — `development-spring`
+      owns Spring Boot version bumps (its `spring-boot-upgrade` agent does
+      the config-property relocations + removed-API fixes a generic dep
+      upgrade can't). Drop the PR from your plan and note it
+      (`"deferred to development-spring (spring-boot-upgrade)"`). This is
+      the one Spring-aware line in `development-java`; the topic plugin's
+      own gather (`gather-spring-findings.zsh`) re-discovers the same PR
+      and routes it. If `development-spring` isn't installed, the PR is
+      simply skipped here — surface it in the run summary as
+      human-review rather than mis-upgrading it generically.
   - `docker` whose image is a **JDK base image** (`headRefName`/title/body
     matches `eclipse-temurin|amazoncorretto|openjdk|ibm-semeru|bellsoft`
     with a major version) → its **own** `java-runtime-upgrade` group (one

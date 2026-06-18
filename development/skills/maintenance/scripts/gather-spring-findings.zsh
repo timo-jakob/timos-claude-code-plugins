@@ -12,7 +12,13 @@ setopt err_exit nounset pipefail
 # `org.springframework.boot` Gradle plugin or a `spring-boot-starter-*`
 # dependency). Topics aren't code with tests, so `coverage` is always null.
 #
-# v1 (this slice) ships ONE tool — `spring_config` — which discovers the
+# Tools so far:
+#   - spring_config        : config audit -> spring-config-advisor
+#   - spring_boot_upgrade  : open Dependabot/Snyk org.springframework.boot
+#                            major/minor bump PRs -> spring-boot-upgrade
+#                            (development-java DEFERS Boot bumps to here).
+#
+# `spring_config` discovers the
 # project's Spring configuration files (application.yml/.yaml/.properties +
 # profile variants) and emits one `config-audit` finding per file. The
 # spring-config-advisor agent then READS each file (YAML-aware, which a grep
@@ -77,6 +83,48 @@ else
   notes+=("spring_config: no Spring configuration files (application.yml/.yaml/.properties) found under the project; nothing to audit.")
 fi
 
+# --- spring_boot_upgrade: open vendor PRs bumping org.springframework.boot ----
+# Reactive trigger. development-spring OWNS Spring Boot version bumps (the
+# config-property relocations + removed-API fixes a generic dep bump can't do);
+# development-java's planner DEFERS org.springframework.boot bumps here. We list
+# open Dependabot/Snyk PRs that bump org.springframework.boot to a new MAJOR or
+# MINOR (where the Boot configuration changelog matters). In practice patch +
+# minor gradle bumps are grouped (so only standalone majors surface here);
+# patch bumps stay with development-java's normal vendor-PR triage.
+# The tool is "configured" for any Spring repo; findings are [] when gh can't
+# list PRs.
+local has_boot_upgrade="true"
+local boot_findings="[]"
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  local raw
+  raw="$( { gh pr list --author "app/dependabot" --state open \
+              --json number,title,headRefName 2>/dev/null || print -- '[]'
+            gh pr list --state open --search "head:snyk-" \
+              --json number,title,headRefName 2>/dev/null || print -- '[]'
+          } | jq -s 'add // []' )"
+  boot_findings="$(print -r -- "$raw" | jq '
+    [ .[]
+      | select(.title | test("org\\.springframework\\.boot"))
+      | (.title | capture("from (?<from>[0-9]+(\\.[0-9]+)+) to (?<to>[0-9]+(\\.[0-9]+)+)")) as $v
+      | select($v != null)
+      | { from: $v.from, to: $v.to,
+          fmaj: ($v.from | split(".")[0] | tonumber),
+          tmaj: ($v.to   | split(".")[0] | tonumber),
+          fmin: (($v.from | split(".")[1]) // "0" | tonumber),
+          tmin: (($v.to   | split(".")[1]) // "0" | tonumber),
+          number, title, headRefName }
+      | select(.tmaj > .fmaj or (.tmaj == .fmaj and .tmin > .fmin))
+      | { type:"dependency", severity:"MAJOR", rule:"spring:boot-upgrade",
+          package:"org.springframework.boot",
+          from_version:.from, to_version:.to,
+          pr_number:.number, title:.title, headRefName:.headRefName,
+          source:(if (.headRefName|startswith("snyk-")) then "snyk_prs" else "dependabot" end),
+          message:("Spring Boot " + .from + " -> " + .to + " (PR #" + (.number|tostring) + ") — apply the Boot migration (config relocations + removed-API fixes)."),
+          key:("spring_boot_upgrade:" + (.number|tostring)) } ]')"
+else
+  notes+=("spring_boot_upgrade: gh not available/authenticated; can't list open Spring Boot bump PRs.")
+fi
+
 # --- emit --------------------------------------------------------------------
 local notes_json
 notes_json="$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s '.' 2>/dev/null || print -- '[]')"
@@ -85,11 +133,18 @@ notes_json="$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s '.' 2>/dev/null || p
 jq -n \
   --argjson spring_config_cfg "$has_spring_config" \
   --argjson spring_config_findings "$findings" \
+  --argjson boot_upgrade_cfg "$has_boot_upgrade" \
+  --argjson boot_upgrade_findings "$boot_findings" \
   --argjson notes "$notes_json" '
 {
-  tooling_configured: { spring_config: $spring_config_cfg },
+  tooling_configured: {
+    spring_config:        $spring_config_cfg,
+    spring_boot_upgrade:  $boot_upgrade_cfg
+  },
   findings_by_tool: (
-    {} + (if $spring_config_cfg then {spring_config: $spring_config_findings} else {} end)
+    {}
+    + (if $spring_config_cfg then {spring_config: $spring_config_findings} else {} end)
+    + (if $boot_upgrade_cfg  then {spring_boot_upgrade: $boot_upgrade_findings} else {} end)
   ),
   coverage: null,
   notes: $notes

@@ -53,8 +53,11 @@ orchestrator wrote. Read it and parse as JSON. Topic payload shape:
   "language": "spring",
   "dispatch_mode": "primary",
   "language_meta": { "version": null, "manifests": ["build.gradle"] },
-  "tooling_configured": { "spring_config": true },
-  "findings_by_tool": { "spring_config": [ /* config-audit findings: component, rule, line, message, key */ ] },
+  "tooling_configured": { "spring_config": true, "spring_boot_upgrade": true },
+  "findings_by_tool": {
+    "spring_config": [ /* config-audit findings: component, rule, line, message, key */ ],
+    "spring_boot_upgrade": [ /* one per open Boot bump PR: package, from_version, to_version, source, pr_number, title, headRefName, key */ ]
+  },
   "coverage": null,
   "policy": { "severity_gate": "high" },
   "worktree": { "available": true, "base_branch": "main" },
@@ -66,12 +69,13 @@ orchestrator wrote. Read it and parse as JSON. Topic payload shape:
 target. `coverage` is always `null` for a topic. `findings_by_tool` only
 contains keys for configured tools.
 
-> **Tool universe (this slice).** `development-spring` supports one tool:
-> `spring_config` (a Spring configuration audit → `spring-config-advisor`).
-> **Scope: Spring Boot 4+** (baseline Spring Framework 7 / Jakarta EE 11) —
-> older Boot lines and the `javax`→`jakarta` migration are out of scope.
-> Later slices add a Spring Boot version-upgrade agent (config relocations
-> plus removed-API fixes), `bootBuildImage` container generation, and the
+> **Tool universe (so far).** `development-spring` supports `spring_config`
+> (a Spring configuration audit → `spring-config-advisor`) and
+> `spring_boot_upgrade` (an open Dependabot/Snyk `org.springframework.boot`
+> major/minor bump → `spring-boot-upgrade`, which `development-java` defers
+> here). **Scope: Spring Boot 4+** (baseline Spring Framework 7 / Jakarta EE
+> 11) — older Boot lines and the `javax`→`jakarta` migration are out of
+> scope. Later slices add `bootBuildImage` container generation and the
 > contract-first API drift gate (#296).
 
 ## Validation
@@ -87,29 +91,37 @@ contains keys for configured tools.
    misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). Each name in
-   `only_tools` must be a supported tool: `spring_config`. Unknown names
-   halt: "Unknown tool '`<X>`' in dispatch_filter.only_tools; supported:
-   spring_config." A name with `tooling_configured.<name> == false` halts:
-   "Cannot scope to `<X>`: not configured for this project."
+   `only_tools` must be a supported tool: `spring_config`,
+   `spring_boot_upgrade`. Unknown names halt: "Unknown tool '`<X>`' in
+   dispatch_filter.only_tools; supported: spring_config,
+   spring_boot_upgrade." A name with `tooling_configured.<name> == false`
+   halts: "Cannot scope to `<X>`: not configured for this project."
 
 ## Build the plan
 
 For each **configured** tool with a **non-empty** finding list (and
 allowed by any `dispatch_filter`), emit one group routed to its agent:
 
-| Source tool | Agent | `isolation` |
-| --- | --- | --- |
-| `spring_config` | `spring-config-advisor` | `true` |
+| Source tool | Agent | `isolation` | Grouping |
+| --- | --- | --- | --- |
+| `spring_config` | `spring-config-advisor` | `true` | one group, ALL findings |
+| `spring_boot_upgrade` | `spring-boot-upgrade` | `true` | **one group per PR** |
 
-`spring-config-advisor` edits config files in a worktree, so `isolation`
-is `true`. One group carries ALL the tool's findings (the agent reads each
-audited file). Omit a tool's group entirely when it has no findings.
+`spring-config-advisor` edits config files in a worktree (`isolation:
+true`); one group carries ALL its findings (the agent reads each audited
+file). `spring-boot-upgrade` does a local Boot-version migration per PR, so
+**each `spring_boot_upgrade` finding becomes its own group** (one PR in,
+one migration PR out — mirroring `java-major-upgrade`). Omit a tool's
+group(s) entirely when it has no findings.
 
-Each plan entry carries `group_id`, `tool`, `description`, `findings` (the
-finding keys), `files` (the audited config paths), `rationale`, `agent`,
-`isolation`, `suggested_pr_title` (conventional-commit style, e.g.
-`fix(spring): relocate deprecated Spring Boot config keys`), and a
-`priority_score` (config findings are MINOR/MAJOR — score ~0.4).
+Each plan entry carries `group_id`, `tool`, `description`, `findings`,
+`files`, `rationale`, `agent`, `isolation`, `suggested_pr_title`
+(conventional-commit style — `fix(spring): relocate deprecated Spring Boot
+config keys`, or `chore(deps): upgrade Spring Boot <from> -> <to>`), and a
+`priority_score`. A `spring_boot_upgrade` group additionally carries the
+upgrade fields its agent needs in `findings` — `package`
+(`org.springframework.boot`), `from_version`, `to_version`, `source`,
+`pr_number` — copied straight from the gather finding.
 
 ### Render the plan to the user
 
