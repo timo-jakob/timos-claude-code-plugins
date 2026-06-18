@@ -182,10 +182,30 @@ cause. Without a floor, halt and return (echo the reason):
 }
 ```
 
-**Exception — pure-mechanical format_lint:** if the only finding category
-is `format_lint` (and it's configured), do **not** halt. Return a plan with
-a single group routed to `java-format-lint-fixer`. `spotlessApply` is
-behavior-preserving, so coverage isn't load-bearing for it.
+**Exception — coverage-exempt findings:** do **not** halt when **every**
+finding belongs to a coverage-exempt category. These never touch Java
+source under test, so a missing/untrustworthy floor isn't load-bearing for
+them — they're the same set Step 2 excludes from the affected-classes set:
+
+- `format_lint` (`spotlessApply` is behavior-preserving),
+- the **build-config advisors** `versioning`, `grpc`, `openapi` (they edit
+  `build.gradle(.kts)` version/codegen wiring, not source under test —
+  generated stubs/DTOs aren't classes under test), and
+- file-less `code_scanning` findings (Scorecard repo-policy + the
+  action-pinning fixes that edit `.github/workflows/*.yml`).
+
+In that case do **not** halt — return a plan routing each exempt category
+to its agent (`java-format-lint-fixer`, `java-versioning-advisor`,
+`java-grpc-advisor`, `java-openapi-advisor`, `java-code-scanning-triage`).
+
+Only halt when at least one **coverage-respecting** finding is present —
+`sonarcloud`, `semgrep`, or a *file-bearing* `code_scanning` alert (these
+edit real code under test) — **and** coverage is missing/unreliable. Even
+then you may still plan the coverage-exempt groups and halt only the
+coverage-respecting ones (Step 2d's partial-halt spirit). This is the
+common real case: a repo that hasn't bootstrapped JaCoCo but has, say, a
+`grpc` audit and a `versioning` finding must still get those planned, not
+be blocked behind a coverage measurement they don't need.
 
 ### Step 2 — when coverage data IS present
 
