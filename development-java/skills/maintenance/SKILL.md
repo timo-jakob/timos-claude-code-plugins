@@ -108,10 +108,10 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 
 > **Tool universe (so far).** `development-java` supports `format_lint`
 > (Spotless), `sonarcloud`, `code_scanning` (CodeQL + Scorecard), `semgrep`,
-> and vendor-PR handling (`dependabot` + `snyk_prs` → triage or
-> `java-major-upgrade`), with coverage measured via JaCoCo. The JDK
-> runtime-upgrade special case is a later slice (#308). Validate and route
-> against the supported set only.
+> and vendor-PR handling (`dependabot` + `snyk_prs` → triage,
+> `java-major-upgrade`, or `java-runtime-upgrade` for JDK base-image bumps),
+> with coverage measured via JaCoCo. Validate and route against the
+> supported set only.
 
 ## Validation
 

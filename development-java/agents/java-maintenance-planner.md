@@ -112,7 +112,8 @@ Order groups by descending priority. Ties broken by:
 | `semgrep` | `java-semgrep-triage` | `true` |
 | `dependabot` / `snyk_prs` — gradle/github-actions patch+minor | `java-dependabot-snyk-triage` | `false` |
 | `dependabot` / `snyk_prs` — gradle major (incl. 0.x major-equiv) | `java-major-upgrade` (one PR per bump) | `true` |
-| `dependabot` / `snyk_prs` — docker, github-actions major, unknown | `java-dependabot-snyk-triage` (human-review) | `false` |
+| `dependabot` — docker, **JDK base image** (eclipse-temurin / amazoncorretto / openjdk / …) | `java-runtime-upgrade` (one PR per bump) | `true` |
+| `dependabot` / `snyk_prs` — docker (non-JDK), github-actions major, unknown | `java-dependabot-snyk-triage` (human-review) | `false` |
 
 The static-analysis agents edit local files (`isolation: true`).
 `java-dependabot-snyk-triage` acts on GitHub PRs via `gh`, not local
@@ -148,18 +149,46 @@ These two tools carry raw GitHub PR records (`number`, `title`, `body`,
     group (one PR per bump), carrying `package` (the `group:artifact`),
     `current_version`, `target_version`, `source`, `pr_number`, and the
     `release_notes_url` if the body links one.
-  - `docker` (any level), `github-actions` **major**, `unknown` ecosystem
-    → `human-review`, with a `routing_reason`, in the
-    `java-dependabot-snyk-triage` group. (Docker base-image bumps include
-    the JDK image; the dedicated `java-runtime-upgrade` handler is a later
-    slice — #308 — so they stay human-review for now.)
+  - `docker` whose image is a **JDK base image** (`headRefName`/title/body
+    matches `eclipse-temurin|amazoncorretto|openjdk|ibm-semeru|bellsoft`
+    with a major version) → its **own** `java-runtime-upgrade` group (one
+    PR per bump). This is a JDK runtime migration, not a generic image
+    bump — different consequences (class-file version, removed APIs, a
+    newer Gradle). Extract `from_version` / `to_version` (the JDK majors,
+    e.g. `21` → `25`) and `from_image` / `to_image` from the PR title/body
+    for the record, and attach the `pre_dispatch_hook` below.
+  - `docker` (non-JDK image, any level), `github-actions` **major**,
+    `unknown` ecosystem → `human-review`, with a `routing_reason`, in the
+    `java-dependabot-snyk-triage` group.
 
 **Grouping:** one `java-dependabot-snyk-triage` group carries ALL the
 `auto-merge-if-green` + `human-review` PRs (mixed sources OK — the agent
 reads each record's `source`/`routing`). Each `gradle`-major PR becomes
-its **own** `java-major-upgrade` group. Each plan entry's `findings`
-holds the classified PR record(s); `java-major-upgrade` groups carry
-exactly one.
+its **own** `java-major-upgrade` group; each JDK docker bump its **own**
+`java-runtime-upgrade` group. Each plan entry's `findings` holds the
+classified PR record(s); the major-upgrade and runtime-upgrade groups
+carry exactly one.
+
+**`pre_dispatch_hook` — only on `java-runtime-upgrade` groups** (omit it
+on every other group). It tells the orchestrator to verify the target JDK
+is installed locally before spawning the agent (the agent's cascade needs
+it, and subagents can't prompt the user). Fill `target` with the JDK major
+this group upgrades to:
+
+```json
+"pre_dispatch_hook": {
+  "type": "runtime_availability",
+  "script": "development-java/scripts/pre-dispatch-runtime-upgrade.zsh",
+  "target": "25",
+  "prompt_field": "local_verification_mode",
+  "modes": { "available": "auto", "unavailable": "skip" },
+  "label": "JDK 25"
+}
+```
+
+The orchestrator runs the protocol generically and passes the outcome to
+the agent as `local_verification_mode` (`auto` when the JDK is present or
+installed, `skip` when the user declines).
 
 ## Output
 
