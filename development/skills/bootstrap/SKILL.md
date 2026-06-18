@@ -402,6 +402,37 @@ that **no version is hardcoded** — surface this TODO too:
 > version. Locally, `./gradlew currentVersion` shows the derived version and
 > `./gradlew final -Prelease.scope=minor` cuts a release.
 
+**Only if the project uses gRPC / Protocol Buffers** (has `.proto` files),
+surface this TODO too — generated stubs must be produced by the build, and
+kept out of the coverage gate:
+
+> ☕ **Wire gRPC/protobuf code generation.** Generate Java + gRPC stubs from
+> your authoritative `.proto` contract via the `com.google.protobuf` Gradle
+> plugin (`protoc` + the gRPC plugin), and exclude the generated sources from
+> coverage so they don't skew the gate:
+>
+> ```groovy
+> plugins { id 'com.google.protobuf' version '0.9.4' }
+> dependencies {
+>     implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
+>     implementation "io.grpc:grpc-protobuf:${grpcVersion}"
+>     implementation "io.grpc:grpc-stub:${grpcVersion}"
+>     implementation "com.google.protobuf:protobuf-java:${protoVersion}"
+>     compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+> }
+> protobuf {
+>     protoc { artifact = "com.google.protobuf:protoc:${protoVersion}" }
+>     plugins { grpc { artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}" } }
+>     generateProtoTasks { all()*.plugins { grpc {} } }
+> }
+> // Keep generated code out of the JaCoCo/Sonar coverage gate:
+> //   sonar.coverage.exclusions=**/build/generated/**
+> ```
+>
+> The `build/generated/**` output is already covered by the Java `.gitignore`
+> (it ignores `build/`). The `java-grpc-advisor` audits this wiring on each
+> maintenance run.
+
 Do not modify `build.gradle(.kts)` automatically — that's their file. Just
 call it out, with the snippet.
 

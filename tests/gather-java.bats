@@ -53,9 +53,20 @@ setup() {
   printf 'plugins { java }\n' > "$WORK/build.gradle"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
-  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs; do
+  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs grpc; do
     [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
   done
+}
+
+@test "gather-java: .proto present -> grpc configured + a proto-audit finding" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  mkdir -p "$WORK/src/main/proto"
+  printf 'syntax = "proto3";\nmessage X {}\n' > "$WORK/src/main/proto/x.proto"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.grpc <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.grpc | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.grpc[0].rule' <<<"$output")" = "grpc:proto-audit" ]
 }
 
 @test "gather-java: no sonar-project.properties -> sonarcloud not configured" {

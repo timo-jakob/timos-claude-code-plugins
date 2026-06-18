@@ -37,6 +37,10 @@ sonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.
 # Sonar's Java analyzer needs compiled bytecode to resolve types; point it at
 # the Gradle output (`gradle build` produces these in CI before the scan).
 sonar.java.binaries=build/classes
+# Keep generated sources (protobuf/gRPC stubs, annotation processors) out of
+# coverage + analysis so they don't skew the gate.
+sonar.coverage.exclusions=**/build/generated/**
+sonar.exclusions=**/build/generated/**
 sonar.java.test.binaries=build/classes
 # --- JAVA-END -----------
 
