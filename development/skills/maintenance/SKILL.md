@@ -158,6 +158,7 @@ manifest. Known topics:
 | Topic | Marker (present in repo) | Gather script |
 | --- | --- | --- |
 | `claude-plugin` | a `.claude-plugin/` dir holding `plugin.json` (an individual plugin) **or** `marketplace.json` (a marketplace of plugins, like this repo) | `gather-claude-plugin-findings.zsh` |
+| `spring` | an `org.springframework.boot` Gradle plugin **or** a `spring-boot-starter-*` dependency in `build.gradle(.kts)` / `pom.xml` (composes alongside `java` — only meaningful when Java is also detected) | `gather-spring-findings.zsh` |
 
 For each known topic whose marker is present, check for its gather script:
 
