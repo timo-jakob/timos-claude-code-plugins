@@ -53,11 +53,12 @@ orchestrator wrote. Read it and parse as JSON. Topic payload shape:
   "language": "spring",
   "dispatch_mode": "primary",
   "language_meta": { "version": null, "manifests": ["build.gradle"] },
-  "tooling_configured": { "spring_config": true, "spring_boot_upgrade": true, "spring_container": true },
+  "tooling_configured": { "spring_config": true, "spring_boot_upgrade": true, "spring_container": true, "spring_api": true },
   "findings_by_tool": {
     "spring_config": [ /* config-audit findings: component, rule, line, message, key */ ],
     "spring_boot_upgrade": [ /* one per open Boot bump PR: package, from_version, to_version, source, pr_number, title, headRefName, key */ ],
-    "spring_container": [ /* container-audit findings: component (build file), rule, line, message, key */ ]
+    "spring_container": [ /* container-audit findings: component (build file), rule, line, message, key */ ],
+    "spring_api": [ /* api-audit findings: component (build file), rule, line, message, key */ ]
   },
   "coverage": null,
   "policy": { "severity_gate": "high" },
@@ -74,12 +75,13 @@ contains keys for configured tools.
 > (a Spring configuration audit → `spring-config-advisor`),
 > `spring_boot_upgrade` (an open Dependabot/Snyk `org.springframework.boot`
 > major/minor bump → `spring-boot-upgrade`, which `development-java` defers
-> here), and `spring_container` (a `bootBuildImage` / Cloud Native
-> Buildpacks config audit → `spring-container-advisor`, JVM mode;
-> native-image deferred). **Scope: Spring Boot 4+** (baseline Spring
-> Framework 7 / Jakarta EE 11) — older Boot lines and the `javax`→`jakarta`
-> migration are out of scope. A later slice adds the contract-first API
-> drift gate (#296).
+> here), `spring_container` (a `bootBuildImage` / Cloud Native Buildpacks
+> config audit → `spring-container-advisor`, JVM mode; native-image
+> deferred), and `spring_api` (the contract-first API drift gate — a
+> committed OpenAPI spec + openapi-generator Spring interfaces →
+> `spring-api-advisor`; web surface only). **Scope: Spring Boot 4+**
+> (baseline Spring Framework 7 / Jakarta EE 11) — older Boot lines and the
+> `javax`→`jakarta` migration are out of scope.
 
 ## Validation
 
@@ -95,11 +97,11 @@ contains keys for configured tools.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). Each name in
    `only_tools` must be a supported tool: `spring_config`,
-   `spring_boot_upgrade`, `spring_container`. Unknown names halt: "Unknown
-   tool '`<X>`' in dispatch_filter.only_tools; supported: spring_config,
-   spring_boot_upgrade, spring_container." A name with
-   `tooling_configured.<name> == false` halts: "Cannot scope to `<X>`: not
-   configured for this project."
+   `spring_boot_upgrade`, `spring_container`, `spring_api`. Unknown names
+   halt: "Unknown tool '`<X>`' in dispatch_filter.only_tools; supported:
+   spring_config, spring_boot_upgrade, spring_container, spring_api." A name
+   with `tooling_configured.<name> == false` halts: "Cannot scope to `<X>`:
+   not configured for this project."
 
 ## Build the plan
 
@@ -111,6 +113,7 @@ allowed by any `dispatch_filter`), emit one group routed to its agent:
 | `spring_config` | `spring-config-advisor` | `true` | one group, ALL findings |
 | `spring_boot_upgrade` | `spring-boot-upgrade` | `true` | **one group per PR** |
 | `spring_container` | `spring-container-advisor` | `true` | one group, ALL findings |
+| `spring_api` | `spring-api-advisor` | `true` | one group, ALL findings |
 
 `spring-config-advisor` edits config files in a worktree (`isolation:
 true`); one group carries ALL its findings (the agent reads each audited

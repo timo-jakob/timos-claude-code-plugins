@@ -20,6 +20,10 @@ setopt err_exit nounset pipefail
 #   - spring_container     : bootBuildImage (Cloud Native Buildpacks) config
 #                            audit -> spring-container-advisor (JVM mode;
 #                            native-image deferred).
+#   - spring_api           : contract-first API drift gate audit (committed
+#                            OpenAPI spec + openapi-generator Spring
+#                            interfaces) -> spring-api-advisor. Web surface
+#                            (spring-boot-starter-web/-webflux) only.
 #
 # `spring_config` discovers the
 # project's Spring configuration files (application.yml/.yaml/.properties +
@@ -154,6 +158,32 @@ if [[ -n "${build_files[1]}" ]]; then
   [[ ${#container_objs[@]} -gt 0 ]] && container_findings="$(printf '%s\n' "${container_objs[@]}" | jq -s '.')"
 fi
 
+# --- spring_api: contract-first API drift gate audit -------------------------
+# Applies only to services that expose a Spring web HTTP surface
+# (spring-boot-starter-web / -webflux). Emit one api-audit finding per build
+# file; the advisor assesses the contract-first wiring (a committed OpenAPI
+# spec as the authoritative HTTP surface + org.openapi.generator producing
+# Spring interfaces the controllers implement) and recommends adoption when
+# absent. (Reuses build_files from the spring_container scan above.)
+local has_spring_api="false"
+local api_findings="[]"
+if [[ -n "${build_files[1]}" ]] &&
+  grep -rqE 'spring-boot-starter-web(flux)?' \
+    --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null; then
+  has_spring_api="true"
+  local -a api_objs=()
+  local bf_api
+  for bf_api in "${build_files[@]}"; do
+    [[ -n "$bf_api" && -f "$bf_api" ]] || continue
+    api_objs+=("$(jq -n --arg c "${bf_api#./}" \
+      '{type:"config", severity:"MINOR", rule:"spring:api-audit",
+        component:$c, line:0,
+        message:("Audit the contract-first API wiring for `" + $c + "` — a committed OpenAPI spec as the authoritative HTTP-surface definition, with openapi-generator producing Spring interfaces the controllers implement (so code/spec drift fails the build)."),
+        key:("spring_api:audit:" + $c)}')")
+  done
+  [[ ${#api_objs[@]} -gt 0 ]] && api_findings="$(printf '%s\n' "${api_objs[@]}" | jq -s '.')"
+fi
+
 # --- emit --------------------------------------------------------------------
 local notes_json
 notes_json="$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s '.' 2>/dev/null || print -- '[]')"
@@ -166,18 +196,22 @@ jq -n \
   --argjson boot_upgrade_findings "$boot_findings" \
   --argjson container_cfg "$has_spring_container" \
   --argjson container_findings "$container_findings" \
+  --argjson api_cfg "$has_spring_api" \
+  --argjson api_findings "$api_findings" \
   --argjson notes "$notes_json" '
 {
   tooling_configured: {
     spring_config:        $spring_config_cfg,
     spring_boot_upgrade:  $boot_upgrade_cfg,
-    spring_container:     $container_cfg
+    spring_container:     $container_cfg,
+    spring_api:           $api_cfg
   },
   findings_by_tool: (
     {}
     + (if $spring_config_cfg then {spring_config: $spring_config_findings} else {} end)
     + (if $boot_upgrade_cfg  then {spring_boot_upgrade: $boot_upgrade_findings} else {} end)
     + (if $container_cfg     then {spring_container: $container_findings} else {} end)
+    + (if $api_cfg           then {spring_api: $api_findings} else {} end)
   ),
   coverage: null,
   notes: $notes
