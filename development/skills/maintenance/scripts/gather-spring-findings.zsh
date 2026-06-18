@@ -17,6 +17,9 @@ setopt err_exit nounset pipefail
 #   - spring_boot_upgrade  : open Dependabot/Snyk org.springframework.boot
 #                            major/minor bump PRs -> spring-boot-upgrade
 #                            (development-java DEFERS Boot bumps to here).
+#   - spring_container     : bootBuildImage (Cloud Native Buildpacks) config
+#                            audit -> spring-container-advisor (JVM mode;
+#                            native-image deferred).
 #
 # `spring_config` discovers the
 # project's Spring configuration files (application.yml/.yaml/.properties +
@@ -125,6 +128,32 @@ else
   notes+=("spring_boot_upgrade: gh not available/authenticated; can't list open Spring Boot bump PRs.")
 fi
 
+# --- spring_container: bootBuildImage config audit ---------------------------
+# Spring Boot's Gradle plugin provides bootBuildImage (an OCI image via Cloud
+# Native / Paketo Buildpacks, no Dockerfile). Emit one container-audit finding
+# per root build file; the advisor reads it (Groovy/Kotlin DSL aware) and
+# recommends a pinned builder/run-image + explicit image name + publish config.
+local has_spring_container="false"
+local container_findings="[]"
+local -a build_files
+build_files=("${(@f)$(find . -maxdepth 2 \
+  -path '*/build/*' -prune -o -path '*/.git/*' -prune -o \
+  \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null)}")
+if [[ -n "${build_files[1]}" ]]; then
+  has_spring_container="true"
+  local bf
+  local -a container_objs=()
+  for bf in "${build_files[@]}"; do
+    [[ -n "$bf" && -f "$bf" ]] || continue
+    container_objs+=("$(jq -n --arg c "${bf#./}" \
+      '{type:"config", severity:"MINOR", rule:"spring:container-audit",
+        component:$c, line:0,
+        message:("Audit the bootBuildImage (Cloud Native Buildpacks) configuration in `" + $c + "` — pin the builder/run-image, set an explicit image name, and configure publish for reproducible, CVE-patchable OCI images (JVM mode; native-image deferred)."),
+        key:("spring_container:audit:" + $c)}')")
+  done
+  [[ ${#container_objs[@]} -gt 0 ]] && container_findings="$(printf '%s\n' "${container_objs[@]}" | jq -s '.')"
+fi
+
 # --- emit --------------------------------------------------------------------
 local notes_json
 notes_json="$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s '.' 2>/dev/null || print -- '[]')"
@@ -135,16 +164,20 @@ jq -n \
   --argjson spring_config_findings "$findings" \
   --argjson boot_upgrade_cfg "$has_boot_upgrade" \
   --argjson boot_upgrade_findings "$boot_findings" \
+  --argjson container_cfg "$has_spring_container" \
+  --argjson container_findings "$container_findings" \
   --argjson notes "$notes_json" '
 {
   tooling_configured: {
     spring_config:        $spring_config_cfg,
-    spring_boot_upgrade:  $boot_upgrade_cfg
+    spring_boot_upgrade:  $boot_upgrade_cfg,
+    spring_container:     $container_cfg
   },
   findings_by_tool: (
     {}
     + (if $spring_config_cfg then {spring_config: $spring_config_findings} else {} end)
     + (if $boot_upgrade_cfg  then {spring_boot_upgrade: $boot_upgrade_findings} else {} end)
+    + (if $container_cfg     then {spring_container: $container_findings} else {} end)
   ),
   coverage: null,
   notes: $notes
