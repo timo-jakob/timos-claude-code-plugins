@@ -109,7 +109,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see Requirements below). |
-| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the v1 JSON payload, dispatches to the language plugin (currently only `development-python`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
+| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
 
@@ -189,6 +189,77 @@ constructs the input and dispatches here.
 All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
 safety net, not the primary verification loop.
+
+### development-java
+
+Java/Gradle maintenance — the **full-maintenance tier**, mirroring
+`development-python`. Triages and fixes findings from the Gradle toolchain
+`/development:bootstrap` installs (Spotless, SonarCloud, CodeQL + Scorecard,
+semgrep), reviews Dependabot/Snyk vendor PRs, applies dependency-major and
+JDK-LTS upgrades, raises JaCoCo coverage, flags versioning risks, and reviews
+PRs as the Claude Approver. Pure function of its JSON input — dispatched by
+`/development:maintenance`; it runs no detection of its own. **Adding it
+required zero edits to the generic orchestrator** (discovered purely via the
+gather-script + dispatch contract).
+
+**Skills:**
+
+| Skill | Command | Description |
+| --- | --- | --- |
+| Maintenance dispatcher | `/development-java:maintenance <json>` | Validates the payload, runs the JaCoCo coverage pre-flight (may raise coverage first), plans the per-tool groups, returns the plan + `ci_fixer_agent`. |
+| Approve (local dry-run) | `/development-java:approve [<pr>]` | Runs the `java-approver` against an open PR locally — prints the verdict instead of posting. |
+
+**Agents:**
+
+| Agent | Model | Focus |
+| ------- | ------- | ------- |
+| java-format-lint-fixer | haiku | `./gradlew spotlessApply` (google-java-format); behaviour-preserving |
+| java-sonar-triage | sonnet | SonarCloud bugs/smells/vulns/hotspots (`java:Sxxxx`); LSP-scoped; `// NOSONAR` for justified accepts |
+| java-code-scanning-triage | sonnet | CodeQL (Java) + Scorecard; pins GH Actions to SHAs; dataflow rules → human-review |
+| java-semgrep-triage | sonnet | semgrep: fix / `// nosemgrep` suppress / escalate; SQL concat → `PreparedStatement` |
+| java-dependabot-snyk-triage | sonnet | Vendor PRs: auto-merge green patch/minor (never self-approves); defers majors + docker to the right handler |
+| java-major-upgrade | opus | Gradle dependency majors — release notes + LSP call-site migration + `gradle build` |
+| java-runtime-upgrade | opus | JDK LTS bumps (Docker base image) — swaps the Gradle toolchain + wrapper, cascades JDK-sensitive deps |
+| java-coverage-improver | opus | Writes meaningful JUnit tests to raise JaCoCo coverage; never edits production code |
+| java-versioning-advisor | sonnet | Flags a hardcoded `version` (a SemVer risk); recommends build-driven versioning (nebula-release) |
+| java-maintenance-planner | sonnet | Ranks + groups findings, routes each to its agent (defers `org.springframework.boot` bumps to `development-spring`) |
+| java-ci-fixer | sonnet | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
+| java-approver | opus | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`) |
+
+**Build-driven semantic versioning:** `/development:bootstrap` emits a
+`release.yml` whose default `auto` scope runs `derive-release-scope.zsh` to
+derive the SemVer bump from the Conventional Commits since the last tag
+(breaking → major, `feat` → minor, else patch) and cuts a nebula-release
+version — no manual bump, SemVer obeyed automatically. The agent contract is
+documented in
+[`development-java/docs/java-approver.md`](./development-java/docs/java-approver.md).
+
+### development-spring
+
+A **topic plugin** for **Spring Boot 4+** projects. It **composes alongside
+`development-java`** (per `ARCHITECTURE.md`) — it holds zero Java-foundation
+logic, only dispatches when both Java and Spring markers are present, and
+reuses `java-ci-fixer` for its CI cycle. Audits Spring configuration, owns
+Spring Boot version upgrades, configures container images, and gates the API
+contract.
+
+**Skills:**
+
+| Skill | Command | Description |
+| ------- | --------- | ------------- |
+| Maintenance dispatcher | `/development-spring:maintenance <json>` | Routes Spring findings to their advisor; returns the plan (with `ci_fixer_agent: "java-ci-fixer"`). |
+
+**Agents:**
+
+| Agent | Model | Focus |
+| ------- | ------- | ------- |
+| spring-config-advisor | sonnet | Relocates deprecated/relocated Spring Boot 4 config keys; flags actuator over-exposure (human-review) |
+| spring-boot-upgrade | opus | Owns Spring Boot version bumps end-to-end (config relocations + removed-API fixes per the migration guide); `development-java` defers `org.springframework.boot` bumps here |
+| spring-container-advisor | sonnet | Audits `bootBuildImage` (Cloud Native / Paketo Buildpacks) config — pinned builder/run-image, image name, publish; JVM mode (native-image deferred) |
+| spring-api-advisor | sonnet | Contract-first API drift gate: a committed OpenAPI spec + openapi-generator Spring interfaces, so code/spec drift fails the build |
+
+Scope: **Spring Boot 4+** (baseline Spring Framework 7 / Jakarta EE 11) —
+older Boot lines and the `javax`→`jakarta` migration are out of scope.
 
 ### development-claude-plugin
 
@@ -428,10 +499,12 @@ what CI's Approver will say before pushing.
 
 ### Languages
 
-Python first (`python-approver`, opus). Future plugins
-(`development-node`, `development-go`, etc.) ship their own `<lang>-approver`
-agents and policy templates following the same pattern. Bootstrap with
-`--claude-approver true` on an unsupported language warns and skips.
+Python and Java ship `<lang>-approver` agents (opus) + policy templates
+today (`python-approver`, `java-approver`); the bootstrap wires the
+per-language approver via `{{APPROVER_LANG}}`. Future plugins
+(`development-node`, `development-go`, etc.) follow the same pattern.
+Bootstrap with `--claude-approver true` on a language with no approver warns
+and skips.
 
 ## Requirements
 
