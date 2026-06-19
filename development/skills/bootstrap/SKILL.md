@@ -348,51 +348,57 @@ Just call it out.
 
 ### Java-specific recommendation (when applicable)
 
+> **Kotlin DSL only (family policy).** The Java/Spring plugins standardize
+> on **`build.gradle.kts`** — one blessed build format, nothing to choose.
+> Maven is not accepted, and a Groovy `build.gradle` must be converted to
+> Kotlin DSL to be maintained (Step 4c offers the conversion). All wiring
+> below is Kotlin DSL.
+
 If `java` is in the detected languages, the generated Gradle CI
 (`./gradlew build jacocoTestReport`) and the pre-commit Spotless +
-coverage-floor hooks **depend on the project's `build.gradle(.kts)`
-applying the Spotless and JaCoCo plugins**. Those plugins live in the build
-script — so without them the **first CI run and the first `git push` both
-fail** (`spotlessApply` / `jacocoTestReport` are unknown tasks; the
-coverage-floor hook finds no JaCoCo XML). This is not optional polish: it's
-a prerequisite for the very pipeline bootstrap just generated. So bootstrap
-**wires it for you** — see **Step 4c**, a confirmed (you approve first),
-idempotent edit. The canonical wiring 4c applies:
+coverage-floor hooks **depend on `build.gradle.kts` applying the Spotless
+and JaCoCo plugins**. Those plugins live in the build script — so without
+them the **first CI run and the first `git push` both fail**
+(`spotlessApply` / `jacocoTestReport` are unknown tasks; the coverage-floor
+hook finds no JaCoCo XML). This is not optional polish: it's a prerequisite
+for the very pipeline bootstrap just generated. So bootstrap **wires it for
+you** — see **Step 4c**, a confirmed (you approve first), idempotent edit.
+The canonical wiring 4c applies (Kotlin DSL):
 
-```groovy
+```kotlin
 plugins {
-    id 'com.diffplug.spotless' version '7.0.2'
-    id 'jacoco'
+    id("com.diffplug.spotless") version "7.0.2"
+    jacoco
 }
 spotless {
     java { googleJavaFormat() }
-    // For Kotlin DSL / Kotlin sources, also: kotlin { ktlint() }
+    // For Kotlin sources, also: kotlin { ktlint() }
 }
-jacocoTestReport {
-    dependsOn test
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
     reports { xml.required = true }   // required by Sonar + diff-cover
 }
-tasks.test { finalizedBy jacocoTestReport }
+tasks.test { finalizedBy(tasks.jacocoTestReport) }
 ```
 
 **When the project uses gRPC / Protocol Buffers** (has `.proto` files),
 Step 4c also adds the generated-sources coverage exclude so stubs don't
-skew the gate (Groovy shown; use the Kotlin form in a `.kts` file):
+skew the gate:
 
-```groovy
-jacocoTestReport {
+```kotlin
+tasks.jacocoTestReport {
     afterEvaluate {
-        classDirectories.setFrom(files(classDirectories.files.collect {
-            fileTree(dir: it, exclude: '**/build/generated/**')
-        }))
+        classDirectories.setFrom(classDirectories.files.map {
+            fileTree(it) { exclude("**/build/generated/**") }
+        })
     }
 }
 // The Sonar side (sonar.coverage.exclusions=**/build/generated/**) is
 // already in the generated sonar-project.properties.
 ```
 
-Whether `build.gradle(.kts)` may be edited at all is the one line the rest
-of bootstrap won't cross — **application logic and custom build config stay
+Whether `build.gradle.kts` may be edited at all is the one line the rest of
+bootstrap won't cross — **application logic and custom build config stay
 the user's**. Step 4c's edit is scoped narrowly to the CI-prerequisite
 plugins above, only with explicit confirmation, and it **skips anything
 already applied** (so a repo that already has Spotless/JaCoCo gets no edit
@@ -412,11 +418,11 @@ place.**
   print **nothing** — it is not a follow-up.
 
   > ☕ **Adopt build-driven versioning (nebula-release).** Remove any
-  > hardcoded `version = '...'` and apply the plugin:
+  > hardcoded `version = "..."` and apply the plugin (Kotlin DSL):
   >
-  > ```groovy
+  > ```kotlin
   > plugins {
-  >     id 'com.netflix.nebula.release' version '<latest>'  // or 'nebula.release'
+  >     id("com.netflix.nebula.release") version "<latest>"
   > }
   > ```
   >
@@ -944,46 +950,64 @@ If the script exits non-zero with a 403 (user is not a repo admin), do not
 retry. Print the equivalent manual setup instructions from `SETUP.md` and
 continue.
 
-### 4c. Wire Java build plugins into `build.gradle(.kts)` (Java only)
+### 4c. Build script — enforce Kotlin DSL, then wire Java build plugins (Java only)
 
-**Only when `java` is in the detected languages.** The generated CI +
-pre-commit hooks depend on Spotless + JaCoCo being applied in the build
-script (see *Java-specific recommendation* above) — without them the first
-CI run and first push fail. So wire them, with confirmation, idempotently.
+**Only when `java` is in the detected languages.** Two parts: first the
+family's **Kotlin-DSL-only** policy is enforced on the build script, then the
+CI-prerequisite plugins are wired into `build.gradle.kts`.
 
-1. **Determine what's missing.** Read the project's `build.gradle` or
-   `build.gradle.kts`. Skip each piece already present — check for the
-   `com.diffplug.spotless` plugin (Spotless), the `jacoco` plugin +
-   `jacocoTestReport`, and (when `.proto` files exist) a generated-sources
-   coverage exclude. `language_meta.java.has_cov` is a hint for JaCoCo. If
-   **all** are already applied, print one line ("Spotless + JaCoCo already
-   wired — nothing to do") and skip the rest of this step — **do not** turn
+**Part 1 — Kotlin DSL gate.** The Java/Spring plugins maintain only
+`build.gradle.kts`; this is deliberate (one blessed format — see
+*Java-specific recommendation*). Branch on what detection found:
+
+- **`build.gradle.kts` present** → good, proceed to Part 2.
+- **Groovy `build.gradle` present (no `.kts`)** → **offer to convert it**
+  (confirmed action). Explain: the family standardizes on Kotlin DSL, and
+  maintenance (`/development:maintenance`) will **refuse to run** on a Groovy
+  build. On approval, rewrite `build.gradle` → `build.gradle.kts` (translate
+  the plugins block, dependencies, `version`/config to Kotlin DSL syntax),
+  `git rm` the old `build.gradle`, and **validate** with
+  `./gradlew --no-daemon help -q`; if it fails, roll back the conversion
+  (`git checkout -- build.gradle && git rm -f build.gradle.kts`) and surface
+  it as a blocking Step 5 TODO. If the user **declines**, stop here and record
+  a blocking TODO ("convert build.gradle to build.gradle.kts — maintenance
+  won't run until you do"); skip Part 2.
+- **Maven only (`pom.xml`, no Gradle)** → out of scope; this should already
+  have been rejected at detection (Step 1). Do not wire anything.
+
+**Part 2 — wire Spotless + JaCoCo into `build.gradle.kts`** (confirmed,
+idempotent). The generated CI + hooks depend on these (without them the first
+CI run and push fail):
+
+1. **Determine what's missing.** Read `build.gradle.kts`. Skip each piece
+   already present — check for the `com.diffplug.spotless` plugin, the
+   `jacoco` plugin + `jacocoTestReport`, and (when `.proto` files exist) a
+   generated-sources coverage exclude. `language_meta.java.has_cov` is a hint
+   for JaCoCo. If **all** are already applied, print one line ("Spotless +
+   JaCoCo already wired — nothing to do") and skip the rest — **do not** turn
    a satisfied check into a prompt or a TODO.
-2. **Confirm before editing.** `build.gradle(.kts)` is the user's file;
-   bootstrap edits it nowhere else. Show exactly what you'll add (the
-   canonical blocks from *Java-specific recommendation*) and ask. If the
-   user declines, carry the wiring into the Step 5 checklist as an
-   outstanding TODO instead.
-3. **Apply, matching the DSL.** Use the Groovy form in `build.gradle`, the
-   Kotlin form in `build.gradle.kts`. Add the missing `id '...'` lines into
-   the existing `plugins { }` block (don't create a second one); append the
-   `spotless` / `jacocoTestReport` / generated-sources-exclude blocks. Pin
-   Spotless to a current version. Add **only** the missing pieces.
-4. **Validate the script still parses** — a DSL slip would break every
-   Gradle invocation:
+2. **Confirm before editing.** Show exactly what you'll add (the canonical
+   Kotlin-DSL blocks from *Java-specific recommendation*) and ask. If the
+   user declines, carry the wiring into the Step 5 checklist as a TODO.
+3. **Apply (Kotlin DSL).** Add the missing plugin entries into the existing
+   `plugins { }` block (don't create a second one); append the `spotless` /
+   `jacocoTestReport` / generated-sources-exclude blocks. Pin Spotless to a
+   current version. Add **only** the missing pieces.
+4. **Validate the script still parses** — a DSL slip breaks every Gradle
+   invocation:
 
    ```bash
    ./gradlew --no-daemon help -q 2>&1 | tail -20
    ```
 
-   If it fails, roll the edit back (`git checkout -- build.gradle` /
-   `build.gradle.kts`) and surface the wiring as a Step 5 TODO instead of
-   leaving the build broken. Do **not** run the full build here.
+   If it fails, roll the edit back (`git checkout -- build.gradle.kts`) and
+   surface the wiring as a Step 5 TODO instead of leaving the build broken.
+   Do **not** run the full build here.
 
-This is the **one** edit bootstrap makes to a hand-authored build file, and
-only because the artifacts it just generated don't work without it. The
-nebula / full-gRPC / dependency-locking items stay recommendations (Step 5)
-— never auto-applied.
+These are the **only** edits bootstrap makes to a hand-authored build file,
+and only because the family policy (Kotlin DSL) and the artifacts it just
+generated require them. The nebula / full-gRPC / dependency-locking items
+stay recommendations (Step 5) — never auto-applied.
 
 ### 4d. Initial commit
 
@@ -1183,10 +1207,14 @@ short ("push a branch and open a PR"). Reference `SETUP.md` for full details.
 > it doesn't belong here at all. In particular: the Java build-plugin
 > wiring (Spotless + JaCoCo + generated-sources exclude) is handled by
 > **Step 4c** — include it here **only** when the user *declined* 4c or it
-> was rolled back, as: "☕ Wire Spotless + JaCoCo into build.gradle (CI +
-> the pre-push coverage hook fail until you do)." The nebula / full-gRPC /
-> dependency-locking recommendations appear here only when actually missing
-> (per the gating in *Java-specific recommendation*).
+> was rolled back, as: "☕ Wire Spotless + JaCoCo into `build.gradle.kts`
+> (CI + the pre-push coverage hook fail until you do)." If the user declined
+> the Step 4c **Groovy→Kotlin conversion**, lead with that as a *blocking*
+> item: "⛔ Convert `build.gradle` → `build.gradle.kts` —
+> `/development:maintenance` will refuse to run until you do (family policy:
+> Kotlin DSL only)." The nebula / full-gRPC / dependency-locking
+> recommendations appear here only when actually missing (per the gating in
+> *Java-specific recommendation*).
 
 Example for public path:
 
