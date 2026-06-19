@@ -550,9 +550,11 @@ The bootstrap skill offers to apply these automatically via `gh api`. If you
 want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_BRANCH}}`:
 
 - [x] Require a pull request before merging (1 approval, dismiss stale reviews)
-- [x] Require status checks to pass before merging
-  - **PUBLIC**: `sonarcloud`, `snyk-open-source`, `snyk-code`, `license-fs`, `image` (if Docker), `semgrep`, `analyze` (CodeQL), `pre-commit`, `test-and-coverage`
-  - **PRIVATE**: `sonarqube`, `trivy-fs`, `license-fs`, `image` (if Docker), `semgrep`, `pre-commit`, `test-and-coverage`
+- [x] Require status checks to pass before merging — the **exact contexts**
+  `branch-protection.sh` applies (it's the source of truth; this list mirrors it):
+  - **PUBLIC**: `test-and-coverage`, `sonarcloud`, `semgrep`, `license-fs`, `pre-commit`, `analyze (<language>)` (one per CodeQL language), `image` (only if a Dockerfile is present)
+  - **PRIVATE**: `test-and-coverage`, `sonarqube`, `trivy-fs`, `semgrep`, `license-fs`, `pre-commit`, `image` (only if a Dockerfile is present)
+  - **Not required:** Snyk's `security/snyk` (Open Source) and `code/snyk` (Code) are **advisory** PR checks, not workflow jobs — leave them unchecked here (matching `branch-protection.sh`, which never adds them). `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).
 - [x] Require branches to be up to date before merging
 - [x] Require linear history
 - [x] Do not allow bypassing the above settings
