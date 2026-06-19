@@ -99,9 +99,13 @@ First establish the codegen state:
      `grpc-netty-shaded`)?
    - With the protobuf plugin **0.9.x** the generated sources are added
      to the main source set and `generateProto` is wired into
-     `compileJava` **automatically**. For older / explicit setups, check
-     that `sourceSets.main.java.srcDirs` includes
-     `build/generated/source/proto/main/{java,grpc}`. Both are fine.
+     `compileJava` **automatically** — so the build must **NOT** also add
+     them manually. A `sourceSets.main.java.srcDirs("build/generated/…/proto/…")`
+     on top of the plugin — especially pointing at a stale/parallel path
+     (e.g. the singular `…/source/…` vs the plugin's `…/sources/…`) —
+     compiles the same stubs twice → a `duplicate class` build failure on
+     incremental builds. Check the source set does **not** redundantly add
+     the proto output.
 
 Then decide.
 
@@ -141,6 +145,13 @@ The change is structural — recommend, never auto-apply:
 - **Mis-wired.** The protobuf plugin is applied but the grpc deps are
   missing, or the stubs aren't on the compile path (generated dir not in
   the source set on an older/explicit setup). Recommend the specific fix.
+- **Redundant proto `srcDirs` (0.9.x duplicate-class).** The 0.9.x plugin is
+  applied **and** the build manually adds the generated proto dir to
+  `sourceSets.main.java.srcDirs`. The plugin already registers its output, so
+  the manual entry double-compiles the stubs → a `duplicate class` failure
+  (worse when it points at a stale/parallel path). Recommend **removing** the
+  manual `srcDirs` entry — it's behavior-preserving (the plugin still
+  registers the real output) and clears the duplicate-class.
 
 ### `unable_to_fix` when
 
@@ -173,10 +184,11 @@ protobuf {
 ```
 
 The `com.google.protobuf` plugin 0.9.x automatically adds the generated
-sources to the main source set and wires `generateProto` into
-`compileJava`; older setups add
-`build/generated/source/proto/main/{java,grpc}` to
-`sourceSets.main.java.srcDirs` explicitly — both are fine.
+sources to the main source set and wires `generateProto` into `compileJava`
+— note there is **no** `sourceSets { … srcDirs(…) }` above, and that's
+deliberate: do **not** add the proto output to the source set yourself. A
+redundant manual `srcDirs` entry (especially one pointing at a stale/parallel
+path) compiles the same stubs twice and fails with `duplicate class`.
 
 Your service impl (the gRPC analog of a `@RestController`) then `extends`
 the generated `*ImplBase` service class produced from the `.proto` — so
