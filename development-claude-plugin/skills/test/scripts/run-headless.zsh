@@ -16,7 +16,17 @@ setopt err_exit nounset pipefail
 #     --out <file.jsonl> \
 #     --plugins <dir1>[,<dir2>,...] \
 #     --prompt "<task, e.g. /development:maintenance --dry-run --tool version_sync>" \
+#     [--gh-repo <owner/repo>]     # give the child GitHub context (see note below)
 #     [--permission-mode <mode>]   # default: bypassPermissions (see note below)
+#
+# NOTE on --gh-repo: the clone's `origin` is a local filesystem path, so the
+# child's `gh` calls can't resolve a GitHub host and every gh-based gather
+# (vendor PRs, code scanning, container scan) comes back empty. Passing
+# --gh-repo exports GH_REPO for the child, which `gh` honors over git-remote
+# detection — so READ-ONLY gathers resolve the real repo while git push/fetch
+# stay isolated on the local-path origin. Because that same context would let a
+# non-dry-run run MUTATE real shared PRs, only pass --gh-repo for dry-run /
+# read-only tasks (the harness SKILL enforces this).
 #
 # Exit code mirrors the child `claude` process. The transcript (newline-delimited
 # JSON, one event per line) is always written to --out, even on failure, so the
@@ -30,7 +40,7 @@ setopt err_exit nounset pipefail
 
 emulate -L zsh
 
-local cwd="" out="" plugins="" prompt="" permission_mode="bypassPermissions"
+local cwd="" out="" plugins="" prompt="" permission_mode="bypassPermissions" gh_repo=""
 
 while (( $# )); do
   case "$1" in
@@ -38,6 +48,7 @@ while (( $# )); do
     --out)             out="$2";             shift 2 ;;
     --plugins)         plugins="$2";         shift 2 ;;
     --prompt)          prompt="$2";          shift 2 ;;
+    --gh-repo)         gh_repo="$2";         shift 2 ;;
     --permission-mode) permission_mode="$2"; shift 2 ;;
     *) print -u2 "run-headless.zsh: unknown argument: $1"; exit 2 ;;
   esac
@@ -74,15 +85,19 @@ print -u2 "run-headless.zsh: launching headless claude"
 print -u2 "  cwd:        $cwd"
 print -u2 "  plugins:    ${(j:, :)${(s/,/)plugins}}"
 print -u2 "  permission: $permission_mode"
+print -u2 "  gh-repo:    ${gh_repo:-<none — gh gathers will be empty>}"
 print -u2 "  prompt:     $prompt"
 print -u2 "  transcript: $out"
 
 # `-p` with stream-json requires --verbose. Run from the target directory so
 # the session's cwd is the project under test. err_exit is suspended around the
 # call so we can capture and surface the child's exit code rather than aborting.
+# GH_REPO (when set) is exported only for the child subshell so its gh-based
+# gathers resolve the real repo; git push/fetch still use the local-path origin.
 local rc=0
 {
   cd "$cwd"
+  [[ -n "$gh_repo" ]] && export GH_REPO="$gh_repo"
   claude \
     "${plugin_flags[@]}" \
     -p "$prompt" \
