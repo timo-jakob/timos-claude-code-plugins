@@ -158,26 +158,25 @@ manifest. Known topics:
 | Topic | Marker (present in repo) | Gather script |
 | --- | --- | --- |
 | `claude-plugin` | a `.claude-plugin/` dir holding `plugin.json` (an individual plugin) **or** `marketplace.json` (a marketplace of plugins, like this repo) | `gather-claude-plugin-findings.zsh` |
-| `spring` | an `org.springframework.boot` Gradle plugin **or** a `spring-boot-starter-*` dependency in `build.gradle(.kts)` / `pom.xml` (composes alongside `java` — only meaningful when Java is also detected) | `gather-spring-findings.zsh` |
+| `spring` | an `org.springframework.boot` Gradle plugin **or** a `spring-boot-starter-*` dependency in `build.gradle.kts` (composes alongside `java` — only meaningful when Java is also detected) | `gather-spring-findings.zsh` |
 
 **Detecting a marker — use these exact recipes, don't improvise.** A
 *file-presence* marker (the `claude-plugin` dir) is robust to test with
-`test -e`. A **content** marker (the `spring` one — you must grep *inside*
-`build.gradle`) is **not**: passing possibly-absent files as bare `grep`
-arguments (`grep -E … build.gradle build.gradle.kts pom.xml`) makes grep
-exit **2** when any named file is missing, and that error **overrides a
-genuine match** in the file that does exist (worse, `2>/dev/null` hides the
-cause). A Groovy-DSL Spring repo has only `build.gradle` — so the naive
-form silently fails to detect Spring. Grep recursively with `--include`
-filters over `.` instead, so missing files can't poison the result:
+`test -e`. The **content** marker (the `spring` one) must grep *inside*
+the build script. Kotlin DSL only (#343) — the family maintains
+`build.gradle.kts`, so the marker greps only that; a Groovy/Maven repo is
+detected as `java` (so the dispatcher halts it) but does **not** compose
+Spring. Grep recursively with an `--include` filter over `.` — never pass a
+possibly-absent file as a bare `grep` argument (a missing file makes grep
+exit non-zero and can mask a genuine match):
 
 ```bash
 # claude-plugin marker (file presence — robust):
 test -f .claude-plugin/plugin.json || test -f .claude-plugin/marketplace.json
 
-# spring marker (content — missing manifests cannot defeat a real match):
-grep -REl --include='build.gradle' --include='build.gradle.kts' \
-  --include='pom.xml' 'org\.springframework\.boot|spring-boot-starter-' . \
+# spring marker (content; --include over '.' tolerates an absent build file):
+grep -REl --include='build.gradle.kts' \
+  'org\.springframework\.boot|spring-boot-starter-' . \
   2>/dev/null | grep -q .
 ```
 

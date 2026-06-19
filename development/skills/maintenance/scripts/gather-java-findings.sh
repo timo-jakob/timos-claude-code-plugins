@@ -84,11 +84,12 @@ fi
 
 # --- tooling_configured ------------------------------------------------------
 # Spotless: the com.diffplug.spotless plugin (or a bare `spotless {` block) in a
-# Gradle build script (Groovy or Kotlin DSL).
+# Gradle build script. Kotlin DSL only (#343) — the family maintains
+# build.gradle.kts; Groovy/Maven repos are halted by the dispatcher.
 has_format_lint_config="false"
 spotless_marker='com\.diffplug\.spotless|spotless[[:space:]]*\{'
 if grep -rqE "$spotless_marker" \
-	--include='build.gradle' --include='build.gradle.kts' . 2>/dev/null; then
+	--include='build.gradle.kts' . 2>/dev/null; then
 	has_format_lint_config="true"
 fi
 
@@ -102,7 +103,7 @@ fi
 # a coverage measurement at all.
 has_jacoco_config="false"
 if grep -rqE 'jacoco' \
-	--include='build.gradle' --include='build.gradle.kts' . 2>/dev/null; then
+	--include='build.gradle.kts' . 2>/dev/null; then
 	has_jacoco_config="true"
 fi
 
@@ -148,7 +149,7 @@ fi
 # whenever a Gradle build file exists; findings fire on a hardcoded version.
 has_versioning_config="false"
 if find . -maxdepth 2 -path '*/build/*' -prune -o \
-	\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print -quit 2>/dev/null | grep -q .; then
+	-name 'build.gradle.kts' -print -quit 2>/dev/null | grep -q .; then
 	has_versioning_config="true"
 fi
 
@@ -172,7 +173,7 @@ if find . -path '*/build/*' -prune -o -path '*/.git/*' -prune -o \
 	\( -iname 'openapi.yaml' -o -iname 'openapi.yml' -o -iname 'openapi.json' \) \
 	-print -quit 2>/dev/null | grep -q .; then
 	if ! grep -rqE 'spring-boot-starter-web(flux)?' \
-		--include='build.gradle' --include='build.gradle.kts' . 2>/dev/null; then
+		--include='build.gradle.kts' . 2>/dev/null; then
 		has_openapi_config="true"
 	fi
 fi
@@ -350,7 +351,7 @@ fi
 # build script, and `version=...` in gradle.properties.
 if [[ "$has_versioning_config" == "true" ]]; then
 	ver_hits="$(grep -rnE "^[[:space:]]*version[[:space:]]*=[[:space:]]*['\"]" \
-		--include='build.gradle' --include='build.gradle.kts' . 2>/dev/null || true)"
+		--include='build.gradle.kts' . 2>/dev/null || true)"
 	if [[ -f "gradle.properties" ]]; then
 		gp_hits="$(grep -nE '^[[:space:]]*version[[:space:]]*=' gradle.properties 2>/dev/null |
 			sed 's#^#./gradle.properties:#' || true)"
@@ -384,7 +385,7 @@ fi
 if [[ "$has_grpc_config" == "true" ]]; then
 	echo "[]" >"$findings_dir/grpc.json"
 	grpc_build="$(find . -maxdepth 2 -path '*/build/*' -prune -o \
-		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null | head -n1)"
+		-name 'build.gradle.kts' -print 2>/dev/null | head -n1)"
 	if [[ -n "$grpc_build" ]]; then
 		jq -n --arg c "${grpc_build#./}" '[{
 			type: "config", severity: "MINOR", rule: "grpc:proto-audit",
@@ -402,7 +403,7 @@ fi
 if [[ "$has_openapi_config" == "true" ]]; then
 	echo "[]" >"$findings_dir/openapi.json"
 	oa_build="$(find . -maxdepth 2 -path '*/build/*' -prune -o \
-		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null | head -n1)"
+		-name 'build.gradle.kts' -print 2>/dev/null | head -n1)"
 	if [[ -n "$oa_build" ]]; then
 		jq -n --arg c "${oa_build#./}" '[{
 			type: "config", severity: "MINOR", rule: "openapi:contract-audit",

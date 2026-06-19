@@ -113,7 +113,7 @@ local boot_findings="[]"
 # used as the "from" for Renovate PRs whose title carries only the target.
 local cur_boot
 cur_boot="$(grep -rhE "springframework\.boot" \
-  --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null \
+  --include='build.gradle.kts' . 2>/dev/null \
   | grep -E "version|:[0-9]" \
   | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 [[ -n "$cur_boot" ]] || cur_boot="0.0.0"
@@ -166,7 +166,7 @@ local container_findings="[]"
 local -a build_files
 build_files=("${(@f)$(find . -maxdepth 2 \
   -path '*/build/*' -prune -o -path '*/.git/*' -prune -o \
-  \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null)}")
+  -name 'build.gradle.kts' -print 2>/dev/null)}")
 if [[ -n "${build_files[1]}" ]]; then
   has_spring_container="true"
   local bf
@@ -193,7 +193,7 @@ local has_spring_api="false"
 local api_findings="[]"
 if [[ -n "${build_files[1]}" ]] &&
   grep -rqE 'spring-boot-starter-web(flux)?' \
-    --include='build.gradle' --include='build.gradle.kts' . 2>/dev/null; then
+    --include='build.gradle.kts' . 2>/dev/null; then
   has_spring_api="true"
   local -a api_objs=()
   local bf_api
