@@ -547,6 +547,13 @@ Copy from `templates/common/`:
   - `--claude-plugin true` → copy `renovate.json` instead (static, no substitution) and **do NOT render
     `.github/dependabot.yml`**. A plugin repo is templates, not production dependency manifests; Renovate's
     github-actions manager (plus the `.tmpl` customManager in the config) covers its real moving surface.
+  - **the repo already has a `renovate.json`** (a downstream app already on
+    Renovate) → keep it; ask before adding Dependabot and **don't run both**
+    (dueling bots create duplicate PRs). Do **not** render
+    `.github/dependabot.yml`. Leave the config's substance alone, but if it
+    `extends` the **deprecated `config:base`** preset, **offer a confirmed
+    one-line swap** to `config:recommended` (Renovate renamed it; `config:base`
+    is deprecated) — safe and opt-in. If declined, surface it as a Step 5 TODO.
 - `.github/workflows/gitleaks.yml` (static copy — secret-scanning CI for **every** repo; defense in depth behind the
   gitleaks pre-commit hook. Note: repos owned by a GitHub Organization need a `GITLEAKS_LICENSE` repo secret — see the
   workflow comment.)
