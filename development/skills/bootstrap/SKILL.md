@@ -350,91 +350,95 @@ Just call it out.
 
 If `java` is in the detected languages, the generated Gradle CI
 (`./gradlew build jacocoTestReport`) and the pre-commit Spotless +
-coverage-floor hooks **assume the project's `build.gradle(.kts)` applies
-the Spotless and JaCoCo plugins** — config that lives in the build script,
-which bootstrap does **not** edit. Surface this TODO during Step 5 (gate
-it on what's missing: check `language_meta.java.has_cov` for JaCoCo, and
-whether the gather/detection saw a `spotless` marker):
+coverage-floor hooks **depend on the project's `build.gradle(.kts)`
+applying the Spotless and JaCoCo plugins**. Those plugins live in the build
+script — so without them the **first CI run and the first `git push` both
+fail** (`spotlessApply` / `jacocoTestReport` are unknown tasks; the
+coverage-floor hook finds no JaCoCo XML). This is not optional polish: it's
+a prerequisite for the very pipeline bootstrap just generated. So bootstrap
+**wires it for you** — see **Step 4c**, a confirmed (you approve first),
+idempotent edit. The canonical wiring 4c applies:
 
-> ☕ **Wire Spotless + JaCoCo into your `build.gradle(.kts)`.** The
-> generated CI + pre-commit hooks depend on them:
->
-> ```groovy
-> plugins {
->     id 'com.diffplug.spotless' version '7.0.2'
->     id 'jacoco'
-> }
-> spotless {
->     java { googleJavaFormat() }
->     // For Kotlin DSL / Kotlin sources, also: kotlin { ktlint() }
-> }
-> jacocoTestReport {
->     dependsOn test
->     reports { xml.required = true }   // required by Sonar + diff-cover
-> }
-> tasks.test { finalizedBy jacocoTestReport }
-> ```
->
-> **Optional — Gradle dependency locking** (the "built-in" half of
-> dependency hygiene, alongside the Snyk App): add
-> `dependencyLocking { lockAllConfigurations() }` and run
-> `./gradlew dependencies --write-locks` to commit a `gradle.lockfile`, so
-> dependency resolution is reproducible and a surprise transitive bump
-> shows up as a lockfile diff in review.
+```groovy
+plugins {
+    id 'com.diffplug.spotless' version '7.0.2'
+    id 'jacoco'
+}
+spotless {
+    java { googleJavaFormat() }
+    // For Kotlin DSL / Kotlin sources, also: kotlin { ktlint() }
+}
+jacocoTestReport {
+    dependsOn test
+    reports { xml.required = true }   // required by Sonar + diff-cover
+}
+tasks.test { finalizedBy jacocoTestReport }
+```
 
-If `java` is detected, the generated **`.github/workflows/release.yml`**
-(build-driven semantic versioning) assumes **nebula-release** is wired and
-that **no version is hardcoded** — surface this TODO too:
+**When the project uses gRPC / Protocol Buffers** (has `.proto` files),
+Step 4c also adds the generated-sources coverage exclude so stubs don't
+skew the gate (Groovy shown; use the Kotlin form in a `.kts` file):
 
-> ☕ **Adopt build-driven versioning (nebula-release).** The generated
-> `release.yml` derives the version from git tags via the nebula plugin —
-> remove any hardcoded `version = '...'` and apply the plugin:
->
-> ```groovy
-> plugins {
->     id 'com.netflix.nebula.release' version '<latest>'  // or 'nebula.release'
-> }
-> // No `version = '...'` — nebula derives it from the last git tag.
-> ```
->
-> Then run a release with `.github/workflows/release.yml` (manual dispatch,
-> pick patch/minor/major) — it runs `./gradlew final`, which tags the next
-> version. Locally, `./gradlew currentVersion` shows the derived version and
-> `./gradlew final -Prelease.scope=minor` cuts a release.
+```groovy
+jacocoTestReport {
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: '**/build/generated/**')
+        }))
+    }
+}
+// The Sonar side (sonar.coverage.exclusions=**/build/generated/**) is
+// already in the generated sonar-project.properties.
+```
 
-**Only if the project uses gRPC / Protocol Buffers** (has `.proto` files),
-surface this TODO too — generated stubs must be produced by the build, and
-kept out of the coverage gate:
+Whether `build.gradle(.kts)` may be edited at all is the one line the rest
+of bootstrap won't cross — **application logic and custom build config stay
+the user's**. Step 4c's edit is scoped narrowly to the CI-prerequisite
+plugins above, only with explicit confirmation, and it **skips anything
+already applied** (so a repo that already has Spotless/JaCoCo gets no edit
+and no prompt — a satisfied check produces nothing, not a TODO).
 
-> ☕ **Wire gRPC/protobuf code generation.** Generate Java + gRPC stubs from
-> your authoritative `.proto` contract via the `com.google.protobuf` Gradle
-> plugin (`protoc` + the gRPC plugin), and exclude the generated sources from
-> coverage so they don't skew the gate:
->
-> ```groovy
-> plugins { id 'com.google.protobuf' version '0.9.4' }
-> dependencies {
->     implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
->     implementation "io.grpc:grpc-protobuf:${grpcVersion}"
->     implementation "io.grpc:grpc-stub:${grpcVersion}"
->     implementation "com.google.protobuf:protobuf-java:${protoVersion}"
->     compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
-> }
-> protobuf {
->     protoc { artifact = "com.google.protobuf:protoc:${protoVersion}" }
->     plugins { grpc { artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}" } }
->     generateProtoTasks { all()*.plugins { grpc {} } }
-> }
-> // Keep generated code out of the JaCoCo/Sonar coverage gate:
-> //   sonar.coverage.exclusions=**/build/generated/**
-> ```
->
-> The `build/generated/**` output is already covered by the Java `.gitignore`
-> (it ignores `build/`). The `java-grpc-advisor` audits this wiring on each
-> maintenance run.
+The remaining items below are **recommendations**, surfaced in Step 5 only
+when genuinely outstanding — bootstrap does *not* auto-apply them (each is a
+structural / architectural choice the user owns). **Gate every one on what
+is actually missing; never print a recommendation for something already in
+place.**
 
-Do not modify `build.gradle(.kts)` automatically — that's their file. Just
-call it out, with the snippet.
+- **Build-driven versioning (nebula-release).** The generated
+  `.github/workflows/release.yml` derives the version from git tags via the
+  nebula plugin and assumes **no hardcoded `version = '...'`**. Recommend
+  this **only when nebula isn't already applied** (check the build script;
+  `language_meta` / the gather may also report it). When it's already wired,
+  print **nothing** — it is not a follow-up.
+
+  > ☕ **Adopt build-driven versioning (nebula-release).** Remove any
+  > hardcoded `version = '...'` and apply the plugin:
+  >
+  > ```groovy
+  > plugins {
+  >     id 'com.netflix.nebula.release' version '<latest>'  // or 'nebula.release'
+  > }
+  > ```
+  >
+  > Then `./gradlew final -Prelease.scope=minor` cuts a release;
+  > `./gradlew currentVersion` shows the derived version.
+
+- **Full gRPC/protobuf code generation** (only when `.proto` files exist
+  *and* the `com.google.protobuf` plugin isn't already wired). This is a
+  structural choice (protoc + the gRPC plugin, transport deps) — recommend,
+  don't auto-apply. The `java-grpc-advisor` audits it on each maintenance
+  run. When the project already wires it (like tick-client-snapper), print
+  nothing.
+
+  > ☕ **Wire gRPC/protobuf code generation** via the `com.google.protobuf`
+  > Gradle plugin (`protoc` + the gRPC plugin) so the generated stubs are
+  > produced by the build from your authoritative `.proto` contract. See
+  > `java-grpc-advisor` for the canonical block.
+
+- **Optional — Gradle dependency locking** (the "built-in" half of
+  dependency hygiene, alongside the Snyk App): add
+  `dependencyLocking { lockAllConfigurations() }` and run
+  `./gradlew dependencies --write-locks` to commit a `gradle.lockfile`.
 
 ### `{{SECURITY_CONTACT_BLOCK}}` substitution
 
@@ -940,11 +944,52 @@ If the script exits non-zero with a 403 (user is not a repo admin), do not
 retry. Print the equivalent manual setup instructions from `SETUP.md` and
 continue.
 
-### 4c. Initial commit
+### 4c. Wire Java build plugins into `build.gradle(.kts)` (Java only)
 
-Offer to commit the generated files using the `/development:commit` flow with a
-suggested message like `Bootstrap project with quality and security toolchain`.
-Do not push.
+**Only when `java` is in the detected languages.** The generated CI +
+pre-commit hooks depend on Spotless + JaCoCo being applied in the build
+script (see *Java-specific recommendation* above) — without them the first
+CI run and first push fail. So wire them, with confirmation, idempotently.
+
+1. **Determine what's missing.** Read the project's `build.gradle` or
+   `build.gradle.kts`. Skip each piece already present — check for the
+   `com.diffplug.spotless` plugin (Spotless), the `jacoco` plugin +
+   `jacocoTestReport`, and (when `.proto` files exist) a generated-sources
+   coverage exclude. `language_meta.java.has_cov` is a hint for JaCoCo. If
+   **all** are already applied, print one line ("Spotless + JaCoCo already
+   wired — nothing to do") and skip the rest of this step — **do not** turn
+   a satisfied check into a prompt or a TODO.
+2. **Confirm before editing.** `build.gradle(.kts)` is the user's file;
+   bootstrap edits it nowhere else. Show exactly what you'll add (the
+   canonical blocks from *Java-specific recommendation*) and ask. If the
+   user declines, carry the wiring into the Step 5 checklist as an
+   outstanding TODO instead.
+3. **Apply, matching the DSL.** Use the Groovy form in `build.gradle`, the
+   Kotlin form in `build.gradle.kts`. Add the missing `id '...'` lines into
+   the existing `plugins { }` block (don't create a second one); append the
+   `spotless` / `jacocoTestReport` / generated-sources-exclude blocks. Pin
+   Spotless to a current version. Add **only** the missing pieces.
+4. **Validate the script still parses** — a DSL slip would break every
+   Gradle invocation:
+
+   ```bash
+   ./gradlew --no-daemon help -q 2>&1 | tail -20
+   ```
+
+   If it fails, roll the edit back (`git checkout -- build.gradle` /
+   `build.gradle.kts`) and surface the wiring as a Step 5 TODO instead of
+   leaving the build broken. Do **not** run the full build here.
+
+This is the **one** edit bootstrap makes to a hand-authored build file, and
+only because the artifacts it just generated don't work without it. The
+nebula / full-gRPC / dependency-locking items stay recommendations (Step 5)
+— never auto-applied.
+
+### 4d. Initial commit
+
+Offer to commit the generated files (and any 4c build-script wiring) using
+the `/development:commit` flow with a suggested message like `Bootstrap
+project with quality and security toolchain`. Do not push.
 
 ## Step 4.5: Offer Automation (macOS + Homebrew only)
 
@@ -1129,7 +1174,21 @@ first.
 Print a clear, ordered checklist of everything the user **still** has to do
 manually — i.e., only the steps that automation didn't cover (or that the user
 declined). If automation in Step 4.5 ran end-to-end, this checklist may be very
-short ("push a branch and open a PR"). Reference `SETUP.md` for full details. Example for public path:
+short ("push a branch and open a PR"). Reference `SETUP.md` for full details.
+
+> **Only list genuinely outstanding work.** A checklist item is a TODO the
+> user must act on — never a status report. Do **not** render an
+> already-satisfied check (e.g. "nebula-release already applied ✅",
+> "Spotless + JaCoCo already wired") as a `☕` follow-up; if it's done,
+> it doesn't belong here at all. In particular: the Java build-plugin
+> wiring (Spotless + JaCoCo + generated-sources exclude) is handled by
+> **Step 4c** — include it here **only** when the user *declined* 4c or it
+> was rolled back, as: "☕ Wire Spotless + JaCoCo into build.gradle (CI +
+> the pre-push coverage hook fail until you do)." The nebula / full-gRPC /
+> dependency-locking recommendations appear here only when actually missing
+> (per the gating in *Java-specific recommendation*).
+
+Example for public path:
 
 ```text
 NEXT STEPS:
