@@ -47,7 +47,7 @@ Your prompt contains:
   project.
 - `findings` — the `proto-audit` findings array (only when
   `configured == true`), each with:
-  - `component` — a build file path (`build.gradle` or `build.gradle.kts`)
+  - `component` — a build file path (`build.gradle.kts`)
   - `rule` — `grpc:proto-audit`
 - `commit_subject` — the suggested PR title for this group.
 - `policy.severity_gate` — informational.
@@ -87,13 +87,13 @@ First establish the codegen state:
 1. **Locate the `.proto` files.** Conventional location is
    `src/main/proto/**`; also check `**/*.proto`. Note that they exist —
    they are the authoritative contract.
-2. **Read each named `build.gradle(.kts)`** and check the wiring:
+2. **Read each named `build.gradle.kts`** and check the wiring:
    - Is the `com.google.protobuf` plugin applied?
    - Is `protoc` configured — the `protobuf { protoc { artifact = ... } }`
      block?
-   - Is the gRPC plugin enabled — `plugins { grpc { artifact =
+   - Is the gRPC plugin enabled — `plugins { id("grpc") { artifact =
      "io.grpc:protoc-gen-grpc-java:..." } }` **and**
-     `generateProtoTasks { all()*.plugins { grpc {} } }`?
+     `generateProtoTasks { all().forEach { it.plugins { id("grpc") } } }`?
    - Are the `grpc-stub`, `grpc-protobuf`, and `protobuf-java`
      dependencies present (plus a transport such as
      `grpc-netty-shaded`)?
@@ -112,15 +112,16 @@ category **small**:
 
 - **gRPC generation not switched on.** The protobuf plugin **and**
   `protoc` are present, but gRPC generation isn't enabled in
-  `generateProtoTasks`. Adding the `all()*.plugins { grpc {} }` line (and
-  the `plugins { grpc { artifact = ... } }` declaration if missing) is a
+  `generateProtoTasks`. Adding the
+  `all().forEach { it.plugins { id("grpc") } }` line (and the
+  `plugins { id("grpc") { artifact = ... } }` declaration if missing) is a
   one-line, behavior-additive change.
 - **Floating protobuf-plugin version.** Pin the `com.google.protobuf`
   plugin to a specific version when it floats (no version / a dynamic
   range). This stabilizes codegen without changing the contract.
 
-Match the file's DSL: Groovy in `build.gradle`, Kotlin in
-`build.gradle.kts`. Prefer `human-review` whenever you're unsure.
+Write Kotlin DSL — the build is always `build.gradle.kts`. Prefer
+`human-review` whenever you're unsure.
 
 ### `human-review` (actions_requiring_review) when
 
@@ -148,29 +149,26 @@ You can't confidently parse the build file or classify the codegen setup.
 ## Example recommended config
 
 The shape the `human-review` recommendations point to — the canonical
-protobuf/gRPC wiring (Groovy DSL; adjust to Kotlin DSL when the file is
-`.kts`):
+protobuf/gRPC wiring (Kotlin DSL):
 
-```groovy
+```kotlin
 plugins {
-    id 'com.google.protobuf' version '0.9.4'
+    id("com.google.protobuf") version "0.9.4"
 }
-ext {
-    grpcVersion = '1.69.0'
-    protoVersion = '4.29.2'
-}
+val grpcVersion = "1.69.0"
+val protoVersion = "4.29.2"
 dependencies {
-    implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
-    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
-    implementation "io.grpc:grpc-stub:${grpcVersion}"
-    implementation "com.google.protobuf:protobuf-java:${protoVersion}"
+    implementation("io.grpc:grpc-netty-shaded:$grpcVersion")
+    implementation("io.grpc:grpc-protobuf:$grpcVersion")
+    implementation("io.grpc:grpc-stub:$grpcVersion")
+    implementation("com.google.protobuf:protobuf-java:$protoVersion")
     // @Generated annotations on Java 9+ need this at compile time:
-    compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+    compileOnly("org.apache.tomcat:annotations-api:6.0.53")
 }
 protobuf {
-    protoc { artifact = "com.google.protobuf:protoc:${protoVersion}" }
-    plugins { grpc { artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}" } }
-    generateProtoTasks { all()*.plugins { grpc {} } }
+    protoc { artifact = "com.google.protobuf:protoc:$protoVersion" }
+    plugins { id("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion" } }
+    generateProtoTasks { all().forEach { it.plugins { id("grpc") } } }
 }
 ```
 
@@ -192,11 +190,10 @@ the `.proto` contract drives the code, not the other way around.
 2. Locate the `.proto` files (`src/main/proto/**`, `**/*.proto`) with
    Grep / Read — they are the authoritative contract.
 3. Group `proto-audit` findings by `component` so you Read each build
-   file once. Read the named file fully — it may be Groovy
-   (`build.gradle`) or Kotlin DSL (`build.gradle.kts`). Determine the
-   codegen state per the decision rules.
+   file once. Read the named `build.gradle.kts` fully (Kotlin DSL).
+   Determine the codegen state per the decision rules.
 4. Decide `fix` / `human-review` / `unable_to_fix` per above. Apply only
-   the conservative `fix` edits with Edit, matching the file's DSL.
+   the conservative `fix` edits with Edit, in Kotlin DSL.
 5. `git status --short` to summarize what changed.
 6. **Validate the build script still parses** — a DSL typo would fail
    configuration:
@@ -232,15 +229,15 @@ the `.proto` contract drives the code, not the other way around.
     {
       "type": "fix",
       "rule": "grpc:proto-audit",
-      "finding_id": "build.gradle",
-      "location": "build.gradle",
-      "summary": "enabled gRPC generation in generateProtoTasks (all()*.plugins { grpc {} }) so the protoc run emits the gRPC stubs — behavior-additive",
+      "finding_id": "build.gradle.kts",
+      "location": "build.gradle.kts",
+      "summary": "enabled gRPC generation in generateProtoTasks (all().forEach { it.plugins { id(\"grpc\") } }) so the protoc run emits the gRPC stubs — behavior-additive",
       "worktree_branch": "<branch>"
     }
   ],
   "actions_requiring_review": [
     {
-      "finding_id": "build.gradle",
+      "finding_id": "build.gradle.kts",
       "type": "no-grpc-wiring",
       "severity": "MAJOR",
       "recommendation": ".proto files present but no com.google.protobuf plugin / no codegen; wire the protobuf + gRPC generation (the example block in this agent) so the .proto is the authoritative contract and the generated stubs compile into the build.",
@@ -260,7 +257,7 @@ make no commit, and the runtime cleans up the empty worktree.
 - **The `.proto` files are authoritative.** Never generate them from code
   and never rewrite them — humans own the contract. When wiring is
   missing, recommend it; don't author proto.
-- **Only edit `build.gradle(.kts)`** for the conservative wiring fixes
+- **Only edit `build.gradle.kts`** for the conservative wiring fixes
   (switch on gRPC generation, pin the plugin version). Never auto-add the
   full wiring, never edit generated sources, and never touch application
   code (the `*ImplBase` service impls).

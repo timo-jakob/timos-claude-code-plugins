@@ -96,23 +96,21 @@ tree). Operate from your current cwd. The Spring Boot version lives in
 exactly **one** of these — grep before assuming:
 
 ```bash
-grep -nE "id ['\"]org\.springframework\.boot['\"] version" \
-  build.gradle build.gradle.kts 2>/dev/null
+grep -nE "id\(['\"]org\.springframework\.boot['\"]\) version" \
+  build.gradle.kts 2>/dev/null
 grep -nE "spring-boot|springBoot|org\.springframework\.boot" \
   gradle/libs.versions.toml 2>/dev/null
 grep -nE "spring.?boot.*[Vv]ersion|springBootVersion" \
   gradle.properties 2>/dev/null
-grep -nE "spring-boot-starter-parent" pom.xml 2>/dev/null
 ```
 
 Typical layouts, in rough order of preference:
 
 - the Gradle plugins block —
-  `id 'org.springframework.boot' version 'X'` in `build.gradle(.kts)`
+  `id("org.springframework.boot") version "X"` in `build.gradle.kts`
 - a Gradle **version catalog** at `gradle/libs.versions.toml` —
   `spring-boot = "X"` under `[versions]`, or a plugin alias
 - a `gradle.properties` version property
-- `pom.xml`'s `spring-boot-starter-parent` `<version>` (Maven projects)
 
 You only need to find the **one** place Boot's version is declared.
 Boot's dependency-management plugin / BOM manages the rest of the Spring
@@ -152,8 +150,8 @@ anchor in the guide, no edit.
 
 Bump the version in the single file Phase 1 found, **respecting the
 existing style** — the catalog `[versions]` entry, the
-`gradle.properties` property, the plugins-block `version 'X'`, or the
-`spring-boot-starter-parent` `<version>`. Change only the Boot version;
+`gradle.properties` property, or the plugins-block `version "X"`.
+Change only the Boot version;
 the BOM re-resolves the rest of the ecosystem on the next build.
 
 ### Phase 4 — apply migrations

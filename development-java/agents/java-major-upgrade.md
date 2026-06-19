@@ -87,7 +87,7 @@ Your prompt contains:
    - a Gradle **version catalog** at `gradle/libs.versions.toml`
      (bump the matching `[versions]` entry), OR
    - a `gradle.properties` version property, OR
-   - an inline dependency string in `build.gradle` / `build.gradle.kts`
+   - an inline dependency string in `build.gradle.kts`
      (`implementation 'group:artifact:1.2.3'`, or a `libs.versions` /
      `ext` reference)
 2. For each affected call site:

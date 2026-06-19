@@ -52,7 +52,7 @@ Your prompt contains:
   exists in a **non-Spring** Java service.
 - `findings` — the `openapi-audit` findings array (only when
   `configured == true`), each with:
-  - `component` — a build file path (`build.gradle` or `build.gradle.kts`)
+  - `component` — a build file path (`build.gradle.kts`)
   - `rule` — `openapi:contract-audit`
 - `commit_subject` — the suggested PR title for this group.
 - `policy.severity_gate` — informational.
@@ -94,12 +94,12 @@ First establish the contract-first state:
 1. **Locate the committed OpenAPI spec.** Search conventional locations:
    `src/main/resources/**/openapi.{yaml,yml,json}`, `api/**`,
    `openapi/**`, `**/openapi.{yaml,yml,json}`. Note whether one exists.
-2. **Check the openapi-generator wiring** in `build.gradle(.kts)`: is the
+2. **Check the openapi-generator wiring** in `build.gradle.kts`: is the
    `org.openapi.generator` plugin applied? Is there an `openApiGenerate`
-   task with `generatorName = 'jaxrs-spec'` (**NOT** `'spring'` — that's
+   task with `generatorName = "jaxrs-spec"` (**NOT** `"spring"` — that's
    the Spring binding, wrong for a non-Spring service), `inputSpec`
    pointing at the committed spec, `configOptions` including
-   `interfaceOnly = 'true'` and `useJakartaEe = 'true'` (Jakarta REST
+   `interfaceOnly = "true"` and `useJakartaEe = "true"` (Jakarta REST
    namespace), an `outputDir`, the generated dir wired into the main
    source set, and `compileJava` depending on `openApiGenerate`?
 
@@ -115,12 +115,13 @@ category **small**:
   range). This stabilizes the generator without changing the contract.
 - **Missing compile dependency.** When the plugin **and** the
   `openApiGenerate` task already exist but `compileJava` doesn't depend
-  on it, add `tasks.compileJava { dependsOn tasks.openApiGenerate }`.
+  on it, add
+  `tasks.named("compileJava") { dependsOn(tasks.named("openApiGenerate")) }`.
   This makes the existing setup correct — the generated interfaces will
   be present before compilation — without changing the contract.
 
-Match the file's DSL: Groovy in `build.gradle`, Kotlin in
-`build.gradle.kts`. Prefer `human-review` whenever you're unsure.
+The build file is Kotlin DSL (`build.gradle.kts`). Prefer `human-review`
+whenever you're unsure.
 
 ### `human-review` (actions_requiring_review) when
 
@@ -135,7 +136,7 @@ auto-apply:
   switch the resources to implement the generated `*Api` interfaces.
   This is a structural change — recommend with the concrete wiring
   snippet (the example block below); do **not** auto-migrate.
-- **Wrong generator.** The wiring uses `generatorName = 'spring'` in a
+- **Wrong generator.** The wiring uses `generatorName = "spring"` in a
   non-Spring repo. The project has no Spring runtime to satisfy the
   Spring interfaces — recommend switching to `jaxrs-spec`. Conversely,
   if this is actually a Spring app then spring-api-advisor
@@ -155,34 +156,33 @@ You can't confidently parse the build file or classify the API setup.
 ## Example recommended config
 
 The shape the `human-review` recommendations point to — the
-contract-first `jaxrs-spec` wiring (Groovy DSL; adjust to Kotlin DSL when
-the file is `.kts`):
+contract-first `jaxrs-spec` wiring (Kotlin DSL):
 
-```groovy
+```kotlin
 plugins {
-    id 'org.openapi.generator' version '<version>'
+    id("org.openapi.generator") version "<version>"
 }
 
 openApiGenerate {
-    generatorName = 'jaxrs-spec'
+    generatorName = "jaxrs-spec"
     inputSpec = "$rootDir/src/main/resources/openapi.yaml"
-    outputDir = layout.buildDirectory.dir('generated/openapi').get().asFile.toString()
-    configOptions = [
-        interfaceOnly: 'true',
-        useJakartaEe : 'true',
-    ]
+    outputDir = layout.buildDirectory.dir("generated/openapi").get().asFile.toString()
+    configOptions = mapOf(
+        "interfaceOnly" to "true",
+        "useJakartaEe" to "true",
+    )
 }
 
 sourceSets {
     main {
         java {
-            srcDir layout.buildDirectory.dir('generated/openapi/src/gen/java')
+            srcDir(layout.buildDirectory.dir("generated/openapi/src/gen/java"))
         }
     }
 }
 
-tasks.compileJava {
-    dependsOn tasks.openApiGenerate
+tasks.named("compileJava") {
+    dependsOn(tasks.named("openApiGenerate"))
 }
 ```
 
@@ -190,7 +190,7 @@ Your JAX-RS resources then `implements <Name>Api` (the generated
 interface) — so when a resource and the committed spec drift apart, the
 interface no longer matches and compilation fails. That is the drift
 gate. (For a client SDK rather than a server contract, swap
-`generatorName = 'java'`.)
+`generatorName = "java"`.)
 
 ## Procedure
 
@@ -200,11 +200,11 @@ gate. (For a client SDK rather than a server contract, swap
 2. Locate the committed OpenAPI spec (the conventional locations above)
    with Grep / Read — it is the authoritative contract.
 3. Group `openapi-audit` findings by `component` so you Read each build
-   file once. Read the named file fully — it may be Groovy
-   (`build.gradle`) or Kotlin DSL (`build.gradle.kts`). Determine the
-   contract-first state per the decision rules.
+   file once. Read the named file fully — it is Kotlin DSL
+   (`build.gradle.kts`). Determine the contract-first state per the
+   decision rules.
 4. Decide `fix` / `human-review` / `unable_to_fix` per above. Apply only
-   the conservative `fix` edits with Edit, matching the file's DSL.
+   the conservative `fix` edits with Edit, in Kotlin DSL.
 5. `git status --short` to summarize what changed.
 6. **Validate the build script still parses** — a DSL typo would fail
    configuration:
@@ -240,15 +240,15 @@ gate. (For a client SDK rather than a server contract, swap
     {
       "type": "fix",
       "rule": "openapi:contract-audit",
-      "finding_id": "build.gradle",
-      "location": "build.gradle",
+      "finding_id": "build.gradle.kts",
+      "location": "build.gradle.kts",
       "summary": "wired compileJava.dependsOn(tasks.openApiGenerate) so the generated *Api interfaces are present before compilation — contract-preserving",
       "worktree_branch": "<branch>"
     }
   ],
   "actions_requiring_review": [
     {
-      "finding_id": "build.gradle",
+      "finding_id": "build.gradle.kts",
       "type": "no-contract-first",
       "severity": "MAJOR",
       "recommendation": "Non-Spring HTTP surface present but no committed spec / openapi-generator; adopt contract-first — commit the OpenAPI spec as authoritative, add org.openapi.generator with generatorName = 'jaxrs-spec' (JAX-RS interfaces), and make resources implement the generated *Api interfaces. See the example block in this agent.",
@@ -273,7 +273,7 @@ runtime cleans up the empty worktree.
   this agent handles only non-Spring Java / JAX-RS services with
   `jaxrs-spec` (or `java` for a client SDK). The gather routes the two so
   they never double-handle.
-- **Only edit `build.gradle(.kts)`** for the conservative wiring fixes
+- **Only edit `build.gradle.kts`** for the conservative wiring fixes
   (pin the plugin version, add the `compileJava` dependency). Never
   auto-write resources or DTOs, and never auto-migrate to contract-first
   or switch the generator — recommend it.
