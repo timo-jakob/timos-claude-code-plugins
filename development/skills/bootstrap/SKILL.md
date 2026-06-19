@@ -1007,9 +1007,15 @@ CI run and push fail):
    for JaCoCo. If **all** are already applied, print one line ("Spotless +
    JaCoCo already wired — nothing to do") and skip the rest — **do not** turn
    a satisfied check into a prompt or a TODO.
-2. **Confirm before editing.** Show exactly what you'll add (the canonical
-   Kotlin-DSL blocks from *Java-specific recommendation*) and ask. If the
-   user declines, carry the wiring into the Step 5 checklist as a TODO.
+2. **Confirm before editing — and warn about the first Spotless run.** Show
+   exactly what you'll add (the canonical Kotlin-DSL blocks from *Java-specific
+   recommendation*) and ask. When the project already has Java sources, **warn
+   upfront**: wiring Spotless means the first `spotlessApply` (the pre-commit
+   hook, or the bootstrap commit if you run it) **reformats every existing file
+   in `src/` to google-java-format** — a large but purely mechanical diff. It's
+   expected, and including it in the bootstrap commit means the first PR won't
+   fail the Spotless check. Tell the user so the big diff isn't a surprise. If
+   the user declines the wiring, carry it into the Step 5 checklist as a TODO.
 3. **Apply (Kotlin DSL).** Add the missing plugin entries into the existing
    `plugins { }` block (don't create a second one); append the `spotless` /
    `jacocoTestReport` / generated-sources-exclude blocks. Pin Spotless to a
