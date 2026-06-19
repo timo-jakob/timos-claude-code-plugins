@@ -52,7 +52,7 @@ orchestrator wrote. Read it and parse as JSON. Topic payload shape:
   "repo": { "path": "/abs/path", "default_branch": "main", "visibility": "public" },
   "language": "spring",
   "dispatch_mode": "primary",
-  "language_meta": { "version": null, "manifests": ["build.gradle"] },
+  "language_meta": { "version": null, "manifests": ["build.gradle.kts"] },
   "tooling_configured": { "spring_config": true, "spring_boot_upgrade": true, "spring_container": true, "spring_api": true },
   "findings_by_tool": {
     "spring_config": [ /* config-audit findings: component, rule, line, message, key */ ],
@@ -102,6 +102,31 @@ contains keys for configured tools.
    spring_config, spring_boot_upgrade, spring_container, spring_api." A name
    with `tooling_configured.<name> == false` halts: "Cannot scope to `<X>`:
    not configured for this project."
+6. **Build-system gate — Gradle + Kotlin DSL only (#343).** Spring composes
+   on the Java foundation, which maintains only **`build.gradle.kts`**.
+   Apply the same gate as `development-java` so the two stay consistent
+   (a Groovy or Maven repo must not have Spring planned while Java halts).
+   Infer the flavor from `language_meta.manifests` (a `.kts` entry wins):
+   - includes `build.gradle.kts` / `settings.gradle.kts` → **proceed**.
+   - includes `pom.xml` and no `*.gradle*` → **halt** (Maven out of scope).
+   - includes a Groovy `build.gradle` / `settings.gradle` and no `*.kts` →
+     **halt** (Groovy must be converted).
+
+   On a halt, return:
+
+   ```json
+   {
+     "schema_version": "2",
+     "actions_taken": [],
+     "actions_requiring_review": [],
+     "missing_tooling": [],
+     "human_action_required": [{
+       "reason": "This project's Gradle build uses <Groovy `build.gradle` | Maven `pom.xml`>. The Java/Spring plugins maintain only Kotlin-DSL Gradle builds (`build.gradle.kts`).",
+       "recommendation": "<For Groovy: Run /development:bootstrap — it offers a confirmed build.gradle → build.gradle.kts conversion. | For Maven: Migrate to Gradle with a build.gradle.kts.> Then re-run /development:maintenance."
+     }],
+     "unable_to_fix": []
+   }
+   ```
 
 ## Build the plan
 
