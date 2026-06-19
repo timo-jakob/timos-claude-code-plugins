@@ -8,6 +8,15 @@ rules:
   # 80 is too tight for workflows; 120 is the enforced limit (error).
   line-length:
     max: 120
+    # The bootstrap provenance marker (#213) stamps ONE machine-generated
+    # comment line (template path + plugin version + sha256) onto these tracked
+    # YAML files. It exceeds 120 and cannot wrap, so exempt them from
+    # line-length ONLY — every other yamllint rule still applies to them, and
+    # line-length still applies everywhere else.
+    ignore: |
+      .github/dependabot.yml
+      .github/workflows/*.yml
+      trivy.yaml
   # GitHub Actions' `on:` key is valid; don't flag it as a "truthy" value.
   truthy:
     allowed-values: ['true', 'false', 'on', 'off']
