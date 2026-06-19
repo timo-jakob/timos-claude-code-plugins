@@ -101,7 +101,12 @@ repos:
         language: python
         additional_dependencies: ["diff-cover>=9"]
         pass_filenames: false
-        always_run: true
+        # Run ONLY when Python source is in the push. A docs/config/YAML-only
+        # push has no coverable lines, so skipping it avoids demanding a
+        # coverage.xml a non-Python change never needed (no test build just to
+        # push a comment). `files` + no `always_run` = pre-commit skips the
+        # hook when nothing matches. CI is unaffected (it always builds first).
+        files: \.py$
         stages: [pre-push]
   # --- PYTHON-END ------------------------------------------------------------
 
@@ -152,7 +157,12 @@ repos:
         language: python
         additional_dependencies: ["diff-cover>=9"]
         pass_filenames: false
-        always_run: true
+        # Run ONLY when Java/Kotlin SOURCE is in the push (`.java`/`.kt`, NOT
+        # `.kts` build scripts). A docs/config/YAML-only push has no coverable
+        # lines, so skipping it avoids a full `./gradlew test jacocoTestReport`
+        # just to push a comment. `files` + no `always_run` = pre-commit skips
+        # the hook when nothing matches. CI is unaffected (it always builds).
+        files: \.(java|kt)$
         stages: [pre-push]
   # --- JAVA-END --------------------------------------------------------------
 
