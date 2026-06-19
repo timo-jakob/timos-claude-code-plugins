@@ -30,9 +30,10 @@ on:
         options: ["auto", "patch", "minor", "major"]
         default: "auto"
 
-# nebula's `final` task pushes the release tag — the job needs write access.
+# Least-privilege default at workflow scope; the release job widens to
+# contents: write below (nebula's `final` task pushes the release tag).
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -41,6 +42,8 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # nebula `final` pushes the release tag
     steps:
       - uses: actions/checkout@v6
         with:
