@@ -215,10 +215,23 @@ flow. Stop and ask for input wherever marked; do not guess.
 
       Without that classification, template additions silently look like "no
       change" and propagate stale toolchains to existing repos — exactly the
-      bug captured in issue #166. (`unknown_provenance` files go to the
-      reviewer too — with no trustworthy marker hash, a content review is the
-      only safe call.) Surface the recommendations for per-file apply / skip /
-      cherry-pick.
+      bug captured in issue #166. Surface the recommendations for per-file
+      apply / skip / cherry-pick.
+
+   c. **`unknown_provenance` shortcut — stamp if byte-identical.** A flagged
+      file with no marker is often just an older render that's still identical
+      to the current template; it only lacks a marker. So before sending an
+      `unknown_provenance` file to the reviewer, **byte-compare** it against the
+      rendered template (substitute placeholders + strip the same conditional
+      blocks bootstrap strips):
+      - **byte-identical → just stamp** the provenance marker (non-destructive
+        metadata; the file is now tracked) and treat it resolved — **don't**
+        invoke the reviewer, there is nothing to classify.
+      - **differs → the reviewer** (step b).
+
+      This shortcut is for `unknown_provenance` only. A `drifted` finding (a
+      *stamped* file whose recorded template hash changed) always goes to the
+      reviewer — a hash mismatch means the template genuinely moved.
 
 5. Continue to **shared questions** below if any answer is still unknown
    (language detection may still need user input if `languages=[]`).
