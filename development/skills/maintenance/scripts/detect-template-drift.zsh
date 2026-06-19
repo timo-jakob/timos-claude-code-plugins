@@ -48,9 +48,13 @@ typeset -a tracked=(
   ".github/workflows/claude-approver.yml"
   ".github/workflows/api-stability.yml"
   ".github/workflows/codeql.yml"
+  ".github/workflows/codeql-noop.yml"
   ".github/workflows/quality-public.yml"
+  ".github/workflows/quality-public-noop.yml"
   ".github/workflows/quality-private.yml"
+  ".github/workflows/quality-private-noop.yml"
   ".github/workflows/scorecard.yml"
+  ".github/workflows/release.yml"
   ".github/dependabot.yml"
   "trivy.yaml"
 )
