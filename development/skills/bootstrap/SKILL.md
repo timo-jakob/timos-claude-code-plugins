@@ -399,8 +399,13 @@ Step 4c also adds the generated-sources coverage exclude so stubs don't
 skew the gate:
 
 ```kotlin
-tasks.jacocoTestReport {
-    afterEvaluate {
+// Top-level afterEvaluate — NOT nested inside `tasks.jacocoTestReport { }`.
+// `tasks.test { finalizedBy(tasks.jacocoTestReport) }` realizes the report task
+// after the project is evaluated; registering an afterEvaluate from inside a
+// realized task block then fails ("project already evaluated"). At project scope
+// it runs in the valid context, after the source-set class dirs are populated.
+afterEvaluate {
+    tasks.jacocoTestReport {
         classDirectories.setFrom(classDirectories.files.map {
             fileTree(it) { exclude("**/build/generated/**") }
         })
