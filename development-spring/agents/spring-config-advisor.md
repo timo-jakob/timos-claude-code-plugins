@@ -171,7 +171,7 @@ commit, and the runtime cleans up the empty worktree.
 
 - **Only edit Spring config files** (`application*.yml` / `.yaml` /
   `.properties`). Never touch application Java/Kotlin code or
-  `build.gradle(.kts)`.
+  `build.gradle.kts`.
 - **Preserve YAML structure and comments.** Relocations are
   behavior-preserving moves, not rewrites.
 - **Behavior-preserving relocations only.** The actuator over-exposure

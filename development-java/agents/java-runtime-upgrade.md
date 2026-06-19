@@ -114,7 +114,7 @@ grep before assuming any file exists:
 grep -nE "^FROM (eclipse-temurin|amazoncorretto|openjdk|ibm-semeru|bellsoft)" \
   Dockerfile docker/Dockerfile 2>/dev/null
 grep -nE "JavaLanguageVersion\.of\(|sourceCompatibility|targetCompatibility" \
-  build.gradle build.gradle.kts 2>/dev/null
+  build.gradle.kts 2>/dev/null
 grep -nE "java-version|distributionUrl" \
   .github/workflows/*.yml gradle/wrapper/gradle-wrapper.properties 2>/dev/null
 ls .java-version 2>/dev/null
@@ -122,12 +122,12 @@ ls .java-version 2>/dev/null
 
 You need to know which file(s) carry the JDK pin. Typical layout:
 one `Dockerfile` with a `FROM <vendor>:<N>-jdk-...` line and a
-`build.gradle(.kts)` toolchain block
+`build.gradle.kts` toolchain block
 (`languageVersion = JavaLanguageVersion.of(N)`). Other places the JDK
 version can be pinned and drift out of sync:
 
 - `sourceCompatibility` / `targetCompatibility` in
-  `build.gradle(.kts)`
+  `build.gradle.kts`
 - a `.java-version` file (jenv / asdf / sdkman shim)
 - the CI workflow's `setup-java` `java-version`, **if** the project
   pins it (some projects leave it on a matrix — see the note at the top
@@ -168,12 +168,13 @@ the rest of the tag stays.
 
 Update the canonical runtime declaration:
 
-- **`build.gradle(.kts)` toolchain** —
+- **`build.gradle.kts` toolchain** —
   `languageVersion = JavaLanguageVersion.of(<from_version>)` →
   `JavaLanguageVersion.of(<to_version>)`. This is the modern, canonical
   way Gradle selects the JDK; prefer it.
 - **`sourceCompatibility` / `targetCompatibility`** — if the project
-  sets these (older style) to `<from_version>` (or a `JavaVersion.VERSION_<N>`
+  sets these (older style) to `<from_version>` (or a
+  `sourceCompatibility = JavaVersion.VERSION_<N>`
   shape), bump coherently. If they're permissive / set to an older
   baseline on purpose (the project compiles to an older bytecode level
   deliberately), leave them — the bump is the runtime JDK, not
@@ -293,7 +294,7 @@ PASS 1
         - a version catalog at gradle/libs.versions.toml (bump the
           matching [versions] entry), OR
         - a gradle.properties version property, OR
-        - an inline string in build.gradle(.kts).
+        - an inline string in build.gradle.kts.
       Apply migration patterns to call sites if breaking changes exist.
 
   If NO version of a required dep supports <to_version>, mark it as a
@@ -397,7 +398,7 @@ git commit -m "$(cat <<'EOF'
 
 ## Runtime bump
 - Dockerfile: <from_image> → <to_image>
-- build.gradle: JavaLanguageVersion.of(<from_version>) → of(<to_version>)
+- build.gradle.kts: JavaLanguageVersion.of(<from_version>) → of(<to_version>)
 - <other coherent pins: sourceCompatibility/targetCompatibility, .java-version, CI setup-java>
 
 ## Gradle + dep cascade

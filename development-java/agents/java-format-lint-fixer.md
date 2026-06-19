@@ -38,7 +38,7 @@ missing-tool recommendation:
   "missing_tool_recommendation": {
     "summary": "Spotless is not configured for this project.",
     "what_it_provides": "Spotless with google-java-format — a single opinionated autoformatter for Java; enforces consistent formatting, import ordering, and removes unused imports. Wraps google-java-format via the Gradle `com.diffplug.spotless` plugin.",
-    "how_to_add": "Run /development:bootstrap (sets up Spotless alongside the rest of the Gradle quality toolchain), or add the `com.diffplug.spotless` plugin to build.gradle(.kts) with a googleJavaFormat() step."
+    "how_to_add": "Run /development:bootstrap (sets up Spotless alongside the rest of the Gradle quality toolchain), or add the `com.diffplug.spotless` plugin to build.gradle.kts with a googleJavaFormat() step."
   },
   "actions_taken": [],
   "unable_to_fix": []
@@ -117,7 +117,7 @@ If `spotlessApply` leaves the working tree clean (no changes), return:
 - **Do not commit** beyond your single formatting commit — the
   orchestrator handles merging worktree branches back.
 - **Do not modify Spotless configuration** (the `spotless { … }` block
-  in `build.gradle` / `build.gradle.kts`). Use what's there.
+  in `build.gradle.kts`). Use what's there.
 - **Do not invoke other tools** beyond Spotless and the Gradle test
   task. Other agents handle sonar / semgrep / snyk / etc.
 - If `./gradlew` / `gradle` is not on the PATH, error clearly so the
