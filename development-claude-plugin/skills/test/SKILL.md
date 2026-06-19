@@ -56,6 +56,19 @@ From `$ARGUMENTS`, extract (all optional; apply defaults):
 
 Echo the resolved values back to the user before proceeding.
 
+> **Safety guard — dry-run only for maintenance.** Step 3 gives the child
+> read-only GitHub context (`GH_REPO`) so gh-based gathers (vendor PRs, code
+> scanning, container scan) resolve the **real** repo. That context also lets a
+> *non*-dry-run run **mutate real, shared GitHub state** (`gh pr merge` /
+> `review` / auto-merge), and the maintenance PR cycle's `gh pr create` would
+> reference branches pushed only to the throwaway clone. A clone can't isolate
+> GitHub. So if `--task` invokes `/development:maintenance` (or any
+> `/…:maintenance`) **without `--dry-run`**, **halt** and tell the user: "The
+> test harness runs maintenance in read-only mode only — add `--dry-run` to
+> your `--task`. Mutating tools (vendor-PR triage, the PR cycle) act on shared
+> GitHub state a clone can't isolate." The harness tests the **gather +
+> planning** half; the acting half is a real action, not a test.
+
 ## Step 2 — Preflight
 
 ```bash
@@ -76,14 +89,22 @@ Halt with the printed pointer if either check fails.
 
 Never run the child against the user's real working copy — maintenance-style
 tasks create branches/worktrees/commits even under `--dry-run`. Clone locally
-(fast, hardlinked) into a temp dir and remember the path:
+(fast, hardlinked) into a temp dir and remember the path. The local clone's
+`origin` is a filesystem path, so also capture the source repo's **GitHub
+slug** (`owner/repo`) — the child needs it as `GH_REPO` or every gh-based
+gather (vendor PRs, code scanning, container scan) silently returns empty:
 
 ```bash
 CLONE="$(mktemp -d -t plugin-test-XXXXXX)/$(basename "$TARGET")"
 git clone --local --no-hardlinks "$TARGET" "$CLONE" >/dev/null 2>&1
 OUT="$(mktemp -t plugin-test-transcript-XXXXXX).jsonl"
+# Resolve the real GitHub slug from the SOURCE repo (it has the real remote).
+# Empty if the target isn't a GitHub repo — then gh-based gathers stay empty,
+# which is correct (nothing to resolve), and local-file tools still work.
+GH_REPO_SLUG="$( (cd "$TARGET" && gh repo view --json nameWithOwner -q .nameWithOwner) 2>/dev/null || true)"
 echo "clone:      $CLONE"
 echo "transcript: $OUT"
+echo "gh-repo:    ${GH_REPO_SLUG:-<none — gh gathers will be empty>}"
 ```
 
 ## Step 4 — Decide which local plugins to load
@@ -121,6 +142,7 @@ Inputs:
 - Clone (cwd for the child): <CLONE>
 - Transcript output path: <OUT>
 - Local plugin dirs: <PLUGINS_CSV>
+- GitHub slug (owner/repo, may be empty): <GH_REPO_SLUG>
 - Permission mode: <PERMISSION_MODE>
 - Task prompt for the child: <TASK>
 - Expectation (PASS criteria): <EXPECT or "none given">
@@ -128,9 +150,11 @@ Inputs:
 Do this:
 1. Snapshot the clone's clean state: `git -C <CLONE> rev-parse HEAD` and
    `git -C <CLONE> status --porcelain`.
-2. Launch the child via the wrapper:
+2. Launch the child via the wrapper (include `--gh-repo <GH_REPO_SLUG>` only
+   when the slug is non-empty, so gh-based gathers resolve the real repo):
      <REPO_ROOT>/development-claude-plugin/skills/test/scripts/run-headless.zsh \
        --cwd <CLONE> --out <OUT> --plugins "<PLUGINS_CSV>" \
+       --gh-repo "<GH_REPO_SLUG>" \
        --permission-mode <PERMISSION_MODE> --prompt "<TASK>"
    Capture its exit code. If it is non-zero, the verdict is FAIL unless the task
    was *expected* to exit non-zero.
