@@ -354,6 +354,19 @@ Just call it out.
 > Kotlin DSL to be maintained (Step 4c offers the conversion). All wiring
 > below is Kotlin DSL.
 
+**Java build-system gate (do this first, from detection).** Read
+`language_meta.java.build_system` and `language_meta.java.gradle_dsl`:
+
+- **`build_system == "maven"`** → **reject the Java setup** with a clear
+  message and skip all Java-specific generation + Step 4c: "This family is
+  **Gradle + Kotlin DSL only** — Maven (`pom.xml`) isn't supported. Migrate
+  to Gradle with a `build.gradle.kts`, then re-run /development:bootstrap."
+  (Any non-Java languages detected still bootstrap normally.) Carry the
+  rejection into the Step 5 checklist as a blocking item.
+- **`gradle_dsl == "groovy"`** → Java is supported, but the build must be
+  converted; **Step 4c** offers the Groovy→Kotlin conversion.
+- **`gradle_dsl == "kotlin"`** → proceed normally.
+
 If `java` is in the detected languages, the generated Gradle CI
 (`./gradlew build jacocoTestReport`) and the pre-commit Spotless +
 coverage-floor hooks **depend on `build.gradle.kts` applying the Spotless
@@ -958,22 +971,25 @@ CI-prerequisite plugins are wired into `build.gradle.kts`.
 
 **Part 1 — Kotlin DSL gate.** The Java/Spring plugins maintain only
 `build.gradle.kts`; this is deliberate (one blessed format — see
-*Java-specific recommendation*). Branch on what detection found:
+*Java-specific recommendation*). Branch on `language_meta.java.gradle_dsl`
+(and `.build_system`) from detect-stack:
 
-- **`build.gradle.kts` present** → good, proceed to Part 2.
-- **Groovy `build.gradle` present (no `.kts`)** → **offer to convert it**
-  (confirmed action). Explain: the family standardizes on Kotlin DSL, and
-  maintenance (`/development:maintenance`) will **refuse to run** on a Groovy
-  build. On approval, rewrite `build.gradle` → `build.gradle.kts` (translate
-  the plugins block, dependencies, `version`/config to Kotlin DSL syntax),
-  `git rm` the old `build.gradle`, and **validate** with
-  `./gradlew --no-daemon help -q`; if it fails, roll back the conversion
-  (`git checkout -- build.gradle && git rm -f build.gradle.kts`) and surface
-  it as a blocking Step 5 TODO. If the user **declines**, stop here and record
-  a blocking TODO ("convert build.gradle to build.gradle.kts — maintenance
-  won't run until you do"); skip Part 2.
-- **Maven only (`pom.xml`, no Gradle)** → out of scope; this should already
-  have been rejected at detection (Step 1). Do not wire anything.
+- **`gradle_dsl == "kotlin"`** → good, proceed to Part 2.
+- **`gradle_dsl == "groovy"`** (a Groovy `build.gradle`, no `.kts`) →
+  **offer to convert it** (confirmed action). Explain: the family
+  standardizes on Kotlin DSL, and maintenance (`/development:maintenance`)
+  will **refuse to run** on a Groovy build. On approval, rewrite
+  `build.gradle` → `build.gradle.kts` (translate the plugins block,
+  dependencies, `version`/config to Kotlin DSL syntax), `git rm` the old
+  `build.gradle`, and **validate** with `./gradlew --no-daemon help -q`; if
+  it fails, roll back the conversion (`git checkout -- build.gradle &&
+  git rm -f build.gradle.kts`) and surface it as a blocking Step 5 TODO. If
+  the user **declines**, stop here and record a blocking TODO ("convert
+  build.gradle to build.gradle.kts — maintenance won't run until you do");
+  skip Part 2.
+- **`build_system == "maven"`** → out of scope; this is rejected at the
+  Java build-system gate (see *Java-specific recommendation*). Do not wire
+  anything.
 
 **Part 2 — wire Spotless + JaCoCo into `build.gradle.kts`** (confirmed,
 idempotent). The generated CI + hooks depend on these (without them the first

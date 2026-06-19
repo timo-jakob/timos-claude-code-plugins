@@ -64,6 +64,7 @@ setup() {
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
   [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "parsed" ]
   [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "groovy" ]
   [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "true" ]
 }
 
@@ -74,7 +75,38 @@ setup() {
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "17" ]
   [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "parsed" ]
   [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "kotlin" ]
   [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "false" ]
+}
+
+# --- #343 Gradle DSL policy: Kotlin DSL only, Groovy needs conversion --------
+
+@test "detect-stack: #343 Groovy build.gradle only -> gradle_dsl groovy (needs conversion)" {
+  printf 'plugins { id "java" }\n' > build.gradle
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "groovy" ]
+}
+
+@test "detect-stack: #343 build.gradle.kts -> gradle_dsl kotlin (blessed)" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "kotlin" ]
+}
+
+@test "detect-stack: #343 both DSLs present -> kotlin wins (the one we maintain)" {
+  printf 'plugins { id "java" }\n' > build.gradle
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "kotlin" ]
+}
+
+@test "detect-stack: #343 settings.gradle.kts only -> gradle_dsl kotlin" {
+  printf 'rootProject.name = "x"\n' > settings.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "kotlin" ]
 }
 
 @test "detect-stack: gradle without any version marker -> default LTS 21, source=default" {
@@ -92,6 +124,8 @@ setup() {
   [ "$(jq -r '.languages | index("java")' <<<"$out")" != "null" ]
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
   [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "maven" ]
+  # #343: Maven has no Gradle DSL — gradle_dsl is empty (consumers reject Maven).
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "" ]
   [ "$(jq -r .language_meta.java.has_cov <<<"$out")" = "true" ]
 }
 
@@ -101,6 +135,7 @@ setup() {
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r .language_meta.java.gradle_dsl <<<"$out")" = "kotlin" ]
 }
 
 @test "detect-stack: python + java coexist in language_meta" {

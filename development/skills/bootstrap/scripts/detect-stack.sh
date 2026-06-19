@@ -28,6 +28,9 @@
 #   language_meta.java.version_source    "parsed" | "default"  ("default" means
 #                                         the build declared no toolchain — the
 #                                         version is a guess, not a real pin)
+#   language_meta.java.gradle_dsl        "kotlin" | "groovy" | ""  (#343: family
+#                                        maintains build.gradle.kts ONLY; "groovy"
+#                                        must be converted, "" = not Gradle)
 #   language_meta.java.build_system      "gradle" | "maven" | ""  (Gradle-first;
 #                                         Maven is recorded but unsupported, #296)
 #   language_meta.java.has_cov           bool    (JaCoCo present in the build)
@@ -263,6 +266,21 @@ if [[ "$java_in_langs" == "true" ]]; then
 		java_build_system="maven"
 	fi
 
+	# Gradle DSL flavor (#343 Kotlin-DSL-only policy). The family maintains
+	# ONLY build.gradle.kts; a Groovy build.gradle must be converted to be
+	# maintained, and Maven is out of scope. Emit the flavor so consumers
+	# (bootstrap, maintenance) can route: "kotlin" → proceed; "groovy" →
+	# needs conversion; "" → not Gradle (Maven/none). A `.kts` anywhere wins
+	# (a repo with both is treated as Kotlin — that's the one we maintain).
+	java_gradle_dsl=""
+	if [[ "$java_build_system" == "gradle" ]]; then
+		if printf '%s\n' "$gradle_files" "$gradle_settings" | grep -q '\.kts$'; then
+			java_gradle_dsl="kotlin"
+		elif [[ -n "$gradle_files" || -n "$gradle_settings" ]]; then
+			java_gradle_dsl="groovy"
+		fi
+	fi
+
 	# --- version (first match wins) ---
 	# 1) Gradle toolchain languageVersion = JavaLanguageVersion.of(N)
 	if [[ -z "$java_version" && -n "$gradle_files" ]]; then
@@ -319,8 +337,8 @@ if [[ "$python_in_langs" == "true" ]]; then
 fi
 if [[ "$java_in_langs" == "true" ]]; then
 	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
-	language_meta_json+="$(printf '"java":{"version":%s,"version_source":%s,"build_system":%s,"has_cov":%s}' \
-		"$(json_str "$java_version")" "$(json_str "$java_version_source")" "$(json_str "$java_build_system")" "$(json_bool "$has_jacoco")")"
+	language_meta_json+="$(printf '"java":{"version":%s,"version_source":%s,"build_system":%s,"gradle_dsl":%s,"has_cov":%s}' \
+		"$(json_str "$java_version")" "$(json_str "$java_version_source")" "$(json_str "$java_build_system")" "$(json_str "$java_gradle_dsl")" "$(json_bool "$has_jacoco")")"
 fi
 language_meta_json+="}"
 
