@@ -80,7 +80,7 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "repo": { "path": "/abs/path", "default_branch": "main", "visibility": "public" },
   "language": "java",
   "dispatch_mode": "primary",
-  "language_meta": { "version": "21", "manifests": ["build.gradle", "settings.gradle"] },
+  "language_meta": { "version": "21", "manifests": ["build.gradle.kts", "settings.gradle.kts"] },
   "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true, "dependabot": true, "snyk_prs": true, "renovate": true },
   "findings_by_tool": {
     "format_lint":          [ /* spotless findings */ ],
@@ -154,6 +154,34 @@ configured tools (zero findings → `[]`; unconfigured → absent).
    `tooling_configured.<name> == false` halts with: "Cannot scope to `<X>`:
    not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
+6. **Build-system gate — Gradle + Kotlin DSL only (#343).** This family
+   maintains only **`build.gradle.kts`**; Maven isn't supported and a Groovy
+   `build.gradle` must be converted first. Infer the build flavor from
+   `language_meta.manifests` (a `.kts` entry wins — a repo mid-migration with
+   both is treated as Kotlin):
+   - manifests include `build.gradle.kts` (or `settings.gradle.kts`) →
+     **proceed**.
+   - manifests include `pom.xml` and **no** `*.gradle*` → **halt** (Maven is
+     out of scope).
+   - manifests include a Groovy `build.gradle` (or `settings.gradle`) and
+     **no** `*.kts` → **halt** (Groovy must be converted).
+
+   On a halt, return the `human_action_required` shape below — do **not**
+   run the coverage pre-flight, the planner, or any agent:
+
+   ```json
+   {
+     "schema_version": "2",
+     "actions_taken": [],
+     "actions_requiring_review": [],
+     "missing_tooling": [],
+     "human_action_required": [{
+       "reason": "This project's Gradle build uses <Groovy `build.gradle` | Maven `pom.xml`>. The Java/Spring plugins maintain only Kotlin-DSL Gradle builds (`build.gradle.kts`) — one blessed format (see ARCHITECTURE.md § Build policy).",
+       "recommendation": "<For Groovy: Run /development:bootstrap — it offers a confirmed build.gradle → build.gradle.kts conversion. | For Maven: Migrate to Gradle with a build.gradle.kts, then re-run.> Then re-run /development:maintenance."
+     }],
+     "unable_to_fix": []
+   }
+   ```
 
 ## Coverage pre-flight
 
