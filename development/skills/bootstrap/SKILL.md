@@ -882,11 +882,22 @@ actually rendered in 3a–3f):
 | `.github/dependabot.yml` | `common/.github/dependabot.yml.tmpl` |
 | `.github/workflows/claude-approver.yml` | `common/.github/workflows/claude-approver.yml.tmpl` (only when `--claude-approver true`) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
-| `.github/workflows/codeql.yml` | `public/.github/workflows/codeql.yml.tmpl` OR `public/.github/workflows/codeql-noop.yml.tmpl` (whichever you rendered) |
-| `.github/workflows/quality-public.yml` | `public/.github/workflows/quality-public.yml.tmpl` OR `public/.github/workflows/quality-public-noop.yml.tmpl` |
-| `.github/workflows/quality-private.yml` | `private/.github/workflows/quality-private.yml.tmpl` OR `private/.github/workflows/quality-private-noop.yml.tmpl` |
+| `.github/workflows/codeql.yml` | `public/.github/workflows/codeql.yml.tmpl` |
+| `.github/workflows/codeql-noop.yml` | `public/.github/workflows/codeql-noop.yml.tmpl` |
+| `.github/workflows/quality-public.yml` | `public/.github/workflows/quality-public.yml.tmpl` |
+| `.github/workflows/quality-public-noop.yml` | `public/.github/workflows/quality-public-noop.yml.tmpl` |
+| `.github/workflows/quality-private.yml` | `private/.github/workflows/quality-private.yml.tmpl` |
+| `.github/workflows/quality-private-noop.yml` | `private/.github/workflows/quality-private-noop.yml.tmpl` |
 | `.github/workflows/scorecard.yml` | `public/.github/workflows/scorecard.yml.tmpl` |
+| `.github/workflows/release.yml` | `languages/java/.github/workflows/release.yml.tmpl` (only when `java` is detected) |
 | `trivy.yaml` | `common/trivy.yaml.tmpl` |
+
+The `*-noop.yml` companions and `release.yml` are tracked, rendered files just
+like their main counterparts — each renders from its **own** template (the
+main file is never rendered from a noop template), so stamp each separately
+(#371). That way `/development:maintenance`'s drift detector tracks them too.
+The `.yamllint` `line-length` exemption (#356) already covers
+`.github/workflows/*.yml`, so the new markers won't trip yamllint.
 
 **Scaffold files are intentionally NOT stamped** — `CLAUDE.md`,
 `CONTRIBUTING.md`, `SETUP.md`, `SECURITY.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
