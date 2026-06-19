@@ -378,6 +378,41 @@ per-language policy templates.
 - For topic plugins: anything a language plugin can do better
   (see "Language-first principle").
 
+## Build policy — Gradle + Kotlin DSL only (Java/Spring)
+
+The Java/Spring plugins maintain exactly **one** blessed build format:
+**Gradle with the Kotlin DSL (`build.gradle.kts`)**. This is a deliberate
+application of the *minimize-options* principle — every supported format is a
+maintenance + expertise cost, and DSL choice is a decision adopters shouldn't
+have to make. Concretely:
+
+- **Maven is not accepted.** A `pom.xml`-only project (no Gradle) is out of
+  scope.
+- **Groovy `build.gradle` is not maintained.** It must be converted to
+  `build.gradle.kts` first.
+
+Enforcement is layered, and each layer reads a signal rather than re-deciding:
+
+1. **Detection** (`detect-stack.sh`) still detects Java on Groovy/Maven repos
+   (it must, to flag them) and emits `language_meta.java.gradle_dsl`
+   (`"kotlin" | "groovy" | ""`) alongside `build_system` (`"gradle" | "maven"`).
+2. **Bootstrap converts.** `/development:bootstrap` rejects Maven and offers a
+   confirmed Groovy→Kotlin conversion (validated with `./gradlew help`,
+   rolled back on failure).
+3. **Maintenance halts.** The `development-java` and `development-spring`
+   dispatchers infer the flavor from `language_meta.manifests` and **refuse to
+   run** on a Groovy/Maven build, returning a `human_action_required` that
+   points at bootstrap's conversion. This is a per-dispatcher gate (no generic
+   orchestrator edit — the orchestrator forwards `manifests`, it doesn't
+   interpret them).
+4. **Gathers + advisors are Kotlin-only.** The gather scripts and the Spring
+   topic-marker recipe scan `build.gradle.kts` only; every advisor that edits
+   the build reads/writes Kotlin DSL.
+
+Note the distinction the advisors preserve: the **Maven build tool** (`pom.xml`)
+is rejected, but the **Maven artifact ecosystem** Gradle depends on (Maven
+Central, `group:artifact` coordinates, `mavenCentral()`) is unaffected.
+
 ## Dispatch model
 
 `development:maintenance` (and any future orchestrator) follows a
@@ -563,13 +598,18 @@ of detect-stack's nested `language_meta` registry. detect-stack emits
 `language_meta` keyed by every detected language — e.g.
 `{"python": {"version": "3.13", "version_source": "parsed", "has_cov":
 true}, "java": {"version": "21", "version_source": "default",
-"build_system": "gradle", "has_cov": false}}` — and the orchestrator
-copies the dispatched language's `version` into this payload, adding the
-`manifests` it found. Detection-only fields (`version_source`,
-`has_cov`, `build_system`) stay in detect-stack output for the bootstrap
-skill and are not forwarded here. `version_source` is `"parsed"` |
-`"default"` — `"default"` flags a version that fell back to the LTS
-guess because the build declared no toolchain (#258 reliability).
+"build_system": "gradle", "gradle_dsl": "kotlin", "has_cov": false}}` —
+and the orchestrator copies the dispatched language's `version` into this
+payload, adding the `manifests` it found. Detection-only fields
+(`version_source`, `has_cov`, `build_system`, `gradle_dsl`) stay in
+detect-stack output for the bootstrap skill and are not forwarded here.
+`version_source` is `"parsed"` | `"default"` — `"default"` flags a version
+that fell back to the LTS guess because the build declared no toolchain
+(#258 reliability). `gradle_dsl` (`"kotlin" | "groovy" | ""`) drives the
+bootstrap build-system gate; the maintenance dispatchers don't receive it,
+so they infer the same Groovy/Maven/Kotlin distinction from the forwarded
+`manifests` to apply the "§ Build policy" halt — keeping the gate inside
+the language plugins with zero generic-orchestrator edits.
 
 **`dispatch_filter` is optional** and added by the orchestrator only
 when the user passed `--tool=<name>` (a testing aid). When present,

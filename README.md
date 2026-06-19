@@ -202,6 +202,15 @@ versioning risks, and reviews PRs as the Claude Approver. Pure function of its J
 required zero edits to the generic orchestrator** (discovered purely via the
 gather-script + dispatch contract).
 
+> **Build policy: Gradle + Kotlin DSL only.** The Java/Spring plugins
+> maintain exactly one blessed build format — `build.gradle.kts`. Maven
+> (`pom.xml`) isn't supported, and a Groovy `build.gradle` must be converted
+> to Kotlin DSL first: `/development:bootstrap` offers a confirmed conversion,
+> and `/development:maintenance` **refuses to run** on a Groovy/Maven build
+> until it's done. One format, nothing to choose. (The Maven *artifact
+> ecosystem* — Maven Central, `mavenCentral()` — is unaffected; only the
+> build tool is.) See ARCHITECTURE.md § "Build policy".
+
 **Skills:**
 
 | Skill | Command | Description |

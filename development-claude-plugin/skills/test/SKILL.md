@@ -56,18 +56,26 @@ From `$ARGUMENTS`, extract (all optional; apply defaults):
 
 Echo the resolved values back to the user before proceeding.
 
-> **Safety guard — dry-run only for maintenance.** Step 3 gives the child
-> read-only GitHub context (`GH_REPO`) so gh-based gathers (vendor PRs, code
-> scanning, container scan) resolve the **real** repo. That context also lets a
-> *non*-dry-run run **mutate real, shared GitHub state** (`gh pr merge` /
-> `review` / auto-merge), and the maintenance PR cycle's `gh pr create` would
-> reference branches pushed only to the throwaway clone. A clone can't isolate
-> GitHub. So if `--task` invokes `/development:maintenance` (or any
-> `/…:maintenance`) **without `--dry-run`**, **halt** and tell the user: "The
-> test harness runs maintenance in read-only mode only — add `--dry-run` to
-> your `--task`. Mutating tools (vendor-PR triage, the PR cycle) act on shared
-> GitHub state a clone can't isolate." The harness tests the **gather +
-> planning** half; the acting half is a real action, not a test.
+> **Safety guard — dry-run only for the maintenance *orchestrator*.** Step 3
+> gives the child read-only GitHub context (`GH_REPO`) so gh-based gathers
+> (vendor PRs, code scanning, container scan) resolve the **real** repo. That
+> context also lets a *non*-dry-run **orchestrator** run **mutate real, shared
+> GitHub state** (`gh pr merge` / `review` / auto-merge), and its PR cycle's
+> `gh pr create` would reference branches pushed only to the throwaway clone.
+> A clone can't isolate GitHub. So if `--task` invokes the **orchestrator**
+> `/development:maintenance` **without `--dry-run`**, **halt** and tell the
+> user: "The test harness runs the maintenance orchestrator in read-only mode
+> only — add `--dry-run` to your `--task`. Its mutating half (vendor-PR triage,
+> the PR cycle) acts on shared GitHub state a clone can't isolate."
+>
+> **This applies to the orchestrator only.** A per-language **dispatcher**
+> invoked directly — `/development-<lang>:maintenance <payload.json>` (e.g.
+> `/development-java:maintenance`) — is a **pure function of its payload**: it
+> returns a plan (or a halt) and **does not** spawn work agents, push, or touch
+> GitHub (that's the orchestrator's job). So a direct dispatcher task is
+> GitHub-safe **with or without** `--dry-run` — do **not** block it. (This is
+> how you test dispatcher-only behavior like a validation halt, which
+> `--dry-run` can't reach because the orchestrator never dispatches under it.)
 
 ## Step 2 — Preflight
 
