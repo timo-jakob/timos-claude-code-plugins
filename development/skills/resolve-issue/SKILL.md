@@ -43,9 +43,11 @@ issue must belong to it. If `$ARGUMENTS` is empty, print the invocation help
 
 ### 1. Branch off fresh main
 
-Per `/development:git-branch-naming` — `<type>/<N>-<slug>`, with `type` inferred
-from the issue's label/title (`fix` for a bug, `feat` for a feature, `docs`,
-`chore`, `refactor`). Always branch from the current origin tip — never stack:
+Per `/development:git-branch-naming` — `<type>/<N>-<slug>`, with `type` from
+the issue's type label if it has one; else from the title's Conventional-Commit
+prefix (`fix(...)` → `fix`, `feat(...)` → `feat`, …); else inferred from the
+change (`fix` / `feat` / `docs` / `chore` / `refactor`). Always branch from the
+current origin tip — never stack:
 
 ```bash
 git fetch origin -q
@@ -91,10 +93,13 @@ unless the change is genuinely multi-part. Let pre-commit run (never
 
 ### 6. Open the bot-authored PR
 
-Delegate to **`/development:open-pr`** — it mints the writer token, pushes as the
-Maintenance App, opens the PR **as the bot**, and arms squash auto-merge with
-branch deletion. The PR body follows the template (Type / Summary / Test plan —
-include the Step 3 evidence) and carries `Closes #N`. Outcomes:
+Delegate to **`/development:open-pr`** — i.e. follow its procedure: mint the
+writer token (`mint-maintenance-token.zsh`), **push the branch as the bot**
+(`git push https://x-access-token:$TOKEN@github.com/$REPO.git HEAD:$BRANCH` — so
+the bot is also the last pusher), open the PR with `GH_TOKEN=$TOKEN gh pr create`
+(author = the Maintenance App), then `GH_TOKEN=$TOKEN gh pr merge <n> --auto
+--squash --delete-branch`. The PR body follows the template (Type / Summary /
+Test plan — include the Step 3 evidence) and carries `Closes #N`. Outcomes:
 
 - **Approver repo (Python / Java)** → the Claude Approver auto-approves → it
   auto-merges on green CI.
@@ -111,9 +116,12 @@ conflict-aware, then verify the whole.
 
 ### E1. Enumerate the children
 
-Parse the epic body's task list / linked issues. Consider only the **open**
-ones (skip children already closed/merged). This makes the skill **resumable**:
-re-running continues from wherever a prior run stopped.
+Parse the epic body's **task-list lines** specifically (`- [ ] #N` / `- [x] #N`,
+or `owner/repo#N`) — match those, **not every `#N` mention** in the body (which
+also catches unrelated cross-references and would pull in non-children).
+Consider only the **open** ones (skip children already closed/merged). This
+makes the skill **resumable**: re-running continues from wherever a prior run
+stopped.
 
 ### E2. Analyse order + overlap
 
@@ -127,9 +135,24 @@ them; confirm with a quick repo scan). Then order by:
   children in the *same plugin* both bump `plugin.json` + `marketplace.json`, so
   they are **never completely disjoint** even when their substantive files
   differ.
+- **In-flight PRs** — also list the repo's **open PRs** (`gh pr list --json
+  number,title,headRefName`) and the files they touch. An open PR editing a
+  file (or the plugin's version manifests) a child needs is an **in-flight
+  dependency**: queue that child behind it exactly as you would a merged
+  overlap. Don't analyse against `main` alone.
 
-Partition into the **provably-disjoint set** (no shared files at all —
-realistically: different plugins) and **everything else**.
+> **The version manifest is the dominant serialiser.** Substantively
+> file-disjoint same-plugin children (e.g. three different template files) still
+> can't parallelise, because all three bump `plugin.json` + `marketplace.json`
+> — **two same-plugin PRs open at once will conflict on the version line.** So
+> serialise same-plugin work and resolve each child off the **merged** tip, where
+> its bump increments cleanly. (This bites in-flight too: any open same-plugin PR
+> — even the one that *added* this skill — forces the children to queue behind
+> it. Treat an open same-plugin PR as a hard dependency.)
+
+Partition into the **provably-disjoint set** (no shared files at all *and* no
+in-flight PR touching them — realistically: different plugins) and **everything
+else**.
 
 ### E3. Resolve — sequential by default, disjoint-only in parallel
 
@@ -147,14 +170,17 @@ realistically: different plugins) and **everything else**.
 > the provably-disjoint set. **Minimising merge conflicts beats throughput.**
 > When in doubt, sequential.
 >
-> **Waiting for a merge.** In an **Approver** repo each bot PR auto-merges on
-> green CI, so the sequential loop proceeds on its own — poll the PR state, and
-> when it's merged, fetch + branch the next. In a **human-only** (claude-plugin)
-> repo the PR waits for the human: after opening a child's PR that the next child
-> depends on, surface it and **pause** — tell the user to approve it, and that
-> re-running `/development:resolve-issue <epic#>` continues from the next open
-> child once it has merged. **Never branch the next child off an unmerged
-> dependency.**
+> **Waiting for a merge — and one child per invocation in a human-only repo.**
+> In an **Approver** repo each bot PR auto-merges on green CI, so the sequential
+> loop proceeds on its own — poll the PR state, and when it's merged, fetch +
+> branch the next. In a **human-only** (claude-plugin) repo the PR waits for the
+> human, so a sequential epic resolves **exactly one child per invocation**:
+> resolve it, open the bot PR, then **stop** — the next child can't branch off
+> the unmerged tip (it would stack and conflict on the version line). Surface the
+> PR, tell the user to approve it, and that re-running
+> `/development:resolve-issue <epic#>` continues from the next open child once it
+> merges (the skill is resumable). **Never branch the next child off an unmerged
+> dependency, and never pre-resolve multiple sequential children.**
 
 ### E4. Comprehensive epic verification (after ALL children merge)
 
