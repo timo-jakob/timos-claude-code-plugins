@@ -195,9 +195,9 @@ safety net, not the primary verification loop.
 Java/Gradle maintenance — the **full-maintenance tier**, mirroring
 `development-python`. Triages and fixes findings from the Gradle toolchain
 `/development:bootstrap` installs (Spotless, SonarCloud, CodeQL + Scorecard,
-semgrep), reviews Dependabot/Snyk vendor PRs, applies dependency-major and
-JDK-LTS upgrades, raises JaCoCo coverage, flags versioning risks, and reviews
-PRs as the Claude Approver. Pure function of its JSON input — dispatched by
+semgrep), reviews Dependabot / Snyk / Renovate vendor PRs, applies
+dependency-major and JDK-LTS upgrades, raises JaCoCo coverage, flags
+versioning risks, and reviews PRs as the Claude Approver. Pure function of its JSON input — dispatched by
 `/development:maintenance`; it runs no detection of its own. **Adding it
 required zero edits to the generic orchestrator** (discovered purely via the
 gather-script + dispatch contract).
@@ -217,7 +217,7 @@ gather-script + dispatch contract).
 | java-sonar-triage | sonnet | SonarCloud bugs/smells/vulns/hotspots (`java:Sxxxx`); LSP-scoped; `// NOSONAR` for justified accepts |
 | java-code-scanning-triage | sonnet | CodeQL (Java) + Scorecard; pins GH Actions to SHAs; dataflow rules → human-review |
 | java-semgrep-triage | sonnet | semgrep: fix / `// nosemgrep` suppress / escalate; SQL concat → `PreparedStatement` |
-| java-dependabot-snyk-triage | sonnet | Vendor PRs: auto-merge green patch/minor (never self-approves); defers majors + docker to the right handler |
+| java-dependabot-snyk-triage | sonnet | Vendor PRs (Dependabot / Snyk / Renovate): auto-merge green patch/minor (never self-approves); defers majors + docker to the right handler |
 | java-major-upgrade | opus | Gradle dependency majors — release notes + LSP call-site migration + `gradle build` |
 | java-runtime-upgrade | opus | JDK LTS bumps (Docker base image) — swaps the Gradle toolchain + wrapper, cascades JDK-sensitive deps |
 | java-coverage-improver | opus | Writes meaningful JUnit tests to raise JaCoCo coverage; never edits production code |

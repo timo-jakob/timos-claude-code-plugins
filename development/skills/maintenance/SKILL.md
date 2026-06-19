@@ -28,7 +28,7 @@ Supported flags in `$ARGUMENTS`:
   for manual inspection + merge.
 - `--tool=<name>` — scope dispatch to a single tool (testing aid).
   `<name>` must be one of: `ruff`, `semgrep`, `code_scanning`,
-  `snyk_prs`, `sonarcloud`, `dependabot`, `container_scan`. The gather phase still runs
+  `snyk_prs`, `sonarcloud`, `dependabot`, `renovate`, `container_scan`. The gather phase still runs
   for every tool (the payload stays complete), but the language plugin
   only spawns the agent(s) for the chosen tool. Other agents are
   skipped entirely — no work, no missing-tool recommendation.
@@ -37,22 +37,22 @@ Supported flags in `$ARGUMENTS`:
   group of tools); the coarse-grained sibling of `--tool`. `<name>` must
   be one of:
   - `security` → `snyk_prs`, `code_scanning`, `semgrep`, `container_scan`
-  - `dependencies` → `dependabot`
+  - `dependencies` → `dependabot`, `renovate`
   - `codequality` → `sonarcloud`, `ruff`
 
   It expands to that tool set and scopes dispatch exactly like `--tool`,
   just to several tools at once — the gather phase still runs for
   everything, only dispatch is narrowed. Combinable with `--dry-run` and
   `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
-  other). The three concerns partition all seven tools, so
+  other). The three concerns partition all eight tools, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
   together cover the same set as an unscoped run.
 - `--track-as-issues` — after the run completes, create / update /
   close GitHub tracking issues for each scanner tool's remaining
   findings. One issue per tool (`ruff`, `semgrep`, `code_scanning_alerts`,
   `sonarcloud`, `container_scan`); labels `maintenance` + `tool:<name>`; idempotent on
-  `(repo, tool)`. Skipped for PR-based tools (`dependabot`, `snyk_prs`)
-  since their findings are already first-class PRs. See Phase 10 below
+  `(repo, tool)`. Skipped for PR-based tools (`dependabot`, `snyk_prs`,
+  `renovate`) since their findings are already first-class PRs. See Phase 10 below
   for the contract. Off by default; opt in per run.
 
 Anything else: surface the input to the user as "unrecognized
@@ -61,7 +61,7 @@ arguments" and stop.
 When `--tool=<name>` is set, validate `<name>` against the known set
 above before proceeding. On a mismatch, halt with: "Unknown --tool
 '`<name>`'; supported: ruff, semgrep, code_scanning, snyk_prs,
-sonarcloud, dependabot, container_scan."
+sonarcloud, dependabot, renovate, container_scan."
 
 When `--concern=<name>` is set, validate `<name>` against `security`,
 `dependencies`, `codequality`. On a mismatch, halt with: "Unknown
