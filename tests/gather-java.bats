@@ -16,7 +16,7 @@ setup() {
 }
 
 @test "gather-java: no Spotless config -> format_lint not configured, valid JSON" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   # Output is valid JSON.
@@ -27,7 +27,7 @@ setup() {
 }
 
 @test "gather-java: output always carries the contract keys" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r 'has("tooling_configured")' <<<"$output")" = "true" ]
@@ -37,7 +37,7 @@ setup() {
 }
 
 @test "gather-java: coverage is withheld honestly (null, reliable=false) this slice" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.coverage.overall // "null"' <<<"$output")" = "null" ]
@@ -50,7 +50,7 @@ setup() {
 }
 
 @test "gather-java: bare project -> all tools report not-configured" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs renovate grpc openapi; do
@@ -58,8 +58,20 @@ setup() {
   done
 }
 
+@test "gather-java: #343 Groovy build.gradle is NOT scanned (Kotlin DSL only)" {
+  # A Groovy build with a hardcoded version + Spotless: the gather targets
+  # build.gradle.kts only, so it sees nothing. (The dispatcher halts Groovy
+  # repos; the gather doesn't double-handle the format.)
+  printf "plugins {\n  id 'com.diffplug.spotless'\n}\nversion = '1.2.3'\n" > "$WORK/build.gradle"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e . >/dev/null
+  [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "false" ]
+  [ "$(jq -r .tooling_configured.versioning <<<"$output")" = "false" ]
+}
+
 @test "gather-java: .proto present -> grpc configured + a proto-audit finding" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   mkdir -p "$WORK/src/main/proto"
   printf 'syntax = "proto3";\nmessage X {}\n' > "$WORK/src/main/proto/x.proto"
   run bash "$GATHER" "$WORK"
@@ -70,7 +82,7 @@ setup() {
 }
 
 @test "gather-java: OpenAPI spec in a non-Spring repo -> openapi configured + finding" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   mkdir -p "$WORK/src/main/resources"
   printf 'openapi: 3.0.0\n' > "$WORK/src/main/resources/openapi.yaml"
   run bash "$GATHER" "$WORK"
@@ -80,7 +92,7 @@ setup() {
 }
 
 @test "gather-java: OpenAPI spec in a Spring repo -> openapi deferred (not configured)" {
-  printf 'plugins { java }\ndependencies { implementation "org.springframework.boot:spring-boot-starter-web" }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\ndependencies { implementation "org.springframework.boot:spring-boot-starter-web" }\n' > "$WORK/build.gradle.kts"
   mkdir -p "$WORK/src/main/resources"
   printf 'openapi: 3.0.0\n' > "$WORK/src/main/resources/openapi.yaml"
   run bash "$GATHER" "$WORK"
@@ -90,7 +102,7 @@ setup() {
 }
 
 @test "gather-java: no Renovate config -> renovate not configured" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r .tooling_configured.renovate <<<"$output")" = "false" ]
@@ -98,7 +110,7 @@ setup() {
 }
 
 @test "gather-java: renovate.json present -> renovate configured" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   printf '{ "extends": ["config:recommended"] }\n' > "$WORK/renovate.json"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
@@ -108,7 +120,7 @@ setup() {
 }
 
 @test "gather-java: .github/renovate.json present -> renovate configured" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   mkdir -p "$WORK/.github"
   printf '{ "extends": ["config:recommended"] }\n' > "$WORK/.github/renovate.json"
   run bash "$GATHER" "$WORK"
@@ -117,7 +129,7 @@ setup() {
 }
 
 @test "gather-java: no sonar-project.properties -> sonarcloud not configured" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r .tooling_configured.sonarcloud <<<"$output")" = "false" ]
@@ -125,7 +137,7 @@ setup() {
 }
 
 @test "gather-java: no JaCoCo -> coverage withheld with a JaCoCo reason" {
-  printf 'plugins { java }\n' > "$WORK/build.gradle"
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.coverage.overall // "null"' <<<"$output")" = "null" ]
