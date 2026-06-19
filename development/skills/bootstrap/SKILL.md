@@ -174,23 +174,43 @@ flow. Stop and ask for input wherever marked; do not guess.
    checkboxed list so the user can pick a subset.
 
 4. When `existing_artifacts` is complete AND `github_state` shows no gaps,
-   THEN fall through to the template-drift menu. **You MUST invoke
-   `bootstrap-idempotency-reviewer` for this comparison** — do not delegate
-   to a generic Explore or do an ad-hoc diff yourself. The reviewer's
-   contract is the only one that distinguishes:
-   - **user customization** (skip-default — user edits the template would
-     overwrite)
-   - **template-add drift** (merge-default — template added new sections
-     the user file lacks, with no conflicting user edits)
-   - **outdated patterns** (overwrite-default — pinned versions or
-     deprecated actions the template explicitly upgrades)
+   THEN fall through to the **template-drift check** — deterministic first,
+   the reviewer only when there's something to classify:
 
-   Without the reviewer's classification, template additions silently
-   look like "no change" and propagate stale toolchains to existing repos
-   — exactly the bug captured in issue #166. Pass each existing file's
-   on-disk content AND the rendered template content (after substitution)
-   to the reviewer, then surface the recommendations to the user for
-   per-file apply / skip / cherry-pick.
+   a. **Run the drift detector** — the same marker-sha256 mechanism
+      `/development:maintenance` uses. Don't re-roll the comparison by hand,
+      and don't run the heavy `bootstrap-idempotency-reviewer` blind across
+      every file:
+
+      ```bash
+      "<skill-base-dir>/../maintenance/scripts/detect-template-drift.zsh" "<repo-path>"
+      ```
+
+      It reads each stamped file's marker and compares the **recorded
+      template sha256 against the current template's sha256**, emitting a JSON
+      array: `drifted` (the template changed since this file was rendered — a
+      stale toolchain, the #166 bug) and `unknown_provenance` (no marker —
+      rendered pre-#213 or hand-made). An **empty array means no drift** —
+      report "toolchain is current" and stop; there is nothing to reconcile.
+
+   b. **Only for the files the detector flags**, invoke
+      `bootstrap-idempotency-reviewer` to classify each and recommend apply /
+      skip / cherry-pick — passing the on-disk content AND the rendered
+      template content (after substitution). The reviewer is the only contract
+      that distinguishes:
+      - **user customization** (skip-default — user edits the template would
+        overwrite)
+      - **template-add drift** (merge-default — template added new sections
+        the user file lacks, with no conflicting user edits)
+      - **outdated patterns** (overwrite-default — pinned versions or
+        deprecated actions the template explicitly upgrades)
+
+      Without that classification, template additions silently look like "no
+      change" and propagate stale toolchains to existing repos — exactly the
+      bug captured in issue #166. (`unknown_provenance` files go to the
+      reviewer too — with no trustworthy marker hash, a content review is the
+      only safe call.) Surface the recommendations for per-file apply / skip /
+      cherry-pick.
 
 5. Continue to **shared questions** below if any answer is still unknown
    (language detection may still need user input if `languages=[]`).
