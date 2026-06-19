@@ -193,6 +193,14 @@ flow. Stop and ask for input wherever marked; do not guess.
       rendered pre-#213 or hand-made). An **empty array means no drift** —
       report "toolchain is current" and stop; there is nothing to reconcile.
 
+      > **The sha256 is the drift signal — not the version label.** A marker
+      > records both the template hash AND the plugin version at render time.
+      > A template whose *content* didn't change across a plugin bump keeps its
+      > **old version label** (e.g. a marker reads `@ v1.43.0` on a `v1.48.x`
+      > plugin) even though there is no drift. The detector compares hashes and
+      > ignores the label, and so must you: a stale version label **alone is
+      > not drift** — don't chase it. Only a sha256 mismatch is drift.
+
    b. **Only for the files the detector flags**, invoke
       `bootstrap-idempotency-reviewer` to classify each and recommend apply /
       skip / cherry-pick — passing the on-disk content AND the rendered
