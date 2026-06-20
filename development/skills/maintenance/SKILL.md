@@ -47,13 +47,16 @@ Supported flags in `$ARGUMENTS`:
   other). The three concerns partition all eight tools, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
   together cover the same set as an unscoped run.
-- `--track-as-issues` — after the run completes, create / update /
-  close GitHub tracking issues for each scanner tool's remaining
-  findings. One issue per tool (`ruff`, `semgrep`, `code_scanning_alerts`,
-  `sonarcloud`, `container_scan`); labels `maintenance` + `tool:<name>`; idempotent on
-  `(repo, tool)`. Skipped for PR-based tools (`dependabot`, `snyk_prs`,
-  `renovate`) since their findings are already first-class PRs. See Phase 10 below
-  for the contract. Off by default; opt in per run.
+- `--no-issues` — suppress the GitHub-issue trail (Phase 10). By
+  **default** every real run leaves an issue trail for the changes it makes or
+  proposes — per-tool scanner debt issues *and* tracking issues for PR-cycle
+  outcomes (deferred vendor PRs, escalated stages, applied suppressions) — so no
+  change vanishes into the run summary alone (#384). Pass `--no-issues` to skip
+  that phase entirely (e.g. a quick scoped run where you don't want issue churn).
+  Issue creation is also skipped under `--dry-run` (a dry run performs no
+  outward actions). `--track-as-issues` is accepted as a **deprecated no-op**
+  (issue tracking is now the default) — warn that it's no longer needed and
+  proceed.
 
 Anything else: surface the input to the user as "unrecognized
 arguments" and stop.
@@ -1526,22 +1529,30 @@ Worktree branches available for manual review (no PRs opened):
 Keep the tone factual. If everything was clean, say so: "No issues
 found by the configured tools; project is in good shape."
 
-## Phase 10 — track findings as GitHub issues (opt-in)
+## Phase 10 — track changes and findings as GitHub issues
 
-**Run only when `--track-as-issues` was passed in Phase 0.** Otherwise
-skip this phase entirely.
+**Runs by default.** Skip this phase entirely when `--no-issues` was
+passed, or under `--dry-run` (a dry run performs no outward actions).
+The goal (#384): every change the run made or proposed leaves a
+traceable GitHub issue, so nothing lives only in the run summary.
+**Group similar findings into one issue; split out anything that needs
+its own human action.**
+
+### 10a — scanner debt issues (per tool)
 
 For each language's `findings-<lang>.json`, invoke the tracker:
 
 ```bash
 "<skill-base-dir>/scripts/track-debt-issues.zsh" \
   --findings "/tmp/findings-<lang>.json" \
-  --repo "<repo-path>"
+  --repo "<repo-path>" \
+  --run-ref "<today's date> — <N> PR(s) opened this run"
 ```
 
 The script handles the GitHub side end-to-end: ensures the labels
 exist (`maintenance`, `tool:<name>`), finds existing tracking issues
-by label combo, and acts based on the current finding count:
+by label combo, stamps the `--run-ref` into the body, and acts based
+on the current finding count:
 
 | Finding count | Existing issue? | Action |
 | --- | --- | --- |
@@ -1561,14 +1572,74 @@ Body is capped at the top 50 findings (per-group cap is
 `50 / num_groups` so one giant group can't eat the cap). The
 remainder is summarized with a `+ N more — see source tool` footer.
 
-PR-based tools (`dependabot`, `snyk_prs`) are **intentionally
-excluded** — their findings are already first-class PRs and
-duplicating them as checklist items in an issue creates two states
-to keep in sync.
+PR-based tools (`dependabot`, `snyk_prs`, `renovate`) are **not mirrored
+finding-for-finding** here — an open vendor PR is already a first-class
+PR, and duplicating it as a checklist item creates two states to keep in
+sync. But when one is **deferred** to human review rather than merged, that
+*outcome* does get a follow-up issue in 10b below (the gap #384 closes).
+
+### 10b — PR-cycle outcome issues (deferrals, escalations, suppressions)
+
+The scanner tracker only mirrors *open findings*. The things the run did
+or deferred during the **Phase 8** PR cycle — which otherwise live only in
+the Phase 9 summary — also need a trail. For each outcome accumulated this
+run, open (or update) a tracking issue, **one per PR**, idempotent on the
+PR number:
+
+- **Deferred vendor PRs** — a Dependabot / Renovate / Snyk PR the dispatch
+  routed to `actions_requiring_review` (a breaking major upgrade, a Docker
+  base-image policy deferral, etc.). The vendor PR stays the source of
+  truth; the issue is a *follow-up pointer* so the human action isn't lost.
+- **Escalated stages** — a maintenance PR abandoned after 3 failed CI-fix
+  attempts, or rejected by the Approver / a human.
+- **Applied suppressions** — findings an agent suppressed as false positives
+  inside a merged PR (e.g. SonarCloud S-rules marked WONTFIX). The issue
+  records *what* was suppressed and the *rationale*, so it stays auditable.
+
+Ensure the follow-up label exists once, then for each outcome search for an
+existing open issue before acting:
+
+```bash
+gh label create "maintenance:pr-followup" --color fbca04 \
+  --description "Maintenance run outcome needing human follow-up" 2>/dev/null || true
+
+gh issue list --label maintenance --state open \
+  --search "PR #<n> in:title" --json number,title
+```
+
+For a **new** outcome (no existing open issue), create one:
+
+```bash
+gh issue create \
+  --label maintenance --label "maintenance:pr-followup" \
+  --title "[maintenance] follow-up: PR #<n> — <short reason>" \
+  --body "<body>"
+```
+
+If an open issue **already exists**, `gh issue edit <m>` refreshes its body.
+If the underlying PR has since **merged/closed and needs no further action**,
+`gh issue close <m>` with a one-line comment.
+
+The body must carry: a link to the PR (`#<n>`), the **reason** it was
+deferred / escalated / suppressed (verbatim from the agent's
+`actions_requiring_review` / `escalation_recommendation`), the suggested
+human action, and the run reference (today's date).
+
+**Grouping rule.** One issue per PR is the default — each PR's follow-up is
+its own human action. Only fold multiple items into one issue when they are
+the *same* finding repeated (e.g. the identical SonarCloud rule suppressed
+across several files of one PR → one issue listing them). When in doubt,
+split.
+
+**Honor the run's scope (#53 / #57).** Don't issue-spam: file only for
+outcomes this run actually produced. A `--tool` / `--concern`-scoped run
+files issues only for the tools in scope.
+
+### Report
 
 Print the tracker's stdout (one line per tool — `created` / `updated` /
-`closed` / `no-op`) into the run summary so the user sees what
-changed on the issues side.
+`closed` / `no-op`) **and** a one-line-per-PR-follow-up summary into the run
+summary, so the user sees exactly what changed on the issues side.
 
 ## What you will NOT do
 
