@@ -20,25 +20,30 @@
 # their findings are already first-class PRs.
 #
 # Usage:
-#   track-debt-issues.zsh --findings <path> [--repo <repo-path>]
+#   track-debt-issues.zsh --findings <path> [--repo <repo-path>] [--run-ref <s>]
 #
 #   --findings: path to a JSON file with `findings_by_tool` at top level
 #               (the maintenance Phase 4 payload, or the per-language
 #                findings-<lang>.json before payload construction)
 #   --repo:     target repo path (defaults to $(pwd))
+#   --run-ref:  human-readable reference to the originating run, stamped into
+#               each issue body for traceability (#384). Defaults to the run
+#               date + current branch.
 
 set -euo pipefail
 
 BODY_CAP=50
-MANAGED_MARKER="<!-- managed by /development:maintenance --track-as-issues — do not edit body manually; it will be overwritten on the next maintenance run -->"
+MANAGED_MARKER="<!-- managed by /development:maintenance — do not edit body manually; it will be overwritten on the next maintenance run -->"
 
 findings_path=""
 repo_path="$(pwd)"
+run_ref=""
 
 while (( $# > 0 )); do
   case "$1" in
     --findings) findings_path="$2"; shift 2 ;;
     --repo)     repo_path="$2";     shift 2 ;;
+    --run-ref)  run_ref="$2";       shift 2 ;;
     *) print -u2 "track-debt-issues.zsh: unknown arg: $1"; exit 2 ;;
   esac
 done
@@ -75,6 +80,10 @@ done
 
 today=$(date +%Y-%m-%d)
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || print -- "?")
+# Run reference stamped into every issue body so a finding is traceable to the
+# run that filed it (#384). Defaults to date + branch when the orchestrator
+# doesn't pass an explicit --run-ref.
+[[ -z "$run_ref" ]] && run_ref="${today} (branch \`${branch}\`)"
 
 # Render the body for a single tool. Reads from $findings_path,
 # selects findings_by_tool[$tool], groups by the tool's natural
@@ -221,7 +230,8 @@ render_body() {
   jq -r --argjson cap "$BODY_CAP" "$filter" < "$findings_path"
 
   print -- "---"
-  print -- "_This issue is auto-managed by \`/development:maintenance --track-as-issues\` (#58). It will be updated on every run and auto-closed when ${tool} reaches zero findings._"
+  print -- "_Last maintenance run: ${run_ref}._"
+  print -- "_This issue is auto-managed by \`/development:maintenance\` (#58, #384). It will be updated on every run and auto-closed when ${tool} reaches zero findings._"
 }
 
 # For each tracked tool, search for an existing open issue, then act
