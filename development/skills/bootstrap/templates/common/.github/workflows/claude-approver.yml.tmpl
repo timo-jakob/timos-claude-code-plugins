@@ -327,10 +327,28 @@ jobs:
             exit 0
           fi
 
-          # Legacy combined status must be green when statuses exist.
-          if [ "$status_total" -gt 0 ] && [ "$status_state" != "success" ]; then
-            echo "::notice::Combined commit status is '$status_state', not 'success'."
-            exit 0
+          # Legacy commit statuses must be green when they exist — but
+          # ADVISORY channels are excluded (#387). Snyk's `code/snyk` (SAST)
+          # and `security/snyk` (Open Source) post via the legacy commit-status
+          # API yet are never required branch-protection contexts (see
+          # branch-protection.sh). On the free tier they can go ERROR for
+          # quota reasons ("Code test limit reached") that say nothing about
+          # this PR — and that must not silently skip the Approver. So evaluate
+          # the remaining (non-advisory) statuses individually instead of
+          # trusting the aggregate `state`, which any advisory red would taint.
+          # Required legacy statuses (e.g. `sonarcloud`) are NOT excluded and
+          # still gate as before.
+          if [ "$status_total" -gt 0 ]; then
+            status_full=$(gh api "repos/$REPO/commits/$head_sha/status")
+            advisory='select(.context != "code/snyk" and (.context | startswith("security/snyk") | not))'
+            bad_status=$(printf '%s' "$status_full" \
+                         | jq "[.statuses[] | $advisory | select(.state != \"success\")] | length")
+            if [ "$bad_status" -gt 0 ]; then
+              echo "::notice::A non-advisory commit status is not 'success' on $head_sha — skipping:"
+              printf '%s' "$status_full" \
+                | jq ".statuses[] | $advisory | select(.state != \"success\") | {context, state}"
+              exit 0
+            fi
           fi
 
           # Final race check: head SHA must still be the SHA we evaluated.
