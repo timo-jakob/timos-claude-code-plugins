@@ -1,0 +1,135 @@
+name: ruff-py314-watch
+
+# Self-testing watcher for the ruff behaviour that python-ruff-fixer works
+# around (#81): at ruff 0.15.x, `ruff format --target-version py314` rewrites
+# `except (A, B):` into the parenthesis-free `except A, B:` form. That form is
+# valid on Python 3.14 (PEP 758) but is a SyntaxError on every older
+# interpreter and on tooling that hasn't caught up — which broke ai-doc-organizer's
+# test collection. The `python-ruff-fixer` agent therefore SKIPS `ruff format`
+# when a project pins target-version=py314.
+#
+# This job runs the issue's repro against the LATEST ruff once a month. The
+# trigger condition is purely structural and interpreter-independent: does ruff
+# still STRIP the parentheses? While it does, the job does nothing. The moment
+# ruff leaves `except (A, B):` intact, it opens a tracking issue so a human can
+# drop the workaround via /development:resolve-issue. The repro IS the trigger —
+# no calendar reminder to misjudge, no false alarms. See #81.
+#
+# NB: do NOT detect "fixed" by parsing the output on the runner — this job runs
+# on a 3.x runner where PEP 758 makes the parens-free form parse cleanly, so an
+# AST check would always report "fixed". Detection greps for the parentheses.
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of every month.
+    - cron: '0 6 1 * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_TITLE: 'Remove ruff py314 `ruff format` workaround (upstream fixed)'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install latest ruff
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade ruff
+          echo "ruff_version=$(ruff --version)" >> "$GITHUB_ENV"
+          echo "Testing against $(ruff --version)"
+
+      - name: Run the py314 repro and detect whether the bug is fixed
+        id: probe
+        run: |
+          set -u
+          cat > repro.py <<'PY'
+          def f():
+              try:
+                  pass
+              except (ValueError, TypeError):
+                  pass
+          PY
+
+          # `ruff format` exits 0 even while emitting the rewrite, so the exit
+          # code is not the signal. The signal is structural: does the formatted
+          # file still contain the parenthesised `except (...)`? If ruff stripped
+          # the parens, `except (` is gone -> behaviour unchanged, workaround
+          # still needed. If `except (` survives, ruff stopped rewriting -> the
+          # workaround can go. This is interpreter-independent (see header note).
+          if ! ruff format --target-version py314 repro.py; then
+            echo "ruff format exited non-zero against $ruff_version — unexpected; not claiming a fix."
+            echo "fixed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "----- formatted repro.py -----"
+          cat repro.py
+          echo "------------------------------"
+
+          if grep -q 'except (ValueError, TypeError):' repro.py; then
+            echo "ruff preserved the parentheses in $ruff_version — py314 rewrite GONE; workaround can go."
+            echo "fixed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ruff still stripped the parentheses in $ruff_version — workaround still needed. Nothing to do."
+            echo "fixed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a tracking issue when the bug is fixed (idempotent)
+        if: steps.probe.outputs.fixed == 'true'
+        run: |
+          set -u
+          # Don't pile up duplicates: if an open issue with this title already
+          # exists, just point at it.
+          existing=$(gh issue list --state open --search "in:title $ISSUE_TITLE" \
+            --json number,title \
+            --jq "[.[] | select(.title == env.ISSUE_TITLE)] | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            echo "Tracking issue already open: #$existing — nothing to do."
+            exit 0
+          fi
+
+          # Quoted heredoc: backtick spans in the body are literal, not executed.
+          # The version is appended afterwards (it can't be interpolated here).
+          cat > "$RUNNER_TEMP/body.md" <<'EOF'
+          The monthly `ruff-py314-watch` job confirmed that the latest ruff no
+          longer mangles `except (A, B):` under `--target-version py314`. The
+          upstream bug behind #81 appears fixed.
+
+          ## Remove the workaround
+
+          `development-python/agents/python-ruff-fixer.md` skips the `ruff format`
+          step (Phase 1) when a project pins `target-version = "py314"`. Now that
+          ruff is fixed:
+
+          1. Confirm the repro is clean against the ruff version the maintenance
+             toolchain actually installs (this job tests latest; a pin/floor may
+             differ).
+          2. Drop the `py314` entry from the known-buggy list in the agent — once
+             empty, remove the pre-flight `target-version` check entirely and
+             restore the unconditional `ruff format` step.
+          3. Bump `development-python` (patch) in `plugin.json` +
+             `marketplace.json`.
+          4. Delete `.github/workflows/ruff-py314-watch.yml` — this watcher's job
+             is done.
+
+          Resolve with `/development:resolve-issue` against this issue.
+
+          _Filed automatically by `.github/workflows/ruff-py314-watch.yml`._
+          EOF
+
+          printf '\nTested against: %s\n' "$ruff_version" >> "$RUNNER_TEMP/body.md"
+
+          gh issue create --title "$ISSUE_TITLE" --body-file "$RUNNER_TEMP/body.md"
+          echo "Opened tracking issue."
