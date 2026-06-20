@@ -50,7 +50,34 @@ Stop here — do not invoke ruff, do not touch any files.
    current cwd.
 2. **Phase 1 — safe fixes** (always run, no coverage check needed):
    - `ruff check --fix 2>&1 | tee /tmp/ruff-safe.log`
-   - `ruff format 2>&1 | tee /tmp/ruff-format.log`
+   - **Pre-flight before `ruff format`: check `target-version`.** Some
+     ruff releases corrupt code under specific `target-version` values.
+     The known-buggy list is currently **`py314`**: at ruff 0.15.x,
+     `ruff format` with `target-version = "py314"` rewrites valid
+     `except (A, B):` into invalid bracket-less `except A, B:`, which
+     breaks test collection (see issue #81; upstream astral-sh/ruff).
+     Read the effective `target-version` from the project's ruff config
+     — `ruff.toml` / `.ruff.toml` at the repo root first, else
+     `pyproject.toml` `[tool.ruff]`. If the resolved value is in the
+     known-buggy list, **skip the `ruff format` invocation entirely** and
+     record the skip in `unable_to_fix` (note template below).
+     `ruff check --fix` above is unaffected — it already ran, and is a
+     separate, safe step. Otherwise run format normally:
+     - `ruff format 2>&1 | tee /tmp/ruff-format.log`
+
+   Skip note for `unable_to_fix` when `target-version` is known-buggy:
+
+   ```text
+   "Skipped `ruff format` because target-version=py314 triggers an
+   upstream ruff bug (astral-sh/ruff) that rewrites `except (A, B):`
+   into invalid bracket-less syntax and breaks test collection.
+   `ruff check --fix` was still applied. Re-enable formatting once ruff
+   ships a fix — then drop the fixed version from the known-buggy list."
+   ```
+
+   When ruff ships a fix, narrow the known-buggy list to exclude
+   versions ≥ the fix (currently the whole `py314` entry, since no fixed
+   release exists yet).
 3. **Phase 2 — unsafe fixes** (the dispatcher already verified coverage
    for the affected modules):
    - `ruff check --fix --unsafe-fixes 2>&1 | tee /tmp/ruff-unsafe.log`
