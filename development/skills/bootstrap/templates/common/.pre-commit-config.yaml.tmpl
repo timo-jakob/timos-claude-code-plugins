@@ -136,6 +136,9 @@ repos:
   # a ktlint() step). Slower than ruff (Gradle daemon), so scoped to changed
   # sources. Requires the com.diffplug.spotless plugin in build.gradle(.kts) —
   # see the Java setup recommendation in SETUP.md / the bootstrap summary.
+  # Line-length: this org targets 120 columns toolchain-wide, but Java is a
+  # documented EXEMPTION — google-java-format is hardcoded to 100 columns and is
+  # not configurable (see ARCHITECTURE.md "Line-length policy").
   - repo: local
     hooks:
       - id: spotless
