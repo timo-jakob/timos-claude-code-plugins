@@ -1041,6 +1041,27 @@ the results as part of the JSON payload. Language plugins receive
 "here is the parsed detect-stack output" rather than "here is the path
 to detect-stack.sh; go run it." Pure functions, no path coupling.
 
+## Line-length policy
+
+**Every formatter and linter we configure targets 120 columns** — one limit
+across the whole toolchain so reviewers and contributors never fight per-tool
+widths. When we add a new language, set 120 from the start.
+
+Per-language state (templates under
+`development/skills/bootstrap/templates/languages/`):
+
+| Language   | Tool                          | Limit | Notes |
+|------------|-------------------------------|-------|-------|
+| Python     | ruff (`ruff.toml.tmpl`)       | 120   | `line-length = 120`. |
+| TypeScript | ESLint (`.eslintrc.json`)     | 120   | `max-len` warning at 120 (URLs/strings/template-literals exempt). |
+| Swift      | SwiftLint (`.swiftlint.yml`)  | 120   | `line_length: warning 120`. |
+| Go         | golangci-lint (`.golangci.yml`) | —   | **Exemption.** `gofmt` does not wrap lines and Go convention avoids line-length linting; the `lll` linter is intentionally not enabled. |
+| Java       | Spotless → google-java-format | 100   | **Exemption.** google-java-format is hardcoded to 100 columns and is not configurable; we keep it (do not switch to palantir-java-format). |
+
+When a tool genuinely cannot do 120 (google-java-format), document the
+exemption explicitly here and in the template rather than leaving a silent
+mismatch.
+
 ## Scripting conventions
 
 This project targets **macOS only, Apple Silicon, Homebrew-based**. There

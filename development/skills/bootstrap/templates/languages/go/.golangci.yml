@@ -10,6 +10,11 @@
 #   - issues.exclude-rules → linters.exclusions.rules (nested)
 #   - run.timeout removed (no timeout by default in v2)
 
+# Line-length policy: this org targets 120 columns for every linter/formatter
+# that supports it (see ARCHITECTURE.md "Line-length policy"). Go is a documented
+# EXEMPTION — gofmt does not wrap lines and Go convention avoids line-length
+# linting, so the `lll` linter is intentionally NOT enabled here.
+
 version: "2"
 
 run:
