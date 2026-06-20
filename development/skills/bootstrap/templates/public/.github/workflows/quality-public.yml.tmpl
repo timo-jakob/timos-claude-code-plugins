@@ -237,10 +237,14 @@ jobs:
   #            they must NOT gate a build. They're handled out-of-band: daily
   #            Snyk monitoring → auto-fix PRs → the maintenance pipeline, plus
   #            Dependabot. (Leaving this ON yields the `security/snyk` check.)
-  #        Code analysis                     → ENABLE
-  #            SAST on our OWN code is a fair PR gate, kept ON as defense in
-  #            depth alongside CodeQL (two engines beat one). Yields the
-  #            `code/snyk` check on net-new code vulnerabilities.
+  #        Code analysis                     → DISABLE
+  #            SAST on our OWN code is already covered by CodeQL (the required
+  #            `analyze (<lang>)` checks). Snyk Code adds no incremental
+  #            coverage on the free tier, where its monthly test cap makes
+  #            `code/snyk` go ERROR ("Code test limit reached") — and that
+  #            advisory legacy status used to silently skip the Claude Approver
+  #            (#387). Disabling it drops the `code/snyk` check; CodeQL stays
+  #            the SAST gate.
   #
   #   2. Continuous monitoring + Automatic Fix PRs
   #      Daily re-test of the imported target; when a vulnerable dependency has

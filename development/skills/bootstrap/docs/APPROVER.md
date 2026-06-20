@@ -231,6 +231,14 @@ Once the Approver is set up, the typical PR lifecycle is:
    green (no point asking Claude when CI already said no — the
    failing check tells the story). A new push cancels the waiting
    run via the concurrency group and starts a fresh one.
+   **Advisory legacy commit statuses are excluded** from the green
+   computation (#387): Snyk's `code/snyk` and `security/snyk` post via
+   the legacy commit-status API but are never required branch-protection
+   contexts, and on the free tier they can go ERROR for quota reasons
+   ("Code test limit reached") unrelated to the PR. The gate evaluates
+   the non-advisory statuses individually rather than trusting the
+   aggregate state, so an advisory quota failure can't silently skip the
+   Approver. Required legacy statuses (e.g. `sonarcloud`) still gate.
 4. **When everything's green**, the gate emits `proceed=true` and the
    `approve` job (chained via `needs:`) mints a 1-hour Approver App
    installation token, checks out the PR HEAD, pulls in the plugin

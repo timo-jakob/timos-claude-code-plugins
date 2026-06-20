@@ -315,7 +315,7 @@ info "gate a build — handle them via daily monitoring + auto-Fix-PRs instead."
 info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
 info "  2. GitHub integration → 'Pull request status checks'."
 info "  3. 'Open Source security and licenses' → DISABLE (drops security/snyk)."
-info "  4. 'Code analysis' → ENABLE (keeps code/snyk — SAST on our own code)."
+info "  4. 'Code analysis' → DISABLE (drops code/snyk — CodeQL covers SAST; Snyk Code's free-tier cap breaks the Approver, #387)."
 info "See SETUP.md section 2.5 for the rationale."
 
 # --- GitHub Security & Quality features --------------------------------------
