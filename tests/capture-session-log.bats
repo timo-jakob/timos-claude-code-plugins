@@ -84,3 +84,67 @@ run_cap() { run zsh "$CAP" --projects-dir "$P" "$@"; }
   run zsh "$CAP" --projects-dir "$BATS_TEST_TMPDIR/nope" --list
   [ "$status" -ne 0 ]
 }
+
+# --- related-session discovery (#414) ----------------------------------------
+# A run spans multiple project dirs: the worktree it spawns and headless
+# plugin-test/pt-reval sessions. Build a fixture with a main repo + a worktree
+# sibling + a headless sibling + an unrelated repo, all under one projects dir.
+related_fixture() {
+  D="$BATS_TEST_TMPDIR/rel"
+  mkdir -p "$D/-Users-x-repositories-acme/main1/subagents" \
+           "$D/-Users-x-repositories-acme--claude-worktrees-foo/wt1/subagents" \
+           "$D/-private-T-plugin-test-XXXXXX-rnd-acme/h1/subagents" \
+           "$D/-Users-x-repositories-unrelated/u1"
+  printf '{}\n' > "$D/-Users-x-repositories-acme/main1.jsonl"
+  printf '{}\n' > "$D/-Users-x-repositories-acme/main1/subagents/agent-m.jsonl"
+  printf '{}\n' > "$D/-Users-x-repositories-acme--claude-worktrees-foo/wt1.jsonl"
+  printf '{}\n' > "$D/-Users-x-repositories-acme--claude-worktrees-foo/wt1/subagents/agent-w.jsonl"
+  printf '{}\n' > "$D/-private-T-plugin-test-XXXXXX-rnd-acme/h1.jsonl"
+  printf '{}\n' > "$D/-private-T-plugin-test-XXXXXX-rnd-acme/h1/subagents/agent-h.jsonl"
+  printf '{}\n' > "$D/-Users-x-repositories-unrelated/u1.jsonl"
+}
+
+@test "--dry-run lists worktree + headless siblings with their match signal" {
+  related_fixture
+  run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"related sessions (2)"* ]]
+  [[ "$output" == *"claude-worktrees-foo/wt1  [worktree]"* ]]
+  [[ "$output" == *"plugin-test-XXXXXX-rnd-acme/h1  [headless]"* ]]
+  [[ "$output" != *"unrelated"* ]]   # a non-sibling repo is never pulled in
+}
+
+@test "real bundle stages main at root and siblings under related/" {
+  related_fixture
+  run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --out "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  contents="$(tar -tzf "$BATS_TEST_TMPDIR/claude-session-main1.tgz")"
+  [[ "$contents" == *"main1.jsonl"* ]]
+  [[ "$contents" == *"main1/subagents/agent-m.jsonl"* ]]
+  [[ "$contents" == *"related/-Users-x-repositories-acme--claude-worktrees-foo/wt1.jsonl"* ]]
+  [[ "$contents" == *"related/-Users-x-repositories-acme--claude-worktrees-foo/wt1/subagents/agent-w.jsonl"* ]]
+  [[ "$contents" == *"related/-private-T-plugin-test-XXXXXX-rnd-acme/h1/subagents/agent-h.jsonl"* ]]
+}
+
+@test "--main-only skips related discovery" {
+  related_fixture
+  run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run --main-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipped — --main-only"* ]]
+  [[ "$output" != *"worktree"* ]]
+}
+
+@test "--window-hours bounds discovery; --related force-includes any dir" {
+  related_fixture
+  # age the worktree session out of the default 6h window → dropped
+  touch -t "$(date -v-10H '+%Y%m%d%H%M' 2>/dev/null || date -d '10 hours ago' '+%Y%m%d%H%M')" \
+    "$D/-Users-x-repositories-acme--claude-worktrees-foo/wt1.jsonl"
+  run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run
+  [[ "$output" != *"[worktree]"* ]]
+  # widening the window brings it back
+  run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run --window-hours 24
+  [[ "$output" == *"[worktree]"* ]]
+  # --related forces a dir in regardless of signal/window
+  run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run --related unrelated
+  [[ "$output" == *"unrelated/u1  [manual]"* ]]
+}
