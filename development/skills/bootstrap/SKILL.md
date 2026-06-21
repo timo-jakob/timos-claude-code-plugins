@@ -197,6 +197,30 @@ flow. Stop and ask for input wherever marked; do not guess.
    After rendering, continue to the drift check below for the files that WERE
    already present.
 
+   **Then reconcile `.pre-commit-config.yaml` hooks — whole-file presence is
+   the wrong unit (#409).** A shipped config is only load-bearing if the
+   pre-commit hook that consumes it is also wired. On an older repo, gap-fill
+   can drop in `.yamllint` while the repo's `.pre-commit-config.yaml`
+   *predates* the `yamllint` hook — the file is "present" so it's never in
+   `missing_artifacts`, and it carries no provenance marker so the drift check
+   is blind to it. The config then sits orphaned (yamllint never runs; false
+   assurance). So whenever `.pre-commit-config.yaml` already exists, render the
+   template the normal way (substitute `{{DEFAULT_BRANCH}}`, keep only the
+   detected-language / scope blocks) to a temp file and reconcile the on-disk
+   config against it:
+
+   ```bash
+   "<skill-base-dir>/scripts/reconcile-precommit-hooks.zsh" \
+     "<repo-path>/.pre-commit-config.yaml" "<rendered-precommit-temp>"
+   ```
+
+   It additively appends any hook *provider* (a `- repo:` block — `yamllint`,
+   `gitleaks`, `semgrep`, …) whose hook ids are entirely absent on disk, and is
+   purely additive + idempotent (it never overwrites a user's pinned rev or
+   re-adds a present provider). Surface what it wired. (When
+   `.pre-commit-config.yaml` itself was absent it's a normal
+   `missing_artifacts` whole-file render above and this reconcile is a no-op.)
+
 5. When `missing_artifacts` is empty AND `github_state` shows no gaps,
    THEN fall through to the **template-drift check** — deterministic first,
    the reviewer only when there's something to classify:
