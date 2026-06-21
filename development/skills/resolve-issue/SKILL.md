@@ -8,9 +8,10 @@ description: >
   approves on claude-plugin repos. Epic: decompose the children, order them
   conflict-aware, resolve provably-disjoint ones in parallel worktrees and the
   rest sequentially off fresh main (each child independently tested), then run a
-  holistic end-to-end test over the merged epic. Repo-type-agnostic (Python /
-  Java / Claude-plugin). Composes git-branch-naming, commit, and open-pr; never
-  pushes to the default branch.
+  holistic end-to-end test over the merged epic and explicitly close the epic
+  issue (nothing auto-closes it). Repo-type-agnostic (Python / Java /
+  Claude-plugin). Composes git-branch-naming, commit, and open-pr; never pushes
+  to the default branch.
 disable-model-invocation: false
 ---
 
@@ -112,7 +113,7 @@ Report the PR URL, that it's bot-authored, and that auto-merge is armed.
 ## Epic flow
 
 You do **not** implement the epic directly — you resolve its children
-conflict-aware, then verify the whole.
+conflict-aware, then verify the whole, then **close the epic** (E4/E5).
 
 ### E1. Enumerate the children
 
@@ -122,6 +123,16 @@ also catches unrelated cross-references and would pull in non-children).
 Consider only the **open** ones (skip children already closed/merged). This
 makes the skill **resumable**: re-running continues from wherever a prior run
 stopped.
+
+> **Terminal case — no open children left.** When this enumeration finds **zero
+> open children** (every child already closed/merged, e.g. on the re-run after
+> the last child landed), do **no** child work: skip straight to **E4**
+> (holistic verification) and then **E5** (close the epic). This is the step
+> that's easy to miss — an epic whose children are all merged still sits OPEN
+> until E5 closes it, because nothing carries `Closes #<epic>`. Some epics
+> instead track **inline slices** (`- [ ]` describing work, no `#N`) realized by
+> separate PRs; for those, confirm each slice's PR merged, then E4 + E5 the
+> same way.
 
 ### E2. Analyse order + overlap
 
@@ -183,8 +194,10 @@ else**.
 > the unmerged tip (it would stack and conflict on the version line). Surface the
 > PR, tell the user to approve it, and that re-running
 > `/development:resolve-issue <epic#>` continues from the next open child once it
-> merges (the skill is resumable). **Never branch the next child off an unmerged
-> dependency, and never pre-resolve multiple sequential children.**
+> merges (the skill is resumable). **When a re-run finds no open children left,
+> it does no child work — it runs E4 (holistic verification) and E5 (close the
+> epic).** **Never branch the next child off an unmerged dependency, and never
+> pre-resolve multiple sequential children.**
 
 ### E4. Comprehensive epic verification (after ALL children merge)
 
@@ -200,8 +213,27 @@ children's **combined** effect. Once the whole epic is on `main`, run a
   slices by hand).
 
 If the holistic test surfaces a regression the per-issue runs missed, **file it**
-(and resolve it if it fits) rather than silently marking the epic done. Otherwise
-note the epic complete.
+(and resolve it if it fits) rather than silently marking the epic done — the
+epic stays **open** until that regression is handled. Otherwise the epic's domain
+is verified green: proceed to **E5**.
+
+### E5. Close the epic (the step that gets missed)
+
+**Closing the epic is an explicit action — nothing does it for you.** Each child
+closed via its own PR's `Closes #N`, but the **epic issue has no PR of its own**,
+so no `Closes` trailer ever references it. A done epic therefore lingers OPEN
+unless you close it by hand. This is the single most common miss in this flow, so
+do it as the final, deliberate step — **only after E4 is green** (closed-after-
+final-testing, never before):
+
+```bash
+gh issue close <epic#> --comment "<closing summary>"
+```
+
+The closing summary should carry the **completed checklist** (each child / slice
+→ its merged PR) and the **E4 verification result** (what holistic test ran and
+that it passed), so the closed epic is a self-contained record. Only after this
+is the epic truly done — report it closed, with the PR/verification table.
 
 ## Guardrails
 
@@ -213,5 +245,9 @@ note the epic complete.
 - **One issue per PR, one PR per issue** — squash merge, no stacking: each child
   branches off the merged tip.
 - **Resumable** — re-running on an epic skips already-resolved children.
+- **Close the epic explicitly after E4 (E5)** — children auto-close via their
+  PRs' `Closes #N`, but the epic issue has no PR, so it never closes itself. A
+  done-but-open epic is the most common miss; the final re-run (zero open
+  children) exists to verify and close it.
 - **Don't decide the user's issues for them** — if a single issue is ambiguous,
   ask/stop; don't guess a large or contentious change into a PR.
