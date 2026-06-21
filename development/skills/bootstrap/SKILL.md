@@ -210,7 +210,7 @@ flow. Stop and ask for input wherever marked; do not guess.
    config against it:
 
    ```bash
-   "<skill-base-dir>/scripts/reconcile-precommit-hooks.zsh" \
+   "<skill-base-dir>/scripts/reconcile-precommit-hooks.zsh" --scan \
      "<repo-path>/.pre-commit-config.yaml" "<rendered-precommit-temp>"
    ```
 
@@ -220,6 +220,21 @@ flow. Stop and ask for input wherever marked; do not guess.
    re-adds a present provider). Surface what it wired. (When
    `.pre-commit-config.yaml` itself was absent it's a normal
    `missing_artifacts` whole-file render above and this reconcile is a no-op.)
+
+   **`--scan` proactively runs each newly-wired hook repo-wide before you
+   commit (#410).** Introducing a repo-wide *enforcing* hook (yamllint,
+   gitleaks, …) on a non-greenfield repo almost always hits a pre-existing
+   violation — and discovering it at *push* time (the bot push blocked
+   mid-flow on ai-doc-organizer PR #86) or in CI is late and disruptive. With
+   `--scan` the reconciler runs `pre-commit run <id> --all-files` for the hooks
+   it just wired: auto-fixers (`trailing-whitespace`, `ruff`, …) fix in place,
+   enforcers (`yamllint`) surface what they can't. **Exit 3** means a scanned
+   hook auto-fixed files or surfaced violations on pre-existing content — fix
+   the mechanical ones and stage them (or surface the judgement calls to the
+   user) **before** committing, then continue; don't let the first push be the
+   discovery mechanism. Exit 0 = newly-wired hooks pass repo-wide, safe to
+   commit. (If `pre-commit` isn't installed the scan is skipped with a notice;
+   run it by hand before committing.)
 
 5. When `missing_artifacts` is empty AND `github_state` shows no gaps,
    THEN fall through to the **template-drift check** — deterministic first,

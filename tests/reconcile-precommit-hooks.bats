@@ -6,15 +6,37 @@
 # .pre-commit-config.yaml that predates a newer hook is "present" and left
 # untouched — so a freshly gap-filled .yamllint sits orphaned. This reconciler
 # closes that gap hook-by-hook.
+#
+# #410 adds --scan: after wiring, run each newly-wired hook repo-wide so
+# pre-existing violations are discovered before the commit, not at push.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/bootstrap/scripts/reconcile-precommit-hooks.zsh"
   CONFIG="$BATS_TEST_TMPDIR/.pre-commit-config.yaml"
   RENDERED="$BATS_TEST_TMPDIR/rendered.yaml"
+  PC_LOG="$BATS_TEST_TMPDIR/pc.log"
+  : > "$PC_LOG"
 }
 
 run_it() { run zsh "$S" "$CONFIG" "$RENDERED"; }
+
+# Fake pre-commit (PRE_COMMIT_BIN seam): logs every `run <id> --all-files` call.
+# Any hook id listed in $FAIL_HOOKS exits 1 (violation/auto-fix); others pass.
+write_fake_precommit() {
+  FAKE_PC="$BATS_TEST_TMPDIR/pre-commit"
+  cat > "$FAKE_PC" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$PC_LOG"
+for bad in \${FAIL_HOOKS:-}; do
+  [ "\$2" = "\$bad" ] && exit 1
+done
+exit 0
+EOF
+  chmod +x "$FAKE_PC"
+}
+
+run_scan() { run env PRE_COMMIT_BIN="$FAKE_PC" FAIL_HOOKS="${1:-}" zsh "$S" --scan "$CONFIG" "$RENDERED"; }
 
 # A rendered template carrying the universal + yamllint + gitleaks providers.
 write_rendered() {
@@ -133,4 +155,106 @@ YAML
   write_rendered
   run zsh "$S" "$BATS_TEST_TMPDIR/nope.yaml" "$RENDERED"
   [ "$status" -eq 1 ]
+}
+
+# --- #410: proactive repo-wide scan of newly-wired hooks ---------------------
+
+@test "scan: #410 newly-wired hook is scanned repo-wide before commit" {
+  # gitleaks already present -> only yamllint + the universal block are wired,
+  # and ONLY those are scanned (the present gitleaks is not re-scanned).
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+YAML
+  write_rendered
+  write_fake_precommit
+  run_scan ""           # nothing fails -> clean
+  [ "$status" -eq 0 ]
+  # The newly-wired hooks were scanned --all-files...
+  grep -qx "run yamllint --all-files" "$PC_LOG"
+  grep -qx "run trailing-whitespace --all-files" "$PC_LOG"
+  # ...but the already-present gitleaks was NOT.
+  ! grep -qx "run gitleaks --all-files" "$PC_LOG"
+  echo "$output" | grep -q "safe to commit"
+}
+
+@test "scan: #410 a violation in a newly-wired hook surfaces before commit (exit 3)" {
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+YAML
+  write_rendered
+  write_fake_precommit
+  run_scan "yamllint"   # the pre-existing 133-char-line scenario from #410
+  [ "$status" -eq 3 ]
+  grep -qx "run yamllint --all-files" "$PC_LOG"
+  echo "$output" | grep -q "BEFORE committing"
+}
+
+@test "scan: #410 nothing newly wired -> no scan runs" {
+  # Every provider already present: reconcile wires nothing, so --scan is a no-op.
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: check-yaml
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+YAML
+  write_rendered
+  write_fake_precommit
+  run_scan ""
+  [ "$status" -eq 0 ]
+  [ ! -s "$PC_LOG" ]    # no pre-commit invocations at all
+}
+
+@test "scan: #410 pre-commit not installed -> scan skipped, exit stays 0" {
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+YAML
+  write_rendered
+  run env PRE_COMMIT_BIN="$BATS_TEST_TMPDIR/nonexistent-pc" zsh "$S" --scan "$CONFIG" "$RENDERED"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "skipping the proactive repo-wide"
+  # The hook was still wired despite the skipped scan.
+  [ "$(grep -c 'id: yamllint' "$CONFIG")" -eq 1 ]
+}
+
+@test "scan: #410 without --scan, no scan runs (back-compat)" {
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+YAML
+  write_rendered
+  write_fake_precommit
+  run env PRE_COMMIT_BIN="$FAKE_PC" zsh "$S" "$CONFIG" "$RENDERED"
+  [ "$status" -eq 0 ]
+  [ ! -s "$PC_LOG" ]
+}
+
+@test "scan: unknown flag -> usage error (exit 2)" {
+  write_rendered
+  run zsh "$S" --bogus "$CONFIG" "$RENDERED"
+  [ "$status" -eq 2 ]
 }
