@@ -206,6 +206,30 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index(".github/dependabot.yml")' <<<"$out")" = "null" ]
 }
 
+@test "detect-stack: #408 present check-api-stability.py is tracked at its deploy path, not flagged missing" {
+  # The script's template lives at languages/python/check-api-stability.py but
+  # deploys to .github/scripts/check-api-stability.py. A 1:1 tree->target mapping
+  # probed the bare-root path and reported a present file as a phantom gap.
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  mkdir -p .github/scripts
+  printf '# api stability wrapper\n' > .github/scripts/check-api-stability.py
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts["'".github/scripts/check-api-stability.py"'"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.existing_artifacts["check-api-stability.py"] // "absent"' <<<"$out")" = "absent" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/scripts/check-api-stability.py")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("check-api-stability.py")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #408 absent check-api-stability.py is held out (gated like api-stability.yml)" {
+  # The script + its workflow render together as one api-stability feature gated
+  # by a signal detect-stack can't observe, so an absent script is never an
+  # auto-render gap (would otherwise orphan the script without its workflow).
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index(".github/scripts/check-api-stability.py")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("check-api-stability.py")' <<<"$out")" = "null" ]
+}
+
 @test "detect-stack: #406 approver-policy candidate maps to .claude/approver-policy.md" {
   printf 'plugins { java }\n' > build.gradle.kts
   mkdir -p .claude

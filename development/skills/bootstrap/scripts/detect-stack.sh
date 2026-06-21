@@ -421,13 +421,27 @@ candidate_paths+=(".gitignore" "LICENSE")
 # shellcheck disable=SC2207
 candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 
-# The Approver policy is the one template whose tree path != render target: it
-# lives at languages/<lang>/approver-policy.md.tmpl but renders to
-# .claude/approver-policy.md (SKILL Step 3 mapping table). Rewrite the candidate
-# so existing_artifacts probes the real on-disk path, not a bare root file.
+# A few templates render to a deploy path that differs from their location in
+# the templates tree, so the 1:1 mapping above produces the wrong (bare-root)
+# candidate — and the existence probe then checks a path the file never lands at,
+# reporting a present file as a phantom gap. Rewrite each such candidate to its
+# real on-disk deploy path (SKILL Step 3 mapping table) so existing_artifacts and
+# missing_artifacts probe where the file actually is. Keep this in sync whenever a
+# template's deploy path != its tree path:
+#   approver-policy.md      languages/<lang>/      -> .claude/approver-policy.md
+#   check-api-stability.py  languages/python/      -> .github/scripts/...   (#408)
+# Indexed array of from=to pairs (not an associative array — this script runs on
+# macOS's stock bash 3.2, which has no `declare -A`).
+deploy_path_overrides=(
+	"approver-policy.md=.claude/approver-policy.md"
+	"check-api-stability.py=.github/scripts/check-api-stability.py"
+)
 for i in "${!candidate_paths[@]}"; do
-	[[ "${candidate_paths[i]}" == "approver-policy.md" ]] &&
-		candidate_paths[i]=".claude/approver-policy.md"
+	for ov in "${deploy_path_overrides[@]}"; do
+		from="${ov%%=*}"
+		to="${ov#*=}"
+		[[ "${candidate_paths[i]}" == "$from" ]] && candidate_paths[i]="$to" && break
+	done
 done
 
 # Dependency-update bot is renovate.json XOR .github/dependabot.yml — both live in
@@ -462,14 +476,18 @@ fi
 #     - the Approver pair         — gated by --claude-approver (no filesystem trace
 #                                   when opted out; rendering it without the App
 #                                   key would add a red required check)
-#     - api-stability.yml         — gated by a language plugin's api-stability spec
-#                                   (Python-only today); detect-stack can't see it
+#     - api-stability.yml +       — gated by a language plugin's api-stability spec
+#       check-api-stability.py       (Python-only today); detect-stack can't see
+#                                    it, and the workflow + its wrapper script
+#                                    render together as one feature (#408), so the
+#                                    script is held out for the same reason as the
+#                                    workflow — never one without the other.
 #   These stay installable via a full re-bootstrap with the right flags; only the
 #   unconditionally-expected gaps auto-render.
 held_out=(
 	".gitignore" "LICENSE" "$excluded_bot"
 	".github/workflows/claude-approver.yml" ".claude/approver-policy.md"
-	".github/workflows/api-stability.yml"
+	".github/workflows/api-stability.yml" ".github/scripts/check-api-stability.py"
 )
 artifacts_json="{"
 missing_json="["
