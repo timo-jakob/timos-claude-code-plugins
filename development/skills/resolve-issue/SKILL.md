@@ -172,8 +172,12 @@ else**.
 >
 > **Waiting for a merge — and one child per invocation in a human-only repo.**
 > In an **Approver** repo each bot PR auto-merges on green CI, so the sequential
-> loop proceeds on its own — poll the PR state, and when it's merged, fetch +
-> branch the next. In a **human-only** (claude-plugin) repo the PR waits for the
+> loop proceeds on its own — wait on the PR's checks with the blessed poller
+> (`development/skills/maintenance/scripts/await-pr-checks.zsh <pr>`, which exits
+> 0 on settle and nonzero only on a real timeout/error — never hand-roll a
+> `while [ … ]` poll that leaks its trailing test's exit status as a false
+> failure, #412), then when it's merged fetch + branch the next. In a
+> **human-only** (claude-plugin) repo the PR waits for the
 > human, so a sequential epic resolves **exactly one child per invocation**:
 > resolve it, open the bot PR, then **stop** — the next child can't branch off
 > the unmerged tip (it would stack and conflict on the version line). Surface the

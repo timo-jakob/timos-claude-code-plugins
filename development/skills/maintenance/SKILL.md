@@ -1077,8 +1077,19 @@ After pushing and opening the PR:
    gh pr checks "<pr_number>" --watch
    ```
 
-   (Or poll `gh pr checks --json` until no check is in `PENDING` or
-   `QUEUED` state.)
+   To poll in the background (or anywhere you'd otherwise hand-roll a wait
+   loop), use the blessed poller instead of a bare `while [ … ]; do … done` —
+   such a loop leaks its final test's nonzero status and reports a *successful*
+   settled poll as a failure (#412):
+
+   ```bash
+   "<skill-base-dir>/scripts/await-pr-checks.zsh" "<pr_number>"
+   ```
+
+   It exits 0 the moment the checks settle — printing the green/red verdict for
+   you to read — and reserves nonzero for real failures only (timeout → 3,
+   gh/auth/network → 1). Never let a poll loop's trailing `[ … ]` test be the
+   command result.
 2. **If all checks pass** → proceed to step 5 (approval gate) below.
 3. **If any check fails**, distinguish **new** from **pre-existing**
    failures before spending tokens on the CI-fix agent
