@@ -477,11 +477,16 @@ template_drift=$("<skill-base-dir>/scripts/detect-template-drift.zsh" "$(pwd)")
 It emits a JSON array of findings (possibly empty), each with a
 severity: `drifted`, `unknown_provenance`, `template_missing`, or
 `malformed_marker` (detector mechanics + severity meanings in
-`reference/gather.md` § Template-drift severities). In v1 these are
-**detect-only** — they do not enter `findings_by_tool` or route to any
+`reference/gather.md` § Template-drift severities). A `drifted` finding
+also carries `fixes` (the changelog entries newer than the rendered
+file's marker — what a re-bootstrap would deliver, #400) and `blocking`
+(true when one of those changes a required-check's behavior). In v1 these
+are **detect-only** — they do not enter `findings_by_tool` or route to any
 triage agent. Store `$template_drift` and surface it in Phase 9's
 summary; the user decides between re-bootstrap, manual patch, or
-accepting the drift.
+accepting the drift. Phase 9 renders `blocking` drift first and names the
+fixes, so "I updated the plugins but the repo behaves the same" (the fix
+lives in the rendered file, not the plugin) is no longer a silent trap.
 
 ## Phase 4 — construct one payload per supported language
 
@@ -1504,11 +1509,17 @@ run start; the 🚀 PRs section below shows what was tackled.>
 
 <If $template_drift array is non-empty:>
 🧬 Template drift (rendered config files vs current bootstrap templates):
+  <Render findings with `blocking == true` FIRST, each prefixed ⚠ — a
+   blocking drift means this repo still has the OLD behavior of a required
+   CI check (e.g. the pre-#386 blanket image scan that blocks app PRs).>
   <For each finding, one bullet:>
   - <file> — <severity>: <message>
     <if severity == "drifted">
-        marker: v<marker_version> sha256:<marker_hash[0:12]>…
-        current: v<current_version> sha256:<current_hash[0:12]>…
+        marker: v<marker_version> → current: v<current_version>
+        <if .fixes is non-empty — name what a re-bootstrap delivers:>
+        re-bootstrap would apply:
+          - #<issue>: <summary>   <append " (BLOCKING required-check change)" when that entry's blocking==true>
+        <end if>
         action: re-run /development:bootstrap to re-render, or
                 patch by hand against the upstream template.
     <if severity == "unknown_provenance">

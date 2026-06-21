@@ -66,6 +66,22 @@ emits a JSON array of findings (possibly empty), each carrying one severity:
 | `template_missing` | Marker references a template path that no longer exists upstream (renamed/deleted). |
 | `malformed_marker` | Marker present but unparseable — corrupted by hand-edit. |
 
+A `drifted` finding additionally carries (#400):
+
+- `fixes` — the entries from `reference/template-changelog.json` for this
+  template whose `version` is newer than the rendered file's marker version,
+  i.e. **what a re-bootstrap would deliver** (`{version, issue, blocking, summary}`).
+  Empty when the changelog has no newer entry (the message then falls back to the
+  generic "pick up upstream fixes").
+- `blocking` — `true` when any of those `fixes` changes a **required-check's**
+  behavior (e.g. #386's path-conditional image scan). Phase 9 renders blocking
+  drift first, so a fix that lives in the rendered file rather than the plugin
+  isn't a silent "I updated the plugins but nothing changed" trap.
+
+To surface a new template change here, add an entry to
+`reference/template-changelog.json` keyed by the template path (omit cosmetic
+changes).
+
 In v1 these findings are **detect-only**: they do not enter `findings_by_tool`
 and are not routed to any per-tool triage agent. The orchestrator surfaces them
 in Phase 9's summary and lets the user decide between re-bootstrap, manual

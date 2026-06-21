@@ -1,0 +1,27 @@
+{
+  "_comment": "Notable, user-relevant changes to bootstrap templates, so the template-drift detector can name WHAT a re-bootstrap would deliver (#400) instead of only saying a file drifted. Keyed by template path exactly as the rendered file's `# claude-bootstrap: rendered from <path>` marker records it (relative to skills/bootstrap/templates/). Each entry: `version` = the development plugin version the change shipped in; `issue` = the GitHub issue; `blocking` = true when it changes required-check / merge-gating behavior (the detector escalates these); `summary` = one line a human can act on. Add an entry whenever a template change is worth surfacing on drift; omit cosmetic ones. The detector lists entries whose version is newer than the rendered file's marker version.",
+  "public/.github/workflows/quality-public.yml.tmpl": [
+    {
+      "version": "1.49.2",
+      "issue": 386,
+      "blocking": true,
+      "summary": "image scan is now path-conditional — it gates only PRs that touch container files (Dockerfile/.dockerignore/compose/.snyk), so app & dependency PRs are no longer blocked by pre-existing base-image CVEs they can't influence"
+    }
+  ],
+  "private/.github/workflows/quality-private.yml.tmpl": [
+    {
+      "version": "1.49.2",
+      "issue": 386,
+      "blocking": true,
+      "summary": "image scan is now path-conditional — it gates only PRs that touch container files (Dockerfile/.dockerignore/compose/trivy.yaml), so app & dependency PRs are no longer blocked by pre-existing base-image CVEs they can't influence"
+    }
+  ],
+  "common/.github/workflows/claude-approver.yml.tmpl": [
+    {
+      "version": "1.49.1",
+      "issue": 387,
+      "blocking": false,
+      "summary": "the approver gate excludes advisory Snyk statuses (code/snyk, security/snyk) from its green check, so a free-tier Snyk quota error can no longer silently skip the Approver"
+    }
+  ]
+}

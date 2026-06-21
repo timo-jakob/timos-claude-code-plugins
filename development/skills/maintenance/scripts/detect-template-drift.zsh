@@ -20,6 +20,15 @@
 
 set -euo pipefail
 
+# Return 0 iff semver $1 is strictly greater than $2 (used to pick changelog
+# entries newer than a rendered file's marker version).
+vgt() {
+  [[ "$1" == "$2" ]] && return 1
+  local top
+  top=$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)
+  [[ "$top" == "$1" ]]
+}
+
 if (( $# != 1 )); then
   print -u2 "detect-template-drift.zsh: expected exactly one argument (repo path)"
   exit 2
@@ -38,6 +47,10 @@ plugin_dir="${skills_dir:h}"
 
 plugin_json="${plugin_dir}/.claude-plugin/plugin.json"
 templates_root="${plugin_dir}/skills/bootstrap/templates"
+
+# Curated map of notable template changes, so a drifted file can NAME the fixes a
+# re-bootstrap would deliver (#400). Overridable for tests via TEMPLATE_CHANGELOG.
+changelog="${TEMPLATE_CHANGELOG:-${skill_dir}/reference/template-changelog.json}"
 
 current_plugin_version=$(jq -r '.version' < "$plugin_json")
 
@@ -112,6 +125,33 @@ for target_rel in "${tracked[@]}"; do
     continue
   fi
 
+  # Name the fixes a re-bootstrap would deliver (#400): collect changelog
+  # entries for this template whose version is newer than the marker's.
+  fixes_json='[]'
+  blocking="false"
+  if [[ -f "$changelog" ]]; then
+    typeset -a kept=()
+    while IFS= read -r entry; do
+      [[ -n "$entry" ]] || continue
+      entry_version=$(printf '%s' "$entry" | jq -r '.version')
+      if vgt "$entry_version" "$marker_version"; then
+        kept+=( "$entry" )
+      fi
+    done < <(jq -c --arg t "$template_relpath" '(.[$t] // [])[]' "$changelog" 2>/dev/null)
+    if (( ${#kept[@]} > 0 )); then
+      fixes_json=$(printf '%s\n' "${kept[@]}" | jq -s 'sort_by(.version)')
+      blocking=$(printf '%s' "$fixes_json" | jq 'any(.[]; .blocking == true)')
+    fi
+  fi
+
+  if [[ "$fixes_json" != "[]" ]]; then
+    fix_list=$(printf '%s' "$fixes_json" | jq -r 'map("#\(.issue) (\(.summary))") | join("; ")')
+    message="Rendered from ${template_relpath} at development v${marker_version}; current is v${current_plugin_version}. Re-running /development:bootstrap would apply: ${fix_list}."
+    [[ "$blocking" == "true" ]] && message="BLOCKING — ${message} One of these changes the behavior of a REQUIRED CI check; until you re-bootstrap, this repo keeps the old behavior."
+  else
+    message="Rendered from ${template_relpath} at development v${marker_version}; current development is v${current_plugin_version} and the template has changed (sha256 ${marker_hash} → ${current_hash}). Re-run /development:bootstrap to pick up upstream fixes."
+  fi
+
   findings+=( "$(jq -nc \
     --arg file "$target_rel" \
     --arg template "$template_relpath" \
@@ -120,8 +160,10 @@ for target_rel in "${tracked[@]}"; do
     --arg marker_hash "$marker_hash" \
     --arg current_hash "$current_hash" \
     --arg severity "drifted" \
-    --arg message "Rendered from ${template_relpath} at development v${marker_version}; current development is v${current_plugin_version} and the template has changed (sha256 ${marker_hash} → ${current_hash}). Re-bootstrap or patch to pick up upstream fixes." \
-    '{_tool: "template_drift", file: $file, template_path: $template, marker_version: $marker_version, current_version: $current_version, marker_hash: $marker_hash, current_hash: $current_hash, severity: $severity, message: $message}')" )
+    --argjson fixes "$fixes_json" \
+    --argjson blocking "$blocking" \
+    --arg message "$message" \
+    '{_tool: "template_drift", file: $file, template_path: $template, marker_version: $marker_version, current_version: $current_version, marker_hash: $marker_hash, current_hash: $current_hash, severity: $severity, blocking: $blocking, fixes: $fixes, message: $message}')" )
 done
 
 # Emit as a JSON array. Empty array if no findings.
