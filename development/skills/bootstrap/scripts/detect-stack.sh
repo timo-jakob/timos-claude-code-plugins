@@ -11,7 +11,16 @@
 #   languages             []string  subset of [swift, typescript, python, go, java]
 #   has_dockerfile        bool
 #   language_meta         object   per-language detection metadata — see shape below
+#   is_claude_plugin      bool     repo carries a .claude-plugin marker (selects the
+#                                  Renovate dependency-bot path over Dependabot)
 #   existing_artifacts    object   path -> true for files we would otherwise generate
+#   missing_artifacts     []string templates expected under THIS repo's conditions
+#                                  (visibility/languages/bot path) that are absent —
+#                                  the State D auto-render gap-fill signal. Carries
+#                                  only confidently-expected gaps; holds out non-1:1
+#                                  candidates (.gitignore, LICENSE), the non-selected
+#                                  bot file, and flag/spec-gated files (Approver
+#                                  pair, api-stability.yml) — see the held_out note.
 #   github_state          object   GitHub-side state — see github_state shape below
 #
 # language_meta shape (added 2026-06-17 per issue #305 — nests what used to be
@@ -372,7 +381,7 @@ collect_from() {
 	local dir="$1"
 	[[ -d "$dir" ]] || return 0
 	while IFS= read -r tmpl_path; do
-		rel="${tmpl_path#$dir/}"                # strip prefix
+		rel="${tmpl_path#"$dir"/}"              # strip prefix
 		rel="${rel%.tmpl}"                      # strip .tmpl suffix if present
 		[[ "$rel" == "gitignore" ]] && continue # fragment, not a target file
 		candidate_paths+=("$rel")
@@ -381,8 +390,16 @@ collect_from() {
 
 candidate_paths=()
 collect_from "$templates_dir/common"
-collect_from "$templates_dir/public"
-collect_from "$templates_dir/private"
+# Scope by visibility: a public repo never expects private-path files and vice
+# versa. Over-collecting both was harmless for the present-only existing_artifacts
+# map (an absent out-of-scope file just didn't appear), but missing_artifacts must
+# not flag out-of-scope files as gaps. When visibility is still unknown (no remote
+# yet), the scope can't be determined, so collect neither — missing_artifacts then
+# carries only scope-free candidates until the path is locked in.
+case "$visibility" in
+public) collect_from "$templates_dir/public" ;;
+private) collect_from "$templates_dir/private" ;;
+esac
 
 # Language-specific fragments (only for detected languages).
 # `${langs[@]+...}` guards against the array being empty under `set -u`.
@@ -404,15 +421,75 @@ candidate_paths+=(".gitignore" "LICENSE")
 # shellcheck disable=SC2207
 candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 
+# The Approver policy is the one template whose tree path != render target: it
+# lives at languages/<lang>/approver-policy.md.tmpl but renders to
+# .claude/approver-policy.md (SKILL Step 3 mapping table). Rewrite the candidate
+# so existing_artifacts probes the real on-disk path, not a bare root file.
+for i in "${!candidate_paths[@]}"; do
+	[[ "${candidate_paths[i]}" == "approver-policy.md" ]] &&
+		candidate_paths[i]=".claude/approver-policy.md"
+done
+
+# Dependency-update bot is renovate.json XOR .github/dependabot.yml — both live in
+# templates/common, so collect_from picks up both, but exactly one is ever
+# rendered. A claude-plugin repo (or a repo already carrying renovate.json) is the
+# Renovate path; everything else is the Dependabot default. Resolve which file is
+# the real gap so auto-render never installs the wrong (or a dueling second) bot.
+is_claude_plugin="false"
+if [[ -e "$cwd/.claude-plugin/marketplace.json" ]] ||
+	[[ -n "$(find "$cwd" -path '*/.claude-plugin/plugin.json' -not -path '*/.git/*' 2>/dev/null | head -n1)" ]]; then
+	is_claude_plugin="true"
+fi
+renovate_present="false"
+[[ -e "$cwd/renovate.json" || -e "$cwd/.github/renovate.json" ]] && renovate_present="true"
+# Renovate path when the repo is a plugin repo OR already on Renovate.
+if [[ "$is_claude_plugin" == "true" || "$renovate_present" == "true" ]]; then
+	excluded_bot=".github/dependabot.yml"
+else
+	excluded_bot="renovate.json"
+fi
+
+# existing_artifacts: present-only map (path -> true) — unchanged.
+# missing_artifacts: candidates that detect-stack can say WITH CONFIDENCE are an
+#   expected-but-absent gap, given only what it reliably sees (visibility,
+#   languages, bot path). It is the deterministic auto-render signal for State D,
+#   so it must never include a file whose render is gated by a signal detect-stack
+#   can't observe — otherwise gap-fill installs something a fresh bootstrap would
+#   not have. Held-out candidates (tracked in existing_artifacts when PRESENT, but
+#   never reported as a gap when absent):
+#     - .gitignore / LICENSE     — not 1:1 templates (merged / user-chosen)
+#     - the non-selected bot file — renovate.json XOR dependabot.yml
+#     - the Approver pair         — gated by --claude-approver (no filesystem trace
+#                                   when opted out; rendering it without the App
+#                                   key would add a red required check)
+#     - api-stability.yml         — gated by a language plugin's api-stability spec
+#                                   (Python-only today); detect-stack can't see it
+#   These stay installable via a full re-bootstrap with the right flags; only the
+#   unconditionally-expected gaps auto-render.
+held_out=(
+	".gitignore" "LICENSE" "$excluded_bot"
+	".github/workflows/claude-approver.yml" ".claude/approver-policy.md"
+	".github/workflows/api-stability.yml"
+)
 artifacts_json="{"
+missing_json="["
 first=1
+mfirst=1
 for p in "${candidate_paths[@]}"; do
 	if [[ -e "$cwd/$p" ]]; then
 		[[ $first -eq 1 ]] && first=0 || artifacts_json+=","
 		artifacts_json+="$(json_str "$p"):true"
+		continue
 	fi
+	# Absent — flag as a gap only if it is not a held-out candidate.
+	skip=""
+	for h in "${held_out[@]}"; do [[ "$p" == "$h" ]] && skip="1" && break; done
+	[[ -n "$skip" ]] && continue
+	[[ $mfirst -eq 1 ]] && mfirst=0 || missing_json+=","
+	missing_json+="$(json_str "$p")"
 done
 artifacts_json+="}"
+missing_json+="]"
 
 # --- github-side state (issue #90) -------------------------------------------
 # Probe GitHub for state the bootstrap installs in Step 4 (branch protection,
@@ -522,7 +599,9 @@ cat <<EOF
   "languages": $languages_json,
   "has_dockerfile": $(json_bool "$has_dockerfile"),
   "language_meta": $language_meta_json,
+  "is_claude_plugin": $(json_bool "$is_claude_plugin"),
   "existing_artifacts": $artifacts_json,
+  "missing_artifacts": $missing_json,
   "github_state": $github_state
 }
 EOF
