@@ -264,6 +264,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           REPO: ${{ github.repository }}
+          # The required status-check contexts branch protection enforces
+          # (#411) — rendered by the bootstrap to match the `checks=(...)` set
+          # in scripts/branch-protection.sh. The wait loop below blocks until
+          # every one of these has *registered and settled*, so the gate can
+          # never judge a half-built check set. Without it, a run that fires
+          # before the long-pole jobs (test-and-coverage, sonarcloud) have even
+          # created their check runs sees zero-pending and evaluates against
+          # nothing. An empty array `[]` degrades safely to the pre-#411
+          # behaviour (wait only for whatever has already registered).
+          EXPECTED_CHECKS: '{{APPROVER_REQUIRED_CHECKS}}'
         run: |
           set -e
           # `-R "$REPO"` is needed because no checkout has run yet — see #203.
@@ -286,30 +296,56 @@ jobs:
                          | select(.name != "approve" and .name != "approver-gate")
                          | {name: .name, status: .status, conclusion: .conclusion}' \
                    | jq -s .)
-            # Legacy commit-status API (third-party check posters). The
-            # combined state reads 'pending' when zero statuses exist, so
-            # only treat it as in-flight when there are actual statuses.
-            status=$(gh api "repos/$REPO/commits/$head_sha/status" \
-                     --jq '{state: .state, total: .total_count}')
-            status_state=$(printf '%s' "$status" | jq -r .state)
-            status_total=$(printf '%s' "$status" | jq -r .total)
+            # Legacy commit-status API (third-party check posters). Fetched in
+            # full once per poll and reused below for both the in-flight test
+            # and the expected-set test (#411). The combined state reads
+            # 'pending' when zero statuses exist, so only treat it as in-flight
+            # when there are actual statuses.
+            status_full=$(gh api "repos/$REPO/commits/$head_sha/status")
+            status_state=$(printf '%s' "$status_full" | jq -r .state)
+            status_total=$(printf '%s' "$status_full" | jq -r .total_count)
 
             pending=$(printf '%s' "$runs" | jq 'map(select(.status != "completed")) | length')
-            if [ "$pending" -eq 0 ] && { [ "$status_total" -eq 0 ] || [ "$status_state" != "pending" ]; }; then
+
+            # #411: never judge a partial check set. `pending` only counts
+            # checks that have ALREADY registered — a long-pole job whose check
+            # run doesn't exist yet reads as zero-pending, which is what let an
+            # early run break out and post a verdict before test-and-coverage /
+            # sonarcloud even started. So additionally require every EXPECTED
+            # context (the branch-protection required set) to have registered
+            # and reached a terminal state. Match expected names against both
+            # check-run names and legacy commit-status contexts, since branch
+            # protection gates on either. Empty EXPECTED_CHECKS → no expected
+            # gate (pre-#411 behaviour).
+            settled_names=$(jq -n \
+              --argjson runs "$runs" \
+              --argjson status "$status_full" \
+              '[ $runs[] | select(.status == "completed") | .name ]
+               + [ $status.statuses[] | select(.state != "pending") | .context ]
+               | unique')
+            missing=$(jq -n --argjson exp "$EXPECTED_CHECKS" --argjson settled "$settled_names" \
+                      '$exp - $settled')
+            missing_n=$(printf '%s' "$missing" | jq 'length')
+
+            if [ "$missing_n" -eq 0 ] && [ "$pending" -eq 0 ] \
+               && { [ "$status_total" -eq 0 ] || [ "$status_state" != "pending" ]; }; then
               break
             fi
 
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::notice::Still waiting on $pending check(s) (combined status: $status_state)" \
-                "after 30 minutes — giving up; the next trigger re-evaluates."
+              echo "::notice::Still waiting after 30 minutes — giving up; the" \
+                "next trigger re-evaluates. pending=$pending, combined" \
+                "status=$status_state, expected checks not yet settled:" \
+                "$(printf '%s' "$missing" | jq -c .)"
               exit 0
             fi
 
             # If a push lands while we wait, the `synchronize` trigger
             # cancels this run via the concurrency group — no need to
             # re-resolve the head SHA inside the loop.
-            echo "Waiting: $pending check(s) in progress, combined status '$status_state'" \
-              "($status_total status(es)) on $head_sha."
+            echo "Waiting: $pending check(s) in progress, combined status" \
+              "'$status_state' ($status_total status(es)), $missing_n expected" \
+              "check(s) not yet settled on $head_sha."
             sleep 30
           done
 
@@ -339,7 +375,8 @@ jobs:
           # Required legacy statuses (e.g. `sonarcloud`) are NOT excluded and
           # still gate as before.
           if [ "$status_total" -gt 0 ]; then
-            status_full=$(gh api "repos/$REPO/commits/$head_sha/status")
+            # Reuse the combined-status payload from the final wait iteration
+            # (all statuses are settled by the time we break out, #411).
             advisory='select(.context != "code/snyk" and (.context | startswith("security/snyk") | not))'
             bad_status=$(printf '%s' "$status_full" \
                          | jq "[.statuses[] | $advisory | select(.state != \"success\")] | length")

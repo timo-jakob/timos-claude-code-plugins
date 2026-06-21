@@ -815,7 +815,7 @@ selects the policy template:
 
 | Template | Target path in repo | Placeholders to substitute |
 | --- | --- | --- |
-| `templates/common/.github/workflows/claude-approver.yml.tmpl` | `.github/workflows/claude-approver.yml` | `{{CLAUDE_PLUGINS_REPO}}`, `{{CLAUDE_PLUGINS_REF}}`, `{{APPROVER_LANG}}` |
+| `templates/common/.github/workflows/claude-approver.yml.tmpl` | `.github/workflows/claude-approver.yml` | `{{CLAUDE_PLUGINS_REPO}}`, `{{CLAUDE_PLUGINS_REF}}`, `{{APPROVER_LANG}}`, `{{APPROVER_REQUIRED_CHECKS}}` |
 | `templates/languages/{{APPROVER_LANG}}/approver-policy.md.tmpl` | `.claude/approver-policy.md` | (none) |
 
 Default substitutions:
@@ -838,6 +838,26 @@ Default substitutions:
   regenerates the workflow as a normal PR. Once the plugin family ships
   versioned releases, this substitution moves to the latest release tag.
   See #199.
+- `{{APPROVER_REQUIRED_CHECKS}}` → a **compact one-line JSON array** of the
+  exact required status-check contexts this repo's branch protection enforces
+  — i.e. the same list `scripts/branch-protection.sh` builds in its
+  `checks=(...)` block, computed from the **same** `--visibility` /
+  `--has-dockerfile` / `--has-codeql` / `--codeql-languages` inputs you pass it
+  in Step 4b. The Approver gate waits until every one of these contexts has
+  registered **and** settled before it judges the PR green (#411), so the list
+  must match branch protection exactly:
+  - **public**: `["test-and-coverage","semgrep","pre-commit","sonarcloud","license-fs"]`,
+    plus `"image"` when a Dockerfile is present, plus one `"analyze (<lang>)"`
+    entry per CodeQL language (e.g. `"analyze (python)"`).
+  - **private**: `["test-and-coverage","semgrep","pre-commit","sonarqube","trivy-fs","license-fs"]`,
+    plus `"image"` when a Dockerfile is present.
+
+  Get the contexts right or the gate misbehaves: a context listed here that
+  never appears stalls the gate until its 30-minute deadline (then it gives up
+  with no verdict); a required context omitted here lets the gate evaluate
+  before that check has run. Render `[]` only if branch protection enforces no
+  status checks at all (it degrades to the pre-#411 "wait for whatever
+  registered" behaviour).
 
 The workflow file applies the standard idempotency rules below. The
 policy file (`.claude/approver-policy.md`) is the source of truth for
