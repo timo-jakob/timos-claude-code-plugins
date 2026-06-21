@@ -605,6 +605,10 @@ Copy from `templates/common/`:
   marker (Step 3.6) so it is itself drift-tracked.)
 - `.gitleaks.toml` (static copy — gitleaks config used by **both** the pre-commit hook and the CI workflow; allowlists
   documented false positives like `curl -u "$VAR"` examples in `SETUP.md`).
+- `scripts/update-claude-plugins.zsh` (static copy from `common/scripts/`, `chmod +x`). A one-command helper that
+  refreshes the `timos-claude-code-plugins` marketplace and updates its installed plugins to the latest version
+  **without changing which plugins are enabled/disabled** (#404). Run it before a `/development:maintenance` run to be
+  sure you're on the latest maintenance behavior + templates. Static (no substitution); not drift-tracked.
 - `.github/ISSUE_TEMPLATE/bug.yml`
 - `.github/ISSUE_TEMPLATE/feature.yml`
 - `.github/PULL_REQUEST_TEMPLATE.md`
