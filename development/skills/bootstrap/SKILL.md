@@ -598,6 +598,11 @@ Copy from `templates/common/`:
 - `.github/workflows/gitleaks.yml` (static copy — secret-scanning CI for **every** repo; defense in depth behind the
   gitleaks pre-commit hook. Note: repos owned by a GitHub Organization need a `GITLEAKS_LICENSE` repo secret — see the
   workflow comment.)
+- `.github/workflows/template-drift-watch.yml` (render `common/.github/workflows/template-drift-watch.yml.tmpl` —
+  substitute `{{CLAUDE_PLUGINS_REPO}}`). Scheduled (monthly) watcher for **every** repo: checks this repo's rendered
+  files against the latest plugin templates and opens a tracking issue naming the fixes a re-bootstrap would deliver
+  (#402). Unlike the approver, it tracks the moving `main` tip — drift means "newer templates exist". Stamp a provenance
+  marker (Step 3.6) so it is itself drift-tracked.)
 - `.gitleaks.toml` (static copy — gitleaks config used by **both** the pre-commit hook and the CI workflow; allowlists
   documented false positives like `curl -u "$VAR"` examples in `SETUP.md`).
 - `.github/ISSUE_TEMPLATE/bug.yml`
@@ -931,6 +936,7 @@ actually rendered in 3a–3f):
 | `.github/workflows/quality-private-noop.yml` | `private/.github/workflows/quality-private-noop.yml.tmpl` |
 | `.github/workflows/scorecard.yml` | `public/.github/workflows/scorecard.yml.tmpl` |
 | `.github/workflows/release.yml` | `languages/java/.github/workflows/release.yml.tmpl` (only when `java` is detected) |
+| `.github/workflows/template-drift-watch.yml` | `common/.github/workflows/template-drift-watch.yml.tmpl` |
 | `trivy.yaml` | `common/trivy.yaml.tmpl` |
 
 The `*-noop.yml` companions and `release.yml` are tracked, rendered files just
