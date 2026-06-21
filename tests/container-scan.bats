@@ -46,3 +46,34 @@ emit() { "$GATHER" --from-file "$FIX/$1" 2>/dev/null; }
   run "$GATHER" --from-file
   [ "$status" -eq 2 ]
 }
+
+# --- reliability note (#388): the count is point-in-time; a 0 is a false-zero
+#     risk, not a clean bill. Exercised through the --reliability-note seam.
+
+@test "reliability note: count 0 is framed as 'not a live scan', not clean" {
+  run "$GATHER" --reliability-note 0 "2020-01-01T00:00:00Z" main
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NOT a live scan"* ]]
+  [[ "$output" == *"not a clean image"* ]]
+  [[ "$output" == *"#388"* ]]
+}
+
+@test "reliability note: a stale (>7d) scan escalates with a refresh hint" {
+  run "$GATHER" --reliability-note 0 "2020-01-01T00:00:00Z" main
+  [[ "$output" == *"push to main to refresh"* ]]
+}
+
+@test "reliability note: count >0 reports the count + point-in-time caveat" {
+  run "$GATHER" --reliability-note 3 "2020-01-01T00:00:00Z" main
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ingested 3 unique CVE(s)"* ]]
+  [[ "$output" == *"Point-in-time"* ]]
+}
+
+@test "reliability note: a fresh scan carries the caveat but no refresh hint" {
+  fresh="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"))')"
+  run "$GATHER" --reliability-note 2 "$fresh" main
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Point-in-time"* ]]
+  [[ "$output" != *"refresh before relying"* ]]
+}
