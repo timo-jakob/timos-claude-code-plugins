@@ -1,0 +1,106 @@
+# Scheduled template-drift watcher (#402).
+#
+# This repo's CI/config files were rendered by /development:bootstrap and carry a
+# `# claude-bootstrap: rendered from … sha256:<H>` provenance marker. When the
+# upstream templates move on (a fix lands in the plugin family), the rendered
+# files DON'T change automatically — updating the plugins doesn't update an
+# already-bootstrapped repo. This job notices that gap and opens a tracking issue
+# naming the fixes a re-bootstrap would deliver (e.g. #386's path-conditional
+# image scan), so the fix doesn't sit silently undelivered.
+#
+# It reuses the maintenance pipeline's own drift detector — it checks out the
+# plugin family at the MOVING `main` tip (not the pinned ref the approver uses:
+# we WANT to know when newer templates exist) and runs detect-template-drift.zsh
+# against this repo. Modeled on the ruff-py314 watcher: the diff IS the trigger,
+# the issue is idempotent, and it closes itself when the drift clears.
+#
+# Forks of the plugin family: edit `repository:` / `ref:` below to point at your
+# fork and the branch you track.
+
+name: template-drift-watch
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of every month (matches the other watchers).
+    - cron: "0 6 1 * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  PLUGINS_DIR: .drift-plugins
+  ISSUE_TITLE: "🧬 Template drift — re-bootstrap to apply upstream fixes"
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v6
+
+      - name: Check out the plugin family (latest templates)
+        uses: actions/checkout@v6
+        with:
+          repository: "{{CLAUDE_PLUGINS_REPO}}"
+          # Moving tip on purpose — drift = "newer templates exist than what
+          # this repo rendered". The approver pins a SHA for reproducibility;
+          # the watcher must NOT, or it could never detect drift.
+          ref: main
+          path: .drift-plugins
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install zsh (the detector + formatter are zsh)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Detect template drift
+        id: drift
+        run: |
+          set -euo pipefail
+          detector="${PLUGINS_DIR}/development/skills/maintenance/scripts/detect-template-drift.zsh"
+          json=$(zsh "$detector" "$GITHUB_WORKSPACE")
+          printf '%s' "$json" > "$RUNNER_TEMP/drift.json"
+          count=$(printf '%s' "$json" | jq 'length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Drift findings: $count"
+
+      - name: Open or update the drift issue
+        if: steps.drift.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          formatter="${PLUGINS_DIR}/development/skills/maintenance/scripts/format-drift-issue.zsh"
+          zsh "$formatter" --from-file "$RUNNER_TEMP/drift.json" > "$RUNNER_TEMP/body.md"
+          gh label create template-drift --color fbca04 \
+            --description "Bootstrap templates drifted — re-bootstrap to apply upstream fixes" \
+            2>/dev/null || true
+          existing=$(gh issue list --state open --label template-drift \
+            --search "in:title $ISSUE_TITLE" --json number,title \
+            --jq "[.[] | select(.title == env.ISSUE_TITLE)] | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file "$RUNNER_TEMP/body.md"
+            echo "Updated tracking issue #$existing."
+          else
+            gh issue create --title "$ISSUE_TITLE" --label template-drift \
+              --body-file "$RUNNER_TEMP/body.md"
+            echo "Opened tracking issue."
+          fi
+
+      - name: Close the drift issue when the drift clears
+        if: steps.drift.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --state open --label template-drift \
+            --search "in:title $ISSUE_TITLE" --json number,title \
+            --jq "[.[] | select(.title == env.ISSUE_TITLE)] | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" \
+              --comment "Template drift cleared — rendered files match the current templates. Closing automatically."
+            echo "Closed tracking issue #$existing."
+          else
+            echo "No drift and no open issue — nothing to do."
+          fi

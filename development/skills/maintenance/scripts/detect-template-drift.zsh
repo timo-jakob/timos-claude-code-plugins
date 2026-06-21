@@ -68,6 +68,7 @@ typeset -a tracked=(
   ".github/workflows/quality-private-noop.yml"
   ".github/workflows/scorecard.yml"
   ".github/workflows/release.yml"
+  ".github/workflows/template-drift-watch.yml"
   ".github/dependabot.yml"
   "trivy.yaml"
 )
