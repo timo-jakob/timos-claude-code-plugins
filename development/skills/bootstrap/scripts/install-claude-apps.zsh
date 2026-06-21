@@ -418,6 +418,31 @@ cmd_verify() {
       warn "  must be PKCS#8 for create-github-app-token@v3 ('Invalid keyData')."
     fi
 
+    # 3b. Approver push access (#418). GitHub tallies an APPROVE toward a
+    #     branch's required_approving_review_count ONLY when the reviewer can
+    #     push to the repo — and "push access" is the Contents permission, not
+    #     Pull requests. A claude-approver still on the old Contents:read grant
+    #     posts reviews that never satisfy the gate (authorCanPushToRepository=
+    #     false), so green PRs stay reviewDecision=REVIEW_REQUIRED / BLOCKED.
+    #     Probe GET /app (the JWT already authenticated above) and flag a stale
+    #     grant — a permission INCREASE needs the user to re-accept the install,
+    #     so re-registering alone doesn't fix an existing installation.
+    if [[ "$app" == claude-approver ]]; then
+      app_meta=$(app_probe_with_pem "$(app_id_for "$app")" "$pem" 2>/dev/null) || app_meta=""
+      contents_perm=$(print -r -- "$app_meta" | jq -r '.permissions.contents // "none"' 2>/dev/null)
+      if [[ "$contents_perm" == "write" ]]; then
+        ok "$display: Contents:write present — its approvals count toward branch protection."
+      else
+        err "$display: Contents permission is '$contents_perm', must be 'write' (#418)."
+        err "  Without it the App's approvals don't count toward branch protection,"
+        err "  so green + Approver-approved PRs stay BLOCKED and never auto-merge."
+        err "  Fix: App settings → Permissions → Contents: Read & write → Save, then"
+        err "  github.com/settings/installations → $display → Configure → accept the"
+        err "  permission update (re-registering only affects brand-new installs)."
+        (( problems++ )) || true
+      fi
+    fi
+
     # 4. Repo secret present?
     secret_name="CLAUDE_$(print -- "${app#claude-}" | tr '[:lower:]-' '[:upper:]_')_PRIVATE_KEY"
     if (( secrets_listed )) && ! print -r -- "$secret_names" | grep -qx "$secret_name"; then
