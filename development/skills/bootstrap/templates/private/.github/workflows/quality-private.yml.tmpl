@@ -223,8 +223,17 @@ jobs:
   # --- DOCKER-START ---------------------------------------------------------
   # Container image pipeline.
   #
-  # PRs                     → build linux/amd64 only, scan, no push (fast)
+  # PR touching container files → build linux/amd64 only, scan, no push (gate)
+  # PR NOT touching container files → no scan; the required `image` check
+  #                           passes through (#386 — app/dependency PRs must not
+  #                           be blocked by pre-existing base-image CVEs they
+  #                           can't influence; "working on the app → app checks,
+  #                           working on the image → container checks").
   # push to main / release  → build linux/amd64 + linux/arm64, scan, push to GHCR
+  #
+  # `image` stays a single required branch-protection context that ALWAYS
+  # resolves: the job runs on every non-doc PR, but the build+scan steps are
+  # gated on `scan_decision` so a non-container PR ends green without scanning.
   #
   # Multi-arch via QEMU on the self-hosted runner. If your runner is an
   # Apple Silicon Mac, the linux/arm64 build is native (fast) and linux/amd64
@@ -237,6 +246,41 @@ jobs:
       id-token: write    # cosign keyless OIDC signing
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history so the container-change detection below can diff the
+          # PR against its base SHA.
+          fetch-depth: 0
+
+      # Decide whether the container scan should gate this run (#386). Gates
+      # ONLY when the change touches the container definition; an app/dependency
+      # PR that doesn't can't affect base-image CVEs, so it skips the scan and
+      # the required `image` check passes. Non-PR events always scan. Fails SAFE
+      # to scanning on any diff error.
+      - name: Decide whether to scan the image
+        id: scan_decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "do_scan=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event ($EVENT_NAME) — scanning the image."
+            exit 0
+          fi
+          container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$|(^|/)trivy\.ya?ml$'
+          if ! changed=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null); then
+            echo "do_scan=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not compute the PR diff against $BASE_SHA — scanning to be safe."
+            exit 0
+          fi
+          if printf '%s\n' "$changed" | grep -qE "$container_re"; then
+            echo "do_scan=true" >> "$GITHUB_OUTPUT"
+            echo "Container-relevant files changed — running the image scan gate:"
+            printf '%s\n' "$changed" | grep -E "$container_re" || true
+          else
+            echo "do_scan=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No container files changed; skipping image scan (#386). Required 'image' check passes."
+          fi
 
       - name: Set up QEMU (for foreign-arch emulation)
         uses: docker/setup-qemu-action@v4
@@ -260,6 +304,7 @@ jobs:
       # Single-arch build for scanning. Loading multi-arch images into the
       # local docker daemon isn't supported.
       - name: Build image (amd64 only, for scanning)
+        if: steps.scan_decision.outputs.do_scan == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -275,11 +320,13 @@ jobs:
 
       - name: Pick a tag for scanning
         id: pick
+        if: steps.scan_decision.outputs.do_scan == 'true'
         run: |
           tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Trivy image vulnerability scan
+        if: steps.scan_decision.outputs.do_scan == 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "image"
