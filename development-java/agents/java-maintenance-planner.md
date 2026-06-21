@@ -116,6 +116,7 @@ Order groups by descending priority. Ties broken by:
 | `openapi` | `java-openapi-advisor` | `true` |
 | `dependabot` / `snyk_prs` / `renovate` — gradle/github-actions patch+minor | `java-dependabot-snyk-triage` | `false` |
 | `dependabot` / `snyk_prs` / `renovate` — gradle major (incl. 0.x major-equiv) | `java-major-upgrade` (one PR per bump) | `true` |
+| `dependabot` / `renovate` — docker, **same-tag digest-only refresh** (image `name:tag` unchanged, only `@sha256:` differs) | `java-dependabot-snyk-triage` (**auto-merge-if-green**) | `false` |
 | `dependabot` / `renovate` — docker, **JDK base image** (eclipse-temurin / amazoncorretto / openjdk / …) | `java-runtime-upgrade` (one PR per bump) | `true` |
 | `dependabot` / `snyk_prs` / `renovate` — docker (non-JDK), github-actions major, unknown | `java-dependabot-snyk-triage` (human-review) | `false` |
 
@@ -183,10 +184,23 @@ These three tools carry raw GitHub PR records (`number`, `title`, `body`,
       and routes it. If `development-spring` isn't installed, the PR is
       simply skipped here — surface it in the run summary as
       human-review rather than mis-upgrading it generically.
+  - `docker` **same-tag digest-only refresh** (image `name:tag` unchanged,
+    only the `@sha256:` digest differs, e.g.
+    `eclipse-temurin:21-jre@sha256:AAA… → …@sha256:BBB…`) →
+    `auto-merge-if-green` in the `java-dependabot-snyk-triage` group, with
+    `routing_reason: "docker-digest-refresh — agent must verify the tag is
+    unchanged before merging"`. **This takes precedence over the JDK-base-image
+    rule below** (a digest refresh of a JDK image is NOT a runtime migration —
+    the JDK version is unchanged). It is the same security re-publish that
+    Docker Hub ships for any base image, and it's safe to auto-merge because
+    the PR touches the Dockerfile so the path-conditional `image` scan (#386)
+    validates the new digest before merge. It is also the **keystone** that can
+    unblock container-gated PRs, so the triage agent processes it first.
+    Detection: the from/to image references share an identical `name:tag`.
   - `docker` whose image is a **JDK base image** (`headRefName`/title/body
     matches `eclipse-temurin|amazoncorretto|openjdk|ibm-semeru|bellsoft`
-    with a major version) → its **own** `java-runtime-upgrade` group (one
-    PR per bump). This is a JDK runtime migration, not a generic image
+    with a changed major version) → its **own** `java-runtime-upgrade` group
+    (one PR per bump). This is a JDK runtime migration, not a generic image
     bump — different consequences (class-file version, removed APIs, a
     newer Gradle). Extract `from_version` / `to_version` (the JDK majors,
     e.g. `21` → `25`) and `from_image` / `to_image` from the PR title/body

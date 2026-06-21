@@ -1,7 +1,7 @@
 {
   "name": "development-python",
   "description": "Python development plugin — maintenance skill that dispatches per-tool agents (ruff, semgrep, Snyk, SonarCloud) in parallel worktrees to triage or fix findings produced by the toolchain installed by /development:bootstrap. Pure function of its JSON input per ARCHITECTURE.md.",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "author": {
     "name": "Timo Jakob"
   },

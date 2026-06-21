@@ -480,7 +480,8 @@ have access to it.
 The per-finding → per-agent routing logic — Snyk patch/minor vs major,
 Dependabot ecosystem + bump-level classification, the `(pip, major)` →
 `python-major-upgrade` rule, the Docker `python:X.Y` → `python-runtime-upgrade`
-rule — is owned by `python-maintenance-planner.md`. See that file for
+rule, and the Docker same-tag digest-refresh → `auto-merge-if-green` rule
+(#389) — is owned by `python-maintenance-planner.md`. See that file for
 the full rule tables.
 
 The dispatcher does **not** apply these rules. It passes filtered

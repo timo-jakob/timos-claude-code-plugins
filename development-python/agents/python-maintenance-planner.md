@@ -127,6 +127,7 @@ Order groups by descending priority. Ties broken by:
 | `sonarcloud` | `python-sonar-triage` |
 | `dependabot` patch/minor (pip) | `python-dependabot-snyk-triage` |
 | `dependabot` major (pip) | `python-major-upgrade` |
+| `dependabot` **docker, same-tag digest-only refresh** (image `name:tag` unchanged, only `@sha256:` differs) | `python-dependabot-snyk-triage` (**auto-merge-if-green**) |
 | `dependabot` **docker, image matches `python:\d+\.\d+`** (Python interpreter bump) | `python-runtime-upgrade` (one PR per bump) |
 | `dependabot` (github-actions, docker non-Python, unknown) | `python-dependabot-snyk-triage` (human-review) |
 | `snyk_prs` patch/minor (pip, from `snyk-fix-…` / `snyk-upgrade-…` branches) | `python-dependabot-snyk-triage` |
@@ -138,16 +139,37 @@ The legacy `snyk_code` / `snyk_oss` tool keys were retired in PR ε of #87
 via GitHub Code Scanning, free, GitHub-native), and Snyk Open Source
 vulnerabilities are now consumed as PRs flowing through `snyk_prs`.
 
+**Same-tag Docker digest refreshes take precedence over the interpreter
+rule below (#389).** A `dependabot/docker` PR that keeps the image
+`name:tag` identical and changes only the `@sha256:` digest (e.g.
+`python:3.14-slim-bookworm@sha256:AAA… → …@sha256:BBB…`) is Docker Hub
+re-publishing the SAME tag with patched OS packages — typically the very
+base-image CVE fix the run wants, not a version migration. Route it to
+`python-dependabot-snyk-triage` as **auto-merge-if-green** (NOT
+`python-runtime-upgrade`, even when the tag is `python:X.Y`, and NOT
+human-review), with `routing_reason: "docker-digest-refresh — agent must
+verify the tag is unchanged before merging"`. It is safe to consider for
+auto-merge because the PR touches the Dockerfile, so the path-conditional
+`image` scan (#386) runs on it and validates the new digest — a
+still-vulnerable digest fails CI and never merges. The triage agent
+re-verifies tag-equality authoritatively from the diff (its Step B0).
+Detection: the PR's from/to image references share an identical
+`name:tag` and differ only after `@sha256:`. Such a refresh is also the
+**keystone** that can unblock container-gated PRs, so the triage agent
+processes it first in its batch.
+
 **Python-interpreter docker bumps are a special case.** A
 `dependabot/docker/...` PR whose `headRefName` or `body` references
-the `python:X.Y...` base image is the project's runtime Python being
-bumped (e.g. `python:3.13-slim-bookworm → 3.14-slim-bookworm`). That
-has very different consequences from a generic Docker bump
-(libxml2 update, alpine bump, etc.) — it's a language migration. Route
-it to `python-runtime-upgrade`, which attempts the swap once,
-escalates cleanly on dep-compat issues, and produces a structured
-report instead of looping. Other docker bumps still go to
-`python-dependabot-snyk-triage` as human-review per the existing rule.
+the `python:X.Y...` base image **with a changed tag** is the project's
+runtime Python being bumped (e.g. `python:3.13-slim-bookworm →
+3.14-slim-bookworm`). That has very different consequences from a generic
+Docker bump (libxml2 update, alpine bump, etc.) — it's a language
+migration. Route it to `python-runtime-upgrade`, which attempts the swap
+once, escalates cleanly on dep-compat issues, and produces a structured
+report instead of looping. (A same-tag digest refresh of `python:X.Y` is
+NOT this — it goes to auto-merge-if-green per the rule above.) Other
+docker bumps still go to `python-dependabot-snyk-triage` as human-review
+per the existing rule.
 
 Detection: regex-match the headRefName tail or PR title for
 `python:\d+\.\d+`. A grouped PR with `python:` as one member of the
