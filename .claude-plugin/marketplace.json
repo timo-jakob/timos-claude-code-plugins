@@ -19,7 +19,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills.",
-      "version": "1.49.3",
+      "version": "1.50.0",
       "author": {
         "name": "Timo Jakob"
       },
