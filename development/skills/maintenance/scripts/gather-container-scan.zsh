@@ -78,6 +78,47 @@ emit_from() {
   jq -n --argjson f "$mapped" '{ container_scan: $f }'
 }
 
+# Build the reliability note for the container-scan count (#388). The artifact
+# is a POINT-IN-TIME snapshot: Snyk's vuln DB is queried at scan time, so a CVE
+# disclosed against the SAME image AFTER the last default-branch push scan is
+# NOT reflected here. A `0` therefore means "none known as of that scan", never
+# "the image is clean right now" — the false-zero that made a maintenance run
+# dispatch PRs blind to live base-image CVEs. We can't re-scan locally (no
+# Docker build, no Snyk container-scan quota — free-plan-safe), so we report the
+# count WITH its provenance + a reliability caveat, escalating with the scan's
+# age, per the "reliable reported numbers" policy.
+#
+# Args: <count> <created_iso|""> <branch>. Echoes the note to stdout.
+reliability_note() {
+  local count="$1" created="$2" branch="$3" age=""
+  if [[ -n "$created" ]] && command -v python3 >/dev/null 2>&1; then
+    age=$(python3 - "$created" <<'PY' 2>/dev/null || true
+import sys, datetime
+try:
+    t = datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+    now = datetime.datetime.now(datetime.timezone.utc)
+    print((now - t).days)
+except Exception:
+    pass
+PY
+)
+  fi
+  local when="the latest ${branch} push run"
+  [[ -n "$created" ]] && when="the ${branch} push run on ${created%T*}"
+  [[ -n "$age" ]] && when="${when} (${age}d ago)"
+
+  local msg
+  if [[ "$count" -eq 0 ]]; then
+    msg="container scan: 0 CVEs as of ${when} — NOT a live scan. A base-image CVE disclosed since then won't appear until the next ${branch} push re-scans; treat 0 as 'none known at scan time', not a clean image (#388)."
+  else
+    msg="container scan: ingested ${count} unique CVE(s) from ${when}. Point-in-time — CVEs disclosed since that scan aren't reflected (#388)."
+  fi
+  if [[ -n "$age" && "$age" -gt 7 ]]; then
+    msg="${msg} The scan is ${age}d old — push to ${branch} to refresh before relying on this count."
+  fi
+  print -r -- "$msg"
+}
+
 # --- testable seam: --from-file <path> ---------------------------------------
 if [[ "${1:-}" == "--from-file" ]]; then
   src="${2:-}"
@@ -86,6 +127,14 @@ if [[ "${1:-}" == "--from-file" ]]; then
   n=$(jq '(.vulnerabilities // []) | map(.id) | unique | length' "$src" 2>/dev/null || echo 0)
   emit_from "$src"
   print -u2 -- "container scan (from-file): normalized $n unique CVE(s) from $src."
+  exit 0
+fi
+
+# --- testable seam: --reliability-note <count> <created_iso|""> [branch] ------
+# Prints the reliability note that the live harvest emits, without gh/network,
+# so tests can assert the provenance + false-zero caveat + age escalation.
+if [[ "${1:-}" == "--reliability-note" ]]; then
+  reliability_note "${2:-0}" "${3:-}" "${4:-main}"
   exit 0
 fi
 
@@ -141,28 +190,13 @@ done < <(print -r -- "$runs" | jq -r '.[] | "\(.databaseId)|\(.createdAt)"')
 
 if [[ "$found" != "true" || ! -f "$tmp/snyk-container.json" ]]; then
   print -- '{"container_scan": []}'
-  print -u2 -- "No snyk-container-scan artifact found on $REPO_FULL@$DEFAULT_BRANCH (no push run yet, or the artifact expired). Container CVEs not ingested this run."
+  print -u2 -- "container scan: NO snyk-container-scan artifact on $REPO_FULL@$DEFAULT_BRANCH (no push run yet, or the artifact expired) — the count is UNKNOWN, not zero. Push to $DEFAULT_BRANCH to produce one before trusting a clean bill (#388)."
   exit 0
 fi
 
 n=$(jq '(.vulnerabilities // []) | map(.id) | unique | length' "$tmp/snyk-container.json" 2>/dev/null || echo 0)
 emit_from "$tmp/snyk-container.json"
 
-# Staleness: the artifact is only as fresh as the last default-branch push.
-note="container scan: ingested $n unique CVE(s) from the latest $DEFAULT_BRANCH push run."
-if [[ -n "$chosen_created" ]] && command -v python3 >/dev/null 2>&1; then
-  age_days=$(python3 - "$chosen_created" <<'PY' 2>/dev/null || true
-import sys, datetime
-try:
-    t = datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
-    now = datetime.datetime.now(datetime.timezone.utc)
-    print((now - t).days)
-except Exception:
-    pass
-PY
-)
-  if [[ -n "$age_days" && "$age_days" -gt 14 ]]; then
-    note="$note Findings are from a run ${age_days}d old — push to $DEFAULT_BRANCH to refresh."
-  fi
-fi
-print -u2 -- "$note"
+# Reliability: the artifact is only as fresh as the last default-branch push;
+# a 0 means "none known at that scan", not "clean now" (#388).
+print -u2 -- "$(reliability_note "$n" "$chosen_created" "$DEFAULT_BRANCH")"
