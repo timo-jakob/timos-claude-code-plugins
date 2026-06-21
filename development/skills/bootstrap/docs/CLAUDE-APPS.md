@@ -222,7 +222,16 @@ Once registered, each App is *installed* on individual repos via
    - `CLAUDE_MAINTENANCE_APP_ID` (variable)
    - `CLAUDE_MAINTENANCE_PRIVATE_KEY` (secret — PEM contents)
    - `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` (variable — defaults to
-     the machine-only list).
+     the machine-only list). Its **dependency-update bot entry tracks the
+     repo's actual tool** (#425): a **Renovate** repo (`renovate.json` /
+     `.github/renovate.json`) is seeded with `renovate[bot]`, a **Dependabot**
+     repo (`.github/dependabot.yml`) with `dependabot[bot]`, both if both are
+     present (`github-actions[bot]` always; the maintenance App's real
+     owner-suffixed `<slug>[bot]` appended). Seeding the wrong bot makes the
+     Approver Gate-3-skip every vendor PR (it matches the REST `.user.login`),
+     so a Renovate repo seeded with only `dependabot[bot]` would never approve
+     or auto-merge a Renovate PR. On an existing repo on the wrong default, widen
+     the `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` repo variable by hand.
 
 Phase 1 is tracked under #89 and is **not** part of this PR.
 

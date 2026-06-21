@@ -54,7 +54,29 @@ readonly KNOWN_APPS=(claude-approver claude-maintenance)
 # slug (#229): GitHub App slugs are globally unique, so registered apps get
 # owner-suffixed slugs like `claude-maintenance-<owner>` — the generic
 # `claude-maintenance[bot]` login never matches an actual PR author.
-readonly BASE_AUTHOR_ALLOWLIST='["dependabot[bot]","github-actions[bot]"]'
+#
+# The dependency-update bot entry tracks the repo's ACTUAL tool (#425). The
+# Approver's Gate 3 matches the REST `.user.login` — `renovate[bot]` on a
+# Renovate repo, `dependabot[bot]` on a Dependabot one — so seeding the wrong
+# one policy-skips every dependency PR (it never gets an Approver review and
+# never auto-merges). Detect the rendered bot file (same files detect-stack.sh
+# keys on) and include the matching login; default to dependabot[bot] (the
+# family's default bot) when neither is configured yet. github-actions[bot] is
+# always included. Returns the base allowlist as a compact JSON array.
+base_author_allowlist() {
+  local cwd="${1:-$PWD}"
+  local -a deps
+  local renovate=0 dependabot=0
+  [[ -e "$cwd/renovate.json" || -e "$cwd/.github/renovate.json" \
+     || -e "$cwd/.github/renovate.json5" ]] && renovate=1
+  [[ -e "$cwd/.github/dependabot.yml" || -e "$cwd/.github/dependabot.yaml" ]] && dependabot=1
+  (( renovate )) && deps+=("renovate[bot]")
+  (( dependabot )) && deps+=("dependabot[bot]")
+  (( ! renovate && ! dependabot )) && deps+=("dependabot[bot]")
+  # Dependency bot(s) first, then github-actions — order is cosmetic (Gate 3 is
+  # a set-membership test), but keeps a stable, diff-friendly value.
+  jq -nc '$ARGS.positional' --args "${deps[@]}" "github-actions[bot]"
+}
 
 readonly REGISTER_SCRIPT="${SCRIPT_DIR}/register-claude-apps.zsh"
 
@@ -734,16 +756,20 @@ main() {
   # Allowlist: base entries + the maintenance bot's REAL login (#229).
   # The bot login is "<slug>[bot]" with the owner-suffixed slug, e.g.
   # "claude-maintenance-timo-jakob[bot]" — never the generic name.
-  local maintenance_slug author_allowlist
+  local maintenance_slug author_allowlist base_allowlist
+  # Seeded from the repo's actual dependency-update bot (#425), not a hardcoded
+  # dependabot[bot] — a Renovate repo gets renovate[bot] so its PRs aren't
+  # Gate-3 policy-skipped.
+  base_allowlist=$(base_author_allowlist)
   if maintenance_slug=$(app_slug_resolve claude-maintenance); then
-    author_allowlist=$(jq -nc --argjson base "$BASE_AUTHOR_ALLOWLIST" \
+    author_allowlist=$(jq -nc --argjson base "$base_allowlist" \
       --arg m "${maintenance_slug}[bot]" '$base + [$m]')
   else
     warn "Could not resolve the claude-maintenance App slug; allowlist will"
     warn "not include the maintenance bot. Add \"<slug>[bot]\" to the"
     warn "CLAUDE_APPROVER_AUTHOR_ALLOWLIST repo variable manually (the slug"
     warn "is shown on https://github.com/settings/apps)."
-    author_allowlist="$BASE_AUTHOR_ALLOWLIST"
+    author_allowlist="$base_allowlist"
   fi
   gh variable set CLAUDE_APPROVER_AUTHOR_ALLOWLIST --body "$author_allowlist"
   ok "Variable set: CLAUDE_APPROVER_AUTHOR_ALLOWLIST = $author_allowlist"
@@ -763,4 +789,9 @@ main() {
   print -- "  Run '/development-python:approve' locally to dry-run before pushing."
 }
 
-main "$@"
+# Run main only when executed directly — when the file is *sourced* (unit tests
+# exercising base_author_allowlist etc.) ZSH_EVAL_CONTEXT carries a `:file`
+# segment and we skip it, so sourcing has no side effects.
+if [[ "${ZSH_EVAL_CONTEXT:-}" != *:file* ]]; then
+  main "$@"
+fi
