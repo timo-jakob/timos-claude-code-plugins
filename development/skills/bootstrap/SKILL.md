@@ -145,7 +145,7 @@ flow. Stop and ask for input wherever marked; do not guess.
 1. Skip the GitHub repo creation questions — already done.
 2. Skip the visibility question — already known.
 3. **Inspect `github_state` before deciding what to offer the user.** If
-   `existing_artifacts` is complete (every expected file present) AND
+   `missing_artifacts` is empty (every expected file present) AND
    `github_state` reports any of the following gaps, the right next action
    is a **gap-fill flow**, not the template-drift menu — Step 4 of a prior
    bootstrap clearly didn't complete:
@@ -173,7 +173,31 @@ flow. Stop and ask for input wherever marked; do not guess.
    in the working tree. If multiple gaps coexist, present them as a
    checkboxed list so the user can pick a subset.
 
-4. When `existing_artifacts` is complete AND `github_state` shows no gaps,
+4. **Missing-file gap-fill — run this BEFORE the drift check whenever
+   `missing_artifacts` is non-empty.** `detect-stack.sh` emits
+   `missing_artifacts`: the templates this repo's actual conditions
+   (visibility, languages, dependency-bot path) expect but that are **absent
+   on disk** — a newly-added template (added to the suite after this repo was
+   bootstrapped) or an incomplete prior run. The drift detector **cannot see
+   these** — it only compares the recorded sha256 of files that already carry
+   a provenance marker, so a file that was never rendered has no marker to
+   compare and is invisible to it. An empty `existing_artifacts` map looking
+   "all true" is **not** evidence of completeness; `missing_artifacts` is the
+   only completeness signal.
+
+   For each path in `missing_artifacts`, **render it from its template and
+   stamp the provenance marker** (Step 3 + Step 3.6), writing into the working
+   tree for the user to commit. These are the unconditionally-expected gaps
+   only — `detect-stack.sh` deliberately **holds out** files whose render is
+   gated by a signal it can't observe (the `--claude-approver` Approver pair,
+   the language-spec-gated `api-stability.yml`, the non-selected
+   `renovate.json`/`dependabot.yml`), so the list is safe to render blind. Two
+   list members keep their existing special paths and are never in the list
+   anyway: `LICENSE` (ask which license) and `.gitignore` (merge, don't copy).
+   After rendering, continue to the drift check below for the files that WERE
+   already present.
+
+5. When `missing_artifacts` is empty AND `github_state` shows no gaps,
    THEN fall through to the **template-drift check** — deterministic first,
    the reviewer only when there's something to classify:
 
@@ -233,7 +257,7 @@ flow. Stop and ask for input wherever marked; do not guess.
       *stamped* file whose recorded template hash changed) always goes to the
       reviewer — a hash mismatch means the template genuinely moved.
 
-5. Continue to **shared questions** below if any answer is still unknown
+6. Continue to **shared questions** below if any answer is still unknown
    (language detection may still need user input if `languages=[]`).
 
 ### Shared questions

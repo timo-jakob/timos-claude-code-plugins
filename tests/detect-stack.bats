@@ -147,6 +147,75 @@ setup() {
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
 }
 
+# --- #406 missing_artifacts: gap-fill detection that drift can't see ----------
+
+@test "detect-stack: #406 missing_artifacts flags every-repo templates that are absent" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # template-drift-watch is an every-repo template -> a bare repo is missing it.
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/template-drift-watch.yml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #406 a present every-repo file is NOT flagged missing" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  mkdir -p .github/workflows
+  printf 'name: drift\n' > .github/workflows/template-drift-watch.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/template-drift-watch.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.existing_artifacts["'".github/workflows/template-drift-watch.yml"'"]' <<<"$out")" = "true" ]
+}
+
+@test "detect-stack: #406 flag-gated Approver pair is held out of missing_artifacts" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  # Approver workflow + policy are gated by --claude-approver (no filesystem
+  # trace when opted out) -> never auto-render gaps.
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/claude-approver.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".claude/approver-policy.md")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #406 language-spec-gated api-stability.yml is held out" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/api-stability.yml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #406 no bot present + not a plugin -> dependabot expected, renovate held out" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_claude_plugin <<<"$out")" = "false" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/dependabot.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("renovate.json")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #406 renovate.json present -> dependabot held out (no dueling bots)" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  printf '{ "extends": ["config:recommended"] }\n' > renovate.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_claude_plugin <<<"$out")" = "false" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/dependabot.yml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #406 claude-plugin repo -> is_claude_plugin true, renovate expected, dependabot held out" {
+  mkdir -p .claude-plugin
+  printf '{}\n' > .claude-plugin/marketplace.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_claude_plugin <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("renovate.json")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/dependabot.yml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #406 approver-policy candidate maps to .claude/approver-policy.md" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  mkdir -p .claude
+  printf '# policy\n' > .claude/approver-policy.md
+  out=$(bash "$DETECT" 2>/dev/null)
+  # The present policy is tracked at its real render path, not a bare root file.
+  [ "$(jq -r '.existing_artifacts["'".claude/approver-policy.md"'"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.existing_artifacts["approver-policy.md"] // "absent"' <<<"$out")" = "absent" ]
+}
+
 @test "verify-python-state: pyproject WITHOUT requires-python -> exit 0 (no crash)" {
   printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
   bash "$VERIFY" "$WORK" >/dev/null 2>&1
