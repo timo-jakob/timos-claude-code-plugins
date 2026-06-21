@@ -31,11 +31,21 @@ on would add a delivery destination we don't use.
 | Scope | Level | Why |
 | --- | --- | --- |
 | `pull_requests` | write | Post reviews. |
-| `contents` | read | Read the PR diff. |
+| `contents` | **write** | **Makes the App's `APPROVE` *count*.** GitHub tallies an approval toward a branch's `required_approving_review_count` only from a reviewer who **can push to the repo**, and push access *is* the Contents permission — not Pull requests. With `contents:read` the review posts but `authorCanPushToRepository=false`, so a green + approved PR stays `reviewDecision=REVIEW_REQUIRED` / `mergeStateStatus=BLOCKED` and never auto-merges (#418). Also reads the PR diff. The Approver never pushes — `main` stays PR-protected, so the bot can't write to a protected branch; the grant only confers the "counts as an approval" property. |
 | `issues` | read | Read the linked issue body for `feat:` PRs (per the Approver's per-PR-type criteria). |
 | `actions` | read | Read GitHub Actions workflow runs and their conclusions (the "everything green" gate). |
 | `checks` | read | Read check runs from third-party integrations (Sonar, Snyk, CodeQL) that don't post via Actions. |
 | `metadata` | read | Required default for every App. |
+
+> **Upgrading an existing Approver install to `contents:write` (#418).** A
+> permission *increase* on an already-installed App is **not** applied by
+> re-running `register-claude-apps.zsh` — GitHub requires the user to
+> **re-accept** the new grant per installation. On a repo whose Approver
+> predates this change: App settings → **Permissions → Contents: Read &
+> write → Save**, then **github.com/settings/installations → Claude Approver →
+> Configure → accept the permission update**, and re-trigger the Approver on a
+> fresh head SHA. `install-claude-apps.zsh --verify` flags an Approver still on
+> the old read-only grant.
 
 ### Claude Maintenance
 

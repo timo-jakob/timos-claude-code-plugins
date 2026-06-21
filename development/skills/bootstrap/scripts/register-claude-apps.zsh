@@ -49,9 +49,18 @@ app_display_name() {
 app_permissions_json() {
   case "$1" in
     claude-approver)
+      # contents:write is NOT for pushing — the Approver never commits. GitHub
+      # only tallies an APPROVE toward a branch's required_approving_review_count
+      # when the reviewer *can push to the repo*, and "push access" is the
+      # Contents permission (NOT Pull requests). With contents:read the App's
+      # reviews post but `authorCanPushToRepository=false`, so the PR stays
+      # reviewDecision=REVIEW_REQUIRED / mergeStateStatus=BLOCKED and never
+      # auto-merges. See CLAUDE-APPS.md and #418 (root-caused on
+      # tick-client-snapper#226). `main` stays PR-protected, so the bot still
+      # cannot push directly to a protected branch — exposure is bounded.
       print -- '{
         "pull_requests": "write",
-        "contents":      "read",
+        "contents":      "write",
         "issues":        "read",
         "actions":       "read",
         "checks":        "read",
@@ -531,4 +540,9 @@ main() {
   esac
 }
 
-main "$@"
+# Run main only when executed directly — when the file is *sourced* (unit tests
+# exercising app_permissions_json etc.) ZSH_EVAL_CONTEXT carries a `:file`
+# segment and we skip it, so sourcing has no side effects.
+if [[ "${ZSH_EVAL_CONTEXT:-}" != *:file* ]]; then
+  main "$@"
+fi
