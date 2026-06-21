@@ -1,6 +1,6 @@
 ---
 name: java-dependabot-snyk-triage
-description: Review vendor-opened PRs (Dependabot, Snyk auto-Fix/Upgrade, AND Renovate PRs) that the dispatcher has classified as either "auto-merge-if-green" (gradle + github-actions patch/minor with verifiable safety, or Snyk security fixes) or "human-review" (Docker base images, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-java:maintenance.
+description: Review vendor-opened PRs (Dependabot, Snyk auto-Fix/Upgrade, AND Renovate PRs) that the dispatcher has classified as either "auto-merge-if-green" (gradle + github-actions patch/minor with verifiable safety, Snyk security fixes, or a Docker same-tag digest-only refresh whose tag-equality the agent re-verifies) or "human-review" (Docker base-image tag/version bumps, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-java:maintenance.
 model: sonnet
 tools: Bash, Read, Grep, WebFetch
 ---
@@ -220,8 +220,38 @@ safe in this case.
 ### Path B — `routing == "auto-merge-if-green"`
 
 The dispatcher decided this PR is safe to consider for auto-merge
-(typically: gradle-ecosystem patch or minor; or github-actions
-patch/minor). You verify CI status + scan release notes, then act.
+(typically: gradle-ecosystem patch or minor; github-actions patch/minor;
+or a Docker same-tag digest refresh). You verify CI status + scan release
+notes, then act.
+
+**Process docker digest-refresh PRs (Step B0) first in your batch (#389)**
+— merging one can clear a base-image CVE that a later, container-gated PR
+in the same batch is waiting on (the keystone). Handle those before the
+gradle/github-actions PRs.
+
+#### Step B0 — Docker digest-refresh verification (docker PRs only)
+
+When `routing_reason` marks this a `docker-digest-refresh`,
+**authoritatively confirm it before trusting the routing** — the
+planner's detection is heuristic. Inspect the Dockerfile diff:
+
+```bash
+gh pr diff <number> --patch | grep -E '^[-+].*FROM '
+```
+
+Every changed `FROM` line must differ **only** in the `@sha256:<digest>`
+— the image `name:tag` must be byte-identical on the `-` and `+` sides.
+
+- **Tag unchanged (digest-only)** → genuine same-tag refresh. Continue to
+  B1. The `image` scan runs on this PR (it touches the Dockerfile, #386)
+  and validates the new digest, so a still-vulnerable digest fails CI and
+  blocks the merge. **Skip Step B2** — no version transition to read.
+- **Any `name:tag` changed** (a version / tag / distro bump disguised as a
+  digest update — including a JDK major like `21-jre → 25-jre`) → DEMOTE
+  to `actions_requiring_review`: "not a digest-only refresh — base image
+  changed to `<new name:tag>`; needs human review." Do not merge.
+
+Non-docker PRs skip this step.
 
 #### Step B1 — check CI status
 
@@ -248,6 +278,7 @@ Patch bumps skip this step.
 
 | Bump | CI | Release notes | Action |
 | --- | --- | --- | --- |
+| docker digest-refresh (B0 verified) | green | skipped | **merge if approved, else arm auto-merge** |
 | patch | green | n/a | **merge if approved, else arm auto-merge** |
 | minor | green | clean | **merge if approved, else arm auto-merge** |
 | minor | green | breaking-change flag | defer to `actions_requiring_review` |
@@ -360,13 +391,18 @@ multi-PR-per-package cases).
   the code-side migration story; that's `java-major-upgrade`'s job. Any
   gradle-major PR reaching you is a dispatcher routing error — surface
   it in `actions_requiring_review`.
-- **Non-JDK Docker base-image bumps are human-review.** The dispatcher
-  routes them to Path A. **JDK base-image bumps (eclipse-temurin /
-  amazoncorretto / openjdk / …) do NOT reach you** — the planner extracts
+- **Non-JDK Docker base-image *tag/version* bumps are human-review.** The
+  dispatcher routes them to Path A. **The exception is a same-tag
+  digest-only refresh** (`@sha256:` change, tag unchanged), which reaches
+  you as `auto-merge-if-green` — verify tag-equality in Step B0, then
+  merge on green CI (#389). **JDK base-image *version* bumps (eclipse-temurin
+  / amazoncorretto / openjdk / …) do NOT reach you** — the planner extracts
   those into their own `java-runtime-upgrade` group (the JDK LTS migration
   handler), the same way `gradle`-major bumps go to `java-major-upgrade`.
-  If a JDK base-image bump lands in your input, treat it as a dispatcher
-  routing error and surface it in `actions_requiring_review`.
+  (A digest-only refresh of a JDK image is NOT a version bump — it stays
+  with you as auto-merge-if-green.) If a JDK *version* bump lands in your
+  input, treat it as a dispatcher routing error and surface it in
+  `actions_requiring_review`.
 - **Read release notes carefully for minors.** Skim ≠ read. A minor
   bump that silently changes default values is the most common
   "I auto-merged this and it broke prod" trap. Spend the WebFetch

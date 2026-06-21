@@ -1,6 +1,6 @@
 ---
 name: python-dependabot-snyk-triage
-description: Review vendor-opened PRs (Dependabot AND Snyk auto-Fix/Upgrade PRs) that the dispatcher has classified as either "auto-merge-if-green" (pip + github-actions patch/minor with verifiable safety, or Snyk security fixes) or "human-review" (Docker base images, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-python:maintenance.
+description: Review vendor-opened PRs (Dependabot AND Snyk auto-Fix/Upgrade PRs) that the dispatcher has classified as either "auto-merge-if-green" (pip + github-actions patch/minor with verifiable safety, Snyk security fixes, or a Docker same-tag digest-only refresh whose tag-equality the agent re-verifies) or "human-review" (Docker base-image tag/version bumps, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-python:maintenance.
 model: sonnet
 tools: Bash, Read, Grep, WebFetch
 ---
@@ -208,8 +208,39 @@ safe in this case.
 ### Path B — `routing == "auto-merge-if-green"`
 
 The dispatcher decided this PR is safe to consider for auto-merge
-(typically: pip-ecosystem patch or minor; or github-actions
-patch/minor). You verify CI status + scan release notes, then act.
+(typically: pip-ecosystem patch or minor; github-actions patch/minor; or
+a Docker same-tag digest refresh). You verify CI status + scan release
+notes, then act.
+
+**Process docker digest-refresh PRs (Step B0) first in your batch (#389)**
+— merging one can clear a base-image CVE that a later, container-gated PR
+in the same batch is waiting on (the keystone). Handle those before the
+pip/github-actions PRs.
+
+#### Step B0 — Docker digest-refresh verification (docker PRs only)
+
+When `routing_reason` marks this a `docker-digest-refresh`,
+**authoritatively confirm it before trusting the routing** — the
+planner's detection is heuristic. Inspect the Dockerfile diff:
+
+```bash
+gh pr diff <number> --patch | grep -E '^[-+].*FROM '
+```
+
+Every changed `FROM` line must differ **only** in the `@sha256:<digest>`
+— the image `name:tag` must be byte-identical on the `-` and `+` sides.
+
+- **Tag unchanged (digest-only)** → it's a genuine same-tag refresh.
+  Continue to B1. The `image` scan runs on this PR (it touches the
+  Dockerfile, #386) and validates the new digest, so a still-vulnerable
+  digest will fail CI and block the merge. **Skip Step B2** — there is no
+  version transition to read release notes for.
+- **Any `name:tag` changed** (a version / tag / distro bump disguised as
+  a digest update) → DEMOTE to `actions_requiring_review`: "not a
+  digest-only refresh — base image changed to `<new name:tag>`; needs
+  human review (a tag change can rebuild the runtime)." Do not merge.
+
+Non-docker PRs skip this step.
 
 #### Step B1 — check CI status
 
@@ -236,6 +267,7 @@ Patch bumps skip this step.
 
 | Bump | CI | Release notes | Action |
 | --- | --- | --- | --- |
+| docker digest-refresh (B0 verified) | green | skipped | **merge if approved, else arm auto-merge** |
 | patch | green | n/a | **merge if approved, else arm auto-merge** |
 | minor | green | clean | **merge if approved, else arm auto-merge** |
 | minor | green | breaking-change flag | defer to `actions_requiring_review` |
