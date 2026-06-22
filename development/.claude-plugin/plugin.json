@@ -1,7 +1,7 @@
 {
   "name": "development",
   "description": "General development workflow skills for committing, branch naming, and other git operations.",
-  "version": "1.53.10",
+  "version": "1.53.11",
   "author": {
     "name": "Timo Jakob"
   },
