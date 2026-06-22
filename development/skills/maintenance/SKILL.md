@@ -908,6 +908,41 @@ spawned with `isolation="worktree"`.
 
 ### Stages 1..N — one PR per planner group, in priority order
 
+**Ordering rule — worktree stages first, vendor-PR (GitHub-PR) stages last
+(#432).** The planner ranks groups by priority, but under `main`'s `strict`
+("require branches up to date") + `dismiss_stale_reviews` branch protection a
+multi-PR run is quadratic: every merged stage moves `main`, marking every other
+open PR `BEHIND`; bringing one up to date is a new commit that **dismisses the
+approval already earned** and re-runs CI. To minimise that churn, run all
+`isolation: true` (worktree) stages — which open and merge their own fresh PRs —
+and only **then** the `isolation: false` vendor-PR stages (Dependabot / Renovate
+/ Snyk triage), which act on standing GitHub PRs that each first-party merge
+would otherwise re-stale. Keep the planner's priority order among the worktree
+stages; just sink the vendor-PR stage(s) to the end so they're processed once
+`main` is stable. (A standing PR against a moving base is the worst case — it
+re-stales on every intervening merge.)
+
+**Re-staling is unavoidable under `strict`, but deterministic.** When a PR you
+still need to merge has gone `BEHIND` from an intervening merge, drive it with
+the blessed helper (#431), never a hand-rolled loop:
+
+```bash
+"<skill-base-dir>/scripts/merge-pr-cycle.zsh" --update --retrigger "<pr_number>"
+```
+
+`--update` brings it up to date (which, under `dismiss_stale_reviews`, drops the
+prior approval); the helper waits for the fresh SHA's CI to **register** and
+settle, then `--retrigger` posts one `/approve` to re-earn the Approver's
+counting review. Process such PRs **one at a time** — each merge re-stales the
+rest, so a batch must be serial.
+
+> The structural O(N) cost is inherent to `strict` + `dismiss_stale_reviews`.
+> Bounding the batch (#53 `--batch=N`, #57 budget) keeps it tractable; a GitHub
+> **merge queue** — or relaxing `strict` for the bot path while keeping required
+> reviews — would remove the per-PR churn entirely. Both are branch-protection
+> **policy decisions for the repo owner** (tracked in #432), not changed by the
+> pipeline here.
+
 For each entry in `response.plan`, in priority order:
 
 1. **Determine the effective base branch** — the user's current branch
