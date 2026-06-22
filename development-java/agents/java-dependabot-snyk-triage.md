@@ -285,6 +285,64 @@ Patch bumps skip this step.
 | any | red | n/a | defer with failing-check name |
 | any | pending | n/a | `unable_to_fix` |
 
+#### Step B3.5 — make the PR Approver-legible (merge/arm case only)
+
+Where a Claude Approver gates merge, it judges every PR against
+`.claude/approver-policy.md`. Two of its checks fail on **Renovate** PRs
+even when the bump is clean and CI-green — and they're about *form*, not
+substance, so the gate lands at `COMMENT` / `REQUEST_CHANGES`, the PR never
+earns a counting approval, and safe vendor bumps pile up unmerged (the #1
+cause of a maintenance run leaving PRs open):
+
+- **Type detection** reads a conventional-commit prefix from the title.
+  Dependabot and the maintenance bot carry one; Renovate's default
+  `Update <pkg> to v<new>` does not → type "ambiguous" → `REQUEST_CHANGES`.
+- **The `chore(deps)` must-have** wants a release-notes link/excerpt present
+  in **the PR body or a comment**; Renovate's body often carries none.
+
+You already fetched the release notes in Step B2 — **pass that evidence
+through instead of discarding it.** Only in the merge/arm rows of Step B3,
+on the PR's current (up-to-date, green) head:
+
+1. **Retitle** when the title has no conventional-commit prefix:
+   `gh pr edit <number> --title "chore(deps): bump <pkg> <old> → <new>"`
+   (`chore(deps-major):` for a major — match the bump level). Dependabot/
+   maintenance titles already comply; skip them.
+2. **Post one evidence-and-retrigger comment.** It does double duty: it
+   supplies the release-notes must-have ("or comment") *and* re-triggers the
+   gate, which fires on an `issue_comment` whose body starts with `/approve`
+   (#190) — the reliable re-trigger, because a body **edit** alone fires no
+   gate event (`edited` isn't a trigger) and the gate evaluates per head SHA:
+
+   ```bash
+   gh pr comment <number> --body "/approve
+
+   ## Type
+   chore(deps) — <bump_level> bump of <pkg> <old> → <new> (<source>).
+
+   ## Summary
+   <one line: what moved, and why it is safe>.
+
+   ## Test plan
+   CI is green at the head SHA (<key checks: build, test, sonar…>), which
+   directly exercises the new version — the strongest verification a
+   dependency bump can get.
+
+   ## Release notes
+   <link to the release/CHANGELOG for the transition>, scanned in Step B2 —
+   no BREAKING / removed / renamed markers. (Patch bumps: state \"patch
+   bump; no release notes published for the transition\".)"
+   ```
+
+   The `/approve` prefix is a **re-trigger command, not an approval** — the
+   Approver still reaches its own verdict (no self-approval, #224). The
+   commenter needs repo write access for the gate to honour the trigger
+   (#190); the maintenance identity has it.
+
+> For a **BEHIND** PR you sent `@renovate rebase`, do the enrichment on the
+> *next* pass once the rebase lands on a fresh SHA — a rebase regenerates
+> the Renovate body, so enriching the pre-rebase SHA is wasted work.
+
 #### Step B4 — apply (merge case)
 
 **Never post an approval yourself** — `gh pr review --approve` with
