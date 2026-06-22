@@ -4,8 +4,9 @@ description: >
   Python project maintenance dispatcher. Receives findings from
   /development:maintenance (or equivalent JSON input), validates the payload,
   runs a coverage pre-flight (may spawn `python-coverage-improver` in a
-  worktree when affected modules sit between Floor and Required), and
-  otherwise invokes `python-maintenance-planner` and returns its plan. The
+  worktree when affected modules sit below Required — topping up toward
+  Required, or bootstrapping a below-floor (0%) module toward the Floor, #429),
+  and otherwise invokes `python-maintenance-planner` and returns its plan. The
   per-group work agents are the orchestrator's job, not the dispatcher's.
   Pure function of its JSON input; does not run its own detection. See
   ARCHITECTURE.md for the schema and dispatch contract.
@@ -67,8 +68,11 @@ flow below, unchanged.
 1. Validate the payload.
 2. Run the coverage pre-flight again. With Phase A's PR merged, all
    affected modules should now be at or above Required (branch 1 of
-   Step 2c). If somehow not, that's an unexpected state — escalate
-   via `human_action_required`. Do NOT re-spawn the improver here.
+   Step 2c) → plan. If a module still sits below Required — e.g. a
+   **bootstrapped** module (#429) reached only the Floor in one pass —
+   escalate it via `human_action_required`, noting that re-running
+   `/development:maintenance` runs another improver pass toward Required
+   (each run = one pass). Do NOT re-spawn the improver here.
 3. Run the planner (`python-maintenance-planner`).
 4. Return `plan` + `missing_tooling`. No `improver_result` (that was
    the previous invocation's responsibility).
@@ -313,10 +317,19 @@ Three branches:
 
 1. **All modules in the affected set ≥ Required** → proceed to
    dispatch.
-2. **Some modules between Floor and Required** → this is Phase A. Spawn
-   `python-coverage-improver` with `isolation="worktree"` so its new tests
-   land on a fresh branch off `worktree.base_branch`, not in the user's
-   working tree:
+2. **Any module below Required, with coverage data** → this is Phase A.
+   Spawn `python-coverage-improver` with `isolation="worktree"` so its new
+   tests land on a fresh branch off `worktree.base_branch`, not in the
+   user's working tree. Give each under-covered module a `target` by where
+   it sits:
+   - **between Floor and Required** → `target = Required` (top-up mode).
+   - **below Floor**, including 0% / greenfield → `target = Floor`
+     (**bootstrap-from-zero mode**, #429). The floor exists to stop the
+     improver rubber-stamping lines on a module whose *existing* tests it
+     can't judge — but a module at 0% has **no existing tests to break**, so
+     it's the lowest-regression-risk target for *new* tests, not the
+     riskiest. Aim for the Floor first (a smaller, reviewable increment);
+     subsequent runs top it up toward Required.
 
    ```text
    Agent(
@@ -325,10 +338,11 @@ Three branches:
      isolation="worktree",
      prompt="""
        repo_path: <repo.path>
-       target_threshold: <Required for this action class, e.g. 80 or 90>
-       under_covered_modules: [
-         { "file": "src/...", "current_coverage": 61.9 },
-         ...
+       policy.coverage_threshold: <Required for this action class, e.g. 80 or 90>
+       test_root: tests/
+       modules_to_improve: [
+         { "path": "src/...", "current": 61, "target": 80 },  # top-up
+         { "path": "src/...", "current": 0,  "target": 60 }   # bootstrap
        ]
        worktree.base_branch: <worktree.base_branch>
        commit_subject: "test(coverage): raise coverage on <comma-separated module names>"
@@ -341,11 +355,19 @@ Three branches:
    )
    ```
 
+   The bootstrap branch applies to modules named by an **explicit finding
+   file path** (ruff-unsafe / semgrep / code_scanning / sonar refactors).
+   The project-wide major-upgrade scan (Step 2b) does **not** bootstrap —
+   see Step 2d; bringing the whole project from zero to the 70% major-work
+   floor isn't a safe single autonomous step.
+
    When it finishes, **return immediately** with the `improver_result`
    shape (see the Response section). No `plan` field. See the intro's
    Phase A bullet for the orchestrator-side loop that re-invokes you
    after the improver's PR merges.
-3. **Any module in the affected set below Floor** → halt. Return:
+3. **A module in the affected set is missing entirely from
+   `coverage.by_module`** (no coverage data at all) → halt; you can't
+   target what isn't measured. Return:
 
    ```json
    {
@@ -354,17 +376,12 @@ Three branches:
      "actions_requiring_review": [],
      "missing_tooling": [],
      "human_action_required": [{
-       "reason": "Coverage on <module> is <X>% — below the <Floor>% floor required for autonomous changes. Planned work: <action description>.",
-       "recommendation": "Invest in test coverage first. Run /development-python:improve-test-coverage (when available — see issue #35) or write tests by hand. Re-run /development:maintenance once coverage is at least <Floor>%."
+       "reason": "<module> is named by a finding but has no coverage data — it can't be measured or improved automatically. Planned work: <action description>.",
+       "recommendation": "Confirm the module is imported by the test run and present in the coverage report (not omitted), then re-run /development:maintenance."
      }],
      "unable_to_fix": []
    }
    ```
-
-If an affected module is missing from `coverage.by_module` entirely
-(coverage data exists for some modules but not this one), treat that
-as "unknown coverage" → halt as in branch 3, citing the specific
-module(s) with no data.
 
 Pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
 format) skip this check — they're behavior-preserving by ruff's own

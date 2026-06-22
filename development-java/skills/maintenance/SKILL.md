@@ -4,7 +4,9 @@ description: >
   Java/Gradle project maintenance dispatcher. Receives findings from
   /development:maintenance (or equivalent JSON input), validates the payload,
   runs a JaCoCo coverage pre-flight (may spawn `java-coverage-improver` in a
-  worktree when affected classes sit between Floor and Required), and otherwise
+  worktree when affected classes sit below Required — topping up toward
+  Required, or bootstrapping a below-floor (0%) class toward the Floor, #429),
+  and otherwise
   invokes `java-maintenance-planner` and returns its plan. The per-group work
   agents are the orchestrator's job, not the dispatcher's. Pure function of its
   JSON input; does not run its own detection. Mirrors development-python.
@@ -58,8 +60,11 @@ flow below.
 
 1. Validate the payload.
 2. Run the coverage pre-flight again. With Phase A merged, affected classes
-   should now clear Required (branch 1). If not, escalate via
-   `human_action_required`; do NOT re-spawn the improver.
+   should now clear Required (branch 1) → plan. If a class still sits below
+   Required — e.g. a **bootstrapped** class (#429) reached only the Floor in
+   one pass — escalate it via `human_action_required`, noting that re-running
+   `/development:maintenance` runs another improver pass toward Required (each
+   run = one pass). Do **not** re-spawn the improver this invocation.
 3. Run the planner (`java-maintenance-planner`).
 4. Return `plan` + `missing_tooling`. No `improver_result`.
 
@@ -275,8 +280,17 @@ local files, so module coverage isn't load-bearing for them.
 Three branches:
 
 1. **All affected classes ≥ Required** → proceed to planning.
-2. **Some between Floor and Required** → this is Phase A. Spawn
-   `java-coverage-improver` with `isolation="worktree"`:
+2. **Any affected class below Required, with coverage data** → this is
+   Phase A. Spawn `java-coverage-improver` with `isolation="worktree"`,
+   giving each under-covered class a `target` by where it sits:
+   - **between Floor and Required** → `target = Required` (top-up mode).
+   - **below Floor**, including 0% / greenfield → `target = Floor`
+     (**bootstrap-from-zero mode**, #429). The floor exists to stop the
+     improver rubber-stamping lines on a class whose *existing* tests it
+     can't judge — but a class at 0% has **no existing tests to break**, so
+     it's the lowest-regression-risk target for *new* tests, not the
+     riskiest. Aim for the Floor first (a smaller, reviewable increment);
+     subsequent runs top it up toward Required.
 
    ```text
    Agent(
@@ -287,7 +301,10 @@ Three branches:
        repo_path: <repo.path>
        policy.coverage_threshold: <Required, e.g. 80>
        test_root: src/test/java
-       modules_to_improve: [ { "path": "src/main/java/...", "current": 61, "target": 80 }, ... ]
+       modules_to_improve: [
+         { "path": "src/main/java/...", "current": 61, "target": 80 },  # top-up
+         { "path": "src/main/java/...", "current": 0,  "target": 60 }   # bootstrap
+       ]
        worktree.base_branch: <worktree.base_branch>
        commit_subject: "test(coverage): raise coverage on <comma-separated class names>"
 
@@ -298,18 +315,24 @@ Three branches:
    )
    ```
 
+   The bootstrap branch applies to classes named by an **explicit finding
+   file path** (sonar / semgrep / code_scanning refactors). The
+   project-wide major-upgrade scan (Step 2b) does **not** bootstrap — see
+   Step 2d; bringing an entire module set from zero to the 70% major-work
+   floor isn't a safe single autonomous step.
+
    When it finishes, **return immediately** with `improver_result` (no
    `plan`). See the Phase A bullet for the orchestrator-side loop.
-3. **Any affected class below Floor** (or missing from `coverage.by_module`)
-   → halt:
+3. **An affected class is missing entirely from `coverage.by_module`**
+   (no JaCoCo data at all) → halt; you can't target what isn't measured:
 
    ```json
    {
      "schema_version": "2",
      "actions_taken": [], "actions_requiring_review": [], "missing_tooling": [],
      "human_action_required": [{
-       "reason": "Coverage on <class> is <X>% — below the <Floor>% floor required for autonomous changes. Planned work: <action description>.",
-       "recommendation": "Invest in test coverage first (java-coverage-improver runs only between Floor and Required). Write JUnit tests by hand, then re-run /development:maintenance once coverage is at least <Floor>%."
+       "reason": "<class> is named by a finding but has no JaCoCo coverage data — it can't be measured or improved automatically. Planned work: <action description>.",
+       "recommendation": "Confirm the class is built and present in the JaCoCo report (not excluded), then re-run /development:maintenance."
      }],
      "unable_to_fix": []
    }
