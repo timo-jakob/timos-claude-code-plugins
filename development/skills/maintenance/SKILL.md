@@ -1217,6 +1217,29 @@ After pushing and opening the PR:
    `check_suite: completed`, so once CI is green its verdict typically
    lands within a few minutes.
 
+   **Use the blessed merge-cycle helper — do NOT hand-roll this loop (#431).**
+   The tick-client-snapper run's improvised background loops re-triggered the
+   Approver ~30s after `update-branch` (before the new SHA's checks had even
+   registered, burning the one re-trigger), and mangled push refspecs forcing
+   fresh SHAs. `merge-pr-cycle.zsh` does the subtle parts correctly: it waits
+   for the head SHA's checks to *register* and settle (re-pinning if a rebase
+   lands mid-wait), reads `reviewDecision`, and — with `--retrigger` — posts a
+   single `/approve` comment to re-trigger the Approver (the gate honours it,
+   #190), never an empty-commit push:
+
+   ```bash
+   "<skill-base-dir>/scripts/merge-pr-cycle.zsh" --retrigger "<pr_number>"
+   # add --update first for a vendor PR that's BEHIND under strict branch protection
+   ```
+
+   Branch on its single `result:` line / exit code:
+   `READY` (0) → step 6 (merge); `CHANGES-REQUESTED` (5) → the
+   `CHANGES_REQUESTED` handling below; `AWAITING-APPROVAL` (4) or `TIMED-OUT`
+   (3) → arm native auto-merge and move on (the `REVIEW_REQUIRED` branch below);
+   `NOT-GREEN` (6) → back to step 3. The manual poll below is exactly what it
+   automates — drop to it only when you need the finer-grained in-run
+   rejection-fix rounds.
+
    Poll the review decision (30s interval, 10-minute budget):
 
    ```bash
