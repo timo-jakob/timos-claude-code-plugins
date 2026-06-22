@@ -1509,11 +1509,24 @@ pushed fixes for — detected, never dispatched:>
 render the verdict line FIRST — it's the broadest system-health
 signal. Map .status to the display word: OK→PASS, ERROR→FAIL,
 WARN→WARN, NONE→"not computed". When FAIL or WARN, list each
-condition whose .status != "OK" as a bullet:>
+condition whose .status != "OK" as a bullet.
 
-Quality Gate (<default branch>): PASS|FAIL|WARN|not computed
+**Scope the label honestly (#433).** SonarCloud's default `Sonar way`
+gate measures **new code only** (its conditions are `new_*` metrics), so
+a PASS means "no new-code regressions" — NOT "the codebase is clean".
+Title the line `new code` and append the caveat, so a PASS is never read
+as overall Sonar health (the run that motivated #433 flipped the gate to
+PASS while the legacy/overall issue backlog was essentially untouched —
+"Reported numbers must be reliable or withheld"). The overall/legacy
+backlog is reflected by the category inventory below — the issues static
+analysis surfaced this run — not by this gate.>
+
+Quality Gate — new code (<default branch>): PASS|FAIL|WARN|not computed
   - <metricKey>: actual <actualValue>, threshold <comparator> <errorThreshold>
   ...
+  (New-code gate only — it does NOT measure the overall/legacy issue
+  backlog; the category inventory below shows what static analysis
+  surfaced this run.)
 
 <If .sonar_quality_gate is null or absent, omit the line entirely —
 the pooled notes already explain why the fetch didn't happen.>
