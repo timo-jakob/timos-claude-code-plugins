@@ -43,6 +43,20 @@
 #   language_meta.java.build_system      "gradle" | "maven" | ""  (Gradle-first;
 #                                         Maven is recorded but unsupported, #296)
 #   language_meta.java.has_cov           bool    (JaCoCo present in the build)
+#   language_meta.swift.version          string  ("6.0", "5.10", ...; default 6.0)
+#   language_meta.swift.version_source   "parsed" | "default"  ("default" means
+#                                         no manifest/.swift-version/pbxproj pin
+#                                         was found — the version is a guess, #258)
+#   language_meta.swift.build_system     "xcode" | "swiftpm" | ""  (#297 Slice A:
+#                                         Xcode wins when an .xcodeproj/.xcworkspace
+#                                         is present — the app is the product; a
+#                                         bare Package.swift is swiftpm)
+#   language_meta.swift.has_cov          bool    (test targets present; Swift
+#                                         coverage is toolchain-built-in — xccov for
+#                                         Xcode, `swift test --enable-code-coverage`
+#                                         for SwiftPM — so unlike JaCoCo there is no
+#                                         dependency to declare; test presence is the
+#                                         real coverage precondition)
 #
 # github_state shape (added 2026-06-04 per issue #90 — keeps detection
 # honest about GitHub-side configuration the on-disk artifacts don't see):
@@ -333,6 +347,85 @@ if [[ "$java_in_langs" == "true" ]]; then
 	fi
 fi
 
+# --- swift version + build system + coverage --------------------------------
+# Only meaningful when Swift is detected (#297 Slice A). Build system: Xcode
+# wins when an .xcodeproj/.xcworkspace is present (the app is the product); a
+# bare Package.swift (no Xcode project) is SwiftPM. Version sources, first match
+# wins: Package.swift `// swift-tools-version:`, then `.swift-version`, then the
+# Xcode `SWIFT_VERSION` build setting; default to the current stable. Coverage
+# is toolchain-built-in for Swift (no JaCoCo-style dependency to declare), so
+# `has_cov` records the real precondition: whether test targets exist to measure.
+swift_version=""
+swift_version_source="default"
+swift_build_system=""
+has_swift_cov="false"
+
+swift_in_langs="false"
+for l in ${langs[@]+"${langs[@]}"}; do
+	[[ "$l" == "swift" ]] && swift_in_langs="true"
+done
+
+if [[ "$swift_in_langs" == "true" ]]; then
+	# Build system: Xcode wins when a project/workspace is present.
+	xcode_proj="$(find "$cwd" \
+		-path '*/.git' -prune -o \
+		-path '*/.build' -prune -o \
+		\( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -print -quit 2>/dev/null)"
+	package_swift="$(find "$cwd" \
+		-path '*/.git' -prune -o \
+		-path '*/.build' -prune -o \
+		-name 'Package.swift' -print -quit 2>/dev/null)"
+	if [[ -n "$xcode_proj" ]]; then
+		swift_build_system="xcode"
+	elif [[ -n "$package_swift" ]]; then
+		swift_build_system="swiftpm"
+	fi
+
+	# --- version (first match wins) ---
+	# 1) Package.swift tools-version pin: `// swift-tools-version:6.0`
+	if [[ -z "$swift_version" && -n "$package_swift" ]]; then
+		swift_version="$(grep -oiE 'swift-tools-version:[[:space:]]*[0-9]+(\.[0-9]+)?' "$package_swift" 2>/dev/null |
+			grep -oE '[0-9]+(\.[0-9]+)?' | head -n1 || true)"
+	fi
+	# 2) .swift-version (swiftenv)
+	if [[ -z "$swift_version" && -f "$cwd/.swift-version" ]]; then
+		swift_version="$(grep -oE '[0-9]+(\.[0-9]+)?' "$cwd/.swift-version" 2>/dev/null | head -n1 || true)"
+	fi
+	# 3) Xcode SWIFT_VERSION build setting (language mode) from the pbxproj
+	if [[ -z "$swift_version" ]]; then
+		pbxproj="$(find "$cwd" \
+			-path '*/.git' -prune -o \
+			-name 'project.pbxproj' -print -quit 2>/dev/null)"
+		if [[ -n "$pbxproj" ]]; then
+			swift_version="$(grep -oE 'SWIFT_VERSION = [0-9]+(\.[0-9]+)?' "$pbxproj" 2>/dev/null |
+				grep -oE '[0-9]+(\.[0-9]+)?' | head -n1 || true)"
+		fi
+	fi
+	# Default to the current stable Swift at time of writing. Track parsed-vs-
+	# guessed (#258 reliability) — Swift 6 migration work (Slice G) needs the
+	# real declared version, not a fallback.
+	if [[ -n "$swift_version" ]]; then
+		swift_version_source="parsed"
+	else
+		swift_version="6.0"
+		swift_version_source="default"
+	fi
+
+	# --- coverage precondition: test targets present ---
+	# SwiftPM: a `.testTarget(` in Package.swift or a Tests/ dir. Otherwise any
+	# XCTest file (conventionally named `*Tests.swift` / `*Test.swift`).
+	if [[ -n "$package_swift" ]] && grep -qE '\.testTarget\(' "$package_swift" 2>/dev/null; then
+		has_swift_cov="true"
+	elif [[ -d "$cwd/Tests" ]]; then
+		has_swift_cov="true"
+	elif find "$cwd" \
+		-path '*/.git' -prune -o \
+		-path '*/.build' -prune -o \
+		\( -name '*Tests.swift' -o -name '*Test.swift' \) -print -quit 2>/dev/null | grep -q .; then
+		has_swift_cov="true"
+	fi
+fi
+
 # --- language_meta (nested per-language detection metadata) ------------------
 # Replaces the former flat python_version / has_pytest_cov keys; keyed by
 # language so each carries its own metadata (issue #305). Only detected
@@ -348,6 +441,11 @@ if [[ "$java_in_langs" == "true" ]]; then
 	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
 	language_meta_json+="$(printf '"java":{"version":%s,"version_source":%s,"build_system":%s,"gradle_dsl":%s,"has_cov":%s}' \
 		"$(json_str "$java_version")" "$(json_str "$java_version_source")" "$(json_str "$java_build_system")" "$(json_str "$java_gradle_dsl")" "$(json_bool "$has_jacoco")")"
+fi
+if [[ "$swift_in_langs" == "true" ]]; then
+	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
+	language_meta_json+="$(printf '"swift":{"version":%s,"version_source":%s,"build_system":%s,"has_cov":%s}' \
+		"$(json_str "$swift_version")" "$(json_str "$swift_version_source")" "$(json_str "$swift_build_system")" "$(json_bool "$has_swift_cov")")"
 fi
 language_meta_json+="}"
 
