@@ -64,6 +64,12 @@ cycle() { run zsh "$S" --timeout 5 --interval 0 --register-grace 0 "$@" 99; }
 green() { printf '[{"name":"a","state":"SUCCESS","bucket":"pass"},{"name":"b","state":"SUCCESS","bucket":"pass"}]' > "$CHECKS"; }
 red()   { printf '[{"name":"a","state":"FAILURE","bucket":"fail"},{"name":"b","state":"SUCCESS","bucket":"pass"}]' > "$CHECKS"; }
 pending(){ printf '[{"name":"a","state":"IN_PROGRESS","bucket":"pending"}]' > "$CHECKS"; }
+# Required contexts pass, but the Approver gate's jobs are CANCELLED — the
+# normal state of every Approver PR (the pull_request run is superseded by the
+# check_suite run, #190). This must read as GREEN, not NOT-GREEN.
+green_with_cancelled_approver() {
+  printf '[{"name":"test-and-coverage","state":"SUCCESS","bucket":"pass"},{"name":"sonarcloud","state":"SUCCESS","bucket":"pass"},{"name":"approve","state":"CANCELLED","bucket":"cancel"},{"name":"approver-gate","state":"CANCELLED","bucket":"cancel"}]' > "$CHECKS"
+}
 
 @test "usage: missing pr -> exit 2" {
   run zsh "$S"
@@ -108,6 +114,28 @@ pending(){ printf '[{"name":"a","state":"IN_PROGRESS","bucket":"pending"}]' > "$
   cycle
   [ "$status" -eq 6 ]
   echo "$output" | grep -q "result: NOT-GREEN"
+}
+
+@test "cancelled Approver-gate jobs are not failures -> green, reaches approval (exit 4)" {
+  # Regression for the tick-client-snapper run: required contexts all pass but
+  # the approve/approver-gate jobs are CANCELLED by design. The helper must NOT
+  # count the "cancel" bucket as a failure (else it exits 6 NOT-GREEN before the
+  # /approve re-trigger ever fires). With no --retrigger it reaches the approval
+  # gate and reports AWAITING-APPROVAL.
+  green_with_cancelled_approver; export GH_DECISION=REVIEW_REQUIRED
+  cycle
+  [ "$status" -eq 4 ]
+  echo "$output" | grep -q "result: AWAITING-APPROVAL"
+}
+
+@test "cancelled Approver-gate jobs + --retrigger -> posts /approve, approval lands -> READY" {
+  # The whole point of the fix: a green PR whose only non-pass checks are the
+  # cancelled Approver jobs must be allowed to reach (and fire) the re-trigger.
+  green_with_cancelled_approver; export GH_DECISION=REVIEW_REQUIRED GH_DECISION_AFTER=APPROVED
+  cycle --retrigger
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "result: READY"
+  [ "$(wc -l < "$COMMENT_LOG")" -eq 1 ]
 }
 
 @test "pending + timeout -> TIMED-OUT (exit 3)" {
