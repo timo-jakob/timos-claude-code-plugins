@@ -147,6 +147,69 @@ setup() {
   [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
 }
 
+# --- Swift detection (#297 Slice A) -----------------------------------------
+
+@test "detect-stack: SwiftPM Package.swift tools-version + testTarget -> swiftpm, parsed, has_cov" {
+  printf '// swift-tools-version:6.0\nimport PackageDescription\nlet package = Package(\n  name: "X",\n  targets: [\n    .target(name: "X"),\n    .testTarget(name: "XTests", dependencies: ["X"]),\n  ]\n)\n' > Package.swift
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("swift")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.swift.version <<<"$out")" = "6.0" ]
+  [ "$(jq -r .language_meta.swift.version_source <<<"$out")" = "parsed" ]
+  [ "$(jq -r .language_meta.swift.build_system <<<"$out")" = "swiftpm" ]
+  [ "$(jq -r .language_meta.swift.has_cov <<<"$out")" = "true" ]
+}
+
+@test "detect-stack: Xcode project SWIFT_VERSION -> xcode build_system, parsed version, no tests -> has_cov false" {
+  mkdir -p App.xcodeproj
+  printf '\t\t\t\tSWIFT_VERSION = 5.0;\n' > App.xcodeproj/project.pbxproj
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("swift")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.swift.build_system <<<"$out")" = "xcode" ]
+  [ "$(jq -r .language_meta.swift.version <<<"$out")" = "5.0" ]
+  [ "$(jq -r .language_meta.swift.version_source <<<"$out")" = "parsed" ]
+  [ "$(jq -r .language_meta.swift.has_cov <<<"$out")" = "false" ]
+}
+
+@test "detect-stack: Swift both Package.swift and .xcodeproj -> xcode wins (the app is the product)" {
+  printf '// swift-tools-version:5.9\n' > Package.swift
+  mkdir -p App.xcodeproj
+  printf '\t\t\t\tSWIFT_VERSION = 6.0;\n' > App.xcodeproj/project.pbxproj
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .language_meta.swift.build_system <<<"$out")" = "xcode" ]
+  # version: first match wins = Package.swift tools-version (5.9)
+  [ "$(jq -r .language_meta.swift.version <<<"$out")" = "5.9" ]
+}
+
+@test "detect-stack: SwiftPM no tools-version pin -> default 6.0, source=default" {
+  printf 'import PackageDescription\nlet package = Package(name: "X")\n' > Package.swift
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.swift.version <<<"$out")" = "6.0" ]
+  [ "$(jq -r .language_meta.swift.version_source <<<"$out")" = "default" ]
+  [ "$(jq -r .language_meta.swift.build_system <<<"$out")" = "swiftpm" ]
+}
+
+@test "detect-stack: Swift .swift-version pin + Tests/ dir -> parsed version, has_cov true" {
+  printf 'import PackageDescription\n' > Package.swift
+  printf '5.10\n' > .swift-version
+  mkdir -p Tests
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.swift.version <<<"$out")" = "5.10" ]
+  [ "$(jq -r .language_meta.swift.version_source <<<"$out")" = "parsed" ]
+  [ "$(jq -r .language_meta.swift.has_cov <<<"$out")" = "true" ]
+}
+
+@test "detect-stack: no Swift markers -> swift not detected, no language_meta.swift" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("swift")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.language_meta.swift // "absent"' <<<"$out")" = "absent" ]
+}
+
 # --- #406 missing_artifacts: gap-fill detection that drift can't see ----------
 
 @test "detect-stack: #406 missing_artifacts flags every-repo templates that are absent" {
