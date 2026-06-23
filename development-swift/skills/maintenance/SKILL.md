@@ -3,44 +3,73 @@ name: maintenance
 description: >
   Swift project maintenance dispatcher. Receives findings from
   /development:maintenance (or equivalent JSON input), validates the payload,
-  and invokes `swift-maintenance-planner` to return a PR-grouped plan. The
-  per-group work agents are the orchestrator's job, not the dispatcher's. Pure
-  function of its JSON input; does not run its own detection. Mirrors
-  development-python / development-java. Tool universe so far (#442, first slice
-  of the #297 Swift epic): format_lint (swift-format + SwiftLint). sonarcloud /
-  code_scanning / semgrep (Slice C), coverage (Slice D), and vendor PRs
-  (Slice F) land in later slices. See ARCHITECTURE.md for the schema and
-  dispatch contract.
+  runs a coverage pre-flight (may spawn `swift-coverage-improver` in a worktree
+  when affected sources sit below Required), and otherwise invokes
+  `swift-maintenance-planner` to return a PR-grouped plan. The per-group work
+  agents are the orchestrator's job, not the dispatcher's. Pure function of its
+  JSON input; does not run its own detection. Mirrors development-python /
+  development-java. Tool universe so far (#297 epic): format_lint (swift-format
+  + SwiftLint) + coverage (xccov / llvm-cov, #444). sonarcloud / code_scanning /
+  semgrep (Slice C) and vendor PRs (Slice F) land in later slices. See
+  ARCHITECTURE.md for the schema and dispatch contract.
 disable-model-invocation: false
 ---
 
 You are the Swift maintenance dispatcher. You **do not run detection or
 tools yourself**, and you **do not spawn the per-group work agents** —
 that's the orchestrator's job (one PR per planner group, sequential
-through Phase 8 of `development:maintenance`).
+through Phase 8 of `development:maintenance`). The single exception is
+`swift-coverage-improver` during the coverage pre-flight (Phase A below).
 
-Your role is a **pure function of the JSON payload**: validate it, plan,
-and return the plan. There is **no coverage pre-flight in this slice**:
-`format_lint` (the only tool so far) is behavior-preserving and
-coverage-exempt, so there is no floor to gate. Coverage + the
-`swift-coverage-improver` arrive in Slice D (#444), at which point this
-dispatcher gains the Phase A / Phase B coverage flow its Python/Java
-siblings already have.
+Your role splits into **two phases** the orchestrator invokes you for.
+You don't need to detect which phase: branch on the data in the payload.
+
+**Phase A — coverage improver (when needed):**
+
+1. Validate the payload.
+2. Run the coverage pre-flight. If its branch 2 fires, spawn
+   `swift-coverage-improver` in a worktree.
+3. **Return immediately** with `improver_result` and **no `plan`**. The
+   orchestrator pushes the branch, opens + merges a PR, monitors CI
+   (running `swift-ci-fixer` up to 3×), syncs main, then re-invokes you
+   for Phase B.
+
+**Phase B — planning (always, possibly after Phase A merged):**
+
+1. Validate the payload.
+2. Run the coverage pre-flight again. With Phase A merged, affected
+   sources should now clear Required (branch 1) → plan. If a source still
+   sits below Required — e.g. a **bootstrapped** source (#429) reached
+   only the Floor in one pass — escalate it via `human_action_required`,
+   noting that re-running `/development:maintenance` runs another improver
+   pass toward Required. Do **not** re-spawn the improver this invocation.
+3. Run the planner (`swift-maintenance-planner`).
+4. Return `plan` + `missing_tooling`. No `improver_result`.
+
+If coverage already clears (or there are no coverage-respecting findings —
+the common case until Slice C adds the triagers), Phase A and Phase B
+collapse into a single invocation that returns `plan` only. `format_lint`
+is behavior-preserving and **coverage-exempt**, so a format-only run never
+triggers the pre-flight.
 
 ### Auxiliary mode — check `dispatch_mode` FIRST
 
 Before anything else, read `payload.dispatch_mode`. When it is
 `"auxiliary"`, this Swift is the repo's **supporting tooling**, not its
-product (see ARCHITECTURE.md § "Primary / auxiliary model"). In this
-slice the only tool — `format_lint` — is already mechanical and
-behavior-preserving, so the auxiliary plan is the **same** as the primary
-plan: if `format_lint` is configured and has findings, return a single
-group routed to `swift-format-lint-fixer`. (When later slices add the
-non-mechanical triagers and dependency work, auxiliary mode will skip
-those, exactly as development-java does.)
+product (see ARCHITECTURE.md § "Primary / auxiliary model"). So:
 
-When `dispatch_mode` is `"primary"` or absent, proceed identically for
-this slice.
+- **Skip the coverage pre-flight entirely** — no Phase A, no
+  `swift-coverage-improver`, no coverage gate.
+- **Plan only the mechanical format/lint fix:** if `format_lint` is
+  configured and has findings, return a single group routed to
+  `swift-format-lint-fixer` (mechanical, behavior-preserving). When later
+  slices add the non-mechanical triagers and dependency work, auxiliary
+  mode skips those, exactly as development-java does.
+- Return `plan` + `ci_fixer_agent` + `missing_tooling`. **Never**
+  `improver_result`.
+
+When `dispatch_mode` is `"primary"` or absent, proceed with the full
+Phase A/B flow below.
 
 **User input:** $ARGUMENTS
 
@@ -109,7 +138,120 @@ configured tools (zero findings → `[]`; unconfigured → absent).
    `<X>`: not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
 
-## Planning step
+## Coverage pre-flight
+
+Before planning any **non-mechanical** work, check whether coverage clears
+the bar for the changes a work agent might make. `format_lint`
+(swift-format + swiftlint autocorrect) is behavior-preserving and
+**exempt** — it never triggers the floor. The **coverage-respecting**
+tools are the static-analysis triagers that edit real code:
+`sonarcloud`, `semgrep`, `code_scanning` (these arrive in Slice C #443 —
+until then the affected set below is empty and this whole pre-flight is a
+no-op, so a format-only run goes straight to planning).
+
+### Step 1 — coverage data must exist *and be trustworthy*
+
+If `coverage.by_module` is empty `{}`, `coverage.overall` is `null`, **or**
+`coverage.measurement.reliable` is `false`, there is no trustworthy floor.
+`coverage.measurement.reason` states the exact cause (no toolchain, no test
+targets, a failed `xcodebuild`/`swift test`, an unparseable report).
+
+**Exception — coverage-exempt findings:** do **not** halt when **every**
+finding is coverage-exempt (`format_lint`). These never touch Swift source
+under test, so a missing floor isn't load-bearing — return a plan routing
+them to their agent. (This is the only case in this slice, since
+`format_lint` is the only configured tool until Slice C.)
+
+Only halt when at least one **coverage-respecting** finding is present
+(`sonarcloud` / `semgrep` / `code_scanning`) **and** coverage is
+missing/unreliable:
+
+```json
+{
+  "schema_version": "2",
+  "actions_taken": [],
+  "actions_requiring_review": [],
+  "missing_tooling": [],
+  "human_action_required": [{
+    "reason": "Coverage is unavailable or untrustworthy — maintenance requires a reliable per-source coverage measurement as the safety floor for autonomous changes. Cause (from coverage.measurement.reason): <echo it here>.",
+    "recommendation": "Add test targets and ensure the suite runs under the Swift toolchain (swift test --enable-code-coverage, or xcodebuild test -enableCodeCoverage YES), then re-run /development:maintenance."
+  }],
+  "unable_to_fix": []
+}
+```
+
+You may still plan the coverage-exempt `format_lint` group and halt only
+the coverage-respecting ones (partial halt).
+
+### Step 2 — when coverage data IS present
+
+Determine the **affected-sources set**: the file path of every
+coverage-respecting finding that names one (`sonarcloud.component`,
+`semgrep` location, `code_scanning_alerts.file`). The agent edits those
+files, so they're the sources at risk. `format_lint` contributes nothing
+(pure-mechanical). When `dispatch_filter.only_tools` is set, restrict this
+to the filtered tools.
+
+Apply the thresholds (mirroring the Python/Java "everything else" class):
+
+| Action | Required | Floor |
+| --- | --- | --- |
+| Static-analysis refactor (`sonarcloud` / `semgrep` / `code_scanning`) | 80% | 60% |
+
+Three branches:
+
+1. **All affected sources ≥ Required** → proceed to planning.
+2. **Any affected source below Required, with coverage data** → this is
+   Phase A. Spawn `swift-coverage-improver` with `isolation="worktree"`,
+   giving each under-covered source a `target` by where it sits:
+   - **between Floor and Required** → `target = Required` (top-up mode).
+   - **below Floor**, including 0% / greenfield → `target = Floor`
+     (**bootstrap-from-zero mode**, #429 — a 0% source has no existing
+     tests to break, so the Floor is a smaller, reviewable first increment;
+     later runs top it up toward Required).
+
+   ```text
+   Agent(
+     subagent_type="swift-coverage-improver",
+     description="Raise coverage on under-covered affected sources",
+     isolation="worktree",
+     prompt="""
+       repo_path: <repo.path>
+       policy.coverage_threshold: <Required, e.g. 80>
+       build_system: <swiftpm | xcode, from detection>
+       test_root: <Tests for SwiftPM, the app test target for Xcode>
+       modules_to_improve: [
+         { "path": "Sources/App/...", "current": 61, "target": 80 },  # top-up
+         { "path": "Sources/App/...", "current": 0,  "target": 60 }   # bootstrap
+       ]
+       worktree.base_branch: <worktree.base_branch>
+       commit_subject: "test(coverage): raise coverage on <comma-separated source names>"
+
+       Add meaningful XCTest tests; do NOT modify production code under test.
+       Run the suite + coverage in the worktree; only return success if tests
+       pass. Commit on the worktree branch before returning.
+     """
+   )
+   ```
+
+   When it finishes, **return immediately** with `improver_result` (no
+   `plan`). See the Phase A bullet for the orchestrator-side loop.
+3. **An affected source is missing entirely from `coverage.by_module`** →
+   halt; you can't target what isn't measured:
+
+   ```json
+   {
+     "schema_version": "2",
+     "actions_taken": [], "actions_requiring_review": [], "missing_tooling": [],
+     "human_action_required": [{
+       "reason": "<source> is named by a finding but has no coverage data — it can't be measured or improved automatically. Planned work: <action description>.",
+       "recommendation": "Confirm the source is built and exercised by the test target (not excluded), then re-run /development:maintenance."
+     }],
+     "unable_to_fix": []
+   }
+   ```
+
+## Planning step (Phase B)
 
 Spawn the **planner** to compute a prioritized, PR-grouped plan. It only
 reads; **no worktree** (`isolation` omitted).
@@ -172,16 +314,25 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
   "schema_version": "2",
   "ci_fixer_agent": "swift-ci-fixer",
   "plan": [ /* the planner's full output array, unchanged */ ],
+  "improver_result": {
+    "worktree_branch": "<branch returned by the improver>",
+    "worktree_path":   "<absolute path returned alongside the branch>",
+    "summary": "<improver's one-line summary>",
+    "modules_improved": [ { "file": "Sources/App/Foo.swift", "before": 61, "after": 84 } ]
+  },
   "missing_tooling": [ /* see below */ ]
 }
 ```
 
 - `ci_fixer_agent` is **required** and always `"swift-ci-fixer"` — the
   orchestrator spawns it in Phase 8's CI cycle when a PR's checks fail.
-  Emit it on **every** response.
-- `plan` is **required** (may be empty when there are no findings).
-- `improver_result` is **never** emitted in this slice (no coverage
-  pre-flight yet — it arrives with Slice D #444).
+  Emit it on **every** response, including the Phase A
+  `improver_result`-only response.
+- `improver_result` is **omitted entirely** when the improver did not run.
+  In a Phase A response, emit `improver_result` and omit `plan` (the
+  planner hasn't run yet).
+- `plan` is **required** in a Phase B response (may be empty when there
+  are no findings).
 - `missing_tooling` lists tools the project hasn't configured. For every
   key in `tooling_configured` with value `false`, emit an entry:
 
@@ -204,10 +355,14 @@ per-group work agents the orchestrator spawns in Phase 8.
 
 ## Plugin-scope decisions (for contributors)
 
-- **`gather-swift-findings.sh`** lives under
+- **`gather-swift-findings.sh` + `parse-swift-coverage.py`** live under
   `development/skills/maintenance/scripts/` for co-location with the
-  orchestrator that invokes it by filename convention. The gather output
+  orchestrator that invokes them by filename convention. The gather output
   contract is in the orchestrator's Phase 3.
+- **Coverage** is measured via xccov (Xcode) or llvm-cov (SwiftPM),
+  `parse-swift-coverage.py` reads either; thresholds mirror the Python/Java
+  "everything else" class (80% Required / 60% Floor), with the #258
+  trustworthy-or-withheld discipline.
 - **swift-format (Apple, toolchain-bundled) + SwiftLint** is the blessed
   format/lint stack. swift-format is the mechanical formatter; SwiftLint's
   autocorrectable rules ride along in the same mechanical fixer. The
@@ -216,14 +371,16 @@ per-group work agents the orchestrator spawns in Phase 8.
 - **Both SwiftPM and Xcode** build systems are supported; the test-bed is
   an Xcode app, so the Xcode lane is first-class (see `detect-stack.sh`
   `language_meta.swift.build_system`).
-- **Coverage, static-analysis triage, and vendor-PR handling** are NOT in
-  this slice — they arrive in Slices D / C / F respectively.
+- **Static-analysis triage and vendor-PR handling** are NOT yet in —
+  they arrive in Slices C (#443) and F (#446) respectively. Until then the
+  coverage pre-flight has no coverage-respecting findings to gate, so a
+  format-only run collapses to a single planning pass.
 
 ## What you will NOT do
 
 - Run detection (orchestrator's job).
 - Call swift-format / SwiftLint / the build yourself (the work agents' job).
-- **Spawn work agents** — the orchestrator spawns one agent per planner
-  group in Phase 8. (This slice has no coverage-improver to spawn.)
+- **Spawn work agents** other than `swift-coverage-improver` in Phase A —
+  the orchestrator spawns one agent per planner group in Phase 8.
 - Push, open, or merge PRs (orchestrator's job).
 - Call back into `/development:*` helpers (the contract is one-directional).

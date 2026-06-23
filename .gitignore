@@ -4,6 +4,10 @@
 # Claude Code
 .claude/
 
+# Python bytecode cache (the maintenance scripts include parse-*.py helpers)
+__pycache__/
+*.pyc
+
 # Editors
 *.swp
 *.swo

@@ -36,14 +36,17 @@ setup() {
   [ "$(jq -r 'has("notes")' <<<"$output")" = "true" ]
 }
 
-@test "gather-swift: coverage is withheld honestly (null, reliable=false) this slice" {
+@test "gather-swift: no test targets -> coverage withheld honestly (null, reliable=false), no toolchain run" {
+  # A bare Package.swift with no .testTarget / Tests/ / *Tests.swift: measurement
+  # is gated on test presence, so the gather withholds rather than running a
+  # heavy, pointless `swift test`. This keeps the test hermetic even on a host
+  # that HAS the Swift toolchain.
   printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.coverage.overall // "null"' <<<"$output")" = "null" ]
   [ "$(jq -r .coverage.measurement.reliable <<<"$output")" = "false" ]
-  # The reason names the slice where coverage arrives, so it isn't read as a bug.
-  echo "$output" | jq -e '.coverage.measurement.reason | test("Slice D")' >/dev/null
+  echo "$output" | jq -e '.coverage.measurement.reason | test("nothing to cover")' >/dev/null
 }
 
 @test "gather-swift: missing repo path -> usage error, exit 2" {
@@ -70,4 +73,43 @@ setup() {
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
+}
+
+# --- parse-swift-coverage.py unit checks (#444) -----------------------------
+
+@test "parse-swift-coverage: xccov format -> per-file LINE coverage, drops build artifacts" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-swift-coverage.py"
+  cat > "$WORK/xccov.json" <<EOF
+{"lineCoverage":0.5,"targets":[{"name":"App","files":[
+  {"name":"Foo.swift","path":"$WORK/Sources/App/Foo.swift","coveredLines":46,"executableLines":50},
+  {"name":"dep.swift","path":"$WORK/.build/checkouts/X/dep.swift","coveredLines":0,"executableLines":100}
+]}]}
+EOF
+  out=$(cd "$WORK" && python3 "$PARSE" xccov.json)
+  # .build vendored file dropped; overall reflects only project source.
+  [ "$(jq '.overall == 92' <<<"$out")" = "true" ]
+  [ "$(jq '.by_module["Sources/App/Foo.swift"] == 92' <<<"$out")" = "true" ]
+  [ "$(jq '.by_module | has("Sources/App/Foo.swift")' <<<"$out")" = "true" ]
+  [ "$(jq '.by_module | length' <<<"$out")" = "1" ]
+}
+
+@test "parse-swift-coverage: llvm-cov export format -> per-file coverage, drops SDK files" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-swift-coverage.py"
+  cat > "$WORK/llvm.json" <<EOF
+{"data":[{"files":[
+  {"filename":"$WORK/Sources/App/Bar.swift","summary":{"lines":{"count":10,"covered":5,"percent":50.0}}},
+  {"filename":"/Applications/Xcode.app/SDK/System.swift","summary":{"lines":{"count":999,"covered":0,"percent":0}}}
+]}]}
+EOF
+  out=$(cd "$WORK" && python3 "$PARSE" llvm.json)
+  [ "$(jq '.overall == 50' <<<"$out")" = "true" ]
+  [ "$(jq '.by_module["Sources/App/Bar.swift"] == 50' <<<"$out")" = "true" ]
+  [ "$(jq '.by_module | length' <<<"$out")" = "1" ]
+}
+
+@test "parse-swift-coverage: empty / no measurable source -> overall null" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-swift-coverage.py"
+  printf '{}\n' > "$WORK/empty.json"
+  out=$(cd "$WORK" && python3 "$PARSE" empty.json)
+  [ "$(jq -r .overall <<<"$out")" = "null" ]
 }
