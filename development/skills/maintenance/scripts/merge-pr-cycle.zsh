@@ -156,7 +156,19 @@ _await_settle() {
     pending=$(print -r -- "$out" | jq '[.[] | select(.bucket == "pending")] | length')
     if [[ "$pending" -eq 0 ]]; then
       passed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "pass")] | length')
-      failed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length')
+      # A CANCELLED check is NOT a failed check. The Approver gate's
+      # approve/approver-gate jobs are cancelled by design on every run — the
+      # pull_request-triggered run is superseded by the check_suite run (#190)
+      # — so folding the "cancel" bucket into the failure count flips a green
+      # PR to NOT-GREEN on *every* Approver PR and makes the script exit 6
+      # before the `/approve` re-trigger below can ever fire (the
+      # tick-client-snapper symptom: the helper reported NOT-GREEN while all
+      # required contexts were green, and the orchestrator had to hand-roll the
+      # gate dance the helper exists to own). Only the "fail" bucket is a real
+      # required-check failure; a genuinely-cancelled *required* CI check is
+      # caught by branch protection (native auto-merge just won't fire), not by
+      # this advisory verdict.
+      failed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "fail")] | length')
       if [[ "$failed" -eq 0 ]]; then print -- "GREEN"; else print -- "NOT-GREEN"; fi
       return 0
     fi
