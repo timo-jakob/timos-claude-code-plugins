@@ -47,6 +47,26 @@ Supported flags in `$ARGUMENTS`:
   other). The three concerns partition all eight tools, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
   together cover the same set as an unscoped run.
+- `--batch=N` — cap how much of the plan this run processes. After the
+  language plugin's planner ranks the findings into groups (one PR / stage
+  each), process only the **top N groups by priority**, deferring the rest
+  to a later run. `N` must be a positive integer. This is the lever that
+  keeps a multi-PR run tractable under `strict` branch protection, where
+  every merged PR re-stales every other open one (see Phase 8's ordering
+  note — bounding the batch is why #53 is cross-referenced there).
+
+  **The unit is a planner group / PR / stage, not an individual finding.**
+  The planner keeps a tool's findings together — it never subdivides a
+  tool (see `development-python/agents/python-maintenance-planner.md` § 3)
+  — so a group is the smallest reviewable unit, and "top N" is "the N
+  highest-priority groups." **Stage 0 (the coverage pre-flight) is never
+  counted** against the batch — it's a prerequisite, not a discretionary
+  group. Combinable with `--tool` / `--concern` (those scope *which* tools
+  are eligible; `--batch` then caps *how many* of the ranked groups run),
+  `--no-merge`, and `--dry-run` — but under `--dry-run` the planner never
+  runs (Phase 5 stops before dispatch), so `--batch` can only *annotate*
+  what a live run would cap to, not select groups. Default when absent:
+  process the entire plan, exactly as before.
 - `--no-issues` — suppress the GitHub-issue trail (Phase 10). By
   **default** every real run leaves an issue trail for the changes it makes or
   proposes — per-tool scanner debt issues *and* tracking issues for PR-cycle
@@ -73,6 +93,14 @@ Expand it to its tool set (above) and carry that set forward as the
 dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
 exactly as it does for `--tool`. If **both** `--tool` and `--concern`
 are passed, halt with: "Pass --tool or --concern, not both."
+
+When `--batch=N` is set, validate that `N` parses as an integer ≥ 1. On a
+mismatch (non-numeric, zero, or negative), halt with: "Invalid --batch
+'`<value>`'; expected a positive integer (e.g. --batch=5)." Carry `N`
+forward as the **batch cap** applied in Phase 8's Stages 1..N. `--batch` is
+orthogonal to `--tool` / `--concern` — it does not touch the payload or the
+`dispatch_filter`; it only bounds how many of the planner's ranked groups
+the PR cycle processes.
 
 ## Phase 1 — detect
 
@@ -598,6 +626,12 @@ unsupported languages / topics, and stop. Nothing is dispatched or merged.
 (Topic payloads are built and printed too, unless `--tool` / `--concern`
 scoped the run — in which case note that topic checks were skipped.)
 
+If `--batch=N` was also passed, the planner never runs under `--dry-run`
+(planning happens inside the dispatcher in Phase 6, which dry-run skips), so
+there is no ranked plan to cap here. Note in the dry-run output that a live
+run would process **at most the top N planner groups** and defer the rest —
+don't claim a specific group count, since the plan doesn't exist yet.
+
 ## Phase 6 — dispatch per supported language to plan
 
 For each `lang` in `supported`, invoke the matching language plugin via
@@ -908,6 +942,19 @@ spawned with `isolation="worktree"`.
 
 ### Stages 1..N — one PR per planner group, in priority order
 
+**Batch cap — `--batch=N` (when set).** Before applying the ordering rule
+below, decide which groups run this round. Sort the full `response.plan` by
+`priority_score` (descending) and keep the **top N**; the remaining `M − N`
+groups are **deferred** — not dispatched, no PR opened, no agent spawned.
+Record each deferred group (tool, description, finding count, priority
+score) for the Phase 9 *"Deferred this batch"* list. The cap counts
+**planner groups only** — Stage 0 (the coverage pre-flight, already merged
+above) is never counted against `N`. When `--batch` is absent the batch is
+the whole plan, so this step is a no-op. Selection is by **priority**;
+*execution order* among the selected groups is still set by the ordering
+rule below (priority ranks what matters most; the rule sequences the chosen
+work to minimise re-stale churn — the two are independent).
+
 **Ordering rule — worktree stages first, vendor-PR (GitHub-PR) stages last
 (#432).** The planner ranks groups by priority, but under `main`'s `strict`
 ("require branches up to date") + `dismiss_stale_reviews` branch protection a
@@ -943,7 +990,8 @@ rest, so a batch must be serial.
 > **policy decisions for the repo owner** (tracked in #432), not changed by the
 > pipeline here.
 
-For each entry in `response.plan`, in priority order:
+For each entry in the **selected batch** (the whole plan when `--batch` is
+absent; the top-N groups when it is set), in priority order:
 
 1. **Determine the effective base branch** — the user's current branch
    after all prior merges (initially `worktree.base_branch`; updated
@@ -1471,6 +1519,10 @@ Topics processed:    <comma-separated list from supported_topics, or "none">
 ⚠ Scoped to concern: <name> (tools: <comma-separated expanded set>)
   Tools outside this concern were gathered but not dispatched. Re-run
   without --concern (or with the other concerns) to process them.
+<If --batch=N was set AND the plan had more than N groups:>
+⚠ Batch-limited: processed the top <N> of <M> planned groups (by priority).
+  The remaining <M−N> are deferred (listed below) — re-run
+  /development:maintenance to process the next batch.
 
 <If unsupported is non-empty:>
 ⚠ Languages detected but not yet supported:
@@ -1552,6 +1604,13 @@ run start; the 🚀 PRs section below shows what was tackled.>
   - #<pr> [stage 0: coverage] <title> — <merged|escalated after 3 CI fixes>
   - #<pr> [group 1: <tool>] <title> — <merged|escalated after 3 CI fixes>
   - ...
+
+<If --batch=N deferred any planner groups (M > N):>
+⏸ Deferred this batch — not processed (M−N):
+  - [<tool>] <description> — <finding-count> finding(s), priority <score>
+  - ...
+  Re-run /development:maintenance (optionally with --batch) to process the
+  next batch. These groups remain tracked as scanner-debt issues (Phase 10).
 
 <If any stage or vendor PR ended automerge_armed / awaiting approval (#224):>
 ⏳ Awaiting approval — not merged (N):
@@ -1726,7 +1785,12 @@ split.
 
 **Honor the run's scope (#53 / #57).** Don't issue-spam: file only for
 outcomes this run actually produced. A `--tool` / `--concern`-scoped run
-files issues only for the tools in scope.
+files issues only for the tools in scope. A `--batch`-capped run files
+PR-cycle follow-ups (10b) only for the groups it actually processed —
+groups **deferred** by the batch cap weren't acted on, so they get no 10b
+follow-up; they stay visible through the 10a scanner-debt issues, which
+track the full finding backlog regardless of how many groups this run
+processed.
 
 ### Report
 
