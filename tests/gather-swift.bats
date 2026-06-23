@@ -75,6 +75,28 @@ setup() {
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 
+@test "gather-swift: bare project -> all four tools report not-configured (#443)" {
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  for tool in format_lint sonarcloud code_scanning semgrep; do
+    [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
+  done
+  # tooling_configured always carries every key, even when false.
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "4" ]
+}
+
+@test "gather-swift: semgrep is always deferred (false) even when a semgrep config is present (#443)" {
+  # Semgrep's Swift support is experimental with an empty rule registry, so it
+  # is hardcoded not-configured — never fetched, never an empty findings array.
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  printf 'repos:\n  - repo: https://github.com/semgrep/semgrep\n' > "$WORK/.pre-commit-config.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.semgrep <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("semgrep")' <<<"$output")" = "false" ]
+}
+
 # --- parse-swift-coverage.py unit checks (#444) -----------------------------
 
 @test "parse-swift-coverage: xccov format -> per-file LINE coverage, drops build artifacts" {

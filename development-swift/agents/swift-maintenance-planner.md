@@ -37,6 +37,10 @@ Your prompt contains:
 - **Severity component** (normalize each tool's scale, case-insensitively):
   - swift-format / SwiftLint format findings: `ERROR` → 0.7,
     `WARNING` / `MINOR` → 0.35, `INFO` → 0.1.
+  - Sonar: `BLOCKER` → 1.0, `CRITICAL` → 0.85, `MAJOR` → 0.6,
+    `MINOR` → 0.35, `INFO` → 0.1.
+  - Code Scanning (CodeQL/Scorecard): `critical` → 0.85, `high` → 0.7,
+    `medium` → 0.5, `low` → 0.3, `warning` → 0.2, `note`/`null` → 0.1.
   - Unmapped / missing severity → 0.3 (a sensible mid-low default so a
     finding is never dropped to zero priority for an unknown scale).
 
@@ -77,10 +81,10 @@ when they span different rules, files, or severities.
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
-> **Tool universe so far (#442, first slice of the #297 Swift epic):
-> `format_lint` only.** Later slices add `sonarcloud` / `code_scanning` /
-> `semgrep` (Slice C), coverage (Slice D), and the vendor-PR tools
-> (Slice F), each extending the map below.
+> **Tool universe so far (#297 epic): `format_lint`, `sonarcloud`,
+> `code_scanning`.** All are one-group-per-tool. `semgrep` is deferred for
+> Swift (experimental, empty rule registry — #443). The vendor-PR tools
+> (Slice F #446) extend the map below later.
 
 ### 4. Group priority + ordering
 
@@ -96,9 +100,11 @@ Order groups by descending priority. Ties broken by:
 | Source tool | Agent for this group | `isolation` |
 | --- | --- | --- |
 | `format_lint` | `swift-format-lint-fixer` | `true` |
+| `sonarcloud` | `swift-sonar-triage` | `true` |
+| `code_scanning` | `swift-code-scanning-triage` | `true` |
 
-`swift-format-lint-fixer` edits local files, so its group is
-`isolation: true`. A single group never spans multiple agents.
+All three agents edit local files, so their groups are `isolation: true`.
+A single group never spans multiple agents.
 
 ## Output
 
