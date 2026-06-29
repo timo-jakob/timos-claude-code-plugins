@@ -1,0 +1,216 @@
+{
+  "data": [
+    {
+      "files": [
+        {
+          "branches": [],
+          "expansions": [],
+          "filename": "/private/var/folders/gk/7rwv_x915wl4l3hhyk2f8m440000gn/T/tmp.U9nfELFb0d/Sources/Demo/Demo.swift",
+          "mcdc_records": [],
+          "segments": [
+            [
+              2,
+              42,
+              1,
+              true,
+              true,
+              false
+            ],
+            [
+              2,
+              52,
+              0,
+              true,
+              true,
+              false
+            ],
+            [
+              2,
+              53,
+              1,
+              true,
+              false,
+              false
+            ],
+            [
+              2,
+              56,
+              1,
+              true,
+              true,
+              false
+            ],
+            [
+              2,
+              58,
+              1,
+              true,
+              false,
+              false
+            ],
+            [
+              2,
+              60,
+              0,
+              false,
+              false,
+              false
+            ],
+            [
+              3,
+              44,
+              0,
+              true,
+              true,
+              false
+            ],
+            [
+              3,
+              53,
+              0,
+              false,
+              false,
+              false
+            ]
+          ],
+          "summary": {
+            "branches": {
+              "count": 0,
+              "covered": 0,
+              "notcovered": 0,
+              "percent": 0
+            },
+            "functions": {
+              "count": 2,
+              "covered": 1,
+              "percent": 50
+            },
+            "instantiations": {
+              "count": 2,
+              "covered": 1,
+              "percent": 50
+            },
+            "lines": {
+              "count": 2,
+              "covered": 1,
+              "percent": 50
+            },
+            "mcdc": {
+              "count": 0,
+              "covered": 0,
+              "notcovered": 0,
+              "percent": 0
+            },
+            "regions": {
+              "count": 4,
+              "covered": 2,
+              "notcovered": 2,
+              "percent": 50
+            }
+          }
+        }
+      ],
+      "functions": [
+        {
+          "branches": [],
+          "count": 1,
+          "filenames": [
+            "/private/var/folders/gk/7rwv_x915wl4l3hhyk2f8m440000gn/T/tmp.U9nfELFb0d/Sources/Demo/Demo.swift"
+          ],
+          "mcdc_records": [],
+          "name": "$s4DemoAAV7coveredyS2iF",
+          "regions": [
+            [
+              2,
+              42,
+              2,
+              60,
+              1,
+              0,
+              0,
+              0
+            ],
+            [
+              2,
+              52,
+              2,
+              53,
+              0,
+              0,
+              0,
+              0
+            ],
+            [
+              2,
+              56,
+              2,
+              58,
+              1,
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        {
+          "branches": [],
+          "count": 0,
+          "filenames": [
+            "/private/var/folders/gk/7rwv_x915wl4l3hhyk2f8m440000gn/T/tmp.U9nfELFb0d/Sources/Demo/Demo.swift"
+          ],
+          "mcdc_records": [],
+          "name": "$s4DemoAAV9uncoveredyS2iF",
+          "regions": [
+            [
+              3,
+              44,
+              3,
+              53,
+              0,
+              0,
+              0,
+              0
+            ]
+          ]
+        }
+      ],
+      "totals": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0
+        },
+        "functions": {
+          "count": 7,
+          "covered": 6,
+          "percent": 85.71428571428571
+        },
+        "instantiations": {
+          "count": 7,
+          "covered": 6,
+          "percent": 85.71428571428571
+        },
+        "lines": {
+          "count": 22,
+          "covered": 18,
+          "percent": 81.81818181818183
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0
+        },
+        "regions": {
+          "count": 16,
+          "covered": 13,
+          "notcovered": 3,
+          "percent": 81.25
+        }
+      }
+    }
+  ],
+  "type": "llvm.coverage.json.export",
+  "version": "3.0.1"
+}
