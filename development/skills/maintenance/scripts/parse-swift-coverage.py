@@ -127,6 +127,7 @@ def regions_from_xccov(doc, root):
                     end_line = int(functions[i + 1].get("lineNumber", start_line + 1)) - 1
                 else:
                     end_line = start_line + max(exec_lines - 1, 0)
+                end_line = max(end_line, start_line)
                 pct = round(100.0 * covered_lines / exec_lines, 1) if exec_lines else 0.0
                 regions.append({
                     "file": file_key,

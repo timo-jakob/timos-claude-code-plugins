@@ -154,6 +154,7 @@ EOF
   [ "$(jq '[.regions[] | select(.name | test("covered"))][0].pct >= 99' <<<"$out")" = "true" ]
   [ "$(jq '[.regions[] | select(.name | test("uncovered"))][0].pct == 0' <<<"$out")" = "true" ]
   [ "$(jq '.regions[0] | has("start_line") and has("end_line")' <<<"$out")" = "true" ]
+  [ "$(jq '[.regions[] | select(.start_line >= 1 and .end_line >= .start_line)] | length >= 1' <<<"$out")" = "true" ]
 }
 
 @test "parse-swift-coverage: containment - line inside covered function resolves to region, line above all functions does not" {
