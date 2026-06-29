@@ -209,60 +209,44 @@ Apply the thresholds (mirroring the Python/Java "everything else" class):
 | --- | --- | --- |
 | Static-analysis refactor (`sonarcloud` / `semgrep` / `code_scanning`) | 80% | 60% |
 
-**Coverage is human-driven (#456).** Autonomous coverage work is limited to
-a **small bootstrap up to the Floor** — reaching **Required is the human's
-job**. This both keeps the #429 from-zero bootstrap (a small, reviewable
-increment a 0% source can't regress) and avoids #456's dead-end, where the
-improver burned a whole PR cycle chasing Required only for the finding to
-escalate anyway. So:
+Three branches:
 
 1. **All affected sources ≥ Required** → proceed to planning.
-2. **Any affected source below Required, with coverage data:**
-   - **below Floor** (incl. 0% / greenfield) → this is Phase A: spawn
-     `swift-coverage-improver` with `target = Floor` (the allowed small
-     bootstrap, #429). After its PR merges, Phase B re-runs the pre-flight;
-     if the source now sits between Floor and Required, the next bullet
-     escalates the residual gap to a human — the improver does **not** make
-     a second autonomous pass toward Required.
+2. **Any affected source below Required, with coverage data** → this is
+   Phase A. Spawn `swift-coverage-improver` with `isolation="worktree"`,
+   giving each under-covered source a `target` by where it sits:
+   - **between Floor and Required** → `target = Required` (top-up mode).
+   - **below Floor**, including 0% / greenfield → `target = Floor`
+     (**bootstrap-from-zero mode**, #429 — a 0% source has no existing
+     tests to break, so the Floor is a smaller, reviewable first increment;
+     later runs top it up toward Required).
 
-     ```text
-     Agent(
-       subagent_type="swift-coverage-improver",
-       description="Bootstrap coverage on from-zero affected sources to the Floor",
-       isolation="worktree",
-       prompt="""
-         repo_path: <repo.path>
-         policy.coverage_threshold: <Floor, e.g. 60>
-         build_system: <swiftpm | xcode, from detection>
-         test_root: <Tests for SwiftPM, the app test target for Xcode>
-         modules_to_improve: [
-           { "path": "Sources/App/...", "current": 0, "target": 60 }
-         ]
-         worktree.base_branch: <worktree.base_branch>
-         commit_subject: "test(coverage): bootstrap coverage on <comma-separated source names>"
+   ```text
+   Agent(
+     subagent_type="swift-coverage-improver",
+     description="Raise coverage on under-covered affected sources",
+     isolation="worktree",
+     prompt="""
+       repo_path: <repo.path>
+       policy.coverage_threshold: <Required, e.g. 80>
+       build_system: <swiftpm | xcode, from detection>
+       test_root: <Tests for SwiftPM, the app test target for Xcode>
+       modules_to_improve: [
+         { "path": "Sources/App/...", "current": 61, "target": 80 },  # top-up
+         { "path": "Sources/App/...", "current": 0,  "target": 60 }   # bootstrap
+       ]
+       worktree.base_branch: <worktree.base_branch>
+       commit_subject: "test(coverage): raise coverage on <comma-separated source names>"
 
-         Add meaningful XCTest tests; do NOT modify production code under test.
-         Run the suite + coverage in the worktree; only return success if tests
-         pass. Commit on the worktree branch before returning.
-       """
-     )
-     ```
+       Add meaningful XCTest tests; do NOT modify production code under test.
+       Run the suite + coverage in the worktree; only return success if tests
+       pass. Commit on the worktree branch before returning.
+     """
+   )
+   ```
 
-     When it finishes, **return immediately** with `improver_result` (no
-     `plan`). See the Phase A bullet for the orchestrator-side loop.
-   - **between Floor and Required** → do **NOT** spawn the improver (no
-     autonomous top-up toward Required — that's human-driven, #456).
-     Escalate via `human_action_required`, and you may still plan the
-     coverage-exempt `format_lint` group:
-
-     ```json
-     {
-       "human_action_required": [{
-         "reason": "<source> sits at <X>% (>= Floor 60, < Required 80); a coverage-respecting finding (<rule>) needs Required before it can be auto-fixed, and reaching Required is human-driven (#456).",
-         "recommendation": "Add tests to bring <source> to 80% (or address the finding manually), then re-run /development:maintenance."
-       }]
-     }
-     ```
+   When it finishes, **return immediately** with `improver_result` (no
+   `plan`). See the Phase A bullet for the orchestrator-side loop.
 
 3. **An affected source is missing entirely from `coverage.by_module`** →
    halt; you can't target what isn't measured:
@@ -415,9 +399,6 @@ per-group work agents the orchestrator spawns in Phase 8.
 - **Static-analysis triage** (`sonarcloud`, `code_scanning`) is in as of
   Slice C (#443) — `semgrep` is deferred (experimental Swift support, empty
   rule registry). **Vendor-PR handling** lands in Slice F (#446).
-- **Coverage is human-driven (#456):** the improver does only the small
-  from-zero bootstrap to the Floor; the Floor→Required gap escalates to a
-  human rather than an autonomous top-up.
 
 ## What you will NOT do
 
