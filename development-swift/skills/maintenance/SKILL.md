@@ -9,9 +9,10 @@ description: >
   agents are the orchestrator's job, not the dispatcher's. Pure function of its
   JSON input; does not run its own detection. Mirrors development-python /
   development-java. Tool universe so far (#297 epic): format_lint (swift-format
-  + SwiftLint) + coverage (xccov / llvm-cov, #444). sonarcloud / code_scanning /
-  semgrep (Slice C) and vendor PRs (Slice F) land in later slices. See
-  ARCHITECTURE.md for the schema and dispatch contract.
+  + SwiftLint), sonarcloud (Sonar Swift), code_scanning (CodeQL swift +
+  Scorecard), and coverage (xccov / llvm-cov, #444). semgrep is deferred for
+  Swift (#443); vendor PRs land in Slice F (#446). See ARCHITECTURE.md for the
+  schema and dispatch contract.
 disable-model-invocation: false
 ---
 
@@ -62,9 +63,11 @@ product (see ARCHITECTURE.md § "Primary / auxiliary model"). So:
   `swift-coverage-improver`, no coverage gate.
 - **Plan only the mechanical format/lint fix:** if `format_lint` is
   configured and has findings, return a single group routed to
-  `swift-format-lint-fixer` (mechanical, behavior-preserving). When later
-  slices add the non-mechanical triagers and dependency work, auxiliary
-  mode skips those, exactly as development-java does.
+  `swift-format-lint-fixer` (mechanical, behavior-preserving). The
+  non-mechanical triagers (`sonarcloud`, `code_scanning`) and — when it
+  lands — dependency work are **skipped** in auxiliary mode (an auxiliary
+  Swift isn't the product), exactly as development-java does. List the
+  skipped tools in a note so the summary is honest.
 - Return `plan` + `ci_fixer_agent` + `missing_tooling`. **Never**
   `improver_result`.
 
@@ -86,9 +89,11 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "swift",
   "dispatch_mode": "primary",
   "language_meta": { "version": "6.0", "manifests": ["Package.swift"] },
-  "tooling_configured": { "format_lint": true },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": false },
   "findings_by_tool": {
-    "format_lint": [ /* swift-format findings: type, severity, rule, component, line, message, key */ ]
+    "format_lint":          [ /* swift-format findings: type, severity, rule, component, line, message, key */ ],
+    "sonarcloud":           [ /* normalized Sonar findings: type, severity, rule, component, line, message, key */ ],
+    "code_scanning_alerts": [ /* CodeQL swift + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ]
   },
   "coverage": { "overall": null, "by_module": {}, "measurement": { "reliable": false, "reason": "..." } },
   "policy": { "coverage_threshold": 80, "severity_gate": "high" },
@@ -102,9 +107,13 @@ not set up for this project. `findings_by_tool` only contains keys for
 configured tools (zero findings → `[]`; unconfigured → absent).
 `dispatch_filter` is optional — added only when the user passed `--tool`.
 
-> **Tool universe (this slice).** `development-swift` supports
-> `format_lint` (swift-format + SwiftLint). Validate and route against the
-> supported set only; later slices extend it.
+> **Tool universe (so far).** `development-swift` supports `format_lint`
+> (swift-format + SwiftLint), `sonarcloud` (Sonar Swift analyzer), and
+> `code_scanning` (CodeQL swift + Scorecard), with coverage measured via
+> xccov / llvm-cov. `semgrep` is **deferred** for Swift (experimental,
+> empty rule registry — #443) and always reports `tooling_configured:
+> false`. Vendor-PR handling lands in Slice F (#446). Validate and route
+> against the supported set only.
 
 ## Validation
 
@@ -131,11 +140,12 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 3. Confirm `language == "swift"`. If not, error — the orchestrator misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). Each name in
-   `only_tools` must be a supported tool: `format_lint`. Unknown names
-   halt with: "Unknown tool '`<X>`' in dispatch_filter.only_tools;
-   supported: format_lint." Each name with
-   `tooling_configured.<name> == false` halts with: "Cannot scope to
-   `<X>`: not configured for this project. Set it up first via
+   `only_tools` must be a supported tool: `format_lint`, `sonarcloud`,
+   `code_scanning`. Unknown names halt with: "Unknown tool '`<X>`' in
+   dispatch_filter.only_tools; supported: format_lint, sonarcloud,
+   code_scanning." (`semgrep` is deferred for Swift — treat it as unknown.)
+   Each name with `tooling_configured.<name> == false` halts with: "Cannot
+   scope to `<X>`: not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
 
 ## Coverage pre-flight
@@ -144,10 +154,10 @@ Before planning any **non-mechanical** work, check whether coverage clears
 the bar for the changes a work agent might make. `format_lint`
 (swift-format + swiftlint autocorrect) is behavior-preserving and
 **exempt** — it never triggers the floor. The **coverage-respecting**
-tools are the static-analysis triagers that edit real code:
-`sonarcloud`, `semgrep`, `code_scanning` (these arrive in Slice C #443 —
-until then the affected set below is empty and this whole pre-flight is a
-no-op, so a format-only run goes straight to planning).
+tools are the static-analysis triagers that edit real code: `sonarcloud`
+and `code_scanning` (a file-bearing CodeQL alert). A format-only run has an
+empty affected set, so the pre-flight is a no-op and it goes straight to
+planning.
 
 ### Step 1 — coverage data must exist *and be trustworthy*
 
@@ -163,7 +173,7 @@ them to their agent. (This is the only case in this slice, since
 `format_lint` is the only configured tool until Slice C.)
 
 Only halt when at least one **coverage-respecting** finding is present
-(`sonarcloud` / `semgrep` / `code_scanning`) **and** coverage is
+(`sonarcloud` or a file-bearing `code_scanning` alert) **and** coverage is
 missing/unreliable:
 
 ```json
@@ -186,11 +196,12 @@ the coverage-respecting ones (partial halt).
 ### Step 2 — when coverage data IS present
 
 Determine the **affected-sources set**: the file path of every
-coverage-respecting finding that names one (`sonarcloud.component`,
-`semgrep` location, `code_scanning_alerts.file`). The agent edits those
-files, so they're the sources at risk. `format_lint` contributes nothing
-(pure-mechanical). When `dispatch_filter.only_tools` is set, restrict this
-to the filtered tools.
+coverage-respecting finding that names one (`sonarcloud.component`, a
+file-bearing `code_scanning_alerts.file`). The agent edits those files, so
+they're the sources at risk. `format_lint` contributes nothing
+(pure-mechanical); file-less `code_scanning` findings (Scorecard
+repo-policy, workflow-pinning) contribute nothing either. When
+`dispatch_filter.only_tools` is set, restrict this to the filtered tools.
 
 Apply the thresholds (mirroring the Python/Java "everything else" class):
 
@@ -236,6 +247,7 @@ Three branches:
 
    When it finishes, **return immediately** with `improver_result` (no
    `plan`). See the Phase A bullet for the orchestrator-side loop.
+
 3. **An affected source is missing entirely from `coverage.by_module`** →
    halt; you can't target what isn't measured:
 
@@ -347,7 +359,20 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
 
   Each tool's `summary` / `what_it_provides` / `how_to_add` copy lives in
   its agent file's `missing_tool_recommendation` block (`format_lint` →
-  `swift-format-lint-fixer.md`); reuse it verbatim.
+  `swift-format-lint-fixer.md`, `sonarcloud` → `swift-sonar-triage.md`,
+  `code_scanning` → `swift-code-scanning-triage.md`); reuse it verbatim.
+
+  **`semgrep` is the exception** — it has no triage agent (deferred for
+  Swift, #443). Emit its entry inline rather than from an agent file:
+
+  ```json
+  {
+    "tool": "semgrep",
+    "summary": "semgrep is deferred for Swift.",
+    "what_it_provides": "Pattern-based SAST. Semgrep's Swift support is experimental and the rule registry ships no Swift rules, so `--config=auto` finds nothing — a triage agent would falsely imply coverage.",
+    "how_to_add": "Deferred until Semgrep's registry gains Swift rules (#443). CodeQL (code_scanning) covers SAST for Swift in the meantime."
+  }
+  ```
 
 `actions_taken`, `actions_requiring_review`, and `unable_to_fix` are
 **not** the dispatcher's responsibility — they're produced by the
@@ -371,10 +396,9 @@ per-group work agents the orchestrator spawns in Phase 8.
 - **Both SwiftPM and Xcode** build systems are supported; the test-bed is
   an Xcode app, so the Xcode lane is first-class (see `detect-stack.sh`
   `language_meta.swift.build_system`).
-- **Static-analysis triage and vendor-PR handling** are NOT yet in —
-  they arrive in Slices C (#443) and F (#446) respectively. Until then the
-  coverage pre-flight has no coverage-respecting findings to gate, so a
-  format-only run collapses to a single planning pass.
+- **Static-analysis triage** (`sonarcloud`, `code_scanning`) is in as of
+  Slice C (#443) — `semgrep` is deferred (experimental Swift support, empty
+  rule registry). **Vendor-PR handling** lands in Slice F (#446).
 
 ## What you will NOT do
 

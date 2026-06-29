@@ -96,6 +96,74 @@ if [[ "$has_format_lint_config" == "true" ]]; then
 	fi
 fi
 
+# --- sonarcloud (Sonar Swift analyzer) — #443 -------------------------------
+# Configured when sonar-project.properties is present. Findings + the main
+# branch Quality Gate verdict come from the language-agnostic
+# gather-sonarcloud.zsh helper (org+project from the properties file; token
+# resolved inside the helper). Swift rule keys look like `swift:Sxxxx`.
+has_sonar_config="false"
+[[ -f "sonar-project.properties" ]] && has_sonar_config="true"
+sonar_json="null"
+sonar_quality_gate="null"
+if [[ "$has_sonar_config" == "true" ]]; then
+	sonar_org=$(grep -E '^[[:space:]]*sonar\.organization' sonar-project.properties 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \r')
+	sonar_project=$(grep -E '^[[:space:]]*sonar\.projectKey' sonar-project.properties 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \r')
+	if [[ -z "$sonar_org" || -z "$sonar_project" ]]; then
+		sonar_json="[]"
+		notes+=("sonarcloud is configured but sonar-project.properties is missing 'sonar.organization' or 'sonar.projectKey'; live findings can't be fetched until both are set.")
+	else
+		sonar_raw="$(mktemp)"
+		sonar_stderr="$(mktemp)"
+		if "$SCRIPT_DIR/gather-sonarcloud.zsh" "$sonar_org" "$sonar_project" >"$sonar_raw" 2>"$sonar_stderr"; then
+			sonar_json="$(jq '.findings // []' "$sonar_raw")"
+			sonar_quality_gate="$(jq -c '.quality_gate // null' "$sonar_raw")"
+		else
+			sonar_json="[]"
+		fi
+		sonar_note="$(tail -1 "$sonar_stderr" 2>/dev/null || true)"
+		[[ -n "$sonar_note" ]] && notes+=("$sonar_note")
+		rm -f "$sonar_raw" "$sonar_stderr"
+	fi
+fi
+
+# --- code_scanning (CodeQL swift + Scorecard) — #443 ------------------------
+# Configured when a CodeQL workflow is present (bootstrap generates
+# .github/workflows/codeql.yml). Alerts come from the language-agnostic
+# gather-github-security.zsh helper (gh API; free, no quota). The alert shape
+# is identical across languages — only the CodeQL rule IDs differ (swift/...).
+has_code_scanning_config="false"
+if ls .github/workflows/codeql*.yml >/dev/null 2>&1; then
+	has_code_scanning_config="true"
+fi
+code_scanning_json="null"
+if [[ "$has_code_scanning_config" == "true" ]]; then
+	cs_helper="$SCRIPT_DIR/gather-github-security.zsh"
+	if [[ ! -x "$cs_helper" ]]; then
+		code_scanning_json="[]"
+		notes+=("Code Scanning gather: helper script not found or not executable at $cs_helper. Update your plugin install (cd to the marketplace dir, 'git pull').")
+	else
+		cs_raw="$(mktemp)"
+		cs_stderr="$(mktemp)"
+		if "$cs_helper" "$repo" >"$cs_raw" 2>"$cs_stderr"; then
+			code_scanning_json="$(jq '.code_scanning_alerts' "$cs_raw")"
+			cs_label="ok"
+		else
+			code_scanning_json="[]"
+			cs_label="failed"
+		fi
+		cs_content="$(tr '\n' ' ' <"$cs_stderr" 2>/dev/null | sed 's/[[:space:]]*$//' || true)"
+		[[ -n "$cs_content" ]] && notes+=("Code Scanning gather ($cs_label): $cs_content")
+		rm -f "$cs_raw" "$cs_stderr"
+	fi
+fi
+
+# --- semgrep — DEFERRED for Swift (#443) ------------------------------------
+# Semgrep's Swift support is experimental and the rule registry ships NO Swift
+# rules — `--config=auto` finds nothing, so a triage agent would falsely imply
+# coverage. Reported as not-configured (never an empty findings array); no
+# gather, no agent. Revisit when the registry gains Swift rules (#443).
+has_semgrep_config="false"
+
 # --- coverage (xccov / llvm-cov) — #444, #258 reliability --------------------
 # Measure per-source-file LINE coverage when the Swift toolchain is available
 # AND test targets exist. A figure is only trustworthy when the test run
@@ -220,7 +288,13 @@ fi
 # --- emit --------------------------------------------------------------------
 jq -n \
 	--argjson format_lint_cfg "$has_format_lint_config" \
+	--argjson sonar_cfg "$has_sonar_config" \
+	--argjson code_scanning_cfg "$has_code_scanning_config" \
+	--argjson semgrep_cfg "$has_semgrep_config" \
 	--argjson format_lint_findings "$format_lint_json" \
+	--argjson sonar_findings "$sonar_json" \
+	--argjson cs_findings "$code_scanning_json" \
+	--argjson sonar_quality_gate "$sonar_quality_gate" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--arg coverage_source "$coverage_source" \
@@ -229,11 +303,16 @@ jq -n \
 	--argjson notes "$notes_json" '
 {
   tooling_configured: {
-    format_lint: $format_lint_cfg
+    format_lint:   $format_lint_cfg,
+    sonarcloud:    $sonar_cfg,
+    code_scanning: $code_scanning_cfg,
+    semgrep:       $semgrep_cfg
   },
   findings_by_tool: (
     {} +
-    (if $format_lint_findings != null then {format_lint: $format_lint_findings} else {} end)
+    (if $format_lint_findings != null then {format_lint:          $format_lint_findings} else {} end) +
+    (if $sonar_findings       != null then {sonarcloud:           $sonar_findings}       else {} end) +
+    (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,
@@ -244,6 +323,7 @@ jq -n \
       reason:   $coverage_reason
     }
   },
+  sonar_quality_gate: $sonar_quality_gate,
   notes: $notes
 }
 '
