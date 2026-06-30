@@ -99,6 +99,7 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "coverage": {
     "overall": 84,
     "by_module": { "src/main/java/com/example/Foo.java": 92, "src/main/java/com/example/Cli.java": 61 },
+    "regions": [ /* per-method {file, name, start_line, end_line, pct} from JaCoCo */ ],
     "measurement": { "source": "gradle", "gradle_exit": 0, "reliable": true, "reason": "measured with '\''./gradlew test jacocoTestReport'\'' (exit 0)." }
   },
   "policy": { "coverage_threshold": 90, "severity_gate": "high" },
@@ -244,20 +245,28 @@ be blocked behind a coverage measurement they don't need.
 
 ### Step 2 — when coverage data IS present
 
-Determine the **affected-classes set**: the file path of every
-non-mechanical finding that names one — `sonarcloud.component`,
-`semgrep` location, and `code_scanning_alerts.file`. The agent edits those
-files, so they're the classes at risk. These exemptions contribute nothing
-to the set: `format_lint` (pure-mechanical, behavior-preserving); the
-file-less `code_scanning` findings (Scorecard repo-policy alerts, and the
-Tier A action-pinning fixes that edit `.github/workflows/*.yml`, not Java
-source); `versioning` (the advisor edits the build script's version
-config, never Java source under test); `grpc` (the advisor edits the build
-script's protobuf/codegen wiring — generated stubs aren't source under
-test, and the advisor recommends excluding them from coverage); and
-`openapi` (likewise edits the build script's openapi-generator wiring, not
-source under test). When `dispatch_filter.only_tools` is set, restrict this
-to the filtered tools.
+Two kinds of affected work gate **differently**: refactor findings gate on
+the **enclosing method (region-scoped)**, major upgrades gate on the
+**whole module** (they have no per-finding line).
+
+**(A) Refactor findings — region-scoped (epic #462).** For every
+coverage-respecting finding that names a file + line (`sonarcloud.component`,
+`semgrep` location, a file-bearing `code_scanning_alerts.file`), resolve its
+**enclosing method region** from `coverage.regions` (JaCoCo per-method data):
+the entry whose `file` matches and whose `start_line ≤ finding.line ≤
+end_line`, innermost on overlap. Gate that region against a **single Required
+threshold (80%)** — no Floor tier. When no region contains the line (a
+class-/file-level finding, or a parser gap), **fall back to the whole-file
+figure** `coverage.by_module[file]`. **Dedupe one improver work-item per
+region.** These exemptions contribute nothing: `format_lint`
+(pure-mechanical); file-less `code_scanning` (Scorecard repo-policy + Tier A
+action-pinning that edits `.github/workflows/*.yml`); `versioning` / `grpc` /
+`openapi` (build-script wiring, not source under test). When
+`dispatch_filter.only_tools` is set, restrict to the filtered tools.
+
+**(B) Major dep upgrades — whole-module (unchanged).** A `gradle`-major
+upgrade has no per-finding line, so it can't be region-scoped — keep the
+whole-module scan below (Step 2b) against the major thresholds.
 
 #### Step 2b — major dep upgrades (the no-file-path case)
 
@@ -274,39 +283,44 @@ local files, so module coverage isn't load-bearing for them.
 
 | Action | Required | Floor |
 | --- | --- | --- |
-| Major-version dep upgrade (`java-major-upgrade`) | 90% | 70% |
-| Sonar / semgrep / code_scanning refactor (non-mechanical) | 80% | 60% |
+| Major-version dep upgrade (whole-module, Step 2b) | 90% | 70% |
+| Refactor finding (region-scoped — enclosing method, or whole-file fallback) | 80% | — (single threshold) |
 
 Three branches:
 
-1. **All affected classes ≥ Required** → proceed to planning.
-2. **Any affected class below Required, with coverage data** → this is
-   Phase A. Spawn `java-coverage-improver` with `isolation="worktree"`,
-   giving each under-covered class a `target` by where it sits:
-   - **between Floor and Required** → `target = Required` (top-up mode).
-   - **below Floor**, including 0% / greenfield → `target = Floor`
-     (**bootstrap-from-zero mode**, #429). The floor exists to stop the
-     improver rubber-stamping lines on a class whose *existing* tests it
-     can't judge — but a class at 0% has **no existing tests to break**, so
-     it's the lowest-regression-risk target for *new* tests, not the
-     riskiest. Aim for the Floor first (a smaller, reviewable increment);
-     subsequent runs top it up toward Required.
+1. **All affected regions ≥ Required, and all major-scan classes ≥ Required**
+   → proceed to planning.
+2. **Something below Required, with coverage data** → this is Phase A. Spawn
+   `java-coverage-improver` with `isolation="worktree"`. The
+   `modules_to_improve` entries differ by kind:
+   - **Refactor finding's region < Required** → a **method-scoped** entry,
+     `target = Required (80)`. No Floor for refactors — a single method is small
+     enough to reach 80% in one pass, so #462 collapsed the tier and fixed the
+     #456 dead-end. Build the entry straight from the under-covered region:
+     `method` = `region.name`, `start_line` / `end_line` / `current` = the
+     region's `start_line` / `end_line` / `pct`. Dedupe one entry per region.
+   - **Major-upgrade class below Required** → a **whole-class** entry by where it
+     sits: between Floor and Required → `target = Required (90)`; below Floor
+     (incl. 0% / greenfield) → `target = Floor (70)`, the #429 bootstrap. A major
+     upgrade can't be region-scoped (no per-finding line), so its whole-class
+     two-tier stays.
 
    ```text
    Agent(
      subagent_type="java-coverage-improver",
-     description="Raise JaCoCo coverage on under-covered affected classes",
+     description="Raise JaCoCo coverage on under-covered affected methods / classes",
      isolation="worktree",
      prompt="""
        repo_path: <repo.path>
-       policy.coverage_threshold: <Required, e.g. 80>
+       policy.coverage_threshold: <Required for this entry>
        test_root: src/test/java
        modules_to_improve: [
-         { "path": "src/main/java/...", "current": 61, "target": 80 },  # top-up
-         { "path": "src/main/java/...", "current": 0,  "target": 60 }   # bootstrap
+         { "file": "src/main/java/com/example/Foo.java", "method": "save",
+           "start_line": 78, "end_line": 95, "current": 40, "target": 80 },  # refactor: method-scoped
+         { "path": "src/main/java/com/example/Cli.java", "current": 0, "target": 70 }  # major: whole-class
        ]
        worktree.base_branch: <worktree.base_branch>
-       commit_subject: "test(coverage): raise coverage on <comma-separated class names>"
+       commit_subject: "test(coverage): cover <comma-separated method/class names>"
 
        Add meaningful JUnit behavior tests; do NOT modify production code.
        Run the Gradle test + jacocoTestReport in the worktree; only return
@@ -315,16 +329,11 @@ Three branches:
    )
    ```
 
-   The bootstrap branch applies to classes named by an **explicit finding
-   file path** (sonar / semgrep / code_scanning refactors). The
-   project-wide major-upgrade scan (Step 2b) does **not** bootstrap — see
-   Step 2d; bringing an entire module set from zero to the 70% major-work
-   floor isn't a safe single autonomous step.
-
    When it finishes, **return immediately** with `improver_result` (no
    `plan`). See the Phase A bullet for the orchestrator-side loop.
-3. **An affected class is missing entirely from `coverage.by_module`**
-   (no JaCoCo data at all) → halt; you can't target what isn't measured:
+3. **A refactor finding's file is missing entirely from `coverage`** (no region
+   AND no `by_module` entry), or **a major-scan class has no JaCoCo data** →
+   halt; you can't target what isn't measured:
 
    ```json
    {
