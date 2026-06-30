@@ -266,6 +266,14 @@ if [[ -n "$cov_json" ]]; then
 			coverage_overall="$maybe_overall"
 			coverage_by_module="$(jq '.by_module' <<<"$parsed")"
 			coverage_regions="$(jq -c '.regions // []' <<<"$parsed")"
+			# Demangle Swift symbol names for legibility (#464). The parser is
+			# kept toolchain-free; we demangle here, where the toolchain is
+			# already present (coverage was just measured). Best-effort — the
+			# raw names are kept on any failure.
+			if [[ "$coverage_regions" != "[]" ]]; then
+				demangled="$(printf '%s' "$coverage_regions" | python3 "$SCRIPT_DIR/demangle-swift-regions.py" 2>/dev/null || true)"
+				[[ -n "$demangled" ]] && jq -e . >/dev/null 2>&1 <<<"$demangled" && coverage_regions="$demangled"
+			fi
 			coverage_reliable="true"
 			coverage_reason="measured via $coverage_source, parsed by parse-swift-coverage.py."
 		else
