@@ -100,6 +100,12 @@ this section when it lands.
 
 ## Plugins
 
+> **Adding support for a new language?** See
+> [`docs/adding-a-language-plugin.md`](docs/adding-a-language-plugin.md) — the
+> consolidated guide for taking the maintenance pipeline from "doesn't know
+> about language `L`" to a full-maintenance `development-<L>` plugin (the pattern
+> proven by the Java and Swift epics).
+
 ### development
 
 Language-agnostic workflow tooling for git operations, committing, and branch management.
