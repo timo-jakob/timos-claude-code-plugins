@@ -179,6 +179,7 @@ has_semgrep_config="false"
 # never trigger a heavy, pointless toolchain run.
 coverage_overall="null"
 coverage_by_module="{}"
+coverage_regions="[]"
 coverage_source="none"
 coverage_reliable="false"
 coverage_reason="Coverage was not measured."
@@ -264,6 +265,7 @@ if [[ -n "$cov_json" ]]; then
 		if [[ "$maybe_overall" != "null" ]]; then
 			coverage_overall="$maybe_overall"
 			coverage_by_module="$(jq '.by_module' <<<"$parsed")"
+			coverage_regions="$(jq -c '.regions // []' <<<"$parsed")"
 			coverage_reliable="true"
 			coverage_reason="measured via $coverage_source, parsed by parse-swift-coverage.py."
 		else
@@ -297,6 +299,7 @@ jq -n \
 	--argjson sonar_quality_gate "$sonar_quality_gate" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
+	--argjson coverage_regions "$coverage_regions" \
 	--arg coverage_source "$coverage_source" \
 	--argjson coverage_reliable "$coverage_reliable" \
 	--arg coverage_reason "$coverage_reason" \
@@ -317,6 +320,7 @@ jq -n \
   coverage: {
     overall:   $coverage_overall,
     by_module: $coverage_by_module,
+    regions:   $coverage_regions,
     measurement: {
       source:   $coverage_source,
       reliable: $coverage_reliable,

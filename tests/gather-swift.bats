@@ -49,6 +49,18 @@ setup() {
   echo "$output" | jq -e '.coverage.measurement.reason | test("nothing to cover")' >/dev/null
 }
 
+@test "gather-swift: coverage carries a regions array (empty when withheld) (#463)" {
+  # The region-scoped gate consumes coverage.regions; the gather always emits
+  # the key (empty [] when coverage is withheld/unmeasured, as in this hermetic
+  # no-tests case).
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.coverage | has("regions")' <<<"$output")" = "true" ]
+  [ "$(jq -r '.coverage.regions | type' <<<"$output")" = "array" ]
+  [ "$(jq -r '.coverage.regions | length' <<<"$output")" = "0" ]
+}
+
 @test "gather-swift: missing repo path -> usage error, exit 2" {
   run bash "$GATHER" "$BATS_TEST_TMPDIR/does-not-exist"
   [ "$status" -eq 2 ]
