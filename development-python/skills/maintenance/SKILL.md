@@ -134,6 +134,7 @@ See ARCHITECTURE.md § "JSON schema (v2)" for the rationale.
       "src/aido/store/persons.py": 92,
       "src/aido/cli.py": 67
     },
+    "regions": [ /* per-function {file, name, start_line, end_line, pct} (coverage.py + AST) */ ],
     "measurement": {
       "source": ".venv",
       "pytest_exit": 0,
@@ -276,11 +277,20 @@ nor `dependabot` is in the filter.)
 
 For each finding in `ruff`, `semgrep`, `code_scanning`, `sonarcloud`,
 collect the `file_path` field (or `file` for `code_scanning_alerts`).
-The agent will edit only those files (plus possibly their direct
-dependents if a refactor is needed), so these are the modules at risk.
 (`container_scan` carries no Python `file_path` — it edits `Dockerfile` /
 `.snyk` — so it contributes nothing here and is exempt from the floor; see
 Step 2c's pure-mechanical note.)
+
+**Region-scoped (epic #462).** For each such finding, resolve its
+**enclosing function region** from `coverage.regions` (the entry whose `file`
+matches and whose `start_line ≤ finding.line ≤ end_line`, innermost on
+overlap). Gate **that region** against a **single Required threshold (80%)** —
+no Floor tier. When no region contains the line (a module-/class-level
+finding, or a parser gap), **fall back to the whole-file figure**
+`coverage.by_module[file]`. **Dedupe one improver work-item per region.**
+The unit is the function: a 40%-covered module is fine to refactor inside a
+well-tested function; a 95%-covered module is correctly blocked at its one
+untested function.
 
 #### Step 2b — for major dep upgrades (the no-file-path case)
 
@@ -310,42 +320,45 @@ the bump itself, not in fragile call sites.
 
 | Action | Required | Floor |
 | --- | --- | --- |
-| Major-version dep upgrade | 90% | 70% |
-| Everything else | 80% | 60% |
+| Major-version dep upgrade (whole-module, Step 2b) | 90% | 70% |
+| Refactor finding (region-scoped — enclosing function, or whole-file fallback) | 80% | — (single threshold) |
 
 Three branches:
 
-1. **All modules in the affected set ≥ Required** → proceed to
-   dispatch.
-2. **Any module below Required, with coverage data** → this is Phase A.
-   Spawn `python-coverage-improver` with `isolation="worktree"` so its new
-   tests land on a fresh branch off `worktree.base_branch`, not in the
-   user's working tree. Give each under-covered module a `target` by where
-   it sits:
-   - **between Floor and Required** → `target = Required` (top-up mode).
-   - **below Floor**, including 0% / greenfield → `target = Floor`
-     (**bootstrap-from-zero mode**, #429). The floor exists to stop the
-     improver rubber-stamping lines on a module whose *existing* tests it
-     can't judge — but a module at 0% has **no existing tests to break**, so
-     it's the lowest-regression-risk target for *new* tests, not the
-     riskiest. Aim for the Floor first (a smaller, reviewable increment);
-     subsequent runs top it up toward Required.
+1. **All affected regions ≥ Required, and all major-scan modules ≥ Required**
+   → proceed to dispatch.
+2. **Something below Required, with coverage data** → this is Phase A.
+   Spawn `python-coverage-improver` with `isolation="worktree"`. The
+   `modules_to_improve` entries differ by kind:
+   - **Refactor finding's region < Required** → a **function-scoped** entry,
+     `target = Required (80)`. No Floor for refactors — a single function is
+     small enough to reach 80% in one pass, so #462 collapsed the tier and
+     fixed the #456 dead-end. Build the entry straight from the under-covered
+     region: `function` = `region.name`, `start_line` / `end_line` / `current`
+     = the region's `start_line` / `end_line` / `pct`. Dedupe one entry per
+     region.
+   - **Major-upgrade module below Required** → a **whole-module** entry by
+     where it sits: between Floor and Required → `target = Required (90)`;
+     below Floor (incl. 0% / greenfield) → `target = Floor (70)`, the #429
+     bootstrap. A major upgrade has no per-finding line, so its whole-module
+     two-tier stays.
 
    ```text
    Agent(
      subagent_type="python-coverage-improver",
-     description="Raise coverage on under-covered affected modules",
+     description="Raise coverage on under-covered affected functions / modules",
      isolation="worktree",
      prompt="""
        repo_path: <repo.path>
-       policy.coverage_threshold: <Required for this action class, e.g. 80 or 90>
+       policy.coverage_threshold: <Required for this entry>
        test_root: tests/
        modules_to_improve: [
-         { "path": "src/...", "current": 61, "target": 80 },  # top-up
-         { "path": "src/...", "current": 0,  "target": 60 }   # bootstrap
+         { "file": "src/app/store.py", "function": "save",
+           "start_line": 40, "end_line": 72, "current": 40, "target": 80 },  # refactor: function-scoped
+         { "path": "src/app/cli.py", "current": 0, "target": 70 }  # major: whole-module
        ]
        worktree.base_branch: <worktree.base_branch>
-       commit_subject: "test(coverage): raise coverage on <comma-separated module names>"
+       commit_subject: "test(coverage): cover <comma-separated function/module names>"
 
        Add meaningful behavior tests; do NOT modify production code.
        Run pytest in the worktree; only return success if tests pass.
@@ -355,19 +368,13 @@ Three branches:
    )
    ```
 
-   The bootstrap branch applies to modules named by an **explicit finding
-   file path** (ruff-unsafe / semgrep / code_scanning / sonar refactors).
-   The project-wide major-upgrade scan (Step 2b) does **not** bootstrap —
-   see Step 2d; bringing the whole project from zero to the 70% major-work
-   floor isn't a safe single autonomous step.
-
    When it finishes, **return immediately** with the `improver_result`
    shape (see the Response section). No `plan` field. See the intro's
    Phase A bullet for the orchestrator-side loop that re-invokes you
    after the improver's PR merges.
-3. **A module in the affected set is missing entirely from
-   `coverage.by_module`** (no coverage data at all) → halt; you can't
-   target what isn't measured. Return:
+3. **A refactor finding's file is missing entirely from `coverage`** (no
+   region AND no `by_module` entry), or **a major-scan module has no
+   coverage data** → halt; you can't target what isn't measured. Return:
 
    ```json
    {
