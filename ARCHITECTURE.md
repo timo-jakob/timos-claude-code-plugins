@@ -940,6 +940,24 @@ modules' coverage (not whole-project coverage):
 | Floor ≤ coverage < Required | Agent runs `python-coverage-improver` first to bring affected modules up to Required, then makes the change. Adds tests only; never modifies production code under test. |
 | < Floor | Refuse. Surface a `missing_tooling`-shaped recommendation pointing at the standalone `/development-python:improve-test-coverage` skill (issue #35). The user invests in coverage deliberately, then re-runs maintenance. |
 
+#### Region-scoped gate (Swift — epic #462)
+
+The whole-file model above measures coverage of the **touched module**.
+`development-swift` refines it to the **enclosing function**: each
+coverage-respecting finding (`sonarcloud`, a file-bearing `code_scanning`
+alert) resolves to the function containing its line — via the per-function
+`coverage.regions` the Swift gather emits — and is gated against a **single
+Required threshold (80%)**, with whole-file fallback when a finding maps to
+no function. The unit being the function means a 40%-covered file is fine to
+refactor inside a well-tested function, and a 95%-covered file is correctly
+blocked at its one untested function. It also collapses the Floor/Required
+tiers (a single function is small enough to reach Required in one improver
+pass) and removes the dead-end where bootstrapping a from-zero class to a
+Floor never cleared the finding's Required bar. The `swift-coverage-improver`
+is correspondingly **function-scoped**. Java and Python adopt the same gate
+in later slices of epic #462; until then they use the whole-file model above.
+Design: `docs/superpowers/specs/2026-06-29-coverage-safety-signal-design.md`.
+
 **Exception**: pure-mechanical agents skip the coverage check:
 
 - `ruff check --fix` without `--unsafe-fixes` (ruff has formally

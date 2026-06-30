@@ -1,0 +1,38 @@
+{
+  "targets": [
+    {
+      "buildProductPath": "/path/to/Demo.o",
+      "coveredLines": 1,
+      "executableLines": 2,
+      "lineCoverage": 0.5,
+      "name": "Demo",
+      "files": [
+        {
+          "coveredLines": 1,
+          "executableLines": 2,
+          "lineCoverage": 0.5,
+          "name": "Demo.swift",
+          "path": "/path/to/Sources/Demo/Demo.swift",
+          "functions": [
+            {
+              "coveredLines": 1,
+              "executableLines": 1,
+              "lineCoverage": 1.0,
+              "lineNumber": 2,
+              "name": "covered(_:)",
+              "executionCount": 1
+            },
+            {
+              "coveredLines": 0,
+              "executableLines": 1,
+              "lineCoverage": 0.0,
+              "lineNumber": 3,
+              "name": "uncovered(_:)",
+              "executionCount": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

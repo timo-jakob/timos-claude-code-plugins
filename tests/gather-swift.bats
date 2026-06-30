@@ -49,6 +49,18 @@ setup() {
   echo "$output" | jq -e '.coverage.measurement.reason | test("nothing to cover")' >/dev/null
 }
 
+@test "gather-swift: coverage carries a regions array (empty when withheld) (#463)" {
+  # The region-scoped gate consumes coverage.regions; the gather always emits
+  # the key (empty [] when coverage is withheld/unmeasured, as in this hermetic
+  # no-tests case).
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.coverage | has("regions")' <<<"$output")" = "true" ]
+  [ "$(jq -r '.coverage.regions | type' <<<"$output")" = "array" ]
+  [ "$(jq -r '.coverage.regions | length' <<<"$output")" = "0" ]
+}
+
 @test "gather-swift: missing repo path -> usage error, exit 2" {
   run bash "$GATHER" "$BATS_TEST_TMPDIR/does-not-exist"
   [ "$status" -eq 2 ]
@@ -134,4 +146,34 @@ EOF
   printf '{}\n' > "$WORK/empty.json"
   out=$(cd "$WORK" && python3 "$PARSE" empty.json)
   [ "$(jq -r .overall <<<"$out")" = "null" ]
+}
+
+# --- per-function regions (#463) --------------------------------------------
+
+@test "parse-swift-coverage: xccov -> per-function regions with line spans" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-swift-coverage.py"
+  out=$(cd "$REPO_ROOT" && python3 "$PARSE" tests/fixtures/coverage/xcode-xccov.json)
+  [ "$(jq '.regions | length >= 2' <<<"$out")" = "true" ]
+  [ "$(jq '[.regions[] | select(.name | test("covered"))][0].pct >= 99' <<<"$out")" = "true" ]
+  [ "$(jq '[.regions[] | select(.name | test("uncovered"))][0].pct == 0' <<<"$out")" = "true" ]
+  [ "$(jq '.regions[0] | has("start_line") and has("end_line")' <<<"$out")" = "true" ]
+}
+
+@test "parse-swift-coverage: llvm-cov -> per-function regions with pct" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-swift-coverage.py"
+  out=$(cd "$REPO_ROOT" && python3 "$PARSE" tests/fixtures/coverage/swiftpm-llvmcov.json)
+  [ "$(jq '.regions | length >= 2' <<<"$out")" = "true" ]
+  [ "$(jq '[.regions[] | select(.name | test("covered"))][0].pct >= 99' <<<"$out")" = "true" ]
+  [ "$(jq '[.regions[] | select(.name | test("uncovered"))][0].pct == 0' <<<"$out")" = "true" ]
+  [ "$(jq '.regions[0] | has("start_line") and has("end_line")' <<<"$out")" = "true" ]
+  [ "$(jq '[.regions[] | select(.start_line >= 1 and .end_line >= .start_line)] | length >= 1' <<<"$out")" = "true" ]
+}
+
+@test "parse-swift-coverage: containment - line inside covered function resolves to region, line above all functions does not" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-swift-coverage.py"
+  out=$(cd "$REPO_ROOT" && python3 "$PARSE" tests/fixtures/coverage/xcode-xccov.json)
+  # Line 2 is inside covered(_:) which has lineNumber=2
+  [ "$(jq '[.regions[] | select(.start_line <= 2 and .end_line >= 2)] | length > 0' <<<"$out")" = "true" ]
+  # Line 1 is above all functions (first function starts at line 2)
+  [ "$(jq '[.regions[] | select(.start_line <= 1 and .end_line >= 1)] | length == 0' <<<"$out")" = "true" ]
 }

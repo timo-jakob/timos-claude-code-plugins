@@ -38,19 +38,18 @@ You don't need to detect which phase: branch on the data in the payload.
 **Phase B — planning (always, possibly after Phase A merged):**
 
 1. Validate the payload.
-2. Run the coverage pre-flight again. With Phase A merged, affected
-   sources should now clear Required (branch 1) → plan. If a source still
-   sits below Required — e.g. a **bootstrapped** source (#429) reached
-   only the Floor in one pass — escalate it via `human_action_required`,
-   noting that re-running `/development:maintenance` runs another improver
-   pass toward Required. Do **not** re-spawn the improver this invocation.
+2. Run the coverage pre-flight again. With Phase A merged, the affected
+   **functions** should now clear Required (branch 1) → plan. If a function
+   still sits below Required — the improver couldn't reach it in one pass and
+   escalated that region — surface it via `human_action_required`. Do
+   **not** re-spawn the improver this invocation.
 3. Run the planner (`swift-maintenance-planner`).
 4. Return `plan` + `missing_tooling`. No `improver_result`.
 
-If coverage already clears (or there are no coverage-respecting findings —
-the common case until Slice C adds the triagers), Phase A and Phase B
-collapse into a single invocation that returns `plan` only. `format_lint`
-is behavior-preserving and **coverage-exempt**, so a format-only run never
+If coverage already clears (or there are no coverage-respecting findings),
+Phase A and Phase B collapse into a single invocation that returns `plan`
+only. `format_lint` is behavior-preserving and **coverage-exempt**, so a
+format-only run never
 triggers the pre-flight.
 
 ### Auxiliary mode — check `dispatch_mode` FIRST
@@ -95,7 +94,7 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
     "sonarcloud":           [ /* normalized Sonar findings: type, severity, rule, component, line, message, key */ ],
     "code_scanning_alerts": [ /* CodeQL swift + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ]
   },
-  "coverage": { "overall": null, "by_module": {}, "measurement": { "reliable": false, "reason": "..." } },
+  "coverage": { "overall": null, "by_module": {}, "regions": [ /* {file, name, start_line, end_line, pct} per function */ ], "measurement": { "reliable": false, "reason": "..." } },
   "policy": { "coverage_threshold": 80, "severity_gate": "high" },
   "worktree": { "available": true, "base_branch": "main" },
   "dispatch_filter": { "only_tools": ["format_lint"] }
@@ -153,7 +152,7 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 Before planning any **non-mechanical** work, check whether coverage clears
 the bar for the changes a work agent might make. `format_lint`
 (swift-format + swiftlint autocorrect) is behavior-preserving and
-**exempt** — it never triggers the floor. The **coverage-respecting**
+**exempt** — it never triggers the gate. The **coverage-respecting**
 tools are the static-analysis triagers that edit real code: `sonarcloud`
 and `code_scanning` (a file-bearing CodeQL alert). A format-only run has an
 empty affected set, so the pre-flight is a no-op and it goes straight to
@@ -162,15 +161,15 @@ planning.
 ### Step 1 — coverage data must exist *and be trustworthy*
 
 If `coverage.by_module` is empty `{}`, `coverage.overall` is `null`, **or**
-`coverage.measurement.reliable` is `false`, there is no trustworthy floor.
+`coverage.measurement.reliable` is `false`, there is no trustworthy coverage
+signal — and therefore no `coverage.regions` either.
 `coverage.measurement.reason` states the exact cause (no toolchain, no test
 targets, a failed `xcodebuild`/`swift test`, an unparseable report).
 
 **Exception — coverage-exempt findings:** do **not** halt when **every**
 finding is coverage-exempt (`format_lint`). These never touch Swift source
-under test, so a missing floor isn't load-bearing — return a plan routing
-them to their agent. (This is the only case in this slice, since
-`format_lint` is the only configured tool until Slice C.)
+under test, so a missing signal isn't load-bearing — return a plan routing
+them to their agent.
 
 Only halt when at least one **coverage-respecting** finding is present
 (`sonarcloud` or a file-bearing `code_scanning` alert) **and** coverage is
@@ -183,7 +182,7 @@ missing/unreliable:
   "actions_requiring_review": [],
   "missing_tooling": [],
   "human_action_required": [{
-    "reason": "Coverage is unavailable or untrustworthy — maintenance requires a reliable per-source coverage measurement as the safety floor for autonomous changes. Cause (from coverage.measurement.reason): <echo it here>.",
+    "reason": "Coverage is unavailable or untrustworthy — maintenance requires a reliable per-function coverage measurement as the safety signal for autonomous changes. Cause (from coverage.measurement.reason): <echo it here>.",
     "recommendation": "Add test targets and ensure the suite runs under the Swift toolchain (swift test --enable-code-coverage, or xcodebuild test -enableCodeCoverage YES), then re-run /development:maintenance."
   }],
   "unable_to_fix": []
@@ -193,75 +192,96 @@ missing/unreliable:
 You may still plan the coverage-exempt `format_lint` group and halt only
 the coverage-respecting ones (partial halt).
 
-### Step 2 — when coverage data IS present
+### Step 2 — resolve each finding's region and gate on it
 
-Determine the **affected-sources set**: the file path of every
-coverage-respecting finding that names one (`sonarcloud.component`, a
-file-bearing `code_scanning_alerts.file`). The agent edits those files, so
-they're the sources at risk. `format_lint` contributes nothing
-(pure-mechanical); file-less `code_scanning` findings (Scorecard
-repo-policy, workflow-pinning) contribute nothing either. When
-`dispatch_filter.only_tools` is set, restrict this to the filtered tools.
+Build the **affected set**: every coverage-respecting finding that names a
+file (`sonarcloud.component`, a file-bearing `code_scanning_alerts.file`).
+`format_lint` and file-less `code_scanning` findings (Scorecard repo-policy,
+workflow-pinning) contribute nothing. When `dispatch_filter.only_tools` is
+set, restrict to the filtered tools.
 
-Apply the thresholds (mirroring the Python/Java "everything else" class):
+For each affected finding, resolve its **enclosing region** from
+`coverage.regions` (emitted by the gather): the entry whose `file` matches
+and whose `start_line ≤ finding.line ≤ end_line`. On overlap (nested
+functions / closures), pick the **innermost** — the smallest line span. If
+**no** region contains the finding's line (a file/class-level finding, or a
+parser gap), **fall back to the whole-file figure** from
+`coverage.by_module[file]` — for a genuinely file-level finding the file is
+the correct unit.
 
-| Action | Required | Floor |
-| --- | --- | --- |
-| Static-analysis refactor (`sonarcloud` / `semgrep` / `code_scanning`) | 80% | 60% |
+Gate each finding's region (or file fallback) against a **single Required
+threshold (80%)** — there is no Floor tier. The unit is the **enclosing
+function**, not the whole file: a 40%-covered file is fine to refactor
+inside a well-tested function; a 95%-covered file is correctly blocked at
+its one untested function.
 
-Three branches:
+Branches (evaluated per finding, then **deduped by region** — many findings
+in one under-covered function yield ONE improver work-item, not one per
+finding):
 
-1. **All affected sources ≥ Required** → proceed to planning.
-2. **Any affected source below Required, with coverage data** → this is
-   Phase A. Spawn `swift-coverage-improver` with `isolation="worktree"`,
-   giving each under-covered source a `target` by where it sits:
-   - **between Floor and Required** → `target = Required` (top-up mode).
-   - **below Floor**, including 0% / greenfield → `target = Floor`
-     (**bootstrap-from-zero mode**, #429 — a 0% source has no existing
-     tests to break, so the Floor is a smaller, reviewable first increment;
-     later runs top it up toward Required).
+1. **Region ≥ Required (80%)** → the change is protected; the finding
+   proceeds to planning. The whole-file figure is irrelevant.
+2. **Region < Required, with coverage data** → this is Phase A. Spawn
+   `swift-coverage-improver` scoped to **that function**, `target = Required`:
 
    ```text
    Agent(
      subagent_type="swift-coverage-improver",
-     description="Raise coverage on under-covered affected sources",
+     description="Raise coverage on under-covered affected functions to Required",
      isolation="worktree",
      prompt="""
        repo_path: <repo.path>
-       policy.coverage_threshold: <Required, e.g. 80>
+       policy.coverage_threshold: 80
        build_system: <swiftpm | xcode, from detection>
        test_root: <Tests for SwiftPM, the app test target for Xcode>
        modules_to_improve: [
-         { "path": "Sources/App/...", "current": 61, "target": 80 },  # top-up
-         { "path": "Sources/App/...", "current": 0,  "target": 60 }   # bootstrap
+         { "file": "Sources/App/Foo.swift", "function": "save(_:)",
+           "start_line": 78, "end_line": 95, "current": 40, "target": 80 }
        ]
        worktree.base_branch: <worktree.base_branch>
-       commit_subject: "test(coverage): raise coverage on <comma-separated source names>"
+       commit_subject: "test(coverage): cover <function> in <file>"
 
-       Add meaningful XCTest tests; do NOT modify production code under test.
-       Run the suite + coverage in the worktree; only return success if tests
-       pass. Commit on the worktree branch before returning.
+       Add meaningful XCTest tests for the named function(s); do NOT modify
+       production code under test. Run the suite + coverage in the worktree;
+       only return success if tests pass. Commit on the worktree branch.
      """
    )
    ```
 
-   When it finishes, **return immediately** with `improver_result` (no
-   `plan`). See the Phase A bullet for the orchestrator-side loop.
+   Each `modules_to_improve` entry is built straight from the under-covered
+   region: `function` = `region.name`, `start_line` / `end_line` / `current`
+   = the region's `start_line` / `end_line` / `pct`, and `target` = Required
+   (80). One work-item **per under-covered region** (deduped). When the
+   improver finishes, **return immediately** with `improver_result` (no
+   `plan`). If
+   the improver **can't reach Required on a region in one pass** (hard
+   branches, external deps), it escalates that region — record it in
+   `human_action_required` and do **not** loop.
 
-3. **An affected source is missing entirely from `coverage.by_module`** →
-   halt; you can't target what isn't measured:
+   **Greenfield (no tests anywhere)** is normal: every affected finding's
+   region is 0%, so each becomes a small region-scoped improver PR — bounded
+   by `--batch=N` (#53), each PR small and meaningful (tests for exactly the
+   functions being changed).
+3. **The finding's file is missing entirely from `coverage`** (no region
+   **and** no `by_module` entry) → halt; you can't target what isn't measured:
 
    ```json
    {
      "schema_version": "2",
      "actions_taken": [], "actions_requiring_review": [], "missing_tooling": [],
      "human_action_required": [{
-       "reason": "<source> is named by a finding but has no coverage data — it can't be measured or improved automatically. Planned work: <action description>.",
+       "reason": "<file> is named by a finding but has no coverage data (no region, no by_module entry) — it can't be measured or improved automatically.",
        "recommendation": "Confirm the source is built and exercised by the test target (not excluded), then re-run /development:maintenance."
      }],
      "unable_to_fix": []
    }
    ```
+
+> **The gate is a pre-flight heuristic, not a full-diff predictor.** It
+> protects the function the finding sits in; if the fix agent edits beyond
+> that function, the agent's own test run + human/Approver review catch
+> out-of-region damage. (Predicting the whole diff was the rejected
+> diff-coverage approach — see the design spec.)
 
 ## Planning step (Phase B)
 
@@ -385,9 +405,13 @@ per-group work agents the orchestrator spawns in Phase 8.
   orchestrator that invokes them by filename convention. The gather output
   contract is in the orchestrator's Phase 3.
 - **Coverage** is measured via xccov (Xcode) or llvm-cov (SwiftPM),
-  `parse-swift-coverage.py` reads either; thresholds mirror the Python/Java
-  "everything else" class (80% Required / 60% Floor), with the #258
-  trustworthy-or-withheld discipline.
+  `parse-swift-coverage.py` reads either and emits per-function
+  `coverage.regions`. The gate is **region-scoped** — the enclosing function
+  of each coverage-respecting finding against a **single Required threshold
+  (80%)**, with whole-file fallback when a finding maps to no function — with
+  the #258 trustworthy-or-withheld discipline. See the region-coverage design
+  spec (`docs/superpowers/specs/2026-06-29-coverage-safety-signal-design.md`,
+  epic #462).
 - **swift-format (Apple, toolchain-bundled) + SwiftLint** is the blessed
   format/lint stack. swift-format is the mechanical formatter; SwiftLint's
   autocorrectable rules ride along in the same mechanical fixer. The
