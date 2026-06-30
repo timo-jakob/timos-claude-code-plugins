@@ -300,6 +300,7 @@ fi
 # overall / empty by_module as "coverage unknown", never as 0%.
 coverage_overall="null"
 coverage_by_module="{}"
+coverage_regions="[]"
 coverage_source="none"
 coverage_pytest_exit="null"
 coverage_reliable="false"
@@ -337,6 +338,12 @@ if [[ -n "$PYTEST_BIN" && -n "$PY_BIN" ]]; then
         | map({ key: .key, value: (.value.summary.percent_covered // 0) })
         | from_entries
       ' coverage.json)
+			# Per-function regions for the region-scoped gate (#462): coverage.py
+			# is per-line, so parse-python-coverage maps lines -> enclosing
+			# functions via the source AST. Best-effort — [] on any failure.
+			coverage_regions=$(python3 "$SCRIPT_DIR/parse-python-coverage.py" coverage.json 2>/dev/null |
+				jq -c '.regions // []' 2>/dev/null || echo "[]")
+			[[ -n "$coverage_regions" ]] || coverage_regions="[]"
 			coverage_reliable="true"
 			coverage_reason="measured with $coverage_source/bin/pytest (exit $pytest_exit)."
 			if ((pytest_exit == 1)); then
@@ -387,6 +394,7 @@ jq -n \
 	--argjson container_scan_findings "$(emit_findings container_scan "$has_container_scan_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
+	--argjson coverage_regions "$coverage_regions" \
 	--arg coverage_source "$coverage_source" \
 	--argjson coverage_pytest_exit "$coverage_pytest_exit" \
 	--argjson coverage_reliable "$coverage_reliable" \
@@ -416,6 +424,7 @@ jq -n \
   coverage: {
     overall:   $coverage_overall,
     by_module: $coverage_by_module,
+    regions:   $coverage_regions,
     measurement: {
       source:      $coverage_source,
       pytest_exit: $coverage_pytest_exit,
