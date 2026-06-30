@@ -956,7 +956,11 @@ pass) and removes the dead-end where bootstrapping a from-zero class to a
 Floor never cleared the finding's Required bar. The `swift-coverage-improver`
 is correspondingly **function-scoped**. Java and Python adopt the same gate
 in later slices of epic #462; until then they use the whole-file model above.
-Design: `docs/superpowers/specs/2026-06-29-coverage-safety-signal-design.md`.
+**Adding region coverage to a new language** follows a fixed vertical (parser
+emits `regions[]` → gather → dispatcher containment → function-scoped improver
+→ docs), with only the parser's per-tool data source differing — see the
+**Per-language playbook** in
+`docs/superpowers/specs/2026-06-29-coverage-safety-signal-design.md`.
 
 **Exception**: pure-mechanical agents skip the coverage check:
 
