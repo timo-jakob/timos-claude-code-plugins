@@ -44,6 +44,18 @@ setup() {
   [ "$(jq -r .coverage.measurement.reliable <<<"$output")" = "false" ]
 }
 
+@test "gather-java: coverage carries a regions array (empty when withheld) (#466)" {
+  # The region-scoped gate consumes coverage.regions; the gather always emits
+  # the key (empty [] when coverage is withheld — no JaCoCo run in this hermetic
+  # no-Gradle case).
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.coverage | has("regions")' <<<"$output")" = "true" ]
+  [ "$(jq -r '.coverage.regions | type' <<<"$output")" = "array" ]
+  [ "$(jq -r '.coverage.regions | length' <<<"$output")" = "0" ]
+}
+
 @test "gather-java: missing repo path -> usage error, exit 2" {
   run bash "$GATHER" "$BATS_TEST_TMPDIR/does-not-exist"
   [ "$status" -eq 2 ]
@@ -170,4 +182,29 @@ EOF
   printf '<report name="empty"></report>\n' > "$WORK/empty.xml"
   out=$(cd "$WORK" && python3 "$PARSE" empty.xml)
   [ "$(jq -r .overall <<<"$out")" = "null" ]
+}
+
+@test "parse-jacoco: per-method regions with line spans + pct (#466)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-jacoco.py"
+  mkdir -p "$WORK/src/main/java/com/example"
+  printf 'class Foo {}\n' > "$WORK/src/main/java/com/example/Foo.java"
+  cat > "$WORK/report.xml" <<'EOF'
+<report name="demo"><package name="com/example">
+<class name="com/example/Foo" sourcefilename="Foo.java">
+<method name="covered" desc="()V" line="10"><counter type="LINE" missed="0" covered="5"/></method>
+<method name="uncovered" desc="()V" line="20"><counter type="LINE" missed="4" covered="0"/></method>
+</class>
+<sourcefile name="Foo.java"><counter type="LINE" missed="4" covered="5"/></sourcefile>
+</package></report>
+EOF
+  out=$(cd "$WORK" && python3 "$PARSE" report.xml)
+  [ "$(jq '.regions | length' <<<"$out")" = "2" ]
+  # covered method: lines 10..19 (next method start - 1), pct 100
+  [ "$(jq '[.regions[] | select(.name=="covered")][0] | .start_line==10 and .end_line==19 and .pct==100' <<<"$out")" = "true" ]
+  # uncovered method: last method, start 20 (start + total-1 = 23), pct 0
+  [ "$(jq '[.regions[] | select(.name=="uncovered")][0] | .start_line==20 and .end_line>=.start_line and .pct==0' <<<"$out")" = "true" ]
+  # region file resolves to the on-disk source path
+  [ "$(jq -r '.regions[0].file' <<<"$out")" = "src/main/java/com/example/Foo.java" ]
+  # by_module/overall unchanged by the regions addition
+  [ "$(jq '.overall' <<<"$out")" = "55.6" ]
 }

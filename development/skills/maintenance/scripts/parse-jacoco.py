@@ -3,7 +3,12 @@
 LINE coverage, keyed by repo-relative source path.
 
 Usage:   parse-jacoco.py <report.xml> [<report2.xml> ...]
-stdout:  {"overall": <0..100|null>, "by_module": {"src/main/java/.../Foo.java": 92.0, ...}}
+stdout:  {"overall": <0..100|null>, "by_module": {...}, "regions": [...]}
+
+`regions` is the per-method coverage the region-scoped gate consumes: one entry
+per method, `{file, name, start_line, end_line, pct}`. JaCoCo's `<method line=>`
+gives the start line and a per-method LINE counter; `end_line` is the next
+method's start - 1 (last method: start + executable-line-count - 1).
 
 Run from the repo root (the caller cd's there). Keys are resolved to the
 actual source path on disk so they match SonarCloud `component` paths the
@@ -39,15 +44,63 @@ def resolve(pkg: str, fname: str) -> str:
     return rel  # generated source or unusual layout — keep the JaCoCo path
 
 
+def _line_counter(elem):
+    """The (missed, covered) of an element's LINE counter, or (0, 0)."""
+    for counter in elem.findall("counter"):
+        if counter.get("type") == "LINE":
+            return int(counter.get("missed", 0)), int(counter.get("covered", 0))
+    return 0, 0
+
+
+def regions_from_jacoco(root) -> list[dict]:
+    """Per-method regions from a JaCoCo report.
+
+    JaCoCo `<class sourcefilename=><method name= line=>` carries each method's
+    start line + a per-method LINE counter. end_line = next method's start - 1
+    within the class (last method: start + executable-line-count - 1, clamped so
+    end_line >= start_line when methods share a line).
+    """
+    regions = []
+    for package in root.findall("package"):
+        pkg = package.get("name", "")
+        for cls in package.findall("class"):
+            sourcefile = cls.get("sourcefilename")
+            if not sourcefile:
+                continue
+            file_key = resolve(pkg, sourcefile)
+            methods = []
+            for m in cls.findall("method"):
+                line = m.get("line")
+                if line is None:
+                    continue
+                missed, covered = _line_counter(m)
+                methods.append(
+                    {"name": m.get("name", ""), "start": int(line), "total": missed + covered, "covered": covered}
+                )
+            methods.sort(key=lambda x: x["start"])
+            for i, m in enumerate(methods):
+                if i + 1 < len(methods):
+                    end = max(methods[i + 1]["start"] - 1, m["start"])
+                else:
+                    end = m["start"] + max(m["total"] - 1, 0)
+                pct = round(100.0 * m["covered"] / m["total"], 1) if m["total"] else 0.0
+                regions.append(
+                    {"file": file_key, "name": m["name"], "start_line": m["start"], "end_line": end, "pct": pct}
+                )
+    return regions
+
+
 def main() -> int:
     missed: dict[str, int] = {}
     covered: dict[str, int] = {}
+    all_regions: list[dict] = []
 
     for path in sys.argv[1:]:
         try:
             root = ET.parse(path).getroot()
         except (ET.ParseError, OSError):
             continue
+        all_regions.extend(regions_from_jacoco(root))
         for package in root.findall("package"):
             pkg = package.get("name", "")
             for sf in package.findall("sourcefile"):
@@ -70,7 +123,7 @@ def main() -> int:
 
     total = tot_missed + tot_covered
     overall = round(100.0 * tot_covered / total, 1) if total else None
-    print(json.dumps({"overall": overall, "by_module": by_module}))
+    print(json.dumps({"overall": overall, "by_module": by_module, "regions": all_regions}))
     return 0
 
 

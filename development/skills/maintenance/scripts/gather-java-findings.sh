@@ -422,6 +422,7 @@ fi
 # Mirrors the Python coverage-reliability discipline (#258).
 coverage_overall="null"
 coverage_by_module="{}"
+coverage_regions="[]"
 coverage_source="none"
 coverage_gradle_exit="null"
 coverage_reliable="false"
@@ -451,6 +452,7 @@ if [[ "$has_jacoco_config" == "true" ]]; then
 			if [[ -n "$parsed" ]] && jq -e . >/dev/null 2>&1 <<<"$parsed"; then
 				coverage_overall=$(jq '.overall' <<<"$parsed")
 				coverage_by_module=$(jq '.by_module' <<<"$parsed")
+				coverage_regions=$(jq -c '.regions // []' <<<"$parsed")
 				coverage_reliable="true"
 				coverage_reason="measured with '$GRADLE_BIN test jacocoTestReport' (exit $gradle_exit)."
 				if ((gradle_exit == 1)); then
@@ -505,6 +507,7 @@ jq -n \
 	--argjson openapi_findings "$(emit_findings openapi "$has_openapi_config")" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
+	--argjson coverage_regions "$coverage_regions" \
 	--arg coverage_source "$coverage_source" \
 	--argjson coverage_gradle_exit "$coverage_gradle_exit" \
 	--argjson coverage_reliable "$coverage_reliable" \
@@ -540,6 +543,7 @@ jq -n \
   coverage: {
     overall:   $coverage_overall,
     by_module: $coverage_by_module,
+    regions:   $coverage_regions,
     measurement: {
       source:      $coverage_source,
       gradle_exit: $coverage_gradle_exit,
