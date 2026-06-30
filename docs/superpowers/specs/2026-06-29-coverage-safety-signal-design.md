@@ -201,6 +201,62 @@ Reconciling the three in-flight artifacts:
   G toolchain, H approver) are coverage-independent. Slice D's whole-file
   pre-flight stays live until the new epic's Swift slice supersedes it.
 
+## Per-language playbook — adding region coverage to a new language
+
+The family will gain more languages (Go, TypeScript, Rust, …). Each is the
+**same vertical**; only the parser's data source differs. Swift is the worked
+reference (`docs/superpowers/plans/2026-06-29-coverage-region-signal-swift-slice.md`).
+To add language `L`:
+
+1. **Extend `parse-<L>-coverage` to emit `regions[]`.** The contract is fixed —
+   each entry is exactly `{file, name, start_line, end_line, pct}`, `file`
+   repo-relative, `pct` a number `0–100`. Do **not** rename keys; the gather,
+   dispatcher, and improver all depend on this shape.
+2. **Gather includes `coverage.regions`** in the payload (empty `[]` when
+   coverage is withheld/unreliable — #258 discipline carries over).
+3. **Dispatcher pre-flight uses region containment** (this prose is identical
+   across languages — copy the Swift dispatcher's Coverage pre-flight section):
+   resolve each coverage-respecting finding's enclosing region
+   (`start_line ≤ finding.line ≤ end_line`, innermost on overlap), gate vs the
+   **single Required threshold (80%)**, whole-file fallback when no region
+   matches, dedupe one improver work-item per region.
+4. **The `<L>-coverage-improver` is function-scoped** — `modules_to_improve`
+   names a function (`{file, function, start_line, end_line, current, target}`),
+   target = Required.
+5. **Update the user-facing docs** in the same slice (the `<L>` dispatcher
+   `SKILL.md`, the improver agent, and any `<L>`-specific coverage wording).
+
+### Where per-function data comes from (per coverage tool)
+
+The only language-specific work is computing per-function line coverage. Known
+sources:
+
+| Tool (language) | Per-function data | Effort |
+| --- | --- | --- |
+| **JaCoCo** (Java) | `<method name= line=>` elements with per-method `LINE` counters | trivial — names + spans + pct directly |
+| **xccov** (Swift / Xcode) | `functions[].{name, lineNumber, executableLines, coveredLines}` | easy — `end_line` = next function's start − 1 |
+| **llvm-cov export** (Swift / SwiftPM, also C/C++/Rust) | `functions[].regions[]` (line spans) + `files[].segments[]` (per-line exec) | medium — span from regions, coverage from covered segments in span |
+| **coverage.py** (Python) | per-**line** only (`executed_lines`/`missing_lines`) — **no** per-function | heaviest — map line→function via the stdlib `ast` module (innermost enclosing `def`) |
+
+**For a tool not in this table:** if it reports per-function/per-method data,
+use it directly (JaCoCo/xccov pattern). If it reports only per-line, map lines
+to functions by parsing the source (the coverage.py/AST pattern). Either way the
+output is the same `regions[]` contract.
+
+### Discipline that carries over to every language
+
+- **Capture real fixtures.** Don't hand-write the tool's JSON/XML — run the real
+  tool on a tiny throwaway project and commit the trimmed output as the test
+  fixture, so the parser is written against the true shape. Tests stay hermetic
+  (load the fixture; no toolchain in CI).
+- **Trustworthy-or-withheld (#258).** No `regions` when the measurement is
+  unreliable; the dispatcher then halts/escalates rather than gating on a bad
+  number.
+- **The contract is the boundary.** Steps 2–4 are nearly copy-paste across
+  languages because the parser absorbs all the per-tool variation behind
+  `regions[]`. If you find yourself changing the dispatcher's containment logic
+  per language, the parser isn't doing its job.
+
 ## Rejected alternatives
 
 - **Approach B — diff coverage (gate after the fix):** measure coverage of the
