@@ -248,8 +248,12 @@ finding):
    )
    ```
 
-   One work-item **per under-covered region** (deduped). When the improver
-   finishes, **return immediately** with `improver_result` (no `plan`). If
+   Each `modules_to_improve` entry is built straight from the under-covered
+   region: `function` = `region.name`, `start_line` / `end_line` / `current`
+   = the region's `start_line` / `end_line` / `pct`, and `target` = Required
+   (80). One work-item **per under-covered region** (deduped). When the
+   improver finishes, **return immediately** with `improver_result` (no
+   `plan`). If
    the improver **can't reach Required on a region in one pass** (hard
    branches, external deps), it escalates that region — record it in
    `human_action_required` and do **not** loop.

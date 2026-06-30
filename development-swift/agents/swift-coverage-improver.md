@@ -64,7 +64,8 @@ Your prompt contains:
      ```
 
 3. From the report, identify the **specific uncovered lines/branches** for
-   each `modules_to_improve` source. Distinguish:
+   each `modules_to_improve` function (its `start_line`–`end_line` span).
+   Distinguish:
    - **Untested public functions/methods** — easy: write tests against them.
    - **Untested branches** (the `else` / `guard else` arm never fires) —
      write tests that trigger them.
@@ -102,9 +103,9 @@ Your prompt contains:
    - SwiftPM: `swift test --filter PeopleTests`.
    - Xcode: `xcodebuild test -scheme <scheme> -destination 'platform=macOS' -only-testing:AppTests/PeopleTests`.
    - They must all pass.
-2. Re-measure coverage (Phase 1 commands) and confirm the target sources are
-   now ≥ their target thresholds.
-3. If a source is still under target, identify what's still uncovered and
+2. Re-measure coverage (Phase 1 commands) and confirm the target functions
+   are now ≥ Required (80%).
+3. If a function is still under Required, identify what's still uncovered and
    iterate (back to Phase 2 for the remaining gaps).
 4. Run the FULL suite to make sure your new tests didn't break anything else
    (`swift test` / full `xcodebuild test`). All tests must pass.
