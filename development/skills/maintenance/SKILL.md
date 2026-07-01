@@ -1354,18 +1354,39 @@ After pushing and opening the PR:
      continue to the next stage.
    - **`REVIEW_REQUIRED` still at timeout** (Approver slow, gates
      exit-78'd, or Approver not installed on this repo) → **arm
-     GitHub's native auto-merge and move on**: remove the worktree
+     GitHub's native auto-merge and poll for the verdict**: remove the worktree
      first (same ordering rule as step 6), then
 
      ```bash
      gh pr merge "<pr_number>" --auto --squash --delete-branch
      ```
 
-     The PR merges by itself the moment an approving review lands.
-     Record the stage outcome as `automerge_armed` for the Phase 9
-     summary. If arming fails (repo setting "Allow auto-merge" is
-     off), leave the PR open and record it in
-     `actions_requiring_review` as awaiting approval.
+     After arming, **poll for the Approver verdict** to distinguish
+     between PRs that actually merged vs those still awaiting approval:
+
+     ```bash
+     # Poll for Approver re-trigger and verdict (timeout: 10 min)
+     "<skill-base-dir>/scripts/merge-pr-cycle.zsh" \
+       --retrigger --timeout 600 "<pr_number>"
+     result_code=$?
+     ```
+
+     - Exit 0 (READY): Approver approved, PR merged (or will merge
+       immediately). Record outcome as `merged`.
+     - Exit 4 (AWAITING-APPROVAL): CI green but no approval within the
+       wait window. Record outcome as `awaiting_approval` (not `automerge_armed`,
+       which was misleading — the PR is armed but won't merge without
+       explicit approval, which may not arrive for hours/days).
+     - Exit 5 (CHANGES-REQUESTED): Approver or reviewer objected. Record
+       in `actions_requiring_review` with the rejecting review reason.
+     - Exit 3 (TIMED-OUT): Checks didn't settle. Record in
+       `actions_requiring_review` as "timed out waiting for CI".
+     - Exit 6 (NOT-GREEN): Required checks failed. Record in
+       `actions_requiring_review` with failing checks.
+
+     If arming fails (repo setting "Allow auto-merge" is off), leave
+     the PR open and record it in `actions_requiring_review` as awaiting
+     approval (do not invoke merge-pr-cycle in this case).
 
    A stage that ends `automerge_armed` or awaiting-approval did
    **not** merge: skip steps 6–8 for it, and the next stage builds
@@ -1612,13 +1633,16 @@ run start; the 🚀 PRs section below shows what was tackled.>
   Re-run /development:maintenance (optionally with --batch) to process the
   next batch. These groups remain tracked as scanner-debt issues (Phase 10).
 
-<If any stage or vendor PR ended automerge_armed / awaiting approval (#224):>
+<If any vendor PR/stage ended awaiting_approval (armed but not approved within polling window) or requires review (#224, #458):>
 ⏳ Awaiting approval — not merged (N):
-  - PR #<pr> ("<title>") — CI green, no approving review within the
-    gate window. <Auto-merge armed: merges automatically once
-    the Approver bot or a human approves.|Left open: repo has no
-    required-review protection / auto-merge disabled — approve and
-    merge manually.>
+  - PR #<pr> ("<title>") — CI green, approval pending. PR is armed
+    for auto-merge but did not approve within the ~10-min polling window.
+    Will merge once approved (may take hours/days if approval is delayed).
+  - ...
+
+<If any vendor PR/stage merged during the approval-poll window:>
+✅ Vendor PRs merged (N):
+  - PR #<pr> ("<title>") — approved and merged during the run
   - ...
 
 ? Missing tooling (N):
