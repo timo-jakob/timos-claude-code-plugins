@@ -148,6 +148,47 @@ EOF
   [ "$(jq -r .overall <<<"$out")" = "null" ]
 }
 
+@test "parse-swift-coverage: xccov multi-line function span (#464)" {
+  # A function at line 10 with the next at line 50 spans 10..49 — a real
+  # multi-line region (the earlier fixtures used adjacent single-line funcs).
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-swift-coverage.py"
+  cat > "$WORK/xccov.json" <<EOF
+{"targets":[{"name":"A","files":[{"name":"Big.swift","path":"$WORK/Big.swift","functions":[
+  {"name":"first()","lineNumber":10,"executableLines":20,"coveredLines":10},
+  {"name":"second()","lineNumber":50,"executableLines":4,"coveredLines":4}
+]}]}]}
+EOF
+  out=$(cd "$WORK" && python3 "$PARSE" xccov.json)
+  # first() spans many lines: end_line = next function's start - 1 = 49
+  [ "$(jq '[.regions[] | select(.name=="first()")][0] | .start_line==10 and .end_line==49' <<<"$out")" = "true" ]
+  [ "$(jq '[.regions[] | select(.name=="first()")][0].pct == 50' <<<"$out")" = "true" ]
+}
+
+@test "demangle-swift-regions: already-readable names pass through unchanged" {
+  H="$REPO_ROOT/development/skills/maintenance/scripts/demangle-swift-regions.py"
+  in='[{"file":"a.swift","name":"save(_:)","start_line":1,"end_line":4,"pct":80}]'
+  out=$(printf '%s' "$in" | python3 "$H")
+  [ "$(jq -r '.[0].name' <<<"$out")" = "save(_:)" ]
+  [ "$(jq '.[0].pct' <<<"$out")" = "80" ]
+}
+
+@test "demangle-swift-regions: empty array stays empty; the schema is preserved" {
+  H="$REPO_ROOT/development/skills/maintenance/scripts/demangle-swift-regions.py"
+  out=$(printf '[]' | python3 "$H")
+  [ "$(jq 'type' <<<"$out")" = '"array"' ]
+  [ "$(jq 'length' <<<"$out")" = "0" ]
+}
+
+@test "demangle-swift-regions: mangled SwiftPM names become readable (needs xcrun)" {
+  command -v xcrun >/dev/null 2>&1 || skip "xcrun not available"
+  H="$REPO_ROOT/development/skills/maintenance/scripts/demangle-swift-regions.py"
+  in='[{"file":"a.swift","name":"$s4DemoAAV7coveredyS2iF","start_line":1,"end_line":4,"pct":100}]'
+  out=$(printf '%s' "$in" | python3 "$H")
+  # readable form, no leading $s mangling
+  [ "$(jq -r '.[0].name | startswith("$s") | not' <<<"$out")" = "true" ]
+  echo "$out" | jq -e '.[0].name | test("covered")' >/dev/null
+}
+
 # --- per-function regions (#463) --------------------------------------------
 
 @test "parse-swift-coverage: xccov -> per-function regions with line spans" {
