@@ -774,16 +774,21 @@ The orchestrator processes the plan **sequentially in priority order**:
    returns a worktree branch; push, open a PR, run the same CI cycle,
    pass the approval gate, merge, sync. Only then move to `plan[i+1]`.
 
-**The approval gate (#224):** a maintenance merge requires an
-approving review from `claude-approver[bot]` or a human — the
-pipeline never posts approvals with the operator's identity. After
-CI green the orchestrator polls `reviewDecision` (10-minute budget);
-an Approver `REQUEST_CHANGES` triggers an in-run re-ingest fix round
-(max 2 per PR), and a timeout arms GitHub's native auto-merge so the
-PR merges whenever an approval eventually lands. The same rule
-applies to vendor PRs handled by an `isolation: false` group (in
-`development-python`, `python-dependabot-snyk-triage`): merge only
-if already approved; otherwise arm auto-merge.
+**The approval gate (#224, Phase 2 of #476):** a maintenance merge requires an
+approving review from `claude-approver[bot]` or a human — the pipeline never
+posts approvals with the operator's identity. The Approver is **user-invoked
+locally** via `/development-<lang>:approve` skills (Python, Java, Swift)
+rather than CI-driven. When the user runs the skill, it mints an Approver
+token locally from system Keychain, posts the verdict as `claude-approver-bot`,
+and requires no Claude platform account.
+
+For orchestrator-driven maintenance PRs after CI green, the orchestrator polls
+`reviewDecision` (10-minute budget); an Approver `REQUEST_CHANGES` triggers an
+in-run re-ingest fix round (max 2 per PR). If no approval arrives within the
+budget, auto-merge is armed so the PR merges when an approval eventually lands
+(via the user-invoked skill). The same rule applies to vendor PRs handled by an
+`isolation: false` group (in `development-python`, `python-dependabot-snyk-triage`):
+merge only if already approved; otherwise arm auto-merge.
 
 This serialization means each group's work runs against the latest
 post-merge state. There is no local merging, no topological ordering of
@@ -796,6 +801,45 @@ dispatcher builds it directly from `tooling_configured` (entries with
 value `false`) — without spawning per-tool agents in unconfigured mode.
 The orchestrator surfaces this to the user as a checklist alongside
 the merged PR list.
+
+### Approver skills — user-invoked local approval (Phase 2 of #476)
+
+Each language plugin ships an `approve` skill that users invoke locally to post
+approval verdicts to GitHub. Unlike the old CI-driven model, approval is now
+**user-controlled and client-initiated**.
+
+**Invocation:**
+
+```bash
+/development-python:approve <PR>    # Python projects
+/development-java:approve <PR>      # Java/Gradle projects
+/development-swift:approve <PR>     # Swift projects
+```
+
+**Flow:**
+
+1. User invokes the skill (or it can be called by an orchestrator after CI green).
+2. Skill mints Approver token locally: reads app ID from `~/.config/claude-plugins/apps.json`,
+   fetches private key from system Keychain, calls GitHub API to mint a 1-hour installation token.
+3. Spawns the language-specific `-approver` agent (same agent as CI) with `DRY_RUN=false`.
+4. Agent posts the verdict to GitHub as `claude-approver-bot` using `gh pr review`.
+
+**Security & portability:**
+
+- **No platform lock-in:** Token is minted locally. No Claude platform account or GitHub
+  Actions required. Works with any AI coding assistant.
+- **Approver App is user-registered:** Each developer registers their own Approver App
+  via `register-claude-apps.zsh` (one-time setup per machine).
+- **Minimal permissions:** Approver App has read-only code access + pull-request review posting.
+  Can't push code or modify configuration.
+- **Token lifetime:** 1 hour (GitHub default), auto-expired. Re-mint on demand.
+
+**Integration with orchestrator:**
+
+When the orchestrator finishes CI on a maintenance PR and needs approval, it can arm
+auto-merge with a 10-minute poll timeout. The user then runs the appropriate `/approve`
+skill to post the verdict. The orchestrator detects the posted review and proceeds with merge
+(or re-ingest if `REQUEST_CHANGES`).
 
 ## Agent model selection
 
@@ -1135,7 +1179,13 @@ the topic-plugin category)
 
 - `MAINTAINING.md` — quarterly refresh procedure for pinned versions
   across the plugin family.
+- `development/skills/bootstrap/docs/CLAUDE-APPS.md` — GitHub App registration
+  and setup for both Maintenance and Approver identities.
+- `development/skills/bootstrap/docs/APPROVER-APP.md` — detailed design of the
+  decentralized Approver: app registration, installation, token minting, permissions.
+- `development/skills/bootstrap/scripts/register-claude-apps.zsh` — user-facing
+  script to register and store local GitHub App credentials.
+- `development/skills/maintenance/scripts/mint-approver-token.zsh` — invoked by
+  approve skills to mint fresh Approver tokens from local Keychain.
 - `development/skills/bootstrap/SKILL.md` — the most detailed example
   of a generic skill; references the conventions in this document.
-- Future: `development-python/SKILL.md` — first example of a language
-  plugin following the contract above.
