@@ -150,6 +150,7 @@ See ARCHITECTURE.md § "JSON schema (v2)" for the rationale.
   "worktree": { "available": true, "base_branch": "main" },
   "dispatch_filter": { "only_tools": ["sonarcloud"] }
 }
+
 ```
 
 `tooling_configured` lists every tool this plugin cares about, even
@@ -185,6 +186,7 @@ Before dispatching:
 
    See ARCHITECTURE.md (top-level repo) § "JSON schema (v2)" for the
    full schema and the file-handover contract.
+
    ```
 
    If the path does not exist on disk, error: "Payload file not
@@ -208,12 +210,13 @@ Before dispatching:
    dispatcher restricts the planner's view of findings to those tools
    (and therefore restricts which groups exist at all); the
    orchestrator never sees groups outside the filter.
-   - Each name in `dispatch_filter.only_tools` must be one of: `ruff`,
+
+- Each name in `dispatch_filter.only_tools` must be one of: `ruff`,
      `semgrep`, `code_scanning`, `snyk_prs`, `sonarcloud`, `dependabot`,
      `container_scan`. Unknown names halt with: "Unknown tool '`<X>`' in
      dispatch_filter.only_tools; supported: ruff, semgrep,
      code_scanning, snyk_prs, sonarcloud, dependabot, container_scan."
-   - Each name with `tooling_configured.<name> == false` halts with:
+- Each name with `tooling_configured.<name> == false` halts with:
      "Cannot scope to `<X>`: not configured for this project. Set it up
      first via /development:bootstrap, or drop `--tool=<X>`." A missing
      tool can't be tested in isolation — there are no findings to act
@@ -248,6 +251,7 @@ Without trustworthy coverage there's no safety floor; halt and return
   }],
   "unable_to_fix": []
 }
+
 ```
 
 Skip the rest of the pre-flight. **Exception — pure-mechanical ruff:**
@@ -316,86 +320,129 @@ Patch / minor dep upgrades skip this conservative check — they
 don't change the package's API surface, so risk is concentrated in
 the bump itself, not in fragile call sites.
 
-#### Step 2c — apply per-action-class thresholds
+#### Step 2c — coverage gating decision tree
 
-| Action | Required | Floor |
-| --- | --- | --- |
-| Major-version dep upgrade (whole-module, Step 2b) | 90% | 70% |
-| Refactor finding (region-scoped — enclosing function, or whole-file fallback) | 80% | — (single threshold) |
+| Work type | Gating unit | Required | Floor |
+| --- | --- | --- | --- |
+| Refactor findings (ruff/semgrep/sonar/code_scanning) | Enclosing function (region-scoped) | 80% | none |
+| Major-version dep upgrades | Entire project (all modules) | 90% | 70% |
+| Patch/minor dep upgrades | N/A (no coverage gate) | N/A | N/A |
 
-Three branches:
+**PHASE A DETECTION** — Scan for coverage shortfalls
 
-1. **All affected regions ≥ Required, and all major-scan modules ≥ Required**
-   → proceed to dispatch.
-2. **Something below Required, with coverage data** → this is Phase A.
-   Spawn `python-coverage-improver` with `isolation="worktree"`. The
-   `modules_to_improve` entries differ by kind:
-   - **Refactor finding's region < Required** → a **function-scoped** entry,
-     `target = Required (80)`. No Floor for refactors — a single function is
-     small enough to reach 80% in one pass, so #462 collapsed the tier and
-     fixed the #456 dead-end. Build the entry straight from the under-covered
-     region: `function` = `region.name`, `start_line` / `end_line` / `current`
-     = the region's `start_line` / `end_line` / `pct`. Dedupe one entry per
-     region.
-   - **Major-upgrade module below Required** → a **whole-module** entry by
-     where it sits: between Floor and Required → `target = Required (90)`;
-     below Floor (incl. 0% / greenfield) → `target = Floor (70)`, the #429
-     bootstrap. A major upgrade has no per-finding line, so its whole-module
-     two-tier stays.
+Execute this logic for each type of work:
 
-   ```text
-   Agent(
-     subagent_type="python-coverage-improver",
-     description="Raise coverage on under-covered affected functions / modules",
-     isolation="worktree",
-     prompt="""
-       repo_path: <repo.path>
-       policy.coverage_threshold: <Required for this entry>
-       test_root: tests/
-       modules_to_improve: [
-         { "file": "src/app/store.py", "function": "save",
-           "start_line": 40, "end_line": 72, "current": 40, "target": 80 },  # refactor: function-scoped
-         { "path": "src/app/cli.py", "current": 0, "target": 70 }  # major: whole-module
-       ]
-       worktree.base_branch: <worktree.base_branch>
-       commit_subject: "test(coverage): cover <comma-separated function/module names>"
+1. **Refactor findings** (from step 2a)
 
-       Add meaningful behavior tests; do NOT modify production code.
-       Run pytest in the worktree; only return success if tests pass.
-       Commit your changes on the worktree branch before returning —
-       the orchestrator will push the branch as-is.
-     """
-   )
-   ```
+   For each finding with an explicit `file_path` (ruff/semgrep/sonar/code_scanning):
 
-   When it finishes, **return immediately** with the `improver_result`
-   shape (see the Response section). No `plan` field. See the intro's
-   Phase A bullet for the orchestrator-side loop that re-invokes you
-   after the improver's PR merges.
-3. **A refactor finding's file is missing entirely from `coverage`** (no
-   region AND no `by_module` entry), or **a major-scan module has no
-   coverage data** → halt; you can't target what isn't measured. Return:
+   - Resolve its enclosing function region from `coverage.regions[]` (entry where
+     `start_line <= finding.line <= end_line`, innermost on overlap)
+   - If no region contains it, fall back to whole-file: `coverage.by_module[file]`
+   - Gate against Required (80%): **if coverage < 80%, mark for improver**
 
-   ```json
-   {
-     "schema_version": "2",
-     "actions_taken": [],
-     "actions_requiring_review": [],
-     "missing_tooling": [],
-     "human_action_required": [{
-       "reason": "<module> is named by a finding but has no coverage data — it can't be measured or improved automatically. Planned work: <action description>.",
-       "recommendation": "Confirm the module is imported by the test run and present in the coverage report (not omitted), then re-run /development:maintenance."
-     }],
-     "unable_to_fix": []
-   }
-   ```
+2. **Major-upgrade modules** (from step 2b)
 
-Pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff
-format) skip this check — they're behavior-preserving by ruff's own
-guarantee. `container_scan` is likewise exempt: its agent edits
-`Dockerfile` and `.snyk`, never Python source, so module coverage isn't
-load-bearing — an unrelated low-coverage module must not block a security
-ignore or an apt pin. Other agents respect it.
+   If at least one major-version dep upgrade exists:
+
+   - Scan all modules in `coverage.by_module` against Required (90%) and Floor (70%)
+   - **If any module < 90%, mark for improver**
+
+##### BRANCH DECISION
+
+Based on what you found, take one path:
+
+##### BRANCH 1: All scanned items >= Required thresholds
+
+Proceed directly to Phase B (planner). No improver needed.
+
+Skip branches 2 and 3; go straight to "Planning step (Phase B only)" below.
+
+##### BRANCH 2: Some items < Required, coverage data exists
+
+##### Spawn improver (Phase A)
+
+Build the `modules_to_improve` array from all under-covered items.
+Dedupe by (file, function) for refactors and (path) for modules.
+
+For each **refactor finding that failed 80%**, add a function-scoped entry:
+
+```json
+{
+  "file": "<file_path>",
+  "function": "<region.name>",
+  "start_line": <region.start_line>,
+  "end_line": <region.end_line>,
+  "current": <region.pct>,
+  "target": 80
+}
+```
+
+For each **major-upgrade module**:
+
+- If `70% <= coverage < 90%`: `{ "path": "<module>", "current": <pct>, "target": 90 }`
+- If `coverage < 70%`: `{ "path": "<module>", "current": <pct>, "target": 70 }`
+
+Invoke the improver with `isolation="worktree"`:
+
+```python
+Agent(
+  subagent_type="python-coverage-improver",
+  description="Raise coverage on under-covered functions and modules",
+  isolation="worktree",
+  prompt=f"""
+    repo_path: {repo.path}
+    test_root: tests/
+    modules_to_improve: {json.dumps(modules_to_improve)}
+    worktree.base_branch: {worktree.base_branch}
+    commit_subject: "test(coverage): raise coverage on <names>"
+
+    For each entry in modules_to_improve:
+    - If "function" is present: add behavior tests for that function,
+      targeting "target"%
+    - If only "path" is present: add behavior tests for that module,
+      targeting "target"%
+
+    Add meaningful behavior tests only. Do NOT modify production code.
+    Run pytest in the worktree.
+    Commit your changes on the worktree branch before returning.
+  """
+)
+```
+
+**On the improver's return:**
+
+- Capture its `worktree_branch`, `worktree_path`, and per-module coverage
+  improvement (before/after)
+- **Return immediately** with the `improver_result` structure (see Response
+  section below)
+- **Do NOT run the planner here** — Phase A only
+- The orchestrator will push the improver's branch, open a PR, monitor CI,
+  merge it, and re-invoke you for Phase B
+
+##### BRANCH 3: A refactor finding or major-scan module has no coverage data
+
+No region AND no `by_module` entry for that file/module.
+You can't target what isn't measured. Halt and return:
+
+```json
+{
+  "schema_version": "2",
+  "actions_taken": [],
+  "actions_requiring_review": [],
+  "missing_tooling": [],
+  "human_action_required": [{
+    "reason": "<module/file> has no coverage data — cannot measure or improve automatically.",
+    "recommendation": "Confirm the module is imported by the test run and appears in coverage report. Then re-run /development:maintenance."
+  }],
+  "unable_to_fix": []
+}
+```
+
+Pure-mechanical agents (ruff `--fix` without `--unsafe-fixes`, ruff format)
+skip this check — they're behavior-preserving by ruff's guarantee.
+`container_scan` is likewise exempt: it edits `Dockerfile`/`.snyk`, never Python
+source.
 
 #### Step 2d — partial halt vs full halt
 
@@ -410,6 +457,7 @@ Surface the skipped major upgrades in `human_action_required` with:
   "reason": "Skipped <N> major dep upgrade(s) — project-wide coverage floor of <Floor>% not met (lowest: <module> at <X>%).",
   "recommendation": "Bring <module> coverage up to <Floor>% (preferably to 90% for major-upgrade work) before re-running maintenance. The patch/minor upgrades and other findings have been processed normally."
 }
+
 ```
 
 This avoids the all-or-nothing problem where one weakly-tested module
@@ -453,6 +501,7 @@ Agent(
     worktree.base_branch: <worktree.base_branch>
   """
 )
+
 ```
 
 **No worktree** — the planner only reads. `isolation` is omitted.
@@ -472,6 +521,7 @@ The planner returns:
             ... ],
   "summary": { "total_findings": 16, "total_groups": 5, "estimated_prs": 5 }
 }
+
 ```
 
 ### Render the plan to the user
@@ -490,6 +540,7 @@ agent, print a scannable summary to the conversation:
      → <agent>   (priority <score>)
 
   2. ...
+
 ```
 
 This is informational; dispatch proceeds automatically after rendering.
@@ -537,6 +588,7 @@ in the same assistant turn.
   },
   "missing_tooling": [ /* see below */ ]
 }
+
 ```
 
 - `ci_fixer_agent` is **required** and always `"python-ci-fixer"` for
@@ -558,6 +610,7 @@ in the same assistant turn.
     "what_it_provides": "<one-line role of the tool>",
     "how_to_add": "Run /development:bootstrap, or see the tool's docs."
   }
+
   ```
 
   Concrete copy may live in the agent files (e.g.
