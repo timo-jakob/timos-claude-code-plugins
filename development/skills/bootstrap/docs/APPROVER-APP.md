@@ -3,8 +3,8 @@
 ## Overview
 
 The **Claude Approver App** is a GitHub App that posts code review verdicts (approval or requested
-changes) to pull requests. Unlike the old workflow (GitHub Actions-driven), the Approver App is
-now **user-managed and invoked locally** via the `/development-python:approve` skill.
+changes) to pull requests. The Approver App is **user-managed and invoked locally** via the
+`/development-python:approve` skill, giving you control over when approval happens.
 
 ## Key Properties
 
@@ -70,7 +70,6 @@ development/skills/bootstrap/scripts/install-claude-apps.zsh --approver-only
 **What it does**:
 
 - Adds Approver App to repo's installed apps
-- Creates GitHub Action runner (NOW REMOVED — Step 3 deletes it)
 - Stores app metadata for later token minting
 
 **Result**: App authorized on this repo, ready to post reviews.
@@ -89,7 +88,7 @@ Both are GitHub Apps registered locally — neither requires CI/GitHub Actions.
 
 ## Token Minting
 
-### Local (New Approach)
+Tokens are minted locally on demand using the `mint-approver-token.zsh` script:
 
 ```bash
 mint-approver-token.zsh
@@ -102,21 +101,6 @@ mint-approver-token.zsh
 
 **Used by**: `/development-python:approve` skill
 **No platform account required**: Works with any AI coding assistant
-
-### Old Approach (Deprecated)
-
-```yaml
-# .github/workflows/claude-approver.yml
-uses: actions/create-github-app-token@v3
-  with:
-    client-id: ${{ vars.CLAUDE_APPROVER_APP_ID }}
-    private-key: ${{ secrets.CLAUDE_APPROVER_PRIVATE_KEY }}
-```
-
-- Requires GitHub Actions (CI-driven, server-side)
-- Requires GitHub secrets/vars (lock-in to GitHub platform)
-- Requires Claude API key in secrets (lock-in to Anthropic)
-- **REMOVED in Phase 1**
 
 ## Why Separate Apps?
 
@@ -138,14 +122,11 @@ uses: actions/create-github-app-token@v3
 - PR timeline shows `claude-approver-bot` for approvals
 - Clear attribution, audit trail
 
-## Backward Compatibility
+## Initial Setup
 
-**For existing repos with old workflow:**
-
-1. New repos: `bootstrap` no longer generates `.github/workflows/claude-approver.yml`
-2. Existing repos: Workflow will continue to work until manually deleted
-3. Migration path: Run `register-claude-apps.zsh` + `install-claude-apps.zsh --approver-only`, then
-   delete workflow
+New repos bootstrapped with this version will have the Approver App configured for local
+invocation only. No GitHub Actions workflow is generated — approval is always user-triggered
+via the `/development-python:approve` skill.
 
 ## Security Considerations
 
