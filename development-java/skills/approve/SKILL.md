@@ -1,43 +1,47 @@
 ---
 name: approve
-description: Run the Claude Approver locally against an open PR — same agent, same `.claude/approver-policy.md`, but the verdict prints to stdout instead of being posted as a review. Useful for predicting what CI's Approver will say before pushing, or for a quick sanity check on someone else's Java PR. Pass a PR number explicitly (`/development-java:approve 123`) or omit it to use the PR associated with your current branch.
+description: >
+  Review and post approval/rejection to an open PR using the Claude Approver
+  identity. Mints token locally, posts as claude-approver-bot. Same agent as
+  CI. Pass a PR number or use current branch's PR.
 disable-model-invocation: false
 ---
 
-You are running a **local dry-run of the Claude Approver**. The user
-wants to see what verdict the `java-approver` agent would render for a
-given PR, without anything being posted to GitHub.
+You are running the **Claude Approver** locally and **posting the verdict to GitHub**
+as `claude-approver-bot`. The Approver App token is minted fresh from your local
+Keychain; no platform account or GitHub Actions required.
 
-**User input:** $ARGUMENTS
+**User input:** `$ARGUMENTS` (PR number, optional; defaults to current branch's PR)
 
 ## What this skill does
 
-1. Verify the repo has the Approver installed (`.claude/approver-policy.md`
-   exists) and the user is authenticated to GitHub.
-2. Resolve which PR to review — explicit argument or the PR for the
-   current branch.
-3. Spawn the same `java-approver` agent the CI workflow uses, with
-   `DRY_RUN=true` in the prompt.
-4. Display the agent's output to the user.
+1. Verify Approver App is registered and installed on this repo.
+2. Resolve which PR to review (explicit argument or current branch).
+3. Mint Approver token locally via `mint-approver-token.zsh`.
+4. Spawn `java-approver` agent with the minted token.
+5. Agent posts verdict to GitHub as `claude-approver-bot`.
 
 ## Step 1 — Preflight
 
-Check both prerequisites; halt with a clear pointer if either fails.
+Verify prerequisites:
 
 ```bash
-test -f .claude/approver-policy.md || {
-  echo "::error::No .claude/approver-policy.md in this repo."
-  echo "Run /development:bootstrap --claude-approver true to install the Approver."
+# Check Approver App is registered locally
+test -f ~/.config/claude-plugins/apps.json || {
+  echo "::error::Approver App not registered."
+  echo "Run: development/skills/bootstrap/scripts/register-claude-apps.zsh"
   exit 1
 }
 
+# Check gh CLI
 command -v gh >/dev/null 2>&1 || {
-  echo "::error::gh CLI not on PATH. Install via: brew install gh"
+  echo "::error::gh CLI not on PATH. Install: brew install gh"
   exit 1
 }
 
+# Check gh authentication
 gh auth status >/dev/null 2>&1 || {
-  echo "::error::gh CLI not authenticated. Run: gh auth login"
+  echo "::error::gh not authenticated. Run: gh auth login"
   exit 1
 }
 ```
@@ -46,104 +50,85 @@ gh auth status >/dev/null 2>&1 || {
 
 Parse `$ARGUMENTS`:
 
-- **A positive integer** (`123`, `--pr 123`, `--pr=123`) → use as
-  `PR_NUMBER`.
-- **Empty** → try `gh pr view --json number --jq .number` to find a
-  PR for the current branch. If none, halt:
+- **Positive integer** (`123`, `--pr 123`) → use as PR number.
+- **Empty** → run `gh pr view --json number` to find current branch's PR.
+  If none, halt with clear message.
 
-  ```text
-  No PR provided and no open PR is associated with the current
-  branch. Either push the branch and open a PR first, or pass an
-  explicit PR number: /development-java:approve 123
-  ```
-
-Capture the repo as `owner/name`:
+Capture repo:
 
 ```bash
 REPO=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name')
 ```
 
-## Step 3 — Invoke the java-approver agent
+## Step 3 — Mint Approver token
 
-Spawn the agent with the same prompt shape the CI workflow uses, but
-with `DRY_RUN=true`. The agent reads `.claude/approver-policy.md`,
-gathers PR context via `gh`, runs the same 13-step procedure as in CI,
-and returns the rendered review body (markdown + hidden JSON block)
-**without posting it**.
+```bash
+TOKEN=$(development/skills/maintenance/scripts/mint-approver-token.zsh)
+if [ -z "$TOKEN" ]; then
+  echo "::error::Failed to mint Approver token."
+  echo "Check: Approver App registered + installed on this repo + Keychain accessible"
+  exit 1
+fi
+```
+
+## Step 4 — Invoke the java-approver agent
+
+Spawn the agent with the minted token in the environment:
 
 ```text
 Agent(
   subagent_type="java-approver",
-  description="Local dry-run review of PR #<n>",
+  description="Review and post PR #<n>",
   prompt="""
-    Review PR #<n> in <owner>/<repo>. Dry-run: true.
+    Review PR #<n> in <owner>/<repo>. Dry-run: false.
 
-    This is a LOCAL invocation via /development-java:approve.
-    Env vars GH_TOKEN, PR_NUMBER, REPO, DRY_RUN are not set; use these
-    values from the prompt and rely on the user's existing `gh auth`
-    for all GitHub API calls. Do NOT post a review — return the
-    rendered review body as your final text.
+    GitHub token (GH_TOKEN) is provided with Approver App permissions.
+    Post the verdict to GitHub using `gh pr review <n> --approve|--request-changes`.
   """
 )
 ```
 
-The agent's full behaviour is documented in
-[`development-java/docs/java-approver.md`](../../docs/java-approver.md)
-and the prompt itself lives at
-[`development-java/agents/java-approver.md`](../../agents/java-approver.md).
-This skill changes nothing about what the agent does — only how it's
-invoked and what it does with its output.
+Pass these env vars to the agent:
 
-## Step 4 — Display
+- `GH_TOKEN=<minted token>`
+- `PR_NUMBER=<n>`
+- `REPO=<owner>/<repo>`
+- `DRY_RUN=false`
 
-Print the agent's return value to the user verbatim. Include both
-halves: the human-readable verdict + findings + risks, AND the hidden
-`<!-- claude-approver:findings -->` JSON block (helpful if the user
-wants to see what `/development:maintenance`'s re-ingest would
-receive).
+The agent runs the same synthesis procedure as CI and posts the verdict
+as `claude-approver-bot` when `DRY_RUN=false`.
 
-Add a brief banner at the top so it's obvious this was a dry-run:
+## Step 5 — Report
+
+When posting succeeds, confirm the review is visible:
 
 ```text
-=================================================================
-LOCAL DRY-RUN — no review was posted to GitHub.
-PR: <owner>/<repo>#<n>
-=================================================================
+✓ Review posted to GitHub as claude-approver-bot
+  https://github.com/<owner>/<repo>/pull/<n>#pullrequestreview-xyz
 ```
 
-## What this skill does NOT do
+Print the agent's full output (human-readable verdict + findings + hidden
+JSON block) for the user to inspect.
 
-- **Does not post a review.** The agent's step 13 sees `DRY_RUN=true`
-  and skips the `gh pr review` call.
-- **Does not modify the PR.** No pushes, no comments, no labels.
-- **Does not consume App tokens.** Uses the user's `gh auth` —
-  `GH_TOKEN` is not set and not needed.
-- **Does not re-run the full Gradle build.** The agent's cheap local
-  checks (Spotless on the diff, a compile/collection sanity check) run
-  as they would in CI — fast, defence-in-depth — but the full test
-  suite already went green in CI and is not re-run here.
+## Security & token handling
+
+- **Token is minted fresh**, 1-hour lifetime (GitHub default).
+- **Token is never logged or committed.**
+- **Private key stays in system Keychain**, not in code or secrets.
+- **Review is posted as `claude-approver-bot`**, not the user's identity.
+- **Approver App has read-only code access** (can't push or modify code).
+- **User controls when approval happens** — skill is user-triggered, not
+  automated.
+
+## When to use
+
+- **When you're ready to approve/reject a PR** with AI synthesis (instead
+  of waiting for CI to run).
+- **For your own PRs** (Approver can't self-approve, but the verdict is
+  useful for quality signal).
+- **On team PRs** when you want a second opinion before human review.
 
 ## Cost
 
-One opus invocation of `java-approver`, ~50–150 K tokens depending on
-diff size and how many test bodies the agent reads. Same cost profile
-as the CI Approver, paid per local-dry-run invocation.
-
-## When to use this
-
-- **Before pushing**, to predict CI's verdict and fix any findings
-  while the iteration loop is local + fast.
-- **On someone else's PR**, for a quick sanity check before reviewing
-  manually.
-- **When the policy file changes**, to test the new criteria against
-  open PRs before merging the policy update (a policy-change PR is
-  evaluated by the previous policy in CI; the new policy applies going
-  forward — `/development-java:approve` lets you preview).
-
-> **CI note.** The shared `.github/workflows/claude-approver.yml`
-> currently invokes `--agent python-approver`. Selecting the
-> per-language approver automatically (and shipping a Java
-> `approver-policy.md` template) is bootstrap work landing in the Java
-> bootstrap slice (#307). Until then, this local skill is the way to run
-> the `java-approver` against a Java PR; for CI, point the workflow's
-> `--agent` at `java-approver` by hand, or wait for the bootstrap slice.
+One Opus invocation of `java-approver` (~50–150 K tokens depending on
+diff size). Same cost as CI, paid per local invocation.
