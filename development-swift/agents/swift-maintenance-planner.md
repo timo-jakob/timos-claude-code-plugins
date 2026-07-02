@@ -78,13 +78,19 @@ The grouping rule is therefore tool-level: **one group per (configured
 tool, single-instance agent)** carrying ALL of that tool's findings, even
 when they span different rules, files, or severities.
 
+**The exceptions are the vendor-PR tools `dependabot`, `snyk_prs`, and
+`renovate`** — a single tool's PRs can dispatch to two different agents
+(the triager vs the major-upgrade agent), so they split per § 5a. A
+single group still never spans multiple agents.
+
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
 > **Tool universe so far (#297 epic): `format_lint`, `sonarcloud`,
-> `code_scanning`.** All are one-group-per-tool. `semgrep` is deferred for
-> Swift (experimental, empty rule registry — #443). The vendor-PR tools
-> (Slice F #446) extend the map below later.
+> `code_scanning`, `dependabot`, `snyk_prs`, `renovate`.** Most are
+> one-group-per-tool; the vendor-PR tools split by ecosystem + bump level
+> (§ 5a). `semgrep` is deferred for Swift (experimental, empty rule
+> registry — #443).
 
 ### 4. Group priority + ordering
 
@@ -102,9 +108,72 @@ Order groups by descending priority. Ties broken by:
 | `format_lint` | `swift-format-lint-fixer` | `true` |
 | `sonarcloud` | `swift-sonar-triage` | `true` |
 | `code_scanning` | `swift-code-scanning-triage` | `true` |
+| `dependabot` / `snyk_prs` / `renovate` — swift/github-actions patch+minor | `swift-dependabot-snyk-triage` | `false` |
+| `dependabot` / `snyk_prs` / `renovate` — swift major (incl. 0.x major-equiv) | `swift-major-upgrade` (one PR per bump) | `true` |
+| `dependabot` / `renovate` — docker, **same-tag digest-only refresh** (image `name:tag` unchanged, only `@sha256:` differs) | `swift-dependabot-snyk-triage` (**auto-merge-if-green**) | `false` |
+| `dependabot` / `snyk_prs` / `renovate` — docker tag/version bumps (incl. `swift:` toolchain images — Slice G #447 owns those migrations), github-actions major, unknown | `swift-dependabot-snyk-triage` (human-review) | `false` |
 
-All three agents edit local files, so their groups are `isolation: true`.
-A single group never spans multiple agents.
+The static-analysis agents edit local files (`isolation: true`).
+`swift-dependabot-snyk-triage` acts on GitHub PRs via `gh`, not local
+files, so its group is `isolation: false`. `swift-major-upgrade` does
+local migration work → `isolation: true`, one group per bump.
+
+### 5a. Vendor-PR classification (`dependabot` + `snyk_prs` + `renovate`)
+
+These three tools carry raw GitHub PR records (`number`, `title`, `body`,
+`headRefName`). Classify each into `source` / `ecosystem` / `bump_level`
+/ `routing`, then split into groups per the routing table above.
+
+- **`source`** — `dependabot` when `_tool == "dependabot"` (or
+  `headRefName` starts `dependabot/`); `snyk` when `headRefName` starts
+  `snyk-fix-` / `snyk-upgrade-`; `renovate` when `_tool == "renovate"`
+  (or `headRefName` starts `renovate/`).
+- **`ecosystem`** — for Dependabot, the segment after `dependabot/` in
+  `headRefName` (`swift`, `github-actions`, `docker`); for Snyk, default
+  `swift` (Snyk OSS for SwiftPM). For **Renovate** the branch doesn't
+  encode the manager, so infer: `github-actions` when the dep is a
+  workflow action (`actions/*`, or the title/body names a
+  `.github/workflows` action), `docker` when it's a base image, otherwise
+  `swift`. Anything unrecognized → `unknown`.
+- **`bump_level`** — for **Dependabot / Snyk**, parse the version pair
+  from `title` (`Bump <pkg> from <old> to <new>`, or `[Snyk] … upgrade
+  <pkg> from <old> to <new>`). For **Renovate**, the title carries only
+  the target (`Update <pkg> to v<new>`) — read the PR **`body`**:
+  Renovate's update table has a **Change** column (`<old> -> <new>`) and
+  an **Update** column stating `major` / `minor` / `patch`. If the body
+  is unavailable, compare the target against the pin in `Package.swift` /
+  `Package.resolved`; if that too is unknown, treat as `minor`
+  (conservative — minors route to auto-merge-if-green, gated by green CI,
+  never to an autonomous major). Then compare semver: first non-zero
+  component changed → `major` (a `0.x → 0.y` bump is a `major-equiv` —
+  treat as major, pre-1.0 minors can break APIs); second → `minor`;
+  third → `patch`. A grouped PR (`Bump the <group> group with N updates`,
+  Renovate `Update <group> monorepo to …`) → `bump_level: "grouped"`,
+  treated as the highest level any member implies (default `minor` unless
+  the body shows a major).
+- **`routing`** —
+  - `swift` / `github-actions` **patch or minor** → `auto-merge-if-green`
+    → the shared `swift-dependabot-snyk-triage` group.
+  - `swift` **major / major-equiv** → its **own** `swift-major-upgrade`
+    group (one PR per bump), carrying `package`, `current_version`,
+    `target_version`, `source`, `pr_number`, `build_system`, and the
+    `release_notes_url` if the body links one.
+  - `docker` **same-tag digest-only refresh** (only the `@sha256:` digest
+    differs) → `auto-merge-if-green` in the triage group, with
+    `routing_reason: "docker-digest-refresh — agent must verify the tag
+    is unchanged before merging"`. This takes precedence over the
+    toolchain-image rule below (a digest refresh of a `swift:` image is
+    NOT a toolchain migration — the version is unchanged).
+  - `docker` **tag/version bumps** → `human-review`. That includes
+    `swift:` toolchain images for now — the Swift toolchain-upgrade
+    agent is Slice G (#447); when it ships, toolchain-image bumps get
+    their own group the way Java's JDK bumps route to
+    `java-runtime-upgrade`. State the reason in `routing_reason`.
+  - `github-actions` **major**, and any `unknown` ecosystem →
+    `human-review` with the reason in `routing_reason`.
+
+Attach the classification fields to each PR record in the group's
+`findings` so the triage agent acts on `routing` without re-deriving it.
 
 ## Output
 

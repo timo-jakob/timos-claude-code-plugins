@@ -87,15 +87,15 @@ setup() {
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 
-@test "gather-swift: bare project -> all four tools report not-configured (#443)" {
+@test "gather-swift: bare project -> all tools report not-configured (#443, #446)" {
   printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
-  for tool in format_lint sonarcloud code_scanning semgrep; do
+  for tool in format_lint sonarcloud code_scanning semgrep dependabot snyk_prs renovate; do
     [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
   done
   # tooling_configured always carries every key, even when false.
-  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "4" ]
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "7" ]
 }
 
 @test "gather-swift: semgrep is always deferred (false) even when a semgrep config is present (#443)" {
@@ -217,4 +217,46 @@ EOF
   [ "$(jq '[.regions[] | select(.start_line <= 2 and .end_line >= 2)] | length > 0' <<<"$out")" = "true" ]
   # Line 1 is above all functions (first function starts at line 2)
   [ "$(jq '[.regions[] | select(.start_line <= 1 and .end_line >= 1)] | length == 0' <<<"$out")" = "true" ]
+}
+
+# --- vendor-PR sources (Slice F, #446) ----------------------------------------
+
+@test "gather-swift: bare project -> vendor-PR sources not configured (#446)" {
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  for tool in dependabot snyk_prs renovate; do
+    [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
+    [ "$(jq -r ".findings_by_tool.$tool // \"absent\"" <<<"$output")" = "absent" ]
+  done
+}
+
+@test "gather-swift: dependabot.yml present -> dependabot configured, findings an array (#446)" {
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  mkdir -p "$WORK/.github"
+  printf 'version: 2\nupdates: []\n' > "$WORK/.github/dependabot.yml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.dependabot <<<"$output")" = "true" ]
+  # WORK isn't a GitHub repo, so the gh listing degrades to [] — but the
+  # key must be present and an array (the contract for configured tools).
+  [ "$(jq -r '.findings_by_tool.dependabot | type' <<<"$output")" = "array" ]
+}
+
+@test "gather-swift: renovate.json present -> renovate configured (#446)" {
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  printf '{ "extends": ["config:recommended"] }\n' > "$WORK/renovate.json"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.renovate <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.renovate | type' <<<"$output")" = "array" ]
+}
+
+@test "gather-swift: .snyk present -> snyk_prs configured (#446)" {
+  printf '// swift-tools-version:6.0\n' > "$WORK/Package.swift"
+  printf 'version: v1.5.0\n' > "$WORK/.snyk"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.snyk_prs <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.snyk_prs | type' <<<"$output")" = "array" ]
 }
