@@ -18,9 +18,9 @@
 #
 #   --repo:     absolute path to the target repo
 #   --target:   relative path of the rendered file inside <repo-path>
-#               e.g. .github/workflows/claude-approver.yml
+#               e.g. .github/dependabot.yml
 #   --template: relative path of the source template inside templates/
-#               e.g. common/.github/workflows/claude-approver.yml.tmpl
+#               e.g. common/.github/dependabot.yml.tmpl
 #
 # Idempotent: if the target already carries a marker line, the script
 # exits 0 without modification. Bootstrap can therefore call it

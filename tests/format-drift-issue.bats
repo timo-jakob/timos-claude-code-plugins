@@ -26,7 +26,7 @@ JSON
 
 @test "non-blocking drift: names the fix but no BLOCKING callout" {
   cat > "$J" <<'JSON'
-[{"file":".github/workflows/claude-approver.yml","severity":"drifted",
+[{"file":".github/workflows/api-stability.yml","severity":"drifted",
   "marker_version":"1.49.0","current_version":"1.50.0","blocking":false,
   "fixes":[{"version":"1.49.1","issue":387,"blocking":false,"summary":"gate excludes advisory snyk"}],
   "message":"x"}]

@@ -571,9 +571,9 @@ fi
 #   never reported as a gap when absent):
 #     - .gitignore / LICENSE     — not 1:1 templates (merged / user-chosen)
 #     - the non-selected bot file — renovate.json XOR dependabot.yml
-#     - the Approver pair         — gated by --claude-approver (no filesystem trace
-#                                   when opted out; rendering it without the App
-#                                   key would add a red required check)
+#     - the Approver policy       — gated by --claude-approver (no filesystem trace
+#                                   when opted out; the workflow half is gone since
+#                                   epic #476 — approval is a local skill, not CI)
 #     - api-stability.yml +       — gated by a language plugin's api-stability spec
 #       check-api-stability.py       (Python-only today); detect-stack can't see
 #                                    it, and the workflow + its wrapper script
@@ -584,7 +584,7 @@ fi
 #   unconditionally-expected gaps auto-render.
 held_out=(
 	".gitignore" "LICENSE" "$excluded_bot"
-	".github/workflows/claude-approver.yml" ".claude/approver-policy.md"
+	".claude/approver-policy.md"
 	".github/workflows/api-stability.yml" ".github/scripts/check-api-stability.py"
 )
 artifacts_json="{"

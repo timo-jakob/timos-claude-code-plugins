@@ -15,13 +15,5 @@
       "blocking": true,
       "summary": "image scan is now path-conditional — it gates only PRs that touch container files (Dockerfile/.dockerignore/compose/trivy.yaml), so app & dependency PRs are no longer blocked by pre-existing base-image CVEs they can't influence"
     }
-  ],
-  "common/.github/workflows/claude-approver.yml.tmpl": [
-    {
-      "version": "1.49.1",
-      "issue": 387,
-      "blocking": false,
-      "summary": "the approver gate excludes advisory Snyk statuses (code/snyk, security/snyk) from its green check, so a free-tier Snyk quota error can no longer silently skip the Approver"
-    }
   ]
 }
