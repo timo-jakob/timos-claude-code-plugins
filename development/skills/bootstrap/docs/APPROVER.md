@@ -20,7 +20,7 @@ If you just want quick links to the underlying specs, skip to
 6. [The PR description schema](#the-pr-description-schema)
 7. [PR types — quick reference](#pr-types--quick-reference)
 8. [The policy file](#the-policy-file)
-9. [Local dry-run with `/development-python:approve`](#local-dry-run-with-development-pythonapprove)
+9. [Invoking the Approver locally via `/development-python:approve`](#invoking-the-approver-locally-via-development-pythonapprove)
 10. [REQUEST_CHANGES → maintenance loop](#request_changes--maintenance-loop)
 11. [The author allowlist](#the-author-allowlist)
 12. [Hotfix override](#hotfix-override)
@@ -171,18 +171,16 @@ cd /path/to/repo
 
 The `--claude-approver true` flag tells bootstrap to:
 
-1. Render `.github/workflows/claude-approver.yml` (the workflow that
-   actually runs the Approver agent).
-2. Render `.claude/approver-policy.md` (the per-PR-type criteria the
+1. Render `.claude/approver-policy.md` (the per-PR-type criteria the
    agent reads).
-3. Merge `## Type` and `## Risk` sections into
+2. Merge `## Type` and `## Risk` sections into
    `.github/PULL_REQUEST_TEMPLATE.md` if those sections aren't already
    present.
-4. Install the **Claude Approver** and **Claude Maintenance** GitHub
+3. Install the **Claude Approver** and **Claude Maintenance** GitHub
    Apps onto this specific repo (opens the install URLs in your
    browser — you select "Only select repositories" and pick the
    current repo).
-5. Store per-repo secrets and variables via `gh`:
+4. Store per-repo secrets and variables via `gh`:
    - **Secrets** (in both Actions and Dependabot scopes):
      - `ANTHROPIC_API_KEY` — captured during install (or read from env).
      - `CLAUDE_APPROVER_PRIVATE_KEY` — the Approver App's PEM.
@@ -210,51 +208,46 @@ Re-running bootstrap is idempotent — existing files go through the
 
 Once the Approver is set up, the typical PR lifecycle is:
 
-1. **You (or a bot) open a PR.** The Approver workflow fires on
-   `pull_request: opened` and every required check fires too.
-2. **The `approver-gate` job short-circuits early** for PRs the
-   Approver shouldn't evaluate (each skip ends the gate job *green*
-   with a `::notice::` explaining why — GitHub records non-zero exits
-   as failures, so skips must not exit non-zero; see #232):
-   - Comment trigger (`/approve`) with the comment author not in
-     `OWNER/MEMBER/COLLABORATOR` → skipped at the job-level `if:`.
-   - PR author matches `claude-approver*[bot]` → anti-rubber-stamp
-     gate skips.
-   - PR author not on `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` → skips.
-   - PR is draft, not OPEN, or has a moving head SHA → skips.
-3. **The all-green check gate waits in-job** — polling the head SHA's
-   check runs every 30s (30-minute deadline) until every other check
-   has completed, then requires `success | skipped | neutral` on all
-   of them. This is what makes the Approver effectively run **last**:
-   GitHub Actions has no cross-workflow ordering, so the gate
-   sequences itself (#232). If a check is red, the gate skips out
-   green (no point asking Claude when CI already said no — the
-   failing check tells the story). A new push cancels the waiting
-   run via the concurrency group and starts a fresh one.
-   **Advisory legacy commit statuses are excluded** from the green
-   computation (#387): Snyk's `code/snyk` and `security/snyk` post via
-   the legacy commit-status API but are never required branch-protection
-   contexts, and on the free tier they can go ERROR for quota reasons
-   ("Code test limit reached") unrelated to the PR. The gate evaluates
-   the non-advisory statuses individually rather than trusting the
-   aggregate state, so an advisory quota failure can't silently skip the
-   Approver. Required legacy statuses (e.g. `sonarcloud`) still gate.
-4. **When everything's green**, the gate emits `proceed=true` and the
-   `approve` job (chained via `needs:`) mints a 1-hour Approver App
-   installation token, checks out the PR HEAD, pulls in the plugin
-   family at the pinned SHA, installs Claude Code CLI, and invokes
-   `python-approver` (opus model). When the gate declines, the
-   `approve` job shows as *skipped*, never red.
-5. **The agent posts the review** as `claude-approver[bot]` via `gh pr
-   review --approve | --request-changes | --comment`. Branch
-   protection sees a fresh review from a non-author identity and
-   updates the *Required reviews* count.
+1. **You (or a bot) open a PR.** All required checks fire (tests, linters,
+   SonarCloud, coverage, API-stability checks, etc.).
+2. **CI runs to completion.** The Approver workflow is **no longer triggered
+   by CI** — it's now user-invoked via a local skill.
+3. **When CI is green, you run the Approver skill locally:**
 
-For machine-authored PRs (Dependabot, the maintenance pipeline), the
-human is fully out of the loop unless the Approver requests changes.
-For human-authored PRs, the Approver supplements a human reviewer
-rather than replacing them — unless you widen the allowlist (see
-below).
+   ```bash
+   /development-python:approve <PR>      # Python projects
+   /development-java:approve <PR>        # Java/Gradle projects
+   /development-swift:approve <PR>       # Swift projects
+   ```
+
+   Or if you're working with the maintenance orchestrator, it can invoke the
+   skill programmatically after CI green.
+
+4. **The skill mints a token and invokes the agent:**
+   - Reads Approver App ID from `~/.config/claude-plugins/apps.json`
+   - Fetches private key from system Keychain
+   - Calls GitHub API to mint a 1-hour installation token
+   - Spawns the language-specific approver agent (same as the old CI workflow,
+     now running locally in your control)
+
+5. **The agent posts the review** as `claude-approver[bot]` via `gh pr review`.
+   Posts one of three verdicts:
+   - `APPROVE` — confidence is high and risk is acceptable
+   - `REQUEST_CHANGES` — something needs attention
+   - `COMMENT` — reservations, defers to human
+
+**No platform lock-in:** The Approver App is registered locally on your machine.
+No Claude platform account or GitHub Actions required. Works with any AI coding
+assistant.
+
+**For machine-authored PRs** (Dependabot, the maintenance pipeline): when the
+orchestrator opens a PR and CI goes green, it can arm GitHub's native auto-merge
+with a 10-minute poll timeout. You then invoke `/approve` at your convenience.
+The orchestrator detects the review and proceeds with merge (or re-ingest if
+`REQUEST_CHANGES`).
+
+**For human-authored PRs:** the Approver supplements a human reviewer (or replaces
+them if you widen the allowlist).
 
 ## The PR description schema
 
@@ -357,37 +350,40 @@ Policy changes go through normal code review:
   model isn't calibrated for them. Keep `REQUEST_CHANGES` with "human
   review required" as the verdict.
 
-## Local dry-run with `/development-python:approve`
+## Invoking the Approver locally via `/development-python:approve`
 
-Sometimes you want to know what verdict the Approver *would* render
-before pushing. Run the agent locally:
+To post an approval (or request changes) to a PR, run the Approver skill locally:
 
 ```sh
-# Reviews the PR for the current branch
+# Posts verdict to the PR for the current branch
 /development-python:approve
 
-# Reviews a specific PR
+# Posts verdict to a specific PR
 /development-python:approve 42
 ```
 
-The skill spawns the same `python-approver` agent the CI workflow
-uses, with `DRY_RUN=true` in the prompt. The agent's verdict (markdown -
-hidden JSON block) prints to stdout. **Nothing is posted to
-GitHub.**
+**What happens:**
 
-Useful for:
+1. Skill mints an Approver token locally from your Keychain
+   (no platform account, no GitHub Actions required).
+2. Spawns the `python-approver` agent (same agent as the old CI workflow).
+3. Agent posts the verdict to GitHub as `claude-approver-bot` via `gh pr review`.
+4. Verdict is one of: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` with reservations.
 
-- Predicting CI's verdict before pushing.
-- Sanity-checking someone else's PR.
-- Previewing a `.claude/approver-policy.md` change against open PRs
-  before merging the policy update.
+**When to invoke it:**
 
-The dry-run consumes your `ANTHROPIC_API_KEY` from the environment
-(or prompts), not the repo's secret. Same per-PR cost as the CI run
-(~50–150 K opus tokens — see [Cost](#cost-and-rate-limits)).
+- When you're ready to approve a PR and want AI synthesis before merging.
+- When the maintenance orchestrator finishes CI and arms auto-merge (the orchestrator
+  can poll for your approval or you invoke the skill manually).
+- For your own PRs — the Approver can't self-approve, but the verdict is useful
+  for quality signal before human review.
 
-Full spec in
-[`../../../development-python/skills/approve/SKILL.md`](../../../development-python/skills/approve/SKILL.md).
+**Cost:**
+
+Same per-PR cost as the old CI run (~50–150 K opus tokens; see [Cost](#cost-and-rate-limits)).
+
+**Full spec:**
+[`../../../development-python/skills/approve/SKILL.md`](../../../development-python/skills/approve/SKILL.md)
 
 ## REQUEST_CHANGES → maintenance loop
 
@@ -885,7 +881,7 @@ they'll be added here.
 | [`CLAUDE-APPS.md`](./CLAUDE-APPS.md) | The two App identities, permissions, manifest flow, manual fallback, key rotation |
 | [`../../../development-python/docs/python-approver.md`](../../../development-python/docs/python-approver.md) | Agent runtime spec — what env it gets, the 13-step procedure, the JSON schema, hard-fail conditions, refusal patterns |
 | [`../../../development-python/docs/api-stability.md`](../../../development-python/docs/api-stability.md) | Griffe-based API-stability gate — the artifact the Approver reads in step 4 |
-| [`../../../development-python/skills/approve/SKILL.md`](../../../development-python/skills/approve/SKILL.md) | Local dry-run skill — how `/development-python:approve` invokes the agent |
+| [`../../../development-python/skills/approve/SKILL.md`](../../../development-python/skills/approve/SKILL.md) | Approval skill — how `/development-python:approve` invokes the agent and posts to GitHub |
 | [Bootstrap `SKILL.md` Step 3e](../SKILL.md) | What gets rendered into the target repo at bootstrap time |
 | [Bootstrap `SKILL.md` Step 4.5 *Claude Apps install*](../SKILL.md) | What `install-claude-apps.zsh` does at bootstrap time |
 | [Maintenance `SKILL.md` Phase 2.5](../../maintenance/SKILL.md) | Approver feedback ingestion — the closed loop |
