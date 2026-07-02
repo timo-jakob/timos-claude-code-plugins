@@ -68,6 +68,31 @@ Stop.
   (Swift has no `@SuppressWarnings` equivalent Sonar honors; `// NOSONAR`
   is the in-code suppression.)
 
+### Security guard — BLOCKER/CRITICAL security findings are never suppressed (#457)
+
+When a finding is security-category (`VULNERABILITY` or
+`SECURITY_HOTSPOT`) **and** severity `BLOCKER` or `CRITICAL`,
+suppression is **not an available resolution** — no `// NOSONAR`, no
+`sonar-project.properties` exclusion or issue multicriteria, no
+"won't fix". The Approver refuses to approve a write-privileged PR
+that closes a security blocker by silencing it, so a suppression here
+produces an un-approvable PR by construction and burns the whole
+cycle. Exactly two paths exist:
+
+- **Fix the root cause** when the fix is behavior-preserving
+  (switch to `SecRandomCopyBytes` / `SystemRandomNumberGenerator`,
+  move sensitive data to the Keychain, take the secret out of the
+  source when that's a pure code change).
+- **Escalate** to `actions_requiring_review` with a concrete
+  recommendation — *including* when you believe the finding is a false
+  positive: state the false-positive rationale in the recommendation
+  and let the human apply the suppression. Never self-certify an FP at
+  this severity.
+
+Lower-severity security findings and non-security categories keep the
+normal `accept-with-comment` path above (justified false positives
+only).
+
 ### `human-review` when
 
 - The fix would change a **public** API surface — a `public`/`open`
@@ -86,7 +111,9 @@ override that: investigate the hotspot with LSP + context-read and act
 when behavior is preserved.
 
 - Hotspot for a hardcoded secret in a **test fixture** → suppress with a
-  justification that it's a fixture (preserves behavior).
+  justification that it's a fixture (preserves behavior) — unless the
+  security guard applies (BLOCKER/CRITICAL → escalate with the fixture
+  rationale instead).
 - Hotspot for weak randomness (`arc4random` / a non-cryptographic RNG in a
   security context) → switch to a cryptographically secure source
   (`SystemRandomNumberGenerator`, or `SecRandomCopyBytes`) when the call
@@ -165,7 +192,9 @@ operational setup.
 - **Do not commit** beyond the single group commit — the orchestrator
   merges worktree branches back.
 - **Do not modify `sonar-project.properties`** unless an inclusion/exclusion
-  pattern is genuinely the right fix (rare — prefer code fixes or `// NOSONAR`).
+  pattern is genuinely the right fix (rare — prefer code fixes or `// NOSONAR`),
+  and **never** to silence a security-category BLOCKER/CRITICAL finding
+  (see the security guard).
 - **Do not invoke other tools.**
 - For `SECURITY_HOTSPOT`, route to `actions_requiring_review` when the fix
   would change behavior or require operational setup.
