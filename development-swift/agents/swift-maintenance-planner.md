@@ -111,12 +111,14 @@ Order groups by descending priority. Ties broken by:
 | `dependabot` / `snyk_prs` / `renovate` — swift/github-actions patch+minor | `swift-dependabot-snyk-triage` | `false` |
 | `dependabot` / `snyk_prs` / `renovate` — swift major (incl. 0.x major-equiv) | `swift-major-upgrade` (one PR per bump) | `true` |
 | `dependabot` / `renovate` — docker, **same-tag digest-only refresh** (image `name:tag` unchanged, only `@sha256:` differs) | `swift-dependabot-snyk-triage` (**auto-merge-if-green**) | `false` |
-| `dependabot` / `snyk_prs` / `renovate` — docker tag/version bumps (incl. `swift:` toolchain images — Slice G #447 owns those migrations), github-actions major, unknown | `swift-dependabot-snyk-triage` (human-review) | `false` |
+| `dependabot` / `renovate` — docker, **`swift:` toolchain image** version bump | `swift-runtime-upgrade` (one PR per bump) | `true` |
+| `dependabot` / `snyk_prs` / `renovate` — docker (non-toolchain) tag/version bumps, github-actions major, unknown | `swift-dependabot-snyk-triage` (human-review) | `false` |
 
 The static-analysis agents edit local files (`isolation: true`).
 `swift-dependabot-snyk-triage` acts on GitHub PRs via `gh`, not local
-files, so its group is `isolation: false`. `swift-major-upgrade` does
-local migration work → `isolation: true`, one group per bump.
+files, so its group is `isolation: false`. `swift-major-upgrade` and
+`swift-runtime-upgrade` do local migration work → `isolation: true`,
+one group per bump.
 
 ### 5a. Vendor-PR classification (`dependabot` + `snyk_prs` + `renovate`)
 
@@ -164,13 +166,32 @@ These three tools carry raw GitHub PR records (`number`, `title`, `body`,
     is unchanged before merging"`. This takes precedence over the
     toolchain-image rule below (a digest refresh of a `swift:` image is
     NOT a toolchain migration — the version is unchanged).
-  - `docker` **tag/version bumps** → `human-review`. That includes
-    `swift:` toolchain images for now — the Swift toolchain-upgrade
-    agent is Slice G (#447); when it ships, toolchain-image bumps get
-    their own group the way Java's JDK bumps route to
-    `java-runtime-upgrade`. State the reason in `routing_reason`.
+  - `docker` whose image is the **Swift toolchain** (`swift:<ver>` FROM
+    lines) with a changed version → its **own** `swift-runtime-upgrade`
+    group (one PR per bump, #447). Extract `from_version` / `to_version`
+    (e.g. `5.10` → `6.1`) and `from_image` / `to_image` from the PR
+    title/body, and attach the `pre_dispatch_hook` below.
+  - `docker` **non-toolchain tag/version bumps** → `human-review` with
+    the reason in `routing_reason`.
   - `github-actions` **major**, and any `unknown` ecosystem →
     `human-review` with the reason in `routing_reason`.
+
+**`pre_dispatch_hook` — only on `swift-runtime-upgrade` groups** (omit
+it on every other group). It tells the orchestrator to verify the target
+toolchain is installed locally before spawning the agent (the agent's
+cascade needs it, and subagents can't prompt the user). Fill `target`
+with the Swift version this group upgrades to:
+
+```json
+"pre_dispatch_hook": {
+  "type": "runtime_availability",
+  "script": "development-swift/scripts/pre-dispatch-runtime-upgrade.zsh",
+  "target": "6.1",
+  "prompt_field": "local_verification_mode",
+  "modes": { "available": "auto", "unavailable": "skip" },
+  "label": "Swift 6.1 toolchain"
+}
+```
 
 Attach the classification fields to each PR record in the group's
 `findings` so the triage agent acts on `routing` without re-deriving it.
