@@ -48,6 +48,9 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Swift has its own macOS job below (the SWIFT block), not a step section
+  # here — xcodebuild/xcrun don't exist on Linux runners.
+  # --- LINUX_TESTS-START -------------------------------------------------------
   test-and-coverage:
     runs-on: self-hosted
     steps:
@@ -119,12 +122,6 @@ jobs:
       - run: go test ./... -coverprofile=coverage.out -covermode=atomic
       # --- GO-END ----------------------------------------------------------
 
-      # --- SWIFT-START -----------------------------------------------------
-      # Switch this job's runner to a macOS self-hosted runner for Swift.
-      - if: false   # placeholder for Swift projects
-        run: echo "Configure macOS self-hosted runner + xcodebuild test for Swift."
-      # --- SWIFT-END -------------------------------------------------------
-
       # --- JAVA-START ------------------------------------------------------
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -166,6 +163,96 @@ jobs:
             coverage/lcov.info
             build/reports/jacoco/test/jacocoTestReport.xml
           if-no-files-found: ignore
+  # --- LINUX_TESTS-END ---------------------------------------------------------
+  # --- SWIFT-START -----------------------------------------------------------
+  # Swift tests need a macOS runner (xcodebuild/xcrun are macOS-only). On the
+  # private path that means registering a SELF-HOSTED macOS runner and giving
+  # it the `macos` label — see SETUP.md. This job REPLACES the Linux
+  # test-and-coverage job on Swift-only repos: its `name:` is the same
+  # `test-and-coverage` context, so branch protection's required checks are
+  # unchanged. When the Linux job was stripped (Swift-only), point the
+  # sonarqube job's `needs:` at `test-and-coverage-swift` (see the bootstrap
+  # skill's Swift notes; on a rare Swift+other-language repo keep both jobs,
+  # extend `needs:` to both, and give this job's artifact a distinct name
+  # plus a second download step).
+  test-and-coverage-swift:
+    name: test-and-coverage
+    runs-on: [self-hosted, macos]
+    steps:
+      - uses: actions/checkout@v6
+
+      # --- SWIFT_SWIFTPM-START -----------------------------------------------
+      - name: Build + test with coverage (SwiftPM)
+        run: swift test --enable-code-coverage
+      - name: Export lcov (SwiftPM)
+        # llvm-cov reads the profdata SwiftPM wrote next to the build
+        # products; the .xctest bundle binary carries the instrumentation.
+        run: |
+          BIN_PATH=$(swift build --show-bin-path)
+          XCTEST_BUNDLE=$(find "$BIN_PATH" -maxdepth 1 -name '*.xctest' | head -1)
+          XCTEST_BIN="$XCTEST_BUNDLE/Contents/MacOS/$(basename "$XCTEST_BUNDLE" .xctest)"
+          xcrun llvm-cov export "$XCTEST_BIN" \
+            -instr-profile "$BIN_PATH/codecov/default.profdata" \
+            -format=lcov \
+            -ignore-filename-regex='(\.build|Tests)/' > coverage.lcov
+      # --- SWIFT_SWIFTPM-END -------------------------------------------------
+
+      # --- SWIFT_XCODE-START ---------------------------------------------------
+      - name: Build + test with coverage (Xcode)
+        run: |
+          xcodebuild test \
+            -scheme "{{XCODE_SCHEME}}" \
+            -destination 'platform=macOS' \
+            -derivedDataPath DerivedData \
+            -enableCodeCoverage YES
+      - name: Export lcov (Xcode)
+        # llvm-cov needs the instrumented binaries plus the profdata that
+        # xcodebuild wrote into DerivedData. The app binary is primary; every
+        # .xctest binary is added via -object (unit-test-target coverage
+        # lives there for library/framework schemes).
+        run: |
+          PROFDATA=$(find DerivedData -name 'Coverage.profdata' | head -1)
+          APP_BIN=$(find DerivedData/Build/Products -type f -path '*.app/Contents/MacOS/*' | head -1)
+          OBJECTS=()
+          while IFS= read -r xctest; do
+            OBJECTS+=(-object "$xctest/Contents/MacOS/$(basename "$xctest" .xctest)")
+          done < <(find DerivedData/Build/Products -maxdepth 3 -name '*.xctest')
+          xcrun llvm-cov export "$APP_BIN" "${OBJECTS[@]}" \
+            -instr-profile "$PROFDATA" \
+            -format=lcov \
+            -ignore-filename-regex='(DerivedData|Tests)/' > coverage.lcov
+      # --- SWIFT_XCODE-END -----------------------------------------------------
+
+      # Coverage floor — 90% on new code (mirrors the Python/Java diff-cover
+      # gate; diff-cover reads lcov natively). PR-only — push to the default
+      # branch has no "new code" diff to enforce against.
+      - name: Install diff-cover (Swift — coverage floor)
+        if: github.event_name == 'pull_request'
+        run: pipx install 'diff-cover>=9'
+      - name: Fetch base ref for diff-cover (Swift)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --prune --depth=100 origin \
+            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+      - name: Coverage floor — 90% on new code (Swift)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          diff-cover coverage.lcov \
+            --compare-branch="origin/${BASE_REF}" \
+            --fail-under=90 \
+            --show-uncovered
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-reports
+          path: coverage.lcov
+          if-no-files-found: ignore
+  # --- SWIFT-END ---------------------------------------------------------------
 
   sonarqube:
     needs: test-and-coverage
