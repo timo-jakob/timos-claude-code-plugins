@@ -152,6 +152,7 @@ Swift-specific development tooling — code review and formatting/linting.
 | Swift Dependabot/Snyk Triage | opus | Vendor-PR triage: dedup, digest-refresh verify, merge/arm on existing approval (#446) |
 | Swift Major Upgrade | fable | SwiftPM dependency majors: release notes, LSP call-site migration, swift test (#446) |
 | Swift Runtime Upgrade | fable | Swift toolchain bumps: pin swap, dep cascade, guide-licensed adaptations (#447) |
+| Swift Approver | fable | Synthesis-layer PR reviewer; risk register fed by the five review dimensions (#448) |
 | Code Quality | opus | Naming, SOLID, readability, dead code, API design |
 | Test Reviewer | opus | Coverage gaps, assertion quality, flaky tests |
 | Swift Lint & Format | opus | Runs SwiftFormat and SwiftLint, fixes issues in-place |

@@ -33,7 +33,7 @@ Supported flags:
   `false`. Requires the Apps to be registered on this machine first via
   `scripts/register-claude-apps.zsh` (the preflight in Step 4.5 will offer
   to run it when missing). When `true`, the Approver is wired for the
-  repo's Approver-capable language (currently Python or Java); it
+  repo's Approver-capable language (currently Python, Java, or Swift); it
   warn-and-skips when neither resolves as the review target (§3e).
 - `--claude-plugin true|false` — bootstrap this repo as a **Claude Code plugin
   repository** (a marketplace of plugins, not an application). Defaults to
@@ -869,8 +869,9 @@ flag was ignored because of `--claude-plugin`. Set up human approval the normal
 way (Step 4b branch protection requires 1 review; no Approver bot to satisfy it).
 
 When the orchestrator was invoked with `--claude-approver true` **and**
-an **Approver-capable language** is in scope (currently `python` or
-`java` — the languages that ship a `<lang>-approver` agent), render the
+an **Approver-capable language** is in scope (currently `python`,
+`java`, or `swift` — the languages that ship a `<lang>-approver`
+agent), render the
 Approver policy file. **No workflow is rendered** — since epic #476 the
 Approver is user-invoked locally via `/development-{{APPROVER_LANG}}:approve`,
 which mints its App token from the Keychain; there is no GitHub Actions
@@ -879,7 +880,8 @@ approver anymore (the old `claude-approver.yml.tmpl` was removed in #479).
 **Resolve `{{APPROVER_LANG}}`** — the language whose approve skill will
 review this repo's PRs:
 
-1. If `{{PRIMARY}}` is an Approver-capable language (`python` / `java`) →
+1. If `{{PRIMARY}}` is an Approver-capable language (`python` /
+   `java` / `swift`) →
    use it.
 2. Else if exactly one detected language is Approver-capable → use it.
 3. Else (primary is a topic or a no-approver language, and zero or
@@ -906,13 +908,13 @@ exists and is missing either section, surface a finding via the
 `bootstrap-idempotency-reviewer` agent rather than overwriting.
 
 **No-approver-language skip.** If `--claude-approver true` was set but
-`{{APPROVER_LANG}}` couldn't be resolved (no `python`/`java` in scope, or
+`{{APPROVER_LANG}}` couldn't be resolved (no `python`/`java`/`swift` in scope, or
 the primary is a topic / no-approver language with no single
 Approver-capable language to fall back to), do **not** render the
 policy file. Warn the user:
 
 > `--claude-approver true` was requested, but no Approver-capable language
-> (currently Python or Java) resolves as this repo's review target. The
+> (currently Python, Java, or Swift) resolves as this repo's review target. The
 > Claude Approver ships per-language; for other languages the policy file
 > would be a no-op. Re-run without the flag, or wait for that language's
 > Approver agent to ship.
@@ -1323,7 +1325,7 @@ in scope — see §3e's `{{APPROVER_LANG}}` resolution), warn the user the
 flag will be a no-op:
 
 > `--claude-approver true` requested but no Approver-capable language
-> (currently Python or Java) resolves as this repo's review target. The
+> (currently Python, Java, or Swift) resolves as this repo's review target. The
 > Approver ships per-language; the Apps would be installed but no approve
 > skill would ever invoke them. Re-run without the flag to skip, or wait
 > for that language's Approver agent to ship.
