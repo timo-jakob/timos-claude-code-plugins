@@ -148,7 +148,10 @@ Swift-specific development tooling — code review and formatting/linting.
 | Bug Hunter | fable | Logic errors, nil crashes, race conditions, stability |
 | Security Reviewer | opus | Secrets, injection, insecure storage, ATS, keychain |
 | Performance Reviewer | opus | Retain cycles, allocations, O(n²), main thread blocking |
-| Swift 6 Compliance | opus | Strict concurrency, typed throws, modern syntax |
+| Swift 6 Compliance | fable | Strict concurrency, typed throws, modern syntax — review mode; also the v6 language-mode migration agent (migrate mode, #447) |
+| Swift Dependabot/Snyk Triage | opus | Vendor-PR triage: dedup, digest-refresh verify, merge/arm on existing approval (#446) |
+| Swift Major Upgrade | fable | SwiftPM dependency majors: release notes, LSP call-site migration, swift test (#446) |
+| Swift Runtime Upgrade | fable | Swift toolchain bumps: pin swap, dep cascade, guide-licensed adaptations (#447) |
 | Code Quality | opus | Naming, SOLID, readability, dead code, API design |
 | Test Reviewer | opus | Coverage gaps, assertion quality, flaky tests |
 | Swift Lint & Format | opus | Runs SwiftFormat and SwiftLint, fixes issues in-place |

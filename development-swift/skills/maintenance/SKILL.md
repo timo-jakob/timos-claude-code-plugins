@@ -116,8 +116,11 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 > `dependabot` + `snyk_prs` + `renovate` (Slice F #446 — the planner
 > classifies ecosystem + bump level per its § 5a and routes patch/minor
 > to `swift-dependabot-snyk-triage` with `isolation: false`, swift
-> majors to `swift-major-upgrade`), with coverage measured via xccov /
-> llvm-cov. `semgrep` is **deferred** for Swift (experimental, empty
+> majors to `swift-major-upgrade`, and `swift:` toolchain-image bumps to
+> `swift-runtime-upgrade` with a `runtime_availability`
+> `pre_dispatch_hook` — Slice G #447; a 5.x→6.x crossing additionally
+> surfaces the `swift6-compliance` migrate-mode recommendation), with
+> coverage measured via xccov / llvm-cov. `semgrep` is **deferred** for Swift (experimental, empty
 > rule registry — #443) and always reports `tooling_configured: false`.
 > Validate and route against the supported set only. Vendor-PR records
 > are coverage-exempt at the dispatcher (majors gate on the whole

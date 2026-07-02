@@ -23,7 +23,7 @@ Launch these 6 agents in one message:
 | bug-hunter | fable |
 | security-reviewer | opus |
 | performance-reviewer | opus |
-| swift6-compliance | opus |
+| swift6-compliance | fable |
 | code-quality | opus |
 | test-reviewer | opus |
 
