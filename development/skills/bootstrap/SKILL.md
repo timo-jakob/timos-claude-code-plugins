@@ -1278,12 +1278,10 @@ which (idempotent):
   from macOS Keychain (populated by `register-claude-apps.zsh` in Phase 0).
 - Opens `https://github.com/apps/<slug>/installations/new` per App so the
   user installs both Apps on the current repo.
-- Captures `ANTHROPIC_API_KEY` from the environment, or prompts.
-- Stores per-repo variables (`CLAUDE_APPROVER_APP_ID`,
-  `CLAUDE_MAINTENANCE_APP_ID`, `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` defaulting
-  to the machine-only list) and secrets (`CLAUDE_APPROVER_PRIVATE_KEY`,
-  `CLAUDE_MAINTENANCE_PRIVATE_KEY`, `ANTHROPIC_API_KEY` — all in Actions
-  AND Dependabot scopes via `gh_secret_set_both`).
+- Stores **no repo secrets or variables** (#476/#498) — both identities
+  mint their tokens locally from the Keychain. On a repo bootstrapped
+  before #476 it flags the leftover CI-era secrets/variables;
+  `--verify --fix` deletes the unambiguous ones.
 
 **No-approver-language warning.** If `--claude-approver true` is set but no
 Approver-capable language resolves as the review target (no `python`/`java`

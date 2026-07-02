@@ -1,7 +1,10 @@
 #!/usr/bin/env zsh
 # install-claude-apps.zsh — install both Claude GitHub Apps on the current
-# repo and store the per-repo secrets + variables the Approver workflow
-# (Phase 2) and the Maintenance bot identity will need at runtime.
+# repo. Since epic #476 the Approver and Maintenance identities mint their
+# installation tokens LOCALLY from the Keychain (mint-approver-token.zsh /
+# mint-maintenance-token.zsh), so this script stores NO repo secrets or
+# variables (#498) — the App *installation* on the repo is all that's needed
+# for the identities to post reviews and author PRs.
 #
 # Prerequisites:
 #   - register-claude-apps.zsh has been run (apps.json entries + Keychain
@@ -12,24 +15,13 @@
 # What it does:
 #   1. Opens https://github.com/apps/<slug>/installations/new in the
 #      browser for each App so the user installs them on the target repo.
-#   2. Captures ANTHROPIC_API_KEY (env var or prompt).
-#   3. Stores per-repo variables (CLAUDE_APPROVER_APP_ID,
-#      CLAUDE_MAINTENANCE_APP_ID, CLAUDE_APPROVER_AUTHOR_ALLOWLIST)
-#      and secrets (CLAUDE_APPROVER_PRIVATE_KEY,
-#      CLAUDE_MAINTENANCE_PRIVATE_KEY, ANTHROPIC_API_KEY) — secrets in
-#      both Actions and Dependabot scopes via gh_secret_set_both.
-#      Private keys are validated against their App (JWT → GET /app)
-#      and normalized to PKCS#8 before being set (#234).
+#   2. Flags leftover CI-era repo secrets/variables (pre-#476 installs
+#      stored the App PEMs as repo secrets) for cleanup.
 #
 # Doctor mode (#234): `--verify [--fix]` detects wrong — not just
-# missing — keys (local validation + failed mint steps in recent
-# Approver runs as runtime evidence), converges repo secrets from the
-# validated Keychain keys, and guides the user through key
-# regeneration when the local key itself is bad.
-#
-# Not in scope for this script:
-#   - Rendering the Approver workflow / policy / PR template (Phase 2).
-#   - The python-approver agent (Phase 3).
+# missing — Keychain keys (local JWT validation against GET /app),
+# guides the user through key regeneration when the local key is bad,
+# and under --fix deletes the obsolete CI-era repo secrets/variables.
 #
 # See development/skills/bootstrap/docs/CLAUDE-APPS.md for the design
 # and the manual fallback.
@@ -46,37 +38,18 @@ readonly CONFIG_DIR="${HOME}/.config/claude-plugins"
 readonly CONFIG_FILE="${CONFIG_DIR}/apps.json"
 readonly KNOWN_APPS=(claude-approver claude-maintenance)
 
-# Approver only evaluates PRs from authors on this list. Bootstrap stores it
-# as a per-repo variable so the user can widen it later via the GitHub UI
-# (e.g., to ["*"] for human PRs) without editing this script.
-#
-# The maintenance bot's entry is appended at runtime from the App's REAL
-# slug (#229): GitHub App slugs are globally unique, so registered apps get
-# owner-suffixed slugs like `claude-maintenance-<owner>` — the generic
-# `claude-maintenance[bot]` login never matches an actual PR author.
-#
-# The dependency-update bot entry tracks the repo's ACTUAL tool (#425). The
-# Approver's Gate 3 matches the REST `.user.login` — `renovate[bot]` on a
-# Renovate repo, `dependabot[bot]` on a Dependabot one — so seeding the wrong
-# one policy-skips every dependency PR (it never gets an Approver review and
-# never auto-merges). Detect the rendered bot file (same files detect-stack.sh
-# keys on) and include the matching login; default to dependabot[bot] (the
-# family's default bot) when neither is configured yet. github-actions[bot] is
-# always included. Returns the base allowlist as a compact JSON array.
-base_author_allowlist() {
-  local cwd="${1:-$PWD}"
-  local -a deps
-  local renovate=0 dependabot=0
-  [[ -e "$cwd/renovate.json" || -e "$cwd/.github/renovate.json" \
-     || -e "$cwd/.github/renovate.json5" ]] && renovate=1
-  [[ -e "$cwd/.github/dependabot.yml" || -e "$cwd/.github/dependabot.yaml" ]] && dependabot=1
-  (( renovate )) && deps+=("renovate[bot]")
-  (( dependabot )) && deps+=("dependabot[bot]")
-  (( ! renovate && ! dependabot )) && deps+=("dependabot[bot]")
-  # Dependency bot(s) first, then github-actions — order is cosmetic (Gate 3 is
-  # a set-membership test), but keeps a stable, diff-friendly value.
-  jq -nc '$ARGS.positional' --args "${deps[@]}" "github-actions[bot]"
-}
+# CI-era repo config (pre-#476/#498). The Actions-based Approver stored the
+# App PEMs, an Anthropic key, and gate variables per-repo; nothing consumes
+# them since approval went local — the PEM secrets in particular are pure
+# liability (a private key copied out of the Keychain). The doctor flags
+# them and deletes them under --fix, unless a workflow file still
+# references the name (a legacy claude-approver.yml not yet removed).
+readonly -a LEGACY_SECRETS=(
+  CLAUDE_APPROVER_PRIVATE_KEY CLAUDE_MAINTENANCE_PRIVATE_KEY ANTHROPIC_API_KEY
+)
+readonly -a LEGACY_VARIABLES=(
+  CLAUDE_APPROVER_APP_ID CLAUDE_MAINTENANCE_APP_ID CLAUDE_APPROVER_AUTHOR_ALLOWLIST
+)
 
 readonly REGISTER_SCRIPT="${SCRIPT_DIR}/register-claude-apps.zsh"
 
@@ -191,35 +164,6 @@ pem_validate_for_app() {
   [[ "$got_id" == "$app_id" ]]
 }
 
-# Normalize a private key to PKCS#8 (#234). GitHub generates App keys in
-# PKCS#1 ('BEGIN RSA PRIVATE KEY'); actions/create-github-app-token@v1
-# accepted that, but v3+ (WebCrypto-based) only reads PKCS#8 ('BEGIN
-# PRIVATE KEY') and fails with 'DataError: Invalid keyData'. The
-# conversion is lossless and v1 accepts PKCS#8 too, so only the
-# normalized form may enter a repo secret.
-pem_to_pkcs8() {
-  local pem="$1" out
-  out=$(print -r -- "$pem" | openssl pkcs8 -topk8 -nocrypt 2>/dev/null) || out=""
-  [[ -n "$out" ]] || return 1
-  print -r -- "$out"
-}
-
-# Fetch an app's key from the Keychain, prove it belongs to the App, and
-# normalize it to PKCS#8 (#234). This is the only path by which a key
-# may reach gh_secret_set_both.
-prepare_pem() {
-  local app="$1" pem
-  pem=$(app_pem_for "$app")
-  if ! pem_validate_for_app "$app" "$pem"; then
-    err "The Keychain key for $(app_display_name "$app") does not authenticate as App ID $(app_id_for "$app")."
-    err "It is unparseable, truncated, or belongs to a different App."
-    err "Run: install-claude-apps.zsh --verify --fix   (guided key regeneration)"
-    return 1
-  fi
-  pem_to_pkcs8 "$pem" \
-    || { err "PKCS#8 conversion failed for $(app_display_name "$app")."; return 1 }
-}
-
 # Resolve an app's slug, falling back to a live GET /app lookup when
 # apps.json has an empty slug (the register --import path doesn't capture
 # it — #229). A successful lookup is backfilled into apps.json so the
@@ -281,18 +225,6 @@ app_pem_for() {
 
 # --- doctor (--verify / --fix) — #234 -----------------------------------------
 
-# gh calls intermittently fail with transient HTTP 401s that pass on
-# retry (observed repeatedly while testing #234). Retry before giving
-# up so one API blip doesn't abort a half-finished fix.
-gh_retry() {
-  local attempt
-  for attempt in 1 2 3; do
-    if "$@"; then return 0; fi
-    (( attempt < 3 )) && sleep 2
-  done
-  return 1
-}
-
 # Guided key regeneration — the one step GitHub has no API for. Leads the
 # user to the App settings page, picks the downloaded key up from
 # ~/Downloads automatically, validates it against the App, and stores it
@@ -351,26 +283,74 @@ regenerate_key_flow() {
   warn "The downloaded file is no longer needed: rm '$pem_path'"
 }
 
-# Runtime evidence that the key in the repo secret is WRONG rather than
-# missing (#234): secrets cannot be read back, but a failed
-# 'Mint Approver App token' step in the Approver's own runs proves the
-# stored key is bad (unparseable, PKCS#1 under a v3 action, or from a
-# different App). Prints the newest such run id, if any.
-latest_mint_failure_run() {
-  local ids run_id
-  ids=$(gh run list --workflow "Claude Approver" --limit 5 \
-          --json databaseId,conclusion \
-          --jq '.[] | select(.conclusion == "failure") | .databaseId' \
-          2>/dev/null) || ids=""
-  for run_id in ${(f)ids}; do
-    if gh run view "$run_id" --json jobs \
-         --jq '.jobs[].steps[]? | select(.name == "Mint Approver App token" and .conclusion == "failure") | .name' \
-         2>/dev/null | grep -q .; then
-      print -- "$run_id"
-      return 0
+# Is a legacy secret/variable name still referenced by a workflow file?
+# A pre-#476 claude-approver.yml (or any user workflow) that still reads
+# the name makes deletion unsafe — flag instead of delete, and point at
+# the workflow that pins it.
+legacy_name_in_workflows() {
+  local name="$1"
+  grep -rls -- "$name" .github/workflows 2>/dev/null
+}
+
+# Flag (and under --fix delete) the CI-era repo secrets/variables that
+# pre-#476 installs stored (#498). Deletion is per-name conservative:
+# skipped with a warning when any workflow file still references the
+# name. ANTHROPIC_API_KEY additionally never auto-deletes — unlike the
+# CLAUDE_* names it isn't unambiguously ours, so removal stays a
+# suggested manual command.
+check_legacy_repo_config() {
+  local fix="${1:-}" name refs found=0
+  local actions_secrets dependabot_secrets variables
+  actions_secrets=$(gh secret list --json name --jq '.[].name' 2>/dev/null) || actions_secrets=""
+  dependabot_secrets=$(gh secret list --app dependabot --json name --jq '.[].name' 2>/dev/null) || dependabot_secrets=""
+  variables=$(gh variable list --json name --jq '.[].name' 2>/dev/null) || variables=""
+
+  for name in "${LEGACY_SECRETS[@]}"; do
+    local in_actions="" in_dependabot=""
+    print -r -- "$actions_secrets"    | grep -qx "$name" && in_actions=1
+    print -r -- "$dependabot_secrets" | grep -qx "$name" && in_dependabot=1
+    [[ -z "$in_actions" && -z "$in_dependabot" ]] && continue
+    found=1
+    if refs=$(legacy_name_in_workflows "$name") && [[ -n "$refs" ]]; then
+      warn "Legacy secret $name is still referenced by: ${refs//$'\n'/, }"
+      warn "  Remove that workflow first (epic #476 retired the Actions Approver)."
+      continue
+    fi
+    if [[ -n "$fix" && "$name" != ANTHROPIC_API_KEY ]]; then
+      [[ -n "$in_actions"    ]] && gh secret delete "$name" >/dev/null \
+        && ok "Deleted legacy Actions secret $name."
+      [[ -n "$in_dependabot" ]] && gh secret delete "$name" --app dependabot >/dev/null \
+        && ok "Deleted legacy Dependabot-scope secret $name."
+    else
+      warn "Legacy secret $name present — nothing consumes it since #476."
+      if [[ "$name" == ANTHROPIC_API_KEY ]]; then
+        warn "  Not auto-deleted (may serve other tooling). If unused:"
+        warn "  gh secret delete $name; gh secret delete $name --app dependabot"
+      fi
     fi
   done
-  return 1
+
+  for name in "${LEGACY_VARIABLES[@]}"; do
+    print -r -- "$variables" | grep -qx "$name" || continue
+    found=1
+    if refs=$(legacy_name_in_workflows "$name") && [[ -n "$refs" ]]; then
+      warn "Legacy variable $name is still referenced by: ${refs//$'\n'/, }"
+      warn "  Remove that workflow first (epic #476 retired the Actions Approver)."
+      continue
+    fi
+    if [[ -n "$fix" ]]; then
+      gh variable delete "$name" >/dev/null && ok "Deleted legacy variable $name."
+    else
+      warn "Legacy variable $name present — nothing consumes it since #476."
+    fi
+  done
+
+  if (( found )); then
+    [[ -z "$fix" ]] && warn "Clean up with: install-claude-apps.zsh --verify --fix"
+  else
+    ok "No legacy CI-era secrets/variables on this repo."
+  fi
+  return 0
 }
 
 cmd_verify() {
@@ -390,17 +370,11 @@ cmd_verify() {
   [[ -f "$CONFIG_FILE" ]] \
     || die "No apps.json — run $REGISTER_SCRIPT first."
 
-  # Distinguish "could not list" from "secret missing": gh hiccups
-  # (transient 401s, rate limits) must not masquerade as missing secrets.
-  local secret_names="" secrets_listed=1
-  secret_names=$(gh secret list --json name --jq '.[].name' 2>/dev/null) \
-    || { secrets_listed=0; warn "Could not list repo secrets (gh error) — skipping presence checks."; }
-
   # NOTE: every loop-used variable must be declared here, NOT inside the
   # loop. zsh's `local name` (no assignment) on an already-declared local
-  # PRINTS the variable and its value — re-declaring `converted` per
-  # iteration leaked a private key to stdout during #234 testing.
-  local problems=0 app display key pem fmt secret_name converted=""
+  # PRINTS the variable and its value — that pattern leaked a private key
+  # to stdout during #234 testing.
+  local problems=0 app display key pem
   for app in "${KNOWN_APPS[@]}"; do
     display=$(app_display_name "$app")
     key=$(config_key_for "$app")
@@ -433,14 +407,7 @@ cmd_verify() {
       ok "$display: Keychain key authenticates as App ID $(app_id_for "$app")."
     fi
 
-    # 3. Format note — PKCS#1 keys break create-github-app-token@v3.
-    fmt=$(print -r -- "$pem" | head -1)
-    if [[ "$fmt" == *"BEGIN RSA PRIVATE KEY"* ]]; then
-      warn "$display: Keychain key is PKCS#1 — fine locally, but the repo secret"
-      warn "  must be PKCS#8 for create-github-app-token@v3 ('Invalid keyData')."
-    fi
-
-    # 3b. Approver push access (#418). GitHub tallies an APPROVE toward a
+    # 3. Approver push access (#418). GitHub tallies an APPROVE toward a
     #     branch's required_approving_review_count ONLY when the reviewer can
     #     push to the repo — and "push access" is the Contents permission, not
     #     Pull requests. A claude-approver still on the old Contents:read grant
@@ -465,62 +432,12 @@ cmd_verify() {
       fi
     fi
 
-    # 4. Repo secret present?
-    secret_name="CLAUDE_$(print -- "${app#claude-}" | tr '[:lower:]-' '[:upper:]_')_PRIVATE_KEY"
-    if (( secrets_listed )) && ! print -r -- "$secret_names" | grep -qx "$secret_name"; then
-      err "$display: repo secret $secret_name is missing."
-      (( problems++ )) || true
-    fi
-
-    # 5. Fix: converge the repo secret onto the validated Keychain key,
-    #    normalized to PKCS#8. Secrets can't be read back, so re-setting
-    #    is also the only safe answer to "is the stored one correct?".
-    if [[ -n "$fix" ]]; then
-      converted=$(pem_to_pkcs8 "$pem") \
-        || { err "$display: PKCS#8 conversion failed."; (( problems++ )) || true; continue }
-      if gh_retry gh_secret_set_both "$secret_name" "$converted"; then
-        ok "$display: $secret_name re-set from the validated Keychain key (PKCS#8)."
-      else
-        err "$display: failed to set $secret_name (gh kept erroring)."
-        (( problems++ )) || true
-      fi
-    fi
   done
   print
 
-  # 6. App-ID variable drift.
-  local var_val expected
-  expected=$(app_id_for claude-approver)
-  var_val=$(gh variable get CLAUDE_APPROVER_APP_ID 2>/dev/null) || var_val=""
-  if [[ "$var_val" != "$expected" ]]; then
-    err "CLAUDE_APPROVER_APP_ID is '$var_val', expected '$expected'."
-    (( problems++ )) || true
-    if [[ -n "$fix" ]]; then
-      gh variable set CLAUDE_APPROVER_APP_ID --body "$expected"
-      ok "CLAUDE_APPROVER_APP_ID fixed."
-    fi
-  else
-    ok "CLAUDE_APPROVER_APP_ID matches apps.json ($expected)."
-  fi
-
-  # 7. Runtime evidence: did the Approver's mint step fail recently?
-  local mint_fail_run
-  if mint_fail_run=$(latest_mint_failure_run); then
-    warn "Run $mint_fail_run failed at 'Mint Approver App token' — the secret"
-    warn "stored in the repo was bad at the time of that run."
-    if [[ -n "$fix" ]]; then
-      if ask_yn "Secrets are converged now. Re-run the failed Approver run?"; then
-        gh run rerun "$mint_fail_run" --failed
-        ok "Re-run dispatched: gh run watch $mint_fail_run"
-      fi
-    else
-      (( problems++ )) || true
-      warn "  Re-run with --fix to converge the secret, then re-run it:"
-      warn "  gh run rerun $mint_fail_run --failed"
-    fi
-  else
-    ok "No recent Approver run failed at the token mint step."
-  fi
+  # 4. Legacy CI-era repo config (#498): flag leftover secrets/variables
+  #    from pre-#476 installs; --fix deletes the unambiguous ones.
+  check_legacy_repo_config "$fix"
   print
 
   if (( problems == 0 )); then
@@ -571,32 +488,14 @@ walk_browser_install() {
   read -r _ < /dev/tty
 }
 
-# --- Anthropic API key -------------------------------------------------------
-
-resolve_anthropic_key() {
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-    ok "Using ANTHROPIC_API_KEY from environment."
-    print -- "$ANTHROPIC_API_KEY"
-    return
-  fi
-
-  local key
-  while true; do
-    ask_secret "Paste ANTHROPIC_API_KEY (sk-ant-...):" key
-    [[ -z "$key" ]] && { err "Empty key."; continue; }
-    [[ "$key" == sk-ant-* ]] && break
-    warn "Doesn't look like an Anthropic API key (expected sk-ant-... prefix)."
-  done
-  print -- "$key"
-}
-
 # --- usage --------------------------------------------------------------------
 
 print_usage() {
   cat <<EOF
-install-claude-apps.zsh — install both Claude GitHub Apps on the current repo
-and store the per-repo secrets + variables the Approver and Maintenance
-identities need.
+install-claude-apps.zsh — install both Claude GitHub Apps on the current repo.
+No repo secrets or variables are stored (#476/#498): both identities mint
+their tokens locally from the Keychain, so installing the Apps is all a repo
+needs.
 
 Usage:
   install-claude-apps.zsh                  Walk the install for both Apps on
@@ -605,44 +504,29 @@ Usage:
                                            writer) — for Claude-plugin repos,
                                            where a human approves (no Approver)
                                            and PRs come from the writer bot via
-                                           /development:open-pr. No repo secrets
-                                           (the token is minted locally).
+                                           /development:open-pr.
   install-claude-apps.zsh --verify         Doctor: validate the local keys
                                            (parseable + cryptographically
                                            matching their App via GET /app),
-                                           check repo secrets/variables, and
-                                           scan recent Approver runs for
-                                           failed token-mint steps (= the
-                                           stored secret is wrong, not just
-                                           missing). Read-only.
-  install-claude-apps.zsh --verify --fix   Doctor + converge: re-set secrets
-                                           from the validated Keychain keys
-                                           (normalized to PKCS#8), fix
-                                           variable drift, offer to re-run a
-                                           failed Approver run. Guides you
-                                           through key regeneration when the
-                                           Keychain key itself is missing or
-                                           invalid (the one step GitHub has
-                                           no API for).
+                                           check the Approver's Contents:write
+                                           grant (#418), and flag leftover
+                                           CI-era repo secrets/variables from
+                                           pre-#476 installs. Read-only.
+  install-claude-apps.zsh --verify --fix   Doctor + converge: delete the
+                                           obsolete CI-era secrets/variables
+                                           (skipping any a workflow file still
+                                           references, and never touching
+                                           ANTHROPIC_API_KEY automatically).
+                                           Guides you through key regeneration
+                                           when the Keychain key itself is
+                                           missing or invalid (the one step
+                                           GitHub has no API for).
   install-claude-apps.zsh --help           Show this help.
 
 Prerequisites:
   - register-claude-apps.zsh has been run on this machine.
   - gh CLI authenticated against the repo's hosting account.
   - Run from inside the target repo's working tree.
-
-What it stores per-repo:
-  Variables:
-    CLAUDE_APPROVER_APP_ID
-    CLAUDE_MAINTENANCE_APP_ID
-    CLAUDE_APPROVER_AUTHOR_ALLOWLIST  (default machine-only)
-  Secrets (set in Actions and Dependabot scopes):
-    CLAUDE_APPROVER_PRIVATE_KEY
-    CLAUDE_MAINTENANCE_PRIVATE_KEY
-    ANTHROPIC_API_KEY                 (env or prompt)
-
-Environment overrides:
-  ANTHROPIC_API_KEY                   skip the prompt; use this value.
 
 See development/skills/bootstrap/docs/CLAUDE-APPS.md for the design,
 the manual fallback flow, and the permissions reference.
@@ -730,67 +614,22 @@ main() {
     print
   done
 
-  # 2. Capture the Anthropic API key (env var, else prompt).
-  info "Anthropic API key"
-  local anthropic_key
-  anthropic_key=$(resolve_anthropic_key)
-  print
-
-  # 3. Store per-repo secrets + variables.
-  info "Storing per-repo secrets and variables…"
-
-  local approver_id maintenance_id approver_pem maintenance_pem
-  approver_id=$(app_id_for claude-approver)
-  maintenance_id=$(app_id_for claude-maintenance)
-  # Validated against the App + normalized to PKCS#8 before they may
-  # enter a repo secret (#234).
-  approver_pem=$(prepare_pem claude-approver)       || exit 1
-  maintenance_pem=$(prepare_pem claude-maintenance) || exit 1
-
-  # Variables — non-secret, plain text.
-  gh variable set CLAUDE_APPROVER_APP_ID    --body "$approver_id"
-  ok "Variable set: CLAUDE_APPROVER_APP_ID = $approver_id"
-  gh variable set CLAUDE_MAINTENANCE_APP_ID --body "$maintenance_id"
-  ok "Variable set: CLAUDE_MAINTENANCE_APP_ID = $maintenance_id"
-
-  # Allowlist: base entries + the maintenance bot's REAL login (#229).
-  # The bot login is "<slug>[bot]" with the owner-suffixed slug, e.g.
-  # "claude-maintenance-timo-jakob[bot]" — never the generic name.
-  local maintenance_slug author_allowlist base_allowlist
-  # Seeded from the repo's actual dependency-update bot (#425), not a hardcoded
-  # dependabot[bot] — a Renovate repo gets renovate[bot] so its PRs aren't
-  # Gate-3 policy-skipped.
-  base_allowlist=$(base_author_allowlist)
-  if maintenance_slug=$(app_slug_resolve claude-maintenance); then
-    author_allowlist=$(jq -nc --argjson base "$base_allowlist" \
-      --arg m "${maintenance_slug}[bot]" '$base + [$m]')
-  else
-    warn "Could not resolve the claude-maintenance App slug; allowlist will"
-    warn "not include the maintenance bot. Add \"<slug>[bot]\" to the"
-    warn "CLAUDE_APPROVER_AUTHOR_ALLOWLIST repo variable manually (the slug"
-    warn "is shown on https://github.com/settings/apps)."
-    author_allowlist="$base_allowlist"
-  fi
-  gh variable set CLAUDE_APPROVER_AUTHOR_ALLOWLIST --body "$author_allowlist"
-  ok "Variable set: CLAUDE_APPROVER_AUTHOR_ALLOWLIST = $author_allowlist"
-
-  # Secrets — stored in both Actions and Dependabot scopes via lib.sh helper.
-  gh_secret_set_both CLAUDE_APPROVER_PRIVATE_KEY    "$approver_pem"
-  ok "Secret set:   CLAUDE_APPROVER_PRIVATE_KEY"
-  gh_secret_set_both CLAUDE_MAINTENANCE_PRIVATE_KEY "$maintenance_pem"
-  ok "Secret set:   CLAUDE_MAINTENANCE_PRIVATE_KEY"
-  gh_secret_set_both ANTHROPIC_API_KEY              "$anthropic_key"
-  ok "Secret set:   ANTHROPIC_API_KEY"
+  # 2. Nothing to store (#476/#498): both identities mint their tokens
+  #    locally from the Keychain. Flag any CI-era leftovers from an
+  #    earlier install so the user knows to clean up.
+  check_legacy_repo_config ""
 
   print
-  ok "Claude Apps installed and configured on $repo_nwo."
-  print -- "  Next: open a PR — the Approver evaluates once CI lands green."
-  print -- "  See development-python/docs/python-approver.md for runtime behaviour."
-  print -- "  Run '/development-python:approve' locally to dry-run before pushing."
+  ok "Claude Apps installed on $repo_nwo."
+  print -- "  No repo secrets or variables were stored — tokens are minted"
+  print -- "  locally from your Keychain when needed."
+  print -- "  Approve PRs with '/development-<lang>:approve <PR>' (posts as"
+  print -- "  the Approver App); /development:maintenance opens PRs as the"
+  print -- "  Maintenance App the same way."
 }
 
-# Run main only when executed directly — when the file is *sourced* (unit tests
-# exercising base_author_allowlist etc.) ZSH_EVAL_CONTEXT carries a `:file`
+# Run main only when executed directly — when the file is *sourced* (unit
+# tests exercising its functions) ZSH_EVAL_CONTEXT carries a `:file`
 # segment and we skip it, so sourcing has no side effects.
 if [[ "${ZSH_EVAL_CONTEXT:-}" != *:file* ]]; then
   main "$@"
