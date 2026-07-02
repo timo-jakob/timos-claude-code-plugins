@@ -118,8 +118,10 @@ repos:
   # --- GO-END ----------------------------------------------------------------
 
   # --- SWIFT-START -----------------------------------------------------------
-  # SwiftLint is invoked via local hook because the official mirror is sparsely
-  # maintained. Install: brew install swiftlint.
+  # SwiftLint + swift-format are invoked via local hooks because the official
+  # mirrors are sparsely maintained. Install: brew install swiftlint swift-format.
+  # Both read the bootstrap-rendered configs (.swiftlint.yml / .swift-format,
+  # line-length 120 per the org-wide policy).
   - repo: local
     hooks:
       - id: swiftlint
@@ -127,6 +129,35 @@ repos:
         entry: swiftlint lint --strict --quiet
         language: system
         files: \.swift$
+      - id: swift-format
+        name: swift-format (lint)
+        entry: swift-format lint --strict
+        language: system
+        files: \.swift$
+
+  # Coverage floor — local mirror of the CI coverage-floor step. Same
+  # diff-cover invocation on the lcov, same 90%-on-new-code threshold.
+  # Stage is pre-push (compares against origin/{{DEFAULT_BRANCH}}). Contract:
+  # assumes a recent test run exported coverage.lcov — the same recipe the
+  # quality workflow's Swift job uses (SwiftPM: `swift test
+  # --enable-code-coverage` + `xcrun llvm-cov export -format=lcov`; Xcode:
+  # `xcodebuild test -enableCodeCoverage YES` + the DerivedData export).
+  - repo: local
+    hooks:
+      - id: coverage-floor-swift
+        name: Coverage floor (90% on new code) — requires recent swift test + llvm-cov lcov export
+        entry: >-
+          diff-cover coverage.lcov
+          --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90
+        language: python
+        additional_dependencies: ["diff-cover>=9"]
+        pass_filenames: false
+        # Run ONLY when Swift source is in the push. A docs/config-only push
+        # has no coverable lines, so skipping it avoids demanding a
+        # coverage.lcov a non-Swift change never needed. `files` + no
+        # `always_run` = pre-commit skips the hook when nothing matches.
+        files: \.swift$
+        stages: [pre-push]
   # --- SWIFT-END -------------------------------------------------------------
 
   # --- JAVA-START ------------------------------------------------------------
@@ -156,7 +187,9 @@ repos:
     hooks:
       - id: coverage-floor-java
         name: Coverage floor (90% on new code) — requires recent gradlew test jacocoTestReport
-        entry: diff-cover build/reports/jacoco/test/jacocoTestReport.xml --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90
+        entry: >-
+          diff-cover build/reports/jacoco/test/jacocoTestReport.xml
+          --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90
         language: python
         additional_dependencies: ["diff-cover>=9"]
         pass_filenames: false

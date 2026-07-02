@@ -840,6 +840,12 @@ For each detected language, merge in the appropriate config from
 - Linter config (e.g., `.eslintrc.json`, `ruff.toml`, `.golangci.yml`)
 - Coverage tooling note in `sonar-project.properties` (paths, report format)
 - Pre-commit hook entries (already merged into `.pre-commit-config.yaml`)
+- **Swift only:** render `templates/languages/swift/swiftlint.yml.tmpl` →
+  `.swiftlint.yml` and `templates/languages/swift/swift-format.tmpl` →
+  `.swift-format` (no placeholders in either — both encode the org-wide
+  120-column line-length policy). The pre-commit SWIFT block's SwiftLint /
+  swift-format hooks and the maintenance pipeline's
+  `swift-format-lint-fixer` agent read exactly these files.
 - **Java only:** render
   `templates/languages/java/.github/workflows/release.yml.tmpl` →
   `.github/workflows/release.yml` (substitute `{{JAVA_VERSION}}`) **and copy**
