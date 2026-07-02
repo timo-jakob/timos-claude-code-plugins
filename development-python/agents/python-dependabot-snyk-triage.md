@@ -1,7 +1,7 @@
 ---
 name: python-dependabot-snyk-triage
 description: Review vendor-opened PRs (Dependabot AND Snyk auto-Fix/Upgrade PRs) that the dispatcher has classified as either "auto-merge-if-green" (pip + github-actions patch/minor with verifiable safety, Snyk security fixes, or a Docker same-tag digest-only refresh whose tag-equality the agent re-verifies) or "human-review" (Docker base-image tag/version bumps, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-python:maintenance.
-model: sonnet
+model: opus
 tools: Bash, Read, Grep, WebFetch
 ---
 
@@ -30,7 +30,7 @@ PR sources you may see:
   Dependabot version-update PR.
 
 **Pip-ecosystem major bumps (incl. 0.x major-equivalents) do NOT come
-to you regardless of source.** Those go to `python-major-upgrade` (opus),
+to you regardless of source.** Those go to `python-major-upgrade` (fable),
 which does local migration work. If a pip-major PR somehow lands in your
 input despite the dispatcher routing, treat as a dispatcher routing
 error and surface in `actions_requiring_review`.

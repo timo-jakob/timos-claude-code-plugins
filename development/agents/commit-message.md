@@ -1,7 +1,7 @@
 ---
 name: commit-message
 description: Generates clear, concise git commit messages from code diffs, ignoring formatting and linting changes
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

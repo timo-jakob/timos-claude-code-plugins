@@ -1,7 +1,7 @@
 ---
 name: bootstrap-idempotency-reviewer
 description: For each existing file that conflicts with a bootstrap template, recommends skip/overwrite/merge with a clear rationale
-model: sonnet
+model: opus
 tools: Read, Grep, Glob
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: spring-api-advisor
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 description: Audit a Spring Boot 4+ HTTP service's contract-first API wiring — a committed OpenAPI spec as the authoritative definition, openapi-generator producing Spring interfaces/DTOs the controllers implement, so code/spec drift fails the build. Verify the wiring; recommend adopting contract-first when an HTTP surface lacks it. Used by development-spring:maintenance.
 ---

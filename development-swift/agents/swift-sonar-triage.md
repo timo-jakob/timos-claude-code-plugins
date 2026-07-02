@@ -1,7 +1,7 @@
 ---
 name: swift-sonar-triage
 description: For each SonarCloud/SonarQube finding (bug, code smell, vulnerability, security hotspot) on a Swift project, investigate the context with LSP first, then fix when behavior is preserved. Security hotspots get the same treatment — investigated, not punted. Used by development-swift:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

@@ -130,5 +130,5 @@ JSON block) for the user to inspect.
 
 ## Cost
 
-One Opus invocation of `python-approver` (~50–150 K tokens depending on
+One Fable invocation of `python-approver` (~50–150 K tokens depending on
 diff size). Same cost as CI, paid per local invocation.

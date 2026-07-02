@@ -1,6 +1,6 @@
 ---
 name: java-openapi-advisor
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 description: Audit a NON-Spring Java/Gradle HTTP service's contract-first OpenAPI wiring — a committed OpenAPI spec as the authoritative definition, openapi-generator producing JAX-RS (Jakarta REST) interfaces/DTOs the resources implement, so code/spec drift fails the build. The Spring case is spring-api-advisor's (development-spring); this is the general/non-Spring generator. Used by development-java:maintenance.
 ---

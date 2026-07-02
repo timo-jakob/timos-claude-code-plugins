@@ -22,7 +22,7 @@ quality + security surroundings for a project.
 Supported flags:
 
 - `--review` — run the opt-in senior-review agent (Step 6) after the bootstrap
-  completes. Adds an opus pass for high-stakes first bootstraps.
+  completes. Adds a fable pass for high-stakes first bootstraps.
 - `--signed-commits` — additionally enforce cryptographically signed commits
   (GPG or SSH) on the default branch. Off by default because every
   contributor must register a signing key. When set, the orchestrator
@@ -379,9 +379,9 @@ Spawn all three in a single assistant turn with multiple `Task` tool calls:
 
 | Agent | Model | What it reviews |
 | --- | --- | --- |
-| `bootstrap-security-reviewer` | opus | GH Actions permissions, secret references, runner-event safety, scan-gates-push, unpinned third-party actions |
-| `bootstrap-config-consistency` | sonnet | Cross-references: Sonar keys, workflow job IDs ↔ branch-protection contexts, secret refs ↔ SETUP.md, language fragment ↔ detected languages |
-| `bootstrap-idempotency-reviewer` | sonnet | For each existing file conflicting with a template, recommends skip/overwrite/merge |
+| `bootstrap-security-reviewer` | fable | GH Actions permissions, secret references, runner-event safety, scan-gates-push, unpinned third-party actions |
+| `bootstrap-config-consistency` | opus | Cross-references: Sonar keys, workflow job IDs ↔ branch-protection contexts, secret refs ↔ SETUP.md, language fragment ↔ detected languages |
+| `bootstrap-idempotency-reviewer` | opus | For each existing file conflicting with a template, recommends skip/overwrite/merge |
 
 Inputs to each agent are provided **in the agent's prompt**, not on disk
 (files aren't written yet):
@@ -1424,7 +1424,7 @@ For private path the checklist additionally includes:
 ## Step 6: Final Senior Review (opt-in, only if `--review` was passed)
 
 If the user invoked the skill with `--review`, run the `bootstrap-reviewer`
-agent (opus). It reads the full set of generated files and produces a
+agent (fable). It reads the full set of generated files and produces a
 short senior-engineer critique covering coherence, operability,
 maintainability, and first-impression.
 

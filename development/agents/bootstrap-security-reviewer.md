@@ -1,7 +1,7 @@
 ---
 name: bootstrap-security-reviewer
 description: Reviews proposed GitHub Actions workflows and bootstrap configuration for security risks before any file is written
-model: opus
+model: fable
 tools: Read, Grep, Glob
 ---
 

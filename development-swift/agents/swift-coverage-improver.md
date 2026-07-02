@@ -1,7 +1,7 @@
 ---
 name: swift-coverage-improver
-description: Bring coverage on specified Swift functions up to the Required threshold by adding meaningful XCTest tests for those functions' behaviour. Conservative — never modifies production code under test. Used by development-swift:maintenance's region-scoped pre-flight when the enclosing function of a coverage-respecting finding sits below Required (80%). Opus because writing tests that actually verify behavior (not just touch lines) is high-judgment work.
-model: opus
+description: Bring coverage on specified Swift functions up to the Required threshold by adding meaningful XCTest tests for those functions' behaviour. Conservative — never modifies production code under test. Used by development-swift:maintenance's region-scoped pre-flight when the enclosing function of a coverage-respecting finding sits below Required (80%). Fable because writing tests that actually verify behavior (not just touch lines) is high-judgment work.
+model: fable
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

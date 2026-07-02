@@ -1,7 +1,7 @@
 ---
 name: python-code-scanning-triage
 description: For each GitHub Code Scanning alert (CodeQL + Scorecard), apply the safe mechanical fix when one exists, defer dataflow-style and risky-to-narrow findings to human review, and surface process-policy findings as informational only. Replaces the deprecated `python-snyk-triage` (Snyk Code SAST was retired in #87 in favour of Code Scanning). Used by development-python:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

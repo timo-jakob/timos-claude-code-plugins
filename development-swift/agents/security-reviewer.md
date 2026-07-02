@@ -1,7 +1,7 @@
 ---
 name: security-reviewer
 description: Swift security specialist that identifies vulnerabilities, insecure storage, injection risks, and privacy issues
-model: sonnet
+model: opus
 tools: Read, Grep, Glob
 ---
 

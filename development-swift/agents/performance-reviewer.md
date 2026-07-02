@@ -1,7 +1,7 @@
 ---
 name: performance-reviewer
 description: Swift performance specialist that identifies retain cycles, excessive allocations, algorithmic inefficiencies, and main thread blocking
-model: sonnet
+model: opus
 tools: Read, Grep, Glob
 ---
 

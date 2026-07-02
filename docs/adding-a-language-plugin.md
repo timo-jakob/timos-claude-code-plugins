@@ -135,7 +135,7 @@ set (map `python-*` → `<L>-*`):
 | `python-sonar-triage` | SonarCloud/SonarQube findings | `true` |
 | `python-code-scanning-triage` | CodeQL + Scorecard alerts | `true` |
 | `python-semgrep-triage` | semgrep findings | `true` |
-| `python-coverage-improver` | raise coverage on affected functions (Opus) | `true` |
+| `python-coverage-improver` | raise coverage on affected functions (Fable) | `true` |
 | `python-dependabot-snyk-triage` | vendor-PR triage (Dependabot/Snyk/Renovate) | `false` |
 | `python-major-upgrade` | autonomous major-version dependency upgrade | `true` |
 | `python-runtime-upgrade` | interpreter/runtime version bump (Docker base image) | `true` |
@@ -152,7 +152,7 @@ tool's support is thin, defer the agent and mark `tooling_configured.<tool>:
 false` with a documented reason; don't ship a triager that finds nothing.
 
 **Models:** mechanical fixers → `haiku`; triagers / ci-fixer / planner →
-`sonnet`; coverage-improver and the approver → `opus` (high-judgment work).
+`opus`; coverage-improver and the approver → `fable` (high-judgment work).
 
 ## 5. How to slice the work (epic-driven)
 

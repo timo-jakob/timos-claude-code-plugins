@@ -1,6 +1,6 @@
 ---
 name: spring-config-advisor
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 description: Audit a Spring Boot 4+ project's configuration (application.yml/.properties + profiles) for deprecated/relocated Spring Boot 4 property keys, actuator endpoint over-exposure, and best-practice gaps; fix the safe mechanical relocations, flag the judgement calls. Used by development-spring:maintenance.
 ---

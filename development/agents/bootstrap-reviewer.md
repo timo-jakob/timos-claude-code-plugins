@@ -1,7 +1,7 @@
 ---
 name: bootstrap-reviewer
 description: Senior-engineer-style final review of the bootstrap output. Opt-in via the --review flag — not run by default.
-model: opus
+model: fable
 tools: Read, Grep, Glob, Bash
 ---
 

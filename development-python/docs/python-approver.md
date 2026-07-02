@@ -282,12 +282,12 @@ not the PR author.
 
 ## Cost expectations
 
-Opus, ~50–150 K tokens per PR depending on diff size and how many
+Fable, ~50–150 K tokens per PR depending on diff size and how many
 test bodies the agent reads. The model is deliberately the
 high-judgement tier because the questions (is this test meaningful?
 does the implementation match the story? what could still go wrong?)
 are not mechanical. The Approver runs only after every other gate is
-green, so the per-PR Opus cost is bounded by the rate at which PRs
+green, so the per-PR Fable cost is bounded by the rate at which PRs
 reach the all-green state — typically once per PR per push, not per
 push.
 

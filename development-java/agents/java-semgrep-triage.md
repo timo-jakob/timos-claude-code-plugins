@@ -1,7 +1,7 @@
 ---
 name: java-semgrep-triage
 description: For each semgrep finding on a Java/Gradle project, fix when the refactor preserves behavior; suppress with a justified annotation when the pattern is a false positive; only escalate when fix would change a public API. Used by development-java:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

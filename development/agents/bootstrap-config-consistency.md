@@ -1,7 +1,7 @@
 ---
 name: bootstrap-config-consistency
 description: Cross-references planned bootstrap files to catch mismatched project keys, missing referenced secrets, and inconsistent job IDs before any file is written
-model: sonnet
+model: opus
 tools: Read, Grep, Glob
 ---
 

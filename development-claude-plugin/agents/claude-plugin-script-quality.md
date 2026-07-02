@@ -1,7 +1,7 @@
 ---
 name: claude-plugin-script-quality
 description: For each script_quality finding (shellcheck warning/error, zsh -n syntax error, or shebang/extension mismatch on a plugin repo's shell scripts), apply the clearly-safe behavior-preserving fix and verify it, dismiss genuine false positives with a justified disable directive, and escalate anything risky (file renames with callers, behavior-changing fixes). Used by development-claude-plugin:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 ---
 

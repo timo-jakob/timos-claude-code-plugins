@@ -1,6 +1,6 @@
 ---
 name: spring-container-advisor
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 description: Audit a Spring Boot 4+ project's bootBuildImage (Cloud Native Buildpacks) configuration in build.gradle.kts — recommend a pinned Paketo builder/run-image, an explicit image name, and publish settings for reproducible, CVE-patchable OCI images; JVM mode only (native-image deferred). Used by development-spring:maintenance.
 ---

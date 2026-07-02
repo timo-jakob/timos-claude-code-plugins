@@ -380,7 +380,7 @@ To post an approval (or request changes) to a PR, run the Approver skill locally
 
 **Cost:**
 
-Same per-PR cost as the old CI run (~50–150 K opus tokens; see [Cost](#cost-and-rate-limits)).
+Same per-PR cost as the old CI run (~50–150 K fable tokens; see [Cost](#cost-and-rate-limits)).
 
 **Full spec:**
 [`../../../development-python/skills/approve/SKILL.md`](../../../development-python/skills/approve/SKILL.md)
@@ -479,7 +479,7 @@ gh variable set CLAUDE_APPROVER_AUTHOR_ALLOWLIST --body '["*"]'
 
 Every PR gets evaluated. **Use this with care** — there's no rate-limit
 defence at the workflow level; a busy repo with many human
-contributors can pile up opus invocations quickly. The default
+contributors can pile up fable invocations quickly. The default
 machine-only allowlist is the right choice for repos where automated
 PRs are the volume and human PRs are the exception.
 
@@ -571,14 +571,14 @@ What you generally **should not** customise without thinking carefully:
 
 ## Cost and rate limits
 
-**Per-PR cost — opus, ~50–150 K tokens.** Driven mostly by:
+**Per-PR cost — fable, ~50–150 K tokens.** Driven mostly by:
 
 - Diff size (the agent reads the full diff).
 - Number of added/modified test files (Step 7's test-quality
   detection reads each test body).
 - For `feat:`, the linked issue body.
 
-At Anthropic's current Opus 4.7 pricing (~$15/M input, $75/M output),
+At Anthropic's current Fable 5 pricing,
 that's roughly **$0.30–$2.00 per evaluated PR.** Skipped PRs (gate
 declines before agent invocation) cost ~$0 in tokens — just the
 workflow runner-minutes, including the gate's wait-for-CI loop.
