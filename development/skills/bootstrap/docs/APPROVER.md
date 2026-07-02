@@ -551,13 +551,13 @@ The most useful per-project customisation surfaces:
 - **Policy criteria** — edit `.claude/approver-policy.md`. Add
   per-type must-haves, adjust calibration thresholds, change the
   baseline rules. Changes go through code review.
-- **Workflow event triggers** — if you want the Approver to *not*
-  fire on every push (e.g., only on `ready_for_review` to save token
-  budget on early-WIP PRs), edit the `on:` block of
-  `.github/workflows/claude-approver.yml`. The Gate 1 trigger-resolver
-  handles missing triggers gracefully (skips out green).
-- **Per-repo cost limits** — currently not enforced by the workflow.
-  See [Cost](#cost-and-rate-limits) for how to estimate and bound.
+- **When the Approver runs** — nothing to configure: invocation is
+  user-initiated (`/development-<lang>:approve <PR>`), so you decide
+  per-PR when the token budget is spent. There is no event trigger to
+  tune anymore (the old workflow's `on:` block went away with epic #476).
+- **Per-repo cost limits** — not enforced by tooling; invocation being
+  user-initiated is the cost control. See
+  [Cost](#cost-and-rate-limits) for how to estimate and bound.
 
 What you generally **should not** customise without thinking carefully:
 

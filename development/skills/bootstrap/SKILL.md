@@ -837,9 +837,13 @@ way (Step 4b branch protection requires 1 review; no Approver bot to satisfy it)
 When the orchestrator was invoked with `--claude-approver true` **and**
 an **Approver-capable language** is in scope (currently `python` or
 `java` — the languages that ship a `<lang>-approver` agent), render the
-two Approver-specific files.
+Approver policy file. **No workflow is rendered** — since epic #476 the
+Approver is user-invoked locally via `/development-{{APPROVER_LANG}}:approve`,
+which mints its App token from the Keychain; there is no GitHub Actions
+approver anymore (the old `claude-approver.yml.tmpl` was removed in #479).
 
-**Resolve `{{APPROVER_LANG}}`** — the language whose approver runs in CI:
+**Resolve `{{APPROVER_LANG}}`** — the language whose approve skill will
+review this repo's PRs:
 
 1. If `{{PRIMARY}}` is an Approver-capable language (`python` / `java`) →
    use it.
@@ -848,62 +852,18 @@ two Approver-specific files.
    multiple Approver-capable languages are detected) → **skip** the
    Approver, per the skip note below.
 
-`{{APPROVER_LANG}}` drives the agent name (`{{APPROVER_LANG}}-approver`)
-and the plugin dir (`development-{{APPROVER_LANG}}`) in the workflow, and
-selects the policy template:
+`{{APPROVER_LANG}}` selects the policy template:
 
 | Template | Target path in repo | Placeholders to substitute |
 | --- | --- | --- |
-| `templates/common/.github/workflows/claude-approver.yml.tmpl` | `.github/workflows/claude-approver.yml` | `{{CLAUDE_PLUGINS_REPO}}`, `{{CLAUDE_PLUGINS_REF}}`, `{{APPROVER_LANG}}`, `{{APPROVER_REQUIRED_CHECKS}}` |
 | `templates/languages/{{APPROVER_LANG}}/approver-policy.md.tmpl` | `.claude/approver-policy.md` | (none) |
 
-Default substitutions:
-
-- `{{CLAUDE_PLUGINS_REPO}}` → `timo-jakob/timos-claude-code-plugins` (the
-  canonical plugin family). Users who fork the family can override after
-  bootstrap by hand-editing the generated workflow.
-- `{{CLAUDE_PLUGINS_REF}}` → the **current commit SHA** of the plugin
-  family's `main` branch, resolved at render time:
-
-  ```bash
-  git ls-remote https://github.com/timo-jakob/timos-claude-code-plugins main | awk '{print $1}'
-  ```
-
-  Pin the literal SHA into the workflow, not the moving `main` ref.
-  Why: a breaking change in the plugin family's `main` would otherwise
-  silently break every downstream Approver workflow with no commit in
-  the downstream repo to bisect. Users opt into upstream changes by
-  re-running `/development:bootstrap`, which re-resolves the SHA and
-  regenerates the workflow as a normal PR. Once the plugin family ships
-  versioned releases, this substitution moves to the latest release tag.
-  See #199.
-- `{{APPROVER_REQUIRED_CHECKS}}` → a **compact one-line JSON array** of the
-  exact required status-check contexts this repo's branch protection enforces
-  — i.e. the same list `scripts/branch-protection.sh` builds in its
-  `checks=(...)` block, computed from the **same** `--visibility` /
-  `--has-dockerfile` / `--has-codeql` / `--codeql-languages` inputs you pass it
-  in Step 4b. The Approver gate waits until every one of these contexts has
-  registered **and** settled before it judges the PR green (#411), so the list
-  must match branch protection exactly:
-  - **public**: `["test-and-coverage","semgrep","pre-commit","sonarcloud","license-fs"]`,
-    plus `"image"` when a Dockerfile is present, plus one `"analyze (<lang>)"`
-    entry per CodeQL language (e.g. `"analyze (python)"`).
-  - **private**: `["test-and-coverage","semgrep","pre-commit","sonarqube","trivy-fs","license-fs"]`,
-    plus `"image"` when a Dockerfile is present.
-
-  Get the contexts right or the gate misbehaves: a context listed here that
-  never appears stalls the gate until its 30-minute deadline (then it gives up
-  with no verdict); a required context omitted here lets the gate evaluate
-  before that check has run. Render `[]` only if branch protection enforces no
-  status checks at all (it degrades to the pre-#411 "wait for whatever
-  registered" behaviour).
-
-The workflow file applies the standard idempotency rules below. The
-policy file (`.claude/approver-policy.md`) is the source of truth for
-the Approver's per-PR-type criteria — if it already exists at bootstrap
-time, default to **skip** and tell the user that policy changes go through
-the normal code-review process (a policy-change PR is evaluated by the
-*previous* version of the policy).
+The policy file (`.claude/approver-policy.md`) is the source of truth for
+the Approver's per-PR-type criteria — it defines what the approve skill
+considers approvable. If it already exists at bootstrap time, default to
+**skip** and tell the user that policy changes go through the normal
+code-review process (a policy-change PR is evaluated by the *previous*
+version of the policy).
 
 Also confirm the existing `.github/PULL_REQUEST_TEMPLATE.md` (rendered in
 3a) carries the `## Type` and `## Risk` sections that the Approver reads.
@@ -914,18 +874,18 @@ exists and is missing either section, surface a finding via the
 **No-approver-language skip.** If `--claude-approver true` was set but
 `{{APPROVER_LANG}}` couldn't be resolved (no `python`/`java` in scope, or
 the primary is a topic / no-approver language with no single
-Approver-capable language to fall back to), do **not** render either
-Approver file. Warn the user:
+Approver-capable language to fall back to), do **not** render the
+policy file. Warn the user:
 
 > `--claude-approver true` was requested, but no Approver-capable language
 > (currently Python or Java) resolves as this repo's review target. The
-> Claude Approver ships per-language; for other languages the workflow and
-> policy file would be no-ops. Re-run without the flag, or wait for that
-> language's Approver agent to ship.
+> Claude Approver ships per-language; for other languages the policy file
+> would be a no-op. Re-run without the flag, or wait for that language's
+> Approver agent to ship.
 
 Offer to drop the flag and continue, or abort. The Step 4.5 install path
-also skips when there's no Approver workflow to consume the App
-credentials.
+also skips when no Approver-capable language resolves — the Approver App
+would be installed with no approve skill to serve it.
 
 ### 3f. Language-specific bootstrap artifacts
 
@@ -968,13 +928,9 @@ files **on disk**:
 - Workflow `needs:` and `steps.<id>.outputs.*` references resolve.
 - Sonar properties are sane (keys set, coverage paths plausible).
 - If `pre-commit` is installed locally, validates the config.
-- When `.github/workflows/claude-approver.yml` was rendered (3e):
-  - The workflow YAML parses.
-  - No `{{CLAUDE_PLUGINS_*}}` placeholders remain (i.e. the substitution
-    ran).
-  - `.claude/approver-policy.md` has the load-bearing sections
-    (`## Type detection`, `## Baseline criteria`, `## Per-type criteria`,
-    `## Confidence calibration`).
+- When `.claude/approver-policy.md` was rendered (3e): it has the
+  load-bearing sections (`## Type detection`, `## Baseline criteria`,
+  `## Per-type criteria`, `## Confidence calibration`).
 - Language-specific bootstrap-artifact checks per each language
   plugin's spec file (see Step 3f). For Python, the spec is
   `development-python/docs/api-stability.md`.
@@ -1004,7 +960,7 @@ For each tracked target path that you actually rendered above, run:
   --template "<template-relpath>"
 ```
 
-Pass the template path you used in Step 3 (e.g., `common/.github/workflows/claude-approver.yml.tmpl`
+Pass the template path you used in Step 3 (e.g., `common/.github/dependabot.yml.tmpl`
 — relative to `<skill-base-dir>/templates/`).
 
 Tracked target/template pairs (only stamp the targets that were
@@ -1013,7 +969,6 @@ actually rendered in 3a–3f):
 | Target | Template |
 | --- | --- |
 | `.github/dependabot.yml` | `common/.github/dependabot.yml.tmpl` |
-| `.github/workflows/claude-approver.yml` | `common/.github/workflows/claude-approver.yml.tmpl` (only when `--claude-approver true`) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
 | `.github/workflows/codeql.yml` | `public/.github/workflows/codeql.yml.tmpl` |
 | `.github/workflows/codeql-noop.yml` | `public/.github/workflows/codeql-noop.yml.tmpl` |
@@ -1337,17 +1292,12 @@ flag will be a no-op:
 
 > `--claude-approver true` requested but no Approver-capable language
 > (currently Python or Java) resolves as this repo's review target. The
-> Approver ships per-language; the secrets and Apps would be installed but
-> no workflow would consume them. Re-run without the flag to skip, or wait
+> Approver ships per-language; the Apps would be installed but no approve
+> skill would ever invoke them. Re-run without the flag to skip, or wait
 > for that language's Approver agent to ship.
 
 Offer the user to drop the flag and continue, or abort. Do not silently
 install Apps that would never be invoked.
-
-**Forward pointer.** Phase 1 ships the credentials only. The Approver
-workflow + policy template + PR description template arrive in **Phase 2**
-of #89; the `python-approver` agent itself in Phase 3. Until then, the
-secrets and variables installed here sit unused but ready.
 
 ### `--claude-plugin true` extension — install the WRITER App
 

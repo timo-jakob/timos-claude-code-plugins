@@ -58,7 +58,6 @@ current_plugin_version=$(jq -r '.version' < "$plugin_json")
 # CONTRIBUTING.md, SETUP.md) are intentionally excluded — users
 # customize those, drift is expected and meaningless to report.
 typeset -a tracked=(
-  ".github/workflows/claude-approver.yml"
   ".github/workflows/api-stability.yml"
   ".github/workflows/codeql.yml"
   ".github/workflows/codeql-noop.yml"
