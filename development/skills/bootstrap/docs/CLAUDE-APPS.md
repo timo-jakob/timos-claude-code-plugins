@@ -213,31 +213,26 @@ can see it. Keychain encrypts at rest, integrates with the login
 session, and matches how the bootstrap already handles the Sonar
 admin password. One pattern, one place to look.
 
-## Per-repo installation (Phase 1 — not in this PR)
+## Per-repo installation
 
 Once registered, each App is *installed* on individual repos via
-`/development:bootstrap --claude-approver true`. That flow will:
+`/development:bootstrap --claude-approver true` (which delegates to
+`install-claude-apps.zsh`). That flow:
 
-1. Read App IDs from `apps.json`.
-2. Install both Apps on the current repo via the GitHub API.
-3. Store as repo-level secrets:
-   - `CLAUDE_APPROVER_APP_ID` (variable)
-   - `CLAUDE_APPROVER_PRIVATE_KEY` (secret — PEM contents)
-   - `CLAUDE_MAINTENANCE_APP_ID` (variable)
-   - `CLAUDE_MAINTENANCE_PRIVATE_KEY` (secret — PEM contents)
-   - `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` (variable — defaults to
-     the machine-only list). Its **dependency-update bot entry tracks the
-     repo's actual tool** (#425): a **Renovate** repo (`renovate.json` /
-     `.github/renovate.json`) is seeded with `renovate[bot]`, a **Dependabot**
-     repo (`.github/dependabot.yml`) with `dependabot[bot]`, both if both are
-     present (`github-actions[bot]` always; the maintenance App's real
-     owner-suffixed `<slug>[bot]` appended). Seeding the wrong bot makes the
-     Approver Gate-3-skip every vendor PR (it matches the REST `.user.login`),
-     so a Renovate repo seeded with only `dependabot[bot]` would never approve
-     or auto-merge a Renovate PR. On an existing repo on the wrong default, widen
-     the `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` repo variable by hand.
+1. Reads App IDs from `apps.json`.
+2. Installs both Apps on the current repo via the browser install flow.
+3. Stores **no repo secrets or variables** (#476/#498). Both identities
+   mint their installation tokens locally from the Keychain
+   (`mint-approver-token.zsh` / `mint-maintenance-token.zsh`), so the
+   private keys never leave the machine and nothing repo-side holds
+   credentials.
 
-Phase 1 is tracked under #89 and is **not** part of this PR.
+**Repos installed before epic #476** may still carry the CI-era
+config (`CLAUDE_*_PRIVATE_KEY` / `ANTHROPIC_API_KEY` secrets,
+`CLAUDE_*_APP_ID` / `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` variables).
+Nothing consumes them anymore; `install-claude-apps.zsh --verify --fix`
+deletes the unambiguous ones (it skips any name a workflow file still
+references, and never auto-deletes `ANTHROPIC_API_KEY`).
 
 ## Rotation
 
@@ -247,13 +242,9 @@ rotation is non-disruptive:
 1. Generate a new key in the App's settings page.
 2. Run `register-claude-apps.zsh --rotate <name> --pem <new-pem-path>`.
    The script replaces the Keychain entry and updates `registered_at`.
-3. Re-run `/development:bootstrap --claude-approver true` on every
-   repo using the App (or extend bootstrap's Phase 1 with a `--rotate`
-   mode that pushes the new key as a repo secret without redoing the
-   rest of the flow). The latter is a Phase 1 nice-to-have, not
-   shipped here.
-4. After confirming all consumers have switched, delete the old key
-   from the App's settings page.
+3. There is nothing repo-side to update (#498): tokens are minted from
+   the Keychain, so every subsequent mint uses the new key immediately.
+4. Delete the old key from the App's settings page.
 
 Old keys keep working until they're revoked, so there is no
 narrow rollover window.

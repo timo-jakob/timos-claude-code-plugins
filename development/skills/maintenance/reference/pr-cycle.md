@@ -15,13 +15,12 @@ Section titles match the `§` pointers in SKILL.md's Phase 8.
 Maintenance PRs are created under the `claude-maintenance[bot]` identity (via
 the minted installation token) rather than the user's `gh` auth, because:
 
-- The Approver's default author allowlist
-  (`CLAUDE_APPROVER_AUTHOR_ALLOWLIST` per-repo variable) is **machine-only**
-  by default and includes the maintenance bot's real owner-suffixed login
-  (e.g. `claude-maintenance-<owner>[bot]`, #229). Without the identity switch,
-  maintenance PRs would be authored by the user, the allowlist would reject
-  them, and the Approver would not evaluate the PR at all — the entire
-  Approver→maintenance loop would never start.
+- GitHub refuses to count a PR author's own approval. A user-authored
+  maintenance PR could never be satisfied by the user's review, and on a
+  single-maintainer repo there is no one else — the bot identity keeps the
+  approval seat free for the Approver App (or the human, on plugin repos).
+  (Pre-#476, the CI gate's author allowlist was a second reason; that gate
+  is retired — the user now decides which PRs the Approver evaluates.)
 - The Approver's anti-rubber-stamp gate (PR author has no `claude-approver`
   prefix) fires correctly: the maintenance and approver Apps are distinct
   identities by design.

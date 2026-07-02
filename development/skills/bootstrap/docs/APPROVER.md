@@ -180,19 +180,12 @@ The `--claude-approver true` flag tells bootstrap to:
    Apps onto this specific repo (opens the install URLs in your
    browser — you select "Only select repositories" and pick the
    current repo).
-4. Store per-repo secrets and variables via `gh`:
-   - **Secrets** (in both Actions and Dependabot scopes):
-     - `ANTHROPIC_API_KEY` — captured during install (or read from env).
-     - `CLAUDE_APPROVER_PRIVATE_KEY` — the Approver App's PEM.
-     - `CLAUDE_MAINTENANCE_PRIVATE_KEY` — the Maintenance App's PEM.
-   - **Variables**:
-     - `CLAUDE_APPROVER_APP_ID`
-     - `CLAUDE_MAINTENANCE_APP_ID`
-     - `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` — defaults to the
-       machine-only list `["dependabot[bot]", "github-actions[bot]",
-       "claude-maintenance[bot]"]`. Add your own login here to have
-       the Approver evaluate your PRs (see [the allowlist
-       section](#the-author-allowlist)).
+4. Store **nothing else** — no repo secrets or variables (#498).
+   Both identities mint their installation tokens locally from your
+   Keychain (`mint-approver-token.zsh` / `mint-maintenance-token.zsh`),
+   so the App installation is all a repo needs. On a repo bootstrapped
+   before epic #476, `install-claude-apps.zsh --verify --fix` removes
+   the leftover CI-era secrets/variables.
 
 If a Python project is detected (any `pyproject.toml` with a
 `[project]` table), bootstrap **also** renders the API-stability gate
@@ -443,45 +436,16 @@ makes v2 mechanical to add later.
 
 ## The author allowlist
 
-`CLAUDE_APPROVER_AUTHOR_ALLOWLIST` is a per-repo GitHub Actions
-variable that controls **which PR authors the Approver evaluates**.
+**Retired with epic #476.** The `CLAUDE_APPROVER_AUTHOR_ALLOWLIST`
+repo variable existed to control which PR authors the *CI-triggered*
+Approver would evaluate — a defence against burning tokens on every
+push from every contributor. With approval user-invoked
+(`/development-<lang>:approve <PR>`), that gate is you: the Approver
+evaluates exactly the PRs you point it at, regardless of author.
 
-### Default — machine-only
-
-```json
-["dependabot[bot]", "github-actions[bot]", "claude-maintenance[bot]"]
-```
-
-PRs from anyone else (including you) are skipped at Gate 3 — the
-gate job ends green without invoking the agent and the `approve` job
-shows as skipped. The Approver is then
-effectively just a robot for machine-authored PRs, and humans still
-get a normal human review process.
-
-### Widening to your login
-
-```sh
-gh variable set CLAUDE_APPROVER_AUTHOR_ALLOWLIST \
-  --body '["dependabot[bot]","github-actions[bot]","claude-maintenance[bot]","timo-jakob"]'
-```
-
-Now the Approver evaluates your PRs too. The Approver's review still
-satisfies branch protection's one-approval requirement (assuming
-you've left the *Required reviews from someone other than the
-last pusher* set), so you get auto-approved PRs that you author —
-provided the Approver's verdict is `APPROVE`.
-
-### Widening to everyone
-
-```sh
-gh variable set CLAUDE_APPROVER_AUTHOR_ALLOWLIST --body '["*"]'
-```
-
-Every PR gets evaluated. **Use this with care** — there's no rate-limit
-defence at the workflow level; a busy repo with many human
-contributors can pile up fable invocations quickly. The default
-machine-only allowlist is the right choice for repos where automated
-PRs are the volume and human PRs are the exception.
+On repos bootstrapped before #476 the variable may still exist;
+nothing reads it, and `install-claude-apps.zsh --verify --fix`
+removes it.
 
 ### Security considerations
 
@@ -598,12 +562,12 @@ the workflow trigger to fire only on `ready_for_review` instead of
 
 **Rate limits:**
 
-- Anthropic API: standard tier limits apply per the
-  `ANTHROPIC_API_KEY` you provided. A burst of many simultaneous
-  Approver runs (e.g., 20 Dependabot PRs opened in one batch) can
-  hit per-minute token limits and stall some evaluations until the
-  window resets. The workflow's `concurrency:` block prevents same-PR
-  races but not cross-PR contention.
+- Anthropic API: the Approver runs in your local Claude Code session,
+  so your own plan's limits apply — no repo-side `ANTHROPIC_API_KEY`
+  is involved (#498). Invocations are user-paced, so the CI-era
+  failure mode (20 Dependabot PRs triggering 20 simultaneous
+  evaluations that stall on per-minute token limits) is gone by
+  construction.
 - GitHub Apps: token-mint is per-App-installation; the Approver App
   caps at 5000 requests/hour per installation, which is well above
   what a single repo's workflow needs.
