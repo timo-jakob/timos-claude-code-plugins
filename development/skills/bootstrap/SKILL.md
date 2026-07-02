@@ -433,6 +433,7 @@ text replacement before writing:
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`language_meta.python.version`) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `language_meta.python.version.replace('.', '')`. |
 | `{{JAVA_VERSION}}` | from `detect-stack.sh` (`language_meta.java.version`) — the JDK major (e.g. `21`, `17`). Defaults to the current LTS `21` when Java isn't detected or the build declares no toolchain (`language_meta.java.version_source == "default"`). Used in `setup-java`'s `java-version`. Substitute as-is. |
+| `{{XCODE_SCHEME}}` | Swift/Xcode only (`language_meta.swift.build_system == "xcode"`) — the scheme `xcodebuild test` runs. Resolve at render time via `xcodebuild -list -json` (take the single shared scheme; if several, ask the user which one carries the tests). Not used on SwiftPM repos — there the `SWIFT_XCODE` block is stripped and `swift test` needs no scheme. |
 | `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
 | `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
 
@@ -600,13 +601,40 @@ Strip blocks where the tag does not apply:
 | `TYPESCRIPT` | typescript detected |
 | `PYTHON` | python detected |
 | `GO` | go detected |
-| `SWIFT` | swift detected |
+| `JAVA` | java detected |
+| `LINUX_TESTS` | any of typescript / python / go / java detected (the Linux `test-and-coverage` job — Swift has its own macOS job instead) |
+| `SWIFT` | swift detected (in the quality workflows this is the whole macOS `test-and-coverage-swift` job) |
+| `SWIFT_SWIFTPM` | swift detected AND `language_meta.swift.build_system == "swiftpm"` |
+| `SWIFT_XCODE` | swift detected AND `language_meta.swift.build_system == "xcode"` |
 | `DOCKER` | Dockerfile detected |
 | `PRIVATE` | visibility == private |
 | `CLAUDE_PLUGIN` | `--claude-plugin true` |
 
 If a tag does not apply, delete the START line, the END line, and everything
-between them.
+between them. After stripping, collapse any run of 3+ consecutive blank
+lines down to one — adjacent stripped blocks otherwise leave a blank-line
+pileup that fails the repo's yamllint (`empty-lines: max 2`).
+
+**Swift job wiring (quality workflows).** Swift's lane is a separate
+`test-and-coverage-swift` job on a macOS runner (`macos-latest` public;
+a self-hosted runner labelled `macos` private) rather than steps in the
+Linux job — `xcodebuild`/`xcrun` don't exist on Linux. Its `name:` is
+`test-and-coverage`, so branch protection's required contexts are
+unchanged. Render rules:
+
+- **Swift-only repo**: the `LINUX_TESTS` block is stripped; update the
+  `sonarcloud` (public) / `sonarqube` (private) job's
+  `needs: test-and-coverage` to `needs: test-and-coverage-swift`.
+- **Swift + another test-lane language** (rare): keep both jobs, extend
+  `needs:` to both, rename the Swift job's uploaded artifact (e.g.
+  `coverage-reports-swift`) and add a matching second download step —
+  two uploads must not share one artifact name.
+- macOS minutes are free on public repos but bill at 10× Linux on
+  private ones — say so in the Step 2 plan when the private path + Swift
+  combine, so the runner cost is a conscious choice.
+- The app-vs-container check separation applies unchanged: the `image`
+  job stays path-conditional, so a Swift app PR is never blocked by
+  Docker base-image findings.
 
 ### `.gitignore` merging
 
