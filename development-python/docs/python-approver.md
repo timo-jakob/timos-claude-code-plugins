@@ -8,35 +8,37 @@ is the human-readable specification of the same behaviour.
 
 ## When it runs
 
-The agent is invoked by `.github/workflows/claude-approver.yml` (one of
-the templates `/development:bootstrap --claude-approver true` renders).
-The workflow fires on three GitHub events:
+The agent is invoked **locally, by the user**, via the
+`/development-python:approve <PR>` skill (epic #476) — there is no
+GitHub Actions trigger. You decide when a PR is ready for an Approver
+verdict; typically after CI has gone green. The skill:
 
-- `check_suite: completed` — primary. Once CI has finished on a PR head
-  SHA, the workflow evaluates whether the gate state allows an Approver
-  verdict.
-- `issue_comment: created` — for `/approve` (manual re-trigger) and
-  `/approve --dry-run` (non-binding evaluation that prints to the log
-  without posting a review).
-- `pull_request_review: submitted | dismissed` — re-evaluate after other
-  reviewers act.
+1. Verifies the Approver App is registered (apps.json + Keychain) and
+   `gh` is authenticated.
+2. Resolves the PR (explicit number, or the current branch's PR).
+3. Mints a 1-hour Approver App installation token from the Keychain
+   via `mint-approver-token.zsh`.
+4. Spawns this agent with `DRY_RUN=false` so the verdict posts to
+   GitHub as `claude-approver-<owner>[bot]`.
 
-The workflow's gating steps (author allowlist, anti-rubber-stamp, PR
-state, all-green checks, HEAD SHA freeze) decide *whether* to invoke
-the agent. The agent itself is invoked **only when those gates pass**;
-it is not a checker.
+The CI-era gate conditions didn't disappear — they moved: *CI green at
+the head SHA* is re-checked by the agent itself (baseline criterion 1),
+the *anti-rubber-stamp* rule (PR author ≠ approver identity) lives in
+the agent's refusal patterns, and the *author allowlist* is retired —
+the user pointing the skill at a PR **is** the trigger filter.
 
 ## Inputs
 
-The workflow exports these env vars before invoking the agent:
+The approve skill provides these env vars when spawning the agent
+(the same contract the CI workflow used to export, minus the repo-side
+`ANTHROPIC_API_KEY` — the model runs in your local Claude session):
 
 | Variable | Source | Used for |
 | --- | --- | --- |
-| `GH_TOKEN` | Claude Approver App installation token | All `gh` mutations attribute to `claude-approver[bot]` |
-| `ANTHROPIC_API_KEY` | Repo secret | Model invocation |
+| `GH_TOKEN` | Approver App installation token, minted locally from the Keychain | All `gh` mutations attribute to `claude-approver-<owner>[bot]` |
 | `PR_NUMBER` | The PR number | Every `gh` call |
 | `REPO` | `<owner>/<repo>` | Path qualification |
-| `DRY_RUN` | `"true"` if `/approve --dry-run`, else empty | Print-vs-post toggle |
+| `DRY_RUN` | `"true"` for a non-binding local run, `"false"` to post | Print-vs-post toggle |
 
 The agent's prompt itself is a short string:
 
@@ -44,9 +46,9 @@ The agent's prompt itself is a short string:
 Review PR #<N> in <owner>/<repo>. Dry-run: <true|false>.
 ```
 
-The PR's HEAD is already checked out into the working directory (with
-full git history). The plugin family is available under
-`.claude-plugins/development` and `.claude-plugins/development-python`.
+The agent runs in your local checkout of the repo (full git history;
+fetch the PR head as needed). The plugin family's skills and agents are
+available through your installed plugins.
 
 ## Procedure (what the agent does, step by step)
 
@@ -260,8 +262,8 @@ post a review** when:
 - `PR_NUMBER` or `REPO` are unset.
 
 These are operator errors, not PR problems. Surfacing them as review
-verdicts would be wrong — the maintainer needs to fix the workflow,
-not the PR author.
+verdicts would be wrong — the operator needs to fix their setup
+(registration, Keychain, `gh` auth), not the PR author.
 
 ## Refusal patterns (will NOT do)
 
@@ -270,9 +272,11 @@ not the PR author.
   finding describing the failure, never `APPROVE` with reduced
   confidence.
 - **Never post a duplicate review on the same head SHA.** If a previous
-  Approver review on the current head SHA already exists, the agent
-  exits 0 silently — the gate workflow re-fires per event; we don't
-  need redundant reviews.
+  Approver review with the same verdict on the current head SHA already
+  exists, the agent exits 0 silently — re-running the skill on an
+  unchanged PR doesn't need a redundant review. (A fresh run *may*
+  supersede a prior COMMENT/REQUEST_CHANGES when its blocking condition
+  has since been addressed.)
 - **Never modify the PR branch.** The agent is review-only. Even if it
   spots a one-line fix, its output is a finding, not a commit. Pushes
   to PR branches come from `/development:maintenance` (in Phase 4 of
@@ -291,19 +295,19 @@ green, so the per-PR Fable cost is bounded by the rate at which PRs
 reach the all-green state — typically once per PR per push, not per
 push.
 
-## Forward-pointers
+## Related
 
-- **Phase 4 of #89**: `/development:maintenance` reads the hidden JSON
-  block from this agent's most recent review and re-dispatches the
-  triage agents listed under `suggested_agent`. The JSON schema above
-  is the contract.
-- **Phase 5 of #89**: a local `/approve` slash command that runs this
-  agent against an open PR from the developer's workstation without
-  posting a review. Useful for predicting what CI's Approver will say
-  before pushing.
-- **Phase 6 of #89**: end-to-end validation against `ai-doc-organizer`
-  (the test bed repo), where the workflow's remaining Claude-Code-install
-  TODO gets validated.
-- **#88**: comprehensive user-facing adoption guide, including
-  troubleshooting and worked examples. Written after Phase 6 has
-  produced real reviews.
+- `/development:maintenance` reads the hidden JSON block from this
+  agent's most recent review and re-dispatches the triage agents listed
+  under `suggested_agent`. The JSON schema above is the contract.
+- `/development-python:approve` is the invocation path (epic #476):
+  user-triggered, token minted locally, verdict posted as the Approver
+  App. Pass `--dry-run` for a non-binding evaluation that prints
+  instead of posting.
+- The end-to-end validation of the local flow ran against
+  `ai-doc-organizer` (#487): COMMENT-with-reservations and APPROVE
+  paths both exercised for real, merge completed on the locally posted
+  review alone.
+- The operator-facing adoption guide, troubleshooting, and worked
+  examples live in
+  `development/skills/bootstrap/docs/APPROVER.md`.

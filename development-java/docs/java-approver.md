@@ -8,35 +8,37 @@ is the human-readable specification of the same behaviour.
 
 ## When it runs
 
-The agent is invoked by `.github/workflows/claude-approver.yml` (one of
-the templates `/development:bootstrap --claude-approver true` renders).
-The workflow fires on three GitHub events:
+The agent is invoked **locally, by the user**, via the
+`/development-java:approve <PR>` skill (epic #476) — there is no
+GitHub Actions trigger. You decide when a PR is ready for an Approver
+verdict; typically after CI has gone green. The skill:
 
-- `check_suite: completed` — primary. Once CI has finished on a PR head
-  SHA, the workflow evaluates whether the gate state allows an Approver
-  verdict.
-- `issue_comment: created` — for `/approve` (manual re-trigger) and
-  `/approve --dry-run` (non-binding evaluation that prints to the log
-  without posting a review).
-- `pull_request_review: submitted | dismissed` — re-evaluate after other
-  reviewers act.
+1. Verifies the Approver App is registered (apps.json + Keychain) and
+   `gh` is authenticated.
+2. Resolves the PR (explicit number, or the current branch's PR).
+3. Mints a 1-hour Approver App installation token from the Keychain
+   via `mint-approver-token.zsh`.
+4. Spawns this agent with `DRY_RUN=false` so the verdict posts to
+   GitHub as `claude-approver-<owner>[bot]`.
 
-The workflow's gating steps (author allowlist, anti-rubber-stamp, PR
-state, all-green checks, HEAD SHA freeze) decide *whether* to invoke
-the agent. The agent itself is invoked **only when those gates pass**;
-it is not a checker.
+The CI-era gate conditions didn't disappear — they moved: *CI green at
+the head SHA* is re-checked by the agent itself (baseline criterion 1),
+the *anti-rubber-stamp* rule (PR author ≠ approver identity) lives in
+the agent's refusal patterns, and the *author allowlist* is retired —
+the user pointing the skill at a PR **is** the trigger filter.
 
 ## Inputs
 
-The workflow exports these env vars before invoking the agent:
+The approve skill provides these env vars when spawning the agent
+(the same contract the CI workflow used to export, minus the repo-side
+`ANTHROPIC_API_KEY` — the model runs in your local Claude session):
 
 | Variable | Source | Used for |
 | --- | --- | --- |
-| `GH_TOKEN` | Claude Approver App installation token | All `gh` mutations attribute to `claude-approver[bot]` |
-| `ANTHROPIC_API_KEY` | Repo secret | Model invocation |
+| `GH_TOKEN` | Approver App installation token, minted locally from the Keychain | All `gh` mutations attribute to `claude-approver-<owner>[bot]` |
 | `PR_NUMBER` | The PR number | Every `gh` call |
 | `REPO` | `<owner>/<repo>` | Path qualification |
-| `DRY_RUN` | `"true"` if `/approve --dry-run`, else empty | Print-vs-post toggle |
+| `DRY_RUN` | `"true"` for a non-binding local run, `"false"` to post | Print-vs-post toggle |
 
 The agent's prompt itself is a short string:
 
@@ -44,9 +46,9 @@ The agent's prompt itself is a short string:
 Review PR #<N> in <owner>/<repo>. Dry-run: <true|false>.
 ```
 
-The PR's HEAD is already checked out into the working directory (with
-full git history). The plugin family is available under
-`.claude-plugins/development` and `.claude-plugins/development-java`.
+The agent runs in your local checkout of the repo (full git history;
+fetch the PR head as needed). The plugin family's skills and agents are
+available through your installed plugins.
 
 ## Procedure (what the agent does, step by step)
 
@@ -271,8 +273,8 @@ post a review** when:
 - `PR_NUMBER` or `REPO` are unset.
 
 These are operator errors, not PR problems. Surfacing them as review
-verdicts would be wrong — the maintainer needs to fix the workflow,
-not the PR author.
+verdicts would be wrong — the operator needs to fix their setup
+(registration, Keychain, `gh` auth), not the PR author.
 
 ## Refusal patterns (will NOT do)
 
@@ -281,9 +283,11 @@ not the PR author.
   a finding describing the failure, never `APPROVE` with reduced
   confidence.
 - **Never post a duplicate review on the same head SHA.** If a previous
-  Approver review on the current head SHA already exists, the agent
-  exits 0 silently — the gate workflow re-fires per event; we don't
-  need redundant reviews.
+  Approver review with the same verdict on the current head SHA already
+  exists, the agent exits 0 silently — re-running the skill on an
+  unchanged PR doesn't need a redundant review. (A fresh run *may*
+  supersede a prior COMMENT/REQUEST_CHANGES when its blocking condition
+  has since been addressed.)
 - **Never modify the PR branch.** The agent is review-only. Even if it
   spots a one-line fix, its output is a finding, not a commit. Pushes
   to PR branches come from `/development:maintenance` (in Phase 4 of
@@ -302,42 +306,28 @@ green, so the per-PR Fable cost is bounded by the rate at which PRs
 reach the all-green state — typically once per PR per push, not per
 push.
 
-## CI wiring status (read this)
+## Wiring status
 
-The CI workflow (`.github/workflows/claude-approver.yml`) currently
-hardcodes `--agent python-approver`. Making it **select the per-language
-approver** (so Java repos invoke `java-approver`) and shipping a Java
-`approver-policy.md` template are **bootstrap concerns** — they land in
-the Java bootstrap slice (Slice C), tracked separately under
-[#307](https://github.com/timo-jakob/timos-claude-code-plugins/issues/307).
+Everything the Java Approver needs is shipped: the `java-approver`
+agent ([`agents/java-approver.md`](../agents/java-approver.md)), the
+`/development-java:approve` skill (user-triggered, posts the verdict
+as `claude-approver-<owner>[bot]`; `--dry-run` prints instead), and
+the Java `approver-policy.md` template rendered by
+`/development:bootstrap --claude-approver true`. The CI-wiring
+question that #307's Slice C used to track (per-language agent
+selection in `claude-approver.yml`) is **moot** — epic #476 retired
+the workflow entirely; the skill is the invocation path on every
+language.
 
-What exists **now**: the `java-approver` agent
-([`agents/java-approver.md`](../agents/java-approver.md)) and the local
-invocation skill `/development-java:approve`, which runs this agent
-against an open PR from your workstation and prints the verdict to
-stdout instead of posting a review. Pass a PR number explicitly
-(`/development-java:approve 123`) or omit it to use the PR for your
-current branch.
+## Related
 
-What follows **later** (the bootstrap slice): the workflow's
-per-language agent selection, and the Java `approver-policy.md` template
-rendered by `/development:bootstrap`. Until then, full CI wiring for
-Java repos is not in place; the `/development-java:approve` skill is the
-supported way to run the Java Approver.
-
-## Forward-pointers
-
-- **#307 (Java bootstrap, Slice C)**: per-language agent selection in
-  `claude-approver.yml` + a Java `approver-policy.md` template. The
-  java-approver agent and `/development-java:approve` skill are ready;
-  this slice wires them into CI for Java repos.
-- **Phase 4 of #89**: `/development:maintenance` reads the hidden JSON
-  block from this agent's most recent review and re-dispatches the
-  triage agents listed under `suggested_agent`. The JSON schema above
-  is the contract.
-- **Phase 5 of #89**: the local `/development-java:approve` slash
-  command (shipped) that runs this agent against an open PR from the
-  developer's workstation without posting a review. Useful for
-  predicting what CI's Approver will say before pushing.
-- **#88**: comprehensive user-facing adoption guide, including
-  troubleshooting and worked examples.
+- `/development:maintenance` reads the hidden JSON block from this
+  agent's most recent review and re-dispatches the triage agents listed
+  under `suggested_agent`. The JSON schema above is the contract.
+- `/development-java:approve` is the invocation path (epic #476):
+  user-triggered, token minted locally, verdict posted as the Approver
+  App. Pass `--dry-run` for a non-binding evaluation that prints
+  instead of posting.
+- The operator-facing adoption guide, troubleshooting, and worked
+  examples live in
+  `development/skills/bootstrap/docs/APPROVER.md`.

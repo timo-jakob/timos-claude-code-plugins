@@ -29,7 +29,7 @@
     {
       "name": "development-python",
       "description": "Python maintenance dispatcher \u2014 fixes ruff / semgrep / Code Scanning / SonarCloud findings autonomously via per-tool agents in parallel worktrees, auto-bumps deps (patch + minor + major) with test-based verification. Favors autonomy over speed: expect tens-of-thousands of tokens per run.",
-      "version": "1.17.0",
+      "version": "1.17.1",
       "author": {
         "name": "Timo Jakob"
       },
@@ -39,7 +39,7 @@
     {
       "name": "development-java",
       "description": "Java/Gradle maintenance plugin \u2014 full-maintenance tier mirroring development-python. Dispatches per-tool agents (Spotless, SonarCloud, CodeQL/Scorecard, semgrep, Dependabot/Snyk PRs, Gradle major upgrades) in worktrees, with a JaCoCo coverage pre-flight; ships the java-approver reviewer + /development-java:approve. JDK runtime upgrades land in a later slice (#308).",
-      "version": "1.10.0",
+      "version": "1.10.1",
       "author": {
         "name": "Timo Jakob"
       },
