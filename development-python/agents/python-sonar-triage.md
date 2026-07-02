@@ -64,6 +64,30 @@ Stop.
   use Sonar's "won't fix" workflow if your project has that configured.
 - Document the rationale in the same line/block.
 
+### Security guard — BLOCKER/CRITICAL security findings are never suppressed (#457)
+
+When a finding is security-category (`VULNERABILITY` or
+`SECURITY_HOTSPOT`) **and** severity `BLOCKER` or `CRITICAL`,
+suppression is **not an available resolution** — no `# noqa`, no
+`sonar-project.properties` exclusion or issue multicriteria, no
+"won't fix". The Approver refuses to approve a write-privileged PR
+that closes a security blocker by silencing it, so a suppression here
+produces an un-approvable PR by construction and burns the whole
+cycle. Exactly two paths exist:
+
+- **Fix the root cause** when the fix is behavior-preserving
+  (parameterize the query, switch to the `secrets` module, move the
+  secret out of the source when that's a pure code change).
+- **Escalate** to `actions_requiring_review` with a concrete
+  recommendation — *including* when you believe the finding is a false
+  positive: state the false-positive rationale in the recommendation
+  and let the human apply the suppression. Never self-certify an FP at
+  this severity.
+
+Lower-severity security findings and non-security categories keep the
+normal `accept-with-comment` path above (justified false positives
+only).
+
 ### `human-review` when
 
 - The fix would change a **public** function's signature, return
@@ -82,7 +106,9 @@ attestation." We override that: the agent investigates the hotspot
 with LSP + context-read, and acts when behavior is preserved.
 
 - Hotspot for hardcoded secret in a test fixture → suppress with a
-  comment justifying it's a fixture (preserves behavior).
+  comment justifying it's a fixture (preserves behavior) — unless the
+  security guard applies (BLOCKER/CRITICAL → escalate with the fixture
+  rationale instead).
 - Hotspot for SQL string concat → refactor to parameterized
   (preserves behavior + parameters).
 - Hotspot for crypto/random in non-crypto context (e.g., shuffling a
@@ -163,11 +189,13 @@ operational setup.
 - **Do not commit.**
 - **Do not modify `sonar-project.properties`** unless adding an
   inclusion/exclusion pattern is the right fix (rare — prefer code
-  fixes or annotations).
+  fixes or annotations), and **never** to silence a security-category
+  BLOCKER/CRITICAL finding (see the security guard).
 - **Do not invoke other tools.**
-- For `SECURITY_HOTSPOT`, never auto-fix or auto-accept — always
-  `actions_requiring_review`. By Sonar's design these require human
-  attestation that they've been reviewed.
+- For `SECURITY_HOTSPOT`, route to `actions_requiring_review` when the
+  fix would change behavior or require operational setup (matching the
+  hotspot section above); BLOCKER/CRITICAL hotspots additionally fall
+  under the security guard — never resolved by suppression.
 - Sonar's `python:Sxxxx` rules sometimes overlap with ruff. If you see
   a smell that ruff would already auto-fix (E501 line length, F401
   unused import, etc.), skip it — the ruff agent handles that. Note
