@@ -1,16 +1,20 @@
 # Claude Apps — registration and identity
 
-Reference for the two GitHub App identities the Claude Approver
-infrastructure depends on. Phase 0 of #89 ships the registration
-script (`register-claude-apps.zsh`) and this document; Phase 1 wires
-the resulting credentials into `/development:bootstrap` per-repo.
+Reference for the two GitHub App identities used by the Claude Approver and Maintenance pipelines.
+
+**⚠️ Architecture Change (Epic #476):** The **Claude Approver App** is no
+longer CI-driven via GitHub Actions. It is now **user-invoked locally** via
+`/development-python:approve` (and the other language plugins' `approve`
+skills), with tokens minted by `mint-approver-token.zsh`. This eliminates
+platform lock-in and lets users work with any AI coding assistant. Full
+design: [APPROVER-APP.md](APPROVER-APP.md).
 
 ## The two App identities
 
-| Identity | GitHub App slug pattern | Purpose |
-| --- | --- | --- |
-| **Claude Approver** | `claude-approver-<github-login>` | Posts pull-request reviews (`APPROVE` / `REQUEST_CHANGES` / commenting). Its `pull_request_review` calls satisfy branch protection's one-approval requirement. |
-| **Claude Maintenance** | `claude-maintenance-<github-login>` | Opens pull requests + pushes commits on behalf of `/development:maintenance`. Distinct identity so the Approver's anti-rubber-stamp gate (*PR author ≠ Approver identity*) fires correctly on machine-authored PRs. |
+| Identity | GitHub App slug pattern | Invocation | Purpose |
+| --- | --- | --- | --- |
+| **Claude Approver** | `claude-approver-<github-login>` | User skill (`/approve`) | Posts pull-request reviews (`APPROVE` / `REQUEST_CHANGES` / commenting). Invoked locally by user when ready to review, never by GitHub Actions. Its `pull_request_review` calls satisfy branch protection's one-approval requirement. |
+| **Claude Maintenance** | `claude-maintenance-<github-login>` | Orchestrator (`/development:maintenance`) | Opens pull requests + pushes commits on behalf of `/development:maintenance`. Distinct identity so the Approver's anti-rubber-stamp gate (*PR author ≠ Approver identity*) fires correctly on machine-authored PRs. |
 
 The two identities are not a stylistic split — they are **load-bearing
 for the Approver's anti-rubber-stamp gate**. If both maintenance and
@@ -23,8 +27,8 @@ distinct removes the question entirely.
 
 Permissions are minimal-by-default. Both Apps register with
 **webhook deactivated** — Approver and Maintenance are both driven by
-workflow tokens at runtime, not by webhook events; turning the webhook
-on would add a delivery destination we don't use.
+locally minted installation tokens at runtime, not by webhook events;
+turning the webhook on would add a delivery destination we don't use.
 
 ### Claude Approver
 
