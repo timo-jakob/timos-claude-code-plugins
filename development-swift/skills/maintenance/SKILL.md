@@ -10,8 +10,9 @@ description: >
   JSON input; does not run its own detection. Mirrors development-python /
   development-java. Tool universe so far (#297 epic): format_lint (swift-format
   + SwiftLint), sonarcloud (Sonar Swift), code_scanning (CodeQL swift +
-  Scorecard), and coverage (xccov / llvm-cov, #444). semgrep is deferred for
-  Swift (#443); vendor PRs land in Slice F (#446). See ARCHITECTURE.md for the
+  Scorecard), coverage (xccov / llvm-cov, #444), and the vendor-PR sources
+  dependabot + snyk_prs + renovate (Slice F #446 — triage + swift majors).
+  semgrep is deferred for Swift (#443). See ARCHITECTURE.md for the
   schema and dispatch contract.
 disable-model-invocation: false
 ---
@@ -88,11 +89,14 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "swift",
   "dispatch_mode": "primary",
   "language_meta": { "version": "6.0", "manifests": ["Package.swift"] },
-  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": false },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": false, "dependabot": true, "snyk_prs": false, "renovate": false },
   "findings_by_tool": {
     "format_lint":          [ /* swift-format findings: type, severity, rule, component, line, message, key */ ],
     "sonarcloud":           [ /* normalized Sonar findings: type, severity, rule, component, line, message, key */ ],
-    "code_scanning_alerts": [ /* CodeQL swift + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ]
+    "code_scanning_alerts": [ /* CodeQL swift + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ],
+    "dependabot":           [ /* open Dependabot PR records: number, title, body, headRefName */ ],
+    "snyk_prs":             [ /* open Snyk auto-Fix/Upgrade PR records: same shape */ ],
+    "renovate":             [ /* open Renovate PR records: same shape */ ]
   },
   "coverage": { "overall": null, "by_module": {}, "regions": [ /* {file, name, start_line, end_line, pct} per function */ ], "measurement": { "reliable": false, "reason": "..." } },
   "policy": { "coverage_threshold": 80, "severity_gate": "high" },
@@ -107,12 +111,17 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 `dispatch_filter` is optional — added only when the user passed `--tool`.
 
 > **Tool universe (so far).** `development-swift` supports `format_lint`
-> (swift-format + SwiftLint), `sonarcloud` (Sonar Swift analyzer), and
-> `code_scanning` (CodeQL swift + Scorecard), with coverage measured via
-> xccov / llvm-cov. `semgrep` is **deferred** for Swift (experimental,
-> empty rule registry — #443) and always reports `tooling_configured:
-> false`. Vendor-PR handling lands in Slice F (#446). Validate and route
-> against the supported set only.
+> (swift-format + SwiftLint), `sonarcloud` (Sonar Swift analyzer),
+> `code_scanning` (CodeQL swift + Scorecard), and the vendor-PR sources
+> `dependabot` + `snyk_prs` + `renovate` (Slice F #446 — the planner
+> classifies ecosystem + bump level per its § 5a and routes patch/minor
+> to `swift-dependabot-snyk-triage` with `isolation: false`, swift
+> majors to `swift-major-upgrade`), with coverage measured via xccov /
+> llvm-cov. `semgrep` is **deferred** for Swift (experimental, empty
+> rule registry — #443) and always reports `tooling_configured: false`.
+> Validate and route against the supported set only. Vendor-PR records
+> are coverage-exempt at the dispatcher (majors gate on the whole
+> affected module the way development-java's do).
 
 ## Validation
 

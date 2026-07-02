@@ -24,7 +24,8 @@
 # SCOPE (#442, first slice of the #297 Swift epic). Tool universe so far:
 #   - format_lint (swift-format + SwiftLint)  — this slice (the runnable loop)
 # Later slices add: sonarcloud / code_scanning / semgrep (Slice C, #443),
-# coverage via xccov / llvm-cov (Slice D, #444), and vendor PRs (Slice F, #446).
+# coverage via xccov / llvm-cov (Slice D, #444), and vendor PRs (Slice F, #446:
+# dependabot + snyk_prs + renovate raw PR records for the planner's § 5a).
 # Each new tool extends `tooling_configured` + `findings_by_tool` the same way
 # the Java gather grew across its slices.
 #
@@ -164,6 +165,29 @@ fi
 # gather, no agent. Revisit when the registry gains Swift rules (#443).
 has_semgrep_config="false"
 
+# --- tooling_configured: vendor-PR sources (Slice F, #446) -------------------
+# Dependabot: configured when .github/dependabot.yml exists.
+has_dependabot_config="false"
+if [[ -f ".github/dependabot.yml" ]]; then
+	has_dependabot_config="true"
+fi
+
+# Snyk auto-Fix/Upgrade PRs: configured when a .snyk policy file is present.
+has_snyk_prs_config="false"
+if [[ -f ".snyk" ]]; then
+	has_snyk_prs_config="true"
+fi
+
+# Renovate: configured when a Renovate config file is present. A third
+# vendor-PR source alongside Dependabot + Snyk; its open PRs feed the same
+# swift-dependabot-snyk-triage path.
+has_renovate_config="false"
+if [[ -f "renovate.json" || -f "renovate.json5" || -f ".github/renovate.json" ||
+	-f ".github/renovate.json5" || -f ".renovaterc" || -f ".renovaterc.json" ||
+	-f ".renovaterc.json5" || -f ".gitlab/renovate.json" ]]; then
+	has_renovate_config="true"
+fi
+
 # --- coverage (xccov / llvm-cov) — #444, #258 reliability --------------------
 # Measure per-source-file LINE coverage when the Swift toolchain is available
 # AND test targets exist. A figure is only trustworthy when the test run
@@ -295,15 +319,62 @@ else
 	notes_json="[]"
 fi
 
+# --- vendor PRs (Slice F, #446) ----------------------------------------------
+# Raw open-PR records for the planner's ecosystem + bump-level classification
+# (swift-maintenance-planner § 5a). Requires gh authenticated; degrades to []
+# plus a note otherwise.
+dependabot_json="null"
+if [[ "$has_dependabot_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		dependabot_json="$(gh pr list --author "app/dependabot" --state open \
+			--json number,title,body,headRefName 2>/dev/null || echo "[]")"
+	else
+		dependabot_json="[]"
+		notes+=("dependabot is configured but 'gh' is not available/authenticated; can't list open Dependabot PRs.")
+	fi
+fi
+
+snyk_prs_json="null"
+if [[ "$has_snyk_prs_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		snyk_prs_json="$({
+			gh pr list --state open --search "head:snyk-fix-" \
+				--json number,title,body,headRefName 2>/dev/null || echo "[]"
+			gh pr list --state open --search "head:snyk-upgrade-" \
+				--json number,title,body,headRefName 2>/dev/null || echo "[]"
+		} | jq -s 'add // []' 2>/dev/null || echo "[]")"
+	else
+		snyk_prs_json="[]"
+		notes+=(".snyk file present but 'gh' is not available/authenticated; can't list open Snyk PRs.")
+	fi
+fi
+
+renovate_json="null"
+if [[ "$has_renovate_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		renovate_json="$(gh pr list --author "app/renovate" --state open \
+			--json number,title,body,headRefName 2>/dev/null || echo "[]")"
+	else
+		renovate_json="[]"
+		notes+=("renovate is configured but 'gh' is not available/authenticated; can't list open Renovate PRs.")
+	fi
+fi
+
 # --- emit --------------------------------------------------------------------
 jq -n \
 	--argjson format_lint_cfg "$has_format_lint_config" \
 	--argjson sonar_cfg "$has_sonar_config" \
 	--argjson code_scanning_cfg "$has_code_scanning_config" \
 	--argjson semgrep_cfg "$has_semgrep_config" \
+	--argjson dependabot_cfg "$has_dependabot_config" \
+	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
+	--argjson renovate_cfg "$has_renovate_config" \
 	--argjson format_lint_findings "$format_lint_json" \
 	--argjson sonar_findings "$sonar_json" \
 	--argjson cs_findings "$code_scanning_json" \
+	--argjson dependabot_findings "$dependabot_json" \
+	--argjson snyk_prs_findings "$snyk_prs_json" \
+	--argjson renovate_findings "$renovate_json" \
 	--argjson sonar_quality_gate "$sonar_quality_gate" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
@@ -317,13 +388,19 @@ jq -n \
     format_lint:   $format_lint_cfg,
     sonarcloud:    $sonar_cfg,
     code_scanning: $code_scanning_cfg,
-    semgrep:       $semgrep_cfg
+    semgrep:       $semgrep_cfg,
+    dependabot:    $dependabot_cfg,
+    snyk_prs:      $snyk_prs_cfg,
+    renovate:      $renovate_cfg
   },
   findings_by_tool: (
     {} +
     (if $format_lint_findings != null then {format_lint:          $format_lint_findings} else {} end) +
     (if $sonar_findings       != null then {sonarcloud:           $sonar_findings}       else {} end) +
-    (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end)
+    (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end) +
+    (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
+    (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end) +
+    (if $renovate_findings    != null then {renovate:             $renovate_findings}    else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,
