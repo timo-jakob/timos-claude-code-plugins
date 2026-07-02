@@ -1,0 +1,17 @@
+# SwiftLint config — the blessed Swift lint layer (pairs with swift-format,
+# which owns formatting; SwiftLint owns style/correctness rules).
+# Docs: https://realm.github.io/SwiftLint/
+
+excluded:
+  - .build
+  - DerivedData
+
+# Org-wide line-length policy is 120 columns for every formatter/linter
+# (see the plugin family's ARCHITECTURE.md "Line-length policy").
+line_length:
+  warning: 120
+  error: 140
+
+# Keep the rule set at SwiftLint's defaults otherwise — one blessed
+# baseline, no per-project rule shopping. Repo-specific opt-outs go
+# through code review like any other change.
