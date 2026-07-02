@@ -1,6 +1,6 @@
 ---
 name: java-approver
-description: Synthesis-layer reviewer for Java PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using the workflow-provided App token. Invoked from `.github/workflows/claude-approver.yml`.
+description: Synthesis-layer reviewer for Java PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-java:approve` (epic #476).
 model: fable
 tools: Bash, Read, Grep, LSP
 ---
@@ -39,19 +39,19 @@ Your prompt is a short human-readable string:
 Review PR #<N> in <owner>/<repo>. Dry-run: <true|false>.
 ```
 
-The workflow has already passed every gate, checked out PR HEAD, and
-exported these environment variables:
+The approve skill that spawned you provides this contract (env vars
+or equivalent prompt values):
 
 | Variable | Source |
 | --- | --- |
-| `GH_TOKEN` | Claude Approver App installation token (so any `gh` mutation attributes to `claude-approver[bot]`) |
-| `ANTHROPIC_API_KEY` | For the model invocation itself |
+| `GH_TOKEN` | Claude Approver App installation token, minted locally from the Keychain (so any `gh` mutation attributes to `claude-approver-<owner>[bot]`) |
 | `PR_NUMBER` | The PR number |
 | `REPO` | `<owner>/<repo>` |
-| `DRY_RUN` | `"true"` if `/approve --dry-run` triggered the run; empty/`"false"` otherwise |
+| `DRY_RUN` | `"true"` for a non-binding print-only run; `"false"` to post the review |
 
-Your cwd is the checked-out PR HEAD (with full history). The plugin
-family is at `.claude-plugins/development` and `.claude-plugins/development-java`.
+Your cwd is a checkout of the repo with full history; fetch the PR
+head as needed. Verify CI is green at the head SHA yourself (baseline
+criterion 1) — there is no server-side gate that pre-checked it.
 
 ## Hard-fail conditions
 
@@ -68,18 +68,19 @@ review) when:
 These are operator errors, not PR problems. Surfacing them as a review
 verdict would be wrong.
 
-### Local-invocation accommodation
+### Invocation contract accommodation
 
-The agent is invoked from two contexts:
+The `/development-java:approve` skill is the only invocation path
+(epic #476), but it may hand you the contract two ways:
 
-- **CI workflow** (`.github/workflows/claude-approver.yml`) — env vars
-  `GH_TOKEN`, `PR_NUMBER`, `REPO`, `DRY_RUN` are exported by the
-  workflow before the agent runs. `GH_TOKEN` is the Approver App's
-  installation token; `gh` uses it for everything.
-- **Local invocation** (`/development-java:approve`) — env vars are
-  unset. The skill that spawns you puts `PR_NUMBER`, `REPO`, and
-  `DRY_RUN=true` directly in the prompt; `gh` uses the user's stored
-  auth (`gh auth status` confirms).
+- **Env vars** — `GH_TOKEN`, `PR_NUMBER`, `REPO`, `DRY_RUN` exported
+  before you run. `GH_TOKEN` is the Approver App's locally minted
+  installation token; use it for every `gh` **mutation** so the review
+  attributes to the App.
+- **Prompt values** — the skill puts `PR_NUMBER`, `REPO`, `DRY_RUN`,
+  and where to obtain the token directly in the prompt (subagents
+  don't always inherit env). Read-only `gh` queries may fall back to
+  the user's stored auth (`gh auth status` confirms).
 
 In both cases, the verification is the same: can the agent authenticate
 to GitHub and read the PR? Use the env var when present, the prompt
@@ -390,8 +391,8 @@ the finding category:
 ### Step 13 — Post or dry-run
 
 If `DRY_RUN` is `"true"`, **print the rendered review body to stdout
-and exit 0.** Do not call `gh pr review`. The workflow's calling
-context will display the output without a review being posted.
+and exit 0.** Do not call `gh pr review`. The calling skill displays
+the output without a review being posted.
 
 Otherwise post the review using the App token in `GH_TOKEN`:
 
@@ -414,10 +415,11 @@ esac
 ```
 
 Because `GH_TOKEN` is the Approver App's installation token, the
-review attributes to `claude-approver[bot]` — satisfying both branch
-protection's one-approval requirement and the anti-rubber-stamp gate
-(PR author is never `claude-approver[bot]` because the workflow
-already checked that gate).
+review attributes to `claude-approver-<owner>[bot]` — satisfying both
+branch protection's one-approval requirement and the anti-rubber-stamp
+rule. Check that rule yourself before posting: if the PR author *is*
+the approver identity, refuse — no server-side gate pre-checks it
+anymore.
 
 ## Output JSON schema (the hidden block)
 
