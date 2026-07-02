@@ -1,7 +1,7 @@
 ---
 name: swift6-compliance
 description: Swift 6 modernization specialist that checks strict concurrency compliance, typed throws, modern syntax, and language evolution adoption
-model: sonnet
+model: opus
 tools: Read, Grep, Glob
 ---
 

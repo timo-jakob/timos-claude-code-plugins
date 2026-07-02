@@ -1,7 +1,7 @@
 ---
 name: java-maintenance-planner
 description: Pre-dispatch planner. Reads a set of Java maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-java:maintenance.
-model: sonnet
+model: opus
 tools: Bash, Read, Grep
 ---
 

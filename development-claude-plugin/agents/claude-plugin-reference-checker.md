@@ -1,7 +1,7 @@
 ---
 name: claude-plugin-reference-checker
 description: For each reference_checking finding (a family slash-command or agent reference that resolves to nothing in this repo), fix the unambiguous cases (a clear typo of a defined name) and escalate the rest — a dangling reference may mean a typo, a removed target, or an intentional pointer at planned work, and which one it is needs judgment. Used by development-claude-plugin:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 ---
 

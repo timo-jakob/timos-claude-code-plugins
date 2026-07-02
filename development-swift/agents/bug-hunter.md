@@ -1,7 +1,7 @@
 ---
 name: bug-hunter
 description: Expert Swift bug hunter that finds logic errors, nil crashes, race conditions, and stability issues in Swift code
-model: opus
+model: fable
 tools: Read, Grep, Glob
 ---
 

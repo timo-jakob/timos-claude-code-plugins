@@ -1,7 +1,7 @@
 ---
 name: python-sonar-triage
 description: For each SonarCloud/SonarQube finding (bug, code smell, vulnerability, security hotspot), investigate the context with LSP first, then fix when behavior is preserved. Security hotspots get the same treatment — investigated, not punted. Used by development-python:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

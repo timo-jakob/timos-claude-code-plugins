@@ -47,7 +47,7 @@ What is shipped and aligned with the motivation:
   GitHub Apps, in-repo policy file, author allowlist, per-type
   criteria, hidden-JSON re-ingest into `/development:maintenance`.
   Phases 0–3 are shipped (App registration, bootstrap install, workflow
-  - policy + PR templates, the `python-approver` opus agent); Phases
+  - policy + PR templates, the `python-approver` fable agent); Phases
   4–6 (maintenance re-ingest, local `/approve`, end-to-end validation)
   remain. The Python library-exports API-stability gate (`griffe` +
   version-bump bypass) is also shipped and couples into the Approver's
@@ -64,7 +64,7 @@ this section when it lands.
    [#89](https://github.com/timo-jakob/timos-claude-code-plugins/issues/89)
    plus [#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174)
    have merged — App registration, bootstrap install, workflow / policy
-   / PR templates, the `python-approver` opus agent, maintenance
+   / PR templates, the `python-approver` fable agent, maintenance
    re-ingest of the Approver's hidden-JSON findings, local `/approve`
    dry-run, and the griffe-based API-stability gate. Adoption docs
    shipped in [`development/skills/bootstrap/docs/APPROVER.md`](./development/skills/bootstrap/docs/APPROVER.md)
@@ -124,10 +124,10 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
-| Commit Message | sonnet | Generates clear commit messages from diffs, ignoring formatting/linting noise |
-| Bootstrap Security Reviewer | opus | Reviews planned workflows for GH Actions permissions, secret refs, self-hosted runner safety, scan-before-push gates |
-| Bootstrap Config Consistency | sonnet | Cross-references Sonar keys, workflow job IDs ↔ branch-protection contexts, language fragments ↔ detected languages |
-| Bootstrap Idempotency Reviewer | sonnet | For each existing file conflicting with a template, recommends skip/overwrite/merge |
+| Commit Message | opus | Generates clear commit messages from diffs, ignoring formatting/linting noise |
+| Bootstrap Security Reviewer | fable | Reviews planned workflows for GH Actions permissions, secret refs, self-hosted runner safety, scan-before-push gates |
+| Bootstrap Config Consistency | opus | Cross-references Sonar keys, workflow job IDs ↔ branch-protection contexts, language fragments ↔ detected languages |
+| Bootstrap Idempotency Reviewer | opus | For each existing file conflicting with a template, recommends skip/overwrite/merge |
 | Bootstrap Validator | haiku | Fast post-write check — YAML/JSON parses, no unresolved placeholders, cross-references resolve |
 | Bootstrap Reviewer | opus | Optional senior-engineer review of the full bootstrap output (`--review` flag) |
 
@@ -145,13 +145,13 @@ Swift-specific development tooling — code review and formatting/linting.
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
-| Bug Hunter | opus | Logic errors, nil crashes, race conditions, stability |
-| Security Reviewer | sonnet | Secrets, injection, insecure storage, ATS, keychain |
-| Performance Reviewer | sonnet | Retain cycles, allocations, O(n²), main thread blocking |
-| Swift 6 Compliance | sonnet | Strict concurrency, typed throws, modern syntax |
-| Code Quality | sonnet | Naming, SOLID, readability, dead code, API design |
-| Test Reviewer | sonnet | Coverage gaps, assertion quality, flaky tests |
-| Swift Lint & Format | sonnet | Runs SwiftFormat and SwiftLint, fixes issues in-place |
+| Bug Hunter | fable | Logic errors, nil crashes, race conditions, stability |
+| Security Reviewer | opus | Secrets, injection, insecure storage, ATS, keychain |
+| Performance Reviewer | opus | Retain cycles, allocations, O(n²), main thread blocking |
+| Swift 6 Compliance | opus | Strict concurrency, typed throws, modern syntax |
+| Code Quality | opus | Naming, SOLID, readability, dead code, API design |
+| Test Reviewer | opus | Coverage gaps, assertion quality, flaky tests |
+| Swift Lint & Format | opus | Runs SwiftFormat and SwiftLint, fixes issues in-place |
 
 ### development-python
 
@@ -170,7 +170,7 @@ constructs the input and dispatches here.
 > major upgrades, run the project's test suite in their isolated
 > worktrees, and iterate up to 3 times on test failures before escalating.
 > A maintenance run on a non-trivial project can consume tens of thousands
-> of tokens; on a project with major-version CVEs requiring opus-driven
+> of tokens; on a project with major-version CVEs requiring fable-driven
 > migration, more. The trade is intentional — see ARCHITECTURE.md's
 > "Maximizing autonomy" section.
 
@@ -185,13 +185,13 @@ constructs the input and dispatches here.
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
 | python-ruff-fixer | haiku | `ruff check --fix` (safe) + `ruff format` + `--unsafe-fixes` with test verification |
-| python-semgrep-triage | sonnet | Per-finding: fix (refactor) / suppress (`# nosemgrep` + reason); LSP-driven scope check; only escalates when public API changes |
-| python-code-scanning-triage | sonnet | CodeQL + Scorecard alerts: pins GH Actions to commit SHAs (Scorecard `PinnedDependenciesID`), removes unused globals / ineffectual statements (CodeQL `py/unused-*`); defers dataflow rules (`py/path-injection`, `py/sql-injection`, etc.) to human-review with concrete recommendations; surfaces process-policy findings (`MaintainedID`, `CodeReviewID`) as informational. Replaces deprecated `python-snyk-triage` per #87. |
-| python-sonar-triage | sonnet | SonarCloud bugs/smells/vulns; security hotspots investigated context-first, not punted by default |
-| python-major-upgrade | opus | Reads official release notes via WebFetch; maps breaking changes to call sites via LSP; applies migration; iterates up to 3 times on test failures |
-| python-runtime-upgrade | opus | Applies a Python interpreter bump (Dependabot's `python:X.Y → Z.W` Docker base-image PR). Swaps Dockerfile FROM and pyproject.toml `requires-python`; best-effort local verify; **cascade-upgrades dependencies** that need newer versions for the new interpreter, reading their release notes and applying migrations (up to 3 passes). Stops only when a required dep has no version on PyPI supporting the new Python — does NOT search for alternative libraries |
-| python-coverage-improver | opus | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
-| python-dependabot-snyk-triage | sonnet | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
+| python-semgrep-triage | opus | Per-finding: fix (refactor) / suppress (`# nosemgrep` + reason); LSP-driven scope check; only escalates when public API changes |
+| python-code-scanning-triage | opus | CodeQL + Scorecard alerts: pins GH Actions to commit SHAs (Scorecard `PinnedDependenciesID`), removes unused globals / ineffectual statements (CodeQL `py/unused-*`); defers dataflow rules (`py/path-injection`, `py/sql-injection`, etc.) to human-review with concrete recommendations; surfaces process-policy findings (`MaintainedID`, `CodeReviewID`) as informational. Replaces deprecated `python-snyk-triage` per #87. |
+| python-sonar-triage | opus | SonarCloud bugs/smells/vulns; security hotspots investigated context-first, not punted by default |
+| python-major-upgrade | fable | Reads official release notes via WebFetch; maps breaking changes to call sites via LSP; applies migration; iterates up to 3 times on test failures |
+| python-runtime-upgrade | fable | Applies a Python interpreter bump (Dependabot's `python:X.Y → Z.W` Docker base-image PR). Swaps Dockerfile FROM and pyproject.toml `requires-python`; best-effort local verify; **cascade-upgrades dependencies** that need newer versions for the new interpreter, reading their release notes and applying migrations (up to 3 passes). Stops only when a required dep has no version on PyPI supporting the new Python — does NOT search for alternative libraries |
+| python-coverage-improver | fable | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
+| python-dependabot-snyk-triage | opus | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
 
 All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
@@ -230,19 +230,19 @@ gather-script + dispatch contract).
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
 | java-format-lint-fixer | haiku | `./gradlew spotlessApply` (google-java-format); behaviour-preserving |
-| java-sonar-triage | sonnet | SonarCloud bugs/smells/vulns/hotspots (`java:Sxxxx`); LSP-scoped; `// NOSONAR` for justified accepts |
-| java-code-scanning-triage | sonnet | CodeQL (Java) + Scorecard; pins GH Actions to SHAs; dataflow rules → human-review |
-| java-semgrep-triage | sonnet | semgrep: fix / `// nosemgrep` suppress / escalate; SQL concat → `PreparedStatement` |
-| java-dependabot-snyk-triage | sonnet | Vendor PRs (Dependabot / Snyk / Renovate): auto-merge green patch/minor (never self-approves); defers majors + docker to the right handler |
-| java-major-upgrade | opus | Gradle dependency majors — release notes + LSP call-site migration + `gradle build` |
-| java-runtime-upgrade | opus | JDK LTS bumps (Docker base image) — swaps the Gradle toolchain + wrapper, cascades JDK-sensitive deps |
-| java-coverage-improver | opus | Writes meaningful JUnit tests to raise JaCoCo coverage; never edits production code |
-| java-versioning-advisor | sonnet | Flags a hardcoded `version` (a SemVer risk); recommends build-driven versioning (nebula-release) |
-| java-grpc-advisor | sonnet | Audits gRPC/protobuf code generation — the `com.google.protobuf` Gradle plugin generating Java + gRPC stubs from the authoritative `.proto` contract; recommends excluding generated sources from coverage |
-| java-openapi-advisor | sonnet | Audits **non-Spring** contract-first OpenAPI — openapi-generator's `jaxrs-spec` (Jakarta REST) generator from a committed spec, so code/spec drift fails the build (the Spring case is `development-spring`'s `spring-api-advisor`) |
-| java-maintenance-planner | sonnet | Ranks + groups findings, routes each to its agent (defers `org.springframework.boot` bumps to `development-spring`) |
-| java-ci-fixer | sonnet | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
-| java-approver | opus | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`) |
+| java-sonar-triage | opus | SonarCloud bugs/smells/vulns/hotspots (`java:Sxxxx`); LSP-scoped; `// NOSONAR` for justified accepts |
+| java-code-scanning-triage | opus | CodeQL (Java) + Scorecard; pins GH Actions to SHAs; dataflow rules → human-review |
+| java-semgrep-triage | opus | semgrep: fix / `// nosemgrep` suppress / escalate; SQL concat → `PreparedStatement` |
+| java-dependabot-snyk-triage | opus | Vendor PRs (Dependabot / Snyk / Renovate): auto-merge green patch/minor (never self-approves); defers majors + docker to the right handler |
+| java-major-upgrade | fable | Gradle dependency majors — release notes + LSP call-site migration + `gradle build` |
+| java-runtime-upgrade | fable | JDK LTS bumps (Docker base image) — swaps the Gradle toolchain + wrapper, cascades JDK-sensitive deps |
+| java-coverage-improver | fable | Writes meaningful JUnit tests to raise JaCoCo coverage; never edits production code |
+| java-versioning-advisor | opus | Flags a hardcoded `version` (a SemVer risk); recommends build-driven versioning (nebula-release) |
+| java-grpc-advisor | opus | Audits gRPC/protobuf code generation — the `com.google.protobuf` Gradle plugin generating Java + gRPC stubs from the authoritative `.proto` contract; recommends excluding generated sources from coverage |
+| java-openapi-advisor | opus | Audits **non-Spring** contract-first OpenAPI — openapi-generator's `jaxrs-spec` (Jakarta REST) generator from a committed spec, so code/spec drift fails the build (the Spring case is `development-spring`'s `spring-api-advisor`) |
+| java-maintenance-planner | opus | Ranks + groups findings, routes each to its agent (defers `org.springframework.boot` bumps to `development-spring`) |
+| java-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
+| java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`) |
 
 **API-style convention.** gRPC is the standard for **internal, inter-service
 communication** — efficient on the wire, low-latency, with bidirectional /
@@ -280,10 +280,10 @@ contract.
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
-| spring-config-advisor | sonnet | Relocates deprecated/relocated Spring Boot 4 config keys; flags actuator over-exposure (human-review) |
-| spring-boot-upgrade | opus | Owns Spring Boot version bumps end-to-end (config relocations + removed-API fixes per the migration guide); `development-java` defers `org.springframework.boot` bumps here |
-| spring-container-advisor | sonnet | Audits `bootBuildImage` (Cloud Native / Paketo Buildpacks) config — pinned builder/run-image, image name, publish; JVM mode (native-image deferred) |
-| spring-api-advisor | sonnet | Contract-first API drift gate: a committed OpenAPI spec + openapi-generator Spring interfaces, so code/spec drift fails the build |
+| spring-config-advisor | opus | Relocates deprecated/relocated Spring Boot 4 config keys; flags actuator over-exposure (human-review) |
+| spring-boot-upgrade | fable | Owns Spring Boot version bumps end-to-end (config relocations + removed-API fixes per the migration guide); `development-java` defers `org.springframework.boot` bumps here |
+| spring-container-advisor | opus | Audits `bootBuildImage` (Cloud Native / Paketo Buildpacks) config — pinned builder/run-image, image name, publish; JVM mode (native-image deferred) |
+| spring-api-advisor | opus | Contract-first API drift gate: a committed OpenAPI spec + openapi-generator Spring interfaces, so code/spec drift fails the build |
 
 Scope: **Spring Boot 4+** (baseline Spring Framework 7 / Jakarta EE 11) —
 older Boot lines and the `javax`→`jakarta` migration are out of scope.
@@ -317,10 +317,10 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
 | claude-plugin-version-sync | haiku | Syncs `marketplace.json` version entries to each plugin's `plugin.json` (the source of truth); escalates add/remove-entry decisions to human review |
-| claude-plugin-skill-validator | sonnet | Triages SKILL.md / agent frontmatter findings (missing/invalid `name`/`description`/`model`/`tools`, empty body); fixes name-to-location mismatches, escalates authored-content gaps |
-| claude-plugin-reference-checker | sonnet | Triages orphaned `/<plugin>:<skill>` and agent references; fixes clear typos of a defined name, escalates removed-target / planned-work cases |
-| claude-plugin-structure-validator | sonnet | Triages plugin directory-layout findings (missing/misnamed `plugin.json`, wrong `skills/`-`agents/` layout, marketplace `source` mismatch); fixes source paths, escalates file moves / identity renames |
-| claude-plugin-script-quality | sonnet | Triages shell-script lint (shellcheck error/warning, `zsh -n` syntax, shebang/extension mismatch); applies verified safe fixes + justified suppressions, escalates renames and behavior-changing rewrites |
+| claude-plugin-skill-validator | opus | Triages SKILL.md / agent frontmatter findings (missing/invalid `name`/`description`/`model`/`tools`, empty body); fixes name-to-location mismatches, escalates authored-content gaps |
+| claude-plugin-reference-checker | opus | Triages orphaned `/<plugin>:<skill>` and agent references; fixes clear typos of a defined name, escalates removed-target / planned-work cases |
+| claude-plugin-structure-validator | opus | Triages plugin directory-layout findings (missing/misnamed `plugin.json`, wrong `skills/`-`agents/` layout, marketplace `source` mismatch); fixes source paths, escalates file moves / identity renames |
+| claude-plugin-script-quality | opus | Triages shell-script lint (shellcheck error/warning, `zsh -n` syntax, shebang/extension mismatch); applies verified safe fixes + justified suppressions, escalates renames and behavior-changing rewrites |
 
 > ⚠️ **Cost**: a full maintenance run as a test is a real autonomous
 > child session (tens of thousands of tokens). Narrow `--task` to one
@@ -341,7 +341,7 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 >
 > - variables they need (`Phase 1`, #180), the workflow + Python policy
 > - PR description template render at bootstrap time (`Phase 2`, #181),
-> the `python-approver` opus agent the workflow invokes is in
+> the `python-approver` fable agent the workflow invokes is in
 > [`development-python/agents/python-approver.md`](./development-python/agents/python-approver.md)
 > with the operator-facing runtime spec at
 > [`development-python/docs/python-approver.md`](./development-python/docs/python-approver.md)
@@ -526,7 +526,7 @@ what CI's Approver will say before pushing.
 
 ### Languages
 
-Python and Java ship `<lang>-approver` agents (opus) + policy templates
+Python and Java ship `<lang>-approver` agents (fable) + policy templates
 today (`python-approver`, `java-approver`); the bootstrap wires the
 per-language approver via `{{APPROVER_LANG}}`. Future plugins
 (`development-node`, `development-go`, etc.) follow the same pattern.

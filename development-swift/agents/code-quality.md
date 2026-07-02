@@ -1,7 +1,7 @@
 ---
 name: code-quality
 description: Swift code quality and design specialist that evaluates naming, structure, readability, SOLID principles, and API design
-model: sonnet
+model: opus
 tools: Read, Grep, Glob
 ---
 

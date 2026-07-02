@@ -1,7 +1,7 @@
 ---
 name: claude-plugin-skill-validator
 description: For each skill_validation finding (SKILL.md / agent .md frontmatter that breaks the plugin file contract), fix the mechanically-safe cases (name that doesn't match its location) and escalate the ones that need authored content (missing description/tools/model, missing frontmatter, empty body, wrong model). Used by development-claude-plugin:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 ---
 
@@ -21,7 +21,7 @@ before acting (the gather is a fast scan; you confirm).
 - **SKILL.md** (`<plugin>/skills/<name>/SKILL.md`): frontmatter with `name`
   (must equal `<name>`) and `description`; a non-empty body.
 - **Agent** (`<plugin>/agents/<name>.md`): frontmatter with `name` (must equal
-  `<name>`), `description`, `model` (one of `haiku` | `sonnet` | `opus`), and
+  `<name>`), `description`, `model` (one of `haiku` | `opus` | `fable`), and
   `tools`; a non-empty body.
 
 ## Decision tree (per finding)
@@ -48,10 +48,10 @@ recommendation — do **not** invent values:
 - **`missing_field`** (`description`, `tools`, `model`, `name`) — you can't
   author a description, choose a tools list, or pick a model tier on the author's
   behalf. For `model`, recommend the tier by task character (haiku =
-  mechanical, sonnet = judgment, opus = high-stakes).
+  mechanical, opus = judgment, fable = high-stakes).
 - **`empty_body`** — the instruction/agent body is the actual content; recommend
   it be written.
-- **`invalid_model`** — the model string isn't `haiku|sonnet|opus`. Recommend the
+- **`invalid_model`** — the model string isn't `haiku|opus|fable`. Recommend the
   closest valid tier but don't guess silently — escalate so a human confirms.
 
 ## What you do

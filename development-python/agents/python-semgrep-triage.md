@@ -1,7 +1,7 @@
 ---
 name: python-semgrep-triage
 description: For each semgrep finding, fix when the refactor preserves behavior; suppress with a justified annotation when the pattern is a false positive; only escalate when fix would change a public API. Used by development-python:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

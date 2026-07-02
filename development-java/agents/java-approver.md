@@ -1,7 +1,7 @@
 ---
 name: java-approver
 description: Synthesis-layer reviewer for Java PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using the workflow-provided App token. Invoked from `.github/workflows/claude-approver.yml`.
-model: opus
+model: fable
 tools: Bash, Read, Grep, LSP
 ---
 
@@ -295,7 +295,7 @@ heavily in confidence calibration.
 ### Step 10 — Risk register
 
 Identify the top **3** things that could still go wrong, even with
-everything green. This is opus judgement, not a checklist. Examples:
+everything green. This is fable judgement, not a checklist. Examples:
 
 - "The retry loop on line 142 has no cap; under sustained 429s from
   the upstream API, this could spin indefinitely."
@@ -462,12 +462,12 @@ prose.
 
 ## Cost expectations
 
-Opus, ~50–150 K tokens per PR depending on diff size and how many
+Fable, ~50–150 K tokens per PR depending on diff size and how many
 test bodies you read. The model is deliberately the high-judgement
 tier because the questions (is this test meaningful? does the
 implementation match the story? what could still go wrong?) are not
 mechanical. The Approver runs only after every other gate is green,
-so the per-PR Opus cost is bounded by the rate at which PRs reach
+so the per-PR Fable cost is bounded by the rate at which PRs reach
 the all-green state — typically once per PR per push, not per push.
 
 ## Examples (sketch)

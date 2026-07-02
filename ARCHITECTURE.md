@@ -696,7 +696,7 @@ record.
 
 `plan` is the output of the language plugin's pre-dispatch planner
 (`python-maintenance-planner` for `development-python`). The planner is
-a sonnet agent that runs without a worktree, reads the findings + git
+an opus agent that runs without a worktree, reads the findings + git
 history, and returns an ordered list of "groups". **One group per
 agent**: each tool's findings stay together as a single group handled
 end-to-end by that tool's agent. The exceptions are `dependabot` and
@@ -859,8 +859,8 @@ Pick by task character, not by importance:
 | Model | When | Examples |
 | --- | --- | --- |
 | **haiku** | Mechanical, deterministic transforms; no judgment | Apply `ruff check --fix`; bump pinned versions; remove unused imports |
-| **sonnet** | Context-aware work; reads surrounding code to decide what fix is appropriate | Triage a Snyk finding (suppress vs fix); choose between refactor patterns; pick a `# nosemgrep` annotation; CI-failure triage |
-| **opus** | High-stakes judgment; security-critical or architectural; cross-codebase migration | Decide if a vulnerability is exploitable; review whether a `# noqa` is justified; migrate a major dep version; apply a Python interpreter upgrade and structured-escalate when deps aren't ready |
+| **opus** | Context-aware work; reads surrounding code to decide what fix is appropriate | Triage a Snyk finding (suppress vs fix); choose between refactor patterns; pick a `# nosemgrep` annotation; CI-failure triage |
+| **fable** | High-stakes judgment; security-critical or architectural; cross-codebase migration | Decide if a vulnerability is exploitable; review whether a `# noqa` is justified; migrate a major dep version; apply a Python interpreter upgrade and structured-escalate when deps aren't ready |
 
 The right model is whichever produces a correct result on the first
 try most often. A wrong haiku output costs more than the haiku tokens
@@ -1036,14 +1036,14 @@ aren't in the workspace).
 
 ### Model selection for autonomy at scale
 
-The earlier "haiku / sonnet / opus by task character" table still
+The earlier "haiku / opus / fable by task character" table still
 holds, with two refinements:
 
-- **Major-version dep upgrades use opus.** Reading release notes,
+- **Major-version dep upgrades use fable.** Reading release notes,
   identifying breaking changes, applying migrations across the
-  codebase, and verifying against tests is exactly opus's strong
-  suit. Don't try this on sonnet.
-- **Coverage improvement uses opus.** Writing meaningful tests
+  codebase, and verifying against tests is exactly fable's strong
+  suit. Don't try this on opus.
+- **Coverage improvement uses fable.** Writing meaningful tests
   (not just line-touching tests that pass false-confidently) requires
   understanding intent. Mechanical test-writing is worse than no test
   because it creates a false safety floor.
@@ -1052,9 +1052,9 @@ holds, with two refinements:
 
 The hard case. Flow:
 
-1. `python-dependabot-snyk-triage` (sonnet) classifies the Snyk Fix-PR
+1. `python-dependabot-snyk-triage` (opus) classifies the Snyk Fix-PR
    or Dependabot PR as a major bump; dispatcher routes it to
-   `python-major-upgrade` (opus). (For CVEs surfaced through Code
+   `python-major-upgrade` (fable). (For CVEs surfaced through Code
    Scanning / CodeQL rather than a PR, `python-code-scanning-triage`
    defers to the existing PR flow via `actions_requiring_review`.)
 2. `python-major-upgrade` reads the official release notes (via WebFetch
@@ -1094,7 +1094,7 @@ Everything else: the agent should figure it out.
 Higher per-run token usage in exchange for fewer manual triage cycles
 is the deliberate trade. A maintenance run on a non-trivial project
 can consume tens of thousands of tokens (LSP queries, release-note
-reads, test runs, possibly opus on the major-upgrade branch). This
+reads, test runs, possibly fable on the major-upgrade branch). This
 is intentional — the alternative is the user spending an afternoon
 clicking through findings.
 

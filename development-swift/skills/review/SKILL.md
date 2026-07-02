@@ -20,12 +20,12 @@ Launch these 6 agents in one message:
 
 | Agent | Model |
 | -------------------- | -------- |
-| bug-hunter | opus |
-| security-reviewer | sonnet |
-| performance-reviewer | sonnet |
-| swift6-compliance | sonnet |
-| code-quality | sonnet |
-| test-reviewer | sonnet |
+| bug-hunter | fable |
+| security-reviewer | opus |
+| performance-reviewer | opus |
+| swift6-compliance | opus |
+| code-quality | opus |
+| test-reviewer | opus |
 
 For each agent, use `subagent_type: general-purpose` and pass this prompt:
 

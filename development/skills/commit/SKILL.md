@@ -31,7 +31,7 @@ Detect the project language from the changed files and pick the matching agent f
 - **Other languages** → if a matching agent exists in an installed plugin, use it; otherwise skip this step and inform
   the user that no formatter/linter is configured for this language
 
-### Agent B — Commit Message (sonnet) — skip if user provided a message in `$ARGUMENTS`
+### Agent B — Commit Message (opus) — skip if user provided a message in `$ARGUMENTS`
 
 Use the `commit-message` agent. Pass it the git diff captured in Step 1.
 

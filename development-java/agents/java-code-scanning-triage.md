@@ -1,7 +1,7 @@
 ---
 name: java-code-scanning-triage
 description: For each GitHub Code Scanning alert (CodeQL java + Scorecard) on a Java/Gradle project, apply the safe mechanical fix when one exists, defer dataflow-style and risky-to-narrow findings to human review, and surface process-policy findings as informational only. Used by development-java:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

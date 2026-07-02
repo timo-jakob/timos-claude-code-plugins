@@ -1,7 +1,7 @@
 ---
 name: test-reviewer
 description: Swift testing specialist that identifies coverage gaps, weak assertions, flaky tests, and test quality issues
-model: sonnet
+model: opus
 tools: Read, Grep, Glob
 ---
 

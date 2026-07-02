@@ -1,7 +1,7 @@
 ---
 name: java-versioning-advisor
 description: Audit a Java/Gradle project's versioning discipline — flag a hardcoded `version = "..."` (a Semantic-Versioning risk) and recommend build-driven versioning via nebula-release, where the version is derived from git tags and the release bump is derived from Conventional Commits. Used by development-java:maintenance.
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 ---
 

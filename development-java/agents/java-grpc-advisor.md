@@ -1,6 +1,6 @@
 ---
 name: java-grpc-advisor
-model: sonnet
+model: opus
 tools: Read, Edit, Bash, Grep
 description: Audit a Java/Gradle project's gRPC / protobuf code-generation wiring — the com.google.protobuf plugin running protoc + the gRPC plugin to generate Java + gRPC stubs from the authoritative .proto files. Verify the wiring; recommend it when .proto files exist without it; recommend excluding generated sources from coverage. Used by development-java:maintenance.
 ---

@@ -1,7 +1,7 @@
 ---
 name: java-ci-fixer
 description: "Triage and fix a failing CI run on an open Java/Gradle PR. Reads `gh pr checks` output, identifies the failing check(s), edits the worktree to fix the root cause, runs the Gradle build/test locally to confirm, commits, and pushes. Used by the development:maintenance orchestrator's per-group PR cycle, up to 3 invocations per PR before the orchestrator escalates."
-model: sonnet
+model: opus
 tools: Bash, Read, Edit, Grep
 ---
 

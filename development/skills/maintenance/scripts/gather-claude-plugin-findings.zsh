@@ -132,7 +132,7 @@ fi
 # Validate the YAML frontmatter contract of every SKILL.md and agent .md across
 # all plugins. SKILL.md (skills/<name>/SKILL.md) requires name + description and
 # `name` must match <name>. Agent files (agents/<name>.md) additionally require
-# model (haiku|sonnet|opus) + tools, and `name` must match the filename.
+# model (haiku|opus|fable) + tools, and `name` must match the filename.
 local has_skill_validation="false"
 local skill_findings="[]"
 
@@ -195,13 +195,13 @@ if (( ${#md_targets} )); then
     if [[ "$kind" == "agent" ]]; then
       model_val=$(grep -E '^model:' <<< "$fm" | head -1 | sed -E 's/^model:[[:space:]]*//; s/[[:space:]]*$//')
       case "$model_val" in
-        ""|haiku|sonnet|opus) ;;   # empty already reported as missing_field
+        ""|haiku|opus|fable) ;;   # empty already reported as missing_field
         *)
           add_skill_finding "$(jq -n --arg file "$file" --arg got "$model_val" '{
             id: ("skill:" + $file + ":model"), tool: "skill_validation", type: "invalid_model",
             severity: "medium", file: $file, kind: "agent", field: "model",
-            message: ("agent \($file): model “\($got)” is not one of haiku|sonnet|opus"),
-            fix: "set model to haiku, sonnet, or opus",
+            message: ("agent \($file): model “\($got)” is not one of haiku|opus|fable"),
+            fix: "set model to haiku, opus, or fable",
             files: [$file] }')"
           ;;
       esac
