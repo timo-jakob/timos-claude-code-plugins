@@ -267,7 +267,11 @@ Walk the policy's *Baseline criteria* section. Apply each:
 1. CI green at head SHA — re-check with `gh pr checks "$PR_NUMBER"`.
 2. No new Sonar/Snyk/CodeQL findings introduced. Read finding diff
    if the repo has the relevant API exposed.
-3. PR description has Type/Summary/Test plan sections.
+3. PR description has Type/Summary/Test plan sections. Exact-allowlist
+   exception: authors `dependabot[bot]`, `renovate[bot]`, `snyk-bot`
+   (`gh` may render `app/dependabot` / `app/renovate`) satisfy this
+   with their native vendor body — derive Type from the title prefix.
+   No other author (bot, App, or human) gets the exception.
 4. No conflict markers in the diff (`grep -E '^<<<<<<<' /tmp/pr.diff`).
 5. No new bare TODO/FIXME without issue link.
 6. No new secrets (gitleaks/SonarCloud should have caught; re-check on

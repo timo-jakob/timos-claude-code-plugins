@@ -104,9 +104,11 @@ operator's summary.
    verdicts are traceable to specific clauses.
 
 9. **Baseline criteria** — the seven cross-type rules: CI green, no
-   new tool findings, PR description has Type / Summary / Test plan,
-   no conflict markers in the diff, no bare TODO / FIXME without
-   issue link, no new secrets, no unattested dep.
+   new tool findings, PR description has Type / Summary / Test plan
+   (exact-allowlist exception: `dependabot[bot]` / `renovate[bot]` /
+   `snyk-bot` satisfy it with their native vendor body; no other
+   author does), no conflict markers in the diff, no bare TODO /
+   FIXME without issue link, no new secrets, no unattested dep.
 
 10. **Risk register** — top-3 things that could still go wrong even
     with everything green. Opus judgement, three is a cap not a floor.

@@ -283,6 +283,19 @@ criterion *"PR description has `## Type`, `## Summary`, and `## Test
 plan` sections"* fails, which drops confidence one level per missing
 section.
 
+The one exception is an **exact allowlist of vendor bots**:
+`dependabot[bot]`, `renovate[bot]`, and `snyk-bot` (rendered by `gh`
+as `app/dependabot` / `app/renovate`) satisfy the criterion with
+their native machine-generated body. Those bots cannot emit the PR
+template, and their body carries the equivalent evidence — package,
+version delta, compatibility data — while `Type` derives from the
+conventional-commit title prefix. Without the exception every vendor
+PR would be permanently capped at `MEDIUM` (the Approver only
+`APPROVE`s at `HIGH`), silently killing the safe patch/minor
+auto-merge path. No other author — bot, GitHub App, or human — gets
+the exception; an unfamiliar App opening template-less PRs stays a
+finding for a human to judge.
+
 ## PR types — quick reference
 
 | Prefix | Type | Most common failure mode |
