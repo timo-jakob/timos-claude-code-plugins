@@ -85,8 +85,15 @@ pipeline already ran tests + tool verification in the worktree.
 1. **Read the policy** (`.claude/approver-policy.md`). Apply it
    verbatim; your judgement enters only at calibration.
 2. **Gather PR context**: `gh pr view` (title, body, author, head SHA,
-   counts, labels, reviewDecision) + `gh pr diff` + the changed-file
-   list. **Verify CI green at the head SHA** (`gh pr checks`).
+   counts, labels, reviewDecision, mergeable, mergeStateStatus) +
+   `gh pr diff` + the changed-file list. **Verify CI green at the
+   head SHA** (`gh pr checks`). **Mergeability gate:** if `mergeable`
+   is `CONFLICTING`, STOP — do not evaluate, do not post any verdict.
+   An APPROVE on a conflicting head is unusable and goes stale on the
+   resolution push; the Approver App is read-only and cannot resolve
+   it. Report that the PR must be conflict-resolved first (the
+   approve skill's mergeability gate says who resolves it) and
+   re-invoked once the new head has green CI.
 3. **Detect PR type** per the policy (title prefix primary, diff
    heuristic fallback, author hint tiebreaker; ambiguous caps at LOW).
 4. **API-stability artifact**: the Swift gate (swift-api-digester) is

@@ -17,9 +17,12 @@ Keychain; no platform account or GitHub Actions required.
 
 1. Verify Approver App is registered and installed on this repo.
 2. Resolve which PR to review (explicit argument or current branch).
-3. Mint Approver token locally via `mint-approver-token.zsh`.
-4. Spawn `java-approver` agent with the minted token.
-5. Agent posts verdict to GitHub as `claude-approver-bot`.
+3. Mergeability gate — a conflicting PR gets resolved first (by the
+   right identity, never the Approver) and re-checked; review happens
+   after, on the resolved head.
+4. Mint Approver token locally via `mint-approver-token.zsh`.
+5. Spawn `java-approver` agent with the minted token.
+6. Agent posts verdict to GitHub as `claude-approver-bot`.
 
 ## Step 1 — Preflight
 
@@ -60,7 +63,43 @@ Capture repo:
 REPO=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name')
 ```
 
-## Step 3 — Mint Approver token
+## Step 3 — Mergeability gate (conflicts get resolved BEFORE review)
+
+A conflicting PR must never be reviewed or approved: auto-merge can't
+fire on it, and the conflict resolution pushes a new head SHA that
+invalidates the verdict anyway. Resolve first, review after — on the
+resolved head.
+
+```bash
+MERGEABLE=$(gh pr view "$PR_NUMBER" --json mergeable -q .mergeable)
+```
+
+- `MERGEABLE` → continue to Step 4.
+- `UNKNOWN` → GitHub is still computing mergeability; re-check after a
+  few seconds (a handful of retries) before deciding.
+- `CONFLICTING` → resolve according to who authored the PR, then
+  re-enter this skill from Step 1:
+  - `dependabot[bot]` → comment `@dependabot rebase` on the PR. Never
+    hand-edit a Dependabot branch — Dependabot force-pushes over
+    manual commits.
+  - `renovate[bot]` → tick the rebase checkbox in the PR body: fetch
+    it with `gh pr view --json body`, flip
+    `- [ ] <!-- rebase-check -->` to `- [x]`, write it back with
+    `gh pr edit --body`. Renovate rebases on its next run.
+  - `claude-maintenance[bot]` (pipeline/writer PRs) → check out the
+    head branch in a scratch worktree, rebase onto the base branch,
+    resolve the conflicts, run the local build/tests, and push with a
+    freshly minted writer token (`mint-maintenance-token.zsh`) using
+    `--force-with-lease`, so the bot stays author and last pusher.
+  - A human author → don't touch their branch; report the conflict to
+    the user and offer the rebase steps instead.
+
+The Approver App itself can never do the resolving — it has read-only
+code access by design (reviewer and author must stay separate
+identities). After the resolution push, wait for CI on the **new**
+head SHA to go green, then proceed.
+
+## Step 4 — Mint Approver token
 
 ```bash
 TOKEN=$(development/skills/maintenance/scripts/mint-approver-token.zsh)
@@ -71,7 +110,7 @@ if [ -z "$TOKEN" ]; then
 fi
 ```
 
-## Step 4 — Invoke the java-approver agent
+## Step 5 — Invoke the java-approver agent
 
 Spawn the agent with the minted token in the environment:
 
@@ -98,7 +137,7 @@ Pass these env vars to the agent:
 The agent runs the same synthesis procedure as CI and posts the verdict
 as `claude-approver-bot` when `DRY_RUN=false`.
 
-## Step 5 — Report
+## Step 6 — Report
 
 When posting succeeds, confirm the review is visible:
 

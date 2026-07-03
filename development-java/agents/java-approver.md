@@ -118,10 +118,20 @@ says.** Your judgement enters only at the calibration step.
 ### Step 2 — Gather PR context
 
 ```bash
-gh pr view "$PR_NUMBER" --json title,body,author,headRefOid,baseRefName,additions,deletions,changedFiles,labels,reviewDecision > /tmp/pr.json
+gh pr view "$PR_NUMBER" --json title,body,author,headRefOid,baseRefName,additions,deletions,changedFiles,labels,reviewDecision,mergeable,mergeStateStatus > /tmp/pr.json
 gh pr diff "$PR_NUMBER" > /tmp/pr.diff
 gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/pr.files
 ```
+
+**Mergeability gate — before anything else.** If `mergeable` is
+`CONFLICTING`, STOP: do not evaluate, do not post any verdict. An
+`APPROVE` on a conflicting head is unusable (auto-merge can never
+fire) and becomes stale the moment the conflict resolution pushes a
+new head SHA. You cannot resolve the conflict yourself — the
+Approver App is read-only by design. Report back that the PR
+conflicts with its base and must be updated first (the approve
+skill's mergeability gate says who resolves it), and that the
+Approver should be re-invoked once the resolved head has green CI.
 
 Capture:
 
