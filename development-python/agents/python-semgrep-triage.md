@@ -126,6 +126,11 @@ not the first.
 4. `git status --short` after all findings processed.
 5. **Run tests** in the worktree:
    - `pytest --tb=short 2>&1 | tail -60`
+   - Any **new executable line** your fix introduces (a lambda, an
+     extracted branch) must be covered by a test before you finish —
+     bootstrapped repos enforce a 90% coverage floor on new lines at
+     push time, so an uncovered new line blocks the orchestrator's
+     push (#524). Add or extend a test alongside the fix.
 6. If tests pass → success.
    If tests fail → diagnose. Up to 2 more remediation passes:
    - Test was relying on the buggy behavior? Fix the test.
