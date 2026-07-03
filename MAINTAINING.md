@@ -175,11 +175,13 @@ Capture the output in a scratch file. You'll compare it to upstream below.
 
 ## Step 2 — GitHub Actions versions (now automated by Renovate)
 
-You no longer refresh these by hand. Renovate's custom regex manager watches the
-`uses: <owner>/<repo>@<version>` pins in the `.tmpl` templates and opens a
-batched **github-actions** PR (majors split into their own PR — templates are
-configured major-only, since they float on major tags). Your job is to
-**review and merge** those PRs; for a major bump, read the release notes first.
+You no longer refresh these by hand. Since #541 every template ref is pinned to
+a full commit SHA with a `# <tag>` comment (the shipped semgrep gate blocks
+mutable tags in downstream repos, so templates can't float on major tags).
+Renovate's custom regex manager watches those pins in the `.tmpl` templates and
+opens a batched **github-actions** PR covering digest refreshes and tag bumps
+alike. Your job is to **review and merge** those PRs; for a major bump, read
+the release notes first.
 
 Renovate only covers GitHub Action `uses:` pins — the remaining steps below
 (pre-commit revs, Docker tags, runtime strings, brew formulas) it doesn't see,

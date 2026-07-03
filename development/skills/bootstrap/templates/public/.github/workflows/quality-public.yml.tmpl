@@ -60,13 +60,13 @@ jobs:
   test-and-coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         # No fetch-depth: 0 here — the SonarCloud job below does its own
         # checkout with full history. Test runners don't need git blame.
 
       # --- TYPESCRIPT-START ------------------------------------------------
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "20"
           cache: "npm"
@@ -78,7 +78,7 @@ jobs:
 
       # --- PYTHON-START ----------------------------------------------------
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "{{PYTHON_VERSION}}"
           cache: "pip"
@@ -135,7 +135,7 @@ jobs:
 
       # --- GO-START --------------------------------------------------------
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "stable"
       - name: Test (Go)
@@ -145,12 +145,12 @@ jobs:
 
       # --- JAVA-START ------------------------------------------------------
       - name: Setup JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: "temurin"
           java-version: "{{JAVA_VERSION}}"
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - name: Build + test + coverage (Java)
         # `gradle build` runs the full `check` (incl. Spotless when applied)
         # plus tests; jacocoTestReport emits the XML that SonarCloud and
@@ -182,7 +182,7 @@ jobs:
       # --- JAVA-END --------------------------------------------------------
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-reports
           path: |
@@ -206,7 +206,7 @@ jobs:
     name: test-and-coverage
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # --- SWIFT_SWIFTPM-START -----------------------------------------------
       - name: Build + test with coverage (SwiftPM)
@@ -274,7 +274,7 @@ jobs:
             --show-uncovered
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-reports
           path: coverage.lcov
@@ -286,18 +286,21 @@ jobs:
     needs: test-and-coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
       - name: Download coverage
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: coverage-reports
           path: .
         # No continue-on-error: if test-and-coverage didn't produce coverage,
         # Sonar should fail loudly rather than silently report green without it.
       - name: SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@v8
+        # The 40-hex commit pin trips semgrep's SonarQube-docs-API-key
+        # detector; it's a git SHA, not a credential.
+        # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
@@ -344,8 +347,8 @@ jobs:
   license-fs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -382,7 +385,7 @@ jobs:
       packages: write    # ghcr.io push
       id-token: write    # cosign keyless OIDC signing
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           # Full history so the container-change detection below can diff the
           # PR against its base SHA.
@@ -421,14 +424,14 @@ jobs:
           fi
 
       - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -445,7 +448,7 @@ jobs:
       # packages, which are arch-invariant at the source level.
       - name: Build image (amd64 only, for scanning)
         if: steps.scan_decision.outputs.do_scan == 'true'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           platforms: linux/amd64
@@ -470,7 +473,7 @@ jobs:
 
       - name: Snyk container scan
         if: steps.scan_decision.outputs.do_scan == 'true'
-        uses: snyk/actions/setup@v1.0.0
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
       - if: steps.scan_decision.outputs.do_scan == 'true'
         run: |
           # --policy-path makes Snyk read .snyk ignores for container scans
@@ -494,7 +497,7 @@ jobs:
       # is precisely when there are CVEs worth ingesting.
       - name: Upload Snyk container scan (for maintenance ingestion)
         if: always() && (github.event_name == 'push' || github.event_name == 'release')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: snyk-container-scan
           path: snyk-container.json
@@ -512,7 +515,7 @@ jobs:
       # or release.
       - name: Login to GHCR
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: docker/login-action@v4
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -521,7 +524,7 @@ jobs:
       - name: Build + push multi-arch image (with SBOM + provenance)
         id: build-push
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -542,7 +545,7 @@ jobs:
       # directly so the output matches the Buildx attestation byte-for-byte.
       - name: Export SBOM as CI artifact
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: ${{ steps.pick.outputs.tag }}
           format: cyclonedx-json
@@ -556,7 +559,7 @@ jobs:
 
       - name: Upload SBOM artifact
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sbom-cyclonedx-${{ github.sha }}
           path: sbom.cdx.json
@@ -568,7 +571,7 @@ jobs:
       # OIDC certificate identity.
       - name: Install cosign
         if: github.event_name == 'push' || github.event_name == 'release'
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign image with cosign (keyless OIDC)
         if: github.event_name == 'push' || github.event_name == 'release'
@@ -593,7 +596,7 @@ jobs:
       # behave identically. Bump in lockstep with `.pre-commit-config.yaml`.
       image: returntocorp/semgrep:1.163.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - run: semgrep ci --config=auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional
@@ -605,10 +608,10 @@ jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0   # some hooks (gitleaks) want history
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "{{PYTHON_VERSION}}"
-      - uses: pre-commit/action@v3.0.1
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
