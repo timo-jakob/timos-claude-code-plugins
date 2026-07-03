@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
-  "description": "Renovate config — primary job is keeping the GitHub Action pins inside the bootstrap workflow *templates* current (issue #109). Renovate's stock github-actions manager already watches .github/workflows/*.yml in this repo; the customManager below extends that coverage to *.tmpl files under development/skills/bootstrap/templates/ where the action pins are baked into the workflow source we ship to downstream repos.",
+  "description": "Renovate config — primary job is keeping the GitHub Action pins inside the bootstrap workflow *templates* current (issues #109, #541). Renovate's stock github-actions manager already watches .github/workflows/ paths (including the plain-.yml templates); the customManager below extends that coverage to *.tmpl files under development/skills/bootstrap/templates/ where the action pins are baked into the workflow source we ship to downstream repos.",
   "timezone": "Europe/Berlin",
   "schedule": ["before 6am on monday"],
   "dependencyDashboard": true,
@@ -12,10 +12,10 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Extract GitHub Action `uses:` pins from bootstrap workflow templates (*.tmpl). Stock github-actions manager only scans .yml/.yaml, so the templates that downstream repos render into their own workflows are otherwise invisible to drift detection.",
+      "description": "Extract GitHub Action `uses:` refs from bootstrap workflow templates (*.tmpl). Since #541 every template ref is pinned to a full commit SHA with a `# <tag>` comment (the shipped semgrep gate blocks mutable tags in downstream repos), so the regex captures the SHA as currentDigest and the tag comment as currentValue — Renovate keeps the digest fresh and bumps the tag comment alongside.",
       "managerFilePatterns": ["/\\.tmpl$/"],
       "matchStrings": [
-        "uses:\\s+(?<depName>[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)(?:/[a-zA-Z0-9_./-]+)?@(?<currentValue>[a-zA-Z0-9._-]+)"
+        "uses:\\s+(?<depName>[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)(?:/[a-zA-Z0-9_./-]+)?@(?<currentDigest>[a-f0-9]{40})\\s+#\\s+(?<currentValue>[a-zA-Z0-9._-]+)"
       ],
       "datasourceTemplate": "github-tags"
     }
@@ -27,12 +27,6 @@
       "groupName": "github-actions",
       "groupSlug": "github-actions",
       "commitMessageTopic": "GitHub Actions"
-    },
-    {
-      "description": "Templates (custom.regex) intentionally float on MAJOR action tags (e.g. @v6) so downstream repos auto-resolve patches at workflow runtime — the template source needs no churn for minor/patch bumps. Only surface MAJOR bumps for templates (a real adopt-the-new-major decision); suppress pin/minor/patch/digest noise. Real workflows (github-actions manager) are unaffected and still get every update type.",
-      "matchManagers": ["custom.regex"],
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "enabled": false
     }
   ]
 }
