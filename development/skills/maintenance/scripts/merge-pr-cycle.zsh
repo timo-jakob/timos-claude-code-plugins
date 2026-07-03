@@ -55,9 +55,14 @@
 #   3  TIMED-OUT          — checks didn't settle before --timeout.
 #   1  gh invocation failed (auth / network / unknown).
 #   4  AWAITING-APPROVAL  — green, but no counting approval (even after an
-#                           optional re-trigger); route to a human.
-#   5  CHANGES-REQUESTED  — the Approver (or a reviewer) requested changes;
-#                           do NOT spin — surface the rejecting review.
+#                           optional re-trigger); route to a human. Also the
+#                           verdict when the only rejection is STALE — pinned
+#                           to a superseded head (#523): that needs a fresh
+#                           review, not surfacing (the result line names the
+#                           superseded commit).
+#   5  CHANGES-REQUESTED  — the Approver (or a reviewer) requested changes
+#                           ON THE CURRENT HEAD; do NOT spin — surface the
+#                           rejecting review.
 #   6  NOT-GREEN          — a required check failed; the failing check is the
 #                           story, an approve verdict would only add noise.
 
@@ -106,6 +111,30 @@ trap 'rm -f "$err"' EXIT
 _review_decision() {
   "$gh" pr view "$pr" ${repo_args[@]+"${repo_args[@]}"} \
     --json reviewDecision --jq '.reviewDecision // "NONE"' 2>"$err"
+}
+
+# Is a CHANGES_REQUESTED decision STALE — the latest request-changes review
+# pinned to a superseded commit, not the current head? A request-changes
+# review survives branch updates (only approvals are auto-dismissed on push),
+# so reviewDecision alone can carry a rejection of a long-gone SHA (#523);
+# terminal exit 5 is reserved for a rejection OF THE CURRENT HEAD. Same
+# commit_id == headRefOid test as the orchestrator's Phase 2.5, read
+# atomically (head + reviews in one gh call, the #521 rule).
+# Returns 0 (stale; echoes the superseded oid), 1 (current — or no rejection
+# oid to prove staleness with, where exit 5 stays the conservative verdict),
+# 2 (gh failure).
+_stale_rejection_oid() {
+  local out rej head_oid
+  out="$("$gh" pr view "$pr" ${repo_args[@]+"${repo_args[@]}"} \
+    --json headRefOid,reviews 2>"$err")" || {
+    print -u2 -- "gh pr view (reviews) failed:"; cat "$err" >&2; return 2; }
+  rej="$(print -r -- "$out" | jq -r \
+    '[.reviews[] | select(.state == "CHANGES_REQUESTED")]
+     | sort_by(.submittedAt) | last | .commit.oid // empty')"
+  head_oid="$(print -r -- "$out" | jq -r '.headRefOid')"
+  [[ -z "$rej" || "$rej" == "$head_oid" ]] && return 1
+  print -- "$rej"
+  return 0
 }
 
 # Wait for the current head SHA's checks to REGISTER and SETTLE.
@@ -213,15 +242,28 @@ esac
 [[ "$verdict" == "GREEN" ]] || { print -- "result: NOT-GREEN — a required check failed on PR #$pr."; exit 6; }
 
 # Green. Now the approval state.
-local decision; decision="$(_review_decision)" || exit 1
+local decision stale_oid stale_note=""
+decision="$(_review_decision)" || exit 1
 case "$decision" in
   APPROVED) print -- "result: READY — green + APPROVED; armed auto-merge will fire."; exit 0 ;;
-  CHANGES_REQUESTED) print -- "result: CHANGES-REQUESTED — surface the rejecting review; not spinning."; exit 5 ;;
+  CHANGES_REQUESTED)
+    stale_oid="$(_stale_rejection_oid)"; rc=$?
+    (( rc == 2 )) && exit 1
+    if (( rc == 1 )); then
+      print -- "result: CHANGES-REQUESTED — surface the rejecting review; not spinning."
+      exit 5
+    fi
+    # Stale: the rejection is pinned to a superseded commit — re-review
+    # territory, not a terminal verdict. Fall through to the approval-pending
+    # path so --retrigger can supersede it with a fresh review (what the
+    # orchestrator otherwise re-derives by hand, #523).
+    stale_note=" (only a stale changes-requested at ${stale_oid[1,12]}, superseded head — re-review, not terminal)"
+    ;;
 esac
 
-# REVIEW_REQUIRED / NONE: green but no counting approval yet.
+# REVIEW_REQUIRED / NONE — or a stale rejection: no counting approval yet.
 if [[ -z "$do_retrigger" ]]; then
-  print -- "result: AWAITING-APPROVAL — green, no counting approval (no --retrigger)."
+  print -- "result: AWAITING-APPROVAL — green, no counting approval (no --retrigger)${stale_note}."
   exit 4
 fi
 
@@ -245,6 +287,17 @@ esac
 decision="$(_review_decision)" || exit 1
 case "$decision" in
   APPROVED) print -- "result: READY — green + APPROVED after one re-trigger."; exit 0 ;;
-  CHANGES_REQUESTED) print -- "result: CHANGES-REQUESTED — surfaced after re-trigger; not spinning."; exit 5 ;;
+  CHANGES_REQUESTED)
+    # Same staleness test as above: only a rejection of the CURRENT head is
+    # terminal. If the re-triggered review hasn't landed yet, the decision
+    # still carries the old stale rejection — that's awaiting, not rejected.
+    stale_oid="$(_stale_rejection_oid)"; rc=$?
+    (( rc == 2 )) && exit 1
+    if (( rc == 1 )); then
+      print -- "result: CHANGES-REQUESTED — surfaced after re-trigger; not spinning."
+      exit 5
+    fi
+    print -- "result: AWAITING-APPROVAL — only a stale changes-requested at ${stale_oid[1,12]} (superseded head) after one re-trigger; route to a human."
+    exit 4 ;;
   *) print -- "result: AWAITING-APPROVAL — still no counting approval after one re-trigger; route to a human."; exit 4 ;;
 esac

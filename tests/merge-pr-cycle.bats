@@ -30,11 +30,15 @@ setup() {
   # can script what each successive poll observes:
   #   state.N     the Nth rollup poll's response (N = 1, 2, …)
   #   state.last  every poll past the scripted sequence (the steady state)
-  # Env toggles drive the remaining conditions:
+  # The stale-rejection probe (#523) reads `pr view --json headRefOid,reviews`;
+  # the fake serves reviews.json for it. Env toggles drive the remaining
+  # conditions:
   #   GH_DECISION       initial reviewDecision (default REVIEW_REQUIRED)
   #   GH_DECISION_AFTER reviewDecision written by `pr comment` (re-trigger flips it)
   #   GH_ERROR=1        the rollup read fails with an auth error
   #   GH_UPDATE_CONFLICT=1  `pr update-branch` reports a merge conflict
+  # `pr comment` also promotes reviews-after.json to reviews.json when a test
+  # staged one (the re-triggered Approver superseding the stale rejection).
   cat > "$FAKE_GH" <<EOF
 #!/usr/bin/env bash
 sub="\$2"   # 'view' | 'comment' | 'update-branch'
@@ -48,6 +52,9 @@ case "\$sub" in
       [ -f "\$f" ] || f="$BATS_TEST_TMPDIR/state.last"
       cat "\$f"; exit 0
     fi
+    if printf '%s ' "\$@" | grep -q "headRefOid,reviews"; then
+      cat "$BATS_TEST_TMPDIR/reviews.json"; exit 0
+    fi
     if printf '%s ' "\$@" | grep -q reviewDecision; then
       if [ -s "$DECISION_FILE" ]; then cat "$DECISION_FILE"; else echo "\${GH_DECISION:-REVIEW_REQUIRED}"; fi
       exit 0
@@ -56,6 +63,9 @@ case "\$sub" in
   comment)
     echo "approve" >> "$COMMENT_LOG"
     [ -n "\${GH_DECISION_AFTER:-}" ] && echo "\${GH_DECISION_AFTER}" > "$DECISION_FILE"
+    if [ -f "$BATS_TEST_TMPDIR/reviews-after.json" ]; then
+      cp "$BATS_TEST_TMPDIR/reviews-after.json" "$BATS_TEST_TMPDIR/reviews.json"
+    fi
     exit 0 ;;
   update-branch)
     if [ "\${GH_UPDATE_CONFLICT:-}" = "1" ]; then echo "merge conflict" >&2; exit 1; fi
@@ -88,6 +98,14 @@ red()     { state last sha1 "$ROLLUP_RED"; }
 pending() { state last sha1 "$ROLLUP_PENDING"; }
 green_with_cancelled_approver() { state last sha1 "$ROLLUP_GREEN_CANCELLED_APPROVER"; }
 
+# rejection_at <review-oid> [<file>] — a CHANGES_REQUESTED review pinned to
+# <review-oid> on a PR whose head is sha1, as `--json headRefOid,reviews`
+# returns it. Write to reviews-after.json to stage the post-/approve state.
+rejection_at() {
+  printf '{"headRefOid":"sha1","reviews":[{"state":"CHANGES_REQUESTED","commit":{"oid":"%s"},"submittedAt":"2026-07-03T06:00:00Z"}]}' \
+    "$1" > "$BATS_TEST_TMPDIR/${2:-reviews.json}"
+}
+
 @test "usage: missing pr -> exit 2" {
   run zsh "$S"
   [ "$status" -eq 2 ]
@@ -119,8 +137,60 @@ green_with_cancelled_approver() { state last sha1 "$ROLLUP_GREEN_CANCELLED_APPRO
   [ ! -s "$COMMENT_LOG" ]
 }
 
-@test "green + CHANGES_REQUESTED -> CHANGES-REQUESTED (exit 5), does not spin" {
+@test "green + CHANGES_REQUESTED at the current head -> CHANGES-REQUESTED (exit 5), does not spin" {
+  green; rejection_at sha1; export GH_DECISION=CHANGES_REQUESTED
+  cycle
+  [ "$status" -eq 5 ]
+  echo "$output" | grep -q "result: CHANGES-REQUESTED"
+}
+
+@test "#523 rejection at the current head stays terminal even with --retrigger (no /approve wasted)" {
+  green; rejection_at sha1; export GH_DECISION=CHANGES_REQUESTED
+  cycle --retrigger
+  [ "$status" -eq 5 ]
+  echo "$output" | grep -q "result: CHANGES-REQUESTED"
+  [ ! -s "$COMMENT_LOG" ]
+}
+
+@test "#523 stale changes-requested (superseded head), no --retrigger -> AWAITING-APPROVAL (exit 4) with stale note" {
+  # A request-changes review survives branch updates (only approvals get
+  # auto-dismissed on push), so reviewDecision alone can carry a rejection of a
+  # long-gone commit. That is re-review territory, not a terminal verdict.
+  green; rejection_at 0ld5ha0000000000; export GH_DECISION=CHANGES_REQUESTED
+  cycle
+  [ "$status" -eq 4 ]
+  echo "$output" | grep -q "result: AWAITING-APPROVAL"
+  echo "$output" | grep -qi "stale changes-requested"
+  echo "$output" | grep -q "0ld5ha000000"   # names the superseded commit (12 chars)
+}
+
+@test "#523 stale changes-requested + --retrigger -> /approve fires, fresh approval supersedes -> READY" {
+  # The money path: the stale rejection must not block the re-trigger; the
+  # fresh Approver review at the new head supersedes it and the PR is READY.
+  green; rejection_at 0ld5ha0000000000
+  export GH_DECISION=CHANGES_REQUESTED GH_DECISION_AFTER=APPROVED
+  cycle --retrigger
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "result: READY"
+  [ "$(wc -l < "$COMMENT_LOG")" -eq 1 ]
+}
+
+@test "#523 stale + --retrigger, Approver re-rejects at the NEW head -> exit 5 (genuine, surfaced)" {
+  green; rejection_at 0ld5ha0000000000
+  rejection_at sha1 reviews-after.json    # the re-review rejects the current head
+  export GH_DECISION=CHANGES_REQUESTED    # decision stays CHANGES_REQUESTED throughout
+  cycle --retrigger
+  [ "$status" -eq 5 ]
+  echo "$output" | grep -q "result: CHANGES-REQUESTED"
+  [ "$(wc -l < "$COMMENT_LOG")" -eq 1 ]
+}
+
+@test "#523 the LATEST rejection decides staleness (old stale + newer current-head one -> exit 5)" {
   green; export GH_DECISION=CHANGES_REQUESTED
+  printf '%s' '{"headRefOid":"sha1","reviews":[
+    {"state":"CHANGES_REQUESTED","commit":{"oid":"sha1"},"submittedAt":"2026-07-03T07:00:00Z"},
+    {"state":"CHANGES_REQUESTED","commit":{"oid":"0ld5ha0000000000"},"submittedAt":"2026-07-03T05:00:00Z"}
+  ]}' > "$BATS_TEST_TMPDIR/reviews.json"
   cycle
   [ "$status" -eq 5 ]
   echo "$output" | grep -q "result: CHANGES-REQUESTED"

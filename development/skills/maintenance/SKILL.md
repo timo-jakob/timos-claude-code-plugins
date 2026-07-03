@@ -1317,7 +1317,11 @@ After pushing and opening the PR:
 
    Branch on its single `result:` line / exit code:
    `READY` (0) → step 6 (merge); `CHANGES-REQUESTED` (5) → the
-   `CHANGES_REQUESTED` handling below; `AWAITING-APPROVAL` (4) or `TIMED-OUT`
+   `CHANGES_REQUESTED` handling below — always a rejection of the **current
+   head**: a stale request-changes pinned to a superseded commit comes back
+   as `AWAITING-APPROVAL` (4) with a stale note instead, since that is
+   re-review territory, not a terminal verdict (#523); `AWAITING-APPROVAL`
+   (4) or `TIMED-OUT`
    (3) → arm native auto-merge and move on (the `REVIEW_REQUIRED` branch below);
    `NOT-GREEN` (6) → back to step 3. The manual poll below is exactly what it
    automates — drop to it only when you need the finer-grained in-run
@@ -1376,8 +1380,12 @@ After pushing and opening the PR:
      - Exit 4 (AWAITING-APPROVAL): CI green but no approval within the
        wait window. Record outcome as `awaiting_approval` (not `automerge_armed`,
        which was misleading — the PR is armed but won't merge without
-       explicit approval, which may not arrive for hours/days).
-     - Exit 5 (CHANGES-REQUESTED): Approver or reviewer objected. Record
+       explicit approval, which may not arrive for hours/days). This is
+       also the verdict when the only rejection is a **stale**
+       request-changes pinned to a superseded head — the `result:` line
+       names the old commit (#523); a fresh review supersedes it.
+     - Exit 5 (CHANGES-REQUESTED): Approver or reviewer objected **at the
+       current head** (stale rejections are exit 4, above). Record
        in `actions_requiring_review` with the rejecting review reason.
      - Exit 3 (TIMED-OUT): Checks didn't settle. Record in
        `actions_requiring_review` as "timed out waiting for CI".
