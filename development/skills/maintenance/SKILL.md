@@ -896,6 +896,46 @@ If `--no-merge` was passed, **skip this phase entirely** and list the
 plan + any local worktree branches in the final summary for manual
 handling.
 
+### Per-stage checkpoint records + resume (#517)
+
+Phase 8 is the long tail of the run, so its progress is checkpointed
+**per stage**, not just at a phase boundary. Maintain a `phase8-stages`
+record — one JSON object keyed by stage (`stage0`, then the planner
+group ids in batch order) — and re-save the whole object via
+`checkpoint.zsh save --phase phase8-stages --data -` at every
+transition:
+
+```json
+{ "stage1": { "group": "<planner group id / tool>", "branch": "<worktree branch>",
+              "pr": 214, "ci_fix_count": 1, "status": "pr_opened" } }
+```
+
+`status` moves `agent_spawned` → `pr_opened` → `merged` |
+`awaiting_approval` | `escalated` | `deferred`. Update points: after
+spawning the group's agent, after the PR opens (record branch + PR
+number), after each CI-fixer invocation (increment `ci_fix_count`), and
+at the stage's terminal state (the post-merge sync for `merged`; the
+approval gate's outcomes for the rest).
+
+**Resuming into Phase 8** (the resume entry already restored the plan
+from `phase6-plan`): reconcile every recorded stage against **GitHub
+reality** before acting — the checkpoint says what *was* true, GitHub
+says what *is*:
+
+- `status: merged` → skip the stage; already done.
+- a `pr` is recorded → `gh pr view <pr> --json state`: **MERGED** → mark
+  `merged`, sync local main, skip; **OPEN** → re-enter the CI cycle on
+  it at the recorded `ci_fix_count` (the 3-per-PR fixer budget spans the
+  interruption); **CLOSED** unmerged → treat as `escalated` and note it
+  for Phase 9.
+- `agent_spawned` with no `pr` → the interrupted session's worktree is
+  gone; re-spawn the group's agent off the current merged tip — nothing
+  outward happened, so this is safe.
+- **Never** re-open an existing PR, re-dispatch a group whose PR merged,
+  or spawn a second agent for a stage that has an open PR.
+
+Stages not yet in the record run normally from the restored plan.
+
 ### Identity for PR creation (when Claude Apps registered)
 
 When `~/.config/claude-plugins/apps.json` has a `claude_maintenance`
@@ -1219,7 +1259,9 @@ absent; the top-N groups when it is set), in priority order:
    effective base branch (titled per the plan entry's
    `suggested_pr_title`, with a body per **§ PR body** above — template-
    conforming, never prose, so the Approver's baseline is satisfied), and
-   capture the new PR number.
+   capture the new PR number. Record the stage in `phase8-stages` —
+   branch, PR number, `status: pr_opened` (§ Per-stage checkpoint
+   records).
 5. **Close superseded vendor PRs.** Inspect the agent's response for
    any `actions_taken[].superseded_prs` entries (currently emitted by
    `python-major-upgrade`; any future agent that opens a replacement
@@ -1545,6 +1587,9 @@ After pushing and opening the PR:
    git -C "<repo.path>" switch "<base_branch>"
    git -C "<repo.path>" pull --ff-only origin "<base_branch>"
    ```
+
+   Then record the stage as `merged` in `phase8-stages`
+   (§ Per-stage checkpoint records).
 
 8. **Re-run the state pre-flight from Phase 3.** A merge — especially
    of a runtime-version-bumping PR — can leave local state (venv,
@@ -1935,6 +1980,19 @@ processed.
 Print the tracker's stdout (one line per tool — `created` / `updated` /
 `closed` / `no-op`) **and** a one-line-per-PR-follow-up summary into the run
 summary, so the user sees exactly what changed on the issues side.
+
+### Run complete — clear the checkpoint (#517)
+
+The run is finished; remove its checkpoint:
+
+```bash
+"<skill-base-dir>/scripts/checkpoint.zsh" clear
+```
+
+A completed run leaves no checkpoint behind — resume is only ever
+offered for *interrupted* runs. When Phase 10 is skipped
+(`--no-issues`), clear at the end of Phase 9 instead. (`--dry-run`
+never wrote one.)
 
 ## What you will NOT do
 
