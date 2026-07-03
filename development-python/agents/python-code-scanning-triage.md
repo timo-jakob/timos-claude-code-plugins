@@ -223,6 +223,11 @@ dismissed_comment="<comment>"`.
    - `git status --short`
 7. **Run tests** if any `fix` action touched Python source:
    - `pytest --tb=short 2>&1 | tail -60`
+   - Any **new executable line** your fix introduces (a lambda, an
+     extracted branch) must be covered by a test before you finish —
+     bootstrapped repos enforce a 90% coverage floor on new lines at
+     push time, so an uncovered new line blocks the orchestrator's
+     push (#524). Add or extend a test alongside the fix.
 
    If tests fail, run up to 2 remediation passes:
    - A removed "unused" variable was actually used dynamically

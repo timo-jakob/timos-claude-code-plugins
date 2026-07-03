@@ -288,6 +288,11 @@ mismatch — and the slug itself is owner-suffixed because App
 slugs are globally unique, e.g. `claude-approver-timo-jakob[bot]`,
 never the generic `claude-approver[bot]` — the #229 mismatch.)
 
+Review bodies contain control characters and markdown: extract fields
+with `gh --jq` only, exactly as above — never round-trip a body through
+shell variable interpolation to re-parse it (that broke on the control
+characters and cost a detection round, #524).
+
 A PR is **Approver-flagged** when ALL hold:
 
 - A review by the Approver bot (login prefix `claude-approver`) exists.
@@ -1299,6 +1304,15 @@ After pushing and opening the PR:
    you will NOT do"). The Approver workflow fires on
    `check_suite: completed`, so once CI is green its verdict typically
    lands within a few minutes.
+
+   When you drive the review yourself (the language plugin's `approve`
+   skill spawning the local approver agent), mint the Approver token
+   **just-in-time**: after `await-pr-checks.zsh` / `merge-pr-cycle.zsh`
+   report settled, immediately before dispatching the review agent —
+   never alongside PR creation. App installation tokens live 1 hour; a
+   token minted before the CI wait can expire mid-wait, and the
+   approver agent then hard-fails on the dead credential and needs a
+   re-mint + resume round-trip (#524).
 
    **Use the blessed merge-cycle helper — do NOT hand-roll this loop (#431).**
    The tick-client-snapper run's improvised background loops re-triggered the

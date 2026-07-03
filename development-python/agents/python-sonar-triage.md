@@ -132,6 +132,11 @@ operational setup.
 4. `git status --short` for the summary.
 5. **Run tests** in the worktree:
    - `pytest --tb=short 2>&1 | tail -60`
+   - Any **new executable line** your fix introduces (a lambda, an
+     extracted branch) must be covered by a test before you finish —
+     bootstrapped repos enforce a 90% coverage floor on new lines at
+     push time, so an uncovered new line blocks the orchestrator's
+     push (#524). Add or extend a test alongside the fix.
 6. If tests pass → success.
    If tests fail → diagnose. Up to 2 remediation passes:
    - Test was relying on buggy behavior the Sonar fix corrected → fix
