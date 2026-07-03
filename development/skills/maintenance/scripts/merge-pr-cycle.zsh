@@ -16,6 +16,13 @@
 # mechanism the gate itself honours (#190) — so there is no empty-commit push
 # and no refspec to mangle.
 #
+# #521 hardened the settle wait further, after four false NOT-GREEN (exit 6)
+# verdicts right after mid-wait head-SHA moves: the head SHA and its check
+# rollup are now read ATOMICALLY (one gh call, so the set judged always
+# belongs to the SHA judged), progress lines go to stderr (stdout is the
+# captured verdict channel — a "waiting:" line there corrupted the verdict
+# comparison), and CANCELLED/STALE conclusions are neutral, never failures.
+#
 # It does NOT merge for you: arm GitHub native auto-merge first
 # (`gh pr merge <pr> --auto --squash`) and this helper tells you when the
 # counting approval has landed so that armed merge will fire — or when to route
@@ -95,12 +102,6 @@ trap 'rm -f "$err"' EXIT
 
 # --- helpers --------------------------------------------------------------
 
-# Read the PR's current head SHA. Echoes the SHA; nonzero on gh failure.
-_head_sha() {
-  "$gh" pr view "$pr" ${repo_args[@]+"${repo_args[@]}"} \
-    --json headRefOid --jq .headRefOid 2>"$err"
-}
-
 # Read reviewDecision (APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED / empty).
 _review_decision() {
   "$gh" pr view "$pr" ${repo_args[@]+"${repo_args[@]}"} \
@@ -110,71 +111,76 @@ _review_decision() {
 # Wait for the current head SHA's checks to REGISTER and SETTLE.
 # Echoes "GREEN" or "NOT-GREEN" on settle; returns:
 #   0 settled (verdict on stdout), 3 timed out, 1 gh error, 7 no checks at all.
-# Re-pins to the head SHA each poll: if a rebase lands mid-wait, the wait
-# restarts against the new SHA instead of judging a stale set (#431-bug-1).
+#
+# stdout is the VERDICT channel — the caller captures it with $(…) — so every
+# progress line in here goes to stderr. A "waiting:" line on stdout corrupted
+# the captured verdict and flipped green PRs to NOT-GREEN whenever a wait
+# iteration preceded the settle, i.e. after every mid-wait rebase (#521).
+#
+# Each poll reads the head SHA and its statusCheckRollup in ONE gh call, so
+# the set judged always belongs to the SHA judged — the old two-read shape
+# (pr view for the SHA, pr checks for the set) raced after a mid-wait push
+# (#521). If a rebase lands mid-wait, the wait restarts against the new SHA
+# instead of judging a stale set (#431-bug-1).
 _await_settle() {
   local deadline=$(( $(date +%s) + timeout ))
   local register_deadline=$(( $(date +%s) + register_grace ))
-  local sha out rc pending total passed failed
-  local sha_at_start; sha_at_start="$(_head_sha)" || return 1
+  local out rc sha rollup pending total failed
+  local sha_at_start=""
   while :; do
-    sha="$(_head_sha)" || return 1
+    out="$("$gh" pr view "$pr" ${repo_args[@]+"${repo_args[@]}"} \
+      --json headRefOid,statusCheckRollup 2>"$err")"
+    rc=$?
+    if (( rc != 0 )); then
+      print -u2 -- "gh pr view failed (rc=$rc):"; cat "$err" >&2
+      return 1
+    fi
+    sha="$(print -r -- "$out" | jq -r '.headRefOid')"
+    [[ -z "$sha_at_start" ]] && sha_at_start="$sha"
     if [[ "$sha" != "$sha_at_start" ]]; then
       # A new commit landed (rebase / push): restart the register grace so we
       # don't judge the previous SHA's already-settled checks as this SHA's.
-      print -- "head SHA moved ($sha_at_start -> $sha); restarting wait." >&2
+      print -u2 -- "head SHA moved ($sha_at_start -> $sha); restarting wait."
       sha_at_start="$sha"
       register_deadline=$(( $(date +%s) + register_grace ))
     fi
 
-    out="$("$gh" pr checks "$pr" ${repo_args[@]+"${repo_args[@]}"} \
-      --json name,state,bucket 2>"$err")"
-    rc=$?
-    if (( rc != 0 )); then
-      # "no checks reported" is gh's nonzero for a PR with zero checks. On a
-      # fresh SHA that can mean "not registered YET" — keep waiting through the
-      # register grace before concluding the PR genuinely has no checks.
-      if grep -qi 'no checks reported' "$err"; then
-        if (( $(date +%s) >= register_deadline )); then
-          return 7
-        fi
-        print -- "waiting: no checks registered yet on $sha (grace)…"
-        sleep "$interval"; continue
-      fi
-      print -u2 -- "gh pr checks failed (rc=$rc):"; cat "$err" >&2
-      return 1
-    fi
-
-    total=$(print -r -- "$out" | jq 'length')
+    rollup="$(print -r -- "$out" | jq '.statusCheckRollup // []')"
+    total=$(print -r -- "$rollup" | jq 'length')
     if [[ "$total" -eq 0 ]]; then
-      # Empty array (not the "no checks reported" error) — same fresh-SHA race.
+      # Nothing registered on this SHA yet — or the PR genuinely has no
+      # checks. Keep waiting through the register grace before concluding
+      # the latter (#431-bug-1).
       if (( $(date +%s) >= register_deadline )); then return 7; fi
-      print -- "waiting: 0 checks registered yet on $sha (grace)…"
+      print -u2 -- "waiting: 0 checks registered yet on $sha (grace)…"
       sleep "$interval"; continue
     fi
 
-    pending=$(print -r -- "$out" | jq '[.[] | select(.bucket == "pending")] | length')
+    # Classify the rollup ourselves — CheckRun nodes plus legacy commit
+    # StatusContext nodes — instead of trusting `gh pr checks` buckets.
+    pending=$(print -r -- "$rollup" | jq '[.[] | select(
+      (.__typename == "StatusContext" and (.state == "PENDING" or .state == "EXPECTED"))
+      or (.__typename != "StatusContext" and .status != "COMPLETED"))] | length')
     if [[ "$pending" -eq 0 ]]; then
-      passed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "pass")] | length')
-      # A CANCELLED check is NOT a failed check. The Approver gate's
-      # approve/approver-gate jobs are cancelled by design on every run — the
-      # pull_request-triggered run is superseded by the check_suite run (#190)
-      # — so folding the "cancel" bucket into the failure count flips a green
-      # PR to NOT-GREEN on *every* Approver PR and makes the script exit 6
-      # before the `/approve` re-trigger below can ever fire (the
-      # tick-client-snapper symptom: the helper reported NOT-GREEN while all
-      # required contexts were green, and the orchestrator had to hand-roll the
-      # gate dance the helper exists to own). Only the "fail" bucket is a real
-      # required-check failure; a genuinely-cancelled *required* CI check is
-      # caught by branch protection (native auto-merge just won't fire), not by
-      # this advisory verdict.
-      failed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "fail")] | length')
+      # A CANCELLED or STALE run is NOT a failed check. The Approver gate's
+      # approve/approver-gate jobs are cancelled by design on every run (the
+      # pull_request-triggered run is superseded by the check_suite run,
+      # #190), and a rebase marks the superseded suite's runs STALE — so
+      # counting either as failure flips a green PR to NOT-GREEN (#520,
+      # #521). Only a genuine failure conclusion flips the verdict; a
+      # genuinely-cancelled *required* check is caught by branch protection
+      # (native auto-merge just won't fire), not by this advisory verdict.
+      failed=$(print -r -- "$rollup" | jq '[.[] | select(
+        (.__typename == "StatusContext" and (.state == "FAILURE" or .state == "ERROR"))
+        or (.__typename != "StatusContext"
+            and (.conclusion == "FAILURE" or .conclusion == "TIMED_OUT"
+                 or .conclusion == "ACTION_REQUIRED" or .conclusion == "STARTUP_FAILURE")))] | length')
       if [[ "$failed" -eq 0 ]]; then print -- "GREEN"; else print -- "NOT-GREEN"; fi
       return 0
     fi
 
     if (( $(date +%s) >= deadline )); then return 3; fi
-    print -- "waiting: ${pending}/${total} check(s) still pending on $sha…"
+    print -u2 -- "waiting: ${pending}/${total} check(s) still pending on $sha…"
     sleep "$interval"
   done
 }
