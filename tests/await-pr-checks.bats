@@ -40,11 +40,14 @@ await() { run env GH_BIN="$FAKE_GH" "$@" zsh "$S" --timeout 5 --interval 0 86; }
   echo "$output" | grep -q "NOT-GREEN"
 }
 
-@test "await: #412 a cancelled check counts as failed for the verdict, still exit 0" {
-  printf '[{"name":"a","state":"CANCELLED","bucket":"cancel"}]' > "$CHECKS"
+@test "await: #522 a cancelled check is neutral, not failed — verdict stays GREEN" {
+  # The Approver gate's approve/approver-gate jobs are cancelled by design on
+  # every run (#190), so the cancel bucket must not flip the verdict (#520).
+  printf '[{"name":"ci","state":"SUCCESS","bucket":"pass"},{"name":"approve","state":"CANCELLED","bucket":"cancel"}]' > "$CHECKS"
   await
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "NOT-GREEN"
+  echo "$output" | grep -q "1 passed, 0 failed, 1 other"
+  echo "$output" | grep -q "— GREEN"
 }
 
 @test "await: #412 skipped/neutral checks don't block settle and stay green" {

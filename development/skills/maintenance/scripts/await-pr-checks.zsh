@@ -88,7 +88,13 @@ while :; do
 
   if [[ "$pending" -eq 0 ]]; then
     passed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "pass")] | length')
-    failed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length')
+    # A CANCELLED check is NOT a failed check (#522): the Approver gate's
+    # approve/approver-gate jobs are cancelled by design on every run (#190),
+    # so counting the cancel bucket as failed flips every green Approver PR to
+    # NOT-GREEN. Only the fail bucket is a real failure (same rule as
+    # merge-pr-cycle.zsh and the root CLAUDE.md); cancels land in "other" so
+    # they stay visible on the settled: line.
+    failed=$(print -r -- "$out" | jq '[.[] | select(.bucket == "fail")] | length')
     other=$(( total - passed - failed ))
     if [[ "$failed" -eq 0 ]]; then verdict="GREEN"; else verdict="NOT-GREEN"; fi
     print -- "settled: ${passed} passed, ${failed} failed, ${other} other (of ${total}) — ${verdict}"
