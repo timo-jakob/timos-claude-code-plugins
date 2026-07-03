@@ -83,6 +83,9 @@ separate type.
 ### Tiebreaker: author hint (when primary and fallback disagree)
 
 - `dependabot[bot]` → `chore_deps`, unless title declares `chore(deps-major):`.
+- `renovate[bot]` → `chore_deps`, unless title declares `chore(deps-major):`
+  or the bump is major per the version delta in the title.
+- `snyk-bot` → `security`.
 - `github-actions[bot]` → `ci`.
 - `claude-maintenance[bot]` → whichever the title prefix says; the
   maintenance pipeline always sets a correct conventional prefix.
@@ -100,6 +103,19 @@ separate type.
    the merge-base.
 3. **PR description has `## Type`, `## Summary`, and `## Test plan`
    sections.** Missing fields are finding-level.
+
+   **Vendor-bot exception — exact allowlist, nobody else.** PRs
+   authored by `dependabot[bot]`, `renovate[bot]`, or `snyk-bot`
+   (`gh` may render the App logins as `app/dependabot` /
+   `app/renovate`) satisfy this criterion with their native
+   machine-generated body: those bots cannot emit the repo's PR
+   template, and their body carries the equivalent evidence
+   (package, version delta, compatibility data, changelog links).
+   Derive `Type` from the conventional-commit title prefix. This
+   exception is those three logins ONLY — any other bot, GitHub
+   App, or human author is held to the full criterion; an unknown
+   App opening template-less PRs is a case for human judgment (emit
+   the finding as usual), never an automatic pass.
 4. **No conflict markers in the diff.** A literal `<<<<<<< HEAD` in any
    tracked file is a critical finding (`REQUEST_CHANGES` regardless of
    type).
@@ -109,7 +125,8 @@ separate type.
    catch this; defence-in-depth re-check at this layer.
 7. **No new dependency without compatibility-score evidence.** For
    dep-bumps, the PR body should contain the Dependabot compatibility
-   score or a release-notes excerpt; absence is a finding.
+   score, Renovate's age/confidence badges, or a release-notes
+   excerpt; absence is a finding.
 
 ---
 
