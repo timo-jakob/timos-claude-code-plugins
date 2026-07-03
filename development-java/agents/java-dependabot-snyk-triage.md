@@ -1,6 +1,6 @@
 ---
 name: java-dependabot-snyk-triage
-description: Review vendor-opened PRs (Dependabot, Snyk auto-Fix/Upgrade, AND Renovate PRs) that the dispatcher has classified as either "auto-merge-if-green" (gradle + github-actions patch/minor with verifiable safety, Snyk security fixes, or a Docker same-tag digest-only refresh whose tag-equality the agent re-verifies) or "human-review" (Docker base-image tag/version bumps, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Used by development-java:maintenance.
+description: Review vendor-opened PRs (Dependabot, Snyk auto-Fix/Upgrade, AND Renovate PRs) that the dispatcher has classified as either "auto-merge-if-green" (gradle + github-actions patch/minor with verifiable safety, Snyk security fixes, or a Docker same-tag digest-only refresh whose tag-equality the agent re-verifies) or "human-review" (Docker base-image tag/version bumps, github-actions majors, unknown ecosystems). Merges the green-CI safe ones once an approving review exists (claude-approver[bot] or human; arms native auto-merge otherwise — never self-approves); passes the rest through to actions_requiring_review with the dispatcher's stated reason. Completes a stale Renovate Gradle lockfile (strict dependency locking + failed Renovate artifact step) on the PR branch instead of deferring the red-CI PR (#531). Used by development-java:maintenance.
 model: opus
 tools: Bash, Read, Grep, WebFetch
 ---
@@ -263,6 +263,42 @@ gh pr checks <number> --json bucket,name,state | jq '[.[] | {name, state, bucket
 - **any failure**: CI red
 - **any pending**: CI in progress — don't act yet; defer to `unable_to_fix`
 
+#### Step B1.5 — complete a stale Renovate Gradle lockfile (#531)
+
+On repos with strict Gradle dependency locking, Renovate's artifact step
+can fail (`renovate/artifacts: Artifact file update failure` — surfaced
+as an "⚠ Artifact update problem" notice in the PR body), leaving the
+bump applied in `build.gradle.kts` but `gradle.lockfile` **stale** — so
+lock verification is red on an otherwise-safe PR. The completion is
+mechanical and verifiable; do it instead of deferring. **Renovate
+`gradle` PRs only**, and only when ALL hold:
+
+- the PR carries Renovate's artifact-failure marker (the body notice or
+  a failing `renovate/artifacts` status), AND
+- the red check is the build/lock-verification one (its failure output
+  names `gradle.lockfile` / dependency locking), AND
+- the bumped version is present in `build.gradle.kts` but absent/stale
+  in `gradle.lockfile`.
+
+```bash
+gh pr checkout <number>
+./gradlew dependencies --write-locks
+git diff --name-only     # must be ONLY lockfile(s); anything else → reset + defer
+./gradlew test 2>&1 | tail -30
+git commit -am "chore(deps): complete gradle.lockfile for <pkg> <new> (Renovate artifact step failed)"
+git push
+```
+
+- Diff touches anything besides lockfiles → `git reset --hard`, defer to
+  `actions_requiring_review` with what changed.
+- Tests fail → defer with the output.
+- After the push, CI re-runs on the new head: re-enter Step B1 on the
+  fresh SHA. **One completion attempt per PR** — if lock verification is
+  still red after it, defer.
+- Note: your commit means Renovate stops rebasing this branch on its own
+  (the PR-body rebase checkbox still works); that's fine — the PR is now
+  complete.
+
 #### Step B2 — for minor bumps, scan release notes
 
 For `bump_level == "minor"`, before merging: `WebFetch` the package's
@@ -282,7 +318,8 @@ Patch bumps skip this step.
 | patch | green | n/a | **merge if approved, else arm auto-merge** |
 | minor | green | clean | **merge if approved, else arm auto-merge** |
 | minor | green | breaking-change flag | defer to `actions_requiring_review` |
-| any | red | n/a | defer with failing-check name |
+| any | red: Renovate gradle artifact-failure (B1.5 conditions) | n/a | **complete the lockfile (B1.5)**, re-enter B1 on the new head |
+| any | red (anything else) | n/a | defer with failing-check name |
 | any | pending | n/a | `unable_to_fix` |
 
 #### Step B3.5 — make the PR Approver-legible (merge/arm case only)
