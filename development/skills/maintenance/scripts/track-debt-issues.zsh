@@ -66,10 +66,15 @@ cd "$repo_path"
 # tracking issue like the others (#299).
 typeset -a tracked_tools=( ruff semgrep code_scanning_alerts sonarcloud container_scan )
 
+# Create the label; an already-existing label IS success. The previous
+# list-then-create dance raced under pipefail: `grep -q` exits at the first
+# match, `gh label list` takes SIGPIPE, the pipeline reads as "missing", and
+# the unconditional create then died on "already exists" under set -e —
+# aborting the whole run's issue updates (#530). One idempotent call instead.
 ensure_label() {
-  local name=$1 color=$2 desc=$3
-  if ! gh label list --json name --jq '.[].name' --limit 200 | grep -qx "$name"; then
-    gh label create "$name" --color "$color" --description "$desc" >/dev/null
+  local name=$1 color=$2 desc=$3 out
+  if ! out=$(gh label create "$name" --color "$color" --description "$desc" 2>&1); then
+    [[ "$out" == *"already exists"* ]] || { print -u2 -- "$out"; return 1; }
   fi
 }
 
@@ -259,7 +264,12 @@ for tool in "${tracked_tools[@]}"; do
   fi
 
   body=$(render_body "$tool" "$count")
-  title="[maintenance] ${tool} debt (${count} finding$([[ $count -ne 1 ]] && print -- s))"
+  # Plural via plain if — a `$([[ ... ]] && ...)` substitution exits 1 when the
+  # test is false (count == 1), and set -e killed the script silently right
+  # here on the first tool with exactly one finding (#530).
+  plural="s"
+  if (( count == 1 )); then plural=""; fi
+  title="[maintenance] ${tool} debt (${count} finding${plural})"
 
   if [[ -n "$existing_n" ]]; then
     body_file=$(mktemp "${TMPDIR:-/tmp}/debt-body.XXXXXXXX")
