@@ -93,11 +93,32 @@ repos:
   # Contract: assumes a recent `pytest --cov --cov-report=xml` produced
   # `coverage.xml` in the worktree. If it's missing, the hook fails with
   # a clear message — run pytest first.
+  #
+  # Worktree guard (#518): in a git worktree that reuses the main checkout's
+  # venv, an editable install (`pip install -e`) resolves imports to the MAIN
+  # checkout, so coverage.xml records that tree's paths and diff-cover counts
+  # the worktree's changed lines as 0% covered — a false NOT-COVERED verdict.
+  # A coverage figure computed against the wrong tree must be withheld, not
+  # emitted: the entry first verifies the report's <source> lives inside THIS
+  # worktree, and otherwise fails with the remedy (a per-worktree venv)
+  # instead of a bogus number. A relative or absent <source> can't be proven
+  # wrong, so it falls through to diff-cover's own handling.
   - repo: local
     hooks:
       - id: coverage-floor
         name: Coverage floor (90% on new code) — requires recent pytest --cov-report=xml
-        entry: diff-cover coverage.xml --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90
+        entry: >-
+          bash -c 'top="$(git rev-parse --show-toplevel)";
+          src="$(sed -n "s|.*<source>\(.*\)</source>.*|\1|p" coverage.xml 2>/dev/null | head -n 1)";
+          case "$src" in
+          ""|.|"$top"|"$top"/*) ;;
+          /*) echo "coverage-floor: coverage.xml was recorded against $src — not this worktree ($top)." >&2;
+          echo "Its numbers cannot judge this tree (stale or shared-venv editable install, #518). Create a venv" >&2;
+          echo "in THIS worktree (python -m venv .venv && .venv/bin/pip install -e .), re-run" >&2;
+          echo "pytest --cov --cov-report=xml, then push again." >&2;
+          exit 1;;
+          esac;
+          exec diff-cover coverage.xml --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90'
         language: python
         additional_dependencies: ["diff-cover>=9"]
         pass_filenames: false

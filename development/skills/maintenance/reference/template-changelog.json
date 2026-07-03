@@ -15,5 +15,13 @@
       "blocking": true,
       "summary": "image scan is now path-conditional — it gates only PRs that touch container files (Dockerfile/.dockerignore/compose/trivy.yaml), so app & dependency PRs are no longer blocked by pre-existing base-image CVEs they can't influence"
     }
+  ],
+  "common/.pre-commit-config.yaml.tmpl": [
+    {
+      "version": "1.58.4",
+      "issue": 518,
+      "blocking": false,
+      "summary": "the Python coverage-floor pre-push hook now withholds its verdict when coverage.xml was recorded against a different tree (shared-venv editable install in a git worktree) and names the per-worktree-venv remedy, instead of false-failing changed lines as 0% covered"
+    }
   ]
 }
