@@ -1,49 +1,58 @@
 #!/usr/bin/env bats
 #
-# Behavioral tests for merge-pr-cycle.zsh (#431): the blessed merge-cycle
+# Behavioral tests for merge-pr-cycle.zsh (#431, #521): the blessed merge-cycle
 # helper that replaces the improvised background loops which carried two real
 # bugs on the tick-client-snapper run —
 #   (1) judging "settled" before the head SHA's checks had registered, and
 #   (2) a zsh `$new:refs` refspec mangling from forcing fresh SHAs.
-# This helper waits for checks to *register* before settling, and re-triggers
-# the Approver via a `/approve` comment (no push, no refspec) — so both bug
-# classes are gone by construction. Drives the script against a FAKE gh (the
-# GH_BIN seam) so every exit path is deterministic.
+# #521 added two more bug classes, both regression-tested here:
+#   (3) progress lines printed to stdout corrupted the captured verdict, so any
+#       wait iteration before settle (always the case right after a head-SHA
+#       move) flipped a green PR to NOT-GREEN, and
+#   (4) the head SHA and its check set were read in two separate gh calls, so
+#       the set judged could belong to a superseded SHA (whose cancelled/stale
+#       runs must never count as failures).
+# Drives the script against a FAKE gh (the GH_BIN seam) so every exit path is
+# deterministic.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/maintenance/scripts/merge-pr-cycle.zsh"
-  CHECKS="$BATS_TEST_TMPDIR/checks.json"
   DECISION_FILE="$BATS_TEST_TMPDIR/decision"   # updated by `gh pr comment`
   COMMENT_LOG="$BATS_TEST_TMPDIR/comments"      # records /approve re-triggers
   FAKE_GH="$BATS_TEST_TMPDIR/gh"
   : > "$COMMENT_LOG"
   export GH_BIN="$FAKE_GH"
 
-  # Fake gh dispatches on the subcommand. Env toggles drive the conditions:
-  #   GH_HEAD_SHA       head SHA from `pr view --json headRefOid` (default sha1)
+  # Fake gh dispatches on the subcommand. The script reads the head SHA and its
+  # statusCheckRollup ATOMICALLY via `pr view --json headRefOid,statusCheckRollup`
+  # (#521); the fake serves those reads from a SEQUENCE of state files so a test
+  # can script what each successive poll observes:
+  #   state.N     the Nth rollup poll's response (N = 1, 2, …)
+  #   state.last  every poll past the scripted sequence (the steady state)
+  # Env toggles drive the remaining conditions:
   #   GH_DECISION       initial reviewDecision (default REVIEW_REQUIRED)
   #   GH_DECISION_AFTER reviewDecision written by `pr comment` (re-trigger flips it)
-  #   GH_NOCHECKS=1     `pr checks` reports "no checks reported"
-  #   GH_ERROR=1        `pr checks` fails with an auth error
+  #   GH_ERROR=1        the rollup read fails with an auth error
   #   GH_UPDATE_CONFLICT=1  `pr update-branch` reports a merge conflict
   cat > "$FAKE_GH" <<EOF
 #!/usr/bin/env bash
-sub="\$2"   # 'view' | 'checks' | 'comment' | 'update-branch'
+sub="\$2"   # 'view' | 'comment' | 'update-branch'
 case "\$sub" in
   view)
-    if printf '%s ' "\$@" | grep -q headRefOid; then
-      echo "\${GH_HEAD_SHA:-sha1}"; exit 0
+    if printf '%s ' "\$@" | grep -q statusCheckRollup; then
+      if [ "\${GH_ERROR:-}" = "1" ]; then echo "HTTP 401: Bad credentials" >&2; exit 1; fi
+      n=\$(cat "$BATS_TEST_TMPDIR/poll-count" 2>/dev/null || echo 0); n=\$((n+1))
+      printf %s "\$n" > "$BATS_TEST_TMPDIR/poll-count"
+      f="$BATS_TEST_TMPDIR/state.\$n"
+      [ -f "\$f" ] || f="$BATS_TEST_TMPDIR/state.last"
+      cat "\$f"; exit 0
     fi
     if printf '%s ' "\$@" | grep -q reviewDecision; then
       if [ -s "$DECISION_FILE" ]; then cat "$DECISION_FILE"; else echo "\${GH_DECISION:-REVIEW_REQUIRED}"; fi
       exit 0
     fi
     exit 0 ;;
-  checks)
-    if [ "\${GH_NOCHECKS:-}" = "1" ]; then echo "no checks reported on the 'main' branch" >&2; exit 8; fi
-    if [ "\${GH_ERROR:-}" = "1" ]; then echo "HTTP 401: Bad credentials" >&2; exit 1; fi
-    cat "$CHECKS"; exit 0 ;;
   comment)
     echo "approve" >> "$COMMENT_LOG"
     [ -n "\${GH_DECISION_AFTER:-}" ] && echo "\${GH_DECISION_AFTER}" > "$DECISION_FILE"
@@ -61,15 +70,23 @@ EOF
 # conditions are set by each test via `export GH_*` before calling.
 cycle() { run zsh "$S" --timeout 5 --interval 0 --register-grace 0 "$@" 99; }
 
-green() { printf '[{"name":"a","state":"SUCCESS","bucket":"pass"},{"name":"b","state":"SUCCESS","bucket":"pass"}]' > "$CHECKS"; }
-red()   { printf '[{"name":"a","state":"FAILURE","bucket":"fail"},{"name":"b","state":"SUCCESS","bucket":"pass"}]' > "$CHECKS"; }
-pending(){ printf '[{"name":"a","state":"IN_PROGRESS","bucket":"pending"}]' > "$CHECKS"; }
+# state <N|last> <sha> <rollup-json> — script the Nth poll's atomic response.
+state() { printf '{"headRefOid":"%s","statusCheckRollup":%s}' "$2" "$3" > "$BATS_TEST_TMPDIR/state.$1"; }
+
+# Rollup fixtures: CheckRun conclusions + a legacy commit StatusContext, the
+# two context shapes statusCheckRollup interleaves.
+ROLLUP_GREEN='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"StatusContext","context":"b","state":"SUCCESS"}]'
+ROLLUP_RED='[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE"},{"__typename":"CheckRun","name":"b","status":"COMPLETED","conclusion":"SUCCESS"}]'
+ROLLUP_PENDING='[{"__typename":"CheckRun","name":"a","status":"IN_PROGRESS","conclusion":""}]'
 # Required contexts pass, but the Approver gate's jobs are CANCELLED — the
 # normal state of every Approver PR (the pull_request run is superseded by the
 # check_suite run, #190). This must read as GREEN, not NOT-GREEN.
-green_with_cancelled_approver() {
-  printf '[{"name":"test-and-coverage","state":"SUCCESS","bucket":"pass"},{"name":"sonarcloud","state":"SUCCESS","bucket":"pass"},{"name":"approve","state":"CANCELLED","bucket":"cancel"},{"name":"approver-gate","state":"CANCELLED","bucket":"cancel"}]' > "$CHECKS"
-}
+ROLLUP_GREEN_CANCELLED_APPROVER='[{"__typename":"CheckRun","name":"test-and-coverage","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"sonarcloud","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"approve","status":"COMPLETED","conclusion":"CANCELLED"},{"__typename":"CheckRun","name":"approver-gate","status":"COMPLETED","conclusion":"CANCELLED"}]'
+
+green()   { state last sha1 "$ROLLUP_GREEN"; }
+red()     { state last sha1 "$ROLLUP_RED"; }
+pending() { state last sha1 "$ROLLUP_PENDING"; }
+green_with_cancelled_approver() { state last sha1 "$ROLLUP_GREEN_CANCELLED_APPROVER"; }
 
 @test "usage: missing pr -> exit 2" {
   run zsh "$S"
@@ -116,10 +133,18 @@ green_with_cancelled_approver() {
   echo "$output" | grep -q "result: NOT-GREEN"
 }
 
+@test "failing legacy StatusContext -> NOT-GREEN (exit 6)" {
+  state last sha1 '[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"StatusContext","context":"sonar","state":"ERROR"}]'
+  export GH_DECISION=APPROVED
+  cycle
+  [ "$status" -eq 6 ]
+  echo "$output" | grep -q "result: NOT-GREEN"
+}
+
 @test "cancelled Approver-gate jobs are not failures -> green, reaches approval (exit 4)" {
   # Regression for the tick-client-snapper run: required contexts all pass but
   # the approve/approver-gate jobs are CANCELLED by design. The helper must NOT
-  # count the "cancel" bucket as a failure (else it exits 6 NOT-GREEN before the
+  # count cancelled runs as failures (else it exits 6 NOT-GREEN before the
   # /approve re-trigger ever fires). With no --retrigger it reaches the approval
   # gate and reports AWAITING-APPROVAL.
   green_with_cancelled_approver; export GH_DECISION=REVIEW_REQUIRED
@@ -136,6 +161,44 @@ green_with_cancelled_approver() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "result: READY"
   [ "$(wc -l < "$COMMENT_LOG")" -eq 1 ]
+}
+
+@test "#521 STALE runs of a superseded suite are neutral, never failed" {
+  # After a rebase GitHub marks the superseded suite's runs STALE (or CANCELLED).
+  # Neither conclusion is a failure — only FAILURE/TIMED_OUT/ACTION_REQUIRED/
+  # STARTUP_FAILURE (and StatusContext FAILURE/ERROR) flip the verdict.
+  state last sha1 '[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"old-suite","status":"COMPLETED","conclusion":"STALE"},{"__typename":"CheckRun","name":"old-approve","status":"COMPLETED","conclusion":"CANCELLED"}]'
+  export GH_DECISION=APPROVED
+  cycle
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "result: READY"
+}
+
+@test "#521 a wait iteration before settle must not corrupt the verdict (pending -> green -> READY)" {
+  # THE observed bug: progress lines went to stdout, which the caller captures
+  # as the verdict — so any poll that printed "waiting:" before the checks
+  # settled made a green PR read NOT-GREEN (exit 6).
+  state 1 sha1 "$ROLLUP_PENDING"
+  state last sha1 "$ROLLUP_GREEN"
+  export GH_DECISION=APPROVED
+  cycle
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "result: READY"
+}
+
+@test "#521 head SHA moves mid-wait, new suite registers and greens -> READY, not NOT-GREEN" {
+  # The full trace from the four tick-client-snapper occurrences: a rebase or
+  # update-branch lands mid-wait ("head SHA moved … restarting wait."), the new
+  # SHA's set is briefly empty (register grace), then settles all green. Every
+  # one of those must end READY — never "NOT-GREEN — a required check failed".
+  state 1 sha1 "$ROLLUP_PENDING"
+  state 2 sha2 '[]'
+  state last sha2 "$ROLLUP_GREEN"
+  export GH_DECISION=APPROVED
+  run zsh "$S" --timeout 5 --interval 0 --register-grace 5 99
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "head SHA moved (sha1 -> sha2)"
+  echo "$output" | grep -q "result: READY"
 }
 
 @test "pending + timeout -> TIMED-OUT (exit 3)" {
@@ -162,7 +225,8 @@ green_with_cancelled_approver() {
 }
 
 @test "no checks on PR -> treated as green, decides on approval" {
-  : > "$CHECKS"; export GH_NOCHECKS=1 GH_DECISION=APPROVED
+  state last sha1 '[]'
+  export GH_DECISION=APPROVED
   cycle
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "result: READY"
