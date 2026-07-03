@@ -62,7 +62,11 @@ operator's summary.
 
 2. **Gather PR context.** `gh pr view` + `gh pr diff` + `gh pr view
    --json files` to capture title, body, author, head SHA, base ref,
-   changed-file list, full diff, and labels.
+   changed-file list, full diff, labels, and mergeability. A
+   `CONFLICTING` PR is a hard stop — no evaluation, no verdict: the
+   conflict gets resolved first (by the writer bot, the vendor bot's
+   own rebase, or the human author — never the read-only Approver),
+   and the review runs afterwards on the resolved head.
 
 3. **Detect PR type** per the policy: primary (conventional-commit
    prefix in title), fallback (diff heuristic over changed paths),
@@ -100,9 +104,11 @@ operator's summary.
    verdicts are traceable to specific clauses.
 
 9. **Baseline criteria** — the seven cross-type rules: CI green, no
-   new tool findings, PR description has Type / Summary / Test plan,
-   no conflict markers in the diff, no bare TODO / FIXME without
-   issue link, no new secrets, no unattested dep.
+   new tool findings, PR description has Type / Summary / Test plan
+   (exact-allowlist exception: `dependabot[bot]` / `renovate[bot]` /
+   `snyk-bot` satisfy it with their native vendor body; no other
+   author does), no conflict markers in the diff, no bare TODO /
+   FIXME without issue link, no new secrets, no unattested dep.
 
 10. **Risk register** — top-3 things that could still go wrong even
     with everything green. Opus judgement, three is a cap not a floor.

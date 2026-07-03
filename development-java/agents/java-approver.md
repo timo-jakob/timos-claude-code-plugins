@@ -118,10 +118,20 @@ says.** Your judgement enters only at the calibration step.
 ### Step 2 — Gather PR context
 
 ```bash
-gh pr view "$PR_NUMBER" --json title,body,author,headRefOid,baseRefName,additions,deletions,changedFiles,labels,reviewDecision > /tmp/pr.json
+gh pr view "$PR_NUMBER" --json title,body,author,headRefOid,baseRefName,additions,deletions,changedFiles,labels,reviewDecision,mergeable,mergeStateStatus > /tmp/pr.json
 gh pr diff "$PR_NUMBER" > /tmp/pr.diff
 gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/pr.files
 ```
+
+**Mergeability gate — before anything else.** If `mergeable` is
+`CONFLICTING`, STOP: do not evaluate, do not post any verdict. An
+`APPROVE` on a conflicting head is unusable (auto-merge can never
+fire) and becomes stale the moment the conflict resolution pushes a
+new head SHA. You cannot resolve the conflict yourself — the
+Approver App is read-only by design. Report back that the PR
+conflicts with its base and must be updated first (the approve
+skill's mergeability gate says who resolves it), and that the
+Approver should be re-invoked once the resolved head has green CI.
 
 Capture:
 
@@ -283,7 +293,11 @@ Walk the policy's *Baseline criteria* section. Apply each:
 1. CI green at head SHA — re-check with `gh pr checks "$PR_NUMBER"`.
 2. No new Sonar/Snyk/CodeQL findings introduced. Read finding diff
    if the repo has the relevant API exposed.
-3. PR description has Type/Summary/Test plan sections.
+3. PR description has Type/Summary/Test plan sections. Exact-allowlist
+   exception: authors `dependabot[bot]`, `renovate[bot]`, `snyk-bot`
+   (`gh` may render `app/dependabot` / `app/renovate`) satisfy this
+   with their native vendor body — derive Type from the title prefix.
+   No other author (bot, App, or human) gets the exception.
 4. No conflict markers in the diff (`grep -E '^<<<<<<<' /tmp/pr.diff`).
 5. No new bare TODO/FIXME without issue link.
 6. No new secrets (gitleaks/SonarCloud should have caught; re-check on
