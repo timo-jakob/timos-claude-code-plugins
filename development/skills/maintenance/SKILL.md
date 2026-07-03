@@ -77,6 +77,11 @@ Supported flags in `$ARGUMENTS`:
   outward actions). `--track-as-issues` is accepted as a **deprecated no-op**
   (issue tracking is now the default) — warn that it's no longer needed and
   proceed.
+- `--resume` / `--fresh` — control the **resume entry** (below) when a
+  checkpoint from an interrupted run exists: `--resume` continues from the
+  last completed phase without asking; `--fresh` discards the checkpoint
+  and starts over. Mutually exclusive (halt if both). Rejected together
+  with `--dry-run` — a dry run neither writes nor consumes checkpoints.
 
 Anything else: surface the input to the user as "unrecognized
 arguments" and stop.
@@ -101,6 +106,48 @@ forward as the **batch cap** applied in Phase 8's Stages 1..N. `--batch` is
 orthogonal to `--tool` / `--concern` — it does not touch the payload or the
 `dispatch_filter`; it only bounds how many of the planner's ranked groups
 the PR cycle processes.
+
+### Resume entry — pick up an interrupted run (#517)
+
+A full run is long, and until #517 all orchestrator state lived only in the
+conversation — an API/token interruption lost the run. Each phase below now
+persists its result through the blessed store
+(`"<skill-base-dir>/scripts/checkpoint.zsh"` — `save`/`load`/`status`/
+`clear`/`dir`; state lives in the target repo's
+`.git/claude-maintenance/`, outside the working tree and shared across
+worktrees, so it survives the session). Before Phase 1, check for one:
+
+```bash
+"<skill-base-dir>/scripts/checkpoint.zsh" status   # exit 3 = none
+```
+
+- **No checkpoint (exit 3)** → proceed to Phase 1 normally.
+- **Checkpoint exists** → judge staleness first: `age=` beyond ~24h, or
+  `git rev-parse origin/<default>` no longer matching the `base_sha`
+  recorded in `phase1-detect`, means the world moved — **recommend
+  `--fresh`** but honour an explicit `--resume`. Then:
+  - **`--resume`** (or the user picks resume) → skip every phase the
+    checkpoint records: reload each phase's data with
+    `checkpoint.zsh load --phase <name>` and re-read copied artifacts
+    from `checkpoint.zsh dir` (never from `/tmp` — it didn't survive).
+    Restore the **recorded flags**: a resumed run keeps its original
+    scope; if this invocation passes a *different* `--tool`/`--concern`/
+    `--batch`, halt — changing scope requires `--fresh`. Continue at the
+    first phase not recorded; phases without a checkpoint of their own
+    (2, 5, 7) are cheap derivations — re-run them from the restored
+    state. Phase 8's per-stage resume additionally reconciles against
+    GitHub reality (#536).
+  - **`--fresh`** (or the user picks fresh) → `checkpoint.zsh clear`,
+    then Phase 1 as normal.
+  - **Neither flag** → ask the user: resume from `last=<phase>` or start
+    fresh (name the checkpoint's age and phases).
+- **`--dry-run`** never writes checkpoints and never offers resume — it
+  performs no outward actions and must not leave state a later real run
+  would resume into.
+
+The checkpoint writes below are one-liners at each phase boundary and are
+**best-effort**: if a save fails, warn and continue — the checkpoint is a
+recovery aid, never a gate.
 
 ## Phase 1 — detect
 
@@ -154,6 +201,16 @@ This sets each dispatch's **mode** (carried in Phase 4's payload as
 in the detected+supported set, treat all targets as `primary` and note the stale
 declaration in the Phase 9 summary. See ARCHITECTURE.md § "Primary / auxiliary
 model" for the rationale.
+
+**Checkpoint `phase1-detect`** (skip under `--dry-run`): save the detection
+result — everything later phases derive from — plus `base_sha` (the resume
+entry's staleness reference) and this run's flags (a resume restores them):
+
+```bash
+print -r -- "{\"languages\":[…],\"topics\":[…],\"primary\":\"…\",\"default_branch\":\"…\",
+  \"flags\":{…},\"base_sha\":\"$(git rev-parse origin/<default>)\"}" \
+  | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase phase1-detect --data -
+```
 
 ## Phase 2 — discover which languages we can act on
 
@@ -521,6 +578,20 @@ accepting the drift. Phase 9 renders `blocking` drift first and names the
 fixes, so "I updated the plugins but the repo behaves the same" (the fix
 lives in the rendered file, not the plugin) is no longer a silent trap.
 
+**Checkpoint `phase3-gather`** (skip under `--dry-run`): the gather
+artifacts live in `/tmp` and won't survive to a new session — copy them
+into the store first, then record what was gathered:
+
+```bash
+ckdir=$("<skill-base-dir>/scripts/checkpoint.zsh" dir)
+cp /tmp/findings-*.json "$ckdir/"
+print -r -- "{\"supported\":[…],\"supported_topics\":[…],
+  \"artifacts\":[\"findings-<lang>.json\",…],\"template_drift\":$template_drift}" \
+  | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase phase3-gather --data -
+```
+
+On resume, re-read every findings file from `$ckdir`, not `/tmp`.
+
 ## Phase 4 — construct one payload per supported language
 
 For each `lang` in `supported`, build the JSON payload per ARCHITECTURE.md
@@ -623,6 +694,17 @@ differences:
 
 The same no-trim construction discipline applies.
 
+**Checkpoint `phase4-payload`** (skip under `--dry-run`): copy each
+constructed payload into the store and record the list, so a resumed run
+dispatches the exact payloads this run built:
+
+```bash
+ckdir=$("<skill-base-dir>/scripts/checkpoint.zsh" dir)
+cp /tmp/payload-*.json "$ckdir/"
+print -r -- "{\"payloads\":[\"payload-<lang>.json\",…]}" \
+  | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase phase4-payload --data -
+```
+
 ## Phase 5 — `--dry-run`?
 
 If `--dry-run`: print each payload (pretty-formatted via `jq .`)
@@ -717,7 +799,10 @@ The orchestrator only needs to handle the three response shapes:
 
 **The `Skill(...)` call is a step, not a turn boundary.** On return,
 continue straight into Phase 7 and Phase 8 in the same assistant turn.
-The dispatcher's plan response is Phase 8's **input**, not a checkpoint.
+The dispatcher's plan response is Phase 8's **input** — and it is
+checkpointed (`phase6-plan`, below, #517), so an interrupted Phase 8
+resumes with the same plan instead of re-dispatching; persistence changes
+nothing about turn flow.
 The only events that end a turn before Phase 9 are (a) `human_action_required`,
 (b) all Phase 8 stages complete + Phase 9 summary printed, or (c) the user
 explicitly says "stop".
@@ -735,6 +820,13 @@ response shape (including the Phase A `improver_result`-only response),
 so it is available before any `plan` exists — Stage 0's CI cycle needs
 it. Never substitute a hardcoded fixer name; use the one the dispatcher
 returned.
+
+**Checkpoint `phase6-plan`**: save the captured responses (the plan +
+`ci_fixer_agent`, keyed by language/topic) via
+`checkpoint.zsh save --phase phase6-plan --data -`. On resume, Phase 8
+rebuilds its stage list from this instead of re-invoking the dispatcher —
+a re-dispatch would re-run the coverage pre-flight and could double-spawn
+improvers. (Per-stage Phase 8 progress records are #536.)
 
 If a `Skill(...)` invocation fails (plugin not actually registered
 despite the gather script existing — shouldn't happen but defend
