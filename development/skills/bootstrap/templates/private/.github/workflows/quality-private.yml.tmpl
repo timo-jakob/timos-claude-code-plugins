@@ -55,8 +55,10 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        # No fetch-depth: 0 here — the sonarqube job below does its own
-        # checkout with full history. Test runners don't need git blame.
+        with:
+          # Full history: diff-cover needs a merge base with origin/<base>,
+          # and a shallow PR checkout has none (its parent link is cut).
+          fetch-depth: 0
 
       # --- TYPESCRIPT-START ------------------------------------------------
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -95,15 +97,8 @@ jobs:
         run: pip install 'diff-cover>=9'
       # BASE_REF is funnelled through `env:` rather than inlined into
       # `run:` to keep semgrep's run-shell-injection rule happy —
-      # github-context values are untrusted input. Applies to both steps
-      # below.
-      - name: Fetch base ref for diff-cover (Python)
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags --prune --depth=100 origin \
-            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+      # github-context values are untrusted input. Applies to the coverage
+      # step below.
       - name: Coverage floor — 90% on new code (Python)
         if: github.event_name == 'pull_request'
         env:
@@ -135,13 +130,6 @@ jobs:
       - name: Install diff-cover (Java — coverage floor)
         if: github.event_name == 'pull_request'
         run: pipx install 'diff-cover>=9'
-      - name: Fetch base ref for diff-cover (Java)
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags --prune --depth=100 origin \
-            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
       - name: Coverage floor — 90% on new code (Java)
         if: github.event_name == 'pull_request'
         env:
@@ -180,6 +168,10 @@ jobs:
     runs-on: [self-hosted, macos]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Full history: diff-cover needs a merge base with origin/<base>,
+          # and a shallow PR checkout has none (its parent link is cut).
+          fetch-depth: 0
 
       # --- SWIFT_SWIFTPM-START -----------------------------------------------
       - name: Build + test with coverage (SwiftPM)
@@ -229,13 +221,6 @@ jobs:
       - name: Install diff-cover (Swift — coverage floor)
         if: github.event_name == 'pull_request'
         run: pipx install 'diff-cover>=9'
-      - name: Fetch base ref for diff-cover (Swift)
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags --prune --depth=100 origin \
-            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
       - name: Coverage floor — 90% on new code (Swift)
         if: github.event_name == 'pull_request'
         env:
