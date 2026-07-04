@@ -841,6 +841,75 @@ auto-merge with a 10-minute poll timeout. The user then runs the appropriate `/a
 skill to post the verdict. The orchestrator detects the posted review and proceeds with merge
 (or re-ingest if `REQUEST_CHANGES`).
 
+## Review finding schema (review panels → consolidator)
+
+The `development-<lang>:review` panels (Swift 6 agents, Python 5, Java 5 — #449)
+report findings as prose in the native `[CRITICAL|WARNING|SUGGESTION]` format,
+for humans. The autonomous story-delivery loop (#557) also needs those findings
+in a form a consolidator can parse, deduplicate, and count. So the review panel
+has **every reviewer emit a machine-readable JSON block alongside its prose**
+(#558): the prose is unchanged and stays for humans; the JSON is for the
+machine. The severity taxonomy is untouched — the JSON carries the same
+severities.
+
+**The emission directive lives in one place, not sixteen.** Rather than copy the
+JSON instruction into every reviewer agent's definition, the `review` skill
+**injects it into each agent's launch prompt**, substituting that agent's
+`dimension` and `reviewer` name from its Step 1 table. The reviewer agents stay
+pure prose reviewers; only the skill knows about the JSON layer. A new language
+wires this up once — in its own `review` skill's Step 1 — and every reviewer it
+launches emits the block for free, with no per-agent boilerplate to maintain.
+
+### The finding object
+
+Each reviewer emits one fenced `json` block whose body is a **JSON array of
+finding objects** (`[]` when it found nothing). Each object has exactly these
+fields:
+
+| Field | Type | Value |
+| --- | --- | --- |
+| `severity` | string | `CRITICAL` \| `WARNING` \| `SUGGESTION` — the native taxonomy, same as the prose tag |
+| `dimension` | string | the emitting agent's dimension (enum below) |
+| `file` | string | repo-relative path |
+| `line` | integer \| null | line number, or `null` for a file-level finding |
+| `title` | string | the finding title (same as the prose title) |
+| `description` | string | one- or two-sentence explanation |
+| `suggested_fix` | string | concrete remediation (may be `""`) |
+| `reviewer` | string | the emitting agent's name (e.g. `python-bug-hunter`) |
+| `round` | integer | the review round from the agent's prompt; `1` when the panel runs standalone |
+
+**Dimension enum.** The five core dimensions are shared across all languages
+(the #449 enum): `bugs` (`*-bug-hunter`), `security` (`*-security-reviewer`),
+`performance` (`*-performance-reviewer`), `code_quality` (`*-code-quality`),
+`tests` (`*-test-reviewer`). Swift adds one language-specific dimension,
+`swift6_compliance` (`swift6-compliance`), for six Swift dimensions in total. A
+language may extend the enum with its own dimension the same way; the core five
+never change meaning.
+
+### Aggregation (per round)
+
+Each review skill's synthesis step concatenates every agent's JSON array into a
+**single findings array for the round** and writes it to one findings file (the
+caller/orchestrator supplies the path; the panel defaults to
+`review-findings-round-<round>.json`). Because every finding is self-describing
+— it carries its own `reviewer`, `dimension`, and `round` — aggregation is a
+flat concatenation, no join. `jq` then reads severity counts straight off the
+aggregate:
+
+```bash
+# per-severity counts for a round's aggregate
+jq '[.[].severity] | group_by(.) | map({severity: .[0], count: length})' \
+  review-findings-round-1.json
+
+# blocking-finding count (Critical + High == CRITICAL + WARNING, per #557)
+jq '[.[] | select(.severity == "CRITICAL" or .severity == "WARNING")] | length' \
+  review-findings-round-1.json
+```
+
+The consolidator (#561) consumes this aggregate; the severity→blocking mapping
+(`CRITICAL→Critical`, `WARNING→High`, `SUGGESTION→Low`; Critical + High block)
+lives with it, not here.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
