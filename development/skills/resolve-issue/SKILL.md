@@ -16,11 +16,12 @@ disable-model-invocation: false
 ---
 
 You turn a filed **issue** into a merge-ready **PR** — or an **epic** into a
-sequence of them — with the implementation **tested before it ever reaches
-review**. You **compose** existing skills rather than reinvent them:
-`git-branch-naming` for the branch, the `commit` conventions for the message,
-and **`/development:open-pr`** for the bot-authored PR. The only novel part is
-the issue → branch → implement → validate flow, plus the epic orchestration.
+sequence of them — with the story **gated for readiness up front** and the
+implementation **tested before it ever reaches review**. You **compose**
+existing skills rather than reinvent them: `story-readiness` for the readiness
+gate, `git-branch-naming` for the branch, the `commit` conventions for the
+message, and **`/development:open-pr`** for the bot-authored PR. The novel part
+is the gate → branch → implement → validate flow, plus the epic orchestration.
 
 **User input:** $ARGUMENTS — a single issue number / URL, or an epic's.
 
@@ -41,6 +42,37 @@ issue must belong to it. If `$ARGUMENTS` is empty, print the invocation help
 (`/development:resolve-issue <issue-number|url>`) and stop.
 
 ## Single-issue flow
+
+### 0. Readiness gate — is the story ready to build? (do NOT skip)
+
+Before branching, spawn the **`story-readiness`** agent (Task tool,
+`subagent_type: story-readiness`), passing it the repo (`owner/name`) and the
+issue number. It returns a verdict JSON — a pure judgment, **no** GitHub writes;
+**this skill** does any posting.
+
+```json
+{ "issue": 123, "verdict": "NEEDS_REFINEMENT", "risk": "normal",
+  "refinement_questions": ["…", "…"], "summary": "…" }
+```
+
+- **`READY`** → carry the `risk` field forward (it rides along to the PR body
+  and the Approver) and proceed to step 1.
+- **`NEEDS_REFINEMENT`** → do **not** branch or implement. Ensure the
+  `needs-refinement` label exists (idempotent), post the refinement questions as
+  an issue comment, and **stop** — report that the story went back for
+  refinement.
+
+  ```bash
+  gh label create needs-refinement --color d4c5f9 \
+    --description "Sent back by the readiness gate — needs clarification before implementation" \
+    2>/dev/null || true   # idempotent: ignore "already exists"
+  gh issue comment <N> --body "<the refinement questions, plus a one-line why>"
+  gh issue edit <N> --add-label needs-refinement
+  ```
+
+Never guess past a `NEEDS_REFINEMENT` — escalating the ambiguity here is the
+whole point, and it is far cheaper than after three review rounds converge on
+the wrong thing.
 
 ### 1. Branch off fresh main
 
@@ -133,6 +165,25 @@ stopped.
 > instead track **inline slices** (`- [ ]` describing work, no `#N`) realized by
 > separate PRs; for those, confirm each slice's PR merged, then E4 + E5 the
 > same way.
+
+### E1b. Readiness pre-flight — gate ALL children before building anything
+
+Before any ordering or implementation, run the readiness gate over **every open
+child**: spawn `story-readiness` (Task tool, `subagent_type: story-readiness`)
+once per child — they're independent, so launch them in parallel in a single
+message — and collect the verdicts.
+
+- **All `READY`** → proceed to E2. Keep each child's `risk`; it rides along to
+  that child's PR when you resolve it.
+- **Any `NEEDS_REFINEMENT`** → the **epic is not ready; build nothing.** For
+  each unready child, ensure the `needs-refinement` label and post its
+  refinement questions as a comment (exactly as Single-issue step 0 does). Then
+  post a **halt summary** on the epic — the checklist of which children are
+  unready and why — and **stop**. One unready child means the epic is not ready.
+
+Re-running after the stories are refined (criteria added, the `needs-refinement`
+label cleared) continues the pre-flight from the still-open children — the gate
+is as resumable as the rest of the flow.
 
 ### E2. Analyse order + overlap
 
@@ -249,5 +300,11 @@ is the epic truly done — report it closed, with the PR/verification table.
   PRs' `Closes #N`, but the epic issue has no PR, so it never closes itself. A
   done-but-open epic is the most common miss; the final re-run (zero open
   children) exists to verify and close it.
+- **Gate before you build** — the `story-readiness` gate runs first (single-issue
+  step 0; epic pre-flight over all children). A `NEEDS_REFINEMENT` verdict posts
+  refinement questions + the `needs-refinement` label and **stops** — never
+  branch or implement past it, and for an epic never build *any* child while one
+  is unready.
 - **Don't decide the user's issues for them** — if a single issue is ambiguous,
-  ask/stop; don't guess a large or contentious change into a PR.
+  the gate sends it back for refinement rather than guessing a large or
+  contentious change into a PR.
