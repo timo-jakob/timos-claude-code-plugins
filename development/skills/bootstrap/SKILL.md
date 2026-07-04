@@ -335,6 +335,7 @@ Bootstrap plan:
   Visibility:       <public | private>
   Languages:        <swift, typescript, ...>
   Docker scanning:  <yes | no>
+  Docker pre-flight: <clean | artifact build steps planned (<command>) | base image stale → bump to <tag> proposed>   # Dockerfile repos only
   Coverage gate:    90% on new code, enforced by CI `coverage-floor` step + pre-push hook
   Sonar gate:       "Zero Tolerance" custom gate (paid plan / self-hosted) or `Sonar way` fallback (SonarCloud free)
   CI runner:        <github-hosted | self-hosted>
@@ -347,6 +348,35 @@ Bootstrap plan:
 ```
 
 Ask for confirmation. Do not proceed until the user explicitly approves.
+
+### Docker pre-flight (when a Dockerfile is present — run BEFORE presenting the plan)
+
+Two first-CI failure classes come from the Dockerfile itself, not the
+generated workflows (#545). Check both while assembling the plan, fold the
+findings into the plan summary above, and confirm them with everything else:
+
+1. **Does the Dockerfile COPY build outputs?** Inspect every `COPY`/`ADD`
+   source. If any points into a build-output directory (`build/`, `dist/`,
+   `target/`, `out/`, `distributions/`, …), the CI image build fails with
+   `lstat ...: no such file or directory` unless the artifacts are built
+   first — the `image` job runs `docker build` on a fresh checkout. Plan
+   **artifact build steps** for the workflow (e.g. `setup-java` +
+   `setup-gradle` + `./gradlew :app:distTar` for a Gradle dist), inserted at
+   the marked anchor in **both** the `image` (scan) job — gated on
+   `scan_decision` like the build they feed — and the `push-and-sign` job
+   (both jobs build the image; step outputs and workspaces don't cross job
+   boundaries). Include the planned steps in the workflow text that Step
+   2.5's reviewers see.
+2. **Is the pinned base image stale?** A pinned tag/digest ages: the Snyk /
+   Trivy container gate this bootstrap installs scans the *pinned* bytes,
+   so a months-old digest often fails the very first run on
+   already-patched CVEs. Compare the `FROM` tag/digest against the
+   registry's current tags (Docker Hub tags API for Hub images; if the
+   registry can't be queried anonymously, skip the check and warn). If a
+   newer same-line tag exists, **propose the bump as part of the bootstrap
+   plan** — the user decides. If they decline (or the check was skipped),
+   carry a prominent warning into the Step 5 checklist: the first image
+   scan will likely fail on the stale base.
 
 ## Step 2.4: Gather workflow-replacement candidates
 
@@ -783,6 +813,12 @@ Behaviour summary:
   needs no noop mirror.
 - The same Buildx cache (`type=gha`) is reused between the scan job's build
   and the push job's, so the second build is fast.
+- **When the Dockerfile COPYs build outputs** (the Step 2 Docker pre-flight
+  detected sources under `build/`, `dist/`, `target/`, …), insert the
+  planned artifact build steps at the `ARTIFACT BUILD STEPS` anchor comment
+  in **both** jobs — gated on `scan_decision` in `image`, unconditional in
+  `push-and-sign`. A `docker build` on a fresh checkout fails its COPY
+  otherwise (#545).
 - **Published images are multi-arch**: `linux/amd64` + `linux/arm64`. The arm64
   build covers Apple Silicon Macs, AWS Graviton, and other ARM hosts. PR
   builds stay amd64-only for fast scan feedback.
@@ -1213,6 +1249,22 @@ and only because the family policy (Kotlin DSL) and the artifacts it just
 generated require them. The nebula / full-gRPC / dependency-locking items
 stay recommendations (Step 5) — never auto-applied.
 
+### 4c.5. Docker build smoke test (when a Dockerfile is present)
+
+Prove the CI image build will work **before** the first push, locally
+(#545):
+
+1. If the Step 2 Docker pre-flight planned artifact build steps, run their
+   local equivalent first (e.g. `./gradlew :app:distTar`) — the Dockerfile's
+   COPY needs the artifacts on disk, exactly as in CI.
+2. Run `docker build .` (a plain single-arch build; no push, no scan).
+3. If it fails, fix the cause before proceeding — a failing COPY here means
+   the pre-flight missed a build output; add the missing steps at the
+   template anchors and re-run.
+
+If Docker isn't available locally, skip with a warning that the `image`
+check is unverified until the first CI run.
+
 ### 4d. Initial commit
 
 Offer to commit the generated files (and any 4c build-script wiring, plus
@@ -1412,7 +1464,11 @@ short ("push a branch and open a PR"). Reference `SETUP.md` for full details.
 > `/development:maintenance` will refuse to run until you do (family policy:
 > Kotlin DSL only)." The nebula / full-gRPC / dependency-locking
 > recommendations appear here only when actually missing (per the gating in
-> *Java-specific recommendation*).
+> *Java-specific recommendation*). If the user **declined the base-image
+> bump** the Docker pre-flight proposed (or the freshness check couldn't
+> run), lead the Docker items with: "⚠️ Base image `<tag>` is stale — the
+> first `image` scan will likely fail on already-patched CVEs; bump the
+> `FROM` pin to clear it."
 
 Example for public path:
 
