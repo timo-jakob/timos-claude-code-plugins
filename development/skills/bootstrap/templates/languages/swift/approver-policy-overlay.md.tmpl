@@ -1,0 +1,100 @@
+<!-- approver-policy: overlay (swift) — language fluency only; the
+     judgment criteria live in the core above. Issue #241. -->
+
+---
+
+# Language overlay — Swift
+
+Where the core policy says "per the language overlay", this part is the
+reference. It adds Swift/SwiftPM fluency to the core's criteria; it
+never relaxes them.
+
+## Fallback diff-heuristic paths
+
+- **Test paths:** `Tests/**`, `**/*Tests.swift`, `**/*Test.swift`.
+- **Build-config paths (→ `ci`):** `.swiftlint.yml`, `.swift-format`.
+- **Dependency manifests (→ `chore_deps`):** the `.package(url:…)`
+  entries of `Package.swift`, `Package.resolved`, or an Xcode project's
+  `XCRemoteSwiftPackageReference` requirement blocks.
+- **Runtime pins (→ `chore_runtime`):** a `Dockerfile` FROM line or the
+  Swift toolchain pin (`.swift-version`, a CI toolchain step) as the
+  only non-manifest diff.
+
+## Test idioms (for the core's *Test representativeness*)
+
+Coverage-padding patterns to flag: `XCTAssertTrue(true)`-style filler;
+assertions only on stub/mock return values; tests that mock the very
+unit they test; test names like `handlesEmptyList` with no empty-list
+case.
+
+## Per-type additions
+
+### `chore(deps-major):`
+
+- The major-upgrade agent is **`swift-major-upgrade`**.
+
+### `chore(deps):`
+
+- Expected agent on a maintenance-dispatched bump:
+  `swift-dependabot-snyk-triage`.
+- Known patch/minor breakage risk: libraries that ship behaviour
+  changes under a patch tag.
+- **Risk factor:** the version bump lives somewhere other than the
+  manifest — the bump should land in `Package.swift` (with
+  `Package.resolved` re-resolved to match), not hand-edited in
+  `Package.resolved` alone.
+
+### `chore(runtime):` — Swift toolchain or Docker base-image bump
+
+- The runtime-upgrade agent is **`swift-runtime-upgrade`** ([#447]);
+  its structured commit body (Runtime / Cascade upgrades / Code
+  adaptations) is the cross-check — every pin listed under Runtime
+  actually changed, every cascade bump present in
+  `Package.swift`/`Package.resolved`.
+- Runtime surfaces that must agree: the Dockerfile `FROM swift:<ver>`,
+  `.swift-version`, and the CI toolchain step.
+- **Must-have:** the language mode was NOT flipped in the same PR
+  (`swiftLanguageMode` / `SWIFT_VERSION` untouched — that migration is
+  its own PR, per the toolchain/language-mode split).
+- **Risk factor:** a cascade upgrade whose own release notes flag
+  breaking changes not visibly addressed.
+
+### `chore:` — dead-code dynamic references
+
+Verify removal against ObjC-runtime lookups (`NSClassFromString`,
+`#selector` targets), `@objc` symbols reached from storyboards/XIBs or
+`performSelector`, `Codable`/`CodingKeys`-driven decoding paths, and
+string-keyed registries.
+
+## API stability — library public-API surface
+
+| Surface | Marker | Detector | Source for the Approver |
+|---|---|---|---|
+| **Library public API (Swift)** | a products-declaring `Package.swift` | `swift-api-digester` | TBD — gate not built yet |
+
+The gate is **not built yet** for Swift: there is no equivalent of
+Python's Griffe `api-stability` workflow or its findings artifact. For
+the core's `refactor:` no-public-break must-have, the Approver records
+an informational "Swift API-stability gate not configured" finding and
+verifies directly: LSP `find-references` on each touched
+`public`/`open` symbol plus a read of the diff (no changed function
+signature, return type, or protocol requirement on a public type).
+This repo's version-bump signal is weak by design — SwiftPM packages
+version via git tags, so an in-repo version literal (a hardcoded
+marketing version in the Xcode project, a version constant in source)
+is already a smell.
+
+## Confidence calibration additions
+
+- `chore(runtime):` — toolchain bumps are cross-checked against
+  `swift-runtime-upgrade`'s structured commit body; **non-toolchain
+  base-image bumps still warrant human review** (cap at `MEDIUM`).
+
+## `suggested_agent` vocabulary
+
+`swift-coverage-improver | swift-major-upgrade | swift-sonar-triage |
+swift-code-scanning-triage | null`
+
+Example finding `file`: `Sources/App/File.swift`.
+
+[#447]: https://github.com/timo-jakob/timos-claude-code-plugins/issues/447

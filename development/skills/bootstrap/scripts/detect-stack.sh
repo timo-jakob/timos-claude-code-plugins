@@ -526,12 +526,15 @@ candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 # real on-disk deploy path (SKILL Step 3 mapping table) so existing_artifacts and
 # missing_artifacts probe where the file actually is. Keep this in sync whenever a
 # template's deploy path != its tree path:
-#   approver-policy.md      languages/<lang>/      -> .claude/approver-policy.md
-#   check-api-stability.py  languages/python/      -> .github/scripts/...   (#408)
+#   approver-policy-core.md     common/            -> .claude/approver-policy.md
+#   approver-policy-overlay.md  languages/<lang>/  -> .claude/approver-policy.md
+#                                  (core + overlay render INTO one file, #241)
+#   check-api-stability.py      languages/python/  -> .github/scripts/...   (#408)
 # Indexed array of from=to pairs (not an associative array — this script runs on
 # macOS's stock bash 3.2, which has no `declare -A`).
 deploy_path_overrides=(
-	"approver-policy.md=.claude/approver-policy.md"
+	"approver-policy-core.md=.claude/approver-policy.md"
+	"approver-policy-overlay.md=.claude/approver-policy.md"
 	"check-api-stability.py=.github/scripts/check-api-stability.py"
 )
 for i in "${!candidate_paths[@]}"; do
@@ -541,6 +544,10 @@ for i in "${!candidate_paths[@]}"; do
 		[[ "${candidate_paths[i]}" == "$from" ]] && candidate_paths[i]="$to" && break
 	done
 done
+# Re-dedupe: the core + overlay templates both map to the single policy file,
+# so the override step can reintroduce a duplicate.
+# shellcheck disable=SC2207
+candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 
 # Dependency-update bot is renovate.json XOR .github/dependabot.yml — both live in
 # templates/common, so collect_from picks up both, but exactly one is ever

@@ -57,6 +57,9 @@
 #                                 --languages when that was passed)
 #   --claude-plugins-repo <o/r>   {{CLAUDE_PLUGINS_REPO}}
 #                                 (default: timo-jakob/timos-claude-code-plugins)
+#   --approver-lang <lang>        {{APPROVER_LANG}} — the resolved Approver
+#                                 language (SKILL Step 3e), used by the
+#                                 approver-policy core template (#241)
 #   --security-contact-email <s>  {{SECURITY_CONTACT_BLOCK}} — email block
 #                                 when non-empty, the no-email fallback block
 #                                 when passed empty; without the flag the
@@ -119,6 +122,7 @@ while (($# > 0)); do
 	--xcode-scheme) vals[XCODE_SCHEME]="$2" && shift 2 ;;
 	--codeql-languages) vals[CODEQL_LANGUAGES]="$2" && shift 2 ;;
 	--claude-plugins-repo) vals[CLAUDE_PLUGINS_REPO]="$2" && shift 2 ;;
+	--approver-lang) vals[APPROVER_LANG]="$2" && shift 2 ;;
 	--security-contact-email) security_email="$2" && security_email_set=1 && shift 2 ;;
 	--visibility) visibility="$2" && shift 2 ;;
 	--docker) docker="$2" && shift 2 ;;

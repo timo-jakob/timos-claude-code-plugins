@@ -114,13 +114,11 @@ pipeline already ran tests + tool verification in the worktree.
    verify, `// TODO: write test` left in.
 8. **Per-type evaluation** against the policy's must-haves + risk
    factors, citing policy sections by name.
-9. **Baseline criteria** — the seven cross-type rules from the policy
-   (CI green, no new tool findings, body sections, no conflict
-   markers, no bare TODO/FIXME, no new secrets, no unattested dep).
-   Body-sections exception: exact allowlist `dependabot[bot]` /
-   `renovate[bot]` / `snyk-bot` (`gh` may render `app/dependabot` /
-   `app/renovate`) satisfy it with their native vendor body — derive
-   Type from the title prefix. No other author gets the exception.
+9. **Baseline criteria** — walk the policy's *Baseline criteria*
+   section and apply each criterion as written there; the policy text
+   is authoritative for the list and for the exact vendor-bot
+   allowlist on the body-sections exception — don't work from a
+   remembered summary (#241).
 10. **Risk register — fed by the review dimensions (#448).** Instead
     of free-form "top risks", walk the five lenses the
     `/development-swift:review` panel uses, one focused pass each over

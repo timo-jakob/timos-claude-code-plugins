@@ -1,0 +1,94 @@
+<!-- approver-policy: overlay (java) — language fluency only; the
+     judgment criteria live in the core above. Issue #241. -->
+
+---
+
+# Language overlay — Java
+
+Where the core policy says "per the language overlay", this part is the
+reference. It adds Java/Gradle fluency to the core's criteria; it never
+relaxes them.
+
+## Fallback diff-heuristic paths
+
+- **Test paths:** `src/test/java/**`, `**/*Test.java`, `**/*Tests.java`,
+  `**/*IT.java`.
+- **Build-config paths (→ `ci`):** the `plugins {}` / `buildscript {}`
+  blocks of `build.gradle` / `build.gradle.kts`, `settings.gradle` /
+  `settings.gradle.kts`.
+- **Dependency manifests (→ `chore_deps`):** `gradle/libs.versions.toml`
+  version-catalog entries, the `dependencies {}` block of
+  `build.gradle` / `build.gradle.kts`, `gradle.properties` dependency
+  pins.
+- **Runtime pins (→ `chore_runtime`):** a `Dockerfile` FROM line or the
+  Gradle toolchain `languageVersion` as the only non-manifest diff.
+
+## Test idioms (for the core's *Test representativeness*)
+
+Coverage-padding patterns to flag: `assertTrue(true)`-style filler;
+assertions only on Mockito mock return values; tests that mock the
+class under test; test names like `handlesEmptyList` with no empty-list
+case.
+
+## Per-type additions
+
+### `chore(deps-major):`
+
+- The major-upgrade agent is **`java-major-upgrade`**.
+
+### `chore(deps):`
+
+- Expected agent on a maintenance-dispatched bump:
+  `java-dependabot-snyk-triage`.
+- Known patch/minor breakage risk: libraries that ship behaviour
+  changes under a patch tag.
+- **Risk factor:** the version bump lives somewhere other than the
+  declared catalog — the bump should land in
+  `gradle/libs.versions.toml`, `gradle.properties`, or the
+  `dependencies {}` block of `build.gradle(.kts)`, not scattered
+  across both.
+
+### `chore(runtime):` — JDK or Docker base-image bump
+
+- The runtime-upgrade agent is **`java-runtime-upgrade`**; its
+  structured commit body (Runtime / Gradle-dep cascade / Code
+  adaptations) is the cross-check, and every cascade bump must have a
+  version available on Maven Central / the configured repos.
+- Runtime surfaces that must agree: the Gradle toolchain
+  (`languageVersion = JavaLanguageVersion.of(N)`) and the Dockerfile
+  FROM line (e.g. `eclipse-temurin:N-jdk`).
+- **Risk factor:** a new JDK version that the project's build plugins
+  (Spotless, Shadow, etc.) don't yet support.
+- **Risk factor:** an early-access / pre-release toolchain or FROM tag.
+
+### `chore:` — dead-code dynamic references
+
+Verify removal against reflection (`Class.forName`), `ServiceLoader` /
+`META-INF/services` provider files, and string-keyed registries.
+
+## API stability — library public-API surface
+
+| Surface | Marker | Detector | Source for the Approver |
+|---|---|---|---|
+| **Library public API (Java)** | published JAR / `build.gradle(.kts)` | `japicmp` / `revapi` | TBD — gate not built yet |
+
+The gate is **not built yet** for Java: there is no equivalent of
+Python's Griffe `api-stability` workflow or its findings artifact. For
+the core's `refactor:` no-public-break must-have, the Approver records
+an informational "Java API-stability gate not configured" finding and
+verifies directly: LSP `find-references` on each touched public symbol
+plus a read of the diff (no changed method signature, return type, or
+checked-exception list on a public type). This repo's version lives in
+`gradle.properties` `version` or the project `version` in
+`build.gradle(.kts)` (the core's version-bump signal).
+
+## Confidence calibration additions
+
+*(none — every type's supporting agent has shipped for Java)*
+
+## `suggested_agent` vocabulary
+
+`java-coverage-improver | java-major-upgrade | java-semgrep-triage |
+java-sonar-triage | java-code-scanning-triage | null`
+
+Example finding `file`: `path/to/File.java`.
