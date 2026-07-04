@@ -18,21 +18,26 @@ Each agent is defined in the `agents/` directory and already knows what to look 
 
 Launch these 5 agents in one message:
 
-| Agent | Model |
-| ------------------------- | ------ |
-| java-bug-hunter | fable |
-| java-security-reviewer | opus |
-| java-performance-reviewer | opus |
-| java-code-quality | opus |
-| java-test-reviewer | opus |
+| Agent | Model | Dimension |
+| ------------------------- | ------ | ------------ |
+| java-bug-hunter | fable | bugs |
+| java-security-reviewer | opus | security |
+| java-performance-reviewer | opus | performance |
+| java-code-quality | opus | code_quality |
+| java-test-reviewer | opus | tests |
 
 For each agent, use its name as the `subagent_type` (e.g. `subagent_type: java-bug-hunter`) so it runs on the model
-declared in its definition, and pass this prompt:
+declared in its definition, and pass the prompt below — substituting that agent's **Dimension** (from the table
+above) for `{DIMENSION}`, its **name** for `{AGENT NAME}`, and the current review **round** for `{ROUND}` (`1` for a
+standalone run). This is where the machine-readable JSON layer is wired in once, for every agent, so the reviewer
+definitions stay pure prose:
 
 ```text
 Review scope: {the review scope}
 
-Analyze all Java code in scope following your instructions. Report every finding using the reporting format defined in your agent definition.
+Analyze all Java code in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
+
+Then, after the prose, emit those same findings once more as a single fenced `json` block — a JSON array of finding objects — per the Review finding schema in ARCHITECTURE.md. Each object has exactly: severity (the CRITICAL|WARNING|SUGGESTION tag from the prose), dimension ("{DIMENSION}"), file, line (integer, or null when file-level), title, description, suggested_fix (may be ""), reviewer ("{AGENT NAME}"), round ({ROUND}). Emit [] if you found nothing.
 ```
 
 ## Step 2: Collect Results
@@ -68,3 +73,27 @@ One-paragraph overall assessment with the most important action items.
 
 Deduplicate findings that multiple agents flagged. If two agents found the same issue, keep the more detailed
 version and note that it was flagged by multiple reviewers.
+
+## Step 4: Emit the machine-readable findings file
+
+Alongside the human-readable summary above, aggregate the machine-readable JSON
+blocks the agents emitted (schema: ARCHITECTURE.md → *Review finding schema*)
+into one findings array for this round. Each agent emitted a fenced `json` block
+of finding objects; concatenate them all into a single flat array. Every finding
+already carries its own `reviewer`, `dimension`, and `round`, so this is a plain
+concatenation, not a join. Preserve every finding — do not drop the exact-
+duplicate lines you merged in the prose; the machine layer keeps them and the
+consolidator (#561) deduplicates downstream.
+
+Write that array to the findings file for this round — the path the caller /
+orchestrator passed, or `review-findings-round-<round>.json` when none is given
+(default `round` 1 when the panel runs standalone). Also include it inline as
+one fenced `json` block under a `## Findings (JSON)` heading so a caller reading
+stdout can pick it up.
+
+The aggregate is what the consolidator and `jq` consume, e.g.:
+
+```bash
+jq '[.[].severity] | group_by(.) | map({severity: .[0], count: length})' \
+  review-findings-round-1.json
+```
