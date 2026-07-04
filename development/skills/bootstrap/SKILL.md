@@ -447,8 +447,43 @@ Block on all three agents finishing. Aggregate their reports:
 
 ## Step 3: Generate Files
 
-Use the templates in `<skill-base-dir>/templates/`. Fill placeholders by simple
-text replacement before writing:
+Use the templates in `<skill-base-dir>/templates/`. **Do NOT hand-write a
+renderer** — the mechanical rendering (placeholder substitution + conditional
+block stripping + leftover check) is done by the shipped, tested script
+(#546):
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --project-slug "<owner/repo>" \
+  --project-key "<key>" --org-key "<org>" \
+  --default-branch "<branch>" --languages "<a b c>" --primary "<primary>" \
+  --python-version "<x.y>" --java-version "<n>" \
+  --security-contact-email "<email-or-empty>" \
+  --visibility "<public|private>" --docker "<true|false>" \
+  --claude-plugin "<true|false>" --swift-build-system "<swiftpm|xcode>" \
+  <template-relpath>...
+```
+
+Render into a **staging directory**, then apply the Step 2.5 idempotency
+decisions when copying files into the repo. Pass only the flags whose
+values you have — an unprovided value is never silently blanked: if a
+selected template needs it, the script exits 1 listing the exact surviving
+placeholder (GitHub `${{ ... }}` expressions and docker-metadata literals
+like `{{version}}` are exempt by design). Spec defaults are built in
+(`PYTHON_VERSION=3.12`, `JAVA_VERSION=21`, `COVERAGE_THRESHOLD=90`,
+`DEFAULT_BRANCH=main`); `{{PYTHON_VERSION_COMPACT}}` and
+`{{CODEQL_LANGUAGES}}` are derived automatically. Output is byte-identical
+across sessions for the same inputs.
+
+**What stays your judgment:** WHICH templates apply (3a–3f below,
+dependabot-vs-renovate, per-language fragments), the idempotency decisions,
+the `{{XCODE_SCHEME}}` resolution (`xcodebuild -list`, ask if ambiguous —
+pass it via `--xcode-scheme`), `.gitignore` merging, the Swift `needs:`
+rewiring below, and the #545 artifact-build-step insertion at the template
+anchors (edit the rendered file after rendering).
+
+The table below documents where each placeholder's **value** comes from:
 
 | Placeholder | Value |
 | --- | --- |
@@ -601,8 +636,11 @@ place.**
 
 ### `{{SECURITY_CONTACT_BLOCK}}` substitution
 
-If the user provided an email in Q6, substitute the following block (4-space indented to fit the existing markdown list
-level):
+Handled by `render.zsh` from `--security-contact-email` (pass the flag with
+an empty value when Q6 was left blank — omitting it entirely leaves the
+placeholder to the leftover check). If the user provided an email in Q6, it
+substitutes the following block (4-space indented to fit the existing
+markdown list level):
 
 ```text
    Email **<email-from-Q6>**. For sensitive material, include the line
@@ -624,7 +662,13 @@ If the user left Q6 blank, substitute this block instead:
 
 Several templates carry conditional blocks delimited by `# --- TAG-START ---`
 and `# --- TAG-END ---` markers (including the surrounding comment lines).
-Strip blocks where the tag does not apply:
+`render.zsh` strips them mechanically from its flags (this table is the
+keep-rule reference it implements; tag spellings normalize `-` to `_`, so
+the pre-commit template's `CLAUDE-PLUGIN` matches `CLAUDE_PLUGIN`). Kept
+blocks retain their marker lines. The script **fails loudly on a tag it
+doesn't know** — when adding a new tag to a template, teach
+`render.zsh`'s `keep_block` its rule (and `tests/render.bats` the case)
+in the same PR:
 
 | Tag | Keep when |
 | --- | --- |
@@ -640,8 +684,8 @@ Strip blocks where the tag does not apply:
 | `PRIVATE` | visibility == private |
 | `CLAUDE_PLUGIN` | `--claude-plugin true` |
 
-If a tag does not apply, delete the START line, the END line, and everything
-between them. After stripping, collapse any run of 3+ consecutive blank
+If a tag does not apply, the script deletes the START line, the END line,
+and everything between them, then collapses any run of 3+ consecutive blank
 lines down to one — adjacent stripped blocks otherwise leave a blank-line
 pileup that fails the repo's yamllint (`empty-lines: max 2`).
 
