@@ -1022,6 +1022,28 @@ Only `CONVERGED` proceeds to commit + open-pr; every escalation stops without a
 PR and is surfaced as a `needs-human-decision` issue comment (#564), never a
 draft PR (a draft would trigger CI, defeating the local loop).
 
+## Typed escalation path (#564)
+
+Escalation quality decides whether a human interruption costs two minutes or an
+afternoon, so every non-`CONVERGED` loop exit produces exactly **one**
+decision-ready artifact and nothing else. `build-escalation.zsh` turns the loop's
+status JSON into an issue-comment body: a typed header (the escalation type), a
+one-line summary, a type-specific detail block (the conflicting dimensions / the
+non-converging blocker / the remaining blockers / the dispatch error), the round
+history one line each, and **2–3 concrete options** tailored to the type (pick a
+winner, reconcile, split; unblock, waive, split; extend, triage, split; name the
+language, skip review, add support). A trailing `<!-- review-loop-escalation:
+<STATUS> -->` marker makes the comment machine-findable.
+
+The skill then: pushes the branch as the bot so the diff-so-far is linkable but
+**creates no PR object** (a draft would trigger CI and defeat the local loop);
+posts the comment; and applies the `needs-human-decision` label idempotently (the
+`ensure_label` idiom — no bootstrap labels manifest exists). The **resume path**
+closes the loop: the human answers in the thread and re-runs
+`/development:resolve-issue <N>`; because the implement step and the readiness
+gate read the issue's *comments*, the decision becomes implementation context and
+the next run can converge. No PR exists until it does.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
