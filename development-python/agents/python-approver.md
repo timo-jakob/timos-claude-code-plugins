@@ -286,23 +286,30 @@ criteria that need commands:
 Emit a finding for each unmet baseline. Baseline failures are weighted
 heavily in confidence calibration.
 
-### Step 10 — Risk register
+### Step 10 — Risk register — fed by the review dimensions (#449)
 
-Identify the top **3** things that could still go wrong, even with
-everything green. This is fable judgement, not a checklist. Examples:
+Identify what could still go wrong, even with everything green. This
+is fable judgement, not a checklist — but instead of free-form "top
+risks", walk the five lenses the `/development-python:review` panel
+uses, one focused pass each over the diff:
 
-- "The retry loop on line 142 has no cap; under sustained 429s from
-  the upstream API, this could spin indefinitely."
-- "The new env-var `FOO_TIMEOUT` is parsed as int but has no default;
-  deployments that don't set it crash on import."
-- "The integration test uses a fixture file `corpus.json` whose
-  contents the PR doesn't touch, but the diff changes the parser so
-  the fixture's coverage of new code paths is incidental, not
-  deliberate."
+- **bugs** (`python-bug-hunter`'s focus): logic errors, None-handling
+  on fallible paths, mutable default arguments, swallowed exceptions,
+  race conditions.
+- **security** (`python-security-reviewer`): secrets, injection,
+  unsafe deserialization, disabled TLS verification.
+- **performance** (`python-performance-reviewer`): accidental O(n²),
+  blocking calls in async code, N+1 I/O, unbounded caches.
+- **code quality** (`python-code-quality`): API design regressions,
+  dead code, naming that will mislead maintainers.
+- **tests** (`python-test-reviewer`): coverage gaps on the changed
+  surface, assertion quality, flakiness signals.
 
-Record each as `{"category": "risk", "title": "...", "detail": "...",
-"file": "...", "line": ...}`. Do NOT pad to three — three is the cap,
-not the floor.
+Emit **at most the top 3 risks overall**, each tagged with the
+dimension that produced it, so the register is traceable to its lens.
+An empty lens contributes nothing — do NOT pad to three; three is the
+cap, not the floor. Record each as `{"category": "risk", "dimension":
+"...", "title": "...", "detail": "...", "file": "...", "line": ...}`.
 
 ### Step 11 — Confidence calibration
 
@@ -424,6 +431,7 @@ anymore.
   "findings": [
     {
       "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | ...",
+      "dimension": "bugs | security | performance | code_quality | tests | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation, ideally citing the policy section that drove this finding.",
       "suggested_agent": "python-coverage-improver | python-semgrep-triage | python-sonar-triage | null",
@@ -436,7 +444,8 @@ anymore.
 
 Every finding in the JSON has a counterpart in the human-readable
 markdown above. Don't add findings to the JSON that aren't in the
-prose.
+prose. `dimension` is set on `risk`-category findings (the step-10
+lens that produced it) and `null` elsewhere.
 
 ## Refusal patterns (do NOT)
 

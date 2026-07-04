@@ -183,6 +183,7 @@ constructs the input and dispatches here.
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | `/development-python:maintenance <json>` | Parses input, runs coverage pre-flight, spawns per-tool agents in parallel worktrees, aggregates results. Standalone invocation prints usage and stops. |
+| Review | `/development-python:review [paths]` | Spawns 5 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449) |
 
 **Agents:**
 
@@ -196,6 +197,11 @@ constructs the input and dispatches here.
 | python-runtime-upgrade | fable | Applies a Python interpreter bump (Dependabot's `python:X.Y → Z.W` Docker base-image PR). Swaps Dockerfile FROM and pyproject.toml `requires-python`; best-effort local verify; **cascade-upgrades dependencies** that need newer versions for the new interpreter, reading their release notes and applying migrations (up to 3 passes). Stops only when a required dep has no version on PyPI supporting the new Python — does NOT search for alternative libraries |
 | python-coverage-improver | fable | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
 | python-dependabot-snyk-triage | opus | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
+| python-bug-hunter | fable | Logic errors, None-handling crashes, mutable defaults, async races, swallowed exceptions (#449) |
+| python-security-reviewer | opus | Secrets, injection, unsafe deserialization, TLS verification, data exposure (#449) |
+| python-performance-reviewer | opus | Accidental O(n²), event-loop blocking, N+1 I/O, unbounded caches (#449) |
+| python-code-quality | opus | Naming, SOLID, readability, dead code, API design (#449) |
+| python-test-reviewer | opus | Coverage gaps, assertion quality, flaky tests, mock misuse (#449) |
 
 All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
@@ -228,6 +234,7 @@ gather-script + dispatch contract).
 | --- | --- | --- |
 | Maintenance dispatcher | `/development-java:maintenance <json>` | Validates the payload, runs the JaCoCo coverage pre-flight (may raise coverage first), plans the per-tool groups, returns the plan + `ci_fixer_agent`. |
 | Approve (local dry-run) | `/development-java:approve [<pr>]` | Runs the `java-approver` against an open PR locally — prints the verdict instead of posting. |
+| Review | `/development-java:review [paths]` | Spawns 5 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449) |
 
 **Agents:**
 
@@ -246,7 +253,12 @@ gather-script + dispatch contract).
 | java-openapi-advisor | opus | Audits **non-Spring** contract-first OpenAPI — openapi-generator's `jaxrs-spec` (Jakarta REST) generator from a committed spec, so code/spec drift fails the build (the Spring case is `development-spring`'s `spring-api-advisor`) |
 | java-maintenance-planner | opus | Ranks + groups findings, routes each to its agent (defers `org.springframework.boot` bumps to `development-spring`) |
 | java-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
-| java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`) |
+| java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`); risk register fed by the five review dimensions (#449) |
+| java-bug-hunter | fable | Logic errors, NPEs, `==` vs `equals`, resource leaks, race conditions (#449) |
+| java-security-reviewer | opus | Secrets, injection, unsafe deserialization, TLS validation, data exposure (#449) |
+| java-performance-reviewer | opus | Accidental O(n²), allocation pressure, N+1 I/O, lock contention, unbounded caches (#449) |
+| java-code-quality | opus | Naming, SOLID, readability, dead code, API design (#449) |
+| java-test-reviewer | opus | Coverage gaps, assertion quality, flaky tests, mock misuse (#449) |
 
 **API-style convention.** gRPC is the standard for **internal, inter-service
 communication** — efficient on the wire, low-latency, with bidirectional /
