@@ -91,7 +91,10 @@ git switch -c "<type>/<N>-<slug>" origin/main
 
 Read the issue carefully and the files it names; read the repo's conventions
 (`CLAUDE.md`, the surrounding code) and match them — comment density, naming,
-idioms. Make the change. This step is identical across languages because you
+idioms. **Also read the issue's comments** (`gh issue view <N> --comments`): on a
+resume after a review-loop escalation (#564), the human's decision lives in the
+comment thread — treat it as authoritative implementation context. Make the
+change. This step is identical across languages because you
 read the repo, not a fixed recipe. If, on reading, the issue is genuinely
 **under-specified** or far larger than its description implies, **stop and say
 so** rather than guessing.
@@ -136,12 +139,44 @@ with a status JSON + code:
 - **`CONVERGED`** (exit 0) → proceed to step 4. Carry the final changelist
   forward — it becomes the review dossier in the PR (#563).
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
-  (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR. Escalate
-  (issue comment + `needs-human-decision`, no draft PR — #564) with the status
-  JSON, and stop. Opening a PR here would spend CI on unconverged work.
+  (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
+  *Escalation* below. Opening a PR here would spend CI on unconverged work.
 
 `--no-review` skips the loop entirely (status `SKIPPED`) — today's fast path,
 for when you deliberately want no local review round.
+
+#### Escalation (any non-`CONVERGED` loop exit) — typed, no PR (#564)
+
+A bad escalation costs a human an afternoon; a good one costs two minutes. On
+any `ESCALATE_*` / `BUDGET_EXHAUSTED` status, produce **one** decision-ready
+issue comment and nothing else — **no PR, no auto-merge exposure**:
+
+1. **Push the branch as the bot** (so the diff-so-far is linkable) but **create
+   no PR object** — a draft would trigger CI and defeat the local loop. Use the
+   `open-pr` token mint + `git push`, then stop before `gh pr create`.
+2. **Build the comment** from the loop's status JSON:
+
+   ```bash
+   "<skill-base-dir>/scripts/build-escalation.zsh" --status <status.json> \
+     --issue <N> --branch <branch> --compare-url "https://github.com/$REPO/tree/<branch>"
+   ```
+
+   It emits the typed header, a summary, the round history, and 2–3 concrete
+   options tailored to the escalation type.
+3. **Post it and label**, idempotently (the repo's ensure-label idiom):
+
+   ```bash
+   gh label create needs-human-decision --color b60205 \
+     --description "A review-loop escalation is waiting on a human decision" \
+     2>/dev/null || true
+   gh issue comment <N> --body-file <comment.md>
+   gh issue edit <N> --add-label needs-human-decision
+   ```
+
+4. **Stop.** The human answers in the thread and re-runs
+   `/development:resolve-issue <N>`; because step 2 (and the readiness gate) read
+   the issue's **comments**, their decision becomes implementation context and
+   the next run can converge. No PR exists until it does.
 
 ### 4. Version bump (plugin content only)
 
