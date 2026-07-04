@@ -763,23 +763,26 @@ The `image` job (build → Trivy scan → conditional GHCR push) is only kept if
 
 ### Container image publishing (both paths, if Dockerfile present)
 
-The generated `image` job follows a single shape regardless of public/private:
+The container pipeline is **two jobs** regardless of public/private (#547 —
+job permissions can't be gated per-step, so the write grants live in a job
+PR runs never execute):
 
-| Step | Always | On merge to `main` / release |
-| --- | --- | --- |
-| Build image with Buildx | ✓ | ✓ |
-| Compute tags via `docker/metadata-action` (semver + `sha-<7>` + `latest`) | ✓ | ✓ |
-| Scan (Snyk container on public / Trivy image on private) | ✓ | ✓ |
-| Login to GHCR with `GITHUB_TOKEN` | | ✓ |
-| Push to `ghcr.io/<owner>/<repo>` | | ✓ |
+| Job | Events | Permissions | Steps |
+| --- | --- | --- | --- |
+| `image` (scan) | PR + push + release | `contents: read` only | Buildx build (amd64), tags via `docker/metadata-action` (semver + `sha-<7>` + `latest`), scan (Snyk container on public / Trivy image on private) |
+| `push-and-sign` | push / release only (`needs: image`) | `packages: write` + `id-token: write` | GHCR login with `GITHUB_TOKEN`, multi-arch push to `ghcr.io/<owner>/<repo>`, SBOM, provenance, cosign |
 
 Behaviour summary:
 
 - Scan **always** runs — even on PRs — so contributors know if their image is
-  broken before merge.
-- Push **only** runs on `push` to the default branch and `release: published`.
-- The same Buildx cache is reused between scan and push, so the second build
-  is fast.
+  broken before merge. PR runs execute **no** job holding write/id-token
+  permissions.
+- Push **only** runs on `push` to the default branch and `release: published`,
+  in `push-and-sign`; `needs: image` makes the scan gate the push. The job is
+  never a required branch-protection check (it produces no PR check) and
+  needs no noop mirror.
+- The same Buildx cache (`type=gha`) is reused between the scan job's build
+  and the push job's, so the second build is fast.
 - **Published images are multi-arch**: `linux/amd64` + `linux/arm64`. The arm64
   build covers Apple Silicon Macs, AWS Graviton, and other ARM hosts. PR
   builds stay amd64-only for fast scan feedback.
