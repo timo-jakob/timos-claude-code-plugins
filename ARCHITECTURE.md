@@ -957,6 +957,38 @@ that as a `needs-human-decision` escalation (#564) rather than proceeding. Exit
 `2` is a usage error; `1` is an internal (detect-stack/git/jq) failure. Tests
 seam detection via `DETECT_STACK_BIN` and git via `GIT_BIN`.
 
+## Review-findings consolidator (#561)
+
+Five reviewers giving unmediated feedback to the implementor produces conflicting
+advice and thrash. One consolidation step turns a round's parallel reviewer
+output (the diff-scoped aggregate above) into a single prioritised **changelist**
+the review-loop orchestrator (#562) acts on.
+
+The consolidation is split the same way as the review panel itself — a
+deterministic engine plus a judgment layer — because the counting must be
+reliable but the merging needs semantics:
+
+- **`consolidate-findings.zsh`** is the deterministic engine (jq), fully
+  bats-tested. It applies the **severity map** `CRITICAL→Critical`,
+  `WARNING→High`, `SUGGESTION→Low`; **blocking = Critical + High** (Low is logged
+  in `suggestions` and never triggers a round); **dedup** by `file`+`line`+
+  `dimension` (most-detailed description kept, reviewers unioned, `agreement`
+  counted, highest severity carried); a **conflict** item for co-located
+  `performance`-vs-`code_quality` recommendations; and **non-convergence** —
+  a blocker whose fingerprint (`file`+`dimension`+normalized `title`) also
+  blocked the previous round (`--prev`) is marked `non_converging: true`. A
+  surviving conflict and a non-converging blocker are both `escalation_reasons`.
+- **`review-consolidator`** (agent, opus) runs the engine, then adds the
+  judgment the exact-key heuristics can't: merging findings that describe the
+  same defect in different words / across dimensions, and confirming or demoting
+  conflicts by reading the cited code. It never re-grades a reviewer's severity
+  and never invents or drops a finding.
+
+Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts},
+blocking[], suggestions[], conflicts[], non_converging, escalation_reasons[] }`.
+The `blocking` array (Critical first, then High) is what the loop must clear;
+`suggestions` ride into the dossier (#563) but never loop.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
