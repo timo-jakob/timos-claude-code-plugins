@@ -366,6 +366,13 @@ jobs:
             echo "::notice::No container files changed; skipping image scan (#386). Required 'image' check passes."
           fi
 
+      # ARTIFACT BUILD STEPS anchor (#545): if the Dockerfile COPYs build
+      # outputs (build/, dist/, target/, ...), the bootstrap inserts the
+      # steps that produce them here — gated on scan_decision like the
+      # image build below (e.g. setup-java + setup-gradle + the Gradle dist
+      # task). Mirror the same steps in push-and-sign, which builds the
+      # image again on its own runner.
+
       - name: Set up QEMU (for foreign-arch emulation)
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
@@ -445,6 +452,10 @@ jobs:
       id-token: write    # cosign keyless OIDC signing
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      # ARTIFACT BUILD STEPS anchor (#545): mirror the artifact build steps
+      # from the image (scan) job here, unconditional — this job builds the
+      # image again and the scan job's workspace doesn't carry over.
 
       - name: Set up QEMU (for foreign-arch emulation)
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
