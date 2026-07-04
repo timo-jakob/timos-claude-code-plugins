@@ -910,6 +910,53 @@ The consolidator (#561) consumes this aggregate; the severity→blocking mapping
 (`CRITICAL→Critical`, `WARNING→High`, `SUGGESTION→Low`; Critical + High block)
 lives with it, not here.
 
+## Review-panel invocation contract (#560)
+
+The autonomous review loop's orchestrator (#562) must invoke the right language
+review panel **without knowing language specifics** — the same principle as the
+`/development:maintenance` dispatch contract, where adding a language requires
+zero orchestrator edits. The seam is
+`development/skills/resolve-issue/scripts/review-dispatch.zsh`, a pure function
+of the worktree with two subcommands.
+
+**`plan --repo PATH [--base REF] [--round N]`** emits the dispatch descriptor:
+
+```json
+{
+  "repo_type": "python",
+  "review_skill": "development-python:review",
+  "round": 1,
+  "base": "origin/main",
+  "findings_path": "<repo>/.review/findings-round-1.json",
+  "changed_files": ["src/app/checkout.py", "src/app/cart.py"]
+}
+```
+
+- **Repo-type detection reuses the maintenance logic** — it runs
+  `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
+  review types are `swift` | `python` | `java`, each mapping to that language's
+  `:review` skill. When several apply, `.maintenance.yml`'s `primary`
+  disambiguates.
+- **The review scope is the story's diff, never the whole repo.** `changed_files`
+  is everything that differs from `base` (committed + staged + unstaged) plus new
+  untracked files. Pre-existing findings in untouched code belong to
+  `/development:maintenance`, not the loop — without diff-scoping, round 2
+  re-litigates legacy code and the loop never converges.
+- **The panel writes its aggregate findings JSON** (the *Review finding schema*
+  above) to `findings_path`, a well-known per-round path in the worktree.
+
+**`scope-findings --repo PATH [--base REF] --findings FILE`** reads the panel's
+aggregate and prints only the findings whose `file` is inside the story's diff —
+the enforcement point for "findings outside the diff do not appear", downstream
+of whatever the panel reported. A missing/empty file yields `[]`.
+
+**An unsupported or ambiguous repo type is a typed escalation, not a crash.**
+`plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or
+`{"error":"ambiguous_repo_type", …}`) and exits `3`; the orchestrator surfaces
+that as a `needs-human-decision` escalation (#564) rather than proceeding. Exit
+`2` is a usage error; `1` is an internal (detect-stack/git/jq) failure. Tests
+seam detection via `DETECT_STACK_BIN` and git via `GIT_BIN`.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
