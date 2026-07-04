@@ -6,9 +6,11 @@
 # container scan on the built Docker image, which the GitHub App can't
 # see.
 #
-# Image publishing: built image is scanned, then pushed to GitHub Container
-# Registry (ghcr.io/<owner>/<repo>) on merge to main + release events. The
-# scan gates the push — a vulnerable image never reaches the registry.
+# Image publishing: built image is scanned (`image` job), then pushed to
+# GitHub Container Registry (ghcr.io/<owner>/<repo>) on merge to main +
+# release events by the separate `push-and-sign` job (`needs: image`). The
+# scan gates the push — a vulnerable image never reaches the registry — and
+# only the push job holds write-capable permissions (#547).
 
 name: Quality (public)
 
@@ -36,9 +38,11 @@ on:
   workflow_dispatch:
 
 # Least-privilege workflow defaults. Individual jobs may widen as needed:
-# the `image` job needs `packages: write` + `id-token: write` for GHCR
-# push and cosign keyless signing; nothing else needs anything beyond
-# `contents: read`.
+# only the `push-and-sign` job (push/release events, never PRs) needs
+# `packages: write` + `id-token: write` for GHCR push and cosign keyless
+# signing; nothing else needs anything beyond `contents: read`. Job
+# permissions can't be gated per-step, so the write grants live in a job
+# that PR runs never execute (#547).
 permissions:
   contents: read
 
@@ -341,7 +345,16 @@ jobs:
           trivy-config: trivy.yaml
 
   # --- DOCKER-START ---------------------------------------------------------
-  # Container image pipeline.
+  # Container image pipeline — two jobs (#547):
+  #
+  #   image (scan)      → PR + push + release: build linux/amd64, scan.
+  #                       `contents: read` only — PR runs never execute a
+  #                       job holding write-capable permissions.
+  #   push-and-sign     → push/release only (`needs: image`): GHCR login,
+  #                       multi-arch push, SBOM, provenance, cosign. Holds
+  #                       `packages: write` + `id-token: write` — job
+  #                       permissions can't be gated per-step, so the write
+  #                       grants live in a job PRs never run.
   #
   # PR touching container files → build linux/amd64 only, scan, no push (gate)
   # PR NOT touching container files → no scan; the required `image` check
@@ -355,17 +368,12 @@ jobs:
   # resolves: the job runs on every non-doc PR, but the heavy build+scan steps
   # are gated on `scan_decision` so a non-container PR ends green without
   # scanning. (Doc-only PRs are covered by the noop companion workflow.)
-  #
-  # The multi-arch build uses QEMU emulation on the x86 runner. This is slower
-  # than native arm64 but free on GitHub-hosted ubuntu-latest. If build time
-  # becomes a problem, split into a matrix using native ubuntu-24.04-arm
-  # runners and merge manifests with `docker manifest create`.
+  # `push-and-sign` never runs on PRs, so it is NOT a required check and
+  # needs no noop mirror.
   image:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write    # ghcr.io push
-      id-token: write    # cosign keyless OIDC signing
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -405,9 +413,8 @@ jobs:
             echo "::notice::No container files changed; skipping image scan (#386). Required 'image' check passes."
           fi
 
-      - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
-
+      # No QEMU here: the scan build is amd64-only on an amd64 runner. QEMU
+      # lives in push-and-sign, where the multi-arch build needs it.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
@@ -473,10 +480,10 @@ jobs:
       # pipeline (/development:maintenance) can ingest base-image CVEs and
       # triage them — fix the safely-fixable, or propose a justified .snyk
       # ignore with an expiry. Gated to push/release like the SBOM export
-      # below: the artifact describes the pushed image, and the gather only
-      # harvests default-branch push runs (anti-spoofing). `always()` so it
-      # still uploads when the scan step exited non-zero on findings — that
-      # is precisely when there are CVEs worth ingesting.
+      # in push-and-sign: the artifact describes the pushed image, and the
+      # gather only harvests default-branch push runs (anti-spoofing).
+      # `always()` so it still uploads when the scan step exited non-zero on
+      # findings — that is precisely when there are CVEs worth ingesting.
       - name: Upload Snyk container scan (for maintenance ingestion)
         if: always() && (github.event_name == 'push' || github.event_name == 'release')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -493,10 +500,47 @@ jobs:
       # a derivative — copyleft obligations don't apply. The license-fs job
       # already covers what matters: the project's own declared dependencies.
 
-      # Login + multi-arch push, only after scan passes, only on merge-to-main
-      # or release.
+  # Publish job — the ONLY job holding write-capable permissions, and it
+  # never runs on PRs. `needs: image` makes the scan gate the push: a
+  # vulnerable image never reaches the registry. The multi-arch build uses
+  # QEMU emulation on the x86 runner; slower than native arm64 but free on
+  # GitHub-hosted ubuntu-latest. If build time becomes a problem, split into
+  # a matrix using native ubuntu-24.04-arm runners and merge manifests with
+  # `docker manifest create`.
+  push-and-sign:
+    needs: image
+    if: github.event_name == 'push' || github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write    # ghcr.io push
+      id-token: write    # cosign keyless OIDC signing
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      # Recomputed rather than passed from the scan job — step outputs don't
+      # cross job boundaries, and metadata-action is deterministic for the
+      # same ref.
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
       - name: Login to GHCR
-        if: github.event_name == 'push' || github.event_name == 'release'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -505,7 +549,6 @@ jobs:
 
       - name: Build + push multi-arch image (with SBOM + provenance)
         id: build-push
-        if: github.event_name == 'push' || github.event_name == 'release'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -523,10 +566,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Pick a tag for the SBOM export
+        id: pick
+        run: |
+          tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       # Export the SBOM as a CI artifact for human inspection. Uses Syft
       # directly so the output matches the Buildx attestation byte-for-byte.
       - name: Export SBOM as CI artifact
-        if: github.event_name == 'push' || github.event_name == 'release'
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: ${{ steps.pick.outputs.tag }}
@@ -534,13 +582,11 @@ jobs:
           output-file: sbom.cdx.json
 
       - name: Validate SBOM is well-formed CycloneDX
-        if: github.event_name == 'push' || github.event_name == 'release'
         run: |
           docker run --rm -v "$PWD:/work" cyclonedx/cyclonedx-cli:v0.32.0 \
             validate --input-file /work/sbom.cdx.json --input-format json --fail-on-errors
 
       - name: Upload SBOM artifact
-        if: github.event_name == 'push' || github.event_name == 'release'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sbom-cyclonedx-${{ github.sha }}
@@ -552,11 +598,9 @@ jobs:
       # registry. Verifiable with `cosign verify` using the workflow's
       # OIDC certificate identity.
       - name: Install cosign
-        if: github.event_name == 'push' || github.event_name == 'release'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign image with cosign (keyless OIDC)
-        if: github.event_name == 'push' || github.event_name == 'release'
         env:
           IMAGE_DIGEST: ${{ steps.build-push.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}

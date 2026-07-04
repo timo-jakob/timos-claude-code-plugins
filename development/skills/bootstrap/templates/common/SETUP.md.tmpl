@@ -562,7 +562,7 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
   - **PUBLIC**: `test-and-coverage`, `sonarcloud`, `semgrep`, `license-fs`, `pre-commit`, `analyze (<language>)` (one per CodeQL language), `image` (only if a Dockerfile is present)
   - **PRIVATE**: `test-and-coverage`, `sonarqube`, `trivy-fs`, `semgrep`, `license-fs`, `pre-commit`, `image` (only if a Dockerfile is present)
   - **`image` is path-conditional (#386):** keep it required, but the job only runs the container build+scan when the PR touches container files (`Dockerfile*`, `.dockerignore`, compose files, the scanner policy `.snyk`/`trivy.yaml`). On an app/dependency PR that touches none of those, the `image` job ends green *without* scanning — so a pre-existing base-image CVE the change can't influence never blocks it ("working on the app → app checks, working on the image → container checks"). A PR that does touch container files gets the full scan gate. Non-PR events (push to the default branch, release, weekly schedule) always scan + publish.
-  - **Not required:** Snyk's `security/snyk` (Open Source) is an **advisory** PR check, not a workflow job — leave it unchecked here (matching `branch-protection.sh`, which never adds it). `code/snyk` (Snyk Code) is **disabled** per §2.5 (CodeQL covers SAST), so it isn't produced at all; if you leave it on, it's advisory too and the Approver excludes it from its green gate (#387). `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).
+  - **Not required:** `push-and-sign` (the GHCR publish job) runs only on push/release events — it never produces a PR check, so it is never in the required list. Snyk's `security/snyk` (Open Source) is an **advisory** PR check, not a workflow job — leave it unchecked here (matching `branch-protection.sh`, which never adds it). `code/snyk` (Snyk Code) is **disabled** per §2.5 (CodeQL covers SAST), so it isn't produced at all; if you leave it on, it's advisory too and the Approver excludes it from its green gate (#387). `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).
 - [x] Require branches to be up to date before merging
 - [x] Require linear history
 - [x] Do not allow bypassing the above settings
@@ -583,8 +583,12 @@ The generated workflows build, scan, and publish your container image to
 | GitHub Release `v1.2.3` | `1.2.3`, `1.2`, `1`, `latest` (if not prerelease) | `linux/amd64` + `linux/arm64` |
 | PR | **Built + scanned but not pushed** — verifies image is clean without polluting the registry | `linux/amd64` only (fast feedback) |
 
-The scan (Snyk container for public repos, Trivy for private) runs **before**
-the push. A vulnerable image never reaches the registry.
+The work is split across two jobs (least privilege — #547): the `image` job
+builds and scans (Snyk container for public repos, Trivy for private) with
+read-only permissions, and the `push-and-sign` job (`needs: image`, push and
+release events only) logs in to GHCR, pushes, and signs — it is the only job
+holding `packages: write` + `id-token: write`, and it never runs on PRs. The
+scan gates the push: a vulnerable image never reaches the registry.
 
 ### Multi-arch builds
 
@@ -676,8 +680,8 @@ dependency-tracking system (e.g. [Dependency-Track](https://dependencytrack.org)
 ### 5.1 Authentication
 
 The workflow uses the auto-provisioned `GITHUB_TOKEN` — no manual token setup
-needed. The `permissions: packages: write` block in the workflow grants the
-required scope.
+needed. The `permissions: packages: write` block on the `push-and-sign` job
+grants the required scope (only that job holds it; PR runs never execute it).
 
 ### 5.2 Image visibility — one-time manual step
 
@@ -694,13 +698,15 @@ This is a one-time flip; subsequent publishes preserve the visibility you set.
 ### 5.3 Switching to a different registry
 
 If you want to publish to Docker Hub instead of (or in addition to) GHCR, edit
-the `image` job in your `quality-*.yml` workflow (`quality-public.yml` for
-public repos, `quality-private.yml` for private):
+the `push-and-sign` job in your `quality-*.yml` workflow (`quality-public.yml`
+for public repos, `quality-private.yml` for private):
 
 1. Add a `Login to Docker Hub` step with `docker/login-action@v4`, registry
    `docker.io`, using `secrets.DOCKERHUB_USERNAME` + `secrets.DOCKERHUB_TOKEN`.
 2. Add a Docker Hub image to `docker/metadata-action`'s `images` input
-   (newline-separated):
+   (newline-separated) — the `Compute image tags` step appears in both the
+   `image` (scan) job and `push-and-sign`; update both so the scanned tags
+   stay aligned with the published ones:
    ```yaml
    images: |
      ghcr.io/${{ github.repository }}
