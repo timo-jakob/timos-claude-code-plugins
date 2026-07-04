@@ -1022,6 +1022,30 @@ Only `CONVERGED` proceeds to commit + open-pr; every escalation stops without a
 PR and is surfaced as a `needs-human-decision` issue comment (#564), never a
 draft PR (a draft would trigger CI, defeating the local loop).
 
+## Review dossier + Approver re-ingest (#563)
+
+The PR is the durable audit record for why auto-merge happened, so a `CONVERGED`
+loop's history lands in it — human-readable for reviewers, machine-readable for
+the Approver. `build-dossier.zsh` turns the loop's status JSON (which now retains
+every round's changelist in `round_changelists`, so the per-dimension detail a
+converged clean final round lacks is still available) into two things appended to
+the PR body by `open-pr`:
+
+1. a **"Review dossier"** section — rounds run, per-round blockers found & fixed,
+   dimensions reviewed (the #449 lenses, each `clean` or with a fixed count),
+   waived Low suggestions, and the reviewers who contributed; and
+2. a hidden `<!-- review-dossier: {…} -->` JSON block, dimension-tagged with the
+   #449 enum.
+
+The Approver re-ingests the hidden block **the same way maintenance re-ingests
+Approver findings** — via the shared `approver-policy-core` (#555), so all three
+language Approvers get it without per-agent edits. A `clean` dimension lowers
+that lens's residual-risk weight (the panel already looked and found nothing); a
+non-clean dimension is where to look hardest; `waived_low` is context, never a
+`REQUEST_CHANGES` on its own. A PR **without** a dossier (`--no-review`, or a
+human-authored PR) is judged exactly as before — `build-dossier.zsh` emits
+nothing, so the body and the Approver's behavior are unchanged.
+
 ## Typed escalation path (#564)
 
 Escalation quality decides whether a human interruption costs two minutes or an

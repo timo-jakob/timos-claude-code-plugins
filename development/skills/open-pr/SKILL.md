@@ -64,6 +64,20 @@ GH_TOKEN="$TOKEN" gh pr create \
 
 Capture the PR number/URL. The PR author is now `claude-maintenance-<login>[bot]`.
 
+**Review dossier (#563).** When the caller ran the local review loop (#562) and
+it exited `CONVERGED`, append the **Review dossier** to the PR body, after the
+Test plan — it is the durable audit record for why auto-merge happened. Build it
+from the loop's status JSON:
+
+```bash
+"<skill-base-dir>/../resolve-issue/scripts/build-dossier.zsh" --status <status.json>
+```
+
+It emits the human-readable dossier section **and** a hidden
+`<!-- review-dossier: {…} -->` JSON block the Approver re-ingests into its risk
+register. When no loop ran (`--no-review` / zero rounds) it prints nothing, so
+the PR body is exactly as it is today — no dossier, no behavior change.
+
 > Optional cleaner attribution: if you want the *commits* (not just the PR)
 > attributed to the bot, amend/rebase with
 > `git -c user.name='claude-maintenance[bot]' -c user.email='<app-id>+claude-maintenance[bot]@users.noreply.github.com'`

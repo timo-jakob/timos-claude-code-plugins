@@ -78,11 +78,15 @@ done
 # emit the status JSON (stdout + optional --status-file) and exit with `code`.
 emit_and_exit() {
   local st="$1" rounds="$2" code="$3" repo_type="$4" review_skill="$5" \
-        final_changelist_file="$6" history_file="$7"
+        final_changelist_file="$6" history_file="$7" changelists_file="${8:-}"
   local final='null'
   [[ -n "$final_changelist_file" && -s "$final_changelist_file" ]] && final=$(<"$final_changelist_file")
   local history='[]'
   [[ -n "$history_file" && -s "$history_file" ]] && history=$(jq -sc '.' "$history_file")
+  # every round's full changelist, in order — the review dossier (#563) needs
+  # per-round, per-dimension detail that the final (converged, clean) round lacks
+  local clists='[]'
+  [[ -n "$changelists_file" && -s "$changelists_file" ]] && clists=$(jq -sc '.' "$changelists_file")
   local esc='[]'
   [[ "$final" != "null" ]] && esc=$(print -r -- "$final" | jq -c '.escalation_reasons // []')
   local out
@@ -90,10 +94,12 @@ emit_and_exit() {
     --arg status "$st" --argjson rounds "$rounds" --argjson max "$max_rounds" \
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
+    --argjson clists "$clists" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
       repo_type:(if $repo_type=="" then null else $repo_type end),
       review_skill:(if $review_skill=="" then null else $review_skill end),
-      escalation_reasons:$esc, history:$history, final_changelist:$final}')
+      escalation_reasons:$esc, history:$history, round_changelists:$clists,
+      final_changelist:$final}')
   print -r -- "$out"
   [[ -n "$status_file" ]] && print -r -- "$out" > "$status_file"
   exit "$code"
@@ -101,7 +107,7 @@ emit_and_exit() {
 
 # --no-review is the fast path — it short-circuits before any other requirement.
 if (( no_review )); then
-  emit_and_exit "SKIPPED" 0 0 "" "" "" ""
+  emit_and_exit "SKIPPED" 0 0 "" "" "" "" ""
 fi
 
 [[ -n "$repo" ]] || { print -u2 -- "resolve-story-loop: --repo is required"; exit 2 }
@@ -112,6 +118,7 @@ fi
 [[ -n "$work_dir" ]] || work_dir=$(mktemp -d)
 mkdir -p "$work_dir"
 local history_file="$work_dir/history.jsonl"; : > "$history_file"
+local changelists_file="$work_dir/changelists.jsonl"; : > "$changelists_file"
 
 # --- dispatch: which panel, on what scope (typed escalation on failure) -----
 local plan rc
@@ -123,7 +130,7 @@ if (( rc == 3 )); then
   jq -nc --argjson e "$plan" '{escalation_reasons:["ambiguous_dispatch"], dispatch_error:$e,
      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0}, blocking:[], suggestions:[],
      conflicts:[], non_converging:false, round:0}' > "$tmpf"
-  emit_and_exit "ESCALATE_AMBIGUOUS" 0 10 "" "" "$tmpf" "$history_file"
+  emit_and_exit "ESCALATE_AMBIGUOUS" 0 10 "" "" "$tmpf" "$history_file" ""
 elif (( rc != 0 )); then
   print -u2 -- "resolve-story-loop: dispatch plan failed (rc=$rc)"; exit 1
 fi
@@ -170,6 +177,7 @@ while (( round <= max_rounds )); do
       print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
   fi
   final_changelist="$changelist"
+  cat "$changelist" >> "$changelists_file"   # one compact line per round (for the dossier, #563)
 
   blocking=$(jq '.summary.blocking' "$changelist")
   conflict=$(jq 'if ((.escalation_reasons // []) | index("unresolved_conflict")) then 1 else 0 end' "$changelist")
@@ -195,7 +203,7 @@ while (( round <= max_rounds )); do
   if [[ -n "$test_cmd" ]]; then
     ( cd "$repo" && eval "$test_cmd" ) || {
       print -u2 -- "resolve-story-loop: --test-cmd red after fix in round $round"
-      emit_and_exit "ERROR" "$round" 1 "$repo_type" "$review_skill" "$final_changelist" "$history_file" }
+      emit_and_exit "ERROR" "$round" 1 "$repo_type" "$review_skill" "$final_changelist" "$history_file" "$changelists_file" }
   fi
 
   prev_changelist="$changelist"
@@ -210,4 +218,4 @@ case "$loop_status" in
   BUDGET_EXHAUSTED) code=13 ;;
   *) code=1 ;;
 esac
-emit_and_exit "$loop_status" "$round" "$code" "$repo_type" "$review_skill" "$final_changelist" "$history_file"
+emit_and_exit "$loop_status" "$round" "$code" "$repo_type" "$review_skill" "$final_changelist" "$history_file" "$changelists_file"
