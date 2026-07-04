@@ -314,6 +314,32 @@ EOF
   grep -q 'JAVA-START' "$P"
 }
 
+@test "render: --approver-lang substitutes {{APPROVER_LANG}} (#241)" {
+  echo 'skill: /development-{{APPROVER_LANG}}:approve agent: {{APPROVER_LANG}}-approver' > "$T/f.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approver-lang python f.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/f")" = "skill: /development-python:approve agent: python-approver" ]
+}
+
+@test "render: real approver-policy core + overlay render clean for all three languages (#241)" {
+  for lang in python java swift; do
+    rm -rf "$OUT"; mkdir -p "$OUT"
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approver-lang "$lang" \
+      common/approver-policy-core.md.tmpl \
+      "languages/$lang/approver-policy-overlay.md.tmpl"
+    [ "$status" -eq 0 ]
+    CORE="$OUT/common/approver-policy-core.md"
+    OVERLAY="$OUT/languages/$lang/approver-policy-overlay.md"
+    grep -q "approver-policy: core" "$CORE"
+    grep -q "approver-policy: overlay ($lang)" "$OVERLAY"
+    grep -q "/development-$lang:approve" "$CORE"
+    # concatenated single-file shape: core then overlay, no leftovers
+    cat "$CORE" "$OVERLAY" > "$BATS_TEST_TMPDIR/policy-$lang.md"
+    ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$BATS_TEST_TMPDIR/policy-$lang.md"
+    grep -q "suggested_agent" "$BATS_TEST_TMPDIR/policy-$lang.md"
+  done
+}
+
 @test "render: static file without placeholders or blocks passes through unchanged" {
   printf 'plain: file\nno: templating\n' > "$T/static.yml"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" static.yml

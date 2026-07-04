@@ -99,8 +99,12 @@ The short version:
 
 The full per-type criteria, calibration rules, and finding schema are
 in the bootstrap-generated `.claude/approver-policy.md` of any
-Approver-enabled repo, and the template the bootstrap renders from is
-[`../templates/languages/python/approver-policy.md.tmpl`](../templates/languages/python/approver-policy.md.tmpl).
+Approver-enabled repo. Since #241 the bootstrap renders it from two
+templates — the language-independent core
+[`../templates/common/approver-policy-core.md.tmpl`](../templates/common/approver-policy-core.md.tmpl)
+plus the language's fluency overlay
+(`../templates/languages/<lang>/approver-policy-overlay.md.tmpl`) —
+concatenated into that single file.
 
 ## One-time setup (per machine)
 
@@ -314,8 +318,11 @@ finding for a human to judge.
 | `revert:` | Clean revert | Dependents since the original commit not considered |
 | `hotfix:` | Emergency | Always `REQUEST_CHANGES` with "human review required" — by design (see below) |
 
-Per-type must-haves and risk factors live in the policy template at
-[`../templates/languages/python/approver-policy.md.tmpl`](../templates/languages/python/approver-policy.md.tmpl).
+Per-type must-haves and risk factors live in the policy core template
+at
+[`../templates/common/approver-policy-core.md.tmpl`](../templates/common/approver-policy-core.md.tmpl),
+with language fluency in each
+`../templates/languages/<lang>/approver-policy-overlay.md.tmpl` (#241).
 The rendered copy is at `.claude/approver-policy.md` in each
 bootstrapped repo.
 
@@ -508,12 +515,14 @@ For other languages (`development-javascript`, `development-go`,
 
 1. Ship the language plugin's `<lang>-approver` agent
    (`development-<lang>/agents/<lang>-approver.md`).
-2. Ship a language-specific policy template
-   (`templates/languages/<lang>/approver-policy.md.tmpl`) bootstrap
-   renders for that language.
+2. Ship a language **fluency overlay**
+   (`templates/languages/<lang>/approver-policy-overlay.md.tmpl`) —
+   paths, tools, idioms, agent vocabulary only. The judgment criteria
+   live once in `templates/common/approver-policy-core.md.tmpl` and are
+   never re-written per language (#241).
 3. Bootstrap's `--claude-approver true` detects which language
-   plugins have an Approver agent and renders the right policy +
-   wires the workflow to invoke the right agent.
+   plugins have an Approver agent and renders core + overlay into the
+   repo's single `.claude/approver-policy.md`.
 
 Until any non-Python plugin ships its Approver agent, bootstrap
 **warns-and-skips** on non-Python projects when `--claude-approver

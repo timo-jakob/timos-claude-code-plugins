@@ -1,0 +1,80 @@
+<!-- approver-policy: overlay (python) — language fluency only; the
+     judgment criteria live in the core above. Issue #241. -->
+
+---
+
+# Language overlay — Python
+
+Where the core policy says "per the language overlay", this part is the
+reference. It adds Python fluency to the core's criteria; it never
+relaxes them.
+
+## Fallback diff-heuristic paths
+
+- **Test paths:** `tests/`, `**/test_*.py`, `**/*_test.py`,
+  `conftest.py`.
+- **Build-config paths (→ `ci`):** the `pyproject.toml` build-system
+  table.
+- **Dependency manifests (→ `chore_deps`):** `pyproject.toml`
+  `[project.dependencies]` / `[project.optional-dependencies]`,
+  `requirements*.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock`.
+- **Runtime pins (→ `chore_runtime`):** a `Dockerfile` FROM line as the
+  only non-manifest diff.
+
+## Test idioms (for the core's *Test representativeness*)
+
+Coverage-padding patterns to flag: `assert True` / `assert 1` / `pass`
+as the only body; assertions only on mock return values
+(`mock.return_value = X; assert call() == X`); tests that
+`unittest.mock` the very unit they test; test names like
+`test_handles_empty_list` with no empty-list assertion.
+
+## Per-type additions
+
+### `chore(deps-major):`
+
+- The major-upgrade agent is **`python-major-upgrade`**.
+
+### `chore(deps):`
+
+- Known patch/minor breakage offenders in this ecosystem: e.g.
+  `pydantic` ≤ 2.0.
+
+### `chore(runtime):` — Python or Docker base-image bump
+
+- The runtime-upgrade agent is **`python-runtime-upgrade`**; its
+  structured commit body (Runtime / Cascade upgrades / Code
+  adaptations) is the cross-check, and every cascade bump must have a
+  version available on PyPI.
+- Runtime surfaces that must agree: `pyproject.toml`
+  `requires-python` and the Dockerfile FROM line.
+
+### `chore:` — dead-code dynamic references
+
+Verify removal against `getattr`, `globals()`, dynamic `importlib`
+calls, plugin entry points in `pyproject.toml`, and string-keyed
+registries.
+
+## API stability — library public-API surface
+
+| Surface | Marker | Detector | Source for the Approver |
+|---|---|---|---|
+| **Library public API (Python)** | `[project]` in `pyproject.toml` | `griffe` (via `.github/scripts/check-api-stability.py`) | `griffe-findings.json` from the `api-stability` workflow |
+
+The gate **is built** for Python: the `api-stability` workflow is
+bootstrap-generated when `pyproject.toml [project]` is present (SKILL
+Step 3f), and the Approver reads its `griffe-findings.json` artifact
+directly for the core's `refactor:` no-public-break must-have. This
+repo's version lives in `pyproject.toml` `[project] version` (the
+core's version-bump signal).
+
+## Confidence calibration additions
+
+*(none — every type's supporting agent has shipped for Python)*
+
+## `suggested_agent` vocabulary
+
+`python-coverage-improver | python-major-upgrade | python-semgrep-triage
+| python-sonar-triage | python-code-scanning-triage | null`
+
+Example finding `file`: `path/to/file.py`.

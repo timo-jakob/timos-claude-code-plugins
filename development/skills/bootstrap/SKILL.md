@@ -501,6 +501,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{XCODE_SCHEME}}` | Swift/Xcode only (`language_meta.swift.build_system == "xcode"`) — the scheme `xcodebuild test` runs. Resolve at render time via `xcodebuild -list -json` (take the single shared scheme; if several, ask the user which one carries the tests). Not used on SwiftPM repos — there the `SWIFT_XCODE` block is stripped and `swift test` needs no scheme. |
 | `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
 | `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
+| `{{APPROVER_LANG}}` | the resolved Approver language from Step 3e (`python` / `java` / `swift`) — used by `common/approver-policy-core.md.tmpl` for the `/development-<lang>:approve` and `<lang>-approver` references. Pass via `render.zsh --approver-lang`; only needed when rendering the Approver policy (#241). |
 
 ### Python-specific recommendation (when applicable)
 
@@ -976,18 +977,42 @@ review this repo's PRs:
    multiple Approver-capable languages are detected) → **skip** the
    Approver, per the skip note below.
 
-`{{APPROVER_LANG}}` selects the policy template:
+The policy is **core + overlay** (#241): a language-independent core
+carrying the judgment criteria (type detection, baseline, test
+representativeness, per-type must-haves/risks, calibration, verdict
+protocol) and a per-language overlay carrying only fluency (paths,
+tools, idioms, agent vocabulary). A new language plugin therefore needs
+only an overlay file + an approver agent — never a policy re-write.
+`{{APPROVER_LANG}}` selects the overlay:
 
 | Template | Target path in repo | Placeholders to substitute |
 | --- | --- | --- |
-| `templates/languages/{{APPROVER_LANG}}/approver-policy.md.tmpl` | `.claude/approver-policy.md` | (none) |
+| `templates/common/approver-policy-core.md.tmpl` | `.claude/approver-policy.md` (first part) | `{{APPROVER_LANG}}` |
+| `templates/languages/{{APPROVER_LANG}}/approver-policy-overlay.md.tmpl` | `.claude/approver-policy.md` (appended) | (none) |
+
+Render both via `render.zsh --approver-lang {{APPROVER_LANG}}`, then
+concatenate — core first, overlay second — into the single target file:
+
+```bash
+cat "<staging>/common/approver-policy-core.md" \
+    "<staging>/languages/{{APPROVER_LANG}}/approver-policy-overlay.md" \
+    > .claude/approver-policy.md
+```
+
+The **agent contract is unchanged**: the approve skill still reads ONE
+policy file, whose marked sections (`<!-- approver-policy: core -->` /
+`<!-- approver-policy: overlay (<lang>) -->`) come from the two
+templates.
 
 The policy file (`.claude/approver-policy.md`) is the source of truth for
 the Approver's per-PR-type criteria — it defines what the approve skill
 considers approvable. If it already exists at bootstrap time, default to
 **skip** and tell the user that policy changes go through the normal
 code-review process (a policy-change PR is evaluated by the *previous*
-version of the policy).
+version of the policy). On a re-bootstrap where the user opts to
+regenerate, the core/overlay render replaces the old single-template
+render equivalently (same criteria, reorganized) — surface the diff via
+the idempotency reviewer as usual.
 
 Also confirm the existing `.github/PULL_REQUEST_TEMPLATE.md` (rendered in
 3a) carries the `## Type` and `## Risk` sections that the Approver reads.
