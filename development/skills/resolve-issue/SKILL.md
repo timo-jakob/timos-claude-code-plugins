@@ -110,6 +110,39 @@ If it's red, fix it; if you can't, **abandon the PR** and report — a child iss
 is never merged or checked off on a red gate. Keep the test evidence for the PR
 body.
 
+### 3.5 Review loop — local, pre-push (do NOT skip unless `--no-review`)
+
+Once the gate is green, run the **local review loop** before committing or
+pushing anything, so a PR is only opened on code a reviewer panel has already
+converged on (no CI minutes spent on unconverged work). Drive
+`development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — the state
+machine (constants `MAX_REVIEW_ROUNDS=3`, `BLOCKING_SEVERITIES=(CRITICAL
+WARNING)`). It ties the pieces together and you provide three hooks for the
+model-driven steps:
+
+- **`--review-cmd`** — run the diff-scoped review panel for this round: use the
+  dispatch plan from `review-dispatch.zsh` (§#560) to pick `development-<lang>:review`,
+  invoke it scoped to `$REVIEW_SCOPE_FILE`, and write the aggregate findings JSON
+  (the #558 schema) to `$REVIEW_FINDINGS`.
+- **`--fix-cmd`** — read `$REVIEW_BLOCKERS` (the consolidated Critical+High
+  items) and implement the fixes, exactly as step 2 implements — Low
+  suggestions never loop.
+- **`--test-cmd`** — re-run the step-3 gate so a fix that breaks tests aborts
+  the loop instead of shipping.
+
+The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
+with a status JSON + code:
+
+- **`CONVERGED`** (exit 0) → proceed to step 4. Carry the final changelist
+  forward — it becomes the review dossier in the PR (#563).
+- **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
+  (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR. Escalate
+  (issue comment + `needs-human-decision`, no draft PR — #564) with the status
+  JSON, and stop. Opening a PR here would spend CI on unconverged work.
+
+`--no-review` skips the loop entirely (status `SKIPPED`) — today's fast path,
+for when you deliberately want no local review round.
+
 ### 4. Version bump (plugin content only)
 
 If you changed any plugin's installable content (`<plugin>/…`), bump that

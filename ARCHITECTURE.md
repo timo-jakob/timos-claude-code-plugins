@@ -989,6 +989,39 @@ blocking[], suggestions[], conflicts[], non_converging, escalation_reasons[] }`.
 The `blocking` array (Critical first, then High) is what the loop must clear;
 `suggestions` ride into the dossier (#563) but never loop.
 
+## Review-loop state machine (#562)
+
+`resolve-story-loop.zsh` ties the gate (#559), the diff-scoped panel (#560), and
+the consolidator (#561) into an autonomous implement→review→fix loop that runs
+**entirely in the worktree** — nothing is pushed and no PR is opened until it
+exits `CONVERGED`. It sits in `/development:resolve-issue` between validate
+(step 3) and open-pr, so CI minutes are only spent on code a panel has already
+converged on. Constants live at the top: `MAX_REVIEW_ROUNDS=3`,
+`BLOCKING_SEVERITIES=(CRITICAL WARNING)` (= Critical + High).
+
+**The agentic steps are hooks.** Running the panel and applying the fix pass are
+model-driven, so they are injected as `--review-cmd` / `--fix-cmd` (and an
+optional `--test-cmd` gate). This keeps the deterministic state machine — rounds,
+budget, consolidation, exit-state — a pure, bats-testable function, and lets the
+skill wire the real panel/fix behind the seam (inline, or a headless `claude -p`).
+
+Per round: run panel (diff-scoped) → `scope-findings` → `consolidate-findings`.
+No blockers ⇒ `CONVERGED`. Otherwise the early-exit escalations fire *before* the
+budget is spent — a surviving conflict ⇒ `ESCALATE_CONFLICT`, a `non_converging`
+blocker (same fingerprint two rounds running) ⇒ `ESCALATE_NO_CONVERGENCE` — else
+feed the blockers-only slice to the fix hook, re-run the gate, and loop. Reaching
+the last round with blockers still open ⇒ `BUDGET_EXHAUSTED`; an unpickable repo
+type from dispatch ⇒ `ESCALATE_AMBIGUOUS`. Each state is a distinct exit code
+(0 `CONVERGED`/`SKIPPED`; 10 ambiguous; 11 conflict; 12 no-convergence; 13 budget;
+2 usage; 1 operational — e.g. a red gate after a fix) alongside a machine-readable
+status JSON (`{status, rounds, max_rounds, repo_type, review_skill,
+escalation_reasons, history, final_changelist}`). `--no-review` yields `SKIPPED`
+— the fast path that bypasses the loop.
+
+Only `CONVERGED` proceeds to commit + open-pr; every escalation stops without a
+PR and is surfaced as a `needs-human-decision` issue comment (#564), never a
+draft PR (a draft would trigger CI, defeating the local loop).
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
