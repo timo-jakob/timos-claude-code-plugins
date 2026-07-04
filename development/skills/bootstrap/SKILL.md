@@ -832,6 +832,11 @@ catches contributors who used `git commit --no-verify` or pushed from a
 machine without pre-commit installed — local hooks are an honour system,
 the CI job makes it enforced.
 
+Because this job runs with `--all-files` while local commits only check
+staged files, it is *stricter* than the local hooks: pre-existing files the
+bootstrap never touched can fail it. Step 4a.5 normalizes them before the
+first push.
+
 ### 3d. Per-language fragments
 
 For each detected language, merge in the appropriate config from
@@ -1061,6 +1066,32 @@ Run this step again whenever `.pre-commit-config.yaml` changes — the
 script is idempotent, and a refresh that adds a new stage won't fire
 on push until the corresponding hook type is installed.
 
+### 4a.5. Normalize pre-existing files: `pre-commit run --all-files` until clean
+
+The CI backstop job runs the hooks with `--all-files`, but local commits
+only check *staged* files — so pre-existing repo files the bootstrap never
+touched (a `Dockerfile` missing its trailing newline, a `.proto` with
+trailing whitespace, …) will fail the first CI run even though every
+bootstrap commit was hook-clean. Close that gap now, before anything is
+committed or pushed:
+
+1. Run `pre-commit run --all-files`.
+2. If any hook failed by *modifying* files (the fixer hooks:
+   `end-of-file-fixer`, `trailing-whitespace`, formatters), those fixes are
+   already in the working tree — re-run until the pass is fully clean.
+3. Leave the fixups in the working tree: Step 4d includes them in the
+   bootstrap commit. If the bootstrap commit has already been made on a
+   re-run, commit them separately as
+   `chore: normalize pre-existing files for pre-commit`.
+4. If a hook fails *without* auto-fixing (e.g. a real gitleaks or yamllint
+   finding in a pre-existing file), surface it to the user instead of
+   guessing a fix — that's a genuine finding, not normalization.
+
+Skip only when `pre-commit` isn't installed locally (then 4a was skipped
+too); in that case warn the user that the first CI run may fail on
+pre-existing files and that running these commands after installing
+pre-commit closes the gap.
+
 ### 4b. Branch protection on `main`
 
 Confirm with the user, then call the helper script:
@@ -1181,7 +1212,8 @@ stay recommendations (Step 5) — never auto-applied.
 
 ### 4d. Initial commit
 
-Offer to commit the generated files (and any 4c build-script wiring) using
+Offer to commit the generated files (and any 4c build-script wiring, plus
+the 4a.5 normalization fixups to pre-existing files) using
 the `/development:commit` flow with a suggested message like `Bootstrap
 project with quality and security toolchain`. Do not push.
 
