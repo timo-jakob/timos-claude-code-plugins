@@ -1,0 +1,322 @@
+#!/usr/bin/env bats
+#
+# Tests for render.zsh — the deterministic bootstrap template renderer (#546).
+# Before it, every bootstrap session hand-wrote its own renderer from the
+# SKILL.md prose, each with fresh bugs (the tick-server-simulator session's
+# flagged the intentional {{PYTHON_VERSION}} default in the unconditional
+# pre-commit CI job as an error). These tests pin the spec in one place:
+# the placeholder table, the conditional-block stripping rules, the loud
+# leftover-placeholder failure, and byte-identical reruns.
+
+setup() {
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  SCRIPT="$REPO_ROOT/development/skills/bootstrap/scripts/render.zsh"
+  REAL_TEMPLATES="$REPO_ROOT/development/skills/bootstrap/templates"
+  T="$BATS_TEST_TMPDIR/templates"
+  OUT="$BATS_TEST_TMPDIR/out"
+  mkdir -p "$T" "$OUT"
+}
+
+# --- argument handling --------------------------------------------------------
+
+@test "render: no args -> usage (exit 2)" {
+  run zsh "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"usage:"* ]]
+}
+
+@test "render: missing file list -> usage (exit 2)" {
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT"
+  [ "$status" -eq 2 ]
+}
+
+@test "render: unknown flag -> usage (exit 2)" {
+  echo "x" > "$T/a.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --frobnicate yes a.tmpl
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unknown flag"* ]]
+}
+
+@test "render: nonexistent template -> error naming it (exit 1)" {
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" missing.tmpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"template not found"* ]]
+}
+
+# --- substitution + output mapping ---------------------------------------------
+
+@test "render: substitutes placeholders and strips the .tmpl suffix" {
+  printf 'name: {{PROJECT_NAME}} on {{DEFAULT_BRANCH}}\nslug: {{PROJECT_SLUG}}\n' > "$T/f.yml.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --project-name demo --project-slug o/r f.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/f.yml" ]
+  [ "$(sed -n 1p "$OUT/f.yml")" = "name: demo on main" ]
+  [ "$(sed -n 2p "$OUT/f.yml")" = "slug: o/r" ]
+}
+
+@test "render: creates nested output directories mirroring the relpath" {
+  mkdir -p "$T/public/.github/workflows"
+  echo "branch: {{DEFAULT_BRANCH}}" > "$T/public/.github/workflows/q.yml.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" public/.github/workflows/q.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/public/.github/workflows/q.yml" ]
+}
+
+@test "render: PYTHON_VERSION defaults to 3.12 even when python is not detected (#546 regression)" {
+  # The unconditional pre-commit CI job uses {{PYTHON_VERSION}} outside any
+  # PYTHON block — the ad-hoc renderer this script replaces flagged that as
+  # a leftover instead of applying the SKILL.md table's default.
+  printf 'python-version: "{{PYTHON_VERSION}}"\ncompact: py{{PYTHON_VERSION_COMPACT}}\n' > "$T/f.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "java" f.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 1p "$OUT/f")" = 'python-version: "3.12"' ]
+  [ "$(sed -n 2p "$OUT/f")" = "compact: py312" ]
+}
+
+@test "render: explicit --python-version drives the compact form too" {
+  echo 'v={{PYTHON_VERSION}} c={{PYTHON_VERSION_COMPACT}}' > "$T/f.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --python-version 3.13 f.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/f")" = "v=3.13 c=313" ]
+}
+
+@test "render: JAVA_VERSION and COVERAGE_THRESHOLD defaults apply" {
+  echo 'j={{JAVA_VERSION}} t={{COVERAGE_THRESHOLD}}' > "$T/f.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" f.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/f")" = "j=21 t=90" ]
+}
+
+@test "render: CODEQL_LANGUAGES is mapped from --languages (typescript -> javascript-typescript)" {
+  echo 'langs: [{{CODEQL_LANGUAGES}}]' > "$T/f.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "typescript python" f.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/f")" = "langs: [javascript-typescript,python]" ]
+}
+
+@test "render: explicit --codeql-languages overrides the mapping" {
+  echo '{{CODEQL_LANGUAGES}}' > "$T/f.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "python" --codeql-languages "go,swift" f.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/f")" = "go,swift" ]
+}
+
+@test "render: SECURITY_CONTACT_BLOCK with an email renders the email block" {
+  printf 'head\n{{SECURITY_CONTACT_BLOCK}}\ntail\n' > "$T/s.md.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --security-contact-email sec@example.org s.md.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'Email \*\*sec@example.org\*\*' "$OUT/s.md"
+  ! grep -q 'SECURITY_CONTACT_BLOCK' "$OUT/s.md"
+}
+
+@test "render: SECURITY_CONTACT_BLOCK with empty email renders the no-email fallback" {
+  printf '{{SECURITY_CONTACT_BLOCK}}\n' > "$T/s.md.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --security-contact-email "" s.md.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'No email channel is configured' "$OUT/s.md"
+}
+
+# --- conditional blocks ---------------------------------------------------------
+
+make_blocky() {
+  cat > "$T/b.yml.tmpl" <<'EOF'
+top: 1
+# --- PYTHON-START ----------------------------------------------------------
+python: yes
+# --- PYTHON-END ------------------------------------------------------------
+# --- JAVA-START --------------------------------------------------------------
+java: yes
+# --- JAVA-END ----------------------------------------------------------------
+bottom: 1
+EOF
+}
+
+@test "render: strips a block whose language is not detected, keeps the detected one WITH markers" {
+  make_blocky
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "java" b.yml.tmpl
+  [ "$status" -eq 0 ]
+  ! grep -q 'python: yes' "$OUT/b.yml"
+  ! grep -q 'PYTHON-START' "$OUT/b.yml"
+  grep -q 'java: yes' "$OUT/b.yml"
+  grep -q 'JAVA-START' "$OUT/b.yml"
+  grep -q 'JAVA-END' "$OUT/b.yml"
+}
+
+@test "render: LINUX_TESTS kept for java, stripped for swift-only" {
+  printf '# --- LINUX_TESTS-START ---\nlinux: yes\n# --- LINUX_TESTS-END ---\n' > "$T/l.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "java" l.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'linux: yes' "$OUT/l"
+  rm -rf "$OUT"; mkdir -p "$OUT"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "swift" l.tmpl
+  [ "$status" -eq 0 ]
+  ! grep -q 'linux: yes' "$OUT/l"
+}
+
+@test "render: nested SWIFT_SWIFTPM/SWIFT_XCODE resolve inside a kept SWIFT block" {
+  cat > "$T/n.tmpl" <<'EOF'
+# --- SWIFT-START ---
+swift: yes
+# --- SWIFT_SWIFTPM-START ---
+spm: yes
+# --- SWIFT_SWIFTPM-END ---
+# --- SWIFT_XCODE-START ---
+xcode: yes
+# --- SWIFT_XCODE-END ---
+# --- SWIFT-END ---
+EOF
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "swift" --swift-build-system xcode n.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'swift: yes' "$OUT/n"
+  grep -q 'xcode: yes' "$OUT/n"
+  ! grep -q 'spm: yes' "$OUT/n"
+}
+
+@test "render: a stripped outer block swallows its inner markers entirely" {
+  cat > "$T/n.tmpl" <<'EOF'
+# --- SWIFT-START ---
+# --- SWIFT_SWIFTPM-START ---
+spm: yes
+# --- SWIFT_SWIFTPM-END ---
+# --- SWIFT-END ---
+after: yes
+EOF
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "java" n.tmpl
+  [ "$status" -eq 0 ]
+  ! grep -q 'spm' "$OUT/n"
+  ! grep -q 'SWIFT' "$OUT/n"
+  grep -q 'after: yes' "$OUT/n"
+}
+
+@test "render: CLAUDE-PLUGIN (hyphen) marker matches the CLAUDE_PLUGIN table entry" {
+  printf '# --- CLAUDE-PLUGIN-START ---\nplugin: yes\n# --- CLAUDE-PLUGIN-END ---\n' > "$T/c.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --claude-plugin true c.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'plugin: yes' "$OUT/c"
+  rm -rf "$OUT"; mkdir -p "$OUT"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --claude-plugin false c.tmpl
+  [ "$status" -eq 0 ]
+  ! grep -q 'plugin: yes' "$OUT/c"
+}
+
+@test "render: PRIVATE block follows --visibility" {
+  printf '# --- PRIVATE-START ---\npriv: yes\n# --- PRIVATE-END ---\n' > "$T/p.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private p.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'priv: yes' "$OUT/p"
+}
+
+@test "render: DOCKER block follows --docker" {
+  printf '# --- DOCKER-START ---\ndocker: yes\n# --- DOCKER-END ---\n' > "$T/d.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --docker false d.tmpl
+  [ "$status" -eq 0 ]
+  ! grep -q 'docker: yes' "$OUT/d"
+}
+
+@test "render: unknown block tag fails loudly with file:line" {
+  printf 'a\n# --- MYSTERY-START ---\nx\n# --- MYSTERY-END ---\n' > "$T/u.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" u.tmpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"u.tmpl:2"* ]]
+  [[ "$output" == *"MYSTERY"* ]]
+}
+
+@test "render: unterminated block fails loudly" {
+  printf '# --- JAVA-START ---\nx\n' > "$T/u.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" u.tmpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unterminated"* ]]
+}
+
+@test "render: 3+ blank lines left by adjacent stripped blocks collapse to one" {
+  printf 'a\n\n# --- PYTHON-START ---\np\n# --- PYTHON-END ---\n\n# --- GO-START ---\ng\n# --- GO-END ---\n\nb\n' > "$T/g.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "java" g.tmpl
+  [ "$status" -eq 0 ]
+  # a, one blank, b — never two-plus consecutive blanks
+  max=$(awk 'BEGIN{b=0;m=0} /^$/{b++; if(b>m)m=b; next} {b=0} END{print m}' "$OUT/g")
+  [ "$max" -le 1 ]
+  grep -q '^a$' "$OUT/g"
+  grep -q '^b$' "$OUT/g"
+}
+
+@test "render: an existing double blank line without stripping is preserved" {
+  printf 'a\n\n\nb\n' > "$T/g.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" g.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(printf 'a\n\n\nb\n')" = "$(cat "$OUT/g")" ]
+}
+
+# --- leftover-placeholder check --------------------------------------------------
+
+@test "render: surviving {{UPPERCASE}} placeholder -> exit 1 listing file and name" {
+  echo 'key: {{PROJECT_KEY}}' > "$T/f.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" f.tmpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"{{PROJECT_KEY}}"* ]]
+  [[ "$output" == *"unsubstituted placeholders"* ]]
+}
+
+@test "render: GitHub \${{ }} expressions and docker-metadata literals are not flagged" {
+  cat > "$T/f.yml.tmpl" <<'EOF'
+a: ${{ secrets.GITHUB_TOKEN }}
+b: ${{ github.base_ref }}
+c: type=semver,pattern={{version}}
+d: type=semver,pattern={{major}}.{{minor}}
+e: type=raw,value=latest,enable={{is_default_branch}}
+f: --format '{{json .SBOM}}'
+EOF
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" f.yml.tmpl
+  [ "$status" -eq 0 ]
+  grep -q '{{version}}' "$OUT/f.yml"
+  grep -q '\${{ secrets.GITHUB_TOKEN }}' "$OUT/f.yml"
+}
+
+# --- determinism + real templates -------------------------------------------------
+
+@test "render: reruns are byte-identical (acceptance: deterministic across sessions)" {
+  mkdir -p "$BATS_TEST_TMPDIR/o1" "$BATS_TEST_TMPDIR/o2"
+  args=(--templates "$REAL_TEMPLATES"
+    --project-name tick --project-slug o/tick --project-key o_tick --org-key o
+    --languages "java" --docker true --security-contact-email ""
+    public/.github/workflows/quality-public.yml.tmpl
+    common/.github/SECURITY.md.tmpl
+    common/.pre-commit-config.yaml.tmpl)
+  zsh "$SCRIPT" --out "$BATS_TEST_TMPDIR/o1" "${args[@]}"
+  zsh "$SCRIPT" --out "$BATS_TEST_TMPDIR/o2" "${args[@]}"
+  diff -r "$BATS_TEST_TMPDIR/o1" "$BATS_TEST_TMPDIR/o2"
+}
+
+@test "render: real quality-public.yml.tmpl for a java+docker repo renders clean" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --project-name tick --project-slug o/tick --project-key o_tick --org-key o \
+    --languages "java" --docker true \
+    public/.github/workflows/quality-public.yml.tmpl
+  [ "$status" -eq 0 ]
+  Q="$OUT/public/.github/workflows/quality-public.yml"
+  # the #546-reported case: the unconditional pre-commit job got the default
+  grep -q 'python-version: "3.12"' "$Q"
+  # java kept, other language lanes stripped
+  grep -q 'JAVA-START' "$Q"
+  ! grep -q 'PYTHON-START' "$Q"
+  ! grep -q 'TYPESCRIPT-START' "$Q"
+  # docker lane kept, with the #547 split intact
+  grep -q 'push-and-sign:' "$Q"
+  # no uppercase placeholder survives
+  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$Q"
+}
+
+@test "render: real pre-commit template for a non-plugin java repo drops the CLAUDE-PLUGIN hooks" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --languages "java" common/.pre-commit-config.yaml.tmpl
+  [ "$status" -eq 0 ]
+  P="$OUT/common/.pre-commit-config.yaml"
+  ! grep -q 'CLAUDE-PLUGIN' "$P"
+  grep -q 'JAVA-START' "$P"
+}
+
+@test "render: static file without placeholders or blocks passes through unchanged" {
+  printf 'plain: file\nno: templating\n' > "$T/static.yml"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" static.yml
+  [ "$status" -eq 0 ]
+  diff "$T/static.yml" "$OUT/static.yml"
+}
