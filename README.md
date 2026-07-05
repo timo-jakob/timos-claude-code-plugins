@@ -77,9 +77,12 @@ What is shipped and aligned with the motivation:
   The epic flow drives all children in one invocation, halting only on those
   escalations
   ([#565](https://github.com/timo-jakob/timos-claude-code-plugins/issues/565)).
-  Epic [#557](https://github.com/timo-jakob/timos-claude-code-plugins/issues/557).
-  Live end-to-end validation on the `ai-doc-organizer` test bed is the remaining
-  step ([#567](https://github.com/timo-jakob/timos-claude-code-plugins/issues/567)).
+  Epic [#557](https://github.com/timo-jakob/timos-claude-code-plugins/issues/557),
+  validated end-to-end on the `ai-doc-organizer` test bed
+  ([#567](https://github.com/timo-jakob/timos-claude-code-plugins/issues/567)):
+  a well-specified story ran gate → review loop → dossier PR → Approver →
+  auto-merge; an underspecified one halted at the readiness gate; and a
+  security-conflicted one escalated to `needs-human-decision` with no PR.
 
 ### Current gaps
 
