@@ -21,3 +21,6 @@ out/
 
 # OS / tooling
 *.log
+
+# Review-loop telemetry (git-ignored; #566)
+.claude/telemetry/

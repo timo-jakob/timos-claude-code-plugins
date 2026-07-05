@@ -58,6 +58,7 @@ local CONSOLIDATE="${self_dir}/consolidate-findings.zsh"
 
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
+local issue="" telemetry_file=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --repo) repo="$2"; shift 2 ;;
@@ -68,12 +69,15 @@ while [[ $# -gt 0 ]]; do
   --max-rounds) max_rounds="$2"; shift 2 ;;
   --status-file) status_file="$2"; shift 2 ;;
   --work-dir) work_dir="$2"; shift 2 ;;
+  --issue) issue="$2"; shift 2 ;;
+  --telemetry-file) telemetry_file="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
-  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] [--base REF] [--max-rounds N] [--no-review]"; exit 0 ;;
+  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] [--base REF] [--max-rounds N] [--issue N] [--telemetry-file PATH] [--no-review]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
+local t0=$(date +%s)   # for the telemetry wall-clock (#566)
 
 # emit the status JSON (stdout + optional --status-file) and exit with `code`.
 emit_and_exit() {
@@ -102,6 +106,20 @@ emit_and_exit() {
       final_changelist:$final}')
   print -r -- "$out"
   [[ -n "$status_file" ]] && print -r -- "$out" > "$status_file"
+
+  # telemetry (#566): append exactly one JSONL record per run, to the explicit
+  # --telemetry-file or the git-ignored default under the repo. Never fatal.
+  local tfile="$telemetry_file"
+  [[ -z "$tfile" && -n "$repo" ]] && tfile="${repo%/}/.claude/telemetry/review-loop.jsonl"
+  if [[ -n "$tfile" ]]; then
+    local tmp_status; tmp_status=$(mktemp)
+    print -r -- "$out" > "$tmp_status"
+    mkdir -p "${tfile:h}"
+    local -a issue_arg; [[ -n "$issue" ]] && issue_arg=(--issue "$issue")
+    "${self_dir}/build-telemetry-record.zsh" --status "$tmp_status" \
+      "${issue_arg[@]}" --ts "$t0" --wall-s "$(( $(date +%s) - t0 ))" >> "$tfile" || true
+    rm -f "$tmp_status"
+  fi
   exit "$code"
 }
 

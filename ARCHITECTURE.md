@@ -1022,6 +1022,33 @@ Only `CONVERGED` proceeds to commit + open-pr; every escalation stops without a
 PR and is surfaced as a `needs-human-decision` issue comment (#564), never a
 draft PR (a draft would trigger CI, defeating the local loop).
 
+## Review-loop telemetry (#566)
+
+Raising autonomy safely needs evidence, so the loop appends **one JSONL record
+per run** to `.claude/telemetry/review-loop.jsonl` (git-ignored — the bootstrap
+gitignore fragments for python/java/swift carry `.claude/telemetry/`). The record
+is built deterministically from the loop's status JSON by
+`build-telemetry-record.zsh`: `ts`, `issue`, `repo_type`, `status`, `escalation`
+(the type, or `null` when converged/skipped), `rounds`, `max_rounds`,
+`findings_by_round` (per round, by priority and by dimension), `fixed` (blockers
+found and cleared) vs `waived` (Low suggestions logged), `wall_s`, and a reserved
+`tokens` field (not observable from zsh in v1). The append is never fatal — a
+telemetry failure can't break the loop's exit.
+
+The three headline metrics come straight off the file with `jq`:
+
+```bash
+# first-pass convergence rate
+jq -s '([.[] | select(.status == "CONVERGED")] | length) / length' .claude/telemetry/review-loop.jsonl
+# mean rounds to converge
+jq -s '([.[].rounds] | add) / length' .claude/telemetry/review-loop.jsonl
+# escalation breakdown
+jq -s 'group_by(.escalation) | map({(.[0].escalation | tostring): length}) | add' .claude/telemetry/review-loop.jsonl
+```
+
+This is the raw material for the DORA-style dashboard and for deciding future
+budgets (tokens, wall-clock) and risk-based review depth.
+
 ## Review dossier + Approver re-ingest (#563)
 
 The PR is the durable audit record for why auto-merge happened, so a `CONVERGED`
