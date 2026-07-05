@@ -21,3 +21,6 @@ htmlcov/
 .tox/
 .env
 .env.local
+
+# Review-loop telemetry (git-ignored; #566)
+.claude/telemetry/

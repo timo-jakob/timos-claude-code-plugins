@@ -133,6 +133,10 @@ model-driven steps:
 - **`--test-cmd`** — re-run the step-3 gate so a fix that breaks tests aborts
   the loop instead of shipping.
 
+Pass `--issue <N>` too: the loop appends one JSONL telemetry record per run to
+`.claude/telemetry/review-loop.jsonl` (git-ignored, #566) — evidence for
+convergence rate, rounds-to-converge, and escalation breakdown.
+
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
 
