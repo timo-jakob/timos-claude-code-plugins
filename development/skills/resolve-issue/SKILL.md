@@ -293,39 +293,60 @@ Partition into the **provably-disjoint set** (no shared files at all *and* no
 in-flight PR touching them — realistically: different plugins) and **everything
 else**.
 
-### E3. Resolve — sequential by default, disjoint-only in parallel
+### E3. Resolve — drive ALL children in one invocation
 
-- **Disjoint children** → may run as **parallel sub-agents**, each in its own
-  **worktree** (so file edits can't collide), each running the Single-issue flow
-  to its own bot-authored PR. They don't depend on each other, so their PRs can
-  be open and merge independently.
+One epic invocation drives **every** open child to completion — decompose,
+order, resolve each — not "next child, then stop". The only thing that ever
+halts a child is a **typed escalation** (§#564); the readiness pre-flight (E1b)
+already proved every child was `READY` before the first one starts, so nothing
+else needs a human mid-run.
+
+- **Disjoint children** → **parallel sub-agents**, each in its own **worktree**
+  (so edits can't collide), each running the Single-issue flow to its own
+  bot-authored PR. They don't depend on each other, so their PRs open and merge
+  independently.
 - **Everything else** → **sequential + stable**: resolve one child fully
-  (Single-issue flow → PR), **wait for it to merge**, then `git fetch origin` and
-  branch the next off the fresh tip. This mirrors `/development:maintenance`'s
-  per-group cadence and is the default.
+  (Single-issue flow → PR), **wait for it to merge**, `git fetch origin`, branch
+  the next off the fresh tip, continue — through the whole chain.
 
 > **Bias hard to sequential.** Worktrees make parallelism *possible*, not
-> *preferred* — even with them, choose sequential stability and only parallelise
-> the provably-disjoint set. **Minimising merge conflicts beats throughput.**
-> When in doubt, sequential.
->
-> **Waiting for a merge — and one child per invocation in a human-only repo.**
-> In an **Approver** repo each bot PR auto-merges on green CI, so the sequential
-> loop proceeds on its own — wait on the PR's checks with the blessed poller
-> (`development/skills/maintenance/scripts/await-pr-checks.zsh <pr>`, which exits
-> 0 on settle and nonzero only on a real timeout/error — never hand-roll a
-> `while [ … ]` poll that leaks its trailing test's exit status as a false
-> failure, #412), then when it's merged fetch + branch the next. In a
-> **human-only** (claude-plugin) repo the PR waits for the
-> human, so a sequential epic resolves **exactly one child per invocation**:
-> resolve it, open the bot PR, then **stop** — the next child can't branch off
-> the unmerged tip (it would stack and conflict on the version line). Surface the
-> PR, tell the user to approve it, and that re-running
-> `/development:resolve-issue <epic#>` continues from the next open child once it
-> merges (the skill is resumable). **When a re-run finds no open children left,
-> it does no child work — it runs E4 (holistic verification) and E5 (close the
-> epic).** **Never branch the next child off an unmerged dependency, and never
-> pre-resolve multiple sequential children.**
+> *preferred*; parallelise only the provably-disjoint set. **Minimising merge
+> conflicts beats throughput.** When in doubt, sequential — and off the *merged*
+> tip, never stacked (the version manifest alone would conflict).
+
+**Waiting for each merge.** In an **Approver** repo each bot PR auto-merges on
+green CI, so the loop advances the whole chain by itself: wait on the PR with the
+blessed poller
+(`development/skills/maintenance/scripts/await-pr-checks.zsh <pr>` — exit 0 on
+settle, nonzero only on a real timeout/error; never hand-roll a `while [ … ]`
+poll that leaks its trailing test's status as a false failure, #412), then
+fetch + branch the next. **All children, one invocation, no re-trigger.** In a
+**human-only** (claude-plugin) repo a human approves + merges each PR — a genuine
+judgement gate, not a needless re-trigger — so a *sequential* chain there still
+advances per merge: open the current child's PR and stop, resuming on re-run once
+it merges. (Disjoint children can still all be opened at once even there.)
+
+**When a child escalates (typed exit from §#564), don't abort the epic.** Triage
+the rest against the escalated child:
+
+- children that **don't depend** on it → **keep going**;
+- children that **do depend** on it → **park** them: leave a note on the epic
+  that they're blocked on child #X (do not branch them off an unmerged/blocked
+  dependency);
+- never fail silently — the escalation already posted its own typed comment on
+  the child (§#564).
+
+**End every run with an epic summary comment** — one comment on the epic listing
+**merged / escalated / parked** children (and any still queued), so the epic's
+state is legible at a glance. Then:
+
+- **All children merged** → proceed to **E4** (holistic verification) and **E5**
+  (close the epic). A re-run that finds **zero open children** does no child work
+  — it goes straight to E4 + E5.
+- **Some escalated/parked** → the epic stays **open**; re-running after the human
+  resolves an escalation (the decision lands in the child's comment thread, which
+  the implement step re-reads) resumes the parked dependents and any remaining
+  children. The flow is fully **resumable**.
 
 ### E4. Comprehensive epic verification (after ALL children merge)
 
