@@ -136,8 +136,11 @@ model-driven steps:
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
 
-- **`CONVERGED`** (exit 0) → proceed to step 4. Carry the final changelist
-  forward — it becomes the review dossier in the PR (#563).
+- **`CONVERGED`** (exit 0) → proceed to step 4. **Keep the loop's status JSON**
+  (`--status-file`) — step 6 feeds it to `build-dossier.zsh` so the **Review
+  dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
+  suggestions, reviewers) lands in the PR body, with a hidden JSON block the
+  Approver re-ingests (#563).
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
   *Escalation* below. Opening a PR here would spend CI on unconverged work.
@@ -200,7 +203,9 @@ writer token (`mint-maintenance-token.zsh`), **push the branch as the bot**
 the bot is also the last pusher), open the PR with `GH_TOKEN=$TOKEN gh pr create`
 (author = the Maintenance App), then `GH_TOKEN=$TOKEN gh pr merge <n> --auto
 --squash --delete-branch`. The PR body follows the template (Type / Summary /
-Test plan — include the Step 3 evidence) and carries `Closes #N`. Outcomes:
+Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
+loop ran and converged (§3.5), append the **Review dossier** via
+`build-dossier.zsh` on the kept status JSON (#563). Outcomes:
 
 - **Approver repo (Python / Java)** → the Claude Approver auto-approves → it
   auto-merges on green CI.

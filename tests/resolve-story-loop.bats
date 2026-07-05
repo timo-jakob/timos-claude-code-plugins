@@ -49,6 +49,9 @@ loop() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
   [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  # #563: every round's changelist is retained for the review dossier
+  [ "$(echo "$output" | jq '.round_changelists | length')" -eq 2 ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
 }
 
 @test "unfixable identical blocker exits ESCALATE_NO_CONVERGENCE before round 3" {

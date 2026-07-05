@@ -50,7 +50,7 @@ For every PR the approve skill is invoked on:
    the core section first, then the language overlay's additions for
    the same type.
 5. Build a risk register from the **Per-type risk factors** (core +
-   overlay).
+   overlay), folding in the **Review dossier** if the PR body carries one.
 6. Calibrate confidence per **Confidence calibration** (the overlay may
    add caps).
 7. Render the verdict: `APPROVE` / `REQUEST_CHANGES` / `COMMENT`-with-reservations.
@@ -423,6 +423,32 @@ version bump) is **not** the same as the Approver's per-type rules —
 `refactor:` PRs that a gate allowed through with `!` still trigger
 `REQUEST_CHANGES` here, because refactors are non-negotiably
 behaviour-preserving.
+
+---
+
+## Review dossier (when present)
+
+A PR opened through the autonomous review loop carries a **Review dossier** in
+its body — a hidden `<!-- review-dossier: {…} -->` JSON block that records what
+the pre-merge reviewer panel already found and fixed. When it is present, parse
+it and fold it into the risk register (it is **context, never a rubber stamp** —
+CI and the per-type criteria still decide):
+
+- **A `clean` dimension lowers that lens's residual-risk weight.** If
+  `dimensions.<lens>.clean == true`, the panel reviewed that lens (bugs,
+  security, performance, code_quality, tests — and swift6_compliance on Swift)
+  and found nothing on the changed surface; treat a fresh risk you would
+  otherwise raise in that lens as lower-probability, and do not manufacture one
+  just to fill the register.
+- **A non-clean dimension is where to look hardest** — the panel found something
+  there; confirm the fix rather than assume it.
+- **`waived_low` is context, not a finding.** Those are Low suggestions the loop
+  logged and deliberately did not act on; never turn a waived-Low into a
+  `REQUEST_CHANGES` on its own.
+
+A PR **without** a dossier (e.g. `--no-review`, or a human-authored PR) is judged
+exactly as before — the dossier only ever *reduces* unnecessary friction, never
+adds a gate.
 
 ---
 
