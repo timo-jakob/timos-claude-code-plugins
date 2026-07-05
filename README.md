@@ -53,6 +53,33 @@ What is shipped and aligned with the motivation:
   version-bump bypass) is also shipped and couples into the Approver's
   per-type rules. See "Claude Approver" below for the design and the
   current ship-status table.
+- **Autonomous story delivery — readiness gate + local review loop.**
+  `/development:resolve-issue` runs a **story-readiness gate** before any code is
+  written (testable acceptance, bounded scope, resolved dependencies, plus a
+  risk classification — [#559](https://github.com/timo-jakob/timos-claude-code-plugins/issues/559)),
+  then a **local, pre-push review loop**
+  ([#562](https://github.com/timo-jakob/timos-claude-code-plugins/issues/562)):
+  the language review panel is invoked **diff-scoped**
+  ([#560](https://github.com/timo-jakob/timos-claude-code-plugins/issues/560)),
+  emits **machine-readable findings**
+  ([#558](https://github.com/timo-jakob/timos-claude-code-plugins/issues/558)),
+  and a **consolidator** turns them into one prioritised changelist
+  ([#561](https://github.com/timo-jakob/timos-claude-code-plugins/issues/561)).
+  The loop fixes blockers and re-reviews up to three rounds, so a PR is only
+  opened — and CI minutes only spent — on code the panel has already converged
+  on. Convergence attaches a **review dossier** the Approver re-ingests
+  ([#563](https://github.com/timo-jakob/timos-claude-code-plugins/issues/563));
+  every non-converged exit is a **typed `needs-human-decision` escalation** with
+  no draft PR
+  ([#564](https://github.com/timo-jakob/timos-claude-code-plugins/issues/564));
+  each run appends **JSONL telemetry**
+  ([#566](https://github.com/timo-jakob/timos-claude-code-plugins/issues/566)).
+  The epic flow drives all children in one invocation, halting only on those
+  escalations
+  ([#565](https://github.com/timo-jakob/timos-claude-code-plugins/issues/565)).
+  Epic [#557](https://github.com/timo-jakob/timos-claude-code-plugins/issues/557).
+  Live end-to-end validation on the `ai-doc-organizer` test bed is the remaining
+  step ([#567](https://github.com/timo-jakob/timos-claude-code-plugins/issues/567)).
 
 ### Current gaps
 
