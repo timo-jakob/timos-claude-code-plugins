@@ -31,6 +31,17 @@ Test bed: `timo-jakob/ai-doc-organizer` (public, Python + web, Approver-configur
    typical PR CI run on `ai-doc-organizer` (look at a recent merged PR's checks
    duration). Call it `CI_MIN`. Savings per story ≈ `(rounds_that_would_have_been_pushed - 1) * CI_MIN`,
    because pre-convergence rounds happen locally instead of on CI.
+5. **The bot push needs a `coverage.xml` on disk.** The repo's `pre-push` hook
+   runs `diff-cover` against a Cobertura `coverage.xml`; without one the push is
+   blocked (observed in the ai-doc-organizer bootstrap, which had to run the
+   suite just to generate a vacuous report — tracked as
+   [#602](https://github.com/timo-jakob/timos-claude-code-plugins/issues/602)).
+   Since these validation stories **do** touch Python, run the per-issue gate as
+   `pytest --cov=<pkg> --cov-report=xml` (Scenario A/C) so `coverage.xml` already
+   exists when the loop pushes the bot PR — otherwise the push stalls exactly as
+   the bootstrap's first attempt did. (Workflow-only pushes hit the separate
+   Writer-App `workflows`-permission limit, [#601](https://github.com/timo-jakob/timos-claude-code-plugins/issues/601)
+   — not a concern here, since the stories change code, not workflows.)
 
 ---
 
