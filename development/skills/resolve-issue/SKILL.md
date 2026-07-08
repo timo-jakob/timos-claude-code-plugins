@@ -89,20 +89,29 @@ On either rejection, what happens next depends on who is driving:
   (below) rather than dead-ending — with a human present, a rejection is a
   fork in the road, not a stop sign.
 
-#### Interactive remediation — offer to clear the blockage (#586)
+#### Interactive remediation — offer to clear the blockage (#586, #587)
 
 Applies **only** with a human present, and only to `REJECT_BLOCKED`:
 
 - **`REJECT_CYCLE` has no remediation.** No order of work satisfies a cycle;
   the fix is a relationship edit (remove whichever blocked-by points the wrong
   way), and that judgment is the human's. Report and stop.
-- **An open blocker classified `kind: "epic"`** is #587's territory
-  (epic-as-dependency recursion). Until it ships, say so and stop — resolving
-  one child of an epic wouldn't unblock the dependent, and improvising the
-  whole epic here would duplicate the epic flow.
+- **An open blocker classified `kind: "epic"` blocks as a whole** (#587):
+  resolving one child wouldn't unblock the dependent — the named issue may
+  depend on the epic's **combined** effect. Remediating an epic blocker means
+  running the **full Epic flow** on it (E1–E5: every child, the holistic E4
+  verification, the explicit E5 close) — **reuse that flow as written**, never
+  a re-implementation of its ordering. The named issue stays queued until the
+  blocking epic is **CLOSED**, not merely until its children merge — E4 may
+  still surface a regression that keeps the epic open. That is the epic flow's
+  "never branch off an unmerged dependency" rule, extended across the epic
+  boundary. (Autonomous runs are unchanged: an epic blocker rejects +
+  escalates like any other — an unattended run never auto-runs the epic.)
 
-For plain-issue blockers, put the choice to the human (AskUserQuestion — one
-question, two options; on rejection, name the open blockers in the question):
+Whatever the blocker's kind, put the choice to the human (AskUserQuestion —
+one question, two options; on rejection, name the open blockers in the
+question, and say when one is an epic, since choosing to resolve it means
+resolving the whole epic):
 
 1. **Resolve the dependency AND the named issue** — clear the whole blocker
    chain, then build the named issue in the same run.
@@ -123,10 +132,16 @@ present, gets the same offer), and #585's cycle refusal is inherited rather
 than re-implemented. One issue per PR, as always — a chain of three blockers
 is three PRs, each **merged before its dependent branches** (never stacked;
 the epic flow's "never branch off an unmerged dependency" rule, applied
-across the remediation chain). Wait for each merge before the next rung: an
-Approver repo auto-merges on green (`await-pr-checks.zsh`); in a human-only
-repo the human is present — report the blocker PR ready and continue once
-they merge it.
+across the remediation chain). An **epic-kind blocker occupies its rung as a
+single unit**: that rung runs the Epic flow (above) instead of the
+single-issue flow, and the rung is complete only when the blocking epic is
+closed. Wait for each merge before the next rung: an Approver repo
+auto-merges on green (`await-pr-checks.zsh`); in a human-only repo the human
+is present — report the blocker PR ready and continue once they merge it.
+When an epic rung pauses awaiting a child's merge (the human-only cadence),
+this remediation pauses with it; re-running `/development:resolve-issue` on
+the **named issue** re-enters the gate and resumes the blocking epic from its
+next open child.
 
 Then, per the chosen option:
 
@@ -135,8 +150,8 @@ Then, per the chosen option:
   its next `resolve-issue` run passes the precheck by itself.
 - **Both** → **re-verify, then proceed**: re-run the precheck on the named
   issue and require `PROCEED` — a squash-merged PR closes its issue via
-  `Closes #N`,
-  but verify rather than assume (a blocker may have gained a new relationship
+  `Closes #N`, but verify rather than assume (a blocker may have gained a new
+  relationship
   while the chain was in flight; a merge may not have closed what you think
   it closed). Only on `PROCEED` continue to step 0b and the rest of the
   single-issue flow, exactly as if the precheck had passed first try.
@@ -520,7 +535,10 @@ is the epic truly done — report it closed, with the PR/verification table.
   **never auto-chains** into resolving the blocker itself. Interactive runs get
   the guided offer (§0a remediation) — resolve blocker + named issue, or just
   the blocker — but remediation only ever starts from an explicit human choice,
-  and cycles are never remediated.
+  and cycles are never remediated. An epic-kind blocker remediates as a
+  **whole epic** — the full Epic flow to a closed epic (E4/E5 included) before
+  the dependent proceeds; never one child, never a reimplementation of the
+  epic's ordering.
 - **Gate before you build** — the `story-readiness` gate runs next (single-issue
   step 0b; epic pre-flight over all children). A `NEEDS_REFINEMENT` verdict posts
   refinement questions + the `needs-refinement` label and **stops** — never

@@ -1143,8 +1143,12 @@ itself. In **interactive** runs the skill layers guided remediation on top
 **deepest-first**, each blocker through the full single-issue flow (one PR per
 blocker, merged before its dependent branches), with closure **re-verified by
 re-running the precheck** before the named issue proceeds. Cycles are never
-remediated (a relationship edit is the human's call), and an epic-kind blocker
-waits for the epic-as-dependency recursion (#587).
+remediated (a relationship edit is the human's call). An **epic-kind blocker
+remediates as a whole** (#587): its rung runs the full epic flow — all
+children plus the holistic E4 verification and the explicit E5 close, reused
+as written — and the dependent stays queued until the blocking epic is
+**closed**, not merely children-merged; autonomous runs still reject +
+escalate rather than auto-running the epic.
 
 ## Agent model selection
 
