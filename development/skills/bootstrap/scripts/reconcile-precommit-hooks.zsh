@@ -19,6 +19,17 @@
 # customizations and pinned revs are preserved. Idempotent: a second run finds
 # every id already present and changes nothing.
 #
+# One tightly-scoped exception (#602): stale `coverage-floor*` pre-push hooks.
+# Pre-#379 those hooks shipped with `always_run: true` and no `files:` guard, so
+# a zero-covered-language push (a docs/workflow-only change) was blocked
+# demanding a vacuous coverage report. #379 replaced always_run with a
+# covered-source `files:` filter that lets pre-commit skip the hook. An older
+# repo still carries the stale shape, so this reconciler ALSO migrates it in
+# place to the guarded form — the one deliberate non-additive edit here, and a
+# safe one: it only rewrites a coverage-floor* hook that BOTH still has
+# `always_run: true` AND lacks a `files:` line, and it pulls the canonical
+# `files:` value for each id from the rendered template rather than hardcoding.
+#
 # With --scan (#410): after wiring, run each newly-wired hook repo-wide
 # (`pre-commit run <id> --all-files`) BEFORE the caller commits. Introducing a
 # repo-wide enforcing hook (yamllint, gitleaks, …) on a non-greenfield repo
@@ -127,6 +138,61 @@ for block in "$work"/block.*(N); do
 done
 
 [[ $added -eq 0 ]] && print -- "all template hook providers already present — nothing to wire."
+
+# --- #602: migrate stale coverage-floor hooks (pre-#379 always_run) ----------
+# For every coverage-floor* hook id the rendered template carries, rewrite an
+# on-disk block that is still in the pre-#379 shape (always_run: true, no
+# files:) to the guarded form, using the template's canonical files: value.
+local -a cf_ids
+cf_ids=("${(@f)$(grep -E '^[[:space:]]*-[[:space:]]*id:[[:space:]]*coverage-floor' "$rendered" 2>/dev/null \
+  | sed -E 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*//; s/[[:space:]]*(#.*)?$//' || true)}")
+
+local cfid files_val cf_block
+for cfid in $cf_ids; do
+  [[ -n "$cfid" ]] || continue
+
+  # Canonical files: value for this id, read from the rendered template block.
+  # (awk reads/prints the value as literal bytes, so a regex like `\.py$`
+  # survives intact — unlike awk -v, which would eat the backslash.)
+  files_val="$(awk -v id="$cfid" '
+    $0 ~ "^[[:space:]]*-[[:space:]]*id:[[:space:]]*" id "([[:space:]]|$)" { inb=1; next }
+    inb && /^[[:space:]]*-[[:space:]]*id:/ { inb=0 }
+    inb && /^[[:space:]]*-[[:space:]]*repo:/ { inb=0 }
+    inb && /^[[:space:]]*files:[[:space:]]*/ {
+      sub(/^[[:space:]]*files:[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit
+    }
+  ' "$rendered")"
+  [[ -n "$files_val" ]] || continue    # template has no files: for this id
+
+  # The on-disk hook block for this id (empty if the hook isn't present).
+  cf_block="$(awk -v id="$cfid" '
+    $0 ~ "^[[:space:]]*-[[:space:]]*id:[[:space:]]*" id "([[:space:]]|$)" { inb=1; print; next }
+    inb && /^[[:space:]]*-[[:space:]]*id:/ { inb=0 }
+    inb && /^[[:space:]]*-[[:space:]]*repo:/ { inb=0 }
+    inb { print }
+  ' "$config")"
+  [[ -n "$cf_block" ]] || continue
+
+  # Stale iff it still has always_run: true AND no files: guard. `if` guards keep
+  # a non-matching grep from tripping err_exit.
+  if ! print -r -- "$cf_block" | grep -qE '^[[:space:]]*always_run:[[:space:]]*true[[:space:]]*$'; then continue; fi
+  if print -r -- "$cf_block" | grep -qE '^[[:space:]]*files:[[:space:]]*'; then continue; fi
+
+  # Rewrite in place: swap the always_run: true line (only inside this id's
+  # block) for a files: line at the same indentation. CF_VAL rides in via the
+  # environment so awk treats the regex value as literal.
+  CF_VAL="$files_val" awk -v id="$cfid" '
+    $0 ~ "^[[:space:]]*-[[:space:]]*id:[[:space:]]*" id "([[:space:]]|$)" { inb=1; print; next }
+    inb && /^[[:space:]]*-[[:space:]]*id:/ { inb=0 }
+    inb && /^[[:space:]]*-[[:space:]]*repo:/ { inb=0 }
+    inb && /^[[:space:]]*always_run:[[:space:]]*true[[:space:]]*$/ {
+      match($0, /^[[:space:]]*/); print substr($0, 1, RLENGTH) "files: " ENVIRON["CF_VAL"]; next
+    }
+    { print }
+  ' "$config" > "$config.migrated"
+  mv "$config.migrated" "$config"
+  print -r -- "migrated stale coverage-floor hook: ${cfid} (always_run: true → files: ${files_val}) (#602)"
+done
 
 # --- #410: proactively scan repo-wide with the newly-wired hooks -------------
 if (( scan )) && (( ${#wired_ids[@]} > 0 )); then

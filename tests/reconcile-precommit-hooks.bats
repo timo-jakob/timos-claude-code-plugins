@@ -258,3 +258,147 @@ YAML
   run zsh "$S" --bogus "$CONFIG" "$RENDERED"
   [ "$status" -eq 2 ]
 }
+
+# --- #602: stale coverage-floor hook migration -------------------------------
+# A rendered template whose coverage-floor* hooks carry the post-#379 guarded
+# shape (files: + no always_run) — the canonical source the migration copies.
+write_rendered_cf() {
+  cat > "$RENDERED" <<'YAML'
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: coverage-floor
+        name: Coverage floor (90% on new code)
+        entry: diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
+        language: python
+        pass_filenames: false
+        # Run ONLY when Python source is in the push.
+        files: \.py$
+        stages: [pre-push]
+
+  - repo: local
+    hooks:
+      - id: coverage-floor-java
+        name: Coverage floor (90% on new code)
+        entry: diff-cover build/reports/jacoco/test/jacocoTestReport.xml --compare-branch=origin/main --fail-under=90
+        language: python
+        pass_filenames: false
+        files: \.(java|kt)$
+        stages: [pre-push]
+YAML
+}
+
+@test "#602 migrates a stale python coverage-floor (always_run: true -> files: guard)" {
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: local
+    hooks:
+      - id: coverage-floor
+        name: Coverage floor (90% on new code)
+        entry: diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
+        language: python
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+YAML
+  write_rendered_cf
+  run_it
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrated stale coverage-floor hook: coverage-floor"
+  # always_run gone, files: guard added WITH the literal backslash preserved.
+  ! grep -qE '^\s*always_run:' "$CONFIG"
+  grep -qE '^\s*files: \\\.py\$' "$CONFIG"
+  # stages line survives the rewrite.
+  grep -qE 'stages: \[pre-push\]' "$CONFIG"
+}
+
+@test "#602 migrates both python and java stale coverage-floor hooks" {
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: local
+    hooks:
+      - id: coverage-floor
+        entry: diff-cover coverage.xml --fail-under=90
+        language: python
+        always_run: true
+        stages: [pre-push]
+  - repo: local
+    hooks:
+      - id: coverage-floor-java
+        entry: diff-cover build/reports/jacoco/test/jacocoTestReport.xml --fail-under=90
+        language: python
+        always_run: true
+        stages: [pre-push]
+YAML
+  write_rendered_cf
+  run_it
+  [ "$status" -eq 0 ]
+  grep -qE '^\s*files: \\\.py\$' "$CONFIG"
+  grep -qE '^\s*files: \\\.\(java\|kt\)\$' "$CONFIG"
+  [ "$(grep -c 'always_run' "$CONFIG")" -eq 0 ]
+}
+
+@test "#602 is idempotent — an already-guarded coverage-floor is untouched" {
+  # Rendered template carries ONLY the already-present, already-guarded hook, so
+  # nothing is additively wired either — the file must be byte-for-byte stable.
+  cat > "$RENDERED" <<'YAML'
+repos:
+  - repo: local
+    hooks:
+      - id: coverage-floor
+        entry: diff-cover coverage.xml --fail-under=90
+        language: python
+        files: \.py$
+        stages: [pre-push]
+YAML
+  cp "$RENDERED" "$CONFIG"
+  before="$(cat "$CONFIG")"
+  run_it
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q "migrated stale coverage-floor"
+  [ "$(cat "$CONFIG")" = "$before" ]   # byte-for-byte unchanged
+}
+
+@test "#602 leaves a NON-coverage-floor hook's always_run alone" {
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: local
+    hooks:
+      - id: my-guard
+        name: keep me
+        entry: echo hi
+        language: system
+        always_run: true
+YAML
+  write_rendered_cf
+  run_it
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q "migrated stale coverage-floor"
+  grep -qE '^\s*always_run: true' "$CONFIG"   # still there
+}
+
+@test "#602 migration and additive wiring co-occur in one run" {
+  # coverage-floor present-but-stale; gitleaks missing entirely.
+  cat > "$CONFIG" <<'YAML'
+repos:
+  - repo: local
+    hooks:
+      - id: coverage-floor
+        entry: diff-cover coverage.xml --fail-under=90
+        language: python
+        always_run: true
+        stages: [pre-push]
+YAML
+  write_rendered_cf
+  run_it
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "wired hook provider: gitleaks"     # additive
+  echo "$output" | grep -q "migrated stale coverage-floor hook: coverage-floor"  # migration
+  grep -qE '^\s*files: \\\.py\$' "$CONFIG"
+  [ "$(grep -c 'id: gitleaks' "$CONFIG")" -eq 1 ]
+}
