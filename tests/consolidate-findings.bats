@@ -70,7 +70,8 @@ EOF
   echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
   [ "$(echo "$output" | jq '.non_converging')" = "false" ]
 
-  # round 2: same defect (reworded title, shifted line) still blocks
+  # round 2: same defect, a different reviewer, punctuation reword + shifted
+  # line — still blocks (identity is file+dimension+line-proximity, not title).
   cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
 [{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":31,"title":"Race on shared counter!","description":"still here","reviewer":"python-security-reviewer"}]
 EOF
@@ -78,6 +79,47 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq '.non_converging')" = "true" ]
   echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
+}
+
+@test "non-convergence: a SEMANTICALLY reworded blocker (same file/dimension) still fires (#606)" {
+  # The #606 regression: round-to-round the reviewer re-words the SAME finding.
+  # A title-based fingerprint misses it and wastes a third round; identity must
+  # be [file, dimension] + line proximity, not the free-text title.
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"security","file":"client.py","line":40,"title":"Disabling TLS verification exposes API key and document PII to MITM","description":"verify=False","reviewer":"python-security-reviewer"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  [ "$(echo "$output" | jq '.non_converging')" = "false" ]
+
+  # round 2: same defect (verify=False still present), title reworded with an
+  # extra clause and the line drifted by 2 — the old title fingerprint would NOT
+  # have matched, so it must still fire on file+dimension+proximity.
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"security","file":"client.py","line":42,"title":"Disabling TLS verification exposes API key and document PII to MITM (now wired and reachable)","description":"verify=False still present","reviewer":"python-security-reviewer"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
+}
+
+@test "non-convergence: a NEW same-file/dimension blocker far from the prior line does not fire" {
+  # Line proximity guards against a false positive: round-1 blocker is fixed and
+  # a genuinely different blocker of the same dimension appears elsewhere in the
+  # file — the loop is still converging, so non_converging must stay false.
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"security","file":"client.py","line":40,"title":"Disabling TLS verification","description":"verify=False","reviewer":"python-security-reviewer"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"security","file":"client.py","line":400,"title":"Unvalidated redirect in fetch()","description":"a different, unrelated defect","reviewer":"python-security-reviewer"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "false" ]
 }
 
 @test "non-convergence: a DIFFERENT blocker in round 2 does not set non_converging" {

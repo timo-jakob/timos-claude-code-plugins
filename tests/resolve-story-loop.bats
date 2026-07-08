@@ -64,8 +64,12 @@ loop() {
 }
 
 @test "round budget exhaustion exits BUDGET_EXHAUSTED with status JSON" {
-  # a different blocker each round -> never non_converging -> runs out the budget
-  loop --review-cmd 'printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":1,\"title\":\"b$REVIEW_ROUND\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"' \
+  # A GENUINELY different blocker each round -> never non_converging -> runs out
+  # the budget. Non-convergence is fingerprinted on [file, dimension] + line
+  # proximity (#606), NOT the title — so a distinct blocker must differ in
+  # location: the line jumps 1000/2000/3000 (well beyond the proximity window),
+  # so no round matches the prior one and the loop exhausts all 3 rounds.
+  loop --review-cmd 'printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":$((REVIEW_ROUND*1000)),\"title\":\"b$REVIEW_ROUND\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"' \
        --fix-cmd 'true'
   [ "$status" -eq 13 ]
   [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
