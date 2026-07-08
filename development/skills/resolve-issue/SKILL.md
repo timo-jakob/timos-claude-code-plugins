@@ -85,9 +85,61 @@ On either rejection, what happens next depends on who is driving:
 
 - **Interactive** (a human invoked `/development:resolve-issue` and is
   present): report the argumentation in the conversation instead — the human
-  is right there, a comment would be noise. Guided remediation (offering to
-  resolve the blocker, or blocker + named issue) is #586; until it ships,
-  stop after reporting.
+  is right there, a comment would be noise. Then offer **guided remediation**
+  (below) rather than dead-ending — with a human present, a rejection is a
+  fork in the road, not a stop sign.
+
+#### Interactive remediation — offer to clear the blockage (#586)
+
+Applies **only** with a human present, and only to `REJECT_BLOCKED`:
+
+- **`REJECT_CYCLE` has no remediation.** No order of work satisfies a cycle;
+  the fix is a relationship edit (remove whichever blocked-by points the wrong
+  way), and that judgment is the human's. Report and stop.
+- **An open blocker classified `kind: "epic"`** is #587's territory
+  (epic-as-dependency recursion). Until it ships, say so and stop — resolving
+  one child of an epic wouldn't unblock the dependent, and improvising the
+  whole epic here would duplicate the epic flow.
+
+For plain-issue blockers, put the choice to the human (AskUserQuestion — one
+question, two options; on rejection, name the open blockers in the question):
+
+1. **Resolve the dependency AND the named issue** — clear the whole blocker
+   chain, then build the named issue in the same run.
+2. **Resolve just the dependency** — clear the chain, then stop; the human
+   re-runs `/development:resolve-issue <N>` when ready (its blockers now
+   closed, the precheck passes on its own).
+
+Declining both (the "Other" escape hatch) stops exactly as before the offer
+existed — never remediate without an explicit choice.
+
+**Either way, the blocker chain resolves deepest-first.** The precheck's
+`blockers` array carries a `depth` per blocker: work from the deepest open
+blocker upward, because a shallower blocker may itself be blocked by a deeper
+one — building it first would just re-reject. Resolve each blocker via the
+**full single-issue flow, recursively**: each blocker's run starts at its own
+step 0a, so a still-deeper blocker surfaces there (and, with the human still
+present, gets the same offer), and #585's cycle refusal is inherited rather
+than re-implemented. One issue per PR, as always — a chain of three blockers
+is three PRs, each **merged before its dependent branches** (never stacked;
+the epic flow's "never branch off an unmerged dependency" rule, applied
+across the remediation chain). Wait for each merge before the next rung: an
+Approver repo auto-merges on green (`await-pr-checks.zsh`); in a human-only
+repo the human is present — report the blocker PR ready and continue once
+they merge it.
+
+Then, per the chosen option:
+
+- **Just the dependency** → stop once the blocker chain is merged. Do not
+  branch, implement, or comment on the named issue — it was never touched, and
+  its next `resolve-issue` run passes the precheck by itself.
+- **Both** → **re-verify, then proceed**: re-run the precheck on the named
+  issue and require `PROCEED` — a squash-merged PR closes its issue via
+  `Closes #N`,
+  but verify rather than assume (a blocker may have gained a new relationship
+  while the chain was in flight; a merge may not have closed what you think
+  it closed). Only on `PROCEED` continue to step 0b and the rest of the
+  single-issue flow, exactly as if the precheck had passed first try.
 
 ### 0b. Readiness gate — is the story ready to build? (do NOT skip)
 
@@ -465,7 +517,10 @@ is the epic truly done — report it closed, with the PR/verification table.
 - **Dependencies gate first** — the 0a precheck rejects on open GitHub-native
   blockers (and refuses cycles) before anything is branched; in autonomous mode
   the rejection is a typed comment + `blocked` label, and an unattended run
-  **never auto-chains** into resolving the blocker itself.
+  **never auto-chains** into resolving the blocker itself. Interactive runs get
+  the guided offer (§0a remediation) — resolve blocker + named issue, or just
+  the blocker — but remediation only ever starts from an explicit human choice,
+  and cycles are never remediated.
 - **Gate before you build** — the `story-readiness` gate runs next (single-issue
   step 0b; epic pre-flight over all children). A `NEEDS_REFINEMENT` verdict posts
   refinement questions + the `needs-refinement` label and **stops** — never
