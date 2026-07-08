@@ -124,13 +124,29 @@ operational setup.
 
 1. **You are already in your worktree** — do NOT `cd "$repo_path"`
    (the parent project). Operate from your current cwd.
+
+   **Resolve the test environment first (#624).** Your worktree has no
+   `.venv`; the project's installed dependencies live in the **main
+   checkout's** `.venv`, bootstrapped by Phase 3 at `<repo_path>/.venv`
+   (`repo_path` is in your prompt). So **run pytest through that
+   interpreter**, with the worktree prepended to `PYTHONPATH` so **your**
+   edits are what get tested — not the main checkout's. Each Bash call is
+   a fresh shell, so prepend this to each pytest run (substitute the real
+   `repo_path`):
+
+   ```bash
+   PYTHONPATH="$PWD/src:$PWD${PYTHONPATH:+:$PYTHONPATH}" <repo_path>/.venv/bin/python -m pytest …
+   ```
+
+   If `<repo_path>/.venv` is absent (bootstrap skipped / pre-#624), fall
+   back to bare `pytest`.
 2. Group findings by file to minimize re-reads.
 3. For each file:
    - Read the file once.
    - For each finding: use LSP to scope the affected symbol
      (find-references → is it public?), then decide + apply.
 4. `git status --short` for the summary.
-5. **Run tests** in the worktree:
+5. **Run tests** in the worktree (through the step-1 interpreter prefix):
    - `pytest --tb=short 2>&1 | tail -60`
    - Any **new executable line** your fix introduces (a lambda, an
      extracted branch) must be covered by a test before you finish —
