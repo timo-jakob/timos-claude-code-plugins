@@ -1095,6 +1095,38 @@ closes the loop: the human answers in the thread and re-runs
 gate read the issue's *comments*, the decision becomes implementation context and
 the next run can converge. No PR exists until it does.
 
+## Issue-dependency model (#583)
+
+**GitHub-native `blockedBy` relationships are the single source of truth for
+issue dependencies.** Prose ("depends on #M", "after #M") is advisory at best:
+nothing can enforce it, and it drifts. So the contract is:
+
+- **Declare it or it doesn't exist.** A dependency required to start must be a
+  native *blocked-by* relationship on the issue (queryable via GraphQL:
+  `blockedBy` / `blocking` / `issueDependenciesSummary`, alongside `subIssues` /
+  `trackedIssues` for hierarchy). The `story-readiness` gate enforces the
+  declaration: a prose-implied dependency with no corresponding native
+  relationship is a `NEEDS_REFINEMENT` reason ("declare #M as a blocked-by
+  relationship"), never something the gate silently infers.
+- **No second machine-readable copy.** The `story-spec` block (#574) carries
+  **no** `dependencies` field — that was a deliberate cut, not an omission. Two
+  machine-readable copies of the same fact would drift; the AI reads
+  dependencies only the native way.
+- **One shared reader.** Every consumer — the readiness gate, the single-issue
+  dependency precheck (#585), the epic-as-dependency recursion (#587) — reads
+  through `development/skills/resolve-issue/scripts/read-dependencies.zsh`, so
+  traversal, classification, and cycle semantics cannot drift between them.
+
+The helper (`read-dependencies.zsh --repo OWNER/NAME --issue N`) emits one JSON
+object: the issue's **transitive** open blockers (`blocked`, `open_blockers`),
+every distinct blocker reached with `state`/`open`/`depth` and a `kind` of
+`epic` (the `epic` label, tracked issues, or a task-list body) vs `issue` —
+the hook #587 uses to require a whole epic resolved before its dependent — and
+**cycles reported explicitly** as the paths that closed them. A CLOSED blocker
+is recorded but not recursed into: a met prerequisite's own history can't block
+anything. `GH_BIN` is the test seam; exit codes are 0 (result), 2 (usage),
+1 (gh/GraphQL failure or nonexistent issue).
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:

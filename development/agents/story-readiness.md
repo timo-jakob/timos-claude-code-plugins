@@ -31,9 +31,23 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
   confirm they exist and that the described change is coherent against the real
   code — an issue that references a function or file that isn't there is not
   ready.
-- Resolve its dependencies: if the issue says "after #M" / "depends on #M" /
-  "blocked by #M", check that issue's state (`gh issue view <M> --json state`).
-  An **open, unmet hard prerequisite** makes the story not ready **unless** the
+- Resolve its dependencies. **GitHub-native `blockedBy` relationships are the
+  canonical source of truth for dependencies** (#583) — prose is not. Read the
+  declared blockers:
+
+  ```bash
+  gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){
+    repository(owner:$owner,name:$name){ issue(number:$number){
+      blockedBy(first:100){nodes{number state}} } } }' \
+    -f owner=<owner> -f name=<name> -F number=<N>
+  ```
+
+  Then reconcile the body's prose against them: a dependency *implied* in prose
+  ("after #M" / "depends on #M" / "blocked by #M") that has **no** corresponding
+  native `blockedBy` relationship is itself a `NEEDS_REFINEMENT` reason — the
+  refinement question is to declare it ("declare #M as a blocked-by relationship
+  on this issue"), never to silently treat the prose as the dependency. An
+  **open, unmet hard prerequisite** makes the story not ready **unless** the
   dependency is merely referenced for context, not required to start.
 
 ## The four readiness checks
@@ -49,9 +63,12 @@ unblock it.
 2. **Scope is bounded.** The change is a single coherent unit of work with
    identifiable files/areas — not an open-ended programme ("rewrite the
    pipeline") that should have been an epic.
-3. **Dependencies are resolved or referenced.** Every hard prerequisite is
-   either already done or explicitly named. An unstated prerequisite the work
-   can't start without fails.
+3. **Dependencies are resolved or declared natively.** Every hard prerequisite
+   is either already done or declared as a GitHub-native `blockedBy`
+   relationship on the issue. An unstated prerequisite the work can't start
+   without fails — and so does a **prose-only** dependency lacking the native
+   relationship (#583): the declaration is the machine-readable contract the
+   `resolve-issue` gate enforces; prose drifts, `blockedBy` doesn't.
 4. **No contradictory requirements.** The story does not ask for mutually
    exclusive things (e.g. "must be synchronous" and "must not block the caller"
    with no reconciliation).
