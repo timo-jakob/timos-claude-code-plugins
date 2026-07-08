@@ -1137,7 +1137,14 @@ first" can never be satisfied. Like the readiness gate it performs no GitHub
 writes; the skill posts. In **autonomous** runs (maintenance pipeline,
 epic-driven resolve) a rejection posts the comment, applies the `blocked` label,
 and stops — an unattended run never auto-chains into resolving the blocker
-itself; the interactive offer-with-options remediation is #586's layer on top.
+itself. In **interactive** runs the skill layers guided remediation on top
+(#586): the human explicitly chooses *resolve blocker + named issue* or
+*just the blocker* (declining stops); plain-issue chains resolve
+**deepest-first**, each blocker through the full single-issue flow (one PR per
+blocker, merged before its dependent branches), with closure **re-verified by
+re-running the precheck** before the named issue proceeds. Cycles are never
+remediated (a relationship edit is the human's call), and an epic-kind blocker
+waits for the epic-as-dependency recursion (#587).
 
 ## Agent model selection
 
