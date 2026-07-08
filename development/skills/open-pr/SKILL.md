@@ -88,6 +88,27 @@ TOKEN=$("<skill-base-dir>/../maintenance/scripts/mint-maintenance-token.zsh" 2>/
 
 ## Step 3 — push as the bot, open the PR as the bot
 
+**Before pushing — the coverage-report precondition (#602).** If the target repo
+ships the `coverage-floor` **pre-push** hook (bootstrapped Python/Java/Swift
+repos do), that hook runs `diff-cover` against a coverage report. Do **not**
+eagerly run the whole test suite to produce that report "just so the push
+succeeds" — for a diff with **no covered-language lines** (a docs/config/workflow
+change) the hook skips and no report is needed, so a test run is pure waste
+(running 167 tests for a vacuous `coverage.xml` was the observed symptom of
+issue 602). Ask the guard first, and only build the report when it says one is
+actually required:
+
+```bash
+"<skill-base-dir>/../bootstrap/scripts/ensure-coverage-precondition.zsh" --lang <python|java|swift>
+#   exit 0 → no report needed (or already on disk) — push straight away, no tests
+#   exit 1 → covered-language lines ARE in the diff — generate the report
+#            (pytest --cov / gradlew jacocoTestReport / swift llvm-cov), then push
+```
+
+(An older, pre-#379 target repo whose hook still has `always_run: true` is
+repaired in place by `reconcile-precommit-hooks.zsh` — see the bootstrap flow —
+so the guard's skip actually takes effect there too.)
+
 The PR **author** is whoever creates it, and the **last pusher** should also be
 the bot (so a "review from someone other than the last pusher" rule never blocks
 *your* approval). Use the token for both:
