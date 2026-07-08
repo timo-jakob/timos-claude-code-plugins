@@ -299,9 +299,12 @@ and the language-plugin triage agents that can fix those findings.
 When the Approver posts `REQUEST_CHANGES` on a PR, the user re-runs
 `/development:maintenance` to ingest the feedback. This phase finds the
 flagged PRs, dispatches agents to fix what's auto-fixable, and pushes
-the fixes back to the PR branches. CI re-runs on each push; the
-Approver re-evaluates on the next `check_suite: completed` event. The
-loop closes without further user intervention.
+the fixes back to the PR branches. CI re-runs on the new head (a plain
+user-identity push's `synchronize` runs it; a bot **App-token** push's
+does **not** — #605 — so the CI cycle re-triggers it deterministically,
+see § *Re-trigger CI after a bot re-push* below); the Approver
+re-evaluates on the next `check_suite: completed` event. The loop closes
+without further user intervention.
 
 **Skip silently** when `~/.config/claude-plugins/apps.json` doesn't
 exist — the Approver isn't set up on this machine, there's nothing
@@ -1408,7 +1411,21 @@ After pushing and opening the PR:
    distinguishing three outcomes:
 
    - `resolved: true` with empty `out_of_scope_failures` → fixer made
-     a commit; re-monitor CI for the next check round.
+     a commit; **re-trigger CI on the new head, then** re-monitor for the
+     next check round. Don't assume the fixer's push re-ran CI: a fixer
+     pushing under a bot **App installation token** fires a `synchronize`
+     that GitHub does **not** turn into workflow runs (#605), so the new
+     head can sit with zero checks and never settle. Run the blessed
+     helper — it is identity-agnostic (a no-op nudge when the push already
+     ran CI, a deterministic close+reopen re-trigger when it didn't):
+
+     ```bash
+     "<skill-base-dir>/scripts/retrigger-pr-ci.zsh" "<pr_number>"
+     # emits `result: CI-RUNNING` (checks registered — no nudge) or
+     # `result: NUDGED` (closed+reopened to re-trigger CI, auto-merge re-armed)
+     ```
+
+     Then re-monitor with `await-pr-checks.zsh` as before.
    - `resolved: true` with non-empty `out_of_scope_failures` → the
      failure was classified out of scope (a different tool's check
      failing, or a generic check pointing at files outside this PR's
