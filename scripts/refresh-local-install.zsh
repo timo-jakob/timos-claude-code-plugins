@@ -188,7 +188,27 @@ for name in "${plugin_names[@]}"; do
   fi
 done
 
+# --- summary: report the installed versions --------------------------------
+# The authoritative "installed version" is the version dir on disk under the
+# cache (cache/<marketplace>/<plugin>/<version>), not what the manifest claims —
+# so a plugin whose install failed shows "(not installed)".
+installed_version() {
+  local -a dirs=("${PLUGINS_DIR}/cache/${MARKETPLACE}/$1"/*(/N))
+  (( ${#dirs} )) && print -- "${dirs[-1]:t}" || print -- "(not installed)"
+}
+
+# Widest plugin name, for column alignment.
+width=0
+for name in "${plugin_names[@]}"; do (( ${#name} > width )) && width=${#name}; done
+
 print -- ""
+print -- "Installed versions:"
+print -- "  Claude Code CLI    $(claude --version 2>/dev/null || print -- '(unknown)')"
+for name in "${plugin_names[@]}"; do
+  printf '  %-*s  %s\n' "$width" "$name" "$(installed_version "$name")"
+done
+print -- ""
+
 if (( failed )); then
   print -u2 -- "Done with ${failed} plugin install failure(s)."
   exit 1
