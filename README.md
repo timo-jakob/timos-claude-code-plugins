@@ -149,6 +149,9 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
+| Open PR | `/development:open-pr` | Opens a PR for the current branch **authored by the Claude Maintenance bot** — so you can approve it (GitHub blocks self-approval) — with squash auto-merge armed; falls back to a user-authored PR when the writer App isn't installed |
+| Library Docs | `/development:library-docs` | Ensures work proceeds from current, authoritative docs for any library / framework / CLI / API in scope rather than stale training-data guesses |
+| Cleanup | `/development:cleanup` | Tidies the local git environment after a merge — prunes stale remote-tracking branches and deletes local branches already merged into `main` |
 
 **Agents:**
 
@@ -160,6 +163,8 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Bootstrap Idempotency Reviewer | opus | For each existing file conflicting with a template, recommends skip/overwrite/merge |
 | Bootstrap Validator | haiku | Fast post-write check — YAML/JSON parses, no unresolved placeholders, cross-references resolve |
 | Bootstrap Reviewer | opus | Optional senior-engineer review of the full bootstrap output (`--review` flag) |
+| Story Readiness | opus | Readiness gate for `/development:resolve-issue` — judges whether a story is specified well enough to build (testable acceptance, bounded scope, resolved dependencies) and emits a low/normal/elevated risk classification; verdict JSON only |
+| Review Consolidator | opus | Consolidates one review round's findings into a single prioritised changelist for the `resolve-issue` local review loop (dedup, blocking classification, conflict + non-convergence detection); changelist JSON only |
 
 ### development-swift
 
@@ -229,6 +234,8 @@ input and dispatches here.
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | `/development-python:maintenance <json>` | Parses input, runs coverage pre-flight, spawns per-tool agents in parallel worktrees, aggregates results. Standalone invocation prints usage and stops. |
+| Approve | `/development-python:approve [<pr>]` | Runs `python-approver` against an open PR and posts the verdict as the Claude Approver identity (same agent as CI) |
+| Improve Test Coverage | `/development-python:improve-test-coverage` | Raises coverage toward a target by spawning `python-coverage-improver` agents in parallel worktrees — deliberate investment outside the maintenance pipeline |
 | Review | `/development-python:review [paths]` | Spawns 5 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449) |
 
 **Agents:**
@@ -243,6 +250,9 @@ input and dispatches here.
 | python-runtime-upgrade | fable | Applies a Python interpreter bump (Dependabot's `python:X.Y → Z.W` Docker base-image PR). Swaps Dockerfile FROM and pyproject.toml `requires-python`; best-effort local verify; **cascade-upgrades dependencies** that need newer versions for the new interpreter, reading their release notes and applying migrations (up to 3 passes). Stops only when a required dep has no version on PyPI supporting the new Python — does NOT search for alternative libraries |
 | python-coverage-improver | fable | Brings under-covered modules up to threshold by writing meaningful behavior tests; never modifies production code |
 | python-dependabot-snyk-triage | opus | Reviews each open Dependabot PR; auto-approves + merges patch + minor bumps with green CI (after scanning release notes for breaking-change flags); defers majors and red-CI PRs to human-review |
+| python-container-cve-triage | opus | Triages Snyk container / base-image CVEs — pins apt packages installed by our Dockerfile when a fix exists; recommends-only for base-image bumps (cross-links the Dependabot docker path); proposes a justified 90-day `.snyk` ignore when no upstream fix exists (reviewable PR, never auto-merged) |
+| python-maintenance-planner | opus | Ranks + groups findings, routes each to its agent (one tool's findings stay together) |
+| python-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (pytest, ruff, coverage) |
 | python-bug-hunter | fable | Logic errors, None-handling crashes, mutable defaults, async races, swallowed exceptions (#449) |
 | python-security-reviewer | opus | Secrets, injection, unsafe deserialization, TLS verification, data exposure (#449) |
 | python-performance-reviewer | opus | Accidental O(n²), event-loop blocking, N+1 I/O, unbounded caches (#449) |
