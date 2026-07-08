@@ -43,7 +43,53 @@ issue must belong to it. If `$ARGUMENTS` is empty, print the invocation help
 
 ## Single-issue flow
 
-### 0. Readiness gate — is the story ready to build? (do NOT skip)
+### 0a. Dependency precheck — reject on open blockers (do NOT skip)
+
+Dependencies are enforced from **GitHub-native `blockedBy` relationships** —
+the single source of truth (#583); prose declares nothing. Before anything
+else — before the readiness gate, before any branch exists — run the precheck:
+
+```bash
+"<skill-base-dir>/scripts/dependency-precheck.zsh" --repo "$REPO" --issue <N>
+```
+
+It wraps the shared reader (`read-dependencies.zsh`, #584) into one typed
+decision (JSON on stdout; like the readiness gate it performs **no** GitHub
+writes — this skill does the posting):
+
+- **`PROCEED` (exit 0)** — no open blockers. Clear a stale `blocked` label if
+  one is present (`gh issue edit <N> --remove-label blocked 2>/dev/null ||
+  true`) and continue to step 0b exactly as today.
+- **`REJECT_BLOCKED` (exit 10)** — the issue has open blockers, directly or
+  transitively. Do **not** branch or implement. The decision JSON's
+  `comment_md` is the ready-to-post argumentation naming each open blocker.
+- **`REJECT_CYCLE` (exit 11)** — the blocked-by graph contains a cycle, which
+  no order of work can satisfy. Same handling as `REJECT_BLOCKED`; the
+  `comment_md` names the cycle. Refuse — never try to loop through it.
+
+On either rejection, what happens next depends on who is driving:
+
+- **Autonomous / non-interactive** (maintenance pipeline, epic-driven resolve —
+  no human to prompt): post `comment_md` as an issue comment, apply the
+  `blocked` label idempotently, and **stop**. **Never auto-chain** into
+  resolving the blocker unattended — an unattended run must not widen its own
+  scope (#583's decision).
+
+  ```bash
+  gh label create blocked --color b60205 \
+    --description "Rejected by the dependency precheck — open blockers in its blocked-by graph" \
+    2>/dev/null || true   # idempotent: ignore "already exists"
+  gh issue comment <N> --body "<comment_md>"
+  gh issue edit <N> --add-label blocked
+  ```
+
+- **Interactive** (a human invoked `/development:resolve-issue` and is
+  present): report the argumentation in the conversation instead — the human
+  is right there, a comment would be noise. Guided remediation (offering to
+  resolve the blocker, or blocker + named issue) is #586; until it ships,
+  stop after reporting.
+
+### 0b. Readiness gate — is the story ready to build? (do NOT skip)
 
 Before branching, spawn the **`story-readiness`** agent (Task tool,
 `subagent_type: story-readiness`), passing it the repo (`owner/name`) and the
@@ -267,7 +313,7 @@ message — and collect the verdicts.
   that child's PR when you resolve it.
 - **Any `NEEDS_REFINEMENT`** → the **epic is not ready; build nothing.** For
   each unready child, ensure the `needs-refinement` label and post its
-  refinement questions as a comment (exactly as Single-issue step 0 does). Then
+  refinement questions as a comment (exactly as Single-issue step 0b does). Then
   post a **halt summary** on the epic — the checklist of which children are
   unready and why — and **stop**. One unready child means the epic is not ready.
 
@@ -349,6 +395,11 @@ the rest against the escalated child:
 - never fail silently — the escalation already posted its own typed comment on
   the child (§#564).
 
+The same triage applies when a child's **dependency precheck rejects it**
+(§0a): epic-driven resolve is autonomous, so the rejection posts the child's
+`blocked` comment + label, the child is **parked** — never auto-chained past —
+and the run continues with the children that don't depend on it.
+
 **End every run with an epic summary comment** — one comment on the epic listing
 **merged / escalated / parked** children (and any still queued), so the epic's
 state is legible at a glance. Then:
@@ -411,8 +462,12 @@ is the epic truly done — report it closed, with the PR/verification table.
   PRs' `Closes #N`, but the epic issue has no PR, so it never closes itself. A
   done-but-open epic is the most common miss; the final re-run (zero open
   children) exists to verify and close it.
-- **Gate before you build** — the `story-readiness` gate runs first (single-issue
-  step 0; epic pre-flight over all children). A `NEEDS_REFINEMENT` verdict posts
+- **Dependencies gate first** — the 0a precheck rejects on open GitHub-native
+  blockers (and refuses cycles) before anything is branched; in autonomous mode
+  the rejection is a typed comment + `blocked` label, and an unattended run
+  **never auto-chains** into resolving the blocker itself.
+- **Gate before you build** — the `story-readiness` gate runs next (single-issue
+  step 0b; epic pre-flight over all children). A `NEEDS_REFINEMENT` verdict posts
   refinement questions + the `needs-refinement` label and **stops** — never
   branch or implement past it, and for an epic never build *any* child while one
   is unready.

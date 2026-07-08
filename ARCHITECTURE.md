@@ -1127,6 +1127,18 @@ is recorded but not recursed into: a met prerequisite's own history can't block
 anything. `GH_BIN` is the test seam; exit codes are 0 (result), 2 (usage),
 1 (gh/GraphQL failure or nonexistent issue).
 
+**The enforcement point is `dependency-precheck.zsh` (#585)** — step 0a of the
+single-issue flow, before the readiness gate and before any branch exists. It
+wraps the reader into one typed decision (`DEPS_BIN` seam): `PROCEED` (exit 0)
+only when no open blockers exist; `REJECT_BLOCKED` (10) with a ready-to-post
+argumentation naming every open blocker; `REJECT_CYCLE` (11) when the graph
+contains a cycle — the cycle wins over the blocker list, because "resolve these
+first" can never be satisfied. Like the readiness gate it performs no GitHub
+writes; the skill posts. In **autonomous** runs (maintenance pipeline,
+epic-driven resolve) a rejection posts the comment, applies the `blocked` label,
+and stops — an unattended run never auto-chains into resolving the blocker
+itself; the interactive offer-with-options remediation is #586's layer on top.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
