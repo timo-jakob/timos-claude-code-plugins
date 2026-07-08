@@ -111,12 +111,12 @@ this section when it lands.
    dispatches `python-coverage-improver` to rewrite the offending
    tests. Live validation that this works end-to-end is part of
    Phase 6.
-3. **Maintenance language parity.** Only Python has the full triage +
-   worktree + autonomous-fix pipeline. Swift is review-only; Java,
-   JavaScript / Angular, PowerShell, zsh, Go, and Rust are not yet
-   implemented. This is intentional sequencing — Python is the proving
-   ground for the dispatch contract; the other languages follow once the
-   Python loop is solid. Tracked:
+3. **Maintenance language parity.** Python, Java, and Swift each have the
+   full triage + worktree + autonomous-fix pipeline (Java via epic #296,
+   Swift via epic #297). JavaScript / Angular, PowerShell, zsh, Go, and Rust
+   are not yet implemented. This is intentional sequencing — Python was the
+   proving ground for the dispatch contract; the other languages follow once
+   each prior loop is solid. Tracked:
    [#170](https://github.com/timo-jakob/timos-claude-code-plugins/issues/170).
 4. **macOS + Homebrew lock-in.** `/development:bootstrap`'s automation
    scripts assume macOS + Homebrew. The generated `SETUP.md` is
@@ -145,7 +145,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see Requirements below). |
-| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
+| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
@@ -163,29 +163,45 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 
 ### development-swift
 
-Swift-specific development tooling — code review and formatting/linting.
+Swift maintenance — a **full-maintenance tier**, mirroring `development-python`
+/ `development-java` (epic #297). Triages and fixes findings from the Swift
+toolchain `/development:bootstrap` installs (swift-format, SwiftLint,
+SonarCloud, CodeQL + Scorecard), reviews Dependabot / Snyk vendor PRs, applies
+SwiftPM dependency-major and Swift-toolchain upgrades, raises code coverage,
+migrates to the Swift 6 language mode, and reviews PRs as the Claude Approver.
+Pure function of its JSON input — dispatched by `/development:maintenance`; it
+runs no detection of its own. (semgrep is deferred for Swift — its rule
+registry is empty, per `ARCHITECTURE.md`.)
 
 **Skills:**
 
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
+| Maintenance dispatcher | `/development-swift:maintenance <json>` | Validates the payload, runs the coverage pre-flight (may raise coverage first), plans the per-tool groups, returns the plan + `ci_fixer_agent`. |
+| Approve | `/development-swift:approve [<pr>]` | Runs `swift-approver` against an open PR and posts the verdict as the Claude Approver identity (same agent as CI). |
 | Review | `/development-swift:review [paths]` | Spawns 6 specialized agents in parallel to analyze bugs, security, performance, Swift 6 compliance, code quality, and test coverage |
 
 **Agents:**
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
-| Bug Hunter | fable | Logic errors, nil crashes, race conditions, stability |
-| Security Reviewer | opus | Secrets, injection, insecure storage, ATS, keychain |
-| Performance Reviewer | opus | Retain cycles, allocations, O(n²), main thread blocking |
-| Swift 6 Compliance | fable | Strict concurrency, typed throws, modern syntax — review mode; also the v6 language-mode migration agent (migrate mode, #447) |
-| Swift Dependabot/Snyk Triage | opus | Vendor-PR triage: dedup, digest-refresh verify, merge/arm on existing approval (#446) |
-| Swift Major Upgrade | fable | SwiftPM dependency majors: release notes, LSP call-site migration, swift test (#446) |
-| Swift Runtime Upgrade | fable | Swift toolchain bumps: pin swap, dep cascade, guide-licensed adaptations (#447) |
-| Swift Approver | fable | Synthesis-layer PR reviewer; risk register fed by the five review dimensions (#448) |
-| Code Quality | opus | Naming, SOLID, readability, dead code, API design |
-| Test Reviewer | opus | Coverage gaps, assertion quality, flaky tests |
-| Swift Lint & Format | opus | Runs SwiftFormat and SwiftLint, fixes issues in-place |
+| swift-format-lint-fixer | haiku | `swift format` + SwiftLint autofixes; behaviour-preserving |
+| swift-sonar-triage | opus | SonarCloud (Sonar Swift) bugs/smells/vulns/hotspots; LSP-scoped |
+| swift-code-scanning-triage | opus | CodeQL (Swift) + Scorecard; pins GH Actions to SHAs; dataflow rules → human-review |
+| swift-dependabot-snyk-triage | opus | Vendor PRs: dedup, digest-refresh verify, auto-merge green patch/minor (never self-approves) (#446) |
+| swift-major-upgrade | fable | SwiftPM dependency majors — release notes + LSP call-site migration + `swift test` (#446) |
+| swift-runtime-upgrade | fable | Swift toolchain bumps — pin swap, dep cascade, guide-licensed adaptations (#447) |
+| swift-coverage-improver | fable | Writes meaningful XCTest / Swift Testing tests to raise coverage; never edits production code |
+| swift6-compliance | fable | Strict concurrency, typed throws, modern syntax — review mode; also the v6 language-mode migration agent (migrate mode, #447) |
+| swift-maintenance-planner | opus | Ranks + groups findings, routes each to its agent |
+| swift-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (build/test, format, coverage) |
+| swift-approver | fable | Synthesis-layer PR reviewer once CI is green; risk register fed by the five review dimensions (#448) |
+| swift-lint-format | opus | Runs SwiftFormat and SwiftLint, fixes issues in-place |
+| bug-hunter | fable | Logic errors, nil crashes, race conditions, stability |
+| security-reviewer | opus | Secrets, injection, insecure storage, ATS, keychain |
+| performance-reviewer | opus | Retain cycles, allocations, O(n²), main thread blocking |
+| code-quality | opus | Naming, SOLID, readability, dead code, API design |
+| test-reviewer | opus | Coverage gaps, assertion quality, flaky tests |
 
 ### development-python
 
@@ -195,8 +211,8 @@ Snyk Open Source, SonarCloud), and autonomously applies dependency
 upgrades (patch + minor + major) with test-based verification.
 
 Pure function of a JSON input per `ARCHITECTURE.md` — it does not run
-detection itself; the `/development:maintenance` orchestrator (forthcoming)
-constructs the input and dispatches here.
+detection itself; the `/development:maintenance` orchestrator constructs the
+input and dispatches here.
 
 > ⚠️ **Cost expectations**: These agents deliberately favor autonomy
 > over speed and token cost. They read code with LSP (find references,
@@ -572,10 +588,10 @@ what CI's Approver will say before pushing.
 
 ### Languages
 
-Python and Java ship `<lang>-approver` agents (fable) + policy templates
-today (`python-approver`, `java-approver`); the bootstrap wires the
-per-language approver via `{{APPROVER_LANG}}`. Future plugins
-(`development-node`, `development-go`, etc.) follow the same pattern.
+Python, Java, and Swift ship `<lang>-approver` agents (fable) + policy
+templates today (`python-approver`, `java-approver`, `swift-approver`); the
+bootstrap wires the per-language approver via `{{APPROVER_LANG}}`. Future
+plugins (`development-node`, `development-go`, etc.) follow the same pattern.
 Bootstrap with `--claude-approver true` on a language with no approver warns
 and skips.
 
