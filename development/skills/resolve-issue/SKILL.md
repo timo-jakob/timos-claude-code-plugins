@@ -105,9 +105,19 @@ Run the repo's own test + lint gate and **only proceed when green**. Detect what
 applies and run it:
 
 - pre-commit hooks (`pre-commit run --all-files`, or the staged subset),
-- tests for the stack: `bats tests/` (plugin repos), `pytest` (Python),
-  `./gradlew test` / `build` (Java/Gradle), etc.,
+- tests for the stack — the **whole suite**, never a subset: `bats tests/`
+  (plugin repos), `pytest` (Python — the whole suite, **not** `pytest
+  tests/unit`), `./gradlew test` / `build` (Java/Gradle), etc.,
 - any repo-specific check named in `CLAUDE.md`.
+
+**Run the full suite — unit *and* integration — not a unit-only subset.** A green
+local gate must mean the **whole** suite is green: a subset run (e.g. `pytest
+tests/unit`) can pass while the change silently breaks integration tests whose
+fixtures exercise it, so the break stays invisible until CI / the Approver —
+after the bot PR is opened and CI minutes are already spent, exactly the outcome
+the local gate exists to prevent (#604). Run the whole suite, or at minimum the
+changed behaviour's **full blast radius** across unit and integration; when in
+doubt, run everything.
 
 If it's red, fix it; if you can't, **abandon the PR** and report — a child issue
 is never merged or checked off on a red gate. Keep the test evidence for the PR
@@ -130,8 +140,11 @@ model-driven steps:
 - **`--fix-cmd`** — read `$REVIEW_BLOCKERS` (the consolidated Critical+High
   items) and implement the fixes, exactly as step 2 implements — Low
   suggestions never loop.
-- **`--test-cmd`** — re-run the step-3 gate so a fix that breaks tests aborts
-  the loop instead of shipping.
+- **`--test-cmd`** — re-run the step-3 gate — the **full** suite (unit **and**
+  integration), never a subset — so a fix that breaks tests anywhere aborts the
+  loop instead of shipping. The per-round re-run is the whole suite too; a
+  loop-round fix that passes a unit subset but breaks an integration test must
+  fail here, not at CI (#604).
 
 Pass `--issue <N>` too: the loop appends one JSONL telemetry record per run to
 `.claude/telemetry/review-loop.jsonl` (git-ignored, #566) — evidence for

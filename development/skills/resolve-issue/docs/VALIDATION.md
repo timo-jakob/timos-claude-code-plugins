@@ -41,8 +41,13 @@ Test bed: `timo-jakob/ai-doc-organizer` (public, Python + web, Approver-configur
    waste (a pre-#379 repo's stale `always_run` hook, now migrated in place by
    `reconcile-precommit-hooks.zsh`). Since these validation stories **do** touch
    Python, run the per-issue gate as `pytest --cov=<pkg> --cov-report=xml`
-   (Scenario A/C) so `coverage.xml` already exists when the loop pushes the bot
-   PR. (Workflow-only pushes hit the separate Writer-App `workflows`-permission
+   (Scenario A/C) — the **whole** suite (unit **and** integration), never a
+   subset like `pytest tests/unit` — so `coverage.xml` already exists when the
+   loop pushes the bot PR. A subset run can pass while the change silently breaks
+   an integration test whose fixtures exercise it, surfacing only at CI / the
+   Approver after the PR is opened — the [#604](https://github.com/timo-jakob/timos-claude-code-plugins/issues/604)
+   miss this runbook itself hit in Scenario A. (Workflow-only pushes hit the
+   separate Writer-App `workflows`-permission
    limit, [#601](https://github.com/timo-jakob/timos-claude-code-plugins/issues/601)
    — not a concern here, since the stories change code, not workflows.)
 
@@ -168,6 +173,9 @@ the thread with a decision and **re-run** — confirm it **resumes and converges
 - These are **live mutations of a public external repo** — go one scenario at a
   time, confirm each outcome before the next.
 - Scenario B must leave **no branch/PR** — verify explicitly.
+- The per-issue gate is the **full** suite (unit **and** integration), never a
+  unit-only subset — a subset that passes while integration breaks defeats the
+  whole point of the local loop (#604).
 - Don't fabricate CI-minute figures; if a run's CI didn't execute, say so.
 - If the loop isn't actually wired to run end to end from the skill (panel/fix are
   model-driven hooks), the driver is **you-as-Claude performing each hook step**;
