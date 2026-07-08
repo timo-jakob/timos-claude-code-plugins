@@ -1260,6 +1260,23 @@ If the script exits non-zero with a 403 (user is not a repo admin), do not
 retry. Print the equivalent manual setup instructions from `SETUP.md` and
 continue.
 
+### 4b.5. Workflow labels (`blocked`)
+
+Create the `blocked` label the `/development:resolve-issue` dependency
+precheck applies when it rejects an issue with open GitHub-native blockers
+(#583/#585), so a bootstrapped repo carries it from day one:
+
+```bash
+gh label create blocked --color b60205 \
+  --description "Rejected by the dependency precheck — open blockers in its blocked-by graph" \
+  2>/dev/null || true   # idempotent: ignore "already exists"
+```
+
+The other workflow labels (`needs-refinement`, `needs-human-decision`) stay
+use-time-created by their skills via the same ensure-label idiom — this step
+exists because an autonomous rejection should not depend on label-creation
+permissions at rejection time.
+
 ### 4c. Build script — enforce Kotlin DSL, then wire Java build plugins (Java only)
 
 **Only when `java` is in the detected languages.** Two parts: first the
