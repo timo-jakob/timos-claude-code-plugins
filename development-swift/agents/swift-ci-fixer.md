@@ -155,6 +155,12 @@ git push
 The pre-commit hooks must pass; if they fail, fix and re-commit.
 **Never use `--no-verify`.**
 
+Your job ends at the push. Do **not** assume the push re-ran CI — a push
+under a bot App installation token fires a `synchronize` that GitHub turns
+into **no** workflow runs (#605). Re-triggering CI on the new head is the
+**orchestrator's** responsibility (its CI cycle runs `retrigger-pr-ci.zsh`
+after your commit); you neither monitor nor re-trigger it.
+
 ## Output
 
 A single JSON object:

@@ -123,6 +123,27 @@ GH_TOKEN="$TOKEN" gh pr create \
 
 Capture the PR number/URL. The PR author is now `claude-maintenance-<login>[bot]`.
 
+**Re-pushing to an already-open PR? Re-trigger CI (#605).** The `gh pr create`
+above fires `pull_request: opened`, which **does** run CI — so the normal
+open-a-fresh-PR path needs nothing extra. But when this same bot **App
+installation token** re-pushes to a PR that is **already open** (a resume, or a
+follow-up fix push), the resulting `pull_request: synchronize` event creates
+**no** workflow runs — the new head sits with zero checks and armed auto-merge
+never fires. After any such re-push, re-trigger CI deterministically with the
+blessed helper (a close+reopen nudge that fires `reopened`, re-arming auto-merge
+that closing disarmed). You pushed as the App, so pass `--grace 0` to nudge
+immediately — no point watching for checks that a bot `synchronize` never
+produces:
+
+```bash
+GH_TOKEN="$TOKEN" "<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh" --grace 0 "<pr-number>"
+#   result: NUDGED → closed+reopened to re-trigger CI on the new head
+```
+
+(This assumes the repo's `on: pull_request` workflows include the `reopened`
+activity type — they do when `types:` is unset, GitHub's default. A workflow
+pinned to `types: [opened, synchronize]` would not re-run on the nudge.)
+
 **Review dossier (#563).** When the caller ran the local review loop (#562) and
 it exited `CONVERGED`, append the **Review dossier** to the PR body, after the
 Test plan — it is the durable audit record for why auto-merge happened. Build it
