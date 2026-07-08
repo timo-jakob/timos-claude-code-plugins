@@ -102,12 +102,17 @@ if [[ -f "$KNOWN_MARKETPLACES" ]]; then
 fi
 
 # --- decide how Claude Code itself gets updated ----------------------------
-# A Homebrew cask resolves to a .../Caskroom/... path; upgrade it via brew so
-# we don't fight brew's own management. Anything else uses `claude update`.
+# A Homebrew cask resolves to a .../Caskroom/<cask>/<ver>/... path; upgrade it
+# via brew so we don't fight brew's own management. The cask name is derived
+# from the path (the segment right after /Caskroom/) rather than hardcoded, so
+# both `claude-code` and the rolling `claude-code@latest` cask are handled.
+# Anything else uses `claude update`.
 claude_path="${commands[claude]}"
 resolved="${claude_path:A}"
 if [[ "$resolved" == *"/Caskroom/"* ]]; then
-  cli_update_desc="brew upgrade --cask claude-code"
+  cli_cask="${resolved#*/Caskroom/}"
+  cli_cask="${cli_cask%%/*}"
+  cli_update_desc="brew upgrade --cask ${cli_cask}"
   cli_update_kind="brew"
 else
   cli_update_desc="claude update"
@@ -144,7 +149,7 @@ fi
 # --- 1. update the CLI -----------------------------------------------------
 print -- ":: Updating Claude Code (${cli_update_desc})..."
 if [[ "$cli_update_kind" == "brew" ]]; then
-  brew upgrade --cask claude-code || print -u2 -- "  (brew upgrade reported no change or failed; continuing)"
+  brew upgrade --cask "$cli_cask" || print -u2 -- "  (brew upgrade reported no change or failed; continuing)"
 else
   claude update || print -u2 -- "  (claude update reported no change or failed; continuing)"
 fi
