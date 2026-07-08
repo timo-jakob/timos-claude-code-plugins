@@ -24,9 +24,14 @@
 #     opposite directions (performance vs code_quality) become a `conflicts`
 #     item — surfaced, not silently ordered; a surviving conflict is an
 #     escalation reason.
-#   - Non-convergence: a blocker whose fingerprint (file+dimension+normalized
-#     title) also blocked the PREVIOUS round (--prev) is marked
-#     non_converging:true, and sets the top-level flag + an escalation reason.
+#   - Non-convergence: a blocker that also blocked the PREVIOUS round (--prev)
+#     is marked non_converging:true, and sets the top-level flag + an escalation
+#     reason. Cross-round identity is [file, dimension] with line proximity
+#     (within LINEWIN lines; a missing line on either side is a wildcard) —
+#     deliberately NOT the free-text title, which a reviewer re-wording the same
+#     finding across rounds would defeat (#606). A missed reword would burn a
+#     third round and escalate as BUDGET_EXHAUSTED instead of the intended early
+#     ESCALATE_NO_CONVERGENCE.
 #
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
@@ -64,11 +69,22 @@ local -r PROG='
 def sevrank(s): if s=="CRITICAL" then 3 elif s=="WARNING" then 2 elif s=="SUGGESTION" then 1 else 0 end;
 def prio(s): if s=="CRITICAL" then "Critical" elif s=="WARNING" then "High" else "Low" end;
 def blocks(s): (s=="CRITICAL" or s=="WARNING");
-def norm_title: (. // "" | ascii_downcase | gsub("[^a-z0-9]+";" ") | gsub("^ +| +$";""));
-def fp: [ (.file // ""), (.dimension // ""), (.title | norm_title) ];
+def normfile: ((. // "") | sub("^\\./";""));
+# Cross-round identity: same file + dimension, with the line close enough that a
+# small edit-drift between rounds still matches (a null line on either side is a
+# wildcard). The title is NOT part of it — a reviewer re-wording the same finding
+# must not defeat the match (#606).
+def LINEWIN: 10;
+# A missing or non-numeric line on either side is a wildcard (match) — never a
+# type error from subtracting a stray string line.
+def line_near($a;$b):
+  if (($a | type) == "number") and (($b | type) == "number")
+  then ((($a) - ($b)) | (if . < 0 then -. else . end) <= LINEWIN)
+  else true end;
 
-# previous round blocker fingerprints (empty on round 1)
-( ($prev // {}) | (.blocking // []) | map(fp) ) as $prevfp
+# previous round blockers projected to [file, dimension, line] (empty on round 1)
+( ($prev // {}) | (.blocking // [])
+  | map({ file: (.file | normfile), dimension: (.dimension // ""), line: .line }) ) as $prevblk
 
 # normalize this round
 | [ .[] | {
@@ -108,10 +124,13 @@ def fp: [ (.file // ""), (.dimension // ""), (.title | norm_title) ];
           detail: "co-located recommendations pull in opposite directions (performance vs code_quality)" }
   ) ) as $conflicts
 
-# mark non-converging blockers (fingerprint also blocked last round).
-# NB: use element-equality (any), not `index($cur)` — index() on an array
-# argument does a SUBSEQUENCE search, not a membership test.
-| ( $items | map( fp as $cur | . + { non_converging: ( .blocking and ($prevfp | any(. == $cur)) ) } ) ) as $items
+# mark non-converging blockers (a matching blocker blocked last round too).
+# Match on [file, dimension] + line proximity via any(gen; cond) over the
+# prior round blockers — NOT the title (#606). NB: keep this jq program free of
+# apostrophes; it lives in a zsh single-quoted string.
+| ( $items | map( . as $cur | . + { non_converging: (
+      .blocking and any($prevblk[];
+        .file == $cur.file and .dimension == $cur.dimension and line_near(.line; $cur.line)) ) } ) ) as $items
 
 | ( [ $items[] | select(.priority=="Critical") ] ) as $crit
 | ( [ $items[] | select(.priority=="High") ] ) as $high
