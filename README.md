@@ -83,6 +83,25 @@ What is shipped and aligned with the motivation:
   a well-specified story ran gate → review loop → dossier PR → Approver →
   auto-merge; an underspecified one halted at the readiness gate; and a
   security-conflicted one escalated to `needs-human-decision` with no PR.
+- **Dependency-aware resolve-issue — GitHub-native `blockedBy` as the enforced
+  source of truth.** Before the readiness gate or any branch, a **dependency
+  precheck** walks the issue's native blocked-by graph transitively
+  ([#584](https://github.com/timo-jakob/timos-claude-code-plugins/issues/584))
+  and rejects on open blockers — autonomous runs post an argumentation
+  comment plus the `blocked` label and **never auto-chain**
+  ([#585](https://github.com/timo-jakob/timos-claude-code-plugins/issues/585));
+  interactive runs offer **guided remediation** (resolve blocker + named issue,
+  or just the blocker; deepest-first, one PR per blocker
+  — [#586](https://github.com/timo-jakob/timos-claude-code-plugins/issues/586));
+  an **epic blocker remediates as a whole epic** (full Epic flow to a closed
+  epic before the dependent proceeds —
+  [#587](https://github.com/timo-jakob/timos-claude-code-plugins/issues/587));
+  cycles are refused, not looped (GitHub only rejects direct 2-cycles — our
+  transitive detection caught a live 3-cycle). Epic
+  [#583](https://github.com/timo-jakob/timos-claude-code-plugins/issues/583),
+  validated end-to-end on a native-relationship test bed
+  ([#588](https://github.com/timo-jakob/timos-claude-code-plugins/issues/588)
+  — evidence in `development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md`).
 
 ### Current gaps
 
@@ -220,7 +239,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see Requirements below). |
 | Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
-| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
+| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
 | Open PR | `/development:open-pr` | Opens a PR for the current branch **authored by the Claude Maintenance bot** — so you can approve it (GitHub blocks self-approval) — with squash auto-merge armed; falls back to a user-authored PR when the writer App isn't installed |
 | Library Docs | `/development:library-docs` | Ensures work proceeds from current, authoritative docs for any library / framework / CLI / API in scope rather than stale training-data guesses |
