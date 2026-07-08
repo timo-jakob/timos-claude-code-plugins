@@ -81,6 +81,24 @@ gh pr view "$pr_number" --json headRefName -q .headRefName
 
 If they don't match, halt — the orchestrator handed you a stale worktree.
 
+**Resolve the test environment (#624).** Your worktree has no `.venv`;
+the project's installed dependencies live in the **main checkout's**
+`.venv`, bootstrapped by Phase 3 at `<repo_path>/.venv` (`repo_path` is
+in your prompt). So **run pytest through that interpreter**, with the
+worktree prepended to `PYTHONPATH` so it's the PR branch's source — your
+fix — that gets tested, not the main checkout's. Each Bash call is a
+fresh shell, so prepend this to each pytest run (substitute the real
+`repo_path`):
+
+```bash
+PYTHONPATH="$PWD/src:$PWD${PYTHONPATH:+:$PYTHONPATH}" <repo_path>/.venv/bin/python -m pytest …
+```
+
+If `<repo_path>/.venv` is absent (bootstrap skipped / pre-#624), fall
+back to bare `pytest`. (If the PR adds a dependency the main venv lacks,
+this run will surface the import error — treat that as the failure to
+fix, or note it if the dep install is out of your scope.)
+
 ### 2. Fetch the failing checks (scoped to your `failing_checks` list)
 
 ```bash
@@ -217,6 +235,8 @@ Edit only what's needed. Do not refactor adjacent code. Keep the diff
 small and reviewable — the human PR reviewer is reading this.
 
 ### 5. Run tests locally
+
+Through the step-1 interpreter prefix:
 
 ```bash
 pytest --tb=short 2>&1 | tail -80

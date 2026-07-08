@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# verify-python-state.sh — confirms the project's local .venv is built
-# against the Python version the project declares. Recreates the venv when
-# it doesn't match.
+# verify-python-state.sh — makes sure the project has a usable local .venv
+# built against the Python version it declares. Bootstraps one when none
+# exists, and recreates it when an existing one is on the wrong interpreter.
 #
 # Owned by the development-python plugin; lives in the orchestrator's
 # scripts directory alongside gather-python-findings.sh to match the
@@ -14,14 +14,21 @@
 #                                                       (used by R.4 fallback)
 #
 # Exit codes (consumed by the orchestrator's Phase 3 / Phase 8 step 7):
-#   0  State is OK OR was successfully recovered.
-#      On recovery, stdout is JSON:
-#        {"recovered": true, "from_py": "<old>", "to_py": "<new>"}
-#   1  User intervention required (typically: python<X.Y> not on PATH).
-#      Stderr carries the actionable message; orchestrator forwards it.
-#   2  Recreate's `pip install` failed. Stdout is JSON:
+#   0  State is OK OR was successfully recovered/bootstrapped.
+#      On a create-or-recreate, stdout is JSON:
+#        {"recovered": true, "action": "created"|"recreated",
+#         "from_py": "<old>|none", "to_py": "<new>",
+#         "install_target": "<what pip installed>"}
+#      "created"   = there was no .venv, so one was bootstrapped (#624) — a
+#                    local-only side effect the orchestrator reports even
+#                    under --dry-run.
+#      "recreated" = an existing .venv was on the wrong interpreter.
+#   1  User intervention required — the interpreter isn't on PATH, or no
+#      dependency manifest is present to install from. Stderr carries the
+#      actionable message; the orchestrator forwards it.
+#   2  The `pip install` step failed. Stdout is JSON:
 #        {"recreate_failed": true, "project_py": "...", "venv_py": "...",
-#         "install_log_excerpt": "..."}
+#         "install_target": "...", "install_log_excerpt": "..."}
 #      Orchestrator handles this via R.4 (AskUserQuestion + fallback).
 
 set -euo pipefail
@@ -70,40 +77,145 @@ if [[ -x .venv/bin/python ]]; then
 		2>/dev/null || true)
 fi
 
-# --- early-exit cases (no action needed) -------------------------------------
-# No declared runtime → user hasn't pinned anything, any venv is OK.
-[[ -z "$project_py" ]] && exit 0
-# No venv at all → not our problem; gather's existing notes path surfaces it.
-[[ -z "$venv_py" && -z "$target_py" ]] && exit 0
-# Match → done.
-[[ "$project_py" == "$venv_py" ]] && exit 0
+# --- detect the pip install target -------------------------------------------
+# Not every project is `.[dev]`. Prefer a dev/test extra of an installable
+# project, then editable-plus-requirements, then a bare requirements install.
+# Populates the globals INSTALL_ARGS (the pip argv, kept as an array so
+# `.[dev]` can't be glob-expanded) and INSTALL_LABEL (a human string for the
+# summary + JSON). Returns 1 when nothing is derivable (caller escalates).
+INSTALL_ARGS=()
+INSTALL_LABEL=""
+detect_install_target() {
+	local extras
+	if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then
+		# Pull the optional-dependency extra names out of pyproject.toml.
+		extras=$(awk '
+			/^\[project\.optional-dependencies\]/ { inopt = 1; next }
+			/^\[/                                 { inopt = 0 }
+			inopt && /^[[:space:]]*[A-Za-z0-9_.-]+[[:space:]]*=/ {
+				key = $0; sub(/[[:space:]]*=.*/, "", key); gsub(/[[:space:]]/, "", key)
+				print key
+			}
+		' pyproject.toml 2>/dev/null || true)
+		if grep -qx 'dev' <<<"$extras"; then
+			INSTALL_ARGS=(-e '.[dev]')
+			INSTALL_LABEL='.[dev]'
+		elif grep -qx 'test' <<<"$extras"; then
+			INSTALL_ARGS=(-e '.[test]')
+			INSTALL_LABEL='.[test]'
+		elif [[ -f requirements-dev.txt ]]; then
+			INSTALL_ARGS=(-e . -r requirements-dev.txt)
+			INSTALL_LABEL='. + requirements-dev.txt'
+		else
+			INSTALL_ARGS=(-e .)
+			INSTALL_LABEL='.'
+		fi
+		return 0
+	fi
+	# Not an installable package (app-style) — fall back to requirements files.
+	if [[ -f requirements-dev.txt ]]; then
+		INSTALL_ARGS=(-r requirements-dev.txt)
+		INSTALL_LABEL='requirements-dev.txt'
+	elif [[ -f requirements.txt ]]; then
+		INSTALL_ARGS=(-r requirements.txt)
+		INSTALL_LABEL='requirements.txt'
+	else
+		return 1
+	fi
+	return 0
+}
 
-# --- R.1: target interpreter must be on PATH ---------------------------------
-if ! command -v "python$project_py" >/dev/null 2>&1; then
-	cat >&2 <<EOF
-Project declares Python $project_py but local .venv is on Python ${venv_py:-(none)},
-and python$project_py is not on PATH. Install it first:
+# --- decide the action -------------------------------------------------------
+# Four cases:
+#   * no .venv present             → bootstrap one (action="created", #624)
+#   * .venv present, no project pin → leave it (any venv is OK)
+#   * .venv present, matches pin    → leave it
+#   * .venv present, wrong pin      → recreate it (action="recreated")
+action=""
+from_py=""
+bootstrap_ver=""
+bootstrap_cmd=""
 
-    brew install python@$project_py
+if [[ -z "$venv_py" ]]; then
+	# No .venv at all. This used to early-exit, which left coverage
+	# unmeasurable and every worktree fix-agent with no environment to
+	# self-verify against (#624); bootstrap one instead.
+	action="created"
+	from_py="none"
+	if [[ -n "$project_py" ]]; then
+		bootstrap_ver="$project_py"
+		bootstrap_cmd="python$project_py"
+	else
+		# No declared interpreter — bootstrap against system python3, and
+		# derive the version label from it below.
+		bootstrap_cmd="python3"
+	fi
+else
+	# A .venv exists.
+	[[ -z "$project_py" ]] && exit 0            # nothing pinned → any venv OK
+	[[ "$project_py" == "$venv_py" ]] && exit 0 # matches → done
+	action="recreated"
+	from_py="$venv_py"
+	bootstrap_ver="$project_py"
+	bootstrap_cmd="python$project_py"
+fi
+
+# --- R.1: the interpreter must be on PATH ------------------------------------
+if ! command -v "$bootstrap_cmd" >/dev/null 2>&1; then
+	if [[ -n "$bootstrap_ver" ]]; then
+		cat >&2 <<EOF
+Project declares Python $bootstrap_ver but $bootstrap_cmd is not on PATH
+(local .venv is on Python ${venv_py:-(none)}). Install it first:
+
+    brew install python@$bootstrap_ver
 
 Then re-run /development:maintenance.
+EOF
+	else
+		cat >&2 <<EOF
+No .venv found and no python3 on PATH to bootstrap one. Install Python
+(e.g. 'brew install python3'), then re-run /development:maintenance.
+EOF
+	fi
+	exit 1
+fi
+
+# Derive the version label when it wasn't pinned (no-venv, no declared runtime).
+if [[ -z "$bootstrap_ver" ]]; then
+	bootstrap_ver=$("$bootstrap_cmd" -c \
+		"import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" \
+		2>/dev/null || echo "unknown")
+fi
+
+# --- resolve the install target (escalate if none) ---------------------------
+if ! detect_install_target; then
+	cat >&2 <<EOF
+Can't bootstrap a virtualenv for $repo: no dependency manifest found. Expected
+a pyproject.toml / setup.py (optionally with a [dev] or [test] extra),
+requirements-dev.txt, or requirements.txt.
+
+Add one, then re-run /development:maintenance.
 EOF
 	exit 1
 fi
 
-# --- R.2: recreate the venv + install ----------------------------------------
-echo "Recreating .venv against Python $project_py (was ${venv_py:-none})…" >&2
+# --- R.2: (re)create the venv + install --------------------------------------
+echo "Bootstrapping .venv ($action) against Python $bootstrap_ver (was $from_py); installing ${INSTALL_LABEL}…" >&2
 rm -rf .venv
-"python$project_py" -m venv .venv
+"$bootstrap_cmd" -m venv .venv
 .venv/bin/pip install --quiet --upgrade pip
 
 install_log=$(mktemp)
 trap 'rm -f "$install_log"' EXIT
 
-if .venv/bin/pip install -e ".[dev]" >"$install_log" 2>&1; then
+if .venv/bin/pip install "${INSTALL_ARGS[@]}" >"$install_log" 2>&1; then
 	cat "$install_log" >&2
-	jq -n --arg from "${venv_py:-none}" --arg to "$project_py" \
-		'{recovered: true, from_py: $from, to_py: $to}'
+	jq -n \
+		--arg action "$action" \
+		--arg from "$from_py" \
+		--arg to "$bootstrap_ver" \
+		--arg it "$INSTALL_LABEL" \
+		'{recovered: true, action: $action, from_py: $from, to_py: $to, install_target: $it}'
 	exit 0
 fi
 
@@ -111,8 +223,9 @@ fi
 cat "$install_log" >&2
 log_excerpt=$(tail -30 "$install_log")
 jq -n \
-	--arg pp "$project_py" \
+	--arg pp "$bootstrap_ver" \
 	--arg vp "${venv_py:-none}" \
+	--arg it "$INSTALL_LABEL" \
 	--arg log "$log_excerpt" \
-	'{recreate_failed: true, project_py: $pp, venv_py: $vp, install_log_excerpt: $log}'
+	'{recreate_failed: true, project_py: $pp, venv_py: $vp, install_target: $it, install_log_excerpt: $log}'
 exit 2

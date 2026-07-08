@@ -54,7 +54,27 @@ Your prompt contains:
 1. **You are already in your worktree** (the runtime put you there via
    `isolation="worktree"`). Do NOT `cd "$repo_path"`; that's the
    parent project. Operate from your current cwd.
-2. Run `pytest --cov --cov-report=term-missing --cov-report=json`
+
+   **Resolve the test environment first (#624).** Your worktree has no
+   `.venv` of its own. The project's installed dependencies — pytest,
+   pytest-cov, the project package — live in the **main checkout's**
+   `.venv`, which Phase 3 bootstraps at `<repo_path>/.venv` (`repo_path`
+   is in your prompt). So **run every `pytest` invocation in this
+   procedure through that interpreter**, with the worktree prepended to
+   `PYTHONPATH` so it's **your** new tests and the worktree's source that
+   get exercised — not the main checkout's. Each Bash call is a fresh
+   shell, so prepend this to *each* pytest run (substitute the real
+   `repo_path` from your prompt):
+
+   ```bash
+   PYTHONPATH="$PWD/src:$PWD${PYTHONPATH:+:$PYTHONPATH}" <repo_path>/.venv/bin/python -m pytest …
+   ```
+
+   If `<repo_path>/.venv` doesn't exist (bootstrap skipped / pre-#624),
+   fall back to bare `pytest`. Wherever a step below says `pytest …`, run
+   it through that prefix.
+2. Run `pytest --cov --cov-report=term-missing --cov-report=json` (via the
+   prefix above)
 3. Read `coverage.json` (or `.coverage` + `coverage report -m`) to
    identify the **specific uncovered lines and branches** for each
    `modules_to_improve` path.
@@ -96,7 +116,7 @@ Your prompt contains:
 
 ### Phase 4 — verify
 
-1. Run the new tests:
+1. Run the new tests (through the Phase-1 interpreter prefix):
    - `pytest tests/path/to/new_tests.py -v`
    - They must all pass.
 2. Re-measure coverage:
