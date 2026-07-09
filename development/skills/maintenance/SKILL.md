@@ -412,6 +412,32 @@ A PR is **Approver-flagged** when ALL hold:
 - Its `body` contains a `<!-- claude-approver:findings ... -->` HTML
   comment block.
 
+### Conflicting standing bot PRs — inventory here, remediate in Phase 8 (#653)
+
+The same open-PR pass also identifies **pipeline-authored PRs that have gone
+`CONFLICTING`** — a prior maintenance PR whose base moved under it. Include
+`author` and `mergeable` in the inventory (add `mergeable` to the
+`gh pr list --json` fields, or read it per PR with
+`gh pr view <pr> --json mergeable`):
+
+- **`claude-maintenance` App author** (login prefix match, same `app/<slug>` /
+  `<slug>[bot]` duality as above) **AND `mergeable: CONFLICTING`** → record the
+  PR in the run state as a `conflicting_bot_prs` entry. These are **the
+  pipeline's own PRs, and their conflicts are the pipeline's to resolve** —
+  never the user's. Phase 8's *standing-PR remediation* step (§ *Conflicting
+  bot-PR remediation*) rebases and re-verifies each one; do **not** act on
+  them here (Phase 2.5 is detection + Approver-feedback only), and do **not**
+  route them to the run summary as a manual to-do (that was the 2026-07-09
+  ai-doc-organizer miss: bot PR #84, approved + armed but CONFLICTING, was
+  deferred to "manual rebase" — the exact outcome this inventory exists to
+  prevent).
+- Conflicting **vendor** PRs are not collected here — the vendor-PR stage owns
+  them with vendor-specific mechanisms (`@dependabot rebase`, the Renovate
+  checkbox). Conflicting **human** PRs are never touched: report only.
+
+Under `--dry-run`, this inventory is read-only like the rest of Phase 2.5:
+list what *would* be remediated in the Phase 9 report, rebase nothing.
+
 ### JSON parsing
 
 Extract the hidden block, parse the JSON. Schema documented in
@@ -1207,6 +1233,53 @@ re-stales the rest, so a batch must be serial.
 > **policy decisions for the repo owner** (tracked in #432), not changed by the
 > pipeline here.
 
+**Conflicting bot-PR remediation — the pipeline resolves its own PRs'
+conflicts (#653).** When Phase 2.5's inventory recorded `conflicting_bot_prs`
+(open `claude-maintenance`-authored PRs at `mergeable: CONFLICTING` — a
+`--update` can't fix those; only a rebase with conflict resolution can),
+remediate them in the **standing-PR slot** — after the worktree stages, at the
+head of the vendor-PR/standing-PR work, so the rebase lands on a stable
+`main`. One PR at a time:
+
+1. **Scratch worktree on the PR head** — never the session worktree (#643):
+
+   ```bash
+   scratch=$(mktemp -d)
+   git -C "<repo.path>" fetch origin "<pr.headRefName>" -q
+   git -C "<repo.path>" worktree add "$scratch/pr" "origin/<pr.headRefName>"
+   git -C "$scratch/pr" rebase origin/<base_branch>
+   # resolve each conflict hunk on its merits (read both sides; keep the
+   # PR's intent applied onto the new base), then `git rebase --continue`
+   ```
+
+2. **Re-validate in the scratch worktree** — the project's **full suite**,
+   leaving the coverage artifact per the pre-push-artifact contract (#644),
+   so the pre-push hook passes and the rebased code is actually green. A red
+   suite here means the conflict resolution is wrong or the PR no longer fits
+   its base: stop, leave the PR untouched (do not push a red rebase), and
+   record the stage as `escalated` with the failure.
+3. **Force-push as the bot** (writer token via its mode-600 file path, #640):
+
+   ```bash
+   git -C "$scratch/pr" push --force-with-lease \
+     "https://x-access-token:$(cat "$maint_token_file")@github.com/<owner/repo>.git" \
+     "HEAD:<pr.headRefName>"
+   git -C "<repo.path>" worktree remove "$scratch/pr" -f -f
+   ```
+
+   `--force-with-lease` is required (a rebase rewrites the branch) and safe
+   (the lease aborts if someone else pushed meanwhile).
+4. **Re-enter the normal CI cycle + approval gate** for the PR: under
+   `dismiss_stale_reviews` the rebase dropped the prior approval, so the
+   mode-aware gate (#642) re-earns it exactly as for any fresh head, and the
+   merge confirms per the standing cascade.
+
+Authorship guard — this step touches **only** `claude-maintenance`-authored
+PRs. Conflicting **vendor** PRs use their vendor mechanisms in the vendor
+stage; conflicting **human** PRs are reported, never rebased. And the run
+summary never presents a bot PR's conflict as a manual to-do — after this
+step it is either merged/armed or `escalated` with a concrete reason.
+
 For each entry in the **selected batch** (the whole plan when `--batch` is
 absent; the top-N groups when it is set), in priority order:
 
@@ -1998,6 +2071,16 @@ run start; the 🚀 PRs section below shows what was tackled.>
 ✅ Vendor PRs merged (N):
   - PR #<pr> ("<title>") — approved and merged during the run
   - ...
+
+<If Phase 2.5 inventoried conflicting_bot_prs (#653):>
+🔧 Conflicting bot PRs remediated (N):
+  - PR #<pr> ("<title>") — rebased onto <base_branch> in a scratch worktree,
+    suite green, force-pushed, <merged | auto-merge re-armed awaiting approval>
+  <For an escalated one:>
+  - PR #<pr> ("<title>") — rebase attempted but <suite red on the rebased
+    head | lease conflict>; left untouched, recorded escalated: <reason>
+  (Never render a bot PR's conflict as a manual-rebase to-do — the pipeline
+  owns its own PRs' conflicts.)
 
 ? Missing tooling (N):
   - <tool>: <summary>
