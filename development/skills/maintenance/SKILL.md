@@ -1959,6 +1959,13 @@ Topics processed:    <comma-separated list from supported_topics, or "none">
 Approver mode:       <ci | local | none — from the Phase 2.5 detection (#642);
                       in local mode the approval gate drove the approve skill
                       directly, posting no /approve comment>
+<If any approver verdict this run carried an `approver_permission` finding (#654):>
+⚠ Approver App permission gap: security_events:read missing on this
+  installation — Code Scanning reads fell back to your gh auth. One-time fix:
+  re-accept the App installation after the permission update
+  (install-claude-apps.zsh --verify shows the exact steps).
+  This is surfaced HERE and in the verdict — never written to session memory;
+  plugin-fixable constellations ship in the plugin (#654).
 <If --tool=<name> was set:>
 ⚠ Scoped to single tool: <name>
   Other tools were gathered but not dispatched. Re-run without --tool

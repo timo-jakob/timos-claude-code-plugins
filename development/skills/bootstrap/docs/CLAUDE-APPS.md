@@ -39,6 +39,7 @@ turning the webhook on would add a delivery destination we don't use.
 | `issues` | read | Read the linked issue body for `feat:` PRs (per the Approver's per-PR-type criteria). |
 | `actions` | read | Read GitHub Actions workflow runs and their conclusions (the "everything green" gate). |
 | `checks` | read | Read check runs from third-party integrations (Sonar, Snyk, CodeQL) that don't post via Actions. |
+| `security_events` | read | Verify Code Scanning alert states (e.g. "is CodeQL alert #N fixed at this head?") under the App's own identity when reviewing security-fix PRs. Without it those reads 403 (`Resource not accessible by integration`) and the approver agent falls back to the user's `gh` auth for the read-only query (#654). Same re-accept dance as #418 for existing installations. |
 | `metadata` | read | Required default for every App. |
 
 > **Upgrading an existing Approver install to `contents:write` (#418).** A

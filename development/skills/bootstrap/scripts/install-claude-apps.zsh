@@ -430,6 +430,23 @@ cmd_verify() {
         err "  permission update (re-registering only affects brand-new installs)."
         (( problems++ )) || true
       fi
+
+      # 3b. security_events:read (#654). Lets the Approver verify Code Scanning
+      #     alert states under its own identity; without it those reads 403 and
+      #     the agent falls back to the user's gh auth. Non-fatal (the fallback
+      #     works), so a stale grant is a warning, not an error — but the same
+      #     re-accept dance as #418 applies to existing installations.
+      se_perm=$(print -r -- "$app_meta" | jq -r '.permissions.security_events // "none"' 2>/dev/null)
+      if [[ "$se_perm" == "read" || "$se_perm" == "write" ]]; then
+        ok "$display: security_events:$se_perm present — Code Scanning reads work under the App token."
+      else
+        warn "$display: security_events permission is '$se_perm' (#654)."
+        warn "  Code Scanning alert reads 403 under the App token; the approver"
+        warn "  agent falls back to your gh auth for those read-only queries."
+        warn "  Fix: App settings → Permissions → Code scanning alerts: Read → Save,"
+        warn "  then github.com/settings/installations → $display → Configure →"
+        warn "  accept the permission update."
+      fi
     fi
 
   done
