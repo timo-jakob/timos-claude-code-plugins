@@ -12,16 +12,26 @@
 # (timeout, gh/auth/network error). Use it instead of hand-rolling a poll loop.
 #
 # Usage:
-#   await-pr-checks.zsh [--repo OWNER/REPO] [--timeout SECS] [--interval SECS] <pr>
+#   await-pr-checks.zsh [--repo OWNER/REPO] [--timeout SECS] [--interval SECS]
+#                       [--register-grace SECS] <pr>
 #
-# Defaults: --timeout 1800 (30 min), --interval 30. Repo defaults to gh's
-# resolution from the current working tree.
+# Defaults: --timeout 1800 (30 min), --interval 30, --register-grace 120.
+# Repo defaults to gh's resolution from the current working tree.
+#
+# Registration grace (#641): right after `gh pr update-branch` or a fresh push,
+# the new head SHA has *zero* registered check runs for a short window — and
+# `gh pr checks` reports that as "no checks reported", indistinguishable from a
+# repo that legitimately runs no CI. Treating the empty set as settled there is
+# a FALSE GREEN. So an empty set is treated as *pending* until either a check
+# registers or the --register-grace window elapses; only then is it reported as
+# the genuinely-checkless verdict. Same flag/semantics as merge-pr-cycle.zsh.
 #
 # Seam: GH_BIN overrides the `gh` binary (for tests / non-PATH installs).
 #
 # Exit codes:
 #   0  checks settled — prints "settled: N passed, M failed, … — GREEN|NOT-GREEN"
-#      (also when the PR legitimately has no checks: nothing to await)
+#      (also when the PR legitimately has no checks after the grace: nothing
+#      to await)
 #   2  usage error
 #   3  timed out before the checks settled — a real failure; caller decides
 #   1  gh invocation failed (auth / network / unknown) — a real failure
@@ -36,13 +46,14 @@ emulate -L zsh
 # out as the script's result.
 setopt nounset pipefail
 
-local repo="" timeout=1800 interval=30
+local repo="" timeout=1800 interval=30 register_grace=120
 local -a positional
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --repo) repo="$2"; shift 2 ;;
   --timeout) timeout="$2"; shift 2 ;;
   --interval) interval="$2"; shift 2 ;;
+  --register-grace) register_grace="$2"; shift 2 ;;
   --) shift; positional+=("$@"); break ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) positional+=("$1"); shift ;;
@@ -50,7 +61,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#positional[@]} -ne 1 ]]; then
-  print -u2 -- "usage: await-pr-checks.zsh [--repo OWNER/REPO] [--timeout SECS] [--interval SECS] <pr>"
+  print -u2 -- "usage: await-pr-checks.zsh [--repo OWNER/REPO] [--timeout SECS] [--interval SECS] [--register-grace SECS] <pr>"
   exit 2
 fi
 local pr="${positional[1]}"
@@ -66,17 +77,31 @@ local err; err="$(mktemp)"
 trap 'rm -f "$err"' EXIT
 
 local deadline=$(( $(date +%s) + timeout ))
+local register_deadline=$(( $(date +%s) + register_grace ))
 local out rc pending total passed failed other verdict
 while :; do
   out="$("$gh" pr checks "$pr" ${repo_args[@]+"${repo_args[@]}"} \
     --json name,state,bucket 2>"$err")"
   rc=$?
   if (( rc != 0 )); then
-    # `gh pr checks` exits non-zero with "no checks reported" when the PR has
-    # no checks at all — that's a settled "nothing to wait for", not an error.
+    # `gh pr checks` exits non-zero with "no checks reported" when the head SHA
+    # has zero registered check runs. That is ambiguous: a fresh push/rebase has
+    # a window where checks haven't registered yet (a FALSE GREEN if we settle
+    # now, #641), vs. a repo that genuinely runs no CI. Keep polling through the
+    # register grace; only after it elapses with the set still empty do we
+    # conclude the legitimately-checkless case.
     if grep -qi 'no checks reported' "$err"; then
-      print -- "PR #$pr has no checks — nothing to await (settled)."
-      exit 0
+      if (( $(date +%s) >= register_deadline )); then
+        print -- "PR #$pr has no checks after ${register_grace}s grace — nothing to await (settled)."
+        exit 0
+      fi
+      if (( $(date +%s) >= deadline )); then
+        print -u2 -- "timed out after ${timeout}s with no checks registered on PR #$pr."
+        exit 3
+      fi
+      print -- "waiting: 0 checks registered yet on PR #$pr (grace)…"
+      sleep "$interval"
+      continue
     fi
     print -u2 -- "gh pr checks failed (rc=$rc):"
     cat "$err" >&2

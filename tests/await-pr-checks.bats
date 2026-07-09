@@ -64,11 +64,36 @@ await() { run env GH_BIN="$FAKE_GH" "$@" zsh "$S" --timeout 5 --interval 0 86; }
   echo "$output" | grep -q "timed out"
 }
 
-@test "await: #412 PR with no checks -> exit 0 (nothing to await)" {
+@test "await: #641 no checks past the register grace -> exit 0 (checkless verdict)" {
+  # A repo that genuinely runs no CI: the set stays empty past the grace, so
+  # the legitimately-checkless verdict is reported (unchanged #412 behaviour).
+  # --register-grace 0 makes the grace elapse immediately, deterministically.
   : > "$CHECKS"
-  await GH_NOCHECKS=1
+  run env GH_BIN="$FAKE_GH" GH_NOCHECKS=1 zsh "$S" --timeout 5 --interval 0 --register-grace 0 86
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "no checks"
+}
+
+@test "await: #641 empty check set is pending — waits through the grace until a check registers, then settles" {
+  # Right after `gh pr update-branch` the head SHA has zero registered check
+  # runs; "no checks reported" must be treated as pending, not a false green
+  # (#641). Here gh reports empty twice, then a real (passing) check registers.
+  local counter="$BATS_TEST_TMPDIR/n"; echo 0 > "$counter"
+  local gh2="$BATS_TEST_TMPDIR/gh2"
+  cat > "$gh2" <<EOF
+#!/usr/bin/env bash
+n=\$(cat "$counter"); n=\$((n + 1)); echo \$n > "$counter"
+if [ "\$n" -le 2 ]; then echo "no checks reported on the 'main' branch" >&2; exit 8; fi
+cat "$CHECKS"
+EOF
+  chmod +x "$gh2"
+  printf '[{"name":"a","state":"SUCCESS","bucket":"pass"}]' > "$CHECKS"
+  run env GH_BIN="$gh2" zsh "$S" --timeout 5 --interval 0 --register-grace 5 86
+  [ "$status" -eq 0 ]
+  # It must have observed the empty set (waited) before the check registered…
+  echo "$output" | grep -q "0 checks registered yet"
+  # …and then settled on the real outcome.
+  echo "$output" | grep -q "GREEN"
 }
 
 @test "await: #412 gh auth/network error -> exit 1 (real failure)" {
