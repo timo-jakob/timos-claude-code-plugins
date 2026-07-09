@@ -137,6 +137,10 @@ Agent(
     Your GitHub token has Approver App permissions. Read it from the file
     path below and export it before any `gh` mutation — do not print it:
       export GH_TOKEN=$(cat <TOKEN_FILE path>)
+    Your cwd is this session's shared worktree — do NOT run git checkout /
+    git switch / gh pr checkout in it or any .claude/worktrees/ dir (#643).
+    Review from `gh pr diff` / `gh api`; if you truly need the PR tree, use
+    a fresh scratch worktree you remove before returning.
     Post the verdict to GitHub using `gh pr review <n> --approve|--request-changes`.
   """
 )

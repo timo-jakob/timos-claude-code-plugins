@@ -47,8 +47,12 @@ The agent's prompt itself is a short string:
 Review PR #<N> in <owner>/<repo>. Dry-run: <true|false>.
 ```
 
-The agent runs in your local checkout of the repo (full git history;
-fetch the PR head as needed). The plugin family's skills and agents are
+The agent runs in your local checkout of the repo, but that cwd is the
+**shared session worktree** — the agent must never `git checkout` /
+`git switch` / `gh pr checkout` in it (or any `.claude/worktrees/` dir),
+which would leave the orchestrator detached (#643); it reviews from
+`gh pr diff` / `gh api`, using a self-removing scratch worktree only if
+it truly needs the PR tree. The plugin family's skills and agents are
 available through your installed plugins.
 
 ## Procedure (what the agent does, step by step)
