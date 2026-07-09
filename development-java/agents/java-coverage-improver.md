@@ -123,9 +123,13 @@ Your prompt contains:
     - Identify what's still uncovered (from the XML)
     - Iterate (return to Phase 2 for the remaining gaps)
 4. Run the FULL suite to make sure your new tests didn't break
-    anything else:
-    - `./gradlew test`
-    - All tests must pass.
+    anything else — and leave a fresh JaCoCo XML in the worktree for the
+    push-time pre-push hook (#644):
+    - `./gradlew test jacocoTestReport`
+    - All tests must pass. The `jacocoTestReport` task writes
+      `build/reports/jacoco/test/jacocoTestReport.xml` in the worktree;
+      the orchestrator pushes from **this worktree**, whose
+      `coverage-floor` pre-push hook reads it there. Leave it in place.
 
 5. **Commit your work before returning** (only when you actually
     added tests). If `git status --porcelain` is empty, skip this

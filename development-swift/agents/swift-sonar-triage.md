@@ -137,7 +137,9 @@ operational setup.
    API?), then decide + apply.
 4. `git status --short` for the summary.
 5. **Run tests** in the worktree:
-   - SwiftPM: `swift test 2>&1 | tail -60`.
+   - SwiftPM: `swift test --enable-code-coverage 2>&1 | tail -60` — the
+     `--enable-code-coverage` leaves the coverage data in the worktree for
+     the push-time pre-push hook the orchestrator runs from here (#644).
    - Xcode: `xcodebuild test -scheme <scheme> -destination 'platform=macOS' 2>&1 | tail -60`.
 6. If tests pass → success. If tests fail → diagnose; up to 2 remediation
    passes (a test relying on the buggy behavior the fix corrected → fix

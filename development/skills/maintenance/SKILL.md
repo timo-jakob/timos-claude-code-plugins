@@ -1080,11 +1080,24 @@ Phase B**. The improver's worktree branch + path are in the response;
 both are returned by the Claude Code runtime because the improver
 spawned with `isolation="worktree"`.
 
-1. **Push the branch** to origin:
+1. **Push the branch** to origin **from the improver's worktree, not
+   `<repo.path>`** (#644). A pre-push hook runs wherever the push runs,
+   and the project's `coverage-floor` pre-push hook needs the build
+   artifacts (`coverage.xml` / JaCoCo XML) the agent produced **in its
+   worktree**. `<repo.path>` has none, so pushing there fails the hook;
+   the artifact-bearing worktree is push-ready (env + artifacts):
 
    ```bash
-   git -C "<repo.path>" push -u origin "<improver_branch>"
+   git -C "<improver_worktree>" push -u origin "<improver_branch>"
    ```
+
+   `<improver_worktree>` is the path returned in the improver's response,
+   alongside `<improver_branch>`. This is the **pre-push-artifact
+   contract**: worktree agents leave their coverage report in the
+   worktree, and every stage pushes from the worktree that holds it —
+   never from `<repo.path>`, which is why Stage 0 previously failed the
+   diff-cover hook and burned tool calls bootstrapping a report by hand
+   (#644, the sequel to #629).
 
 2. **Open a PR** against the user's working branch (the same branch the
    improver was based on):

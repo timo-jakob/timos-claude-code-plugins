@@ -125,7 +125,10 @@ not the first.
    annotation via Edit. For `human-review`: do nothing.
 4. `git status --short` after all findings processed.
 5. **Run tests** in the worktree:
-   - `pytest --tb=short 2>&1 | tail -60`
+   - `pytest --cov --cov-report=xml --tb=short 2>&1 | tail -60` — the
+     `--cov-report=xml` leaves `coverage.xml` in the worktree for the
+     push-time pre-push hook the orchestrator runs from here (#644); it
+     is a gitignored build artifact, so leave it in place.
    - Any **new executable line** your fix introduces (a lambda, an
      extracted branch) must be covered by a test before you finish —
      bootstrapped repos enforce a 90% coverage floor on new lines at

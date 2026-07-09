@@ -242,7 +242,10 @@ dismissed_comment="<comment>"`.
 6. After all findings processed:
    - `git status --short`
 7. **Run tests** if any `fix` action touched Java source:
-   - `./gradlew test 2>&1 | tail -60` (use `gradle` if no wrapper)
+   - `./gradlew test jacocoTestReport 2>&1 | tail -60` (use `gradle` if
+     no wrapper) — the `jacocoTestReport` task leaves the JaCoCo XML in
+     the worktree (`build/reports/jacoco/test/jacocoTestReport.xml`) for
+     the push-time pre-push hook the orchestrator runs from here (#644).
    - Any **new executable line** your fix introduces (a lambda
      supplier, an extracted branch) must be covered by a test before
      you finish — bootstrapped repos enforce a 90% coverage floor on
