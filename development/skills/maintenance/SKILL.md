@@ -1504,7 +1504,35 @@ After pushing and opening the PR:
    you to read — and reserves nonzero for real failures only (timeout → 3,
    gh/auth/network → 1). Never let a poll loop's trailing `[ … ]` test be the
    command result.
-2. **If all checks pass** → proceed to step 5 (approval gate) below.
+
+   **1b. Settled GREEN but a *required* check is CANCELLED → re-run it,
+   deterministically (#656).** A cancelled check is neutral for the greenness
+   verdict (#522 — the Approver-gate jobs cancel by design), but a cancelled
+   **required context** can never satisfy branch protection: the verdict says
+   GREEN while the merge silently stays BLOCKED (observed 2026-07-09: a
+   `cancel-in-progress` concurrency race cancelled the required `sonarcloud`
+   job mid-run while every sibling succeeded). So after settle, when the
+   verdict is GREEN but the "other" bucket is non-zero, cross-check it against
+   branch protection:
+
+   ```bash
+   required=$(gh api "repos/<owner/repo>/branches/<base_branch>/protection" \
+     --jq '.required_status_checks.contexts[]' 2>/dev/null)
+   cancelled=$(gh pr checks "<pr_number>" --json name,bucket \
+     --jq '[.[] | select(.bucket == "cancel") | .name][]')
+   # any name in BOTH lists → a cancelled required check
+   ```
+
+   For each cancelled **required** check: re-run just its job —
+   `gh run rerun <run-id> --failed` (the run id via `gh run list
+   --branch <headRefName> --json databaseId,name`), or the job-level rerun —
+   then **re-enter step 1** and wait for the fresh settle. **Cap: 2 re-runs
+   per PR** (mirroring the CI-fix cap); if the required check is still
+   cancelled after that, record the stage `escalated` naming the check —
+   don't loop forever on a repeating concurrency race. Cancelled
+   **non-required** checks stay neutral exactly as today (#522) — no re-run.
+2. **If all checks pass** (and no required check is cancelled, per 1b) →
+   proceed to step 5 (approval gate) below.
 3. **If any check fails**, distinguish **new** from **pre-existing**
    failures before spending tokens on the CI-fix agent
    (`<response.ci_fixer_agent>`, captured in Phase 6).
