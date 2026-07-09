@@ -25,8 +25,13 @@ The Approver App needs these GitHub permissions:
 Scope: repos this app is installed on
 
 - `pull_requests: write` — post reviews (approval, requested changes, comments)
-- `contents: read` — read PR diffs and files (for review analysis)
+- `contents: write` — read PR diffs/files AND make the App's approvals count
+  toward branch protection (push access = Contents permission, #418; the
+  Approver never actually pushes)
 - `checks: read` — read CI check run results (to inform approval decision)
+- `security_events: read` — verify Code Scanning alert states under the App's
+  own identity when reviewing security-fix PRs; without it those reads 403 and
+  the agent falls back to the user's `gh` auth (#654)
 - `commit_statuses: read` — read legacy commit statuses (Snyk, SonarCloud, etc.)
 
 ### Organization Permissions

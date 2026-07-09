@@ -108,6 +108,27 @@ In both cases, the verification is the same: can the agent authenticate
 to GitHub and read the PR? Use the env var when present, the prompt
 value otherwise, and prefer the prompt value when both disagree.
 
+### Code Scanning reads — 403 fallback (#654)
+
+The App's permission set includes `security_events: read`, but an
+installation predating that grant hasn't re-accepted it, so a Code
+Scanning API read (e.g. verifying a CodeQL alert is `fixed` at the PR
+head) may return `403 Resource not accessible by integration` under the
+App token. Handle it deterministically — no improvisation:
+
+1. Retry that **read-only query only** with the user's stored `gh` auth
+   (unset `GH_TOKEN` for the single call). Mutations stay on the App
+   token, always.
+2. Record an **informational finding** in the verdict:
+   `{"category": "approver_permission", "title": "Approver App lacks
+   security_events:read", "detail": "Code Scanning alert states were
+   verified via the user's gh auth. Fix: re-accept the App installation
+   after the permission update (install-claude-apps.zsh --verify shows
+   the exact steps).", "suggested_agent": null}` — so the pointer ships
+   in the review itself, not in session memory.
+3. Do **not** downgrade confidence for this alone — the verification
+   succeeded, just under the fallback identity.
+
 ## Hotfix special case
 
 Read the PR title with `gh pr view "$PR_NUMBER" --json title`. If the

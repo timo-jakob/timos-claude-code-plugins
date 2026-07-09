@@ -58,13 +58,19 @@ app_permissions_json() {
       # auto-merges. See CLAUDE-APPS.md and #418 (root-caused on
       # tick-client-snapper#226). `main` stays PR-protected, so the bot still
       # cannot push directly to a protected branch — exposure is bounded.
+      # security_events:read lets the Approver verify Code Scanning alert
+      # states (e.g. "is CodeQL alert #N fixed at this head?") under its own
+      # identity — a read squarely inside its read-only review design. Without
+      # it those API reads 403 and the agent falls back to the user's gh auth
+      # (#654). Existing installations must re-accept the updated permissions.
       print -- '{
-        "pull_requests": "write",
-        "contents":      "write",
-        "issues":        "read",
-        "actions":       "read",
-        "checks":        "read",
-        "metadata":      "read"
+        "pull_requests":   "write",
+        "contents":        "write",
+        "issues":          "read",
+        "actions":         "read",
+        "checks":          "read",
+        "security_events": "read",
+        "metadata":        "read"
       }'
       ;;
     claude-maintenance)
