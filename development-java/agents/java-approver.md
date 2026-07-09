@@ -49,9 +49,29 @@ or equivalent prompt values):
 | `REPO` | `<owner>/<repo>` |
 | `DRY_RUN` | `"true"` for a non-binding print-only run; `"false"` to post the review |
 
-Your cwd is a checkout of the repo with full history; fetch the PR
-head as needed. Verify CI is green at the head SHA yourself (baseline
-criterion 1) — there is no server-side gate that pre-checked it.
+**Your cwd depends on how you were invoked — never mutate it (#643).**
+
+- **CI invocation** — your cwd is a disposable checkout created for this
+  run; fetching or checking out the PR head there is harmless.
+- **Local invocation** (the `/development-java:approve` skill) — your cwd
+  is the **orchestrator's shared session worktree**. It is not yours to
+  move: a `git checkout` / `git switch` / `gh pr checkout` there leaves the
+  orchestrator detached at your SHA and corrupts the run.
+
+So, as a **hard rule regardless of invocation**:
+
+- **Never** run `git checkout`, `git switch`, or `gh pr checkout` in the
+  invoking cwd or in any existing `.claude/worktrees/` directory.
+- Read the PR's code with `gh pr diff` / `gh api` file reads — that covers
+  almost everything a review needs.
+- If you genuinely need the PR's checked-out tree (beyond diffs), create a
+  **fresh scratch worktree** in a directory you make
+  (`git worktree add "$(mktemp -d)/pr" <sha>`) or a temp clone, work there,
+  and **remove it before returning** (`git worktree remove --force <dir>`).
+  Never create or reuse a worktree under `.claude/worktrees/`.
+
+Verify CI is green at the head SHA yourself (baseline criterion 1) — there
+is no server-side gate that pre-checked it.
 
 ## Hard-fail conditions
 
