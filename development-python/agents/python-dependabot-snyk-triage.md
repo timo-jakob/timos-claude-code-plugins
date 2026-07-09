@@ -38,6 +38,14 @@ So your pass is: classify → update BEHIND branches → verify safety on
 already-current heads → arm auto-merge on the safe green ones → **return
 the full classification**. One pass, no resume.
 
+**Never check out a PR head in your invoking cwd (#660).** You run
+without isolation, so your cwd is the **orchestrator's shared session
+worktree** — a `gh pr checkout` / `git checkout` / `git switch` there
+detaches the orchestrator (the #643 rule, extended to this agent). You
+almost never need a checkout at all (`gh pr view` / `gh pr diff` /
+`gh api` cover triage); when a step genuinely needs the PR's tree, use a
+fresh scratch worktree you create and remove before returning.
+
 PR sources you may see:
 
 - **Dependabot** — `headRefName` starts with `dependabot/<ecosystem>/`.
