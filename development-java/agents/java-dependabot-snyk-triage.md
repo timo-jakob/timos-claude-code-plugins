@@ -384,9 +384,12 @@ on the PR's current (up-to-date, green) head:
 
 **Never post an approval yourself** — `gh pr review --approve` with
 the operator's gh identity is self-approval and is forbidden
-(timos-claude-code-plugins#224). Approval comes from
-`claude-approver[bot]` (it fires on `check_suite: completed`) or a
-human. You only act on the decision that already exists:
+(timos-claude-code-plugins#224). Approval comes from the Approver
+(`claude-approver-<owner>[bot]`) or a human. In **`ci` mode** a
+workflow posts the verdict on `check_suite: completed`; in **`local`
+mode** (the default since epic #476 — no CI-side workflow) the
+orchestrator drives the approve skill instead. Either way you only act
+on the decision that already exists:
 
 ```bash
 gh pr view <number> --json reviewDecision --jq '.reviewDecision // "NONE"'
