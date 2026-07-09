@@ -222,7 +222,10 @@ dismissed_comment="<comment>"`.
 6. After all findings processed:
    - `git status --short`
 7. **Run tests** if any `fix` action touched Python source:
-   - `pytest --tb=short 2>&1 | tail -60`
+   - `pytest --cov --cov-report=xml --tb=short 2>&1 | tail -60` — the
+     `--cov-report=xml` leaves `coverage.xml` in the worktree for the
+     push-time pre-push hook the orchestrator runs from here (#644); it
+     is a gitignored build artifact, so leave it in place.
    - Any **new executable line** your fix introduces (a lambda, an
      extracted branch) must be covered by a test before you finish —
      bootstrapped repos enforce a 90% coverage floor on new lines at

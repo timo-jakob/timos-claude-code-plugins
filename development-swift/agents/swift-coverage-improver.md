@@ -107,8 +107,12 @@ Your prompt contains:
    are now ≥ Required (80%).
 3. If a function is still under Required, identify what's still uncovered and
    iterate (back to Phase 2 for the remaining gaps).
-4. Run the FULL suite to make sure your new tests didn't break anything else
-   (`swift test` / full `xcodebuild test`). All tests must pass.
+4. Run the FULL suite to make sure your new tests didn't break anything else,
+   **with coverage enabled** so the worktree holds the coverage data the
+   push-time pre-push hook needs (#644): `swift test --enable-code-coverage`
+   (or full `xcodebuild test` with coverage on). All tests must pass. The
+   orchestrator pushes from **this worktree**, whose `coverage-floor` pre-push
+   hook reads the coverage output there — leave it in place.
 
 5. **Commit your work before returning** (only when you actually added
    tests). If `git status --porcelain` is empty, skip this step. Otherwise:

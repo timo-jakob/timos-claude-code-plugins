@@ -126,9 +126,16 @@ Your prompt contains:
     - Identify what's still uncovered
     - Iterate (return to Phase 2 for the remaining gaps)
 4. Run the FULL suite to make sure your new tests didn't break
-    anything else:
-    - `pytest --tb=short`
-    - All tests must pass.
+    anything else — and produce `coverage.xml` in the worktree for the
+    push-time pre-push hook (#644):
+    - `pytest --cov --cov-report=xml --tb=short`
+    - All tests must pass. This writes `coverage.xml` to the worktree
+      root; the orchestrator pushes from **this worktree**, whose
+      `coverage-floor` pre-push hook (`diff-cover coverage.xml`) reads it
+      there. Leave it in place — do **not** delete it before returning.
+    - `coverage.xml` is a build artifact; bootstrapped repos gitignore
+      it, so the `git add -A` commit below won't stage it. (If the repo
+      does not ignore it, stage only your test files, never the report.)
 
 5. **Commit your work before returning** (only when you actually
     added tests). If `git status --porcelain` is empty, skip this

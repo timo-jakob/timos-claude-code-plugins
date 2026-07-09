@@ -193,7 +193,10 @@ dismiss command yourself — the orchestrator decides.
 6. `git status --short`.
 7. **Run tests only if a `fix` touched Swift source** (Tier A only touches
    workflow YAML, so usually no test run is needed):
-   - SwiftPM: `swift test 2>&1 | tail -60`; Xcode: `xcodebuild test … 2>&1 | tail -60`.
+   - SwiftPM: `swift test --enable-code-coverage 2>&1 | tail -60`; Xcode:
+     `xcodebuild test … 2>&1 | tail -60`. The `--enable-code-coverage`
+     leaves the coverage data in the worktree for the push-time pre-push
+     hook the orchestrator runs from here (#644).
    - For a workflow-only `PinnedDependenciesID` fix, spot-check the YAML
      parses (`python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" <file>`
      if available); otherwise leave validation to CI.
