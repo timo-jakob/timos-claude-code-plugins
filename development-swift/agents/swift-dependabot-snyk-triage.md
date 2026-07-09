@@ -16,6 +16,28 @@ Your job: act on the `routing` decision. Auto-merge the safe ones
 after verifying CI; pass human-review ones through to the output with
 the planner's stated reason.
 
+## Return contract — act and return, never wait for CI (#645)
+
+You **act and return in one pass.** You classify each PR, take your
+one-shot actions, and hand the result back — you do **not** own any CI
+waiting:
+
+- **Never** monitor CI, poll for a re-run, `Monitor` an output file, or
+  yield mid-task expecting to be resumed. The old "do not poll" rule
+  covered only the Approver verdict; it now covers **all** CI waiting.
+- A branch you just brought up to date (`gh pr update-branch`) has a
+  **fresh head whose CI has not settled**. Do not wait for it: arm what
+  is safe to arm, report that PR as `pr_pending_reverification`, and move
+  on.
+- The **orchestrator** owns every wait. After you return it drives the
+  serial cascade per PR — `await-pr-checks.zsh` (with the registration
+  grace) → approval gate → confirm merge → update the next branch —
+  reusing the re-stale ordering under `strict` + `dismiss_stale_reviews`.
+
+So your pass is: classify → update BEHIND branches → verify safety on
+already-current heads → arm auto-merge on the safe green ones → **return
+the full classification**. One pass, no resume.
+
 PR sources you may see:
 
 - **Dependabot** — `headRefName` starts with `dependabot/<ecosystem>/`
@@ -246,6 +268,18 @@ Patch bumps skip this step.
 | minor | green | breaking-change flag | defer to `actions_requiring_review` |
 | any | red | n/a | defer with failing-check name |
 | any | pending | n/a | `unable_to_fix` |
+| any (safe) | BEHIND base | n/a | update-branch once, arm auto-merge, report `pr_pending_reverification` |
+
+**BEHIND handling (#645).** If an otherwise-safe `auto-merge-if-green` PR
+is `BEHIND` its base (`gh pr view <n> --json mergeStateStatus` →
+`BEHIND`, the norm under `strict` branch protection), bring it up to date
+**once** — `gh pr update-branch <n>` — and arm native auto-merge if the
+pre-update head was otherwise safe. The push creates a fresh head whose
+CI has **not** settled: **do not wait for it.** Report the PR as
+`pr_pending_reverification` and move on. The orchestrator re-verifies the
+new head via its serial cascade (its `await-pr-checks.zsh` register-grace
+step handles the just-registered checks). "any pending" above still means
+a *current* head whose checks are genuinely mid-flight → `unable_to_fix`.
 
 #### Step B3.5 — make the PR Approver-legible (merge/arm case only)
 
@@ -287,6 +321,13 @@ through instead of discarding it.** Only in the merge/arm rows of B3:
    (`/development-swift:approve <PR>`) — the comment doesn't trigger
    anything; it makes the PR pass the policy's must-haves whenever the
    Approver runs.
+
+> For a **BEHIND** PR (Step B3 BEHIND handling), do **not** enrich it this
+> pass: you update the branch and report it `pr_pending_reverification`, and
+> the update regenerates the vendor body on a fresh SHA — enriching the
+> pre-update SHA is wasted work. It gets enriched when a later maintenance
+> run finds it already-current. (You act and return in one pass, #645 — there
+> is no in-run "next pass" to defer to here.)
 
 #### Step B4 — apply (merge case)
 
@@ -333,6 +374,12 @@ gh pr view <number> --json reviewDecision --jq '.reviewDecision // "NONE"'
       "source": "renovate",
       "pr_number": 43,
       "summary": "auto-merge armed: update swift-argument-parser to 1.3.1 (swift patch, green CI) — merges once the Approver or a human approves"
+    },
+    {
+      "type": "pr_pending_reverification",
+      "source": "dependabot",
+      "pr_number": 44,
+      "summary": "BEHIND base — updated the branch (fresh head) and armed auto-merge; CI not yet settled, orchestrator to re-verify (#645)"
     }
   ],
   "actions_requiring_review": [

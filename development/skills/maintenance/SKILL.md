@@ -1257,6 +1257,34 @@ absent; the top-N groups when it is set), in priority order:
    push/merge a worktree branch do not apply; follow the dispatcher
    SKILL's case list for what such an agent reports back.
 
+   **Vendor-PR post-return cascade — the orchestrator owns all CI waiting
+   (#645).** The vendor-PR agent **acts and returns in one pass**: it
+   classifies, updates BEHIND branches, arms auto-merge on the safe green
+   ones, and hands back its `actions_taken`. It never monitors CI or
+   yields for resume (that improvised agent-side CI monitoring +
+   `SendMessage` resume loop was the most fragile stretch of the
+   2026-07-08 run). So **after it returns, you drive the waiting** — for
+   each PR the agent reported `pr_pending_reverification` (a branch it
+   just updated, whose fresh head's CI hasn't settled), run the serial
+   cascade, **one PR at a time** (each merge re-stales the rest under
+   `strict`):
+
+   1. `await-pr-checks.zsh "<pr>"` — the registration grace (#641) rides
+      the just-registered checks; a false "no checks" won't slip through.
+   2. Approval gate (§ the Phase 8 approval-gate step) — mode-aware
+      (#642); on green + approved, confirm the merge.
+   3. Re-update whichever remaining PR the merge just re-staled, then
+      repeat — the same re-stale ordering as § *Re-staling is unavoidable
+      under `strict`*.
+
+   The agent did the **initial** branch-update for the PRs it reported
+   `pr_pending_reverification`; **you** own the **re-stale re-updates**
+   from here (each merge knocks the rest BEHIND again). `pr_merged` /
+   `pr_automerge_armed` entries need no cascade (already merged, or native
+   auto-merge fires on green); only `pr_pending_reverification` does. This
+   keeps every wait in the orchestrator's one blessed helper, never in the
+   agent.
+
    **Pre-dispatch hook (when `plan[i].pre_dispatch_hook` is present).**
    Some groups need an environment check before their agent is spawned —
    e.g. a runtime-upgrade agent's cascade depends on the target
