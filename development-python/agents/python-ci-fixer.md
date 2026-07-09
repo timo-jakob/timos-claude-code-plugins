@@ -239,7 +239,9 @@ small and reviewable — the human PR reviewer is reading this.
 Through the step-1 interpreter prefix:
 
 ```bash
-pytest --tb=short 2>&1 | tail -80
+pytest --cov --cov-report=xml --tb=short 2>&1 | tail -80
+# --cov-report=xml leaves coverage.xml in the worktree so your own push
+# passes the coverage-floor pre-push hook (#655); it's gitignored — leave it.
 ```
 
 If tests still fail, iterate inside this invocation up to one re-fix.

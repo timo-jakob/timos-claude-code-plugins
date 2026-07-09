@@ -77,7 +77,10 @@ Stop here — do not invoke the tools, do not touch any files.
 5. `git diff --stat` — quantify.
 6. **Build + test** — this is non-negotiable. Formatting/autocorrect
    shouldn't break anything, but verify:
-   - SwiftPM: `swift build && swift test 2>&1 | tail -60`.
+   - SwiftPM: `swift build && swift test --enable-code-coverage 2>&1 | tail -60`
+     — the `--enable-code-coverage` leaves the coverage data in the
+     worktree for the push-time pre-push hook the orchestrator runs from
+     here (#655).
    - Xcode: `xcodebuild -scheme <scheme> -destination 'platform=macOS' build test 2>&1 | tail -60`
      (discover the scheme with `xcodebuild -list`).
    - If neither build system is usable in this environment, say so in

@@ -119,9 +119,12 @@ wide-but-mechanical migration the review mode only reports on:
      import` are **last resorts**, each requiring an inline comment
      justifying why the safe alternatives don't apply.
 4. **Iterate**: rebuild after each batch of fixes, up to 3 passes.
-   Then run the tests (`swift test` / `xcodebuild test`) — a migration
-   that compiles but deadlocks (a hop onto `@MainActor` from a
-   synchronous path) is a failed migration.
+   Then run the tests (`swift test --enable-code-coverage` /
+   `xcodebuild test`) — a migration that compiles but deadlocks (a hop
+   onto `@MainActor` from a synchronous path) is a failed migration. In
+   migrate mode the `--enable-code-coverage` also leaves the coverage
+   data in the worktree for the push-time pre-push hook the orchestrator
+   runs from here (#655).
 5. **Escalate what the guide doesn't cover.** A diagnostic with no
    documented mechanical resolution — or one whose fix would change
    public API or observable behavior — goes to

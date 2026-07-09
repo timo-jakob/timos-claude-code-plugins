@@ -213,8 +213,10 @@ refactor unrelated code, or pin Boot back.
 ### Phase 5 — verify (up to 3 remediation passes total)
 
 ```bash
-./gradlew --no-daemon build 2>&1 | tail -100
-# use ./gradlew if present, otherwise gradle
+./gradlew --no-daemon build jacocoTestReport 2>&1 | tail -100
+# use ./gradlew if present, otherwise gradle; jacocoTestReport leaves the
+# JaCoCo XML in the worktree for the push-time pre-push hook the
+# orchestrator runs from here (#655)
 ```
 
 If the build passes → success, proceed to the commit. If it fails,

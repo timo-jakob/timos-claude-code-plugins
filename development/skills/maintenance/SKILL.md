@@ -1443,6 +1443,17 @@ absent; the top-N groups when it is set), in priority order:
    capture the new PR number. Record the stage in `phase8-stages` —
    branch, PR number, `status: pr_opened` (§ Per-stage checkpoint
    records).
+
+   **Missing-coverage-report fallback (#655).** Every worktree agent's
+   contract says to leave its coverage report in the worktree (#644), so
+   the pre-push hook normally passes first-attempt. If a push still
+   fails on a missing report (an agent that slipped the contract),
+   recover deterministically — regenerate it **in the artifact
+   worktree** with the language's documented command (`pytest --cov
+   --cov-report=xml` / `./gradlew test jacocoTestReport` / `swift test
+   --enable-code-coverage`), retry the push **once**, and note the
+   contract slip in the run summary (it's a plugin bug to file). Never
+   improvise beyond that one retry.
 5. **Close superseded vendor PRs.** Inspect the agent's response for
    any `actions_taken[].superseded_prs` entries (currently emitted by
    `python-major-upgrade`; any future agent that opens a replacement

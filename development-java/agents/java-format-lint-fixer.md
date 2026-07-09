@@ -61,8 +61,10 @@ Stop here — do not invoke Spotless, do not touch any files.
 4. `git diff --stat` — quantify.
 5. **Run tests** — this is non-negotiable. Formatting shouldn't break
    tests, but verify nothing else broke:
-   - `./gradlew test 2>&1 | tail -60` (capture summary + last failures
-     if any).
+   - `./gradlew test jacocoTestReport 2>&1 | tail -60` (capture summary +
+     last failures if any). The `jacocoTestReport` task leaves the JaCoCo
+     XML in the worktree for the push-time pre-push hook the orchestrator
+     runs from here (#655).
 6. If tests pass → success. If tests fail → roll back
    (`git checkout -- .`) and report. (Formatting shouldn't break tests;
    if it does, surface that rather than commit a broken tree.)

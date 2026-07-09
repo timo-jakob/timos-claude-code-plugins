@@ -251,8 +251,10 @@ pass `-Dorg.gradle.java.home="$JAVA_HOME"`:
 ```text
 PASS 1
   Build + test against <to_version>:
-    JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon build 2>&1 | tail -100
-    # (use ./gradlew if present, otherwise gradle)
+    JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon build jacocoTestReport 2>&1 | tail -100
+    # (use ./gradlew if present, otherwise gradle; jacocoTestReport
+    # leaves the JaCoCo XML in the worktree for the push-time pre-push
+    # hook the orchestrator runs from here, #655)
 
   If the build + tests succeed → DONE. Proceed to step 6 (commit).
 
