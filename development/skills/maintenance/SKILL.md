@@ -302,13 +302,63 @@ flagged PRs, dispatches agents to fix what's auto-fixable, and pushes
 the fixes back to the PR branches. CI re-runs on the new head (a plain
 user-identity push's `synchronize` runs it; a bot **App-token** push's
 does **not** — #605 — so the CI cycle re-triggers it deterministically,
-see § *Re-trigger CI after a bot re-push* below); the Approver
-re-evaluates on the next `check_suite: completed` event. The loop closes
-without further user intervention.
+see § *Re-trigger CI after a bot re-push* below). The Approver then
+re-evaluates: in **`ci` mode** automatically on the next
+`check_suite: completed` event; in **`local` mode** when the approve
+skill is next driven (the approval gate does that per stage). The loop
+closes without further user intervention.
 
 **Skip silently** when `~/.config/claude-plugins/apps.json` doesn't
 exist — the Approver isn't set up on this machine, there's nothing
-to ingest.
+to ingest. (The **approver-mode detection** just below still runs — it
+is a pure read and records `none` in that case.)
+
+### Approver mode — detect once per run (#642)
+
+The Approver runs one of two ways, and the approval gate (Phase 8) must
+know which so it doesn't wait on a workflow that isn't there. Detect the
+mode **once**, near the start of the run — this is a pure read, so it
+runs regardless of `--dry-run` or the skip above — and record it in the
+checkpoint so every stage's gate reads the same value:
+
+- **`ci`** — a CI-side Approver workflow exists in `.github/workflows/`
+  (pre-#476 `claude-approver.yml`, or any workflow that posts the
+  Approver verdict on `check_suite: completed`). The gate re-triggers it
+  with a `/approve` comment.
+- **`local`** — the Approver App is registered locally (`apps.json` has
+  `claude_approver`) but there is **no** CI-side workflow — the
+  decentralized default since epic #476 (deployed 2026-07-02). The gate
+  drives the language plugin's `approve` skill directly; a `/approve`
+  comment would only be noise posted under the user's identity, and
+  waiting for a server-side verdict that never comes burns ~10 minutes
+  per stage (#642).
+- **`none`** — no `claude_approver` entry at all: the Approver isn't
+  available here; the gate falls back to a human review / native
+  auto-merge as it does today.
+
+```bash
+mode=none
+if [[ -f ~/.config/claude-plugins/apps.json ]] \
+   && jq -e '.claude_approver' ~/.config/claude-plugins/apps.json >/dev/null 2>&1; then
+  # Registered locally → default to the decentralized model (#476): local.
+  mode=local
+  # Promote to ci ONLY on the pre-#476 CI-gate signature: a workflow that both
+  # references the Approver AND is triggered by check_suite. Bias matters here:
+  # a false 'local' is harmless (driving the approve skill works everywhere),
+  # but a false 'ci' waits on a workflow that isn't there (#642) — so ci needs
+  # the stronger, two-signal match, not a bare name mention (a leftover comment
+  # or bot-login check must not flip the mode).
+  while IFS= read -r wf; do
+    if grep -q 'check_suite' "$wf"; then mode=ci; break; fi
+  done < <(grep -rlsE 'claude-approver|approver-gate' .github/workflows 2>/dev/null)
+fi
+print -r -- "{\"approver_mode\": \"$mode\"}" \
+  | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase approver_mode --data -
+```
+
+Read it back in the approval gate with
+`checkpoint.zsh load --phase approver_mode` (defaulting to `none` when
+absent, e.g. a resumed run whose checkpoint predates this detection).
 
 ### `--dry-run` — detect only, never dispatch or push
 
@@ -1120,14 +1170,22 @@ still need to merge has gone `BEHIND` from an intervening merge, drive it with
 the blessed helper (#431), never a hand-rolled loop:
 
 ```bash
+# ci mode: --retrigger re-earns the Approver's counting review via /approve
 "<skill-base-dir>/scripts/merge-pr-cycle.zsh" --update --retrigger "<pr_number>"
+
+# local mode (#642): no CI-side workflow to re-trigger — --update only, then
+# drive the approve skill to re-earn the review (no /approve comment)
+"<skill-base-dir>/scripts/merge-pr-cycle.zsh" --update "<pr_number>"
+/development-<lang>:approve "<pr_number>"
 ```
 
 `--update` brings it up to date (which, under `dismiss_stale_reviews`, drops the
 prior approval); the helper waits for the fresh SHA's CI to **register** and
-settle, then `--retrigger` posts one `/approve` to re-earn the Approver's
-counting review. Process such PRs **one at a time** — each merge re-stales the
-rest, so a batch must be serial.
+settle. In **`ci` mode** `--retrigger` then posts one `/approve` to re-earn the
+Approver's counting review; in **`local` mode** you drop `--retrigger` and drive
+the `approve` skill instead (same reason as the approval gate — no server-side
+workflow to nudge, #642). Process such PRs **one at a time** — each merge
+re-stales the rest, so a batch must be serial.
 
 > The structural O(N) cost is inherent to `strict` + `dismiss_stale_reviews`.
 > Bounding the batch (#53 `--batch=N`, #57 budget) keeps it tractable; a GitHub
@@ -1458,9 +1516,25 @@ After pushing and opening the PR:
    must **never** satisfy this yourself: posting
    `gh pr review --approve` with the user's gh identity is
    self-approval with admin credentials and is forbidden (see "What
-   you will NOT do"). The Approver workflow fires on
-   `check_suite: completed`, so once CI is green its verdict typically
-   lands within a few minutes.
+   you will NOT do").
+
+   **Branch on the approver mode** detected in Phase 2.5
+   (`checkpoint.zsh load --phase approver_mode`; default `none`):
+
+   - **`ci`** — a CI-side Approver workflow fires on
+     `check_suite: completed`, so once CI is green its verdict typically
+     lands within a few minutes. Use the `--retrigger` merge-cycle path
+     below.
+   - **`local`** (the default since epic #476) — there is **no** CI-side
+     workflow, so **do not `--retrigger`**: a `/approve` comment would
+     post under the user's identity and then wait out its window for a
+     workflow that never runs (~10 min wasted per stage, #642). Instead,
+     once checks settle green, **drive the language plugin's `approve`
+     skill directly** and then confirm the merge — the local-mode path
+     below.
+   - **`none`** — no Approver available; fall through to the human /
+     native-auto-merge handling (the `NONE` / `REVIEW_REQUIRED` branches
+     below).
 
    When you drive the review yourself (the language plugin's `approve`
    skill spawning the local approver agent), mint the Approver token
@@ -1471,22 +1545,55 @@ After pushing and opening the PR:
    approver agent then hard-fails on the dead credential and needs a
    re-mint + resume round-trip (#524).
 
-   **Use the blessed merge-cycle helper — do NOT hand-roll this loop (#431).**
-   The tick-client-snapper run's improvised background loops re-triggered the
-   Approver ~30s after `update-branch` (before the new SHA's checks had even
-   registered, burning the one re-trigger), and mangled push refspecs forcing
-   fresh SHAs. `merge-pr-cycle.zsh` does the subtle parts correctly: it waits
-   for the head SHA's checks to *register* and settle (re-pinning if a rebase
-   lands mid-wait), reads `reviewDecision`, and — with `--retrigger` — posts a
-   single `/approve` comment to re-trigger the Approver (the gate honours it,
-   #190), never an empty-commit push:
+   **`ci` mode — use the blessed merge-cycle helper — do NOT hand-roll this
+   loop (#431).** The tick-client-snapper run's improvised background loops
+   re-triggered the Approver ~30s after `update-branch` (before the new SHA's
+   checks had even registered, burning the one re-trigger), and mangled push
+   refspecs forcing fresh SHAs. `merge-pr-cycle.zsh` does the subtle parts
+   correctly: it waits for the head SHA's checks to *register* and settle
+   (re-pinning if a rebase lands mid-wait), reads `reviewDecision`, and — with
+   `--retrigger` — posts a single `/approve` comment to re-trigger the Approver
+   (the gate honours it, #190), never an empty-commit push:
 
    ```bash
    "<skill-base-dir>/scripts/merge-pr-cycle.zsh" --retrigger "<pr_number>"
    # add --update first for a vendor PR that's BEHIND under strict branch protection
    ```
 
-   Branch on its single `result:` line / exit code:
+   **`local` mode — drive the approve skill, no `--retrigger` (#642).** There
+   is no CI-side workflow to re-trigger, so run the same helper **without**
+   `--retrigger` to wait for the head SHA's checks to register + settle, then
+   drive the language plugin's `approve` skill to earn the verdict, then merge:
+
+   ```bash
+   # 1. wait for green — no /approve comment posted (mode is local)
+   "<skill-base-dir>/scripts/merge-pr-cycle.zsh" "<pr_number>"
+   #    add --update first for a vendor PR that's BEHIND under strict branch
+   #    protection. Exit 4 (AWAITING-APPROVAL) here is expected — green but
+   #    unapproved — and is the cue to drive the approve skill next; exit 6
+   #    (NOT-GREEN) → back to step 3; exit 3 (TIMED-OUT) → record + move on.
+   # 2. mint the Approver token just-in-time (a mode-600 file path, #640) and
+   #    drive the approve skill — it spawns the local approver agent, which
+   #    posts APPROVE as claude-approver-<owner>[bot], never your identity:
+   /development-<lang>:approve "<pr_number>"
+   # 3. re-read reviewDecision (below).
+   ```
+
+   Then, on the re-read `reviewDecision`:
+   - **`APPROVED`** → step 6 (merge).
+   - **`CHANGES_REQUESTED`** → the `CHANGES_REQUESTED` handling below.
+   - **anything else** (still `REVIEW_REQUIRED`/`NONE`, or a
+     COMMENT-with-reservations that isn't a binding `APPROVE`) → the
+     approve skill did not clear the gate; **do not `--retrigger`** (there
+     is no workflow to nudge). Arm native auto-merge, record the outcome
+     as `awaiting_approval`, and move to the next stage — exactly the
+     `local` sub-branch of the `REVIEW_REQUIRED` timeout case below. Do
+     **not** fall through into the shared `--retrigger` poll.
+
+   No `/approve` comment is ever posted in local mode — that was the ~10-min
+   dead wait + user-identity noise this branch removes (#642).
+
+   For the `ci`-mode helper, branch on its single `result:` line / exit code:
    `READY` (0) → step 6 (merge); `CHANGES-REQUESTED` (5) → the
    `CHANGES_REQUESTED` handling below — always a rejection of the **current
    head**: a stale request-changes pinned to a superseded commit comes back
@@ -1529,22 +1636,43 @@ After pushing and opening the PR:
      continue to the next stage.
    - **`REVIEW_REQUIRED` still at timeout** (Approver slow, gates
      exit-78'd, or Approver not installed on this repo) → **arm
-     GitHub's native auto-merge and poll for the verdict**: remove the worktree
-     first (same ordering rule as step 6), then
+     GitHub's native auto-merge**: remove the worktree first (same
+     ordering rule as step 6), then
 
      ```bash
      gh pr merge "<pr_number>" --auto --squash --delete-branch
      ```
 
-     After arming, **poll for the Approver verdict** to distinguish
-     between PRs that actually merged vs those still awaiting approval:
+     After arming, **poll for the verdict — but branch on the approver
+     mode (#642), never `--retrigger` outside `ci` mode:**
 
-     ```bash
-     # Poll for Approver re-trigger and verdict (timeout: 10 min)
-     "<skill-base-dir>/scripts/merge-pr-cycle.zsh" \
-       --retrigger --timeout 600 "<pr_number>"
-     result_code=$?
-     ```
+     - **`ci`** — a server-side workflow can still post the verdict, so
+       re-trigger it and poll:
+
+       ```bash
+       "<skill-base-dir>/scripts/merge-pr-cycle.zsh" \
+         --retrigger --timeout 600 "<pr_number>"
+       result_code=$?
+       ```
+
+     - **`local`** — you already drove the `approve` skill above and it
+       did not yield a binding `APPROVE`; there is no workflow to nudge.
+       Poll **without** `--retrigger` for a late-landing verdict, then
+       stop — no `/approve` comment:
+
+       ```bash
+       "<skill-base-dir>/scripts/merge-pr-cycle.zsh" --timeout 600 "<pr_number>"
+       result_code=$?
+       ```
+
+     - **`none`** — no Approver exists; do **not** poll for a verdict
+       that can never come (that was the ~10-min dead wait, #642). The
+       native auto-merge is armed and will fire if a human approves;
+       record the outcome as `awaiting_approval` and move on
+       (`result_code=4`).
+
+     Then map `result_code` (skip this mapping in `none` mode, which set
+     it to 4 directly):
 
      - Exit 0 (READY): Approver approved, PR merged (or will merge
        immediately). Record outcome as `merged`.
@@ -1714,6 +1842,9 @@ Project:       <repo path>
 Branch:        <user's current branch>
 Languages processed: <comma-separated list from supported>
 Topics processed:    <comma-separated list from supported_topics, or "none">
+Approver mode:       <ci | local | none — from the Phase 2.5 detection (#642);
+                      in local mode the approval gate drove the approve skill
+                      directly, posting no /approve comment>
 <If --tool=<name> was set:>
 ⚠ Scoped to single tool: <name>
   Other tools were gathered but not dispatched. Re-run without --tool
