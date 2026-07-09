@@ -38,6 +38,14 @@ So your pass is: classify → update BEHIND branches → verify safety on
 already-current heads → arm auto-merge on the safe green ones → **return
 the full classification**. One pass, no resume.
 
+**Never check out a PR head in your invoking cwd (#660).** You run
+without isolation, so your cwd is the **orchestrator's shared session
+worktree** — a `gh pr checkout` / `git checkout` / `git switch` there
+detaches the orchestrator (the #643 rule, extended to this agent). You
+almost never need a checkout at all (`gh pr view` / `gh pr diff` /
+`gh api` cover triage); when a step genuinely needs the PR's tree, use a
+fresh scratch worktree you create and remove before returning.
+
 PR sources you may see:
 
 - **Dependabot** — `headRefName` starts with `dependabot/<ecosystem>/`.
@@ -302,20 +310,31 @@ mechanical and verifiable; do it instead of deferring. **Renovate
 - the bumped version is present in `build.gradle.kts` but absent/stale
   in `gradle.lockfile`.
 
+Work in a **fresh scratch worktree** — never `gh pr checkout` in your
+invoking cwd: you run without isolation, so that cwd is the
+**orchestrator's shared session worktree**, and checking the PR head out
+there leaves the orchestrator detached on your branch (#660 — the same
+rule as the approver agents' #643):
+
 ```bash
-gh pr checkout <number>
+scratch=$(mktemp -d)
+git fetch origin "<pr.headRefName>"
+git worktree add "$scratch/pr" "origin/<pr.headRefName>"
+cd "$scratch/pr"
 ./gradlew dependencies --write-locks
-git diff --name-only     # must be ONLY lockfile(s); anything else → reset + defer
+git diff --name-only     # must be ONLY lockfile(s); anything else → clean up + defer
 ./gradlew test jacocoTestReport 2>&1 | tail -30
-# jacocoTestReport leaves the JaCoCo XML in this checkout so the push below
-# passes a coverage-floor pre-push hook (#655)
+# jacocoTestReport leaves the JaCoCo XML in this scratch worktree so the
+# push below passes a coverage-floor pre-push hook (#655)
 git commit -am "chore(deps): complete gradle.lockfile for <pkg> <new> (Renovate artifact step failed)"
-git push
+git push origin "HEAD:<pr.headRefName>"
+cd - && git worktree remove "$scratch/pr" --force   # always remove before returning
 ```
 
-- Diff touches anything besides lockfiles → `git reset --hard`, defer to
-  `actions_requiring_review` with what changed.
-- Tests fail → defer with the output.
+- Diff touches anything besides lockfiles → remove the scratch worktree
+  (nothing was pushed), defer to `actions_requiring_review` with what
+  changed.
+- Tests fail → remove the scratch worktree, defer with the output.
 - After the push, CI re-runs on the new head: re-enter Step B1 on the
   fresh SHA. **One completion attempt per PR** — if lock verification is
   still red after it, defer.
