@@ -20,9 +20,11 @@ Keychain; no platform account or GitHub Actions required.
 3. Mergeability gate — a conflicting PR gets resolved first (by the
    right identity, never the Approver) and re-checked; review happens
    after, on the resolved head.
-4. Mint Approver token locally via `mint-approver-token.zsh`.
-5. Spawn `java-approver` agent with the minted token.
-6. Agent posts verdict to GitHub as `claude-approver-bot`.
+4. Mint Approver token locally via `mint-approver-token.zsh` (it writes the
+   token to a mode-600 file and returns the **path**).
+5. Spawn `java-approver` agent, passing the token **file path** in the prompt.
+6. Agent reads the token from the path and posts the verdict as
+   `claude-approver-bot`.
 
 ## Step 1 — Preflight
 
@@ -99,11 +101,16 @@ code access by design (reviewer and author must stay separate
 identities). After the resolution push, wait for CI on the **new**
 head SHA to go green, then proceed.
 
-## Step 4 — Mint Approver token
+## Step 4 — Mint Approver token (to a file path)
+
+The mint script writes the token to a mode-600 temp file and prints the
+**path** — never the token value. Capture the path; do **not** `cat` or
+`echo` the token yourself (that is exactly the leak this design prevents —
+see #640).
 
 ```bash
-TOKEN=$(development/skills/maintenance/scripts/mint-approver-token.zsh)
-if [ -z "$TOKEN" ]; then
+TOKEN_FILE=$(development/skills/maintenance/scripts/mint-approver-token.zsh)
+if [ -z "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
   echo "::error::Failed to mint Approver token."
   echo "Check: Approver App registered + installed on this repo + Keychain accessible"
   exit 1
@@ -112,7 +119,9 @@ fi
 
 ## Step 5 — Invoke the java-approver agent
 
-Spawn the agent with the minted token in the environment:
+Spawn the agent with the token **file path** in the prompt (the Agent tool
+has no env-var channel, so the token must not be inlined — the agent reads
+it from the path itself):
 
 ```text
 Agent(
@@ -121,21 +130,27 @@ Agent(
   prompt="""
     Review PR #<n> in <owner>/<repo>. Dry-run: false.
 
-    GitHub token (GH_TOKEN) is provided with Approver App permissions.
+    PR_NUMBER=<n>
+    REPO=<owner>/<repo>
+    DRY_RUN=false
+
+    Your GitHub token has Approver App permissions. Read it from the file
+    path below and export it before any `gh` mutation — do not print it:
+      export GH_TOKEN=$(cat <TOKEN_FILE path>)
     Post the verdict to GitHub using `gh pr review <n> --approve|--request-changes`.
   """
 )
 ```
 
-Pass these env vars to the agent:
+Substitute the actual `$TOKEN_FILE` path into `<TOKEN_FILE path>`. The agent
+runs the same synthesis procedure as CI and posts the verdict as
+`claude-approver-bot` when `DRY_RUN=false`.
 
-- `GH_TOKEN=<minted token>`
-- `PR_NUMBER=<n>`
-- `REPO=<owner>/<repo>`
-- `DRY_RUN=false`
+After the agent returns, remove the token file:
 
-The agent runs the same synthesis procedure as CI and posts the verdict
-as `claude-approver-bot` when `DRY_RUN=false`.
+```bash
+rm -f "$TOKEN_FILE"
+```
 
 ## Step 6 — Report
 
@@ -152,7 +167,10 @@ JSON block) for the user to inspect.
 ## Security & token handling
 
 - **Token is minted fresh**, 1-hour lifetime (GitHub default).
-- **Token is never logged or committed.**
+- **Token is never logged or committed.** The mint script returns a
+  mode-600 **file path**, not the token value, so the orchestrator never
+  sees the secret and can't leak it into a prompt or transcript (#640). The
+  agent reads it from the path; the file is removed after the run.
 - **Private key stays in system Keychain**, not in code or secrets.
 - **Review is posted as `claude-approver-bot`**, not the user's identity.
 - **Approver App has read-only code access** (can't push or modify code).

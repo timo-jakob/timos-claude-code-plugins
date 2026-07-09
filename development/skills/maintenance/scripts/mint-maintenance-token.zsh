@@ -1,12 +1,18 @@
 #!/usr/bin/env zsh
 # mint-maintenance-token.zsh — mint a claude-maintenance App installation
-# token for the current repo, print to stdout.
+# token for the current repo. Writes the token to a mode-600 temp file and
+# prints the FILE PATH (default); `--stdout` prints the raw token instead.
 #
 # Used by /development:maintenance during Phase 8 PR creation so that
 # maintenance-opened PRs attribute to claude-maintenance[bot] (a distinct
 # identity from claude-approver[bot]). This is what makes the Claude
 # Approver's anti-rubber-stamp gate fire correctly when the Approver
 # evaluates maintenance-opened PRs.
+#
+# Why print a path by default (#640): so a naive `TOKEN=$(mint...)` captures
+# a path, not a secret — a token value in a shell variable is one `echo` away
+# from the session transcript that .tgz handoffs ship around. A caller that
+# needs the value in-process reads it inline: `$(cat <path>)`, then `rm -f`.
 #
 # Prerequisites:
 #   - register-claude-apps.zsh has been run on this machine (claude-maintenance
@@ -16,17 +22,27 @@
 #   - Run from inside the target repo's working tree.
 #
 # Exit codes:
-#   0 — token printed to stdout
+#   0 — success (path printed, or token printed with --stdout)
 #   1 — prerequisite missing (Apps not registered / not installed locally)
 #   2 — GitHub API failure (network, expired key, etc.)
 #
-# Stdout: the installation token (one line, no trailing newline).
+# Stdout (default): the path to a mode-600 temp file holding the token
+#   (one line, no trailing newline). The caller owns the file — read it with
+#   `$(cat <path>)` at the point of use and `rm -f` it when done.
+# Stdout (--stdout): the raw installation token (one line, no trailing
+#   newline). Escape hatch for callers that cannot read from a file path.
 # Stderr: human-readable diagnostics on failure.
 #
 # Token lifetime: 1 hour (GitHub's default for installation tokens).
 # Re-mint if maintenance runs longer than that.
 
 setopt err_exit nounset pipefail
+
+# --- argument parsing --------------------------------------------------------
+emit_stdout=false
+if [[ "${1:-}" == "--stdout" ]]; then
+  emit_stdout=true
+fi
 
 readonly CONFIG_FILE="${HOME}/.config/claude-plugins/apps.json"
 readonly KEYCHAIN_SERVICE="claude-plugins.claude-maintenance"
@@ -144,4 +160,19 @@ if [[ -z "$token" || "$token" == "null" ]]; then
   exit 2
 fi
 
-print -n -- "$token"
+if [[ "$emit_stdout" == true ]]; then
+  # Escape hatch: raw token on stdout. Use only when the caller genuinely
+  # cannot read from a file path. A token on stdout is easily captured into
+  # a shell variable and echoed into a transcript — the leak #640 fixes.
+  print -n -- "$token"
+else
+  # Default (#640): never expose the token value to the caller. Write it to a
+  # mode-600 temp file and print only the PATH. mktemp already restricts the
+  # file to the owner; chmod 600 makes the intent explicit and defends against
+  # a permissive umask. The caller reads it with `$(cat <path>)` and removes
+  # the file when done.
+  token_file=$(mktemp -t claude-maintenance-token.XXXXXX)
+  chmod 600 "$token_file"
+  print -rn -- "$token" > "$token_file"
+  print -rn -- "$token_file"
+fi

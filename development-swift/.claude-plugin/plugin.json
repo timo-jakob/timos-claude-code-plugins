@@ -1,7 +1,7 @@
 {
   "name": "development-swift",
   "description": "Swift development plugin with code review, formatting/linting, and Swift-specific tooling.",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "author": {
     "name": "Timo Jakob"
   },

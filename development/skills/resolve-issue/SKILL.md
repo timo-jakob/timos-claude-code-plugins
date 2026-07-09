@@ -328,11 +328,14 @@ unless the change is genuinely multi-part. Let pre-commit run (never
 ### 6. Open the bot-authored PR
 
 Delegate to **`/development:open-pr`** — i.e. follow its procedure: mint the
-writer token (`mint-maintenance-token.zsh`), **push the branch as the bot**
-(`git push https://x-access-token:$TOKEN@github.com/$REPO.git HEAD:$BRANCH` — so
-the bot is also the last pusher), open the PR with `GH_TOKEN=$TOKEN gh pr create`
-(author = the Maintenance App), then `GH_TOKEN=$TOKEN gh pr merge <n> --auto
---squash --delete-branch`. The PR body follows the template (Type / Summary /
+writer token (`mint-maintenance-token.zsh` returns a mode-600 file **path**,
+never the token value — #640), **push the branch as the bot**
+(`git push https://x-access-token:$(cat "$TOKEN_FILE")@github.com/$REPO.git HEAD:$BRANCH`
+— so the bot is also the last pusher, reading the token inline at the point of
+use and never echoing it), open the PR with
+`GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr create` (author = the Maintenance App),
+then `GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge <n> --auto --squash
+--delete-branch`. The PR body follows the template (Type / Summary /
 Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
 loop ran and converged (§3.5), append the **Review dossier** via
 `build-dossier.zsh` on the kept status JSON (#563). Outcomes:

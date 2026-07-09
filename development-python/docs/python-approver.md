@@ -17,9 +17,10 @@ verdict; typically after CI has gone green. The skill:
    `gh` is authenticated.
 2. Resolves the PR (explicit number, or the current branch's PR).
 3. Mints a 1-hour Approver App installation token from the Keychain
-   via `mint-approver-token.zsh`.
-4. Spawns this agent with `DRY_RUN=false` so the verdict posts to
-   GitHub as `claude-approver-<owner>[bot]`.
+   via `mint-approver-token.zsh` — which writes it to a mode-600 file and
+   returns the **path**, never the token value (#640).
+4. Spawns this agent with `DRY_RUN=false` and the token **file path** in the
+   prompt, so the verdict posts to GitHub as `claude-approver-<owner>[bot]`.
 
 The CI-era gate conditions didn't disappear — they moved: *CI green at
 the head SHA* is re-checked by the agent itself (baseline criterion 1),
@@ -35,7 +36,7 @@ The approve skill provides these env vars when spawning the agent
 
 | Variable | Source | Used for |
 | --- | --- | --- |
-| `GH_TOKEN` | Approver App installation token, minted locally from the Keychain | All `gh` mutations attribute to `claude-approver-<owner>[bot]` |
+| `GH_TOKEN` | Approver App installation token. Local: read it from the token **file path** given in the prompt (`export GH_TOKEN=$(cat <path>)`); CI: already in the env (#640) | All `gh` mutations attribute to `claude-approver-<owner>[bot]` |
 | `PR_NUMBER` | The PR number | Every `gh` call |
 | `REPO` | `<owner>/<repo>` | Path qualification |
 | `DRY_RUN` | `"true"` for a non-binding local run, `"false"` to post | Print-vs-post toggle |

@@ -45,7 +45,7 @@ equivalent prompt values):
 
 | Variable | Source |
 | --- | --- |
-| `GH_TOKEN` | Claude Approver App installation token, minted locally from the Keychain (so any `gh` mutation attributes to `claude-approver-<owner>[bot]`) |
+| `GH_TOKEN` | Claude Approver App installation token. **Local invocation:** the prompt gives you a **file path**; run `export GH_TOKEN=$(cat <path>)` yourself — the token value is never inlined in the prompt (#640). **CI:** it is already in the environment. Either way, use it for every `gh` mutation so the review attributes to `claude-approver-<owner>[bot]`. Never `echo`/`cat` it to stdout. |
 | `PR_NUMBER` | The PR number |
 | `REPO` | `<owner>/<repo>` |
 | `DRY_RUN` | `"true"` for a non-binding print-only run; `"false"` to post the review |
