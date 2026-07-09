@@ -134,7 +134,9 @@ small and reviewable.
 
 ### 5. Run the Swift build locally
 
-- SwiftPM: `swift build && swift test 2>&1 | tail -80`.
+- SwiftPM: `swift build && swift test --enable-code-coverage 2>&1 | tail -80` —
+  the `--enable-code-coverage` leaves the coverage data in the worktree so
+  your own push passes the coverage-floor pre-push hook (#655).
 - Xcode: `xcodebuild -scheme <scheme> -destination 'platform=macOS' build test 2>&1 | tail -80`
   (discover the scheme with `xcodebuild -list`).
 

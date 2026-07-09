@@ -88,8 +88,10 @@ Stop here — do not invoke ruff, do not touch any files.
 7. **Run tests** — this is non-negotiable. Determine the project's test
    command from `pyproject.toml` `[tool.pytest.ini_options]` or just use
    `pytest`. Run it in the worktree:
-   - `pytest --tb=short 2>&1 | tail -60` (capture summary + last
-     failures if any).
+   - `pytest --cov --cov-report=xml --tb=short 2>&1 | tail -60` (capture
+     summary + last failures if any). The `--cov-report=xml` leaves
+     `coverage.xml` in the worktree for the push-time pre-push hook the
+     orchestrator runs from here (#655); it's gitignored — leave it.
 8. If tests pass → success. If tests fail → roll back unsafe fixes
    (`git checkout -- .` then re-apply only the safe fixes from phase 1)
    and report which unsafe fix caused the failure (if attributable).

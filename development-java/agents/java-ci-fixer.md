@@ -206,7 +206,9 @@ small and reviewable — the human PR reviewer is reading this.
 Use the wrapper if present, otherwise the system Gradle:
 
 ```bash
-./gradlew build test 2>&1 | tail -80     # or: gradle build test 2>&1 | tail -80
+./gradlew build test jacocoTestReport 2>&1 | tail -80     # or: gradle build test jacocoTestReport 2>&1 | tail -80
+# jacocoTestReport leaves the JaCoCo XML in the worktree so your own push
+# passes the coverage-floor pre-push hook (#655).
 ```
 
 For a format-only fix, `./gradlew spotlessApply` then re-run the build

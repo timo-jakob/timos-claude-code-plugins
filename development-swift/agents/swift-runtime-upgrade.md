@@ -144,7 +144,9 @@ each file changed under **Runtime** in your notes.
 
 ### 4. Verify locally (when `local_verification_mode == "auto"`)
 
-- SwiftPM: `swift package resolve && swift test 2>&1 | tail -100`
+- SwiftPM: `swift package resolve && swift test --enable-code-coverage 2>&1 | tail -100`
+  — the `--enable-code-coverage` leaves the coverage data in the worktree
+  for the push-time pre-push hook the orchestrator runs from here (#655).
 - Xcode: `xcodebuild test -scheme <scheme> -destination 'platform=macOS' 2>&1 | tail -100`
 
 If everything passes on the new toolchain: go to step 7.

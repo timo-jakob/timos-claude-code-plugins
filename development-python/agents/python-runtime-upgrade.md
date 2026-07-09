@@ -225,8 +225,10 @@ PASS 1
     .venv-runtime-upgrade-check/bin/pip install -e ".[dev]"
 
   If install succeeds → run tests:
-    .venv-runtime-upgrade-check/bin/pytest --tb=short
-    All pass → DONE. Clean up venv, proceed to step 6 (commit).
+    .venv-runtime-upgrade-check/bin/pytest --cov --cov-report=xml --tb=short
+    All pass → DONE. Clean up venv (the check venv only — leave the
+    coverage.xml it wrote in the worktree: the push-time pre-push hook
+    reads it there, #655), proceed to step 6 (commit).
 
   If install FAILS → identify the offending dep(s) from the error.
   Common shapes:
@@ -325,9 +327,11 @@ it in Step 7):
 `deprecated-api`, `removed-attribute`. The orchestrator uses these
 to group entries in the PR description.
 
-**Loop**: re-run `pytest --tb=short`. If failures remain AND any
-remaining failure is still auto-applicable → second pass. Maximum 2
-adaptation passes total. After pass 2:
+**Loop**: re-run `pytest --cov --cov-report=xml --tb=short` (keep the
+coverage flags on every pass — whichever run is last leaves the
+`coverage.xml` the push-time pre-push hook needs, #655). If failures
+remain AND any remaining failure is still auto-applicable → second pass.
+Maximum 2 adaptation passes total. After pass 2:
 
 - All tests pass → success, proceed to step 6.
 - Remaining failures are escalation-required → escalation path (step

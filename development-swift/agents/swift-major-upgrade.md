@@ -93,7 +93,9 @@ Your prompt contains:
 Build + test in the worktree (longer tail than other agents — major
 upgrades produce more noise):
 
-- SwiftPM: `swift test 2>&1 | tail -100`
+- SwiftPM: `swift test --enable-code-coverage 2>&1 | tail -100` — the
+  `--enable-code-coverage` leaves the coverage data in the worktree for
+  the push-time pre-push hook the orchestrator runs from here (#655).
 - Xcode: `xcodebuild test -scheme <scheme> -destination 'platform=macOS' 2>&1 | tail -100`
 
 ### Phase 5 — iterate

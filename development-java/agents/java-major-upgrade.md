@@ -101,9 +101,11 @@ Your prompt contains:
 
 1. Re-resolve, build, and test with Gradle in the worktree. The
    dependency re-resolves automatically on the next build:
-   - `./gradlew build test 2>&1 | tail -100` (use `./gradlew` if
-     present, otherwise `gradle`; longer tail than other agents —
-     major upgrades produce more noise)
+   - `./gradlew build test jacocoTestReport 2>&1 | tail -100` (use
+     `./gradlew` if present, otherwise `gradle`; longer tail than other
+     agents — major upgrades produce more noise). The `jacocoTestReport`
+     task leaves the JaCoCo XML in the worktree for the push-time
+     pre-push hook the orchestrator runs from here (#655).
 
 ### Phase 5 — iterate
 

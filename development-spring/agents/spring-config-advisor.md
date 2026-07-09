@@ -114,7 +114,9 @@ structure, or a relocation you can't verify is 1:1).
    build / app-context load:
 
    ```bash
-   ./gradlew --no-daemon build 2>&1 | tail -40
+   ./gradlew --no-daemon build jacocoTestReport 2>&1 | tail -40
+   # jacocoTestReport leaves the JaCoCo XML in the worktree for the
+   # push-time pre-push hook the orchestrator runs from here (#655)
    ```
 
    If the build fails **because of your edit**, roll it back

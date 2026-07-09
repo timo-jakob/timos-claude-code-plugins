@@ -306,7 +306,9 @@ mechanical and verifiable; do it instead of deferring. **Renovate
 gh pr checkout <number>
 ./gradlew dependencies --write-locks
 git diff --name-only     # must be ONLY lockfile(s); anything else → reset + defer
-./gradlew test 2>&1 | tail -30
+./gradlew test jacocoTestReport 2>&1 | tail -30
+# jacocoTestReport leaves the JaCoCo XML in this checkout so the push below
+# passes a coverage-floor pre-push hook (#655)
 git commit -am "chore(deps): complete gradle.lockfile for <pkg> <new> (Renovate artifact step failed)"
 git push
 ```

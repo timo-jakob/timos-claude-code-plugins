@@ -93,8 +93,12 @@ Your prompt contains:
     - `pip install <package>==<target_version>` if a flat
       requirements.txt
 2. **Run tests:**
-    - `pytest --tb=short 2>&1 | tail -100` (longer tail than other
-      agents — major upgrades produce more noise)
+    - `pytest --cov --cov-report=xml --tb=short 2>&1 | tail -100` (longer
+      tail than other agents — major upgrades produce more noise). The
+      `--cov-report=xml` leaves `coverage.xml` in the worktree for the
+      push-time pre-push hook the orchestrator runs from here (#655, the
+      pre-push-artifact contract from #644); it is a gitignored build
+      artifact, so leave it in place.
 
 ### Phase 5 — iterate
 
