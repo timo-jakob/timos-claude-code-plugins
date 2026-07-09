@@ -66,11 +66,19 @@ the bot-authored path is exactly as before.
 
 ## Step 2 — mint the writer token
 
+The mint script writes the token to a mode-600 temp file and prints the
+**path**, not the token value (#640) — so capture the path and read the
+token inline (`$(cat "$TOKEN_FILE")`) only at the point of each push / `gh`
+call below. Never assign the token to a variable you might `echo`, and never
+`cat` it to stdout.
+
 ```bash
-TOKEN=$("<skill-base-dir>/../maintenance/scripts/mint-maintenance-token.zsh" 2>/tmp/mint.err)
+TOKEN_FILE=$("<skill-base-dir>/../maintenance/scripts/mint-maintenance-token.zsh" 2>/tmp/mint.err)
 ```
 
-- **Success** → `$TOKEN` is a 1-hour installation token for `claude-maintenance-<login>[bot]`. Continue Step 3.
+- **Success** → `$TOKEN_FILE` is the path to a mode-600 file holding a 1-hour
+  installation token for `claude-maintenance-<login>[bot]`. Continue Step 3;
+  remove the file at the end of Step 4.
 - **Failure** (App not registered / not installed on this repo) → **fall back**:
   tell the user the writer App isn't set up here (so the PR will be authored by
   *them* and they'll need to merge it themselves — admin-merge, since they can't
@@ -114,9 +122,9 @@ the bot (so a "review from someone other than the last pusher" rule never blocks
 *your* approval). Use the token for both:
 
 ```bash
-git push "https://x-access-token:${TOKEN}@github.com/${REPO}.git" "HEAD:${BRANCH}" --force-with-lease
+git push "https://x-access-token:$(cat "$TOKEN_FILE")@github.com/${REPO}.git" "HEAD:${BRANCH}" --force-with-lease
 
-GH_TOKEN="$TOKEN" gh pr create \
+GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr create \
   --base main --head "$BRANCH" \
   --title "<title>" --body "<body — include 'Closes #N' when it fixes an issue>"
 ```
@@ -136,7 +144,7 @@ immediately — no point watching for checks that a bot `synchronize` never
 produces:
 
 ```bash
-GH_TOKEN="$TOKEN" "<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh" --grace 0 "<pr-number>"
+GH_TOKEN="$(cat "$TOKEN_FILE")" "<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh" --grace 0 "<pr-number>"
 #   result: NUDGED → closed+reopened to re-trigger CI on the new head
 ```
 
@@ -167,7 +175,10 @@ the PR body is exactly as it is today — no dossier, no behavior change.
 ## Step 4 — arm auto-merge (squash + delete branch)
 
 ```bash
-GH_TOKEN="$TOKEN" gh pr merge "<pr-number>" --auto --squash --delete-branch
+GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge "<pr-number>" --auto --squash --delete-branch
+
+# Done with the token — remove the mode-600 file minted in Step 2.
+rm -f "$TOKEN_FILE"
 ```
 
 GitHub merges by itself once **your** approving review lands and CI is green

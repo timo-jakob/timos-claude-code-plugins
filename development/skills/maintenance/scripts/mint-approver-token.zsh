@@ -1,12 +1,20 @@
 #!/usr/bin/env zsh
 # mint-approver-token.zsh — mint a claude-approver App installation token
-# for the current repo, print to stdout.
+# for the current repo. Writes the token to a mode-600 temp file and prints
+# the FILE PATH (default); `--stdout` prints the raw token instead.
 #
 # Used by /development-python:approve (and other language approve skills)
 # to post code review verdicts. The App is invoked locally by the user,
 # not by GitHub Actions. This is what enables approval without platform
 # lock-in: user stays in control, no GitHub Actions, works with any AI
 # coding assistant.
+#
+# Why print a path by default (#640): the orchestrator hands the token to a
+# subagent through its *prompt*, and a raw token pasted into a prompt (or
+# echoed to read it) lands verbatim in the session transcript that .tgz
+# handoffs ship around. Printing only the path means the orchestrator never
+# sees the token value — it passes the path along, and the consumer runs
+# `export GH_TOKEN=$(cat <path>)` itself, then removes the file.
 #
 # Prerequisites:
 #   - register-claude-apps.zsh has been run on this machine (claude-approver
@@ -16,17 +24,27 @@
 #   - Run from inside the target repo's working tree.
 #
 # Exit codes:
-#   0 — token printed to stdout
+#   0 — success (path printed, or token printed with --stdout)
 #   1 — prerequisite missing (Apps not registered / not installed locally)
 #   2 — GitHub API failure (network, expired key, etc.)
 #
-# Stdout: the installation token (one line, no trailing newline).
+# Stdout (default): the path to a mode-600 temp file holding the token
+#   (one line, no trailing newline). The caller owns the file — read it with
+#   `$(cat <path>)` at the point of use and `rm -f` it when done.
+# Stdout (--stdout): the raw installation token (one line, no trailing
+#   newline). Escape hatch for callers that cannot read from a file path.
 # Stderr: human-readable diagnostics on failure.
 #
 # Token lifetime: 1 hour (GitHub's default for installation tokens).
 # Re-mint if approve job runs longer than that.
 
 setopt err_exit nounset pipefail
+
+# --- argument parsing --------------------------------------------------------
+emit_stdout=false
+if [[ "${1:-}" == "--stdout" ]]; then
+  emit_stdout=true
+fi
 
 readonly CONFIG_FILE="${HOME}/.config/claude-plugins/apps.json"
 readonly KEYCHAIN_SERVICE="claude-plugins.claude-approver"
@@ -144,4 +162,19 @@ if [[ -z "$token" || "$token" == "null" ]]; then
   exit 2
 fi
 
-print -n -- "$token"
+if [[ "$emit_stdout" == true ]]; then
+  # Escape hatch: raw token on stdout. Use only when the caller genuinely
+  # cannot read from a file path. A token on stdout is easily captured into
+  # a shell variable and echoed into a transcript — the leak #640 fixes.
+  print -n -- "$token"
+else
+  # Default (#640): never expose the token value to the caller. Write it to a
+  # mode-600 temp file and print only the PATH. mktemp already restricts the
+  # file to the owner; chmod 600 makes the intent explicit and defends against
+  # a permissive umask. The caller reads it with `$(cat <path>)` and removes
+  # the file when done.
+  token_file=$(mktemp -t claude-approver-token.XXXXXX)
+  chmod 600 "$token_file"
+  print -rn -- "$token" > "$token_file"
+  print -rn -- "$token_file"
+fi

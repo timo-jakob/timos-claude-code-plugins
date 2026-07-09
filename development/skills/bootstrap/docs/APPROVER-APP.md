@@ -96,8 +96,11 @@ mint-approver-token.zsh
 
 - Reads app ID from `~/.config/claude-plugins/apps.json`
 - Fetches private key from Keychain
-- Calls GitHub API to get installation token
-- Outputs token (stdout, 1 hour lifetime)
+- Calls GitHub API to get installation token (1 hour lifetime)
+- Writes the token to a mode-600 temp file and prints the **path** (default);
+  `--stdout` prints the raw token instead. The path-by-default design keeps the
+  orchestrator from ever seeing the token value, so it can't be inlined into a
+  subagent prompt or echoed into a transcript (#640)
 
 **Used by**: `/development-python:approve` skill
 **No platform account required**: Works with any AI coding assistant
@@ -135,7 +138,10 @@ via the `/development-python:approve` skill.
 - Tokens are 1-hour lived (GitHub default)
 - Private keys stored in system Keychain, not in code or config
 - Tokens should not be logged or committed
-- `mint-approver-token.zsh` outputs token to stdout only
+- `mint-approver-token.zsh` writes the token to a mode-600 temp file and prints
+  the **path** by default (the token value never touches stdout); the `--stdout`
+  escape hatch prints the raw token only when a caller genuinely can't read a
+  file path (#640)
 
 ### App Installation
 

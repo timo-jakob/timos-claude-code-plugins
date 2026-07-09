@@ -44,7 +44,7 @@ or equivalent prompt values):
 
 | Variable | Source |
 | --- | --- |
-| `GH_TOKEN` | Claude Approver App installation token, minted locally from the Keychain (so any `gh` mutation attributes to `claude-approver-<owner>[bot]`) |
+| `GH_TOKEN` | Claude Approver App installation token. **Local invocation:** the prompt gives you a **file path**; run `export GH_TOKEN=$(cat <path>)` yourself — the token value is never inlined in the prompt (#640). **CI:** it is already in the environment. Either way, use it for every `gh` mutation so the review attributes to `claude-approver-<owner>[bot]`. Never `echo`/`cat` it to stdout. |
 | `PR_NUMBER` | The PR number |
 | `REPO` | `<owner>/<repo>` |
 | `DRY_RUN` | `"true"` for a non-binding print-only run; `"false"` to post the review |
@@ -78,9 +78,11 @@ The `/development-python:approve` skill is the only invocation path
   installation token; use it for every `gh` **mutation** so the review
   attributes to the App.
 - **Prompt values** — the skill puts `PR_NUMBER`, `REPO`, `DRY_RUN`,
-  and where to obtain the token directly in the prompt (subagents
-  don't always inherit env). Read-only `gh` queries may fall back to
-  the user's stored auth (`gh auth status` confirms).
+  and the **token file path** directly in the prompt (subagents don't
+  inherit env, and the token value is deliberately never inlined, #640).
+  Obtain the token by reading that path: `export GH_TOKEN=$(cat <path>)`.
+  Read-only `gh` queries may fall back to the user's stored auth
+  (`gh auth status` confirms).
 
 In both cases, the verification is the same: can the agent authenticate
 to GitHub and read the PR? Use the env var when present, the prompt

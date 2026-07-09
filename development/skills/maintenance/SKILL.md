@@ -946,8 +946,11 @@ entry, mint an installation token before every `gh pr create` call in
 this phase so the new PRs attribute to `claude-maintenance[bot]`:
 
 ```bash
-maint_token=$("<skill-base-dir>/scripts/mint-maintenance-token.zsh")
-GH_TOKEN="$maint_token" gh pr create --base ... --head ... --title ... --body ...
+# mint returns a mode-600 file PATH, not the token value (#640). Read it
+# inline at each point of use so the secret never lands in a named variable
+# that could be echoed into the session transcript that .tgz handoffs ship.
+maint_token_file=$("<skill-base-dir>/scripts/mint-maintenance-token.zsh")
+GH_TOKEN="$(cat "$maint_token_file")" gh pr create --base ... --head ... --title ... --body ...
 ```
 
 This identity switch is what lets the Approver evaluate maintenance PRs
@@ -957,7 +960,10 @@ gate requires a non-`claude-approver` author. See `reference/pr-cycle.md`
 
 The installation token has a 1-hour lifetime. If a maintenance run
 takes longer than an hour and you need another `gh pr create`, re-mint
-by calling `mint-maintenance-token.zsh` again.
+by calling `mint-maintenance-token.zsh` again. `$maint_token_file` holds a
+live token for the whole PR-creation phase; remove it once the phase is
+done (`rm -f "$maint_token_file"`) so no mode-600 token file lingers in
+`$TMPDIR` past its usefulness.
 
 If `mint-maintenance-token.zsh` fails (App not installed on the repo,
 key revoked, network down), surface the error to the user and **abort
@@ -1274,7 +1280,7 @@ absent; the top-N groups when it is set), in priority order:
 
    ```bash
    for superseded in <pr numbers from response>; do
-     GH_TOKEN="$maint_token" gh pr close "$superseded" \
+     GH_TOKEN="$(cat "$maint_token_file")" gh pr close "$superseded" \
        --comment "Superseded by #<replacement_pr> — local major-upgrade with full audit + tests."
    done
    ```
