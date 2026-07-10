@@ -1,6 +1,6 @@
 ---
 name: story-readiness
-description: Language-agnostic readiness gate for /development:resolve-issue. Judges whether a filed story (a single issue, or each child of an epic) is specified well enough to build — testable acceptance criteria, bounded scope, resolved/referenced dependencies, no contradictions — and emits a risk classification (low/normal/elevated). Returns a verdict JSON only; it never writes to GitHub (the skill posts comments/labels). Used as step 0 of the single-issue flow and as the epic pre-flight.
+description: Language-agnostic readiness gate for /development:resolve-issue. Judges whether a filed story (a single issue, or each child of an epic) is specified well enough to build — testable acceptance criteria, bounded scope, resolved/referenced dependencies, no contradictions — and emits a risk classification (low/normal/elevated). Also emits a proposed story-spec/v1 block for READY stories and validates any existing block against the prose (#574). Returns a verdict JSON only; it never writes to GitHub (the skill posts comments/labels). Used as step 0 of the single-issue flow and as the epic pre-flight.
 model: opus
 tools: Read, Grep, Glob, Bash
 ---
@@ -49,6 +49,26 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
   on this issue"), never to silently treat the prose as the dependency. An
   **open, unmet hard prerequisite** makes the story not ready **unless** the
   dependency is merely referenced for context, not required to start.
+- **Read and validate any existing `story-spec/v1` block** (#574). If the issue
+  body already carries a machine-readable story-spec block (a `<details>`
+  holding a `story-spec/v1` JSON object, per the ARCHITECTURE.md *Story-spec
+  contract*), check it against the prose:
+  - **stale** — recompute the provenance hash over the sentinel-delimited prose
+    region (`<!-- story-spec:prose:start -->` … `<!-- story-spec:prose:end -->`;
+    normalise to LF, strip per-line trailing whitespace, drop leading/trailing
+    blank lines, append one trailing LF; SHA-256, lowercase hex) and compare to
+    the block's `provenance.prose_sha256`. A mismatch means the prose was edited
+    after the block was generated.
+  - **contradictory** — the block asserts something the current prose no longer
+    supports: acceptance criteria dropped/reversed, scope changed, or a new
+    field disagreeing with the prose (e.g. `interface_surfaces` claiming `rest`
+    when the prose describes a CLI-only change, or a `use_case` actor the prose
+    contradicts).
+
+  A **stale or contradictory** block fails check 4 (below) and is a concrete
+  refinement reason. An **absent** block is **not** a failure — most issues have
+  never been refined; you simply *propose* one in your output (`story_spec`
+  below) rather than demanding it.
 
 ## The four readiness checks
 
@@ -69,9 +89,13 @@ unblock it.
    without fails — and so does a **prose-only** dependency lacking the native
    relationship (#583): the declaration is the machine-readable contract the
    `resolve-issue` gate enforces; prose drifts, `blockedBy` doesn't.
-4. **No contradictory requirements.** The story does not ask for mutually
-   exclusive things (e.g. "must be synchronous" and "must not block the caller"
-   with no reconciliation).
+4. **No contradictory requirements — and any present story-spec block is in
+   sync.** The story does not ask for mutually exclusive things (e.g. "must be
+   synchronous" and "must not block the caller" with no reconciliation). This
+   also fails when an **existing** `story-spec/v1` block is **stale** (provenance
+   mismatch) or **contradicts** the prose (#574): the machine block must agree
+   with the human-authoritative prose, or it can't be trusted. An **absent**
+   block never fails this check.
 
 Judge substance, not formatting: a well-written prose story with no `## Acceptance`
 header can still be `READY`; a checklist of vague bullets is not. When a check
@@ -111,7 +135,8 @@ Emit exactly one fenced `json` block and no other trailing prose. Shape:
     "What is the measurable acceptance criterion — e.g. p95 latency under what threshold, measured how?",
     "Which endpoints are in scope for this change?"
   ],
-  "summary": "Scope is bounded but 'improve performance' has no testable target."
+  "summary": "Scope is bounded but 'improve performance' has no testable target.",
+  "story_spec": null
 }
 ```
 
@@ -124,5 +149,19 @@ Rules for the payload:
 - `risk` is always present (`low` | `normal` | `elevated`), independent of the
   verdict.
 - `summary` is one sentence a human can read at a glance.
+- `story_spec` is the **proposed** `story-spec/v1` block (#574) — the machine
+  summary of the story as you understand it, per the ARCHITECTURE.md *Story-spec
+  contract* (`acceptance_criteria`, `scope_boundaries`, `risk_classification`,
+  `testable_checks`, `interface_surfaces`, `use_case`, `personas`, `test_cases`,
+  `provenance`; **no** `dependencies` field). Populate it for a `READY` story so
+  `refine-issue` can write it back (human-approved) and `resolve-issue` can
+  consume it; set it to `null` for `NEEDS_REFINEMENT` (the story isn't settled
+  enough to summarise). It is advisory output — set the `risk_classification`
+  inside it to match the top-level `risk`. Callers that don't want it ignore the
+  field. **Populating `story_spec` never changes the verdict**: the four checks
+  are the sole basis for `READY` / `NEEDS_REFINEMENT`. In particular, not being
+  able to fill an advisory field (no `personas` registry, a `none`-surface story
+  with no `test_cases`) is **not** a gap — emit `[]`/`null` for it and judge the
+  story on the four checks alone.
 - Never invent a reason to fail a well-specified story, and never wave through a
   vague one — reliability of this judgment is what makes the loop trustworthy.
