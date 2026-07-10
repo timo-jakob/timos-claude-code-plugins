@@ -1150,6 +1150,192 @@ as written — and the dependent stays queued until the blocking epic is
 **closed**, not merely children-merged; autonomous runs still reject +
 escalate rather than auto-running the epic.
 
+## Persona registry contract (`personas/v1`, #665)
+
+A **persona registry** is a target repo's answer to *"who actually uses this
+surface, and what do they type into it?"* It is an **advisory** readiness input
+(who a story serves) and the source of **realistic test data** — the value
+shapes refinement mines to generate `curl` / `grpcurl` / Playwright payloads
+that look like real user input instead of `foo`/`bar`. This section defines the
+`personas/v1` artifact: the file layout, the machine-readable schema, the five
+persona kinds, the registry conventions, and the provenance mechanism that makes
+staleness detectable. The `persona-definer` agent (#666) generates it and the
+`/development:define-personas` skill (#667) writes it back; `story-readiness`
+(advisory check) and `refine-issue` (data-trait mining) consume it (#668).
+
+The artifact lives at **`docs/personas.md` in the target repo** — not in this
+plugin repo, which has no product surface of its own. Seeding a starter registry
+into new repos is an explicit follow-up, out of scope here.
+
+### The registry file (`docs/personas.md`)
+
+Same two-layer contract as `story-spec/v1` (#574): **prose is
+human-authoritative**, and a collapsed `<details>` block carries the
+machine-readable mirror the agents read. The authoritative persona prose is
+fenced by two sentinel comments so the provenance hash (below) covers exactly
+that region and nothing else — edits to the intro, the conventions blurb, or the
+machine block never false-trip staleness:
+
+````markdown
+# Personas
+
+<intro: what this file is, how to regenerate it, the conventions below>
+
+<!-- personas:prose:start -->
+## Dana, the field dispatcher (`dana-dispatcher`)
+
+- **Kind:** end-user
+- **Role:** logs jobs from a phone in a noisy depot, one-handed, in a hurry
+- **Goals:** file a job in under 20 s; never lose a half-typed entry
+- **Failure costs:** a dropped job = a truck sent to the wrong site
+- **Proficiency:** fluent with the app, not technical; never reads docs
+- **Context:** Android, spotty 3G, gloves on, glances not reads
+- **Data traits:** job refs like `JOB-2291`; site names with accents and
+  ampersands (`Müller & Sons`); notes pasted from SMS with emoji
+- **Primary for:** mobile-job-entry
+
+## Mallory, the scraper (`mallory-scraper`)
+
+- **Kind:** adversarial
+- ... (same fields) ...
+<!-- personas:prose:end -->
+
+<details>
+<summary>🤖 machine-readable personas (<code>personas/v1</code>) — generated, do not hand-edit</summary>
+
+<!-- the personas/v1 JSON block (schema below) goes here -->
+
+</details>
+````
+
+### The `personas/v1` block
+
+One fenced `json` object inside the `<details>` (example truncated to two
+personas — a real registry has 3–7; `prose_sha256` is an illustrative digest,
+not the hash of the prose shown above). Shape:
+
+```json
+{
+  "schema": "personas/v1",
+  "provenance": {
+    "generated_by": "persona-definer via /development:define-personas",
+    "generated_at": "2026-07-10T12:00:00Z",
+    "prose_sha256": "9b2e0a1c4d6f83b5a7c9e1f3058d2a4b6c8e0f1a3b5d7c9e1f2a4b6c8d0e2f4a"
+  },
+  "personas": [
+    {
+      "id": "dana-dispatcher",
+      "name": "Dana, the field dispatcher",
+      "kind": "end-user",
+      "role": "logs jobs from a phone in a noisy depot, one-handed, in a hurry",
+      "goals": ["file a job in under 20 s", "never lose a half-typed entry"],
+      "failure_costs": ["a dropped job = a truck sent to the wrong site"],
+      "proficiency": "fluent with the app, not technical; never reads docs",
+      "context": "Android, spotty 3G, gloves on, glances not reads",
+      "data_traits": [
+        { "field": "job_ref", "shape": "JOB-<4 digits>", "example": "JOB-2291" },
+        { "field": "site_name", "shape": "unicode + ampersands", "example": "Müller & Sons" },
+        { "field": "notes", "shape": "SMS-pasted text with emoji", "example": "on site 🚚 call gate" }
+      ],
+      "primary_for": ["mobile-job-entry"]
+    },
+    {
+      "id": "mallory-scraper",
+      "name": "Mallory, the scraper",
+      "kind": "adversarial",
+      "role": "automated client probing the public API for weaknesses",
+      "goals": ["exfiltrate other tenants' jobs", "bypass rate limits"],
+      "failure_costs": ["a successful probe leaks customer data"],
+      "proficiency": "expert; scripts every request, reads error bodies",
+      "context": "headless bot, rotating IPs, high request volume",
+      "data_traits": [
+        { "field": "job_ref", "shape": "SQLi / path-traversal payloads", "example": "JOB-1' OR '1'='1" },
+        { "field": "site_name", "shape": "oversized + control chars", "example": "<40 KB of 0x00>" }
+      ],
+      "primary_for": []
+    }
+  ]
+}
+```
+
+**Field contract.** Every persona object carries exactly these fields:
+
+| Field | Type | Value |
+| --- | --- | --- |
+| `id` | string | stable kebab-case identifier, unique in the registry; **never renamed or reused** — `story-spec/v1.personas` references it |
+| `name` | string | short human-readable label |
+| `kind` | string | one of the five kinds (enum below) |
+| `role` | string | who they are relative to the surface — one decision-bearing sentence |
+| `goals` | string[] | ≥1 — what they are trying to accomplish |
+| `failure_costs` | string[] | ≥1 — what it costs **this** persona when the system fails them (drives failure-mode prioritisation) |
+| `proficiency` | string | technical proficiency *relative to this surface* (e.g. "backend dev integrating our API", "non-technical") |
+| `context` | string | usage context — device, environment, frequency, pressure |
+| `data_traits` | object[] | the realistic value shapes this persona produces; each `{ field, shape, example }`. Required (≥1) for any persona that produces input; `[]` only for a pure observer (e.g. a read-only operator) |
+| `primary_for` | string[] | surface id(s) this persona is *primary* for; `[]` for a non-primary persona |
+
+`data_traits[]` is the field refinement mines: `field` is the input
+parameter/category name, `shape` its realistic pattern (format, length, locale,
+edge characteristics), `example` a concrete representative value.
+
+### Persona kinds
+
+Five kinds, each earning its place by unlocking a class of design or test
+decision the others miss:
+
+| `kind` | Who | What it unlocks |
+| --- | --- | --- |
+| `end-user` | a human using the product UI/CLI directly | happy-path + realistic-input test data for the primary surface |
+| `operator` | runs/deploys/monitors the system (SRE, admin) | operability, observability, and failure-recovery requirements |
+| `api-consumer` | another team's developer integrating our API | the "user" is a developer; `data_traits` describe **request payloads**, not UI input |
+| `negative` | a legitimate user who produces problematic-but-innocent input | robustness/validation cases — wrong formats, empty fields, huge inputs, unusual locales (no malice) |
+| `adversarial` | an attacker deliberately probing for weaknesses | security corner cases — injection, auth bypass, malformed/oversized input |
+
+`negative` and `adversarial` are distinct on purpose: the first hardens
+validation against honest mistakes, the second against attacks. Include an
+`adversarial` (and usually a `negative`) persona for any surface that accepts
+untrusted input.
+
+### Registry conventions
+
+Baked into the schema so a registry stays useful, not decorative:
+
+- **3–7 personas.** Fewer misses a real class of user; more is unmaintainable
+  fluff.
+- **One primary per surface.** Each surface has exactly one persona whose
+  `primary_for` names it — the default voice a story is written for. Others may
+  be secondary (`primary_for: []`).
+- **No demographic fluff.** Age, gender, and location appear **only** when they
+  change a design or test decision. The test for every field: *could this value
+  change what we build or how we test it?* If not, cut it.
+- **Cover the untrusted-input surfaces.** A surface that accepts external input
+  gets at least an `adversarial` persona; developer-facing surfaces get an
+  `api-consumer`.
+
+### Provenance and staleness detection
+
+The block is **generated from the prose**, so the prose can silently outrun it.
+Provenance makes that detectable — the same mechanism `story-spec/v1` uses:
+
+- **What is hashed.** The bytes strictly **between** the
+  `<!-- personas:prose:start -->` and `<!-- personas:prose:end -->` sentinels —
+  the authoritative persona prose, nothing else.
+- **Normalisation (so the hash is reproducible).** Apply in this exact order:
+  (1) convert line endings to `LF`; (2) strip trailing whitespace from each
+  line; (3) drop leading and trailing **blank** lines, where "blank" means empty
+  *after* step 2; (4) append exactly one trailing `LF`. Then take the SHA-256 of
+  the resulting UTF-8 bytes, lowercase hex, stored as `provenance.prose_sha256`.
+  The fixed order matters: an implementer who dropped blank lines before
+  stripping trailing whitespace could hash a different byte string.
+- **The check.** A consumer recomputes the hash over the current prose region and
+  compares. **Match** → the block is in sync with its prose. **Mismatch** → the
+  prose was hand-edited after generation; the block is **stale**, and the
+  consumer flags it and routes the human to `/development:define-personas` to
+  regenerate rather than trusting the drifted block.
+
+This is the whole staleness machinery — no background job. The registry is
+re-derived exactly when reality (the prose a human edited) contradicts the
+generated mirror, on the next pull by a consumer.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
