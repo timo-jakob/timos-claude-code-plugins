@@ -83,6 +83,14 @@ present the **final `proposed_prose` + `proposed_story_spec`** and get the
 human's **explicit approval of the exact rewrite**. Nothing is written until they
 approve. If they want changes, feed their reply back for another round.
 
+> **Missing-persona routing (#668).** When the refiner flags that the story needs
+> a persona the target repo's `personas/v1` registry lacks or fits poorly
+> (typically in its `recommendations`), relay it and **route the human to
+> `/development:define-personas`** to add or adjust the persona — you never invoke
+> that skill automatically. Personas are **advisory**: the human may run it and
+> come back with a real persona id, or proceed without one. Never block on it,
+> and never let the refiner invent a persona id the registry doesn't contain.
+>
 > The agent is a **pure function** — it never touches GitHub. Do not ask it to
 > post or edit; that is Step 3, and it is yours.
 
@@ -145,6 +153,14 @@ Spawn **`story-readiness`** again on the freshly-edited issue. Its verdict is no
 authoritative — and, because a `story-spec` block now exists, its validation also
 checks the block against the prose (it will pass: you just stamped the hash over
 this exact prose).
+
+**Relay the verdict's `advisories` to the human (#668).** The re-gate may return
+non-blocking `advisories` — e.g. a `story-spec` `personas` reference to a persona
+id that isn't in the target repo's `personas/v1` registry, or a stale registry.
+These **never** block (the story can still be `READY`), but the human should see
+them: surface each advisory's `message`, and when it names a missing/ill-fitting
+persona, route the human to **`/development:define-personas`** (as in Step 2) so
+they can add or fix it and, optionally, re-run refine-issue to reference it.
 
 ## Step 5 — resolve the label, honestly
 

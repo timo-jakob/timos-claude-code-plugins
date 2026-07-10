@@ -1,6 +1,6 @@
 ---
 name: story-readiness
-description: Language-agnostic readiness gate for /development:resolve-issue. Judges whether a filed story (a single issue, or each child of an epic) is specified well enough to build — testable acceptance criteria, bounded scope, resolved/referenced dependencies, no contradictions — and emits a risk classification (low/normal/elevated). Also emits a proposed story-spec/v1 block for READY stories and validates any existing block against the prose (#574). Returns a verdict JSON only; it never writes to GitHub (the skill posts comments/labels). Used as step 0 of the single-issue flow and as the epic pre-flight.
+description: Language-agnostic readiness gate for /development:resolve-issue. Judges whether a filed story (a single issue, or each child of an epic) is specified well enough to build — testable acceptance criteria, bounded scope, resolved/referenced dependencies, no contradictions — and emits a risk classification (low/normal/elevated). Also emits a proposed story-spec/v1 block for READY stories and validates any existing block against the prose (#574), plus non-blocking advisories such as persona-reference validation against the target repo's personas/v1 registry (#668). Returns a verdict JSON only; it never writes to GitHub (the skill posts comments/labels). Used as step 0 of the single-issue flow and as the epic pre-flight.
 model: opus
 tools: Read, Grep, Glob, Bash
 ---
@@ -69,6 +69,28 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
   refinement reason. An **absent** block is **not** a failure — most issues have
   never been refined; you simply *propose* one in your output (`story_spec`
   below) rather than demanding it.
+- **Validate persona references — advisory, never a hard fail** (#668). If the
+  story-spec block references persona ids (a non-empty `personas` array),
+  validate them against the target repo's `personas/v1` registry
+  (`docs/personas.md`) and record any problem as an **advisory** (the
+  `advisories` output field), **never** as a check failure:
+  - **unknown id** (`kind: "persona-unknown"`) — a referenced id is absent from
+    the registry's `personas/v1` block → advisory naming the id.
+  - **stale registry** (`kind: "persona-registry-stale"`) — recompute the
+    registry's provenance hash over its sentinel-delimited prose
+    (`<!-- personas:prose:start -->` … `<!-- personas:prose:end -->`, the same
+    normalisation as above) and compare to the **registry block's**
+    `provenance.prose_sha256`; a mismatch means the persona prose was edited
+    after the block was generated → advisory.
+  - **no registry** (`kind: "persona-registry-missing"`) — the story references
+    personas but `docs/personas.md` is absent → advisory that the ids can't be
+    validated.
+
+  A persona-less story (empty or absent `personas`) is **silent** — no advisory.
+  Persona references **never** move the verdict: they inform, they don't gate
+  (personas are advisory by design, #573). When an advisory names a missing or
+  ill-fitting persona, its message points the human at
+  `/development:define-personas` to add or fix it.
 
 ## The four readiness checks
 
@@ -95,7 +117,10 @@ unblock it.
    also fails when an **existing** `story-spec/v1` block is **stale** (provenance
    mismatch) or **contradicts** the prose (#574): the machine block must agree
    with the human-authoritative prose, or it can't be trusted. An **absent**
-   block never fails this check.
+   block never fails this check. **Persona-reference problems are the exception**
+   — an unknown id or a stale *persona* registry is an **advisory**, not a
+   contradiction, and never fails this check (see the persona-validation bullet
+   above, #668).
 
 Judge substance, not formatting: a well-written prose story with no `## Acceptance`
 header can still be `READY`; a checklist of vague bullets is not. When a check
@@ -136,7 +161,8 @@ Emit exactly one fenced `json` block and no other trailing prose. Shape:
     "Which endpoints are in scope for this change?"
   ],
   "summary": "Scope is bounded but 'improve performance' has no testable target.",
-  "story_spec": null
+  "story_spec": null,
+  "advisories": []
 }
 ```
 
@@ -163,5 +189,14 @@ Rules for the payload:
   able to fill an advisory field (no `personas` registry, a `none`-surface story
   with no `test_cases`) is **not** a gap — emit `[]`/`null` for it and judge the
   story on the four checks alone.
+- `advisories` is a list of **non-blocking** notes (#668) — today, persona
+  reference problems (unknown id, stale registry, no registry) found when
+  validating a story-spec block's `personas` against the target repo's
+  `personas/v1` registry. Each entry is `{ "kind": "persona-unknown" |
+  "persona-registry-stale" | "persona-registry-missing", "message": "…" }`, the
+  `message` naming the id and, where relevant, pointing the human at
+  `/development:define-personas`. **Advisories never change the verdict** — a
+  `READY` story with advisories is still `READY`. Empty (`[]`) when there is
+  nothing to note (the common case, including every persona-less story).
 - Never invent a reason to fail a well-specified story, and never wave through a
   vague one — reliability of this judgment is what makes the loop trustworthy.

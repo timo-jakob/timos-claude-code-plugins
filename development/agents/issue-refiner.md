@@ -81,9 +81,15 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
 - **Draft `use_case`** (`actor`, `goal`, `data_sketch`) concrete enough to
   derive realistic data.
 - **Reference personas** from the target repo's `personas/v1` registry
-  (`docs/personas.md`, #665) when one fits, and use its `data_traits` to make
-  drafted payloads realistic (real value shapes, not `foo`/`bar`). Personas are
-  **advisory** — if none fits, leave `personas: []`; never block on it.
+  (`docs/personas.md`, #665) when one fits, and **draw the drafted payloads from
+  the referenced persona's `data_traits`** (#668) — use those exact value shapes
+  and examples so the `test_cases` read like real input, not `foo`/`bar`.
+  Personas are **advisory** — if none fits, leave `personas: []`; never block on
+  it. When a story clearly *needs* a persona the registry lacks (or the best fit
+  is poor), **do not invent an id**: say so in a `recommendations` entry and tell
+  the human to run **`/development:define-personas`** to add or fix it (the
+  routing is a recommendation to the human — you never invoke that skill
+  yourself).
 
 ## Output — one JSON object only
 
