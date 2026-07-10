@@ -174,7 +174,11 @@ follow-up).
    integration (cross-depends on #574 and #576)
 5. End-to-end validation + docs (ai-doc-organizer test bed)
 
-Dependency order: 1 → (2, 4) → 3 → 5.
+Dependency order: 1 → 2 → 3 → 5, with 4 branching off 1 in parallel with the
+2 → 3 chain and 5 waiting on both 3 and 4 — i.e. 3 (the skill) depends only on
+2 (the agent), not on 4 (the consumption wiring, which is 3's downstream
+consumer). 4 additionally cross-depends on #574 and #576. The GitHub-native
+`blockedBy` graph (#583) is authoritative and encodes exactly this.
 
 ## Out of scope
 
