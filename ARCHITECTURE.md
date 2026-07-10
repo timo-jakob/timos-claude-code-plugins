@@ -1150,6 +1150,136 @@ as written — and the dependent stays queued until the blocking epic is
 **closed**, not merely children-merged; autonomous runs still reject +
 escalate rather than auto-running the epic.
 
+## Story-spec contract (`story-spec/v1`, #574)
+
+The refinement phase (`/development:refine-issue`, epic #573) is where an AI has
+its richest, verified understanding of a story. `story-spec/v1` **persists that
+understanding as a durable, machine-readable spec on the issue**, so the
+downstream implementer (`resolve-issue`) consumes a precise interface instead of
+re-deriving everything from prose — while the prose stays foregrounded and
+human-authoritative. The `story-readiness` agent (#559) both **emits** a proposed
+block (part of its verdict) and **validates** an existing one against the prose.
+
+### Where the block lives
+
+Unlike `personas/v1` (a file in the target repo), the story-spec block lives **in
+the GitHub issue body** — appended, collapsed, below the human prose:
+
+```markdown
+<!-- story-spec:prose:start -->
+... the human-authoritative issue prose the block summarises ...
+<!-- story-spec:prose:end -->
+
+<details>
+<summary>🤖 machine-readable story spec (<code>story-spec/v1</code>) — generated, do not hand-edit</summary>
+
+<!-- the story-spec/v1 JSON block (schema below) goes here -->
+
+</details>
+```
+
+The `story-spec:prose:start`/`:end` sentinels bound the prose the provenance hash
+covers (below), exactly as `personas/v1` does. When `refine-issue` writes the
+block, it wraps the (refined) issue prose in the sentinels; the block follows.
+
+### The `story-spec/v1` block
+
+One fenced `json` object inside the `<details>`. Shape:
+
+```json
+{
+  "schema": "story-spec/v1",
+  "provenance": {
+    "generated_by": "story-readiness via /development:refine-issue",
+    "generated_at": "2026-07-10T12:00:00Z",
+    "prose_sha256": "9b2e0a1c4d6f83b5a7c9e1f3058d2a4b6c8e0f1a3b5d7c9e1f2a4b6c8d0e2f4a"
+  },
+  "acceptance_criteria": ["job files in under 20 s", "half-typed entry survives a network drop"],
+  "scope_boundaries": {
+    "in": ["the mobile job-entry form", "local draft persistence"],
+    "out": ["the web dashboard", "offline sync conflict resolution"]
+  },
+  "risk_classification": "normal",
+  "testable_checks": ["POST /jobs with a dropped connection re-submits the saved draft"],
+  "interface_surfaces": ["rest", "web-ui"],
+  "use_case": {
+    "actor": "dana-dispatcher",
+    "goal": "file a job from the depot floor before the truck leaves",
+    "data_sketch": "job_ref JOB-2291, site 'Müller & Sons', notes pasted from SMS"
+  },
+  "personas": ["dana-dispatcher"],
+  "test_cases": [
+    {
+      "id": "tc-happy-file-job",
+      "kind": "happy",
+      "shape": "POST /jobs {job_ref, site_name, notes} -> 201 + job id",
+      "tooling": "curl",
+      "issue": null
+    },
+    {
+      "id": "tc-error-oversized-note",
+      "kind": "error",
+      "shape": "POST /jobs with a 40 KB note -> 413, no partial write",
+      "tooling": "curl",
+      "issue": null
+    }
+  ]
+}
+```
+
+**Field contract:**
+
+| Field | Type | Value |
+| --- | --- | --- |
+| `schema` | string | the schema identifier — literally `story-spec/v1` |
+| `acceptance_criteria` | string[] | testable definition-of-done checks |
+| `scope_boundaries` | object | `{ in: string[], out: string[] }` — what the story does and explicitly does not cover |
+| `risk_classification` | string | `low` \| `normal` \| `elevated` — reuses the gate's classification (#559), given a durable home |
+| `testable_checks` | string[] | seeds for the implementation's tests |
+| `interface_surfaces` | string[] | runtime surfaces the story touches: `rest` \| `grpc` \| `web-ui` \| `cli` (the #242 taxonomy); `[]` when none |
+| `use_case` | object | `{ actor, goal, data_sketch }` — concrete enough to derive realistic test data |
+| `personas` | string[] | persona ids referencing the target repo's `personas/v1` registry (#665). **Advisory; may be `[]`** |
+| `test_cases` | object[] | outside-in cases: `id`, `kind` (`happy` \| `corner` \| `error`), `shape` (given/when/then or request→expected), `tooling` (`curl` \| `grpcurl` \| `playwright` \| `cli`), and `issue` (the linked test-case issue number after spin-out #671, else `null`) |
+| `provenance` | object | `{ generated_by, generated_at, prose_sha256 }` — as below |
+
+**No `dependencies` field — deliberately (#583).** Dependencies live in
+GitHub-native `blockedBy` relationships, the single source of truth. A second
+machine-readable copy in the block would drift; the gate and `resolve-issue`
+read dependencies only the native way. See the issue-dependency model above.
+
+### Provenance and staleness (shared with `personas/v1`)
+
+Identical mechanism to `personas/v1`: `prose_sha256` is the SHA-256 of the
+sentinel-delimited prose region (`<!-- story-spec:prose:start -->` …
+`<!-- story-spec:prose:end -->`), under the **same normalisation** (LF endings →
+strip per-line trailing whitespace → drop leading/trailing blank lines → append
+one `LF`), lowercase hex. A consumer recomputes and compares: **match** → the
+block is in sync; **mismatch** → the issue prose was hand-edited after the block
+was generated, so the block is **stale**. See the personas provenance subsection
+for the exact byte-level recipe — the two contracts share it verbatim.
+
+### How the gate emits and validates it
+
+The `story-readiness` agent extends its read-only verdict (it still writes
+nothing) in two ways:
+
+- **Emit.** For a `READY` story it includes a **proposed** `story_spec` object in
+  its verdict JSON, derived from the issue it just judged — the raw material
+  `refine-issue` writes back (human-approved) and `resolve-issue` can consume.
+  The proposal is advisory output; spawning skills that don't want it ignore the
+  field, so this is backward-compatible with every existing caller.
+- **Validate — only when a block is already present.** If the issue body already
+  carries a `story-spec/v1` block, the gate checks it against the prose: a
+  **stale** block (provenance mismatch) or one that **contradicts** the prose
+  (e.g. acceptance criteria the prose no longer supports, or
+  `interface_surfaces` claiming `rest` when the prose describes a CLI-only
+  change) is a `NEEDS_REFINEMENT` reason, named as such. An **absent** block is
+  *not* a
+  failure — most issues have never been refined, and the gate simply proposes
+  one rather than demanding it. (Full interface-aware hard-requirement
+  enforcement — check 5, requiring `use_case` + `test_cases` for
+  surface-touching stories — is #670, not this contract.)
+
 ## Persona registry contract (`personas/v1`, #665)
 
 A **persona registry** is a target repo's answer to *"who actually uses this
