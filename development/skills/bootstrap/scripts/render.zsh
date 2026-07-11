@@ -55,6 +55,12 @@
 #   --xcode-scheme <s>            {{XCODE_SCHEME}}
 #   --codeql-languages <csv>      {{CODEQL_LANGUAGES}} (default: mapped from
 #                                 --languages when that was passed)
+#   --acceptance-interfaces <csv> {{ACCEPTANCE_INTERFACES}} — the runtime
+#                                 interfaces detect-stack.sh found (#242),
+#                                 comma-joined (e.g. `cli, web-ui`), minus
+#                                 `library`. No default: it survives to the
+#                                 leftover check unless passed, so acceptance.yml
+#                                 is only ever rendered with a real interface set
 #   --claude-plugins-repo <o/r>   {{CLAUDE_PLUGINS_REPO}}
 #                                 (default: timo-jakob/timos-claude-code-plugins)
 #   --approver-lang <lang>        {{APPROVER_LANG}} — the resolved Approver
@@ -121,6 +127,7 @@ while (($# > 0)); do
 	--java-version) vals[JAVA_VERSION]="$2" && shift 2 ;;
 	--xcode-scheme) vals[XCODE_SCHEME]="$2" && shift 2 ;;
 	--codeql-languages) vals[CODEQL_LANGUAGES]="$2" && shift 2 ;;
+	--acceptance-interfaces) vals[ACCEPTANCE_INTERFACES]="$2" && shift 2 ;;
 	--claude-plugins-repo) vals[CLAUDE_PLUGINS_REPO]="$2" && shift 2 ;;
 	--approver-lang) vals[APPROVER_LANG]="$2" && shift 2 ;;
 	--security-contact-email) security_email="$2" && security_email_set=1 && shift 2 ;;
