@@ -756,14 +756,16 @@ fi
 #                                    render together as one feature (#408), so the
 #                                    script is held out for the same reason as the
 #                                    workflow — never one without the other.
-#     - acceptance.yml            — gated by the detected `interfaces` set (#242/
-#                                    #697): rendered only when a runtime interface
-#                                    is detected, and its render needs the
-#                                    interface matrix value (--acceptance-interfaces
-#                                    -> {{ACCEPTANCE_INTERFACES}}), so it is NOT a
-#                                    render-blind candidate — a blank State-D
+#     - acceptance.yml +          — gated by the detected `interfaces` set (#242/
+#       tests/acceptance/cli/         #697): rendered only when a runtime interface
+#       test_smoke.py                 is detected, and their render needs values
+#                                    detect-stack doesn't supply blind — the
+#                                    interface matrix (--acceptance-interfaces ->
+#                                    {{ACCEPTANCE_INTERFACES}}) and, for the cli
+#                                    smoke test, the entry point (--cli-entry-point
+#                                    -> {{CLI_ENTRY_POINT}}, #698). A blank State-D
 #                                    gap-fill would trip render.zsh's leftover
-#                                    check. A `library`-only project renders none
+#                                    check; a `library`-only project renders none
 #                                    at all. Held out; rendered via the interactive
 #                                    Step 3 flow that passes the interface set.
 #   These stay installable via a full re-bootstrap with the right flags; only the
@@ -772,7 +774,7 @@ held_out=(
 	".gitignore" "LICENSE" "$excluded_bot"
 	".claude/approver-policy.md"
 	".github/workflows/api-stability.yml" ".github/scripts/check-api-stability.py"
-	".github/workflows/acceptance.yml"
+	".github/workflows/acceptance.yml" "tests/acceptance/cli/test_smoke.py"
 )
 artifacts_json="{"
 missing_json="["

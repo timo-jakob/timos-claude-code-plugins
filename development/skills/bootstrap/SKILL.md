@@ -1106,7 +1106,7 @@ renders **no** acceptance workflow. Pass the detected interfaces **minus
   --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
   --default-branch "<branch>" \
   --acceptance-interfaces "cli, web-ui" \
-  common/.github/workflows/acceptance.yml
+  common/.github/workflows/acceptance.yml.tmpl
 ```
 
 Detection is **advisory** — present the detected set in the Step 2 plan and let
@@ -1126,10 +1126,32 @@ Approver-consumption child — keep it stable):
   (`if: always()`, so the evidence survives a failing exercise) containing
   **JUnit XML**. `acceptance-report-` is the stable prefix consumers glob.
 
-v1 (#697) ships this as a **green-but-minimal skeleton** — the exercise step
-writes a passing JUnit report so the check and the report contract are live. The
-per-interface harness children replace that step with the real exercise: cli
-(#698) runs `tests/acceptance/cli/` against the built entry point; rest / web-ui
+The spine (#697) ships the structure; the exercise step is a **green-but-minimal
+skeleton** for interfaces whose harness hasn't shipped yet (rest / web-ui, in
+epic #704) — it writes a passing JUnit report so the check + report contract are
+live.
+
+**cli harness (#698).** When `cli` is in the interface set, also render the
+`tests/acceptance/cli/` convention — a green-but-minimal pytest **smoke test**
+that runs the built entry point and asserts exit code + output. The workflow's
+cli leg installs the package and runs `pytest tests/acceptance/cli/
+--junitxml=acceptance-report/acceptance-cli.xml`, so a failing acceptance test
+fails the `acceptance (cli)` check. Pass the built command via
+`--cli-entry-point` — the `[project.scripts]` name (e.g. `aido`) or `python -m
+<package>` for a `__main__`-only cli:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --cli-entry-point "aido" \
+  languages/python/tests/acceptance/cli/test_smoke.py.tmpl
+```
+
+(v1's cli harness is Python — interface detection is Python-only, #242. Like
+`acceptance.yml`, the smoke test is **held out** of `missing_artifacts`: its
+render needs the entry point, so it is not a render-blind gap-fill candidate.)
+Projects grow real acceptance cases (fixture inputs → expected output + exit
+code) into `tests/acceptance/cli/` alongside the seed. rest / web-ui harnesses
 land with epic #704.
 
 ### Idempotency rules (apply for every file write)

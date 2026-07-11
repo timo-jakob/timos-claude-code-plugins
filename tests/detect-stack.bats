@@ -399,6 +399,23 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/acceptance.yml")' <<<"$out")" = "null" ]
 }
 
+@test "detect-stack: #698 cli acceptance smoke test is held out of missing_artifacts" {
+  # tests/acceptance/cli/test_smoke.py renders only when cli is detected AND
+  # needs the entry-point value, so an absent one is never a render-blind gap.
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("tests/acceptance/cli/test_smoke.py")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #698 present cli acceptance smoke test is tracked in existing_artifacts" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
+  mkdir -p tests/acceptance/cli
+  printf 'def test_x():\n    assert True\n' > tests/acceptance/cli/test_smoke.py
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts["tests/acceptance/cli/test_smoke.py"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("tests/acceptance/cli/test_smoke.py")' <<<"$out")" = "null" ]
+}
+
 @test "verify-python-state: pyproject WITHOUT requires-python -> exit 0 (no crash)" {
   printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
   bash "$VERIFY" "$WORK" >/dev/null 2>&1

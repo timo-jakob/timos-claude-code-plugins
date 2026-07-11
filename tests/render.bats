@@ -376,6 +376,39 @@ EOF
   grep -q 'interface: \[cli\]' "$OUT/common/.github/workflows/acceptance.yml"
 }
 
+@test "render: acceptance.yml wires the cli exercise into the spine (#698)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --default-branch main --python-version 3.13 --acceptance-interfaces "cli" \
+    common/.github/workflows/acceptance.yml.tmpl
+  [ "$status" -eq 0 ]
+  A="$OUT/common/.github/workflows/acceptance.yml"
+  # cli leg installs the package and runs pytest -> JUnit into acceptance-report/
+  grep -q "if: matrix.interface == 'cli'" "$A"
+  grep -q 'python-version: "3.13"' "$A"
+  grep -q 'pytest tests/acceptance/cli/' "$A"
+  grep -q -- '--junitxml="acceptance-report/acceptance-cli.xml"' "$A"
+  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$A"
+}
+
+@test "render: cli acceptance smoke test substitutes the entry point (#698)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --cli-entry-point "aido" \
+    languages/python/tests/acceptance/cli/test_smoke.py.tmpl
+  [ "$status" -eq 0 ]
+  S="$OUT/languages/python/tests/acceptance/cli/test_smoke.py"
+  grep -q 'ENTRY_POINT = "aido"' "$S"
+  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$S"
+  # valid Python
+  python3 -m py_compile "$S"
+}
+
+@test "render: cli smoke test without --cli-entry-point fails the leftover check (#698)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    languages/python/tests/acceptance/cli/test_smoke.py.tmpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CLI_ENTRY_POINT"* ]]
+}
+
 @test "render: static file without placeholders or blocks passes through unchanged" {
   printf 'plain: file\nno: templating\n' > "$T/static.yml"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" static.yml

@@ -1,0 +1,38 @@
+"""Acceptance smoke test for the `cli` surface (bootstrap-rendered, #698).
+
+Acceptance tests exercise the SHIPPED artifact through the interface a user
+actually touches — here, the installed command-line entry point. This file is
+the green-but-minimal seed the acceptance stage renders so the
+`acceptance (cli)` check is green from day one; grow real cases (fixture inputs
+-> expected stdout + exit code) into this directory alongside it.
+
+Run in CI by `.github/workflows/acceptance.yml`:
+    python -m pytest tests/acceptance/cli/ --junitxml=acceptance-report/acceptance-cli.xml
+so the results land in the `acceptance-report-cli` artifact (JUnit XML).
+"""
+
+import subprocess
+
+# The built entry point, filled by /development:bootstrap from the project's
+# `[project.scripts]` name (e.g. `aido`), or `python -m <package>` when the cli
+# is a runnable module. Split so multi-word commands work.
+ENTRY_POINT = "{{CLI_ENTRY_POINT}}"
+
+
+def _run(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ENTRY_POINT.split() + list(args),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_cli_help_smoke() -> None:
+    """The built entry point runs and reports usage — the deploy actually works."""
+    result = _run("--help")
+    assert result.returncode == 0, (
+        f"`{ENTRY_POINT} --help` exited {result.returncode}\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert result.stdout or result.stderr, "expected --help to print usage output"
