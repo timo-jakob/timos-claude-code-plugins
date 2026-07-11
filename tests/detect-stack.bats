@@ -381,38 +381,50 @@ setup() {
   [ "$(jq -r '.interfaces | type' <<<"$out")" = "array" ]
 }
 
-@test "detect-stack: #697 interface-gated acceptance.yml is held out of missing_artifacts" {
-  # acceptance.yml renders only when a runtime interface is detected AND needs
-  # the interface matrix value, so it is not a render-blind State-D gap-fill
-  # candidate — an absent one is never flagged missing.
-  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
+# --- #714 acceptance stage: conditional gap so existing repos adopt it ---------
+
+@test "detect-stack: #714 cli repo lacking acceptance.yml -> it IS a missing_artifact" {
+  # An already-bootstrapped repo with a runtime interface but no acceptance stage
+  # must see it as a gap, so a re-bootstrap adopts it (the whole point of #714).
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["flask", "jinja2"]\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
   out=$(bash "$DETECT" 2>/dev/null)
-  [ "$(jq -r '.missing_artifacts | index(".github/workflows/acceptance.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/acceptance.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("tests/acceptance/cli/test_smoke.py")' <<<"$out")" != "null" ]
 }
 
-@test "detect-stack: #697 present acceptance.yml is tracked in existing_artifacts" {
-  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
-  mkdir -p .github/workflows
-  printf 'name: acceptance\n' > .github/workflows/acceptance.yml
+@test "detect-stack: #714 library-only repo -> acceptance stage stays held out" {
+  # `library` has no runtime interface -> renders no acceptance stage at all.
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["requests"]\n' > pyproject.toml
   out=$(bash "$DETECT" 2>/dev/null)
-  [ "$(jq -r '.existing_artifacts["'".github/workflows/acceptance.yml"'"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.interfaces[0].interface' <<<"$out")" = "library" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/acceptance.yml")' <<<"$out")" = "null" ]
-}
-
-@test "detect-stack: #698 cli acceptance smoke test is held out of missing_artifacts" {
-  # tests/acceptance/cli/test_smoke.py renders only when cli is detected AND
-  # needs the entry-point value, so an absent one is never a render-blind gap.
-  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
-  out=$(bash "$DETECT" 2>/dev/null)
   [ "$(jq -r '.missing_artifacts | index("tests/acceptance/cli/test_smoke.py")' <<<"$out")" = "null" ]
 }
 
-@test "detect-stack: #698 present cli acceptance smoke test is tracked in existing_artifacts" {
+@test "detect-stack: #714 rest-only repo -> acceptance.yml is a gap, cli smoke is held out" {
+  # A non-library interface warrants acceptance.yml; the cli smoke test only when
+  # cli is present (rest/web-ui harnesses land with #704).
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["fastapi>=0.110"]\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/acceptance.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("tests/acceptance/cli/test_smoke.py")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #714 non-Python repo -> acceptance.yml stays held out (no interfaces)" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/acceptance.yml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #714 present acceptance stage is tracked, not re-flagged as a gap" {
   printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
-  mkdir -p tests/acceptance/cli
+  mkdir -p .github/workflows tests/acceptance/cli
+  printf 'name: acceptance\n' > .github/workflows/acceptance.yml
   printf 'def test_x():\n    assert True\n' > tests/acceptance/cli/test_smoke.py
   out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts["'".github/workflows/acceptance.yml"'"]' <<<"$out")" = "true" ]
   [ "$(jq -r '.existing_artifacts["tests/acceptance/cli/test_smoke.py"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/acceptance.yml")' <<<"$out")" = "null" ]
   [ "$(jq -r '.missing_artifacts | index("tests/acceptance/cli/test_smoke.py")' <<<"$out")" = "null" ]
 }
 
