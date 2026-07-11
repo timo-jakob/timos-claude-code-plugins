@@ -528,6 +528,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{JAVA_VERSION}}` | from `detect-stack.sh` (`language_meta.java.version`) — the JDK major (e.g. `21`, `17`). Defaults to the current LTS `21` when Java isn't detected or the build declares no toolchain (`language_meta.java.version_source == "default"`). Used in `setup-java`'s `java-version`. Substitute as-is. |
 | `{{XCODE_SCHEME}}` | Swift/Xcode only (`language_meta.swift.build_system == "xcode"`) — the scheme `xcodebuild test` runs. Resolve at render time via `xcodebuild -list -json` (take the single shared scheme; if several, ask the user which one carries the tests). Not used on SwiftPM repos — there the `SWIFT_XCODE` block is stripped and `swift test` needs no scheme. |
 | `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
+| `{{ACCEPTANCE_INTERFACES}}` | comma-joined runtime interfaces from `detect-stack.sh`'s `interfaces` (#242), **minus `library`** — e.g. `cli` or `cli, web-ui`. Rendered inside literal brackets in the template (`interface: [{{ACCEPTANCE_INTERFACES}}]`, the `{{CODEQL_LANGUAGES}}` pattern) → a matrix leg per interface. Pass via `render.zsh --acceptance-interfaces`; **only** when rendering `acceptance.yml` (§3g). No default — omit it and the placeholder trips the leftover check, so the acceptance workflow is never rendered with an empty interface set. |
 | `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
 | `{{APPROVER_LANG}}` | the resolved Approver language from Step 3e (`python` / `java` / `swift`) — used by `common/approver-policy-core.md.tmpl` for the `/development-<lang>:approve` and `<lang>-approver` references. Pass via `render.zsh --approver-lang`; only needed when rendering the Approver policy (#241). |
 
@@ -1084,6 +1085,52 @@ The Python plugin's API-stability spec is independent of
 package, regardless of whether the Approver is also enabled. When both
 are enabled, the spec describes how the gate's artifact couples with
 the Approver's per-type criteria.
+
+### 3g. Acceptance-test workflow (when a runtime interface is detected)
+
+Unit + integration tests and a coverage number don't prove the *shipped
+artifact* works. `acceptance.yml` (the spine from #697,
+`common/.github/workflows/acceptance.yml.tmpl`) adds the missing CI stage:
+deploy/run the built artifact and exercise it through the interface a user
+actually touches. It is a normal check, **not** an
+Approver capability — the Approver later judges the evidence this stage produces,
+and the #232 wait-for-CI gate picks the new check up automatically.
+
+**Renders when** `detect-stack.sh`'s `interfaces` (#242) is non-empty **and not
+solely `["library"]`** — a `library` project has no runtime interface, so it
+renders **no** acceptance workflow. Pass the detected interfaces **minus
+`library`**, comma-joined, via `--acceptance-interfaces`:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --default-branch "<branch>" \
+  --acceptance-interfaces "cli, web-ui" \
+  common/.github/workflows/acceptance.yml
+```
+
+Detection is **advisory** — present the detected set in the Step 2 plan and let
+the user confirm/correct (a web framework serving templates is `web-ui`, one
+serving neither is `rest`; the heuristic can't always tell), then render the
+confirmed set. (Because its render needs this interface value, `acceptance.yml`
+is **held out** of `detect-stack.sh`'s `missing_artifacts` — it is not a
+render-blind State-D gap-fill candidate.)
+
+**The contract this spine establishes** (consumed by follow-up epic #704's
+Approver-consumption child — keep it stable):
+
+- **Check name** — the job is a matrix over `interface`, so the check surfaces as
+  **`acceptance (<interface>)`** (`acceptance (cli)`, `acceptance (web-ui)`, …),
+  one leg per detected interface.
+- **Report artifact** — each leg uploads **`acceptance-report-<interface>`**
+  (`if: always()`, so the evidence survives a failing exercise) containing
+  **JUnit XML**. `acceptance-report-` is the stable prefix consumers glob.
+
+v1 (#697) ships this as a **green-but-minimal skeleton** — the exercise step
+writes a passing JUnit report so the check and the report contract are live. The
+per-interface harness children replace that step with the real exercise: cli
+(#698) runs `tests/acceptance/cli/` against the built entry point; rest / web-ui
+land with epic #704.
 
 ### Idempotency rules (apply for every file write)
 

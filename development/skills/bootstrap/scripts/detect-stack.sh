@@ -756,12 +756,23 @@ fi
 #                                    render together as one feature (#408), so the
 #                                    script is held out for the same reason as the
 #                                    workflow — never one without the other.
+#     - acceptance.yml            — gated by the detected `interfaces` set (#242/
+#                                    #697): rendered only when a runtime interface
+#                                    is detected, and its render needs the
+#                                    interface matrix value (--acceptance-interfaces
+#                                    -> {{ACCEPTANCE_INTERFACES}}), so it is NOT a
+#                                    render-blind candidate — a blank State-D
+#                                    gap-fill would trip render.zsh's leftover
+#                                    check. A `library`-only project renders none
+#                                    at all. Held out; rendered via the interactive
+#                                    Step 3 flow that passes the interface set.
 #   These stay installable via a full re-bootstrap with the right flags; only the
 #   unconditionally-expected gaps auto-render.
 held_out=(
 	".gitignore" "LICENSE" "$excluded_bot"
 	".claude/approver-policy.md"
 	".github/workflows/api-stability.yml" ".github/scripts/check-api-stability.py"
+	".github/workflows/acceptance.yml"
 )
 artifacts_json="{"
 missing_json="["

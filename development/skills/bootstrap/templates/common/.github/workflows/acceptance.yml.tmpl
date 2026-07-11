@@ -1,0 +1,77 @@
+# Acceptance tests — exercise the SHIPPED artifact through its real interface.
+#
+# Unit + integration tests plus a coverage number don't prove the *deployed
+# build* works; this stage does — it runs the built artifact the way a user
+# actually touches it. It is a normal CI check (not an Approver capability): the
+# Approver later judges the evidence this stage produces, and the #232
+# wait-for-CI gate picks the new `acceptance (<interface>)` check up
+# automatically.
+#
+# The interface set is filled by /development:bootstrap from detect-stack.sh's
+# `interfaces` detection (#242) — one matrix leg per detected interface, so the
+# check appears as `acceptance (cli)`, `acceptance (web-ui)`, … A `library`
+# project has no runtime interface and renders no acceptance workflow at all.
+#
+# SPINE (#697): this file is the reusable structure + report contract. The
+# exercise step below is a green-but-minimal skeleton; the per-interface harness
+# children replace it with the real exercise (cli #698 runs tests/acceptance/cli/
+# against the built entry point; rest / web-ui land with follow-up epic #704).
+# The `acceptance-report-<interface>` artifact (JUnit XML) is the durable
+# contract Epic B's Approver-consumption child reads.
+
+name: acceptance
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    # One leg per interface detect-stack.sh found -> check `acceptance (<iface>)`.
+    strategy:
+      fail-fast: false
+      matrix:
+        interface: [{{ACCEPTANCE_INTERFACES}}]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Exercise the ${{ matrix.interface }} interface
+        # SPINE SKELETON (#697) — green-but-minimal. The harness child for this
+        # interface replaces this block with the real exercise: deploy/run the
+        # built artifact and drive tests/acceptance/${{ matrix.interface }}/
+        # against it, writing JUnit results into acceptance-report/.
+        run: |
+          set -euo pipefail
+          iface="${{ matrix.interface }}"
+          mkdir -p acceptance-report
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<testsuites>' \
+            "  <testsuite name=\"acceptance-${iface}\" tests=\"1\" failures=\"0\" errors=\"0\">" \
+            "    <testcase classname=\"acceptance.${iface}\" name=\"spine-skeleton-smoke\"/>" \
+            '  </testsuite>' \
+            '</testsuites>' \
+            >"acceptance-report/acceptance-${iface}.xml"
+
+      - name: Upload acceptance-report
+        # Always upload so the Approver-consumption child (#704) can read the
+        # evidence even when the exercise failed — that is the point of the
+        # report contract. The name is unique per matrix leg (upload-artifact v4+
+        # rejects duplicate artifact names), and `acceptance-report-<interface>`
+        # is the stable prefix consumers glob for.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: acceptance-report-${{ matrix.interface }}
+          path: acceptance-report/
+          retention-days: 30

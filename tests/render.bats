@@ -340,6 +340,42 @@ EOF
   done
 }
 
+@test "render: real acceptance.yml spine renders a matrix leg per interface (#697)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --default-branch main --acceptance-interfaces "cli, web-ui" \
+    common/.github/workflows/acceptance.yml.tmpl
+  [ "$status" -eq 0 ]
+  A="$OUT/common/.github/workflows/acceptance.yml"
+  # matrix over the passed interfaces -> check surfaces as `acceptance (<iface>)`
+  grep -q 'interface: \[cli, web-ui\]' "$A"
+  grep -qE '^\s+acceptance:' "$A"
+  # report contract: acceptance-report-<interface> artifact, JUnit XML
+  grep -q 'name: acceptance-report-${{ matrix.interface }}' "$A"
+  grep -q 'if: always()' "$A"
+  grep -q 'testsuites' "$A"
+  # no uppercase placeholder survives
+  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$A"
+}
+
+@test "render: acceptance.yml without --acceptance-interfaces fails the leftover check (#697)" {
+  # No default for {{ACCEPTANCE_INTERFACES}} — omitting the flag must trip the
+  # loud leftover-placeholder failure, so the workflow is never rendered with an
+  # empty interface set.
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --default-branch main \
+    common/.github/workflows/acceptance.yml.tmpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ACCEPTANCE_INTERFACES"* ]]
+}
+
+@test "render: acceptance.yml single interface renders a one-leg matrix (#697)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --default-branch main --acceptance-interfaces "cli" \
+    common/.github/workflows/acceptance.yml.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'interface: \[cli\]' "$OUT/common/.github/workflows/acceptance.yml"
+}
+
 @test "render: static file without placeholders or blocks passes through unchanged" {
   printf 'plain: file\nno: templating\n' > "$T/static.yml"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" static.yml
