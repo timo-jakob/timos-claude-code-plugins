@@ -102,6 +102,28 @@ What is shipped and aligned with the motivation:
   validated end-to-end on a native-relationship test bed
   ([#588](https://github.com/timo-jakob/timos-claude-code-plugins/issues/588)
   — evidence in `development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md`).
+- **Issue refinement + persona registry — the definition layer.** When the gate
+  says "not ready," `/development:refine-issue` is the guided path back: a human
+  loops the `issue-refiner` agent
+  ([#575](https://github.com/timo-jakob/timos-claude-code-plugins/issues/575)),
+  which turns the gate's objections into questions, a prose rewrite, and a
+  durable **`story-spec/v1`** block
+  ([#574](https://github.com/timo-jakob/timos-claude-code-plugins/issues/574)) —
+  machine-readable and provenance-stamped so a later prose edit is detectable as
+  staleness — written back onto the issue (human-authored). Its **outside-in**
+  test cases draw realistic data from a repo's **persona registry**:
+  `/development:define-personas` builds `personas/v1`
+  ([#665](https://github.com/timo-jakob/timos-claude-code-plugins/issues/665))
+  via the `persona-definer` agent
+  ([#666](https://github.com/timo-jakob/timos-claude-code-plugins/issues/666)),
+  the readiness gate validates persona references as **advisories** (never a hard
+  fail), and `refine-issue` mines their `data_traits` for realistic payloads
+  ([#668](https://github.com/timo-jakob/timos-claude-code-plugins/issues/668)).
+  Epics [#573](https://github.com/timo-jakob/timos-claude-code-plugins/issues/573)
+  (refinement) + [#664](https://github.com/timo-jakob/timos-claude-code-plugins/issues/664)
+  (personas); end-to-end validation + docs in
+  [#581](https://github.com/timo-jakob/timos-claude-code-plugins/issues/581) /
+  [#669](https://github.com/timo-jakob/timos-claude-code-plugins/issues/669).
 
 ### Current gaps
 
@@ -240,6 +262,8 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
+| Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Single-issue (epic-aware is a follow-up). |
+| Define Personas | `/development:define-personas` | **Interactive** — creates or updates a repo's `personas/v1` registry (`docs/personas.md`): who actually uses each surface and what they type into it. Loops the `persona-definer` agent with you (repo-grounded candidate personas + Socratic questions), then writes back the **human-approved** prose + machine block to the working tree (lands via the normal PR flow). The registry feeds `refine-issue`'s realistic test-data generation and the readiness gate's advisory persona-reference check. |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
 | Open PR | `/development:open-pr` | Opens a PR for the current branch **authored by the Claude Maintenance bot** — so you can approve it (GitHub blocks self-approval) — with squash auto-merge armed; falls back to a user-authored PR when the writer App isn't installed |
 | Library Docs | `/development:library-docs` | Ensures work proceeds from current, authoritative docs for any library / framework / CLI / API in scope rather than stale training-data guesses |
@@ -255,8 +279,10 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Bootstrap Idempotency Reviewer | opus | For each existing file conflicting with a template, recommends skip/overwrite/merge |
 | Bootstrap Validator | haiku | Fast post-write check — YAML/JSON parses, no unresolved placeholders, cross-references resolve |
 | Bootstrap Reviewer | opus | Optional senior-engineer review of the full bootstrap output (`--review` flag) |
-| Story Readiness | opus | Readiness gate for `/development:resolve-issue` — judges whether a story is specified well enough to build (testable acceptance, bounded scope, resolved dependencies) and emits a low/normal/elevated risk classification; verdict JSON only |
+| Story Readiness | opus | Readiness gate for `/development:resolve-issue` — judges whether a story is specified well enough to build (testable acceptance, bounded scope, resolved dependencies) and emits a low/normal/elevated risk classification. Also emits a proposed `story-spec/v1` block for READY stories and non-blocking advisories (e.g. persona-reference validation against the repo's `personas/v1` registry); verdict JSON only |
 | Review Consolidator | opus | Consolidates one review round's findings into a single prioritised changelist for the `resolve-issue` local review loop (dedup, blocking classification, conflict + non-convergence detection); changelist JSON only |
+| Issue Refiner | opus | Per-turn refinement engine for `/development:refine-issue` — turns the gate's objections + a human reply into a why-not-ready explanation, questions, recommendations, a prose rewrite, and a proposed `story-spec/v1` block (mining the repo for outside-in test cases, drawing realistic payloads from persona `data_traits`); pure function, no writes |
+| Persona Definer | opus | Per-turn elicitation engine for `/development:define-personas` — proposes repo-grounded candidate personas, asks Socratic questions to extract tacit knowledge, and returns a draft `personas/v1` registry update; challenges gaps (missing kinds, uncovered surfaces) rather than only confirming; pure function, no writes |
 
 ### development-swift
 
