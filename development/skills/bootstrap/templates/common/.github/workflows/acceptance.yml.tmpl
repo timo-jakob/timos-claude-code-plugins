@@ -12,12 +12,12 @@
 # check appears as `acceptance (cli)`, `acceptance (web-ui)`, … A `library`
 # project has no runtime interface and renders no acceptance workflow at all.
 #
-# SPINE (#697): this file is the reusable structure + report contract. The
-# exercise step below is a green-but-minimal skeleton; the per-interface harness
-# children replace it with the real exercise (cli #698 runs tests/acceptance/cli/
-# against the built entry point; rest / web-ui land with follow-up epic #704).
-# The `acceptance-report-<interface>` artifact (JUnit XML) is the durable
-# contract Epic B's Approver-consumption child reads.
+# SPINE (#697) + cli harness (#698): the reusable structure + report contract,
+# with the cli leg now running tests/acceptance/cli/ against the built entry
+# point (#698). Other interfaces stay a green-but-minimal skeleton until their
+# harness ships (rest / web-ui with follow-up epic #704). The
+# `acceptance-report-<interface>` artifact (JUnit XML) is the durable contract
+# Epic B's Approver-consumption child reads.
 
 name: acceptance
 
@@ -45,23 +45,50 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      # --- cli harness (#698) --------------------------------------------------
+      # v1's cli surface is Python (interface detection is Python-only, #242): the
+      # "test system" is just the installed entry point — no service deploy — so
+      # build the artifact by installing the package, then drive
+      # tests/acceptance/cli/ against it. rest / web-ui deploy as long-running
+      # services and set up their own tooling in their harness step (epic #704).
+      - name: Set up Python
+        if: matrix.interface == 'cli'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "{{PYTHON_VERSION}}"
+
+      - name: Build the cli artifact (install the package + pytest)
+        if: matrix.interface == 'cli'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || pip install .
+
       - name: Exercise the ${{ matrix.interface }} interface
-        # SPINE SKELETON (#697) — green-but-minimal. The harness child for this
-        # interface replaces this block with the real exercise: deploy/run the
-        # built artifact and drive tests/acceptance/${{ matrix.interface }}/
-        # against it, writing JUnit results into acceptance-report/.
+        # cli (#698): run tests/acceptance/cli/ against the built entry point,
+        # emitting JUnit into acceptance-report/ — a failing case fails the
+        # `acceptance (cli)` check. Other interfaces are still the green-but-
+        # minimal spine skeleton until their harness ships (epic #704).
         run: |
           set -euo pipefail
           iface="${{ matrix.interface }}"
           mkdir -p acceptance-report
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<testsuites>' \
-            "  <testsuite name=\"acceptance-${iface}\" tests=\"1\" failures=\"0\" errors=\"0\">" \
-            "    <testcase classname=\"acceptance.${iface}\" name=\"spine-skeleton-smoke\"/>" \
-            '  </testsuite>' \
-            '</testsuites>' \
-            >"acceptance-report/acceptance-${iface}.xml"
+          case "$iface" in
+          cli)
+            python -m pytest tests/acceptance/cli/ \
+              --junitxml="acceptance-report/acceptance-cli.xml"
+            ;;
+          *)
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<testsuites>' \
+              "  <testsuite name=\"acceptance-${iface}\" tests=\"1\" failures=\"0\" errors=\"0\">" \
+              "    <testcase classname=\"acceptance.${iface}\" name=\"spine-skeleton-smoke\"/>" \
+              '  </testsuite>' \
+              '</testsuites>' \
+              >"acceptance-report/acceptance-${iface}.xml"
+            ;;
+          esac
 
       - name: Upload acceptance-report
         # Always upload so the Approver-consumption child (#704) can read the

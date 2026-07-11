@@ -61,6 +61,11 @@
 #                                 `library`. No default: it survives to the
 #                                 leftover check unless passed, so acceptance.yml
 #                                 is only ever rendered with a real interface set
+#   --cli-entry-point <cmd>       {{CLI_ENTRY_POINT}} — the built cli command the
+#                                 acceptance smoke test runs (#698): the
+#                                 `[project.scripts]` name (e.g. `aido`) or
+#                                 `python -m <package>`. No default; only needed
+#                                 when rendering tests/acceptance/cli/
 #   --claude-plugins-repo <o/r>   {{CLAUDE_PLUGINS_REPO}}
 #                                 (default: timo-jakob/timos-claude-code-plugins)
 #   --approver-lang <lang>        {{APPROVER_LANG}} — the resolved Approver
@@ -128,6 +133,7 @@ while (($# > 0)); do
 	--xcode-scheme) vals[XCODE_SCHEME]="$2" && shift 2 ;;
 	--codeql-languages) vals[CODEQL_LANGUAGES]="$2" && shift 2 ;;
 	--acceptance-interfaces) vals[ACCEPTANCE_INTERFACES]="$2" && shift 2 ;;
+	--cli-entry-point) vals[CLI_ENTRY_POINT]="$2" && shift 2 ;;
 	--claude-plugins-repo) vals[CLAUDE_PLUGINS_REPO]="$2" && shift 2 ;;
 	--approver-lang) vals[APPROVER_LANG]="$2" && shift 2 ;;
 	--security-contact-email) security_email="$2" && security_email_set=1 && shift 2 ;;
