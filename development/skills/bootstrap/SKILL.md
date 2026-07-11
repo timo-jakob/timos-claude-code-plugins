@@ -251,15 +251,18 @@ flow. Stop and ask for input wherever marked; do not guess.
    `.pre-commit-config.yaml` itself was absent it's a normal
    `missing_artifacts` whole-file render above and this reconcile is a no-op.)
 
-   It **also migrates a stale `coverage-floor*` pre-push hook in place (#602)**:
-   a pre-#379 repo shipped that hook with `always_run: true` and no `files:`
-   guard, so a zero-covered-language push (docs/config/workflow only) was blocked
-   demanding a vacuous coverage report. The reconciler rewrites it to the guarded
-   `files:` form (pulling the canonical value per hook id from the rendered
-   template) so the hook skips correctly — the one deliberate non-additive edit,
-   scoped to a hook that is *both* still `always_run: true` and missing `files:`.
-   This is what makes the pre-push guard (`ensure-coverage-precondition.zsh`,
-   used by `/development:open-pr`) actually take effect on an older repo.
+   It **also migrates a stale `coverage-floor*` pre-push hook in place (#713)**:
+   the canonical hook now guards run/skip *inside* `entry` on the
+   `origin/<default>...HEAD` diff (`always_run: true`, no `files:`), because a
+   `files:` filter over-fires on a brand-new branch push — git reports the remote
+   ref as all-zeros, so pre-commit diffs against the empty tree and every source
+   file counts as "added", blocking a docs/config-only push on a vacuous report.
+   The reconciler replaces any on-disk `coverage-floor*` block whose `entry` lacks
+   that diff guard (both the pre-#379 unguarded `always_run` shape and the #379
+   `files:` shape) with the rendered template's canonical block — a surgical,
+   per-hook swap that leaves sibling user hooks untouched, and a no-op once the
+   hook already carries the guard. This is what makes an older repo stop
+   over-firing on new-branch pushes without a whole-file re-render.
 
    **`--scan` proactively runs each newly-wired hook repo-wide before you
    commit (#410).** Introducing a repo-wide *enforcing* hook (yamllint,

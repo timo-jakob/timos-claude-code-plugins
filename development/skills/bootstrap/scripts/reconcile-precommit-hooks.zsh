@@ -139,30 +139,33 @@ done
 
 [[ $added -eq 0 ]] && print -- "all template hook providers already present — nothing to wire."
 
-# --- #602: migrate stale coverage-floor hooks (pre-#379 always_run) ----------
-# For every coverage-floor* hook id the rendered template carries, rewrite an
-# on-disk block that is still in the pre-#379 shape (always_run: true, no
-# files:) to the guarded form, using the template's canonical files: value.
+# --- #713: migrate stale coverage-floor hooks to the diff-guarded entry -------
+# The canonical coverage-floor* hooks decide run/skip INSIDE `entry`, on the
+# origin/<default>...HEAD diff (marker: `git diff --name-only`), with
+# `always_run: true` and no `files:`. This supersedes both earlier shapes — the
+# pre-#379 unguarded `always_run` (over-fired on every push, #602) and the #379
+# `files:` filter (over-fires on a brand-new branch push, whose empty-tree
+# comparison counts every source file as "added", #713). Migrate any on-disk
+# coverage-floor* hook whose entry LACKS the diff guard by replacing its block
+# with the template's canonical one — surgical, so sibling user hooks in the
+# file are untouched (unlike a whole-file re-render).
 local -a cf_ids
 cf_ids=("${(@f)$(grep -E '^[[:space:]]*-[[:space:]]*id:[[:space:]]*coverage-floor' "$rendered" 2>/dev/null \
   | sed -E 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*//; s/[[:space:]]*(#.*)?$//' || true)}")
 
-local cfid files_val cf_block
+local cfid tmpl_block cf_block
 for cfid in $cf_ids; do
   [[ -n "$cfid" ]] || continue
 
-  # Canonical files: value for this id, read from the rendered template block.
-  # (awk reads/prints the value as literal bytes, so a regex like `\.py$`
-  # survives intact — unlike awk -v, which would eat the backslash.)
-  files_val="$(awk -v id="$cfid" '
-    $0 ~ "^[[:space:]]*-[[:space:]]*id:[[:space:]]*" id "([[:space:]]|$)" { inb=1; next }
+  # The template's canonical block for this id (id line + body, up to the next
+  # sibling `- id:`/`- repo:`).
+  tmpl_block="$(awk -v id="$cfid" '
+    $0 ~ "^[[:space:]]*-[[:space:]]*id:[[:space:]]*" id "([[:space:]]|$)" { inb=1; print; next }
     inb && /^[[:space:]]*-[[:space:]]*id:/ { inb=0 }
     inb && /^[[:space:]]*-[[:space:]]*repo:/ { inb=0 }
-    inb && /^[[:space:]]*files:[[:space:]]*/ {
-      sub(/^[[:space:]]*files:[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit
-    }
+    inb { print }
   ' "$rendered")"
-  [[ -n "$files_val" ]] || continue    # template has no files: for this id
+  [[ -n "$tmpl_block" ]] || continue
 
   # The on-disk hook block for this id (empty if the hook isn't present).
   cf_block="$(awk -v id="$cfid" '
@@ -173,25 +176,23 @@ for cfid in $cf_ids; do
   ' "$config")"
   [[ -n "$cf_block" ]] || continue
 
-  # Stale iff it still has always_run: true AND no files: guard. `if` guards keep
-  # a non-matching grep from tripping err_exit.
-  if ! print -r -- "$cf_block" | grep -qE '^[[:space:]]*always_run:[[:space:]]*true[[:space:]]*$'; then continue; fi
-  if print -r -- "$cf_block" | grep -qE '^[[:space:]]*files:[[:space:]]*'; then continue; fi
+  # Already diff-guarded -> idempotent skip. `if` guard keeps a non-matching
+  # grep from tripping err_exit.
+  if print -r -- "$cf_block" | grep -qF 'git diff --name-only'; then continue; fi
 
-  # Rewrite in place: swap the always_run: true line (only inside this id's
-  # block) for a files: line at the same indentation. CF_VAL rides in via the
-  # environment so awk treats the regex value as literal.
-  CF_VAL="$files_val" awk -v id="$cfid" '
-    $0 ~ "^[[:space:]]*-[[:space:]]*id:[[:space:]]*" id "([[:space:]]|$)" { inb=1; print; next }
+  # Replace the on-disk block with the template's canonical block. TMPL_BLOCK
+  # rides in via the environment so awk emits it as literal bytes.
+  TMPL_BLOCK="$tmpl_block" awk -v id="$cfid" '
+    $0 ~ "^[[:space:]]*-[[:space:]]*id:[[:space:]]*" id "([[:space:]]|$)" && !done {
+      printf "%s\n", ENVIRON["TMPL_BLOCK"]; inb=1; done=1; next
+    }
     inb && /^[[:space:]]*-[[:space:]]*id:/ { inb=0 }
     inb && /^[[:space:]]*-[[:space:]]*repo:/ { inb=0 }
-    inb && /^[[:space:]]*always_run:[[:space:]]*true[[:space:]]*$/ {
-      match($0, /^[[:space:]]*/); print substr($0, 1, RLENGTH) "files: " ENVIRON["CF_VAL"]; next
-    }
+    inb { next }
     { print }
   ' "$config" > "$config.migrated"
   mv "$config.migrated" "$config"
-  print -r -- "migrated stale coverage-floor hook: ${cfid} (always_run: true → files: ${files_val}) (#602)"
+  print -r -- "migrated stale coverage-floor hook: ${cfid} → diff-guarded entry (#713)"
 done
 
 # --- #410: proactively scan repo-wide with the newly-wired hooks -------------
