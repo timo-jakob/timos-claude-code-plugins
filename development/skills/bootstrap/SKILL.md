@@ -86,6 +86,24 @@ The script reports:
 - `visibility` — `public`, `private`, or `unknown` (via `gh repo view`)
 - `languages` — array of detected languages (`swift`, `typescript`, `python`, `go`, `java`)
 - `has_dockerfile` — whether a Dockerfile exists at the repo root or in common locations
+- `interfaces` — the runtime interface(s) a deployed build is exercised through,
+  each with its detection evidence: `[{"interface": "...", "evidence": "..."}]`,
+  `interface ∈ {cli, rest, web-ui, library}` (issue #242). This is the signal that
+  lets bootstrap render **interface-appropriate acceptance tests** (#243) — `cli`
+  is exercised by running the built entry point, `rest`/`web-ui` by deploying and
+  hitting the service, and `library` renders **no** acceptance workflow. Detection
+  is **advisory** and Python-only in v1 (`interfaces` is `[]` when Python isn't
+  detected; other languages emit their own set under their plugins). Present the
+  detected set to the user and let them confirm/correct — a web framework serving
+  templates/static is classed `web-ui`, one serving neither is `rest`, and the
+  heuristic can't always tell them apart. To override detection outright, re-run
+  with `--interfaces`:
+
+  ```bash
+  <skill-base-dir>/scripts/detect-stack.sh --interfaces cli,rest
+  ```
+
+  Every named interface then carries `"user override"` as its evidence.
 - `existing_artifacts` — map of well-known config files already present, so we
   can skip or diff them
 - `github_state` — **GitHub-side state** the on-disk artifacts don't see:
