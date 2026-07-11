@@ -483,6 +483,9 @@ fi
 # build is a browser UI (web-ui); serving neither is a bare API (rest).
 # `library` is the fallback — a [project] build target with no cli/rest/web-ui.
 interfaces_json="[]"
+# Space-separated interface names (e.g. "cli web-ui"), used below to decide
+# whether the interface-gated acceptance artifacts are an expected gap (#714).
+detected_ifaces=""
 
 # emit_interfaces_json: newline-separated "interface|evidence" pairs -> JSON array.
 emit_interfaces_json() {
@@ -510,6 +513,7 @@ if [[ -n "$interfaces_override" ]]; then
 	done
 	IFS="$iface_oldifs"
 	interfaces_json="$(emit_interfaces_json "$iface_pairs")"
+	detected_ifaces="$(printf '%s' "$iface_pairs" | sed 's/|.*//' | tr '\n' ' ')"
 elif [[ "$python_in_langs" == "true" ]]; then
 	pyproject="$cwd/pyproject.toml"
 	iface_pairs=""
@@ -593,6 +597,7 @@ elif [[ "$python_in_langs" == "true" ]]; then
 	fi
 
 	interfaces_json="$(emit_interfaces_json "$iface_pairs")"
+	detected_ifaces="$(printf '%s' "$iface_pairs" | sed 's/|.*//' | tr '\n' ' ')"
 fi
 
 # --- language_meta (nested per-language detection metadata) ------------------
@@ -756,26 +761,36 @@ fi
 #                                    render together as one feature (#408), so the
 #                                    script is held out for the same reason as the
 #                                    workflow — never one without the other.
-#     - acceptance.yml +          — gated by the detected `interfaces` set (#242/
-#       tests/acceptance/cli/         #697): rendered only when a runtime interface
-#       test_smoke.py                 is detected, and their render needs values
-#                                    detect-stack doesn't supply blind — the
-#                                    interface matrix (--acceptance-interfaces ->
-#                                    {{ACCEPTANCE_INTERFACES}}) and, for the cli
-#                                    smoke test, the entry point (--cli-entry-point
-#                                    -> {{CLI_ENTRY_POINT}}, #698). A blank State-D
-#                                    gap-fill would trip render.zsh's leftover
-#                                    check; a `library`-only project renders none
-#                                    at all. Held out; rendered via the interactive
-#                                    Step 3 flow that passes the interface set.
+#   The acceptance stage (acceptance.yml + tests/acceptance/cli/test_smoke.py,
+#   #242/#697/#698) is held out CONDITIONALLY, not unconditionally (#714): unlike
+#   api-stability's language-plugin spec, its gating signal — the detected
+#   `interfaces` — IS in this script's own output, so it can legitimately flag the
+#   gap. It is an expected gap only when its interface is present:
+#     - acceptance.yml           when a NON-`library` interface is detected;
+#     - tests/acceptance/cli/…    when `cli` is detected.
+#   Otherwise (no interface / `library`-only / non-cli) both stay held out — a
+#   `library` project renders no acceptance stage at all. When surfaced, they are
+#   the one exception to "render blind": the State-D gap-fill renders them with
+#   the interface flags detection already supplies (--acceptance-interfaces from
+#   `interfaces` minus library; --cli-entry-point from [project.scripts]) — see
+#   SKILL.md §"State D" step 4 and §3g. This is what lets an already-bootstrapped
+#   repo (e.g. ai-doc-organizer) adopt the stage on re-bootstrap.
 #   These stay installable via a full re-bootstrap with the right flags; only the
 #   unconditionally-expected gaps auto-render.
 held_out=(
 	".gitignore" "LICENSE" "$excluded_bot"
 	".claude/approver-policy.md"
 	".github/workflows/api-stability.yml" ".github/scripts/check-api-stability.py"
-	".github/workflows/acceptance.yml" "tests/acceptance/cli/test_smoke.py"
 )
+# Conditionally hold out the acceptance stage unless its interface is present.
+acceptance_gappable="false"
+cli_gappable="false"
+for _iface in ${detected_ifaces}; do
+	[[ "$_iface" != "library" ]] && acceptance_gappable="true"
+	[[ "$_iface" == "cli" ]] && cli_gappable="true"
+done
+[[ "$acceptance_gappable" == "true" ]] || held_out+=(".github/workflows/acceptance.yml")
+[[ "$cli_gappable" == "true" ]] || held_out+=("tests/acceptance/cli/test_smoke.py")
 artifacts_json="{"
 missing_json="["
 first=1

@@ -212,6 +212,18 @@ flow. Stop and ask for input wherever marked; do not guess.
    `renovate.json`/`dependabot.yml`), so the list is safe to render blind. Two
    list members keep their existing special paths and are never in the list
    anyway: `LICENSE` (ask which license) and `.gitignore` (merge, don't copy).
+
+   **One exception to "render blind": the acceptance stage (#714).** When
+   `missing_artifacts` contains `.github/workflows/acceptance.yml` (and/or
+   `tests/acceptance/cli/test_smoke.py`), it is there because `detect-stack.sh`
+   found a runtime interface this repo lacks the stage for — this is how an
+   **already-bootstrapped** repo adopts the acceptance stage (§3g) on
+   re-bootstrap. Their render is NOT blind: pass the interface values
+   `detect-stack.sh`'s own output already supplies — `--acceptance-interfaces`
+   set to the `interfaces` names minus `library` (e.g. `cli, web-ui`) for the
+   workflow, and `--cli-entry-point` set to the first `[project.scripts]` name
+   (or `python -m PACKAGE`) for the smoke test. (Rendering either blind trips
+   `render.zsh`'s leftover check by design, so this never fails silently.)
    After rendering, continue to the drift check below for the files that WERE
    already present.
 
@@ -1112,9 +1124,11 @@ renders **no** acceptance workflow. Pass the detected interfaces **minus
 Detection is **advisory** — present the detected set in the Step 2 plan and let
 the user confirm/correct (a web framework serving templates is `web-ui`, one
 serving neither is `rest`; the heuristic can't always tell), then render the
-confirmed set. (Because its render needs this interface value, `acceptance.yml`
-is **held out** of `detect-stack.sh`'s `missing_artifacts` — it is not a
-render-blind State-D gap-fill candidate.)
+confirmed set. (An **already-bootstrapped** repo that predates the acceptance
+stage gets it on re-bootstrap: `detect-stack.sh` lists `acceptance.yml` in
+`missing_artifacts` when a non-`library` interface is detected (#714), and the
+State-D gap-fill renders it with the interface flags — see State D step 4. It is
+held out only when no interface warrants it.)
 
 **The contract this spine establishes** (consumed by follow-up epic #704's
 Approver-consumption child — keep it stable):
@@ -1148,8 +1162,9 @@ fails the `acceptance (cli)` check. Pass the built command via
 ```
 
 (v1's cli harness is Python — interface detection is Python-only, #242. Like
-`acceptance.yml`, the smoke test is **held out** of `missing_artifacts`: its
-render needs the entry point, so it is not a render-blind gap-fill candidate.)
+`acceptance.yml`, the smoke test is surfaced in `missing_artifacts` when `cli` is
+detected and it's absent (#714) — so an existing repo adopts it on re-bootstrap —
+and held out otherwise; State D step 4 renders it with `--cli-entry-point`.)
 Projects grow real acceptance cases (fixture inputs → expected output + exit
 code) into `tests/acceptance/cli/` alongside the seed. rest / web-ui harnesses
 land with epic #704. See `docs/ACCEPTANCE-CLI-VALIDATION.md` for end-to-end
