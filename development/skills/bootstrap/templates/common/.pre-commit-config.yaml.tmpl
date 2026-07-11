@@ -108,7 +108,11 @@ repos:
       - id: coverage-floor
         name: Coverage floor (90% on new code) — requires recent pytest --cov-report=xml
         entry: >-
-          bash -c 'top="$(git rev-parse --show-toplevel)";
+          bash -c 'base=origin/{{DEFAULT_BRANCH}};
+          if git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 &&
+          [ -z "$(git diff --name-only --diff-filter=d "$base...HEAD" -- "*.py")" ];
+          then exit 0; fi;
+          top="$(git rev-parse --show-toplevel)";
           src="$(sed -n "s|.*<source>\(.*\)</source>.*|\1|p" coverage.xml 2>/dev/null | head -n 1)";
           case "$src" in
           ""|.|"$top"|"$top"/*) ;;
@@ -122,12 +126,17 @@ repos:
         language: python
         additional_dependencies: ["diff-cover>=9"]
         pass_filenames: false
-        # Run ONLY when Python source is in the push. A docs/config/YAML-only
-        # push has no coverable lines, so skipping it avoids demanding a
-        # coverage.xml a non-Python change never needed (no test build just to
-        # push a comment). `files` + no `always_run` = pre-commit skips the
-        # hook when nothing matches. CI is unaffected (it always builds first).
-        files: \.py$
+        # Run ONLY when this branch's diff vs origin/{{DEFAULT_BRANCH}} touches
+        # Python — the guard at the top of `entry` no-ops (exit 0) when it
+        # doesn't, so a docs/config/YAML-only push needs no coverage.xml (no test
+        # build just to push a comment). We key on the origin/<default>...HEAD
+        # diff, NOT pre-commit's `files:` filter: on a brand-new branch push git
+        # reports the remote ref as all-zeros, so pre-commit diffs against the
+        # empty tree and EVERY .py counts as "added" — `files: \.py$` then
+        # over-fires and demands a vacuous report (#713). The entry guard uses
+        # the same diff-base as CI + ensure-coverage-precondition.zsh, so local
+        # and CI agree. `always_run` (not `files:`) so the guard always decides.
+        always_run: true
         stages: [pre-push]
   # --- PYTHON-END ------------------------------------------------------------
 
@@ -168,16 +177,21 @@ repos:
       - id: coverage-floor-swift
         name: Coverage floor (90% on new code) — requires recent swift test + llvm-cov lcov export
         entry: >-
-          diff-cover coverage.lcov
-          --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90
+          bash -c 'base=origin/{{DEFAULT_BRANCH}};
+          if git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 &&
+          [ -z "$(git diff --name-only --diff-filter=d "$base...HEAD" -- "*.swift")" ];
+          then exit 0; fi;
+          exec diff-cover coverage.lcov --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90'
         language: python
         additional_dependencies: ["diff-cover>=9"]
         pass_filenames: false
-        # Run ONLY when Swift source is in the push. A docs/config-only push
-        # has no coverable lines, so skipping it avoids demanding a
-        # coverage.lcov a non-Swift change never needed. `files` + no
-        # `always_run` = pre-commit skips the hook when nothing matches.
-        files: \.swift$
+        # Run ONLY when this branch's diff vs origin/{{DEFAULT_BRANCH}} touches
+        # Swift — the guard at the top of `entry` no-ops (exit 0) otherwise, so a
+        # docs/config-only push needs no coverage.lcov. Keyed on the
+        # origin/<default>...HEAD diff, not pre-commit's `files:` filter, which
+        # over-fires on a brand-new branch push (empty-tree comparison counts
+        # every .swift as "added", #713). `always_run` so the guard decides.
+        always_run: true
         stages: [pre-push]
   # --- SWIFT-END -------------------------------------------------------------
 
@@ -209,17 +223,24 @@ repos:
       - id: coverage-floor-java
         name: Coverage floor (90% on new code) — requires recent gradlew test jacocoTestReport
         entry: >-
-          diff-cover build/reports/jacoco/test/jacocoTestReport.xml
-          --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90
+          bash -c 'base=origin/{{DEFAULT_BRANCH}};
+          if git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 &&
+          [ -z "$(git diff --name-only --diff-filter=d "$base...HEAD" -- "*.java" "*.kt")" ];
+          then exit 0; fi;
+          exec diff-cover build/reports/jacoco/test/jacocoTestReport.xml
+          --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90'
         language: python
         additional_dependencies: ["diff-cover>=9"]
         pass_filenames: false
-        # Run ONLY when Java/Kotlin SOURCE is in the push (`.java`/`.kt`, NOT
-        # `.kts` build scripts). A docs/config/YAML-only push has no coverable
-        # lines, so skipping it avoids a full `./gradlew test jacocoTestReport`
-        # just to push a comment. `files` + no `always_run` = pre-commit skips
-        # the hook when nothing matches. CI is unaffected (it always builds).
-        files: \.(java|kt)$
+        # Run ONLY when this branch's diff vs origin/{{DEFAULT_BRANCH}} touches
+        # Java/Kotlin SOURCE (`.java`/`.kt`, NOT `.kts` build scripts — a `*.kt`
+        # pathspec ends at `.kt`, so `build.gradle.kts` never matches) — the
+        # guard at the top of `entry` no-ops (exit 0) otherwise, avoiding a full
+        # `./gradlew test jacocoTestReport` to push a comment. Keyed on the
+        # origin/<default>...HEAD diff, not pre-commit's `files:` filter, which
+        # over-fires on a brand-new branch push (empty-tree comparison counts
+        # every source file as "added", #713). `always_run` so the guard decides.
+        always_run: true
         stages: [pre-push]
   # --- JAVA-END --------------------------------------------------------------
 
