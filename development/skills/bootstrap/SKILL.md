@@ -1152,7 +1152,9 @@ fails the `acceptance (cli)` check. Pass the built command via
 render needs the entry point, so it is not a render-blind gap-fill candidate.)
 Projects grow real acceptance cases (fixture inputs → expected output + exit
 code) into `tests/acceptance/cli/` alongside the seed. rest / web-ui harnesses
-land with epic #704.
+land with epic #704. See `docs/ACCEPTANCE-CLI-VALIDATION.md` for end-to-end
+evidence on ai-doc-organizer and a fresh-reader guide to adding cli acceptance
+tests (#699).
 
 ### Idempotency rules (apply for every file write)
 
