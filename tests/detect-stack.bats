@@ -303,6 +303,84 @@ setup() {
   [ "$(jq -r '.existing_artifacts["approver-policy.md"] // "absent"' <<<"$out")" = "absent" ]
 }
 
+# --- #242 interfaces: runtime interface detection (cli/rest/web-ui/library) --
+
+@test "detect-stack: #242 [project.scripts] -> cli interface with evidence" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x.cli:main"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '[.interfaces[].interface] | index("cli")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.interfaces[] | select(.interface=="cli") | .evidence' <<<"$out")" = "[project.scripts] entry point in pyproject.toml" ]
+}
+
+@test "detect-stack: #242 typer dependency -> cli interface" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["typer>=0.9"]\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.interfaces[].interface] | index("cli")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #242 fastapi without UI markers -> rest (not web-ui)" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["fastapi>=0.110"]\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.interfaces[].interface] | index("rest")' <<<"$out")" != "null" ]
+  [ "$(jq -r '[.interfaces[].interface] | index("web-ui")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #242 flask + jinja2 -> web-ui (UI markers disambiguate from rest)" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["flask>=3", "jinja2>=3"]\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.interfaces[].interface] | index("web-ui")' <<<"$out")" != "null" ]
+  [ "$(jq -r '[.interfaces[].interface] | index("rest")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #242 flask + templates/ directory -> web-ui" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["flask>=3"]\n' > pyproject.toml
+  mkdir -p app/templates
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.interfaces[].interface] | index("web-ui")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #242 cli + web-ui coexist (the ai-doc-organizer shape)" {
+  printf '[project]\nname = "aido"\nversion = "0.1.0"\ndependencies = ["flask>=3", "jinja2>=3"]\n[project.scripts]\naido = "aido.cli:main"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.interfaces[].interface] | index("cli")' <<<"$out")" != "null" ]
+  [ "$(jq -r '[.interfaces[].interface] | index("web-ui")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.interfaces | length' <<<"$out")" = "2" ]
+}
+
+@test "detect-stack: #242 plain [project] with no interface -> library" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["requests"]\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.interfaces[0].interface' <<<"$out")" = "library" ]
+  [ "$(jq -r '.interfaces | length' <<<"$out")" = "1" ]
+}
+
+@test "detect-stack: #242 --interfaces overrides detection outright" {
+  # A CLI-looking project, overridden to rest+web-ui — the override wins and
+  # every named interface carries "user override" as its evidence.
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
+  out=$(bash "$DETECT" --interfaces "rest, web-ui" 2>/dev/null)
+  [ "$(jq -r '[.interfaces[].interface]' <<<"$out" | tr -d ' \n')" = '["rest","web-ui"]' ]
+  [ "$(jq -r '.interfaces[0].evidence' <<<"$out")" = "user override" ]
+}
+
+@test "detect-stack: #242 non-Python project -> interfaces [] (Python-only in v1)" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.interfaces' <<<"$out")" = "[]" ]
+}
+
+@test "detect-stack: #242 interfaces key is additive — prior keys unchanged, valid JSON" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\nrequires-python = ">=3.13"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # Still valid JSON and prior keys intact.
+  jq -e . <<<"$out" >/dev/null
+  [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.13" ]
+  [ "$(jq -r '.interfaces | type' <<<"$out")" = "array" ]
+}
+
 @test "verify-python-state: pyproject WITHOUT requires-python -> exit 0 (no crash)" {
   printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
   bash "$VERIFY" "$WORK" >/dev/null 2>&1

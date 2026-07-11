@@ -10,6 +10,9 @@
 #   visibility            "public" | "private" | "unknown"
 #   languages             []string  subset of [swift, typescript, python, go, java]
 #   has_dockerfile        bool
+#   interfaces            []object  runtime interface(s) a deployed build is
+#                                  exercised through, each with its detection
+#                                  evidence — see shape below (#242)
 #   language_meta         object   per-language detection metadata — see shape below
 #   is_claude_plugin      bool     repo carries a .claude-plugin marker (selects the
 #                                  Renovate dependency-bot path over Dependabot)
@@ -58,6 +61,25 @@
 #                                         dependency to declare; test presence is the
 #                                         real coverage precondition)
 #
+# interfaces shape (added 2026-07-11 per issue #242 — the runtime interface(s)
+# through which a deployed build is exercised, so bootstrap can render
+# interface-appropriate acceptance tests, #243). A *set*, not a scalar: a
+# project can be several at once (e.g. a CLI plus a web UI). Each entry pairs
+# the interface with the evidence that detected it, so the bootstrap
+# conversation can show the user WHY and let them confirm/correct:
+#   [{"interface":"cli","evidence":"[project.scripts] entry point in pyproject.toml"},
+#    {"interface":"web-ui","evidence":"flask + jinja2 in dependencies (server-rendered templates)"}]
+#   interface ∈ {cli, rest, web-ui, library}:
+#     cli      invoked from a command line (entry point / __main__ / click|typer)
+#     rest     serves an HTTP/REST API (a web framework, no server-rendered UI)
+#     web-ui   serves a browser UI (a web framework + templates/static/frontend)
+#     library  imported, no runtime interface of its own — renders no acceptance
+#              workflow (unit/integration tests are the whole story)
+# Detection is ADVISORY and PYTHON-only in v1 (#242) — other languages emit
+# their own set under their plugins; `interfaces` is [] when Python isn't
+# detected. A `--interfaces cli,rest` flag overrides detection outright (every
+# named interface then carries "user override" as its evidence).
+#
 # github_state shape (added 2026-06-04 per issue #90 — keeps detection
 # honest about GitHub-side configuration the on-disk artifacts don't see):
 #   branch_protection.state                "applied" | "missing" | "forbidden" | "unknown" | "skipped"
@@ -83,6 +105,28 @@
 set -euo pipefail
 
 cwd="$(pwd)"
+
+# --- args --------------------------------------------------------------------
+# --interfaces cli,rest,web-ui,library  overrides interface auto-detection
+# (detection is advisory; bootstrap presents the detected set and lets the user
+# confirm/correct before rendering acceptance workflows — #242). Unknown args
+# are ignored so the JSON contract stays additive for existing callers.
+interfaces_override=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--interfaces)
+		interfaces_override="${2:-}"
+		shift 2 2>/dev/null || shift
+		;;
+	--interfaces=*)
+		interfaces_override="${1#*=}"
+		shift
+		;;
+	*)
+		shift
+		;;
+	esac
+done
 
 json_bool() { [[ "$1" == "true" ]] && printf "true" || printf "false"; }
 json_str() { printf '"%s"' "${1//\"/\\\"}"; }
@@ -426,6 +470,131 @@ if [[ "$swift_in_langs" == "true" ]]; then
 	fi
 fi
 
+# --- interfaces (issue #242) -------------------------------------------------
+# The runtime interface(s) through which a deployed build is exercised — the
+# signal that lets bootstrap render interface-appropriate acceptance tests
+# (#243). A *set*: a project can be several at once (a CLI plus a web UI). v1
+# heuristics are PYTHON-only; other languages emit their own under their
+# plugins, so `interfaces` is [] when Python isn't detected. Detection is
+# ADVISORY — `--interfaces` overrides it outright.
+#
+# The Flask/Django dependency alone can't tell rest from web-ui — the UI
+# markers disambiguate: a web framework serving templates/static/a frontend
+# build is a browser UI (web-ui); serving neither is a bare API (rest).
+# `library` is the fallback — a [project] build target with no cli/rest/web-ui.
+interfaces_json="[]"
+
+# emit_interfaces_json: newline-separated "interface|evidence" pairs -> JSON array.
+emit_interfaces_json() {
+	local pairs="$1" out="[" first=1 line iface ev
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		iface="${line%%|*}"
+		ev="${line#*|}"
+		[[ $first -eq 1 ]] && first=0 || out+=","
+		out+="$(printf '{"interface":%s,"evidence":%s}' "$(json_str "$iface")" "$(json_str "$ev")")"
+	done <<<"$pairs"
+	out+="]"
+	printf '%s' "$out"
+}
+
+if [[ -n "$interfaces_override" ]]; then
+	# User-specified set wins outright; each named interface records the override.
+	iface_pairs=""
+	iface_oldifs="$IFS"
+	IFS=','
+	for iface in $interfaces_override; do
+		iface="$(printf '%s' "$iface" | tr -d '[:space:]')"
+		[[ -z "$iface" ]] && continue
+		iface_pairs+="$iface|user override"$'\n'
+	done
+	IFS="$iface_oldifs"
+	interfaces_json="$(emit_interfaces_json "$iface_pairs")"
+elif [[ "$python_in_langs" == "true" ]]; then
+	pyproject="$cwd/pyproject.toml"
+	iface_pairs=""
+
+	# Lowercased pyproject as a dependency haystack for framework/lib checks.
+	# Coarse (the whole file, not just [dependencies]) but adequate for a
+	# name-presence heuristic, and it degrades to "" when there's no pyproject.
+	dep_hay=""
+	[[ -f "$pyproject" ]] && dep_hay="$(tr '[:upper:]' '[:lower:]' <"$pyproject" 2>/dev/null || true)"
+
+	# --- cli: an installable entry point, a runnable module, or a CLI framework.
+	cli_ev=""
+	if [[ -f "$pyproject" ]] && grep -qE '^\[project\.scripts\]' "$pyproject" 2>/dev/null; then
+		cli_ev="[project.scripts] entry point in pyproject.toml"
+	elif [[ -f "$pyproject" ]] && grep -qE '^\[project\.entry-points\."?console_scripts"?\]' "$pyproject" 2>/dev/null; then
+		cli_ev="console_scripts entry point in pyproject.toml"
+	elif find "$cwd" \
+		-path '*/.git' -prune -o \
+		-path '*/.venv' -prune -o \
+		-path '*/venv' -prune -o \
+		-path '*/.tox' -prune -o \
+		-path '*/node_modules' -prune -o \
+		-path '*/.build' -prune -o \
+		-path '*/dist' -prune -o \
+		-name '__main__.py' -print 2>/dev/null | grep -q .; then
+		cli_ev="__main__.py runnable module present"
+	elif [[ -n "$dep_hay" ]] && printf '%s' "$dep_hay" | grep -qE '(^|[^a-z])(click|typer)([^a-z]|$)'; then
+		cli_ev="click/typer in dependencies"
+	fi
+	[[ -n "$cli_ev" ]] && iface_pairs+="cli|$cli_ev"$'\n'
+
+	# --- web framework? -> rest vs web-ui, disambiguated by UI markers.
+	web_fw=""
+	if [[ -n "$dep_hay" ]]; then
+		for fw in fastapi flask django starlette aiohttp sanic tornado bottle falcon quart; do
+			if printf '%s' "$dep_hay" | grep -qE "(^|[^a-z])$fw([^a-z]|\$)"; then
+				web_fw="$fw"
+				break
+			fi
+		done
+	fi
+	if [[ -n "$web_fw" ]]; then
+		ui_ev=""
+		# 1) a server-side template engine in deps
+		if printf '%s' "$dep_hay" | grep -qE '(^|[^a-z])jinja2([^a-z]|$)'; then
+			ui_ev="$web_fw + jinja2 in dependencies (server-rendered templates)"
+		fi
+		# 2) template/static assets wired into pyproject package-data
+		if [[ -z "$ui_ev" && -f "$pyproject" ]] && grep -qiE '(templates?/|static/|\.html)' "$pyproject" 2>/dev/null; then
+			ui_ev="$web_fw + templates/static in pyproject package-data"
+		fi
+		# 3) a templates/ or static/ directory in the source tree
+		if [[ -z "$ui_ev" ]]; then
+			ui_dir="$(find "$cwd" \
+				-path '*/.git' -prune -o \
+				-path '*/.venv' -prune -o \
+				-path '*/venv' -prune -o \
+				-path '*/node_modules' -prune -o \
+				-path '*/.build' -prune -o \
+				-type d \( -name templates -o -name static \) -print -quit 2>/dev/null)"
+			[[ -n "$ui_dir" ]] && ui_ev="$web_fw + ${ui_dir##*/}/ directory in source tree"
+		fi
+		# 4) a frontend build (package.json with a build script) alongside python
+		if [[ -z "$ui_ev" ]]; then
+			fe_pkg="$(find "$cwd" -maxdepth 2 -name package.json \
+				-not -path '*/node_modules/*' -not -path '*/.git/*' -print -quit 2>/dev/null)"
+			if [[ -n "$fe_pkg" ]] && grep -qE '"build"[[:space:]]*:' "$fe_pkg" 2>/dev/null; then
+				ui_ev="$web_fw + frontend build (package.json build script)"
+			fi
+		fi
+		if [[ -n "$ui_ev" ]]; then
+			iface_pairs+="web-ui|$ui_ev"$'\n'
+		else
+			iface_pairs+="rest|$web_fw in dependencies (no server-rendered UI detected)"$'\n'
+		fi
+	fi
+
+	# --- library: a [project] build target with no runtime interface of its own.
+	if [[ -z "$iface_pairs" && -f "$pyproject" ]] && grep -qE '^\[project\]' "$pyproject" 2>/dev/null; then
+		iface_pairs="library|[project] build target with no cli/rest/web-ui interface"$'\n'
+	fi
+
+	interfaces_json="$(emit_interfaces_json "$iface_pairs")"
+fi
+
 # --- language_meta (nested per-language detection metadata) ------------------
 # Replaces the former flat python_version / has_pytest_cov keys; keyed by
 # language so each carries its own metadata (issue #305). Only detected
@@ -721,6 +890,7 @@ cat <<EOF
   "visibility": $(json_str "$visibility"),
   "languages": $languages_json,
   "has_dockerfile": $(json_bool "$has_dockerfile"),
+  "interfaces": $interfaces_json,
   "language_meta": $language_meta_json,
   "is_claude_plugin": $(json_bool "$is_claude_plugin"),
   "existing_artifacts": $artifacts_json,
