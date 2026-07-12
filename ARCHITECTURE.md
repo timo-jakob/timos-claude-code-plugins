@@ -1280,6 +1280,38 @@ nothing) in two ways:
   enforcement — check 5, requiring `use_case` + `test_cases` for
   surface-touching stories — is #670, not this contract.)
 
+### Test-case issue convention (`test-case`, #671)
+
+Outside-in test cases follow a **hybrid model**: each case in a story's
+`story-spec/v1` `test_cases[]` lives *both* structured in the block (the single,
+gate-validatable source of truth) *and* as a separate linked **`test-case`
+issue**, so the case is independently visible in the backlog and its existence is
+checkable — while staying implemented in the **same PR** as its parent story, so
+tests and feature can never drift apart.
+
+- **Label.** `test-case` (green, `0e8a16`). `refine-issue` ensures it idempotently
+  on spin-out.
+- **Spin-out.** After the human approves a rewrite, `refine-issue` (Step 2.5)
+  runs `development/skills/refine-issue/scripts/test-case-spinout.zsh` to
+  reconcile the approved `test_cases[]` into `test-case` issues, then splices the
+  returned issue links back into the block before write-back. One issue per case;
+  the **body is generated from the spec entry** (`kind` · `tooling` · `shape` ·
+  a `Parent story: #<N>` reference), stamped with a managed marker and a
+  `<!-- test-case: story=<N> id=<id> -->` locator.
+- **Identity + reconcile.** The stable `test_cases[].id` is the reconcile key.
+  A re-refinement round: a new id creates an issue; an id already linked (via the
+  prior block's `test_cases[].issue`) edits that issue in place; an id **dropped**
+  since last round has its orphaned `test-case` issue **closed with an explanatory
+  comment**. The `test_cases[].issue` field carries the link (`null` before
+  spin-out, the issue number after).
+- **Lifecycle — same PR, joint closure.** Test-case issues are implemented in the
+  **same PR** as their parent story and closed together, one `Closes #N` per issue
+  (`resolve-issue`, #577/#696). There is deliberately **no `blockedBy`** between a
+  story and its test-case issues — same-PR closure makes ordering moot, so the
+  dependency graph (#583) stays uncluttered by within-PR relationships.
+- **Proportionality.** A **no-surface** story (`interface_surfaces: []`,
+  `test_cases: []`) spins out nothing.
+
 ## Persona registry contract (`personas/v1`, #665)
 
 A **persona registry** is a target repo's answer to *"who actually uses this

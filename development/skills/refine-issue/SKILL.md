@@ -94,13 +94,48 @@ approve. If they want changes, feed their reply back for another round.
 > The agent is a **pure function** — it never touches GitHub. Do not ask it to
 > post or edit; that is Step 3, and it is yours.
 
+## Step 2.5 — spin out the test cases (hybrid model, #671)
+
+Once the human approves the rewrite, and **before** you write the block back
+(Step 3), reconcile the approved `proposed_story_spec`'s `test_cases[]` into
+linked **`test-case` issues** — the hybrid model (#671): the cases live *both*
+structured in the block (the gate-validatable source of truth) *and* as separate
+backlog-visible issues, while staying implemented in the **same PR** as the story
+(#577/#696), so tests and feature never drift.
+
+A **surface-touching** story has outside-in `test_cases[]`; a **no-surface**
+story has `test_cases: []` and this step creates nothing (proportionality). Drive
+the reconcile primitive — never hand-roll the `gh issue create`/`close` calls:
+
+```bash
+# The NEW approved spec (from proposed_story_spec) and, if the issue already
+# carried a story-spec block, the OLD one (for reuse + orphan detection):
+"<skill-base-dir>/scripts/test-case-spinout.zsh" \
+  --repo "$REPO" --story <N> \
+  --spec <approved-spec.json> [--old-spec <current-block.json>]
+```
+
+It is **idempotent, keyed on `test_cases[].id`**: a new case is created, a case
+whose id already links to an issue is edited in place, and a case dropped since
+the last round has its orphaned `test-case` issue **closed with a comment**. It
+prints the **reconciled `test_cases` array** (each entry's `issue` now populated)
+to stdout — splice that back into `proposed_story_spec.test_cases` so the block
+you write in Step 3 carries the issue links. (The `id` is the stable key across
+rounds; keep it stable so reconciliation reuses rather than re-creates.)
+
+There is deliberately **no `blockedBy`** between the story and its test-case
+issues — same-PR closure (`resolve-issue`, #577/#696) makes ordering moot.
+
 ## Step 3 — write back the approved rewrite (human-authored)
 
 This edit is **human-approved and human-authored** — you run it with the
 session's own `gh` auth (the human's identity), **not** a bot token and **not** a
 PR. You are editing the issue in place.
 
-Assemble the new body from the approved prose and `proposed_story_spec`:
+Assemble the new body from the approved prose and `proposed_story_spec` — with
+its `test_cases[]` replaced by the **reconciled array from Step 2.5** (issue links
+now filled in), so the block you write records which `test-case` issue each case
+spun out to:
 
 1. **Wrap the approved prose in the provenance sentinels** and drop any prior
    story-spec block (replace, never duplicate):
@@ -196,4 +231,10 @@ or `resolve-issue` — relies on.
   staleness check will disagree with what you wrote.
 - **No `dependencies` in the block** — dependencies are GitHub-native `blockedBy`
   (#583), never in `story-spec`.
+- **Spin out test cases with the script, not by hand (#671).** Step 2.5 runs
+  `scripts/test-case-spinout.zsh` to create/reconcile/close the linked
+  `test-case` issues; splice its reconciled `test_cases[]` (with issue links)
+  into the block before write-back. Never open or close a `test-case` issue with
+  a raw `gh` call — the script keeps the reconcile idempotent and orphan-closing
+  consistent. Keep each case's `id` stable so re-runs reuse rather than duplicate.
 - **Single issue only** — epic-aware refinement is #580.
