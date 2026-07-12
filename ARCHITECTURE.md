@@ -1049,6 +1049,21 @@ jq -s 'group_by(.escalation) | map({(.[0].escalation | tostring): length}) | add
 This is the raw material for the DORA-style dashboard and for deciding future
 budgets (tokens, wall-clock) and risk-based review depth.
 
+### Refine-issue telemetry (#579)
+
+`/development:refine-issue` mirrors this for the refinement phase: every run
+appends **one JSONL record** to `.claude/telemetry/refine-issue.jsonl` (same
+git-ignored sink convention), built deterministically by
+`build-refine-telemetry-record.zsh` from the run summary. Fields: `ts`, `issue`,
+`rounds`, `objections_raised` / `objections_resolved`, `outcome`
+(`refined-ready` when the story re-gated `READY`, or `parked` on a typed parked
+exit, #578), `park_type` (the park type, or `null`), `risk_classification`,
+`wall_s`, and the reserved `tokens`. The append is **never fatal** (`|| true`),
+exactly as the review loop's is, and one record is emitted per run at whichever
+ending it reached (Step 7). Together the two sinks feed the same
+self-improvement handoff — where refinement helps (fewer review rounds later)
+and where it stalls (parks, unresolved objections).
+
 ## Review dossier + Approver re-ingest (#563)
 
 The PR is the durable audit record for why auto-merge happened, so a `CONVERGED`
