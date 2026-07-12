@@ -1276,9 +1276,20 @@ nothing) in two ways:
   change) is a `NEEDS_REFINEMENT` reason, named as such. An **absent** block is
   *not* a
   failure — most issues have never been refined, and the gate simply proposes
-  one rather than demanding it. (Full interface-aware hard-requirement
-  enforcement — check 5, requiring `use_case` + `test_cases` for
-  surface-touching stories — is #670, not this contract.)
+  one rather than demanding it.
+
+**Interface-aware check 5 (#670).** The gate also classifies the story's runtime
+`surface` (`rest` | `grpc` | `web-ui` | `cli`, the #242 taxonomy, or `none`) and,
+for **surface-touching** stories, hard-requires **check 5 — outside-in
+testability**: a concrete `use_case`, `test_cases` covering happy/corner/error in
+the surface's native tooling, and the spun-out `test-case` issues existing and
+linked (#671). A `none`-surface story skips check 5 (proportionality — the
+backlog is not mass-flipped). The verdict JSON grows two fields:
+`surface` (the classified surfaces, `[]` for none — reported at verdict level
+because it's needed even when `story_spec` is `null`) and
+`checks.outside_in_testable`. Personas stay advisory (`advisories[]`, #668),
+never a check-5 failure. The full verdict shape is the `story-readiness` agent
+contract (`development/agents/story-readiness.md`).
 
 ### Test-case issue convention (`test-case`, #671)
 
