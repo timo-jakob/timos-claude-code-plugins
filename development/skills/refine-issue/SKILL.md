@@ -11,7 +11,8 @@ description: >
   bot PR), re-gate, remove the `needs-refinement` label only if READY, and post a
   before/after comment trail. When a session can't converge, take a typed parked
   exit (needs-decision / split-recommended / deferred) that a later run resumes
-  from (#578). Single-issue only; the intelligence lives in the
+  from (#578). Pointed at an epic, it walks each needs-refinement child through
+  that single-issue flow and posts an epic-level summary (#580). The intelligence lives in the
   agent, this skill is the conductor. Composes story-readiness (#559) and
   issue-refiner (#575); consumes the story-spec/v1 contract (#574).
 disable-model-invocation: false
@@ -28,8 +29,42 @@ specified, and a durable machine-readable `story-spec/v1` block rides along.
 (`gh repo view --json nameWithOwner`); the issue must belong to it. If empty,
 print `/development:refine-issue <issue-number|url>` and stop.
 
-**Scope:** single issue only. Epic-aware refinement is a separate follow-up
-(#580) — if handed an epic (a task-list body or an `epic` label), say so and stop.
+**Epic or single issue? (#580)** First classify the target
+(`gh issue view <N> --json labels,body`): it is an **epic** when its body holds a
+task list of child issues (`- [ ] #N`) or it carries the `epic` label. An epic →
+the **Epic walk** below; anything else → the single-issue flow (Steps 0–7).
+
+## Epic walk — refine every needs-refinement child (#580)
+
+When pointed at an epic, you don't refine the epic itself — you **walk its
+`needs-refinement` children** through the single-issue flow, then report. The
+story-readiness epic pre-flight (#559) can park several children at once, and
+this is the guided pass that clears them.
+
+1. **Enumerate the refinable children** with the enumerator (it parses the epic's
+   task-list children — not every `#N` mention — and keeps the **open** ones
+   carrying `needs-refinement`, in body order):
+
+   ```bash
+   "<skill-base-dir>/scripts/list-refinement-children.zsh" --repo "$REPO" --epic <N>
+   ```
+
+   **No children returned** → tell the human the epic has no `needs-refinement`
+   children to refine, and stop.
+
+2. **Walk each child in turn** through the **single-issue flow** (Steps 0–7) —
+   reuse it as written, one child fully before the next. A child either reaches
+   `READY` (its label cleared, Step 5) or takes a **typed parked exit** (Step 2);
+   a parked child does not halt the walk — record it and continue to the next.
+
+3. **Post an epic-level summary** on the epic issue: for each child, whether it is
+   now **ready** (label cleared) or **still parked** (with the park type), plus
+   any that had no work to do. Then re-run the enumerator (or note the still-open
+   `needs-refinement` set) so the summary reflects the true post-walk state. This
+   is the roll-up a human reads to see the epic's refinement progress at a glance.
+
+The walk is **resumable**: re-running on the epic re-enumerates and continues
+from whichever children are still `needs-refinement`.
 
 ## Step 0 — fetch, and check the precondition
 
@@ -340,4 +375,7 @@ mkdir -p "$REPO_ROOT/.claude/telemetry"
   `scripts/build-parked-comment.zsh` (never hand-roll the `refine-parked` marker),
   post it, **keep** `needs-refinement`, stamp **no** `story-spec` block, and stop.
   A later run's Step 0 resumes from it via `scripts/read-parked-state.zsh`.
-- **Single issue only** — epic-aware refinement is #580.
+- **Epic → walk the children (#580)** — pointed at an epic, enumerate its
+  `needs-refinement` children with `scripts/list-refinement-children.zsh` and run
+  each through the single-issue flow, then post an epic-level summary. Never
+  refine the epic issue itself; a parked child doesn't halt the walk.
