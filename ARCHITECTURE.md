@@ -1348,11 +1348,19 @@ tests and feature can never drift apart.
   since last round has its orphaned `test-case` issue **closed with an explanatory
   comment**. The `test_cases[].issue` field carries the link (`null` before
   spin-out, the issue number after).
-- **Lifecycle — same PR, joint closure.** Test-case issues are implemented in the
-  **same PR** as their parent story and closed together, one `Closes #N` per issue
-  (`resolve-issue`, #577/#696). There is deliberately **no `blockedBy`** between a
-  story and its test-case issues — same-PR closure makes ordering moot, so the
-  dependency graph (#583) stays uncluttered by within-PR relationships.
+- **Lifecycle — same PR, joint closure (#696).** Test-case issues are implemented
+  in the **same PR** as their parent story and closed together. `resolve-issue`
+  consumes the block (#577), and — when its `test_cases[]` carry linked issues —
+  plans an acceptance test per case with
+  `scripts/plan-acceptance-tests.zsh`: each is written under
+  `tests/acceptance/<surface>/` (the #243 tree; `curl`→`rest`, `grpcurl`→`grpc`,
+  `playwright`→`web`, `cli`→`cli`), with representative data drawn from the
+  block's `use_case` + referenced persona `data_traits`. The PR body then carries
+  one `Closes #N` for the story **and** each linked test-case issue, so tests and
+  feature land and close together. A story with no linked test cases falls back to
+  a feature-only PR. There is deliberately **no `blockedBy`** between a story and
+  its test-case issues — same-PR closure makes ordering moot, so the dependency
+  graph (#583) stays uncluttered by within-PR relationships.
 - **Proportionality.** A **no-surface** story (`interface_surfaces: []`,
   `test_cases: []`) spins out nothing.
 

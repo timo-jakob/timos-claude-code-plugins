@@ -232,11 +232,36 @@ esac
   interface. They agree (the gate guaranteed it) — read the block for structure,
   the prose for nuance.
 
-> **Out of scope here — `test_cases[]` (#696).** Implementing the block's
-> `test_cases[]` as acceptance tests under `tests/acceptance/…` and co-closing
-> the linked `test-case` issues is the **same-PR test-case lifecycle**, a
-> separate child (#696, which needs #670/#671/#243). This step consumes the
-> block for `acceptance_criteria`/`scope_boundaries`/`testable_checks` only.
+**Same-PR test-case lifecycle (#696).** When the block carries **linked**
+`test_cases[]` (refinement defined them, #670, and spun them out as `test-case`
+issues, #671), implement the feature **and** its acceptance tests in this one PR,
+so tests and feature can never drift. Plan the acceptance tests from the block:
+
+```bash
+# feed the block (from read-story-spec.zsh) to the planner:
+printf '%s' "$(cat /tmp/story-spec.json)" \
+  | "<skill-base-dir>/scripts/plan-acceptance-tests.zsh" > /tmp/acc-plan.json
+case $? in
+  0) : ;;  # linked test cases — /tmp/acc-plan.json lists {issue, id, kind, tooling, dir}
+  1) : ;;  # NO linked test cases — implement ONLY the story (fallback, see below)
+  *) echo "acceptance-test planning errored"; exit 1 ;;
+esac
+```
+
+For each plan entry, **write one acceptance test** for that `test_cases[]` case
+into its `dir` (`tests/acceptance/<surface>/`, the #243 convention;
+`curl`→`rest`, `grpcurl`→`grpc`, `playwright`→`web`, `cli`→`cli`). Draw
+**representative test data** from the block's `use_case` and any referenced
+persona `data_traits` (#668) — real-looking values, never `foo`/`bar`. The story
+and its linked `test-case` issues are then **closed together** in the PR (Step 6:
+one `Closes #N` for the story and for each plan entry's `issue`), so the tests
+land with the feature. Standing up the `tests/acceptance/…` tree + its CI
+execution is #243's concern — this step only writes into it.
+
+**No linked test cases → story-only.** When the planner exits 1 (no block, or a
+block whose `test_cases[]` carry no linked issues), implement **only the story**
+and close only it — exactly as before. The lifecycle is an enhancement for
+refined, surface-touching stories, not a precondition.
 
 **Graceful fallback — no block (exit 1).** Most issues have never been refined
 and carry **no** `story-spec/v1` block; that is **not** an error. Behave exactly
@@ -386,7 +411,16 @@ then `GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge <n> --auto --squash
 --delete-branch`. The PR body follows the template (Type / Summary /
 Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
 loop ran and converged (§3.5), append the **Review dossier** via
-`build-dossier.zsh` on the kept status JSON (#563). Outcomes:
+`build-dossier.zsh` on the kept status JSON (#563).
+
+**Joint closure of the story + its test-case issues (#696).** When the same-PR
+test-case lifecycle ran (Step 2's planner exited 0), the PR body carries **one
+`Closes #N` per issue** — the story **and** every linked `test-case` issue from
+the plan (`jq -r '.[].issue' /tmp/acc-plan.json`) — so the feature and its
+acceptance tests close together and can never drift. With no linked test cases
+(planner exited 1), it's the single `Closes #<story>` as before.
+
+Outcomes:
 
 - **Approver repo (Python / Java)** → the Claude Approver auto-approves → it
   auto-merges on green CI.
