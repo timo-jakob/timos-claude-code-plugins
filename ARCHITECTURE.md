@@ -1291,6 +1291,24 @@ because it's needed even when `story_spec` is `null`) and
 never a check-5 failure. The full verdict shape is the `story-readiness` agent
 contract (`development/agents/story-readiness.md`).
 
+### How resolve-issue consumes the block (#577)
+
+`/development:resolve-issue` reads the block as its **authoritative structured
+interface** in its implement step, via the robust extractor
+`development/skills/resolve-issue/scripts/read-story-spec.zsh` (selects the fenced
+`json` object whose `.schema` is `story-spec/v1` by **content**, not position, so
+an unrelated code block in the prose can't be mistaken for it). It drives
+implementation from `acceptance_criteria` / `testable_checks` (the definition of
+done the Step-3 gate must demonstrate) and bounds the change by
+`scope_boundaries`; dependencies are **never** read from the block (native
+`blockedBy` only, #583). Consumption is safe because step 0b's gate already
+proved the block fresh and consistent with the prose. When **no** block is
+present — the common case for unrefined issues — the extractor exits non-zero and
+resolve-issue **falls back to the prose** exactly as before; a missing block is
+never an error. Implementing the block's `test_cases[]` as acceptance tests and
+co-closing linked test-case issues is a separate concern (the same-PR test-case
+lifecycle, #696), not part of block-consumption.
+
 ### Test-case issue convention (`test-case`, #671)
 
 Outside-in test cases follow a **hybrid model**: each case in a story's

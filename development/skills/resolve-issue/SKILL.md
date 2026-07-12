@@ -202,12 +202,54 @@ git switch -c "<type>/<N>-<slug>" origin/main
 
 ### 2. Implement
 
-Read the issue carefully and the files it names; read the repo's conventions
-(`CLAUDE.md`, the surrounding code) and match them — comment density, naming,
-idioms. **Also read the issue's comments** (`gh issue view <N> --comments`): on a
-resume after a review-loop escalation (#564), the human's decision lives in the
-comment thread — treat it as authoritative implementation context. Make the
-change. This step is identical across languages because you
+**First — consume the `story-spec/v1` block if the issue carries one (#577).** A
+refined issue (via `/development:refine-issue`) has a machine-readable
+`story-spec/v1` block appended to its body (a collapsed `<details>` holding a
+fenced `json` object, per the ARCHITECTURE.md *Story-spec contract*). When
+present it is your **authoritative structured interface** — and you can trust it,
+because step 0b's `story-readiness` gate already validated it against the prose
+(a stale or contradictory block is a `NEEDS_REFINEMENT` reason, so it never
+reaches here out of sync). Extract it with the robust primitive rather than
+hand-parsing markdown:
+
+```bash
+gh issue view <N> --json body -q .body \
+  | "<skill-base-dir>/scripts/read-story-spec.zsh" > /tmp/story-spec.json
+case $? in
+  0) : ;;  # block present in /tmp/story-spec.json — use it as below
+  1) : ;;  # NO block (unrefined issue) — fall back to prose, this is normal
+  *) echo "story-spec extraction errored"; exit 1 ;;
+esac
+```
+
+- **`acceptance_criteria` / `testable_checks`** are the definition of done — they
+  drive what your Step 3 validation must demonstrate.
+- **`scope_boundaries`** (`in` / `out`) bound the change: implement what's `in`,
+  and do **not** wander into what's explicitly `out`.
+- **Dependencies are never read from the block** — they live only in native
+  `blockedBy` (#583), already enforced by step 0a.
+- The prose stays human-authoritative context; the block is the precise machine
+  interface. They agree (the gate guaranteed it) — read the block for structure,
+  the prose for nuance.
+
+> **Out of scope here — `test_cases[]` (#696).** Implementing the block's
+> `test_cases[]` as acceptance tests under `tests/acceptance/…` and co-closing
+> the linked `test-case` issues is the **same-PR test-case lifecycle**, a
+> separate child (#696, which needs #670/#671/#243). This step consumes the
+> block for `acceptance_criteria`/`scope_boundaries`/`testable_checks` only.
+
+**Graceful fallback — no block (exit 1).** Most issues have never been refined
+and carry **no** `story-spec/v1` block; that is **not** an error. Behave exactly
+as before, deriving intent from the prose (and comments). Never stall on a
+missing block, and never fabricate one — block-consumption is an enhancement over
+the prose baseline, not a precondition.
+
+Then, block or not: read the issue carefully and the files it names; read the
+repo's conventions (`CLAUDE.md`, the surrounding code) and match them — comment
+density, naming, idioms. **Also read the issue's comments** (`gh issue view <N>
+--comments`): on a resume after a review-loop escalation (#564), the human's
+decision lives in the comment thread — treat it as authoritative implementation
+context. Make the change. This step is identical across languages because you
 read the repo, not a fixed recipe. If, on reading, the issue is genuinely
 **under-specified** or far larger than its description implies, **stop and say
 so** rather than guessing.
@@ -231,6 +273,12 @@ after the bot PR is opened and CI minutes are already spent, exactly the outcome
 the local gate exists to prevent (#604). Run the whole suite, or at minimum the
 changed behaviour's **full blast radius** across unit and integration; when in
 doubt, run everything.
+
+**When a `story-spec/v1` block was consumed (#577), its `acceptance_criteria` and
+`testable_checks` are the concrete bar this gate must clear** — treat them as the
+definition of done the tests have to demonstrate, not just the repo's suite
+passing. If the change can't be shown to satisfy them, it isn't done. (With no
+block, the prose acceptance criteria play the same role, as before.)
 
 If it's red, fix it; if you can't, **abandon the PR** and report — a child issue
 is never merged or checked off on a red gate. Keep the test evidence for the PR
