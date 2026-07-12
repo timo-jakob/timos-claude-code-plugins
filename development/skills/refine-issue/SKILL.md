@@ -149,7 +149,8 @@ Step 5/6 path**:
 - the comment it posts carries the machine-findable `<!-- refine-parked: <TYPE>
   -->` marker + hidden resume state, which Step 0 of the next run reads back.
 
-Then **stop** and tell the human the session is parked and how to resume
+Then **emit telemetry** (Step 7, `outcome: "parked"` with the `park_type`) and
+**stop** — tell the human the session is parked and how to resume
 (`/development:refine-issue <N>`). Do not run Steps 3–6 on a parked exit.
 
 > **Missing-persona routing (#668).** When the refiner flags that the story needs
@@ -285,6 +286,34 @@ self-contained record: the objections you started from, a short before/after of
 the prose (or a note that the full diff is in the edit history), the re-gate
 verdict, and the resulting label state. This is the audit trail a later reader —
 or `resolve-issue` — relies on.
+
+## Step 7 — emit telemetry (both endings, #579)
+
+Every refine-issue run — whether it reached `refined-ready` (Steps 3–6) **or**
+took a typed parked exit (Step 2) — appends **one** JSONL record so the plugin
+self-improvement handoff can learn where refinement helps and where it stalls.
+Mirror the review-loop telemetry (#566): same sink convention, and **never let a
+telemetry failure break the run** (`|| true`).
+
+Build the record from the run's summary and append it to the git-ignored sink:
+
+```bash
+# /tmp/refine-state.json — this run's summary:
+#   {rounds, objections_raised, objections_resolved,
+#    outcome: "refined-ready"|"parked", park_type|null, risk_classification}
+mkdir -p "$REPO_ROOT/.claude/telemetry"
+"<skill-base-dir>/scripts/build-refine-telemetry-record.zsh" \
+  --state /tmp/refine-state.json --issue <N> --wall-s <seconds> \
+  >> "$REPO_ROOT/.claude/telemetry/refine-issue.jsonl" || true
+```
+
+- `outcome` is `refined-ready` when Step 5 re-gated `READY` and the label was
+  cleared; `parked` when Step 2 took a typed parked exit (carry the `park_type`).
+- `objections_raised` / `objections_resolved` come from the Step 2 loop's
+  `resolved_objections` tally; `rounds` is the loop's round count.
+- Emit **exactly one** record per run, at whichever ending the run reached. On a
+  parked exit, emit it as part of stopping (after Step 2 posts the parked
+  comment).
 
 ## Guardrails
 
