@@ -9,7 +9,9 @@ description: >
   human until they approve a rewrite. Then you write back the human-approved prose
   plus a provenance-stamped `story-spec` block (a human-authored issue edit, NOT a
   bot PR), re-gate, remove the `needs-refinement` label only if READY, and post a
-  before/after comment trail. Single-issue only; the intelligence lives in the
+  before/after comment trail. When a session can't converge, take a typed parked
+  exit (needs-decision / split-recommended / deferred) that a later run resumes
+  from (#578). Single-issue only; the intelligence lives in the
   agent, this skill is the conductor. Composes story-readiness (#559) and
   issue-refiner (#575); consumes the story-spec/v1 contract (#574).
 disable-model-invocation: false
@@ -43,6 +45,26 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   choose that deliberately. If they decline, stop.
 - Read the issue's **prior gate comment(s)** in the thread — the refinement
   questions the gate already posted are the objections you start from.
+- **Resume a parked session if one exists (#578).** A prior run may have taken a
+  **typed parked exit** (Step 2 below) rather than converging. Check the comments
+  for its machine-findable resume state and, if present, carry it into this
+  session so you continue instead of restarting:
+
+  ```bash
+  gh issue view <N> --json comments -q '.comments[].body' \
+    | "<skill-base-dir>/scripts/read-parked-state.zsh" > /tmp/parked.json
+  case $? in
+    0) : ;;  # parked previously — /tmp/parked.json has {type, open_questions, conversation, …}
+    1) : ;;  # never parked — a fresh session, nothing to resume
+    *) echo "parked-state read errored"; exit 1 ;;
+  esac
+  ```
+
+  When a state is present, seed the Step 2 loop with it: its `conversation`
+  becomes the refiner's initial `conversation`, and its `open_questions` (plus
+  the park `type` and any `decision`/`owner`/`candidate_children`) are context
+  the human is resuming from. Tell the human what the prior run parked on before
+  continuing the loop.
 
 ## Step 1 — diagnose (fresh objections)
 
@@ -82,6 +104,53 @@ agent reports every objection `resolved: true` AND `questions == []`** — its
 present the **final `proposed_prose` + `proposed_story_spec`** and get the
 human's **explicit approval of the exact rewrite**. Nothing is written until they
 approve. If they want changes, feed their reply back for another round.
+
+### Step 2 — the typed parked exit (#578)
+
+Not every session reaches `READY` in one sitting. When the human decides it
+**can't converge now**, take a **typed parked exit** — an early exit from this
+loop (not the Step 5 post-re-gate path) that captures the state so a later run
+resumes (Step 0) instead of losing the conversation. Mirrors resolve-issue's
+typed escalation (#564), for the human-present refinement loop. Three types:
+
+- **`needs-decision`** — an absent stakeholder / upstream decision blocks a
+  testable spec. The state names the `decision` and its `owner`.
+- **`split-recommended`** — the story is really an epic; it can't be one bounded
+  spec. The state lists the `candidate_children`.
+- **`deferred`** — the human pauses without converging. The `conversation`
+  so far is preserved.
+
+Build the parked comment with the script (never hand-roll the marker) and post
+it as the human, exactly like every other refine-issue side effect. The state
+object carries the type, the still-**`open_questions`**, the `conversation`, and
+the type-specific fields:
+
+```bash
+# /tmp/parked-state.json — the structured state (type + open_questions +
+# conversation + type-specific decision/owner or candidate_children)
+# Guard the post on the build succeeding — a non-zero build (validation failure)
+# must NOT post a blank/markerless comment, which would silently lose the resume.
+if "<skill-base-dir>/scripts/build-parked-comment.zsh" \
+     --issue <N> --state /tmp/parked-state.json > /tmp/parked-comment.md; then
+  gh issue comment <N> --body-file /tmp/parked-comment.md
+else
+  echo "parked-comment build failed (see stderr) — not posting; fix the state and retry"
+  exit 1
+fi
+```
+
+A parked exit is deliberately **distinct from the Step 3 write-back and the
+Step 5/6 path**:
+
+- it **skips Step 3 entirely** — **no `story-spec` block is stamped** (the prose
+  isn't finalized, so provenance never records an unfinished spec);
+- it **keeps the `needs-refinement` label** (the story still isn't ready) — do
+  **not** remove it;
+- the comment it posts carries the machine-findable `<!-- refine-parked: <TYPE>
+  -->` marker + hidden resume state, which Step 0 of the next run reads back.
+
+Then **stop** and tell the human the session is parked and how to resume
+(`/development:refine-issue <N>`). Do not run Steps 3–6 on a parked exit.
 
 > **Missing-persona routing (#668).** When the refiner flags that the story needs
 > a persona the target repo's `personas/v1` registry lacks or fits poorly
@@ -237,4 +306,9 @@ or `resolve-issue` — relies on.
   into the block before write-back. Never open or close a `test-case` issue with
   a raw `gh` call — the script keeps the reconcile idempotent and orphan-closing
   consistent. Keep each case's `id` stable so re-runs reuse rather than duplicate.
+- **A parked exit skips write-back and keeps the label (#578).** When a session
+  can't converge, take the typed parked exit (Step 2): build the comment with
+  `scripts/build-parked-comment.zsh` (never hand-roll the `refine-parked` marker),
+  post it, **keep** `needs-refinement`, stamp **no** `story-spec` block, and stop.
+  A later run's Step 0 resumes from it via `scripts/read-parked-state.zsh`.
 - **Single issue only** — epic-aware refinement is #580.
