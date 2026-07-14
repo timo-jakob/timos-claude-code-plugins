@@ -5,15 +5,15 @@ review branch protection requires — from Claude rather than (or in addition to
 a human. For the design and *why*, see
 [The Claude Approver — design summary](../explanation/claude-approver.md). The
 operator-facing adoption guide is
-[`development/skills/bootstrap/docs/APPROVER.md`](../../development/skills/bootstrap/docs/APPROVER.md).
+[`development/skills/bootstrap/docs/APPROVER.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/APPROVER.md).
 
 ## Steps
 
 1. **Per-org (one-time)** — register both GitHub Apps (Claude Approver +
    Claude Maintenance); capture App IDs and private keys. The
-   [`development/skills/bootstrap/scripts/register-claude-apps.zsh`](../../development/skills/bootstrap/scripts/register-claude-apps.zsh)
+   [`development/skills/bootstrap/scripts/register-claude-apps.zsh`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/scripts/register-claude-apps.zsh)
    script walks the manifest flow; see
-   [`development/skills/bootstrap/docs/CLAUDE-APPS.md`](../../development/skills/bootstrap/docs/CLAUDE-APPS.md)
+   [`development/skills/bootstrap/docs/CLAUDE-APPS.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/CLAUDE-APPS.md)
    for the design and the manual fallback.
 2. **Per-repo** — `/development:bootstrap --claude-approver true`. Bootstrap
    stores credentials (via `install-claude-apps.zsh`), installs the Apps on

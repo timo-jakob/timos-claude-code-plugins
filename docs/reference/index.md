@@ -9,4 +9,4 @@ when you already know what you're looking for.
 - [Requirements](requirements.md) — platform and runtime dependencies.
 
 For the authoritative architecture & schema contract, see
-[`ARCHITECTURE.md`](../../ARCHITECTURE.md) at the repo root.
+[`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md) at the repo root.

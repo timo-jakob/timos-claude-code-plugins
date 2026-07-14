@@ -1,0 +1,5 @@
+# Docs-site toolchain — CI-side only, never bundled into any plugin.
+# Pinned per the repo's version-pinning discipline (MAINTAINING.md); Renovate
+# keeps this current. mkdocs + pymdown-extensions arrive transitively via
+# mkdocs-material.
+mkdocs-material==9.7.6

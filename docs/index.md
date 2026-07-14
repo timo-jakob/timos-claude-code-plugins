@@ -43,9 +43,11 @@ separate.
 ## 🏗 Architecture
 
 - [Architecture overview (C4 — placeholder)](architecture/index.md)
-- [`ARCHITECTURE.md`](../ARCHITECTURE.md) — the authoritative contributor/Claude-facing
-  architecture & schema contract (kept at repo root).
-- [`MAINTAINING.md`](../MAINTAINING.md) — quarterly template-refresh procedure (repo root).
+- [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
+  — the authoritative contributor/Claude-facing architecture & schema contract
+  (kept at repo root).
+- [`MAINTAINING.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/MAINTAINING.md)
+  — quarterly template-refresh procedure (repo root).
 
 ## Per-plugin & per-skill deep-dive docs
 
@@ -54,19 +56,19 @@ orphaned:
 
 | Doc | Covers |
 | --- | --- |
-| [`development-claude-plugin/docs/test-harness.md`](../development-claude-plugin/docs/test-harness.md) | The plugin end-to-end test harness |
-| [`development-java/docs/java-approver.md`](../development-java/docs/java-approver.md) | Java Approver runtime spec |
-| [`development-python/docs/api-stability.md`](../development-python/docs/api-stability.md) | Python library-exports API-stability gate |
-| [`development-python/docs/python-approver.md`](../development-python/docs/python-approver.md) | Python Approver runtime spec + findings schema |
-| [`development-swift/docs/swift-approver.md`](../development-swift/docs/swift-approver.md) | Swift Approver runtime spec |
-| [`development/skills/bootstrap/docs/APPROVER.md`](../development/skills/bootstrap/docs/APPROVER.md) | Operator-facing Approver adoption guide |
-| [`development/skills/bootstrap/docs/APPROVER-APP.md`](../development/skills/bootstrap/docs/APPROVER-APP.md) | Decentralized Approver App design |
-| [`development/skills/bootstrap/docs/CLAUDE-APPS.md`](../development/skills/bootstrap/docs/CLAUDE-APPS.md) | GitHub App registration & setup |
-| [`development/skills/bootstrap/docs/ACCEPTANCE-CLI-VALIDATION.md`](../development/skills/bootstrap/docs/ACCEPTANCE-CLI-VALIDATION.md) | Acceptance-test CLI validation |
-| [`development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md`](../development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md) | Issue-refinement end-to-end walkthrough |
-| [`development/skills/refine-issue/docs/PERSONA-CONSUMPTION-VALIDATION.md`](../development/skills/refine-issue/docs/PERSONA-CONSUMPTION-VALIDATION.md) | Persona-consumption validation |
-| [`development/skills/resolve-issue/docs/VALIDATION.md`](../development/skills/resolve-issue/docs/VALIDATION.md) | resolve-issue validation evidence |
-| [`development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md`](../development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md) | Dependency-aware resolve-issue validation |
+| [`development-claude-plugin/docs/test-harness.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-claude-plugin/docs/test-harness.md) | The plugin end-to-end test harness |
+| [`development-java/docs/java-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-java/docs/java-approver.md) | Java Approver runtime spec |
+| [`development-python/docs/api-stability.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/api-stability.md) | Python library-exports API-stability gate |
+| [`development-python/docs/python-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/python-approver.md) | Python Approver runtime spec + findings schema |
+| [`development-swift/docs/swift-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-swift/docs/swift-approver.md) | Swift Approver runtime spec |
+| [`development/skills/bootstrap/docs/APPROVER.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/APPROVER.md) | Operator-facing Approver adoption guide |
+| [`development/skills/bootstrap/docs/APPROVER-APP.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/APPROVER-APP.md) | Decentralized Approver App design |
+| [`development/skills/bootstrap/docs/CLAUDE-APPS.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/CLAUDE-APPS.md) | GitHub App registration & setup |
+| [`development/skills/bootstrap/docs/ACCEPTANCE-CLI-VALIDATION.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/ACCEPTANCE-CLI-VALIDATION.md) | Acceptance-test CLI validation |
+| [`development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md) | Issue-refinement end-to-end walkthrough |
+| [`development/skills/refine-issue/docs/PERSONA-CONSUMPTION-VALIDATION.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/refine-issue/docs/PERSONA-CONSUMPTION-VALIDATION.md) | Persona-consumption validation |
+| [`development/skills/resolve-issue/docs/VALIDATION.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/resolve-issue/docs/VALIDATION.md) | resolve-issue validation evidence |
+| [`development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md) | Dependency-aware resolve-issue validation |
 
 ---
 

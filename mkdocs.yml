@@ -1,0 +1,97 @@
+site_name: Claude Code Plugins
+site_description: >-
+  Plugins for Claude Code that bootstrap projects with a quality + security
+  toolchain and then maintain, review, and ship changes with maximum safe
+  automation.
+repo_url: https://github.com/timo-jakob/timos-claude-code-plugins
+repo_name: timos-claude-code-plugins
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+
+# The docs/superpowers tree holds internal design specs/plans, not published
+# manual pages — keep it out of the built site so --strict doesn't demand it
+# in the nav.
+exclude_docs: |
+  superpowers/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# Strict internal-link validation is the whole point of this slice: a broken
+# link between docs pages must fail the build. Links that intentionally point
+# OUT of the docs tree (repo-root ARCHITECTURE.md, per-plugin docs, scripts)
+# are written as absolute repo URLs, so they never enter this validation.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - Getting started: tutorials/getting-started.md
+  - How-to guides:
+      - how-to/index.md
+      - Install and use the plugins: how-to/install-and-use-plugins.md
+      - Adopt the Claude Approver: how-to/adopt-the-approver.md
+      - Maintain this repo: how-to/maintain-this-repo.md
+      - Contribute: how-to/contributing.md
+      - Add a language plugin: adding-a-language-plugin.md
+  - Reference:
+      - reference/index.md
+      - Plugin & command inventory: reference/plugins.md
+      - Repo scripts: reference/repo-scripts.md
+      - Requirements: reference/requirements.md
+  - Explanation:
+      - explanation/index.md
+      - Motivation & current gaps: explanation/motivation.md
+      - Why per-language plugins?: explanation/why-per-language-plugins.md
+      - The Claude Approver: explanation/claude-approver.md
+  - Architecture:
+      - architecture/index.md

@@ -99,7 +99,7 @@ What is shipped and aligned with the motivation:
   [#583](https://github.com/timo-jakob/timos-claude-code-plugins/issues/583),
   validated end-to-end on a native-relationship test bed
   ([#588](https://github.com/timo-jakob/timos-claude-code-plugins/issues/588)
-  — evidence in [`development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md`](../../development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md)).
+  — evidence in [`development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/resolve-issue/docs/DEPENDENCY-VALIDATION.md)).
 - **Issue refinement + persona registry — the definition layer.** When the gate
   says "not ready," `/development:refine-issue` is the guided path back: a human
   loops the `issue-refiner` agent
@@ -136,7 +136,7 @@ What is shipped and aligned with the motivation:
   Epics [#573](https://github.com/timo-jakob/timos-claude-code-plugins/issues/573)
   (refinement) + [#664](https://github.com/timo-jakob/timos-claude-code-plugins/issues/664)
   (personas); a **documented end-to-end run** is in
-  [`development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md`](../../development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md)
+  [`development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/refine-issue/docs/END-TO-END-WALKTHROUGH.md)
   ([#581](https://github.com/timo-jakob/timos-claude-code-plugins/issues/581) /
   [#669](https://github.com/timo-jakob/timos-claude-code-plugins/issues/669)).
 
@@ -153,7 +153,7 @@ this section when it lands.
    / PR templates, the `python-approver` fable agent, maintenance
    re-ingest of the Approver's hidden-JSON findings, local `/approve`
    dry-run, and the griffe-based API-stability gate. Adoption docs
-   shipped in [`development/skills/bootstrap/docs/APPROVER.md`](../../development/skills/bootstrap/docs/APPROVER.md)
+   shipped in [`development/skills/bootstrap/docs/APPROVER.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/APPROVER.md)
    ([#88](https://github.com/timo-jakob/timos-claude-code-plugins/issues/88)).
    **Remaining:** Phase 6 — end-to-end validation against the
    `ai-doc-organizer` test bed. The first bot PR after a fresh
@@ -180,6 +180,7 @@ this section when it lands.
    [#171](https://github.com/timo-jakob/timos-claude-code-plugins/issues/171).
 5. **Topic plugins are aspirational.** `development-container`,
    `development-kubernetes`, and `development-terraform` are described in
-   [`ARCHITECTURE.md`](../../ARCHITECTURE.md) but not implemented. Security-by-default
-   really wants the container plugin (Trivy, SBOM, distroless) shipped. Tracked:
+   [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
+   but not implemented. Security-by-default really wants the container plugin
+   (Trivy, SBOM, distroless) shipped. Tracked:
    [#172](https://github.com/timo-jakob/timos-claude-code-plugins/issues/172).
