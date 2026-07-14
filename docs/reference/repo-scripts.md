@@ -1,0 +1,9 @@
+# Repo scripts
+
+Three helper scripts live in [`scripts/`](../../scripts):
+
+| Script | What it does |
+| --- | --- |
+| [`capture-session-log.zsh`](../../scripts/capture-session-log.zsh) | Bundles a Claude Code run's main transcript **and** its subagent transcripts (plus any worktree / headless `plugin-test` sessions it spawned) into one `.tgz` for handing a real run back to the plugins. Interactive by default (no arguments — defaults to the newest project + session); supports `--list`, `--project`, `--session`, `--out`, `--dry-run`, `--main-only`, and `--related`. See "Feeding real runs back" in [How-to: maintain this repo](../how-to/maintain-this-repo.md). |
+| [`check-marketplace-sync.zsh`](../../scripts/check-marketplace-sync.zsh) | Verifies that every per-plugin version in `.claude-plugin/marketplace.json` matches the corresponding `plugin.json`. Exits `0` when in sync, `1` on any mismatch, `2` on usage errors (missing `jq` or marketplace file). Takes no arguments; run it locally before pushing. Also runs in CI via `marketplace-sync.yml` on every PR that touches a `plugin.json` or `marketplace.json` (issue #188). |
+| [`refresh-local-install.zsh`](../../scripts/refresh-local-install.zsh) | Fully refreshes your local install: updates the Claude Code CLI (Homebrew cask or `claude update`), hard-purges every on-disk cache for the `timos-claude-code-plugins` marketplace (per-plugin cache, marketplace clone, plugin data dir, shared catalog cache), then re-adds the marketplace and reinstalls every plugin it publishes — so local state matches the latest published marketplace. Only the timos marketplace is touched. Destructive: prints the plan and prompts once; `-y`/`--yes` skips the prompt, `--dry-run` prints the plan and changes nothing. Restart Claude Code afterwards to apply. Requires `jq` + the `claude` CLI. |
