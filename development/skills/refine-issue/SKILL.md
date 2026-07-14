@@ -59,7 +59,13 @@ this is the guided pass that clears them.
 
 3. **Post an epic-level summary** on the epic issue: for each child, whether it is
    now **ready** (label cleared) or **still parked** (with the park type), plus
-   any that had no work to do. Then re-run the enumerator (or note the still-open
+   any that had no work to do. **A ready child's line also notes its expected
+   docs pages (#768)** — the refiner's `expected_docs_pages` from that child's
+   final turn (e.g. `· docs: docs/how-to/use-the-rest-api.md`), omitted when the
+   field is `[]` (a no-surface child has no docs duty) — so the epic's docs
+   impact is legible at refinement time, before resolve-issue's same-PR
+   user-docs step (#767) enforces it at build time. Then re-run the enumerator
+   (or note the still-open
    `needs-refinement` set) so the summary reflects the true post-walk state. This
    is the roll-up a human reads to see the epic's refinement progress at a glance.
 
