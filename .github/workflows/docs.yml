@@ -1,0 +1,48 @@
+# Docs site build gate — epic #744 slice (b), issue #753.
+#
+# Builds the MkDocs-Material site with `--strict`, so a broken internal link
+# (or any build warning) fails the check. Path-conditional on the docs surface
+# only, per the app-vs-container check-separation policy (#573) — it never runs
+# on, or blocks, a PR that doesn't touch the docs. Publication (Pages, PDF/ePub,
+# OCI image) lands in later slices (#754/#755/#756); this slice is the gate.
+
+name: docs
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the docs toolchain
+        run: pip install -r requirements-docs.txt
+
+      - name: Build the site (strict — broken internal links fail the build)
+        run: mkdocs build --strict

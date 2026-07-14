@@ -1,7 +1,7 @@
 # The Claude Approver — design summary
 
 > **Operator-facing adoption guide:**
-> [`development/skills/bootstrap/docs/APPROVER.md`](../../development/skills/bootstrap/docs/APPROVER.md).
+> [`development/skills/bootstrap/docs/APPROVER.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/APPROVER.md).
 > Start there if you want to use the Approver on your own project. This page
 > is the design summary that explains *why* the Approver works the way it does.
 > To adopt it, see [How-to: adopt the Approver](../how-to/adopt-the-approver.md).
@@ -12,15 +12,15 @@
 > variables they need (`Phase 1`, #180), the workflow + Python policy +
 > PR description template render at bootstrap time (`Phase 2`, #181),
 > the `python-approver` fable agent the workflow invokes is in
-> [`development-python/agents/python-approver.md`](../../development-python/agents/python-approver.md)
+> [`development-python/agents/python-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/agents/python-approver.md)
 > with the operator-facing runtime spec at
-> [`development-python/docs/python-approver.md`](../../development-python/docs/python-approver.md)
+> [`development-python/docs/python-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/python-approver.md)
 > (`Phase 3`, #183), `/development:maintenance` re-ingests the
 > Approver's hidden-JSON findings on the next run (`Phase 4`, #185),
 > and `/development-python:approve` runs the same agent locally for a
 > dry-run verdict (`Phase 5`, #186). The
-> [`api-stability`](../../development-python/docs/api-stability.md) gate
-> (`griffe` + version-bump bypass, from
+> [`api-stability`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/api-stability.md)
+> gate (`griffe` + version-bump bypass, from
 > [#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174))
 > couples in via the artifact the agent reads. **Remaining:** Phase 6 is
 > live validation against the `ai-doc-organizer` test bed; the first
@@ -82,8 +82,8 @@ runs as a non-binding COMMENT.
 
 One-time per-org setup registers both Apps; per-repo bootstrap installs
 them and stores `*_APP_ID` repo variables + `*_PRIVATE_KEY` repo secrets.
-See [`CLAUDE-APPS.md`](../../development/skills/bootstrap/docs/CLAUDE-APPS.md)
-and [`APPROVER-APP.md`](../../development/skills/bootstrap/docs/APPROVER-APP.md).
+See [`CLAUDE-APPS.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/CLAUDE-APPS.md)
+and [`APPROVER-APP.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/APPROVER-APP.md).
 
 ## Author allowlist (machine-only by default)
 
@@ -164,7 +164,7 @@ structure the Approver expects:
 
 The Approver's findings include a hidden machine-readable JSON block —
 **this is shipped** (Phase 3); the schema lives in
-[`development-python/docs/python-approver.md`](../../development-python/docs/python-approver.md).
+[`development-python/docs/python-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/python-approver.md).
 **v1** *(Phase 4, pending)*: the user re-runs `/development:maintenance`,
 which reads the JSON block from the most recent Approver review,
 dispatches the relevant triage agents (ruff, semgrep, snyk, sonar, etc.),

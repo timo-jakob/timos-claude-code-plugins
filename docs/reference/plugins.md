@@ -54,7 +54,7 @@ SwiftPM dependency-major and Swift-toolchain upgrades, raises code coverage,
 migrates to the Swift 6 language mode, and reviews PRs as the Claude Approver.
 Pure function of its JSON input — dispatched by `/development:maintenance`; it
 runs no detection of its own. (semgrep is deferred for Swift — its rule
-registry is empty, per [`ARCHITECTURE.md`](../../ARCHITECTURE.md).)
+registry is empty, per [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md).)
 
 **Skills:**
 
@@ -93,8 +93,9 @@ toolchain `/development:bootstrap` installs (ruff, semgrep, Snyk Code,
 Snyk Open Source, SonarCloud), and autonomously applies dependency
 upgrades (patch + minor + major) with test-based verification.
 
-Pure function of a JSON input per [`ARCHITECTURE.md`](../../ARCHITECTURE.md) — it does not run
-detection itself; the `/development:maintenance` orchestrator constructs the
+Pure function of a JSON input per
+[`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
+— it does not run detection itself; the `/development:maintenance` orchestrator constructs the
 input and dispatches here.
 
 > ⚠️ **Cost expectations**: These agents deliberately favor autonomy
@@ -209,13 +210,15 @@ derive the SemVer bump from the Conventional Commits since the last tag
 (breaking → major, `feat` → minor, else patch) and cuts a nebula-release
 version — no manual bump, SemVer obeyed automatically. The agent contract is
 documented in
-[`development-java/docs/java-approver.md`](../../development-java/docs/java-approver.md).
+[`development-java/docs/java-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-java/docs/java-approver.md).
 
 ## development-spring
 
 A **topic plugin** for **Spring Boot 4+** projects. It **composes alongside
-`development-java`** (per [`ARCHITECTURE.md`](../../ARCHITECTURE.md)) — it holds zero Java-foundation
-logic, only dispatches when both Java and Spring markers are present, and
+`development-java`** (per
+[`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md))
+— it holds zero Java-foundation logic, only dispatches when both Java and Spring
+markers are present, and
 reuses `java-ci-fixer` for its CI cycle. Audits Spring configuration, owns
 Spring Boot version upgrades, configures container images, and gates the API
 contract.
@@ -259,7 +262,7 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
-| Test harness | `/development-claude-plugin:test [--target <path>] [--task "<prompt>"] [--expect "<text>"]` | Exercises a plugin's real behaviour end-to-end. A fresh-context judge subagent drives a *separate* headless `claude` session — local plugins loaded via `--plugin-dir`, run against an isolated clone of the target repo — and returns a structured `PASS`/`FAIL` verdict plus a transcript digest, without flooding the authoring context. See [`docs/test-harness.md`](../../development-claude-plugin/docs/test-harness.md). |
+| Test harness | `/development-claude-plugin:test [--target <path>] [--task "<prompt>"] [--expect "<text>"]` | Exercises a plugin's real behaviour end-to-end. A fresh-context judge subagent drives a *separate* headless `claude` session — local plugins loaded via `--plugin-dir`, run against an isolated clone of the target repo — and returns a structured `PASS`/`FAIL` verdict plus a transcript digest, without flooding the authoring context. See [`docs/test-harness.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-claude-plugin/docs/test-harness.md). |
 | Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher. Validates plugin conventions and returns a plan routing each finding group to a validator agent. No language coverage gate (a script-quality gate is planned, [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issues/263)). Validates version sync, SKILL.md/agent frontmatter, orphaned references, directory layout, and shell-script quality. |
 
 **Agents:**

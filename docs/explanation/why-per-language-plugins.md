@@ -26,7 +26,7 @@ fix my project" prompt cannot carry:
    not. JaCoCo reports per-class with method regions, `coverage.py`
    per-module, and Swift coverage needs symbol demangling before it means
    anything (see
-   [`demangle-swift-regions.py`](../../development/skills/maintenance/scripts/demangle-swift-regions.py)).
+   [`demangle-swift-regions.py`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/maintenance/scripts/demangle-swift-regions.py)).
    The same holds for upgrades: a JDK bump (Gradle toolchains, Temurin
    images, migration-guide-licensed code adaptations) and a Python
    interpreter bump (`requires-python`, whatsnew documents, removed stdlib
@@ -38,7 +38,7 @@ fix my project" prompt cannot carry:
    The suggestion "put the formatters, linters, and coverage tools in shared
    scripts with the language as a parameter" is not a missed alternative —
    it's the shipped design. The orchestrator's script layer
-   ([`development/skills/maintenance/scripts/`](../../development/skills/maintenance/scripts/))
+   ([`development/skills/maintenance/scripts/`](https://github.com/timo-jakob/timos-claude-code-plugins/tree/main/development/skills/maintenance/scripts))
    is mostly language-agnostic (`merge-pr-cycle.zsh`, `await-pr-checks.zsh`,
    `gather-sonarcloud.zsh`, …) with thin per-language
    `gather-<lang>-findings` / `parse-<lang>-coverage` adapters. The plugins
