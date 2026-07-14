@@ -263,6 +263,43 @@ block whose `test_cases[]` carry no linked issues), implement **only the story**
 and close only it — exactly as before. The lifecycle is an enhancement for
 refined, surface-touching stories, not a precondition.
 
+**Same-PR user-docs step (#767).** The same discipline applies to **end-user
+docs**: a story that touches a runtime surface ships its docs update in the
+same PR, so target-repo docs (seeded by bootstrap, #766) are born maintained,
+not seeded-then-abandoned. Plan the docs work from the block:
+
+```bash
+printf '%s' "$(cat /tmp/story-spec.json)" \
+  | "<skill-base-dir>/scripts/plan-user-docs.zsh" > /tmp/docs-plan.json
+case $? in
+  0) : ;;  # plan in /tmp/docs-plan.json — [] for a no-surface story
+  1) : ;;  # NO block (unrefined issue) — no docs step, prose-only as before
+  *) echo "user-docs planning errored"; exit 1 ;;
+esac
+```
+
+The docs step applies when **all three** hold — otherwise it no-ops, and you
+**report which fallback fired** (never fail the story over docs machinery):
+
+1. the planner exited 0 with a **non-empty** plan (a `[]` plan is a
+   `none`-surface story — docs, chores, refactors — with no user-docs duty);
+2. the target repo **has the docs machinery** (`mkdocs.yml` at the repo root —
+   the #766 bootstrap set). Absent → note "docs machinery not adopted yet
+   (#766)" and continue story-only;
+3. the story actually changes user-visible behaviour on that surface (the
+   gate's check-5 classification already implies it).
+
+For each plan entry, **add or update the named page**: extend the surface's
+how-to page (`docs/how-to/use-the-<surface>.md`, the #766 seed) — or add a
+sibling how-to page named for the story's job when the change deserves its own
+"How do I …?" page. Seed the content from the block's `use_case` (and
+referenced persona `data_traits`, #668) — the same representative data rule as
+the acceptance tests: real-looking values, never `foo`/`bar`. **Register any
+new page** in `mkdocs.yml`'s `nav:` and the `docs/index.md` MOC — the strict
+docs build fails on an omitted page, which is exactly the drift-proofing the
+step exists for. The docs change rides the same commit/PR as the feature
+(Step 3 gates it, Step 6 reports it).
+
 **Graceful fallback — no block (exit 1).** Most issues have never been refined
 and carry **no** `story-spec/v1` block; that is **not** an error. Behave exactly
 as before, deriving intent from the prose (and comments). Never stall on a
@@ -288,7 +325,15 @@ applies and run it:
 - tests for the stack — the **whole suite**, never a subset: `bats tests/`
   (plugin repos), `pytest` (Python — the whole suite, **not** `pytest
   tests/unit`), `./gradlew test` / `build` (Java/Gradle), etc.,
-- any repo-specific check named in `CLAUDE.md`.
+- any repo-specific check named in `CLAUDE.md`,
+- **the docs build, when the user-docs step ran (#767)**: a docs page that
+  doesn't compile is a red gate, same as a failing test. Run the target repo's
+  own pinned toolchain — `pip install -r requirements-docs.txt` into a
+  venv/scratch environment (never the system Python), then
+  `mkdocs build --strict` at the repo root — so the PR-time `docs` check
+  (#766's gate) can't fail on something the local gate passed. When the docs
+  step no-oped (no plan / no machinery), there is nothing to build and the
+  gate is unchanged.
 
 **Run the full suite — unit *and* integration — not a unit-only subset.** A green
 local gate must mean the **whole** suite is green: a subset run (e.g. `pytest
@@ -419,6 +464,14 @@ test-case lifecycle ran (Step 2's planner exited 0), the PR body carries **one
 the plan (`jq -r '.[].issue' /tmp/acc-plan.json`) — so the feature and its
 acceptance tests close together and can never drift. With no linked test cases
 (planner exited 1), it's the single `Closes #<story>` as before.
+
+**Docs pages in the PR body (#767).** When the user-docs step ran (Step 2's
+docs planner produced a non-empty plan and the machinery was present), the PR
+body's Summary **names the docs page(s) the PR added or updated** (from
+`jq -r '.[].page' /tmp/docs-plan.json`, plus any sibling page you added) — so
+the reviewer sees feature + docs as one reviewable unit. When it no-oped,
+say why in one line (`surface: none` / no story-spec block / docs machinery
+not adopted yet) — an explicit no-op beats a silent one.
 
 Outcomes:
 
