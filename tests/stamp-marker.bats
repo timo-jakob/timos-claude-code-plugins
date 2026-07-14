@@ -16,8 +16,11 @@ setup() {
   mkdir -p "$R"
 }
 
-mode_of() { # portable octal mode (BSD stat on macOS, GNU stat in CI)
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+mode_of() { # portable octal mode — GNU first: BSD-style `stat -f` on GNU
+  # partially succeeds (prints an fs-info block, exits 1), polluting the
+  # capture; GNU-style `stat -c` on BSD fails with no stdout, so this order
+  # degrades cleanly on both platforms.
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
 @test "stamp-marker: prepends the marker with template path, version, sha" {
