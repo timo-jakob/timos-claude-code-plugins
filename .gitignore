@@ -20,3 +20,8 @@ __pycache__/
 
 # MkDocs build output (docs site, #753)
 site/
+
+# pandoc docs manuals (built in CI, #754)
+/manual.pdf
+/manual.epub
+/chapters.txt
