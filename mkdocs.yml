@@ -80,6 +80,7 @@ nav:
   - How-to guides:
       - how-to/index.md
       - Authoring guide (where docs go): how-to/authoring-guide.md
+      - Write docs in a bootstrapped repo: how-to/write-docs-in-a-target-repo.md
       - Install and use the plugins: how-to/install-and-use-plugins.md
       - Adopt the Claude Approver: how-to/adopt-the-approver.md
       - Maintain this repo: how-to/maintain-this-repo.md
@@ -97,5 +98,6 @@ nav:
       - Motivation & current gaps: explanation/motivation.md
       - Why per-language plugins?: explanation/why-per-language-plugins.md
       - The Claude Approver: explanation/claude-approver.md
+      - The target-repo docs stack: explanation/target-repo-docs-stack.md
   - Architecture:
       - architecture/index.md

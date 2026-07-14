@@ -20,6 +20,8 @@ separate.
 ## 🔧 How-to guides — task-oriented
 
 - [How-to overview](how-to/index.md)
+- [Authoring guide — where docs go](how-to/authoring-guide.md)
+- [Write docs in a bootstrapped repo](how-to/write-docs-in-a-target-repo.md)
 - [Install and use the plugins](how-to/install-and-use-plugins.md)
 - [Adopt the Claude Approver on your repo](how-to/adopt-the-approver.md)
 - [Maintain this repo (quarterly template refresh)](how-to/maintain-this-repo.md)
@@ -39,6 +41,7 @@ separate.
 - [Motivation & current gaps](explanation/motivation.md)
 - [Why per-language plugins?](explanation/why-per-language-plugins.md)
 - [The Claude Approver — design summary](explanation/claude-approver.md)
+- [The target-repo docs stack](explanation/target-repo-docs-stack.md)
 
 ## 🏗 Architecture
 
@@ -74,5 +77,5 @@ orphaned:
 
 *This documentation tree is maintained under epic
 [#744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/744).
-See [How-to: contribute](how-to/contributing.md) and the (forthcoming) authoring
-guide for where new pages belong.*
+See [How-to: contribute](how-to/contributing.md) and the
+[authoring guide](how-to/authoring-guide.md) for where new pages belong.*
