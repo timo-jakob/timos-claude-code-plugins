@@ -9,3 +9,6 @@ behind the plugins. Read these to understand *why* things are the way they are.
   per-language plugin encodes that a generic prompt cannot.
 - [The Claude Approver — design summary](claude-approver.md) — the movable
   human/AI approval seam, its two-App identity model, and the gating rules.
+- [The target-repo docs stack](target-repo-docs-stack.md) — what bootstrap
+  installs into every repo, the three publication channels, and the same-PR
+  lifecycle that keeps target-repo docs from rotting.
