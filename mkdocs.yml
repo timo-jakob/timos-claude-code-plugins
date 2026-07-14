@@ -86,7 +86,9 @@ nav:
       - Add a language plugin: adding-a-language-plugin.md
   - Reference:
       - reference/index.md
-      - Plugin & command inventory: reference/plugins.md
+      - Plugin overview: reference/plugins.md
+      - Commands: reference/commands.md
+      - Agents: reference/agents.md
       - Repo scripts: reference/repo-scripts.md
       - Requirements: reference/requirements.md
   - Explanation:

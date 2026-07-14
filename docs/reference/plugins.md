@@ -1,9 +1,15 @@
-# Plugin & command inventory
+# Plugin overview
 
-The full inventory of plugins, their skills (slash commands), and their agents.
-For the *why* behind splitting these per language, see
+A narrative tour of each plugin — what it's for, its policies, and how the
+pieces compose. For the *why* behind splitting these per language, see
 [Why per-language plugins?](../explanation/why-per-language-plugins.md).
 
+> **Looking for the exhaustive, always-current listing?** The
+> [Commands](commands.md) and [Agents](agents.md) pages are **generated from
+> the skill/agent frontmatter** and diff-checked in CI, so they can never drift
+> from the code. This page is the hand-written overview; those are the
+> authoritative reference.
+>
 > **Adding support for a new language?** See
 > [Add a language plugin](../adding-a-language-plugin.md) — the consolidated
 > guide for taking the maintenance pipeline from "doesn't know about language
