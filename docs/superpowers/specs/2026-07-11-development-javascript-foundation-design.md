@@ -91,10 +91,10 @@ steps. The legacy `.eslintrc.json` template is removed.
 
 ## Implementation note
 
-If the JS bootstrap templates include workflow files
-(`templates/languages/javascript/.github/workflows/*`), the Maintenance App
-cannot push them (no `workflows` permission), so that implementation PR must take
-the user-authored path (`development:open-pr` Step 1.5).
+JS bootstrap templates that include workflow files
+(`templates/languages/javascript/.github/workflows/*`) are no obstacle to
+the bot-authored path — the Maintenance App has the `workflows` permission
+since #750.
 
 ## Open item flagged for review
 

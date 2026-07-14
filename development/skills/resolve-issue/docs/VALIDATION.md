@@ -46,10 +46,11 @@ Test bed: `timo-jakob/ai-doc-organizer` (public, Python + web, Approver-configur
    loop pushes the bot PR. A subset run can pass while the change silently breaks
    an integration test whose fixtures exercise it, surfacing only at CI / the
    Approver after the PR is opened — the [#604](https://github.com/timo-jakob/timos-claude-code-plugins/issues/604)
-   miss this runbook itself hit in Scenario A. (Workflow-only pushes hit the
-   separate Writer-App `workflows`-permission
-   limit, [#601](https://github.com/timo-jakob/timos-claude-code-plugins/issues/601)
-   — not a concern here, since the stories change code, not workflows.)
+   miss this runbook itself hit in Scenario A. (Workflow-touching pushes are
+   fine on the bot path since the Writer App gained `workflows: write`,
+   [#750](https://github.com/timo-jakob/timos-claude-code-plugins/issues/750) —
+   the old [#601](https://github.com/timo-jakob/timos-claude-code-plugins/issues/601)
+   limit only persists on an installation that hasn't re-accepted the grant.)
 
 ---
 

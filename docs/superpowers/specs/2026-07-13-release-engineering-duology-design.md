@@ -56,8 +56,8 @@ On push to `main` touching `*/.claude-plugin/plugin.json`:
    release → notes since the anchor tag.
 
 Runs on the Actions `GITHUB_TOKEN` (`contents: write`); no App token.
-**Caveat:** the PR introducing these workflow files must be **user-authored**
-(the Writer App lacks the `workflows` permission by design).
+The PR introducing these workflow files can be **bot-authored** as usual —
+the Writer App has the `workflows` permission since #750.
 
 ### Children (epic 1/2)
 
