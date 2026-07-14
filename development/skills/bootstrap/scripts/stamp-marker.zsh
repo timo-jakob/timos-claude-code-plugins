@@ -108,6 +108,11 @@ fi
 # Preserve the target's mode: mktemp creates the temp file as 600, so a bare
 # mv would clobber the stamped file's permissions — it silently stripped the
 # exec bit from scripts/docs-nav-to-chapters.zsh and broke the pdf-epub gate
-# on its first real run (#783).
-chmod "$(stat -f '%Lp' "$target_abs" 2>/dev/null || stat -c '%a' "$target_abs")" "$tmp"
+# on its first real run (#783). Probe GNU stat (-c) FIRST: it fails silently
+# on BSD/macOS (no stdout), whereas BSD-style `stat -f '%Lp'` on GNU
+# *partially succeeds* — it prints a filesystem-info block to stdout while
+# exiting 1, so an `||` chain in that order hands chmod a multi-word garbage
+# argument (the ubuntu bats legs caught exactly that).
+target_mode=$(stat -c '%a' "$target_abs" 2>/dev/null) || target_mode=$(stat -f '%Lp' "$target_abs")
+chmod "$target_mode" "$tmp"
 mv "$tmp" "$target_abs"
