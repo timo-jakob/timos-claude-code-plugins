@@ -1,0 +1,91 @@
+# Docs build gate — installed by /development:bootstrap (#766, epic #745).
+#
+# Two jobs, both part of the PR gate, path-conditional on the docs surface only
+# (the app-vs-container check-separation policy: docs builds must never block
+# app PRs that don't touch docs):
+#   - build:    MkDocs-Material site with `--strict` (a broken internal link or
+#               any build warning fails the check).
+#   - pdf-epub: pandoc builds manual.pdf + manual.epub from the SAME nav order
+#               (derived by scripts/docs-nav-to-chapters.zsh), so the manuals
+#               can't drift from the site; a pandoc failure fails the gate.
+# Publication (Pages deploy, docs-latest assets, OCI image) happens on the
+# default branch via docs-deploy.yml / docs-publish.yml; this workflow only
+# gates. Keep these checks OUT of branch protection's required contexts —
+# path-conditional checks don't run on non-docs PRs.
+
+name: docs
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - "scripts/docs-nav-to-chapters.zsh"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [{{DEFAULT_BRANCH}}]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - "scripts/docs-nav-to-chapters.zsh"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the docs toolchain
+        run: pip install -r requirements-docs.txt
+
+      - name: Build the site (strict — broken internal links fail the build)
+        run: mkdocs build --strict
+
+  pdf-epub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install zsh (for the nav->chapters converter)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+
+      - name: Derive chapter order from the mkdocs nav
+        run: ./scripts/docs-nav-to-chapters.zsh > chapters.txt
+
+      - name: Build manual.pdf + manual.epub with pandoc
+        # Pinned official pandoc/latex container (bundles xelatex). The repo's
+        # dependency bot keeps the tag current. xelatex handles the docs'
+        # Unicode; glyphs with no font (e.g. emoji) are dropped with a warning,
+        # not fatal.
+        run: |
+          set -euo pipefail
+          mapfile -t chapters < chapters.txt
+          common=(--pdf-engine=xelatex --toc --metadata title="{{PROJECT_NAME}}"
+                  --metadata author="{{PROJECT_SLUG}}")
+          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+            "${common[@]}" -o manual.pdf "${chapters[@]}"
+          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+            --toc --metadata title="{{PROJECT_NAME}}" \
+            --metadata author="{{PROJECT_SLUG}}" \
+            -o manual.epub "${chapters[@]}"
+
+      - name: Confirm both manuals were produced
+        run: test -s manual.pdf && test -s manual.epub

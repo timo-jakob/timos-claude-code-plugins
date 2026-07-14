@@ -775,6 +775,12 @@ fi
 #   `interfaces` minus library; --cli-entry-point from [project.scripts]) — see
 #   SKILL.md §"State D" step 4 and §3g. This is what lets an already-bootstrapped
 #   repo (e.g. ai-doc-organizer) adopt the stage on re-bootstrap.
+#   The per-surface docs how-to stubs (docs/how-to/use-the-{cli,rest-api,web-ui}.md,
+#   #766) are held out CONDITIONALLY on the same interface signal: each is an
+#   expected gap only when its interface is detected. Like the acceptance pair,
+#   their State-D render is NOT blind — the docs set renders with
+#   --project-name/--project-slug plus --acceptance-interfaces so mkdocs.yml's
+#   surface-conditional nav and the stub files stay in lockstep (SKILL.md §3h).
 #   These stay installable via a full re-bootstrap with the right flags; only the
 #   unconditionally-expected gaps auto-render.
 held_out=(
@@ -785,12 +791,24 @@ held_out=(
 # Conditionally hold out the acceptance stage unless its interface is present.
 acceptance_gappable="false"
 cli_gappable="false"
+rest_gappable="false"
+webui_gappable="false"
 for _iface in ${detected_ifaces}; do
 	[[ "$_iface" != "library" ]] && acceptance_gappable="true"
 	[[ "$_iface" == "cli" ]] && cli_gappable="true"
+	[[ "$_iface" == "rest" ]] && rest_gappable="true"
+	[[ "$_iface" == "web-ui" ]] && webui_gappable="true"
 done
 [[ "$acceptance_gappable" == "true" ]] || held_out+=(".github/workflows/acceptance.yml")
 [[ "$cli_gappable" == "true" ]] || held_out+=("tests/acceptance/cli/test_smoke.py")
+# The per-surface docs how-to stubs (#766) follow the same conditional pattern:
+# each is an expected gap only when its interface is detected — a CLI-only repo
+# must never be told it's missing the REST how-to (and blind-rendering it would
+# desync the stub set from mkdocs.yml's surface-conditional nav, failing the
+# strict docs build on an omitted-from-nav page).
+[[ "$cli_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-cli.md")
+[[ "$rest_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-rest-api.md")
+[[ "$webui_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-web-ui.md")
 artifacts_json="{"
 missing_json="["
 first=1

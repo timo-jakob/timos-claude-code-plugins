@@ -13,7 +13,11 @@
 #   1. Strips `# --- TAG-START ---` / `# --- TAG-END ---` conditional blocks
 #      whose tag does not apply (marker lines + content); kept blocks retain
 #      their markers. Tags normalize `-` to `_` (the pre-commit template
-#      spells CLAUDE-PLUGIN, the SKILL.md table CLAUDE_PLUGIN).
+#      spells CLAUDE-PLUGIN, the SKILL.md table CLAUDE_PLUGIN). Markdown
+#      templates use the HTML-comment form `<!-- --- TAG-START --- -->` /
+#      `<!-- --- TAG-END --- -->` instead (#766) — same stripping rules, and
+#      a kept block's markers are invisible in rendered Markdown, unlike a
+#      `#` line which Markdown would render as a heading.
 #   2. Substitutes the {{UPPERCASE}} placeholder table. A placeholder is
 #      substituted only when its flag was passed or has a spec default —
 #      an unprovided value is NOT silently blanked; it survives and trips
@@ -60,7 +64,13 @@
 #                                 comma-joined (e.g. `cli, web-ui`), minus
 #                                 `library`. No default: it survives to the
 #                                 leftover check unless passed, so acceptance.yml
-#                                 is only ever rendered with a real interface set
+#                                 is only ever rendered with a real interface set.
+#                                 ALSO drives the SURFACE_* block keep set (#766):
+#                                 SURFACE_CLI / SURFACE_REST / SURFACE_WEB_UI /
+#                                 SURFACE_GRPC blocks are kept iff their interface
+#                                 is in this csv (all stripped when it's absent),
+#                                 so the docs templates' nav/MOC entries track the
+#                                 same interface set as the acceptance stage
 #   --cli-entry-point <cmd>       {{CLI_ENTRY_POINT}} — the built cli command the
 #                                 acceptance smoke test runs (#698): the
 #                                 `[project.scripts]` name (e.g. `aido`) or
@@ -179,6 +189,25 @@ fi
 # {{PYTHON_VERSION_COMPACT}} is always PYTHON_VERSION minus the dot.
 vals[PYTHON_VERSION_COMPACT]="${vals[PYTHON_VERSION]//./}"
 
+# {{PAGES_URL}} is always derived from PROJECT_SLUG: the repo's GitHub Pages
+# site URL (mkdocs.yml.tmpl's site_url, #766). owner/repo -> owner.github.io/repo.
+if [[ -n "${vals[PROJECT_SLUG]:-}" ]]; then
+	vals[PAGES_URL]="https://${vals[PROJECT_SLUG]%%/*}.github.io/${vals[PROJECT_SLUG]#*/}/"
+fi
+
+# The SURFACE_* block keep set (#766): the interfaces csv, normalized to tag
+# form (lowercase names like `web-ui` become `WEB_UI` fragments for matching).
+typeset -a surfaces
+if [[ -n "${vals[ACCEPTANCE_INTERFACES]:-}" ]]; then
+	typeset _s
+	for _s in "${(@s:,:)vals[ACCEPTANCE_INTERFACES]}"; do
+		_s="${_s// /}"
+		[[ -n "$_s" ]] && surfaces+=("${_s//-/_}")
+	done
+fi
+
+has_surface() { ((${surfaces[(Ie)$1]})); }
+
 # The two canonical SECURITY_CONTACT_BLOCK bodies from SKILL.md Step 3
 # (4-space indented to sit at the template's markdown list level).
 security_block=""
@@ -212,6 +241,10 @@ keep_block() {
 	DOCKER) [[ "$docker" == "true" ]] ;;
 	PRIVATE) [[ "$visibility" == "private" ]] ;;
 	CLAUDE_PLUGIN) [[ "$claude_plugin" == "true" ]] ;;
+	SURFACE_CLI) has_surface cli ;;
+	SURFACE_REST) has_surface rest ;;
+	SURFACE_WEB_UI) has_surface web_ui ;;
+	SURFACE_GRPC) has_surface grpc ;;
 	*) return 2 ;; # unknown tag — the caller fails loudly
 	esac
 }
@@ -231,7 +264,8 @@ render_file() {
 	local line tag key i rc skip_tag="" lineno=0
 	for line in "${in_lines[@]}"; do
 		((lineno += 1))
-		if [[ "$line" =~ '^[[:space:]]*# --- ([A-Z_-]+)-START' ]]; then
+		if [[ "$line" =~ '^[[:space:]]*# --- ([A-Z_-]+)-START' ||
+			"$line" =~ '^[[:space:]]*<!-- --- ([A-Z_-]+)-START' ]]; then
 			tag="${match[1]}"
 			if [[ -n "$skip_tag" ]]; then
 				continue # inside a stripped block — inner markers go with it
@@ -245,7 +279,8 @@ render_file() {
 			esac
 			continue
 		fi
-		if [[ "$line" =~ '^[[:space:]]*# --- ([A-Z_-]+)-END' ]]; then
+		if [[ "$line" =~ '^[[:space:]]*# --- ([A-Z_-]+)-END' ||
+			"$line" =~ '^[[:space:]]*<!-- --- ([A-Z_-]+)-END' ]]; then
 			if [[ -n "$skip_tag" ]]; then
 				[[ "${match[1]}" == "$skip_tag" ]] && skip_tag=""
 				continue

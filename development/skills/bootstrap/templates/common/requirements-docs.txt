@@ -1,0 +1,5 @@
+# Docs-site toolchain — CI-side only, never an app dependency. Installed by
+# /development:bootstrap (#766, epic #745); the repo's dependency bot keeps the
+# pin current. mkdocs + pymdown-extensions arrive transitively via
+# mkdocs-material.
+mkdocs-material==9.7.6

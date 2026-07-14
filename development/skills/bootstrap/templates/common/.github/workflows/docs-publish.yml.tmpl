@@ -1,0 +1,96 @@
+# Publish the docs artifacts — installed by /development:bootstrap (#766,
+# epic #745).
+#
+# Runs ONLY on push to the default branch (publishing must never happen from a
+# PR). Builds the site + the PDF/ePub manuals, then:
+#   1. refreshes a rolling `docs-latest` GitHub pre-release carrying manual.pdf +
+#      manual.epub, and
+#   2. builds + pushes the OCI docs image ghcr.io/<owner>/<repo>-docs
+#      (nginx-alpine serving the built site, with the manuals under /downloads/).
+# The PR-time gate (docs.yml) and Pages deploy (docs-deploy.yml) are separate;
+# this only publishes the current docs build.
+
+name: docs publish
+
+on:
+  push:
+    branches: [{{DEFAULT_BRANCH}}]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - "scripts/docs-nav-to-chapters.zsh"
+      - "Dockerfile.docs"
+      - ".github/workflows/docs-publish.yml"
+
+permissions:
+  contents: write # refresh the docs-latest pre-release
+  packages: write # push the OCI docs image to GHCR
+
+concurrency:
+  group: docs-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the docs toolchain
+        run: |
+          pip install -r requirements-docs.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+
+      - name: Build the site
+        run: mkdocs build --strict
+
+      - name: Build the PDF + ePub manuals
+        run: |
+          set -euo pipefail
+          ./scripts/docs-nav-to-chapters.zsh > chapters.txt
+          mapfile -t chapters < chapters.txt
+          common=(--pdf-engine=xelatex --toc --metadata title="{{PROJECT_NAME}}"
+                  --metadata author="{{PROJECT_SLUG}}")
+          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+            "${common[@]}" -o manual.pdf "${chapters[@]}"
+          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+            --toc --metadata title="{{PROJECT_NAME}}" \
+            --metadata author="{{PROJECT_SLUG}}" \
+            -o manual.epub "${chapters[@]}"
+
+      - name: Stage the manuals into the site (/downloads/)
+        run: |
+          mkdir -p site/downloads
+          cp manual.pdf manual.epub site/downloads/
+
+      - name: Refresh the rolling docs-latest pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="Rolling documentation build from ${GITHUB_SHA}. Downloadable PDF/ePub of the latest docs on {{DEFAULT_BRANCH}}."
+          if gh release view docs-latest >/dev/null 2>&1; then
+            gh release upload docs-latest manual.pdf manual.epub --clobber
+            gh release edit docs-latest --notes "$notes"
+          else
+            gh release create docs-latest manual.pdf manual.epub \
+              --prerelease --title "Docs (latest)" --notes "$notes"
+          fi
+
+      - name: Log in to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build + push the OCI docs image
+        run: |
+          set -euo pipefail
+          img="ghcr.io/${{ github.repository }}-docs"
+          docker build -f Dockerfile.docs -t "${img}:latest" -t "${img}:${GITHUB_SHA}" .
+          docker push "${img}:latest"
+          docker push "${img}:${GITHUB_SHA}"

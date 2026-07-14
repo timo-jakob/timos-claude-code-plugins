@@ -415,3 +415,64 @@ EOF
   [ "$status" -eq 0 ]
   diff "$T/static.yml" "$OUT/static.yml"
 }
+
+# --- #766 docs machinery: markdown markers, SURFACE_* tags, PAGES_URL ---------
+
+@test "render: #766 markdown HTML-comment block is stripped when its tag does not apply" {
+  printf '# T\n\n<!-- --- SURFACE_REST-START --- -->\n- [REST](use-the-rest-api.md)\n<!-- --- SURFACE_REST-END --- -->\nafter\n' > "$T/m.md.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" m.md.tmpl
+  [ "$status" -eq 0 ]
+  ! grep -q "SURFACE_REST" "$OUT/m.md"
+  ! grep -q "use-the-rest-api" "$OUT/m.md"
+  grep -q "after" "$OUT/m.md"
+}
+
+@test "render: #766 markdown HTML-comment block is kept (markers retained) when its tag applies" {
+  printf '<!-- --- SURFACE_CLI-START --- -->\n- [CLI](use-the-cli.md)\n<!-- --- SURFACE_CLI-END --- -->\n' > "$T/m.md.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --acceptance-interfaces "cli" m.md.tmpl
+  [ "$status" -eq 0 ]
+  grep -q "use-the-cli.md" "$OUT/m.md"
+  grep -q "SURFACE_CLI-START" "$OUT/m.md"
+}
+
+@test "render: #766 SURFACE tags follow --acceptance-interfaces (kept + stripped in one file)" {
+  cat > "$T/nav.yml.tmpl" <<'TMPL'
+nav:
+# --- SURFACE_CLI-START ---
+  - cli: how-to/use-the-cli.md
+# --- SURFACE_CLI-END ---
+# --- SURFACE_REST-START ---
+  - rest: how-to/use-the-rest-api.md
+# --- SURFACE_REST-END ---
+# --- SURFACE_WEB_UI-START ---
+  - web: how-to/use-the-web-ui.md
+# --- SURFACE_WEB_UI-END ---
+TMPL
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --acceptance-interfaces "cli, web-ui" nav.yml.tmpl
+  [ "$status" -eq 0 ]
+  grep -q "use-the-cli.md" "$OUT/nav.yml"
+  grep -q "use-the-web-ui.md" "$OUT/nav.yml"
+  ! grep -q "use-the-rest-api.md" "$OUT/nav.yml"
+}
+
+@test "render: #766 no --acceptance-interfaces -> every SURFACE block is stripped" {
+  printf '# --- SURFACE_CLI-START ---\nx\n# --- SURFACE_CLI-END ---\n# --- SURFACE_GRPC-START ---\ny\n# --- SURFACE_GRPC-END ---\nkeep\n' > "$T/s.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" s.tmpl
+  [ "$status" -eq 0 ]
+  ! grep -qE '^(x|y)$' "$OUT/s"
+  grep -q "keep" "$OUT/s"
+}
+
+@test "render: #766 PAGES_URL derives from --project-slug" {
+  printf 'site_url: {{PAGES_URL}}\n' > "$T/mk.yml.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --project-slug "owner/some-repo" mk.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/mk.yml")" = "site_url: https://owner.github.io/some-repo/" ]
+}
+
+@test "render: #766 PAGES_URL without --project-slug survives to the leftover check" {
+  printf 'site_url: {{PAGES_URL}}\n' > "$T/mk.yml.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" mk.yml.tmpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PAGES_URL"* ]]
+}
