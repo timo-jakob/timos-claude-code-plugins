@@ -79,6 +79,7 @@ nav:
       - Getting started: tutorials/getting-started.md
   - How-to guides:
       - how-to/index.md
+      - Authoring guide (where docs go): how-to/authoring-guide.md
       - Install and use the plugins: how-to/install-and-use-plugins.md
       - Adopt the Claude Approver: how-to/adopt-the-approver.md
       - Maintain this repo: how-to/maintain-this-repo.md
