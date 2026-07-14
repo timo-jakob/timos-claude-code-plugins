@@ -26,7 +26,7 @@ is the same.
 ## Where new documentation goes
 
 Docs follow the [Diátaxis](https://diataxis.fr/) split — tutorials, how-to,
-reference, explanation. Place new pages by reader intent and link them from the
-[docs MOC](../index.md). A dedicated authoring guide (placement rules) is
-delivered by child (g) of epic
-[#744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/744).
+reference, explanation. See the **[Authoring guide](authoring-guide.md)** for the
+placement rule per bucket and the repo-specific mechanics (nav, strict link
+checking, the generated reference), then link new pages from the
+[docs MOC](../index.md).

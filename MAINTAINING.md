@@ -4,6 +4,12 @@ Two unrelated upkeep tasks live here: **per-merge plugin version bumps**
 (critical, every PR that changes plugin content) and a **quarterly template
 refresh** (slower-paced, the original purpose of this doc).
 
+> **Writing or moving documentation?** See the
+> [Authoring guide](docs/how-to/authoring-guide.md) for where each kind of page
+> belongs (the Diátaxis buckets) and the repo-specific docs mechanics — nav
+> registration, strict link checking, and the generated command/agent reference
+> (don't hand-edit `docs/reference/commands.md` or `agents.md`).
+
 ## Per-merge: bump plugin versions whenever you change a plugin
 
 **Every PR that modifies content under `<plugin>/`** (a SKILL.md, an agent
