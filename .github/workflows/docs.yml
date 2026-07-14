@@ -1,10 +1,14 @@
-# Docs site build gate — epic #744 slice (b), issue #753.
+# Docs build gate — epic #744 slices (b) #753 and (c) #754.
 #
-# Builds the MkDocs-Material site with `--strict`, so a broken internal link
-# (or any build warning) fails the check. Path-conditional on the docs surface
-# only, per the app-vs-container check-separation policy (#573) — it never runs
-# on, or blocks, a PR that doesn't touch the docs. Publication (Pages, PDF/ePub,
-# OCI image) lands in later slices (#754/#755/#756); this slice is the gate.
+# Two jobs, both part of the PR gate, path-conditional on the docs surface only
+# (app-vs-container check-separation policy, #573):
+#   - build:    MkDocs-Material site with `--strict` (a broken internal link or
+#               any build warning fails the check).
+#   - pdf-epub: pandoc builds manual.pdf + manual.epub from the SAME nav order
+#               (derived by scripts/docs-nav-to-chapters.zsh), so the manuals
+#               can't drift from the site; a pandoc failure fails the gate.
+# Publication of the built assets (Pages is #755; docs-latest pre-release + OCI
+# image is #756) lives elsewhere; this workflow only gates.
 
 name: docs
 
@@ -14,6 +18,7 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - "requirements-docs.txt"
+      - "scripts/docs-nav-to-chapters.zsh"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
@@ -21,6 +26,7 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - "requirements-docs.txt"
+      - "scripts/docs-nav-to-chapters.zsh"
       - ".github/workflows/docs.yml"
 
 permissions:
@@ -46,3 +52,36 @@ jobs:
 
       - name: Build the site (strict — broken internal links fail the build)
         run: mkdocs build --strict
+
+  pdf-epub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install zsh (for the nav->chapters converter)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+
+      - name: Derive chapter order from the mkdocs nav
+        run: ./scripts/docs-nav-to-chapters.zsh > chapters.txt
+
+      - name: Build manual.pdf + manual.epub with pandoc
+        # Pinned official pandoc/latex container (bundles xelatex). Renovate's
+        # docker manager keeps the tag current. xelatex handles the docs' Unicode;
+        # glyphs with no font (e.g. emoji) are dropped with a warning, not fatal.
+        run: |
+          set -euo pipefail
+          mapfile -t chapters < chapters.txt
+          common=(--pdf-engine=xelatex --toc --metadata title="Claude Code Plugins"
+                  --metadata author="timos-claude-code-plugins")
+          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+            "${common[@]}" -o manual.pdf "${chapters[@]}"
+          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+            --toc --metadata title="Claude Code Plugins" \
+            --metadata author="timos-claude-code-plugins" \
+            -o manual.epub "${chapters[@]}"
+
+      - name: Confirm both manuals were produced
+        run: test -s manual.pdf && test -s manual.epub
