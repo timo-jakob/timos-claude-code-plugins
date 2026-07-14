@@ -440,3 +440,57 @@ setup() {
   bash "$VERIFY" "$WORK" >/dev/null 2>&1
   [ "$?" -eq 0 ]
 }
+
+# --- #766 docs machinery: unconditional gaps + interface-conditional stubs -----
+
+@test "detect-stack: #766 repo without docs machinery -> mkdocs.yml + docs tree are missing_artifacts" {
+  # The docs set is an unconditionally-expected gap: this is how an
+  # already-bootstrapped repo adopts the end-user docs machinery (SKILL §3h).
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("mkdocs.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/index.md")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/docs.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/docs-deploy.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/docs-publish.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("Dockerfile.docs")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("requirements-docs.txt")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("scripts/docs-nav-to-chapters.zsh")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #766 cli repo -> cli docs stub is a gap, rest/web-ui stubs held out" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.scripts]\nx = "x:main"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-cli.md")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-rest-api.md")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-web-ui.md")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #766 rest-only repo -> rest docs stub is a gap, cli/web-ui stubs held out" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["fastapi>=0.110"]\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-rest-api.md")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-cli.md")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-web-ui.md")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #766 no-interface repo -> all docs surface stubs held out, docs tree still a gap" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-cli.md")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-rest-api.md")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/how-to/use-the-web-ui.md")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("mkdocs.yml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #766 present docs machinery is tracked, not re-flagged as a gap" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  printf 'site_name: x\n' > mkdocs.yml
+  mkdir -p docs
+  printf '# x\n' > docs/index.md
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts["mkdocs.yml"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.existing_artifacts["docs/index.md"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("mkdocs.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/index.md")' <<<"$out")" = "null" ]
+}

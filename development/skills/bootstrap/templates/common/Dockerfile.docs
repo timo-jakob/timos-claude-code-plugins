@@ -1,0 +1,15 @@
+# Offline / portable documentation image — installed by /development:bootstrap
+# (#766, epic #745).
+#
+# Serves the built MkDocs site over nginx. The PDF/ePub manuals are staged into
+# site/downloads/ by the docs-publish workflow before this image is built, so a
+# `docker run` of the image is a fully self-contained docs bundle (HTML + search
+# + downloadable manuals) with no external dependencies.
+#
+# Built + pushed only from the default branch by
+# .github/workflows/docs-publish.yml; the `site/` build context is produced
+# there by `mkdocs build`, never committed.
+FROM nginx:1.27-alpine
+
+# Static docs only — nginx's default server block serves /usr/share/nginx/html.
+COPY site/ /usr/share/nginx/html/

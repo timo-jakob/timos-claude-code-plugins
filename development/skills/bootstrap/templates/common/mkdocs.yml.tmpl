@@ -1,0 +1,96 @@
+# MkDocs-Material configuration — installed by /development:bootstrap (#766,
+# epic #745). The docs toolchain is CI-side only (requirements-docs.txt);
+# nothing here becomes an app dependency. The nav below is the single source
+# of structure: the HTML site, and (via scripts/docs-nav-to-chapters.zsh) the
+# pandoc PDF/ePub chapter order, are both derived from it.
+site_name: {{PROJECT_NAME}}
+site_description: >-
+  End-user documentation for {{PROJECT_NAME}}.
+site_url: {{PAGES_URL}}
+repo_url: https://github.com/{{PROJECT_SLUG}}
+repo_name: {{PROJECT_SLUG}}
+edit_uri: edit/{{DEFAULT_BRANCH}}/docs/
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# Strict internal-link validation is the point of the docs CI gate: a broken
+# link between docs pages must fail the build. Links that intentionally point
+# OUT of the docs tree (repo-root files, code) are written as absolute repo
+# URLs, so they never enter this validation.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+# Every page under docs/ must appear here (mkdocs build --strict fails on an
+# omitted file), and scripts/docs-nav-to-chapters.zsh derives the PDF/ePub
+# chapter order from this list — add new pages to the nav in the same PR.
+nav:
+  - Home: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - Getting started: tutorials/getting-started.md
+  - How-to guides:
+      - how-to/index.md
+# --- SURFACE_CLI-START ---
+      - Use the CLI: how-to/use-the-cli.md
+# --- SURFACE_CLI-END ---
+# --- SURFACE_REST-START ---
+      - Use the REST API: how-to/use-the-rest-api.md
+# --- SURFACE_REST-END ---
+# --- SURFACE_WEB_UI-START ---
+      - Use the web UI: how-to/use-the-web-ui.md
+# --- SURFACE_WEB_UI-END ---
+  - Reference:
+      - reference/index.md
+  - Explanation:
+      - explanation/index.md
+  - Architecture:
+      - architecture/index.md

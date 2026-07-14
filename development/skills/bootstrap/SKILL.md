@@ -224,6 +224,22 @@ flow. Stop and ask for input wherever marked; do not guess.
    workflow, and `--cli-entry-point` set to the first `[project.scripts]` name
    (or `python -m PACKAGE`) for the smoke test. (Rendering either blind trips
    `render.zsh`'s leftover check by design, so this never fails silently.)
+
+   **The docs machinery (#766) is the second not-blind set.** An
+   already-bootstrapped repo that predates the docs templates reports the
+   whole §3h set in `missing_artifacts` (`mkdocs.yml`, `docs/…`, the three
+   docs workflows, `Dockerfile.docs`, `requirements-docs.txt`,
+   `scripts/docs-nav-to-chapters.zsh`) — this is how existing repos adopt
+   end-user docs on re-bootstrap. Render them per §3h: pass `--project-name`
+   and `--project-slug` (both already known in State D) plus
+   `--acceptance-interfaces` from the detected `interfaces` minus `library`
+   (omit when there are none), so `mkdocs.yml`'s surface-conditional nav and
+   the per-surface how-to stubs (conditionally listed in `missing_artifacts`,
+   like the acceptance pair) land in lockstep. Skip-if-present per file keeps
+   the adoption idempotent — an immediate re-run finds no docs gaps and
+   renders nothing. Then enable the Pages source (§3h's
+   `gh api … build_type=workflow` call, also idempotent).
+
    After rendering, continue to the drift check below for the files that WERE
    already present.
 
@@ -532,6 +548,7 @@ The table below documents where each placeholder's **value** comes from:
 | --- | --- |
 | `{{PROJECT_NAME}}` | display name — repo name from `gh repo view --json name` or the directory name. Use in titles, prose ("Contributing to X", "vulnerability in X"), and Sonar's `sonar.projectName`. |
 | `{{PROJECT_SLUG}}` | `<owner>/<repo>` — full GitHub path. Use in URL contexts (`ghcr.io/<slug>`, `github.com/<slug>/security/advisories/new`, `scorecard.dev/viewer/?uri=github.com/<slug>`, cosign `--certificate-identity-regexp`). From `gh repo view --json nameWithOwner` or `<github_repo>` field of `detect-stack.sh`. |
+| `{{PAGES_URL}}` | the repo's GitHub Pages site URL — **derived automatically** from `{{PROJECT_SLUG}}` (`owner/repo` → `https://owner.github.io/repo/`), never passed as a flag. Used by `mkdocs.yml.tmpl`'s `site_url` (§3h). |
 | `{{PROJECT_KEY}}` | for Sonar — usually `<github-org>_<repo>` (SonarCloud convention) or `<repo>` (SonarQube) |
 | `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
@@ -728,6 +745,18 @@ in the same PR:
 | `DOCKER` | Dockerfile detected |
 | `PRIVATE` | visibility == private |
 | `CLAUDE_PLUGIN` | `--claude-plugin true` |
+| `SURFACE_CLI` | `cli` in `--acceptance-interfaces` |
+| `SURFACE_REST` | `rest` in `--acceptance-interfaces` |
+| `SURFACE_WEB_UI` | `web-ui` in `--acceptance-interfaces` |
+| `SURFACE_GRPC` | `grpc` in `--acceptance-interfaces` |
+
+The `SURFACE_*` tags (#766) gate the docs templates' per-interface nav/MOC
+entries (§3h); when `--acceptance-interfaces` isn't passed at all, every
+`SURFACE_*` block is stripped. **Markdown templates** spell the markers as
+HTML comments — `<!-- --- TAG-START --- -->` / `<!-- --- TAG-END --- -->` —
+because a `# --- … ---` line would render as a Markdown heading; the
+stripping rules are identical, and a kept block's HTML-comment markers are
+invisible on the rendered page.
 
 If a tag does not apply, the script deletes the START line, the END line,
 and everything between them, then collapses any run of 3+ consecutive blank
@@ -1173,6 +1202,67 @@ code) into `tests/acceptance/cli/` alongside the seed. rest / web-ui harnesses
 land with epic #704. See `docs/ACCEPTANCE-CLI-VALIDATION.md` for end-to-end
 evidence on ai-doc-organizer and a fresh-reader guide to adding cli acceptance
 tests (#699).
+
+### 3h. End-user docs machinery (every repo — #766, epic #745)
+
+Every bootstrapped repo gets the Diátaxis docs machinery the plugin repo
+proved in epic #744: a seeded `docs/` tree, `mkdocs.yml`, and three
+path-conditional workflows (strict PR gate → Pages deploy → `docs-latest`
+PDF/ePub assets + OCI `ghcr.io/<owner>/<repo>-docs` image). Docs that don't
+compile don't merge; docs that merge publish themselves.
+
+Render the whole set in one call — `{{PAGES_URL}}` derives from the slug, and
+`--acceptance-interfaces` (the same value §3g uses, omit it when no interface
+was detected) drives the `SURFACE_*` blocks in `mkdocs.yml`'s nav and the MOC
+pages:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --project-slug "<owner/repo>" \
+  --default-branch "<branch>" \
+  --acceptance-interfaces "cli, web-ui" \
+  common/mkdocs.yml.tmpl \
+  common/docs/index.md.tmpl \
+  common/docs/tutorials/index.md.tmpl \
+  common/docs/tutorials/getting-started.md.tmpl \
+  common/docs/how-to/index.md.tmpl \
+  common/docs/reference/index.md.tmpl \
+  common/docs/explanation/index.md.tmpl \
+  common/docs/architecture/index.md.tmpl \
+  common/.github/workflows/docs.yml.tmpl \
+  common/.github/workflows/docs-deploy.yml.tmpl \
+  common/.github/workflows/docs-publish.yml.tmpl \
+  common/Dockerfile.docs \
+  common/requirements-docs.txt \
+  common/scripts/docs-nav-to-chapters.zsh
+```
+
+- **Per-surface how-to stubs** — additionally render
+  `common/docs/how-to/use-the-cli.md.tmpl` / `use-the-rest-api.md.tmpl` /
+  `use-the-web-ui.md.tmpl` for **exactly** the detected interfaces (§3g's
+  confirmed set, minus `library`). The stub files and the surface-conditional
+  nav/MOC entries must agree: a stub without its nav line fails the strict
+  build as an omitted page, a nav line without its stub as a broken link —
+  render both from the same interface set and the gate proves the seed
+  coherent.
+- `chmod +x scripts/docs-nav-to-chapters.zsh` after copying (like
+  `update-claude-plugins.zsh`).
+- The docs checks are **path-conditional** — never add them to branch
+  protection's required contexts (Step 4b), or every non-docs PR wedges.
+- `architecture/` ships as a placeholder page — the C4 machinery is a separate
+  epic (#746); don't seed diagrams here.
+- **Enable the Pages source** so `docs-deploy.yml`'s first run doesn't fail
+  (idempotent — POST 409s when Pages already exists, then verify/fix the
+  build type):
+
+  ```bash
+  gh api "repos/<owner/repo>/pages" -X POST -f build_type=workflow 2>/dev/null ||
+    gh api "repos/<owner/repo>/pages" -X PUT -f build_type=workflow
+  ```
+
+  If the token lacks admin on the repo, surface it in the Step 5 checklist
+  instead (Settings → Pages → Source: GitHub Actions).
 
 ### Idempotency rules (apply for every file write)
 
@@ -1671,7 +1761,9 @@ short ("push a branch and open a PR"). Reference `SETUP.md` for full details.
 > bump** the Docker pre-flight proposed (or the freshness check couldn't
 > run), lead the Docker items with: "⚠️ Base image `<tag>` is stale — the
 > first `image` scan will likely fail on already-patched CVEs; bump the
-> `FROM` pin to clear it."
+> `FROM` pin to clear it." If the §3h **Pages-source enablement failed**
+> (token lacks repo admin), include: "Enable GitHub Pages with Source:
+> GitHub Actions (Settings → Pages) — `docs deploy` fails until you do."
 
 Example for public path:
 
