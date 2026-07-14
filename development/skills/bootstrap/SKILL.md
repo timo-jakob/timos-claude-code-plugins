@@ -1263,7 +1263,8 @@ pages:
   render both from the same interface set and the gate proves the seed
   coherent.
 - `chmod +x scripts/docs-nav-to-chapters.zsh` after copying (like
-  `update-claude-plugins.zsh`).
+  `update-claude-plugins.zsh`). Stamping preserves file modes (#783), so
+  chmod-then-stamp and stamp-then-chmod both work.
 - The docs checks are **path-conditional** — never add them to branch
   protection's required contexts (Step 4b), or every non-docs PR wedges.
 - `architecture/` ships as a placeholder page — the C4 machinery is a separate

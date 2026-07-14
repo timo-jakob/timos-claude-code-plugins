@@ -86,9 +86,28 @@ marker_line_1="# claude-bootstrap: rendered from ${template} @ v${plugin_version
 marker_line_2="# (do not edit this line; the maintenance pipeline uses it for drift detection — see #213)"
 
 tmp=$(mktemp "${TMPDIR:-/tmp}/stamp-marker.XXXXXXXX")
-{
-  print -- "$marker_line_1"
-  print -- "$marker_line_2"
-  cat "$target_abs"
-} > "$tmp"
+# A shebang must stay on line 1 or the kernel never sees it — stamping an
+# executable script above its `#!` line made bash execute a zsh script
+# (`emulate: command not found`, ai-doc-organizer#120 / #783). Insert the
+# marker AFTER a shebang, before everything else otherwise.
+first_line=$(head -1 "$target_abs")
+if [[ "$first_line" == '#!'* ]]; then
+  {
+    print -- "$first_line"
+    print -- "$marker_line_1"
+    print -- "$marker_line_2"
+    tail -n +2 "$target_abs"
+  } > "$tmp"
+else
+  {
+    print -- "$marker_line_1"
+    print -- "$marker_line_2"
+    cat "$target_abs"
+  } > "$tmp"
+fi
+# Preserve the target's mode: mktemp creates the temp file as 600, so a bare
+# mv would clobber the stamped file's permissions — it silently stripped the
+# exec bit from scripts/docs-nav-to-chapters.zsh and broke the pdf-epub gate
+# on its first real run (#783).
+chmod "$(stat -f '%Lp' "$target_abs" 2>/dev/null || stat -c '%a' "$target_abs")" "$tmp"
 mv "$tmp" "$target_abs"
