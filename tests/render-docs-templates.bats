@@ -158,12 +158,19 @@ assert_no_orphan_pages() {
   grep -A8 "id: check-yaml" "$TEMPLATES/common/.pre-commit-config.yaml.tmpl" \
     | grep -q 'exclude: \^mkdocs\\.yml\$'
   grep -A6 "ignore: |" "$TEMPLATES/common/.yamllint" | grep -qE "^[[:space:]]+mkdocs\.yml"
-  # Templates stay yamllint-WARNING-free, not merely error-free (zero-warnings
-  # policy): every inline comment — action-pin `# vN` suffixes included — gets
-  # two spaces before the `#`.
-  ! grep -nE '[^ #] # ' "$TEMPLATES/common/.github/workflows/docs.yml.tmpl" \
-      "$TEMPLATES/common/.github/workflows/docs-deploy.yml.tmpl" \
-      "$TEMPLATES/common/.github/workflows/docs-publish.yml.tmpl"
+}
+
+@test "shipped configs enforce the zero-warnings policy Renovate-compatibly (#781)" {
+  # yamllint runs --strict (warnings fail the hook) and the comments rule
+  # accepts Renovate's one-space `sha # vN` pin style as VALID — a two-space
+  # mandate would turn every Renovate pin-update PR red. Both halves are
+  # needed: strict without the rule change breaks Renovate; the rule change
+  # without strict lets new warning classes accumulate silently.
+  grep -A8 "id: yamllint" "$TEMPLATES/common/.pre-commit-config.yaml.tmpl" | grep -q -- "--strict"
+  grep -A2 "^  comments:" "$TEMPLATES/common/.yamllint" | grep -q "min-spaces-from-content: 1"
+  # This repo holds itself to the same standard.
+  grep -A12 "id: yamllint" "$REPO_ROOT/.pre-commit-config.yaml" | grep -q -- "--strict"
+  grep -A2 "^  comments:" "$REPO_ROOT/.yamllint" | grep -q "min-spaces-from-content: 1"
 }
 
 @test "docs templates: a docs/superpowers page is excluded from the build, not an orphan (#775)" {

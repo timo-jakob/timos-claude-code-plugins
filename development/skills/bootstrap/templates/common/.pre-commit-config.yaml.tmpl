@@ -33,6 +33,10 @@ repos:
     rev: v1.38.0
     hooks:
       - id: yamllint
+        # --strict: warnings fail the hook — zero-warnings policy (#781). The
+        # .yamllint comments rule accepts Renovate's one-space pin style, so
+        # strict mode stays green across dependency-bot updates.
+        args: [--strict]
 
   # --- secret scanning -------------------------------------------------------
   - repo: https://github.com/gitleaks/gitleaks

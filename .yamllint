@@ -18,6 +18,14 @@ rules:
   # 80 is too tight for workflows; 120 is the enforced limit (error).
   line-length:
     max: 120
+  # One space before an inline comment is valid (not just tolerated): Renovate
+  # rewrites action-pin comments as `sha # vN` with a single space — in this
+  # repo's *.tmpl pins and in every target repo's workflows — so requiring two
+  # would put every Renovate pin-update PR permanently in the red (#781). The
+  # zero-warnings policy is enforced by `--strict` on the yamllint hook; this
+  # rule change makes the dominant ecosystem style conform instead of warn.
+  comments:
+    min-spaces-from-content: 1
   # GitHub Actions' `on:` key is valid; don't flag it as a "truthy" value.
   truthy:
     allowed-values: ['true', 'false', 'on', 'off']

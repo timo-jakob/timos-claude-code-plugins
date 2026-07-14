@@ -18,6 +18,13 @@ rules:
       .github/workflows/*.yml
       trivy.yaml
       mkdocs.yml
+  # One space before an inline comment is valid (not just tolerated): Renovate
+  # rewrites action-pin comments as `sha # vN` with a single space, so
+  # requiring two would put every Renovate pin-update PR permanently in the
+  # red (#781). The zero-warnings policy is enforced by `--strict` on the
+  # yamllint hook; this rule makes the dominant style conform instead of warn.
+  comments:
+    min-spaces-from-content: 1
   # GitHub Actions' `on:` key is valid; don't flag it as a "truthy" value.
   truthy:
     allowed-values: ['true', 'false', 'on', 'off']

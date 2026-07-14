@@ -88,10 +88,21 @@ setup() {
 }
 
 @test "render: CODEQL_LANGUAGES is mapped from --languages (typescript -> javascript-typescript)" {
+  # Comma+space join (#781): the value sits in a YAML flow sequence, where a
+  # bare comma is a yamllint `commas` error on the rendered workflow.
   echo 'langs: [{{CODEQL_LANGUAGES}}]' > "$T/f.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "typescript python" f.tmpl
   [ "$status" -eq 0 ]
-  [ "$(cat "$OUT/f")" = "langs: [javascript-typescript,python]" ]
+  [ "$(cat "$OUT/f")" = "langs: [javascript-typescript, python]" ]
+}
+
+@test "render: #781 a stripped end-of-file block leaves no trailing blank line" {
+  # yamllint's empty-lines rule rejects a blank final line at ERROR level, so
+  # trailing blanks are dropped entirely, not collapsed to one.
+  printf 'key: value\n\n# --- DOCKER-START ---\ndocker: bits\n# --- DOCKER-END ---\n' > "$T/f.yml.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" f.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(tail -1 "$OUT/f.yml")" = "key: value" ]
 }
 
 @test "render: explicit --codeql-languages overrides the mapping" {

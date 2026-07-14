@@ -182,7 +182,11 @@ if ((languages_set)); then
 			python | go | swift | java) codeql+=("$l") ;;
 			esac
 		done
-		((${#codeql})) && vals[CODEQL_LANGUAGES]="${(j:,:)codeql}"
+		# Comma+space join: the value renders inside a YAML flow sequence
+		# (`language: [{{CODEQL_LANGUAGES}}]`), where a bare comma is a
+		# yamllint `commas` ERROR — any multi-language repo would fail its
+		# own gate (#781).
+		((${#codeql})) && vals[CODEQL_LANGUAGES]="${(j:, :)codeql}"
 	fi
 fi
 
@@ -319,7 +323,9 @@ render_file() {
 		fi
 		final+=("$line")
 	done
-	((blanks > 0)) && final+=("") # trailing blanks collapse to one
+	# Trailing blank lines are dropped entirely (not collapsed to one): a
+	# stripped end-of-file conditional block otherwise leaves a blank final
+	# line, which yamllint's empty-lines rule rejects at ERROR level (#781).
 
 	if ((${#final})); then
 		print -rl -- "${final[@]}" >"$dst"
