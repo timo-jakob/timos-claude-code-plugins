@@ -3,6 +3,7 @@ site_description: >-
   Plugins for Claude Code that bootstrap projects with a quality + security
   toolchain and then maintain, review, and ship changes with maximum safe
   automation.
+site_url: https://timo-jakob.github.io/timos-claude-code-plugins/
 repo_url: https://github.com/timo-jakob/timos-claude-code-plugins
 repo_name: timos-claude-code-plugins
 edit_uri: edit/main/docs/
