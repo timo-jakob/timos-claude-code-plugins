@@ -449,6 +449,28 @@ cmd_verify() {
       fi
     fi
 
+    # 3c. Maintenance workflows:write (#750). Lets bot-authored PRs include
+    #     .github/workflows/* changes. Without it GitHub rejects any bot push
+    #     touching a workflow file wholesale, forcing those PRs onto the
+    #     user-authored + admin-merge path. Same re-accept dance as #418: a
+    #     permission increase on an already-installed App is not applied until
+    #     the user re-accepts it per installation.
+    if [[ "$app" == claude-maintenance ]]; then
+      app_meta=$(app_probe_with_pem "$(app_id_for "$app")" "$pem" 2>/dev/null) || app_meta=""
+      wf_perm=$(print -r -- "$app_meta" | jq -r '.permissions.workflows // "none"' 2>/dev/null)
+      if [[ "$wf_perm" == "write" ]]; then
+        ok "$display: workflows:write present — bot-authored PRs may touch .github/workflows/*."
+      else
+        err "$display: workflows permission is '$wf_perm', must be 'write' (#750)."
+        err "  GitHub rejects any bot push touching .github/workflows/* wholesale,"
+        err "  so workflow-file PRs fall back to the user-authored + admin-merge path."
+        err "  Fix: App settings → Permissions → Workflows: Read and write → Save, then"
+        err "  github.com/settings/installations → $display → Configure → accept the"
+        err "  permission update (re-registering only affects brand-new installs)."
+        (( problems++ )) || true
+      fi
+    fi
+
   done
   print
 

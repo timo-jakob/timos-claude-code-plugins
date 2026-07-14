@@ -33,37 +33,6 @@ This skill is for repos where the **writer App is installed** — typically a
 `claude-plugin`-primary repo (check `.maintenance.yml` says `primary:
 claude-plugin`). It works on any repo with the Maintenance App installed.
 
-## Step 1.5 — workflow-touching changeset? Skip the doomed bot push (#601)
-
-The Writer App **deliberately lacks** the `workflows` permission (security — see
-project memory *"Maintenance App lacks workflows permission"*), so GitHub
-**rejects any bot push that adds, edits, or deletes a `.github/workflows/*`
-file** — and it rejects the push **wholesale**, so even one workflow file in an
-otherwise-fine mixed changeset dooms the whole push:
-
-```text
-! [remote rejected] HEAD -> <branch> (refusing to allow a GitHub App to create or
-  update workflow `.github/workflows/api-stability.yml` without `workflows` permission)
-```
-
-That rejection is **certain, not incidental**. So detect it **up front** — before
-minting a token or attempting any push — and, if the changeset touches a workflow
-file, go **straight to the user-authored fallback** (Step 2's fallback branch),
-minting **no** token and attempting **no** bot push:
-
-```bash
-# origin/main...HEAD = everything this branch changed since it forked off main.
-# Any hit (add / edit / delete) under .github/workflows/ means the bot push is
-# certain to be rejected — take the user path instead.
-if [[ -n "$(git diff --name-only origin/main...HEAD -- '.github/workflows/')" ]]; then
-  echo "changeset touches .github/workflows/* — the bot push would be rejected wholesale; taking the user-authored path"
-  # → skip Steps 2–4 entirely; open the PR the user-authored way (Step 2's fallback), then stop.
-fi
-```
-
-A changeset that touches **no** workflow file falls through unchanged to Step 2 —
-the bot-authored path is exactly as before.
-
 ## Step 2 — mint the writer token
 
 The mint script writes the token to a mode-600 temp file and prints the
@@ -86,13 +55,6 @@ TOKEN_FILE=$("<skill-base-dir>/../maintenance/scripts/mint-maintenance-token.zsh
   (`install-claude-apps.zsh --writer-only` once it ships, or the browser App-install),
   then open the PR the normal way: `gh pr create ...` (as the user) and **stop**
   (don't arm auto-merge — there's no approver-able author). Report which path ran.
-
-> **The user-authored fallback is also the destination for a workflow-touching
-> changeset** (Step 1.5). The difference is only the *reason* to report: not
-> "the App isn't installed", but "the changeset touches `.github/workflows/*`,
-> which the Writer App can't push by design." In that case don't even mint the
-> token — jump directly to `gh pr create ...` (as the user), then **stop** and
-> report the user-authored path. The user admin-merges, exactly as above.
 
 ## Step 3 — push as the bot, open the PR as the bot
 
@@ -130,6 +92,26 @@ GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr create \
 ```
 
 Capture the PR number/URL. The PR author is now `claude-maintenance-<login>[bot]`.
+
+**Push rejected with `without 'workflows' permission`? Stale installation grant
+(#750).** The Maintenance App is granted `workflows: write` (so a changeset
+touching `.github/workflows/*` is fine on the bot path), but a permission
+increase only takes effect on an installation once the user **re-accepts** it —
+an installation still on the pre-#750 grant rejects any workflow-touching push
+**wholesale**:
+
+```text
+! [remote rejected] HEAD -> <branch> (refusing to allow a GitHub App to create or
+  update workflow `.github/workflows/api-stability.yml` without `workflows` permission)
+```
+
+When the bot push fails with exactly that error: tell the user this
+installation hasn't accepted the `workflows: write` grant yet — point them at
+`install-claude-apps.zsh --verify` (it prints the re-accept instructions) —
+then **fall back to the user-authored path for this run**: `rm -f "$TOKEN_FILE"`,
+push + `gh pr create` as the user, **stop** (no auto-merge; they admin-merge),
+and report which path ran and why. Don't retry the bot push — the rejection is
+deterministic until the grant is re-accepted.
 
 **Re-pushing to an already-open PR? Re-trigger CI (#605).** The `gh pr create`
 above fires `pull_request: opened`, which **does** run CI — so the normal

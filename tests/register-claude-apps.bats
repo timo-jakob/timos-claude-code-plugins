@@ -44,6 +44,12 @@ perms() { run zsh -c "source '$S'; app_permissions_json '$1'"; }
   [ "$(echo "$output" | jq -r .pull_requests)" = "write" ]
 }
 
+@test "register: #750 claude-maintenance requests workflows:write (bot-authored workflow-file PRs)" {
+  perms claude-maintenance
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .workflows)" = "write" ]
+}
+
 @test "register: sourcing the script does not run main (no side effects)" {
   # If the guard were missing, sourcing with no args would run the registration
   # flow and print to stdout. A clean source emits nothing.

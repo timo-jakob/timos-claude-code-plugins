@@ -44,8 +44,7 @@ app_display_name() {
 }
 
 # Permissions are minimal-by-default. See CLAUDE-APPS.md for the rationale
-# behind each scope. workflows:write is deliberately NOT granted to
-# Maintenance — workflow edits go through human review.
+# behind each scope.
 app_permissions_json() {
   case "$1" in
     claude-approver)
@@ -74,10 +73,19 @@ app_permissions_json() {
       }'
       ;;
     claude-maintenance)
+      # workflows:write lets bot-authored PRs include .github/workflows/*
+      # changes (#750). Workflow edits go through the same review path as
+      # every other change — the Approver's ci:/build: risk-register lens on
+      # app repos, human approval on plugin repos — so a separate
+      # user-authored detour buys no extra safety. A permission increase on
+      # an already-installed App requires a per-installation re-accept
+      # (same dance as #418); install-claude-apps.zsh --verify flags
+      # installations still on the old grant.
       print -- '{
         "contents":      "write",
         "pull_requests": "write",
         "issues":        "write",
+        "workflows":     "write",
         "actions":       "read",
         "checks":        "read",
         "metadata":      "read"

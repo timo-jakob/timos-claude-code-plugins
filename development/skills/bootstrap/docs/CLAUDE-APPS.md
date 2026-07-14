@@ -59,17 +59,25 @@ turning the webhook on would add a delivery destination we don't use.
 | `contents` | write | Push commits and create branches. |
 | `pull_requests` | write | Open and edit PRs. |
 | `issues` | write | Close issues from PR descriptions (`Closes #N` is the convention codified in repo memory). |
+| `workflows` | write | Push branches that add/edit/delete `.github/workflows/*` files (#750). Without it GitHub rejects any such bot push **wholesale**. Workflow-file PRs go through the same review path as every other change — the Approver's `ci:`/`build:` risk-register lens on app repos, human approval on plugin repos — so a separate user-authored detour buys no extra safety. |
 | `actions` | read | Check workflow status before merging. |
 | `checks` | read | Same as Approver — third-party check runs. |
 | `metadata` | read | Required default. |
 
+> **Upgrading an existing Maintenance install to `workflows: write` (#750).**
+> Same dance as the Approver's #418 `contents:write` upgrade — a permission
+> *increase* on an already-installed App is **not** applied by re-running
+> `register-claude-apps.zsh`; the user must **re-accept** the new grant per
+> installation. On a repo whose Maintenance App predates this change: App
+> settings → **Permissions → Workflows: Read and write → Save**, then
+> **github.com/settings/installations → Claude Maintenance → Configure →
+> accept the permission update**. `install-claude-apps.zsh --verify` flags a
+> Maintenance App still on the old grant. Until re-accepted, a bot push
+> touching a workflow file is rejected and `/development:open-pr` falls back
+> to the user-authored path for that run.
+
 Explicitly **not granted**:
 
-- `workflows: write` on Claude Maintenance. The maintenance pipeline
-  is not authorised to modify `.github/workflows/*.yml` autonomously.
-  Bootstrap-template-drift PRs that need this run as the user, not as
-  the bot, until a deliberate review process for workflow changes is
-  designed.
 - Org administration scopes (members, secrets, settings) on either App.
 
 ## Registration
