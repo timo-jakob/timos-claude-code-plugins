@@ -13,6 +13,13 @@ edit_uri: edit/{{DEFAULT_BRANCH}}/docs/
 docs_dir: docs
 site_dir: site
 
+# The docs/superpowers tree holds internal design specs/plans (the family's
+# brainstorming workflow writes there in every repo), not published manual
+# pages — keep it out of the built site so --strict doesn't demand it in the
+# nav (#775).
+exclude_docs: |
+  superpowers/
+
 theme:
   name: material
   palette:

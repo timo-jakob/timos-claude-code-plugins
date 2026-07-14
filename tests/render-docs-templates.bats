@@ -135,3 +135,20 @@ assert_no_orphan_pages() {
   diff "$REPO_ROOT/scripts/docs-nav-to-chapters.zsh" \
     "$TEMPLATES/common/scripts/docs-nav-to-chapters.zsh"
 }
+
+@test "docs templates: a docs/superpowers page is excluded from the build, not an orphan (#775)" {
+  # Every family repo keeps design specs/plans under docs/superpowers/ — the
+  # seeded strict build must ignore them (they are neither nav entries nor
+  # orphaned pages), or the very first build on a spec-carrying repo fails.
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  mkdir -p "$OUT/common/docs/superpowers/specs"
+  printf '# internal design spec\n' > "$OUT/common/docs/superpowers/specs/plan.md"
+  grep -q "^exclude_docs:" "$OUT/common/mkdocs.yml"
+  grep -qE "^[[:space:]]+superpowers/" "$OUT/common/mkdocs.yml"
+  # The nav derives no chapter from the superpowers tree…
+  chapters="$(zsh "$OUT/common/scripts/docs-nav-to-chapters.zsh" "$OUT/common/mkdocs.yml")"
+  ! grep -q "superpowers" <<<"$chapters"
+  # …and the nav<->files lockstep still holds for the published pages.
+  assert_nav_files_exist
+}
