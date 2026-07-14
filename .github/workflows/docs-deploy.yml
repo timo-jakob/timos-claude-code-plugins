@@ -1,0 +1,62 @@
+# Deploy the docs site to GitHub Pages — epic #744 slice (d), issue #755.
+#
+# Runs ONLY on push to main (never on PRs — the PR-time strict-build gate is
+# docs.yml, #753). Builds the MkDocs-Material site and publishes it to GitHub
+# Pages. Path-conditional on the docs surface, per the app-vs-container
+# check-separation policy (#573). PDF/ePub + OCI publication is slice (e), #756.
+
+name: docs deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - ".github/workflows/docs-deploy.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress run so a live
+# deploy always completes.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the docs toolchain
+        run: pip install -r requirements-docs.txt
+
+      - name: Build the site (strict — broken internal links fail the build)
+        run: mkdocs build --strict
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
