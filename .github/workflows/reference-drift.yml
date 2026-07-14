@@ -1,0 +1,51 @@
+# Generated-reference drift gate — epic #744 slice (f), issue #757.
+#
+# The docs/reference/{commands,agents}.md pages are generated from skill/agent
+# frontmatter by scripts/generate-docs-reference.py. This check regenerates them
+# and fails if the committed pages differ — so the reference can't drift from the
+# code (the marketplace-sync precedent, applied to docs). It triggers on changes
+# to the frontmatter sources, the generated pages, or the generator itself — NOT
+# on unrelated docs edits, and it's separate from the docs site build so a plain
+# frontmatter change doesn't spin up mkdocs/pandoc.
+
+name: reference drift
+
+on:
+  pull_request:
+    paths:
+      - "development*/skills/**/SKILL.md"
+      - "development*/agents/*.md"
+      - "docs/reference/commands.md"
+      - "docs/reference/agents.md"
+      - "scripts/generate-docs-reference.py"
+      - ".github/workflows/reference-drift.yml"
+  push:
+    branches: [main]
+    paths:
+      - "development*/skills/**/SKILL.md"
+      - "development*/agents/*.md"
+      - "docs/reference/commands.md"
+      - "docs/reference/agents.md"
+      - "scripts/generate-docs-reference.py"
+      - ".github/workflows/reference-drift.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Regenerate the reference and fail on drift
+        run: python3 scripts/generate-docs-reference.py --check
