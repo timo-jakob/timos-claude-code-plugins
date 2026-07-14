@@ -136,6 +136,21 @@ assert_no_orphan_pages() {
     "$TEMPLATES/common/scripts/docs-nav-to-chapters.zsh"
 }
 
+@test "docs templates: shipped pre-commit/yamllint configs tolerate the seeded mkdocs.yml (#777)" {
+  # The seeded mkdocs.yml carries MkDocs' custom YAML tags (check-yaml's safe
+  # loader can't construct them) and a >120-char provenance-marker line
+  # (stamped at adoption). The shipped configs must exempt it, or docs
+  # adoption fails the target repo's own pre-commit.
+  grep -A8 "id: check-yaml" "$TEMPLATES/common/.pre-commit-config.yaml.tmpl" \
+    | grep -q 'exclude: \^mkdocs\\.yml\$'
+  grep -A6 "ignore: |" "$TEMPLATES/common/.yamllint" | grep -qE "^[[:space:]]+mkdocs\.yml"
+  # Templates themselves stay yamllint-clean: no one-space inline comments in
+  # the docs workflows (yamllint wants two before a trailing comment).
+  ! grep -nE '[^ #] # ' "$TEMPLATES/common/.github/workflows/docs.yml.tmpl" \
+      "$TEMPLATES/common/.github/workflows/docs-deploy.yml.tmpl" \
+      "$TEMPLATES/common/.github/workflows/docs-publish.yml.tmpl"
+}
+
 @test "docs templates: a docs/superpowers page is excluded from the build, not an orphan (#775)" {
   # Every family repo keeps design specs/plans under docs/superpowers/ — the
   # seeded strict build must ignore them (they are neither nav entries nor

@@ -17,6 +17,7 @@ rules:
       .github/dependabot.yml
       .github/workflows/*.yml
       trivy.yaml
+      mkdocs.yml
   # GitHub Actions' `on:` key is valid; don't flag it as a "truthy" value.
   truthy:
     allowed-values: ['true', 'false', 'on', 'off']

@@ -24,8 +24,8 @@ on:
       - ".github/workflows/docs-publish.yml"
 
 permissions:
-  contents: write # refresh the docs-latest pre-release
-  packages: write # push the OCI docs image to GHCR
+  contents: write  # refresh the docs-latest pre-release
+  packages: write  # push the OCI docs image to GHCR
 
 concurrency:
   group: docs-publish
