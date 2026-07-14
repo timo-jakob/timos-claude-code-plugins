@@ -75,7 +75,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          notes="Rolling documentation build from ${GITHUB_SHA}. Downloadable PDF/ePub of the latest docs on {{DEFAULT_BRANCH}}."
+          notes="Rolling documentation build from ${GITHUB_SHA}."
+          notes+=" Downloadable PDF/ePub of the latest docs on {{DEFAULT_BRANCH}}."
           if gh release view docs-latest >/dev/null 2>&1; then
             gh release upload docs-latest manual.pdf manual.epub --clobber
             gh release edit docs-latest --notes "$notes"

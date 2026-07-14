@@ -39,6 +39,14 @@ repos:
     rev: v1.38.0
     hooks:
       - id: yamllint
+        # --strict: warnings fail the hook — the zero-warnings policy (#781).
+        # The types/files override extends the hook to the bootstrap
+        # *.ya?ml.tmpl templates: .yamllint's yaml-files already declares them
+        # lintable, but pre-commit's default `types: [yaml]` filter never
+        # forwarded them, so template regressions were invisible to the hook.
+        args: [--strict]
+        types: [file]
+        files: (\.ya?ml(\.tmpl)?|\.yamllint)$
 
   # --- secret scanning (shift-left; CI runs gitleaks in its own workflow) -----
   - repo: https://github.com/gitleaks/gitleaks
