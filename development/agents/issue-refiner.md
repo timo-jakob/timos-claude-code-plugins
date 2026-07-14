@@ -125,7 +125,8 @@ Emit exactly one fenced `json` block and no other prose. Shape:
   },
   "resolved_objections": [
     { "objection": "The acceptance criterion 'fast' has no measurable target.", "resolved": false, "note": "still awaiting the p95 number" }
-  ]
+  ],
+  "expected_docs_pages": ["docs/how-to/use-the-rest-api.md"]
 }
 ```
 
@@ -168,6 +169,21 @@ Rules for the payload:
   conductor's control flow: the skill **converges only when every
   `resolved_objections` entry is `resolved: true` AND `questions` is `[]`**;
   otherwise it **loops**.
+- **`expected_docs_pages`** (#768) — the `docs/` pages the story's eventual PR
+  will likely add or update, so docs impact is visible at refinement time
+  (resolve-issue's same-PR user-docs step, #767, enforces it at build time).
+  Derive from `proposed_story_spec.interface_surfaces`: per surface, default to
+  its how-to page from the #766 seed convention — `cli` →
+  `docs/how-to/use-the-cli.md`, `rest` → `docs/how-to/use-the-rest-api.md`,
+  `web-ui` → `docs/how-to/use-the-web-ui.md`, `grpc` →
+  `docs/how-to/use-the-grpc-api.md` (the same mapping as
+  `plan-user-docs.zsh`) — but apply the placement rule where you can judge
+  better: lookup material (commands, endpoints, config, schemas) belongs on a
+  `docs/reference/` page, and a story deserving its own "How do I …?" page
+  names that page instead. Emit `[]` for a no-surface story (docs, chore,
+  refactor, library-internal) and whenever `proposed_story_spec` is still
+  `null` — this field is **visibility, not enforcement**, and never blocks
+  convergence.
 - **Never write to GitHub, never fabricate evidence.** If the repo has no
   OpenAPI/tests/persona to mine, say so in a recommendation and draft from the
   prose alone — a grounded "I couldn't find X" beats an invented test case.
