@@ -240,6 +240,18 @@ flow. Stop and ask for input wherever marked; do not guess.
    renders nothing. Then enable the Pages source (§3h's
    `gh api … build_type=workflow` call, also idempotent).
 
+   **Docs adoption must also reconcile two pre-existing configs (#777)** —
+   the hook reconciler only appends missing providers, never edits hook args,
+   so apply these edits directly (both idempotent — skip when already
+   present): the repo's `.pre-commit-config.yaml` `check-yaml` hook gains
+   `exclude: ^mkdocs\.yml$` (MkDocs' custom YAML tags break the safe
+   loader), and the repo's `.yamllint` `line-length.ignore` list gains
+   `mkdocs.yml` (the provenance marker line exceeds 120 and cannot wrap —
+   the same exemption the stamped workflows already have). Without them the
+   adopted docs set fails the repo's own pre-commit. Fresh bootstraps get
+   both from the current templates; this reconcile is for repos rendered
+   before the docs stack existed.
+
    After rendering, continue to the drift check below for the files that WERE
    already present.
 

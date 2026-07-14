@@ -13,6 +13,12 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # mkdocs.yml uses MkDocs' custom YAML tags (e.g.
+        # `!!python/name:pymdownx.superfences.fence_code_format` for Mermaid),
+        # which check-yaml's safe loader can't construct. yamllint (below)
+        # still lints it for style; excluding it here only skips tag
+        # construction, not validation. (#777)
+        exclude: ^mkdocs\.yml$
       - id: check-json
       - id: check-added-large-files
         args: ["--maxkb=1024"]
