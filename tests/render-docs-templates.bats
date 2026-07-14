@@ -136,6 +136,20 @@ assert_no_orphan_pages() {
     "$TEMPLATES/common/scripts/docs-nav-to-chapters.zsh"
 }
 
+@test "docs templates: every workflow action ref is SHA-pinned (#779, target-repo semgrep policy)" {
+  # Target repos' semgrep hook rejects mutable tag refs; shipped workflow
+  # templates carry full-SHA pins with a version comment (supply-chain policy).
+  for wf in docs.yml.tmpl docs-deploy.yml.tmpl docs-publish.yml.tmpl; do
+    # every uses: line must carry a 40-hex SHA
+    while IFS= read -r line; do
+      echo "$line" | grep -qE 'uses: [A-Za-z0-9_./-]+@[0-9a-f]{40}( #| )' || {
+        echo "mutable action ref in $wf: $line" >&2
+        return 1
+      }
+    done < <(grep "uses:" "$TEMPLATES/common/.github/workflows/$wf")
+  done
+}
+
 @test "docs templates: shipped pre-commit/yamllint configs tolerate the seeded mkdocs.yml (#777)" {
   # The seeded mkdocs.yml carries MkDocs' custom YAML tags (check-yaml's safe
   # loader can't construct them) and a >120-char provenance-marker line
@@ -144,8 +158,9 @@ assert_no_orphan_pages() {
   grep -A8 "id: check-yaml" "$TEMPLATES/common/.pre-commit-config.yaml.tmpl" \
     | grep -q 'exclude: \^mkdocs\\.yml\$'
   grep -A6 "ignore: |" "$TEMPLATES/common/.yamllint" | grep -qE "^[[:space:]]+mkdocs\.yml"
-  # Templates themselves stay yamllint-clean: no one-space inline comments in
-  # the docs workflows (yamllint wants two before a trailing comment).
+  # Templates stay yamllint-WARNING-free, not merely error-free (zero-warnings
+  # policy): every inline comment — action-pin `# vN` suffixes included — gets
+  # two spaces before the `#`.
   ! grep -nE '[^ #] # ' "$TEMPLATES/common/.github/workflows/docs.yml.tmpl" \
       "$TEMPLATES/common/.github/workflows/docs-deploy.yml.tmpl" \
       "$TEMPLATES/common/.github/workflows/docs-publish.yml.tmpl"
