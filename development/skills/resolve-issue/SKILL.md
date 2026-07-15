@@ -187,6 +187,16 @@ Never guess past a `NEEDS_REFINEMENT` — escalating the ambiguity here is the
 whole point, and it is far cheaper than after three review rounds converge on
 the wrong thing.
 
+**Division of labour — the gate judges specification, 0a enforces sequencing**
+(#800). One fact, one owner: step 0a (`dependency-precheck.zsh`) is the **sole**
+enforcement point for whether a blocker has landed, and it has already run by the
+time you reach here. The gate judges only whether dependencies are **declared**
+natively and acyclic — it never fails a story because a declared blocker is still
+open. So a `READY` verdict on a story with open blockers is not a contradiction:
+0a rejected it already if it mattered. Never re-derive the sequencing question
+from the gate's verdict, and never treat a `READY`-with-open-blockers story as a
+gate malfunction.
+
 ### 1. Branch off fresh main
 
 Per `/development:git-branch-naming` — `<type>/<N>-<slug>`, with `type` from
@@ -526,6 +536,20 @@ Re-running after the stories are refined (criteria added, the `needs-refinement`
 label cleared) continues the pre-flight from the still-open children — the gate
 is as resumable as the rest of the flow.
 
+> **A child with declared-but-open blockers is `READY`-but-queued — never a
+> pre-flight veto** (#800). #583 *requires* declaring a prerequisite as a native
+> `blockedBy` edge, so a **correctly sequenced** epic is one whose children carry
+> open blockers — that is the epic doing its job, not a defect. If an open
+> blocker halted the pre-flight, every dependency-ordered epic would deadlock
+> permanently (only an epic with no internal sequencing at all could pass), and
+> refinement could never clear it, because no human reply closes a blocker. The
+> gate is aligned with this: check 3 judges **declaration and acyclicity, not
+> closure**, so such a child gates `READY` on its own merits. **E2** then orders
+> the children by the dependency graph, and **step 0a** enforces the wait when a
+> child's turn comes — exactly what E3's sequential chain already does ("wait for
+> it to merge … branch the next off the fresh tip"). Halt the pre-flight only for
+> a genuine specification gap.
+
 ### E2. Analyse order + overlap
 
 For each child, determine the files it will touch (the issue body usually names
@@ -682,6 +706,13 @@ is the epic truly done — report it closed, with the PR/verification table.
   refinement questions + the `needs-refinement` label and **stops** — never
   branch or implement past it, and for an epic never build *any* child while one
   is unready.
+- **The gate judges specification; 0a enforces sequencing** (#800) — one fact,
+  one owner. The gate never fails a story for a **declared-but-open** blocker
+  (that is 0a's call, already made); it fails only for an **undeclared** or
+  **prose-only** dependency, or a **cycle**. So a child with open blockers is
+  `READY`-but-queued and **never** vetoes the E1b pre-flight — otherwise every
+  dependency-ordered epic, which #583 requires you to sequence natively, would
+  deadlock forever.
 - **Don't decide the user's issues for them** — if a single issue is ambiguous,
   the gate sends it back for refinement rather than guessing a large or
   contentious change into a PR.
