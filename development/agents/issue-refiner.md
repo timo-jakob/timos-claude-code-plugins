@@ -1,7 +1,7 @@
 ---
 name: issue-refiner
 description: Per-turn refinement engine for /development:refine-issue (#575). A pure function of one turn — given a needs-refinement issue, the story-readiness gate's objections, the conversation so far, and the human's latest reply, it returns a plain-language why-not-ready explanation, targeted questions, concrete recommendations, a rewritten prose draft, and a proposed story-spec/v1 block (mining the repo — OpenAPI/proto specs, UI routes, tests/acceptance, the personas/v1 registry — to draft the outside-in use_case / test_cases / personas so the human curates instead of authors). Returns a JSON object only; it performs NO GitHub writes — the refine-issue skill owns every side effect.
-model: opus
+model: fable
 tools: Read, Grep, Glob, Bash
 ---
 

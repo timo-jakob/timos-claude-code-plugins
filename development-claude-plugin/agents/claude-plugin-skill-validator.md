@@ -48,10 +48,11 @@ recommendation — do **not** invent values:
 - **`missing_field`** (`description`, `tools`, `model`, `name`) — you can't
   author a description, choose a tools list, or pick a model tier on the author's
   behalf. For `model`, recommend the tier by task character (haiku =
-  mechanical, opus = judgment, fable = high-stakes).
+  mechanical, sonnet = light comprehension with bounded output, opus =
+  judgment, fable = high-stakes).
 - **`empty_body`** — the instruction/agent body is the actual content; recommend
   it be written.
-- **`invalid_model`** — the model string isn't `haiku|opus|fable`. Recommend the
+- **`invalid_model`** — the model string isn't `haiku|sonnet|opus|fable`. Recommend the
   closest valid tier but don't guess silently — escalate so a human confirms.
 
 ## What you do

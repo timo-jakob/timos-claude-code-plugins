@@ -21,7 +21,7 @@ Launch these 5 agents in one message:
 | Agent | Model | Dimension |
 | --------------------------- | ------ | ------------ |
 | python-bug-hunter | fable | bugs |
-| python-security-reviewer | opus | security |
+| python-security-reviewer | fable | security |
 | python-performance-reviewer | opus | performance |
 | python-code-quality | opus | code_quality |
 | python-test-reviewer | opus | tests |

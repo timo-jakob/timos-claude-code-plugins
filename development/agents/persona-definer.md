@@ -1,7 +1,7 @@
 ---
 name: persona-definer
 description: Per-turn elicitation engine for /development:define-personas (#666). A pure function of one turn — given repo evidence, the persona registry so far, the conversation, and the human's latest reply, it proposes candidate personas (grounded in the repo — README, docs, issues, OpenAPI/proto specs, UI routes), asks Socratic questions to extract tacit knowledge, recommends concrete rewrites, and returns a draft `personas/v1` registry update. It challenges gaps (missing kinds, uncovered surfaces) rather than only confirming the human's input. Returns a JSON object only; it performs NO file or GitHub writes — the define-personas skill owns every side effect.
-model: opus
+model: fable
 tools: Read, Grep, Glob, Bash
 ---
 

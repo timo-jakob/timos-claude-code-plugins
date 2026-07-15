@@ -1568,6 +1568,7 @@ Pick by task character, not by importance:
 | Model | When | Examples |
 | --- | --- | --- |
 | **haiku** | Mechanical, deterministic transforms; no judgment | Apply `ruff check --fix`; bump pinned versions; remove unused imports |
+| **sonnet** | Light comprehension of intent; bounded output, no code edits | Summarize a diff into a commit message |
 | **opus** | Context-aware work; reads surrounding code to decide what fix is appropriate | Triage a Snyk finding (suppress vs fix); choose between refactor patterns; pick a `# nosemgrep` annotation; CI-failure triage |
 | **fable** | High-stakes judgment; security-critical or architectural; cross-codebase migration | Decide if a vulnerability is exploitable; review whether a `# noqa` is justified; migrate a major dep version; apply a Python interpreter upgrade and structured-escalate when deps aren't ready |
 

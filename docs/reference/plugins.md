@@ -85,9 +85,9 @@ registry is empty, per [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-c
 | swift-maintenance-planner | opus | Ranks + groups findings, routes each to its agent |
 | swift-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (build/test, format, coverage) |
 | swift-approver | fable | Synthesis-layer PR reviewer once CI is green; risk register fed by the five review dimensions (#448) |
-| swift-lint-format | opus | Runs SwiftFormat and SwiftLint, fixes issues in-place |
+| swift-lint-format | haiku | Runs SwiftFormat and SwiftLint, fixes issues in-place |
 | bug-hunter | fable | Logic errors, nil crashes, race conditions, stability |
-| security-reviewer | opus | Secrets, injection, insecure storage, ATS, keychain |
+| security-reviewer | fable | Secrets, injection, insecure storage, ATS, keychain |
 | performance-reviewer | opus | Retain cycles, allocations, O(n²), main thread blocking |
 | code-quality | opus | Naming, SOLID, readability, dead code, API design |
 | test-reviewer | opus | Coverage gaps, assertion quality, flaky tests |
@@ -139,7 +139,7 @@ input and dispatches here.
 | python-maintenance-planner | opus | Ranks + groups findings, routes each to its agent (one tool's findings stay together) |
 | python-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (pytest, ruff, coverage) |
 | python-bug-hunter | fable | Logic errors, None-handling crashes, mutable defaults, async races, swallowed exceptions (#449) |
-| python-security-reviewer | opus | Secrets, injection, unsafe deserialization, TLS verification, data exposure (#449) |
+| python-security-reviewer | fable | Secrets, injection, unsafe deserialization, TLS verification, data exposure (#449) |
 | python-performance-reviewer | opus | Accidental O(n²), event-loop blocking, N+1 I/O, unbounded caches (#449) |
 | python-code-quality | opus | Naming, SOLID, readability, dead code, API design (#449) |
 | python-test-reviewer | opus | Coverage gaps, assertion quality, flaky tests, mock misuse (#449) |
@@ -196,7 +196,7 @@ gather-script + dispatch contract).
 | java-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
 | java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`); risk register fed by the five review dimensions (#449) |
 | java-bug-hunter | fable | Logic errors, NPEs, `==` vs `equals`, resource leaks, race conditions (#449) |
-| java-security-reviewer | opus | Secrets, injection, unsafe deserialization, TLS validation, data exposure (#449) |
+| java-security-reviewer | fable | Secrets, injection, unsafe deserialization, TLS validation, data exposure (#449) |
 | java-performance-reviewer | opus | Accidental O(n²), allocation pressure, N+1 I/O, lock contention, unbounded caches (#449) |
 | java-code-quality | opus | Naming, SOLID, readability, dead code, API design (#449) |
 | java-test-reviewer | opus | Coverage gaps, assertion quality, flaky tests, mock misuse (#449) |

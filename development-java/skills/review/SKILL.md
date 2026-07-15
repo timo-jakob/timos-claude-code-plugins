@@ -21,7 +21,7 @@ Launch these 5 agents in one message:
 | Agent | Model | Dimension |
 | ------------------------- | ------ | ------------ |
 | java-bug-hunter | fable | bugs |
-| java-security-reviewer | opus | security |
+| java-security-reviewer | fable | security |
 | java-performance-reviewer | opus | performance |
 | java-code-quality | opus | code_quality |
 | java-test-reviewer | opus | tests |
