@@ -1,7 +1,7 @@
 ---
 name: swift-lint-format
 description: Runs SwiftFormat and SwiftLint on Swift files, fixing all warnings and errors in-place
-model: opus
+model: haiku
 tools: Read, Grep, Glob, Bash, Edit
 ---
 

@@ -21,7 +21,7 @@ Launch these 6 agents in one message:
 | Agent | Model | Dimension |
 | -------------------- | -------- | ----------------- |
 | bug-hunter | fable | bugs |
-| security-reviewer | opus | security |
+| security-reviewer | fable | security |
 | performance-reviewer | opus | performance |
 | swift6-compliance | fable | swift6_compliance |
 | code-quality | opus | code_quality |

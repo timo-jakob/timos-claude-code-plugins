@@ -1,7 +1,7 @@
 ---
 name: python-security-reviewer
 description: Python security specialist that identifies vulnerabilities, injection risks, unsafe deserialization, and secret leaks. The security dimension of /development-python:review; also a risk-register lens for python-approver (#449).
-model: opus
+model: fable
 tools: Read, Grep, Glob
 ---
 
