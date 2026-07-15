@@ -507,15 +507,40 @@ Consider only the **open** ones (skip children already closed/merged). This
 makes the skill **resumable**: re-running continues from wherever a prior run
 stopped.
 
-> **Terminal case — no open children left.** When this enumeration finds **zero
-> open children** (every child already closed/merged, e.g. on the re-run after
-> the last child landed), do **no** child work: skip straight to **E4**
-> (holistic verification) and then **E5** (close the epic). This is the step
-> that's easy to miss — an epic whose children are all merged still sits OPEN
-> until E5 closes it, because nothing carries `Closes #<epic>`. Some epics
-> instead track **inline slices** (`- [ ]` describing work, no `#N`) realized by
-> separate PRs; for those, confirm each slice's PR merged, then E4 + E5 the
-> same way.
+> **An empty enumeration is ambiguous — classify it, never assume it.** Zero
+> open children means *only* that no open `#N` child matched. It does **not**
+> mean the work is done: an epic whose children all merged and an epic whose
+> children were **never filed** enumerate identically (zero). Before any
+> terminal-case reasoning, decide which of these you are looking at:
+>
+> 1. **Children were filed and all are closed/merged** — the task list holds
+>    `#N` lines and every one is closed. The work exists on `main`; this is the
+>    genuine terminal case → do no child work, go to **E4**, then **E5**. This
+>    is the step that's easy to miss — such an epic still sits OPEN until E5
+>    closes it, because nothing carries `Closes #<epic>`.
+> 2. **The task list holds inline slices** (`- [ ]` describing work, no `#N`) —
+>    a supported pattern, realized by separate PRs. **Confirm a merged PR for
+>    each slice.** All slices confirmed → E4 + E5 the same way as case 1. **Any
+>    slice unrealized → halt** (below): do not run E4, do not close.
+> 3. **No children were ever filed / no task list at all** — the epic has not
+>    been decomposed. → **halt** and report that decomposition comes first.
+>    Never invent children ("don't decide the user's issues for them").
+>
+> **Positive-evidence rule — never close an epic without evidence its work
+> merged.** That evidence is closed `#N` children referencing the epic (case 1)
+> or a confirmed merged PR per inline slice (case 2). Zero children is an
+> *absence* of evidence and by itself licenses **nothing**. Do not look to E4
+> for this: E4 verifies that existing behaviour didn't regress, and a
+> never-started epic passes it trivially — the suite is green because nothing
+> changed, and there is no behaviour to exercise end-to-end because the feature
+> doesn't exist. A verification gate cannot tell "the feature works" from "the
+> feature was never built"; only positive merge evidence can.
+>
+> **The halt (cases 2 and 3).** Mirror E1b's halt: post a summary comment on the
+> epic naming which slices are unrealized (case 2) or that no children are filed
+> and decomposition is needed (case 3), build nothing, leave the epic **OPEN**,
+> and stop. Re-running after a human files the children — or after the missing
+> slices' PRs merge — resumes the flow normally.
 
 ### E1b. Readiness pre-flight — gate ALL children before building anything
 
@@ -635,7 +660,10 @@ state is legible at a glance. Then:
 
 - **All children merged** → proceed to **E4** (holistic verification) and **E5**
   (close the epic). A re-run that finds **zero open children** does no child work
-  — it goes straight to E4 + E5.
+  — but it goes to E4 + E5 **only** once E1's classification confirms the
+  children were filed and merged (case 1), or every inline slice's PR is
+  confirmed merged (case 2). Zero children on its own is never the licence;
+  cases 2-unrealized and 3 halt there instead.
 - **Some escalated/parked** → the epic stays **open**; re-running after the human
   resolves an escalation (the decision lands in the child's comment thread, which
   the implement step re-reads) resumes the parked dependents and any remaining
@@ -689,8 +717,14 @@ is the epic truly done — report it closed, with the PR/verification table.
 - **Resumable** — re-running on an epic skips already-resolved children.
 - **Close the epic explicitly after E4 (E5)** — children auto-close via their
   PRs' `Closes #N`, but the epic issue has no PR, so it never closes itself. A
-  done-but-open epic is the most common miss; the final re-run (zero open
-  children) exists to verify and close it.
+  done-but-open epic is the most common miss; the final re-run exists to verify
+  and close it.
+- **Never close an epic without positive evidence its work merged** — closed
+  `#N` children, or a confirmed merged PR per inline slice (E1's
+  classification). **Zero children never licenses E5 by itself**: a
+  never-decomposed epic and an all-merged one enumerate identically, and E4
+  cannot tell them apart (it passes trivially when nothing was built). Cases
+  2-unrealized and 3 **halt** with a summary on the epic instead.
 - **Dependencies gate first** — the 0a precheck rejects on open GitHub-native
   blockers (and refuses cycles) before anything is branched; in autonomous mode
   the rejection is a typed comment + `blocked` label, and an unattended run
