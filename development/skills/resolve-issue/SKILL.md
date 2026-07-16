@@ -32,9 +32,15 @@ gh issue view <N> --json number,title,body,state,labels,url
 ```
 
 - If `state` is not `OPEN`, stop — it's already handled.
-- **Epic?** It's an epic when the body holds a **task list of child issues**
-  (`- [ ] #123`, `- [ ] owner/repo#123`) or it carries an `epic` label →
-  go to **Epic flow**.
+- **Epic?** It's an epic when it has **native sub-issues**
+  (`read-sub-issues.zsh --repo "$REPO" --epic <N>` reports
+  `summary.total > 0` — the authoritative signal, #802), when it carries an
+  `epic` label, or when the body holds a **task list of child issues**
+  (`- [ ] #123`, `- [ ] owner/repo#123` — which marks an *un-backfilled*
+  epic, see E1) → go to **Epic flow**. A **failed** reader call (nonzero
+  exit) is a classification failure — report it and stop; never fall back to
+  the label/task-list signals as if the native signal were checked and
+  absent (a native-only epic would misclassify as a single issue).
 - Otherwise → **Single-issue flow**.
 
 Operate on the **session's repo** (`gh repo view --json nameWithOwner`); the
@@ -502,46 +508,94 @@ conflict-aware, then verify the whole, then **close the epic** (E4/E5).
 
 ### E1. Enumerate the children
 
-Parse the epic body's **task-list lines** specifically (`- [ ] #N` / `- [x] #N`,
-or `owner/repo#N`) — match those, **not every `#N` mention** in the body (which
-also catches unrelated cross-references and would pull in non-children).
-Consider only the **open** ones (skip children already closed/merged). This
-makes the skill **resumable**: re-running continues from wherever a prior run
-stopped.
+**Native sub-issues are the source of truth for parenthood (#802)** — the same
+contract #583 established for dependencies: declare it natively or it doesn't
+exist. Read them through the shared reader, never by parsing the body (the
+markdown task list stays as the human-readable view, but it is no longer
+authoritative — exactly as prose dependencies stopped being after #583):
 
-> **An empty enumeration is ambiguous — classify it, never assume it.** Zero
-> open children means *only* that no open `#N` child matched. It does **not**
-> mean the work is done: an epic whose children all merged and an epic whose
-> children were **never filed** enumerate identically (zero). Before any
-> terminal-case reasoning, decide which of these you are looking at:
+```bash
+"<skill-base-dir>/scripts/read-sub-issues.zsh" --repo "$REPO" --epic <N>
+```
+
+It emits the native children (number, state) plus **`summary`**
+(`subIssuesSummary { total, completed }`). Work only the **open** children
+(skip closed/merged ones) — this keeps the skill **resumable**: re-running
+continues from wherever a prior run stopped.
+
+> **The terminal case branches on `summary` — deterministically, no
+> inference.** Markdown parsing could never distinguish "no children were ever
+> filed" from "all children are closed" (both yielded zero — #798's failure
+> mode); `subIssuesSummary` answers it directly:
 >
-> 1. **Children were filed and all are closed/merged** — the task list holds
->    `#N` lines and every one is closed. The work exists on `main`; this is the
->    genuine terminal case → do no child work, go to **E4**, then **E5**. This
->    is the step that's easy to miss — such an epic still sits OPEN until E5
->    closes it, because nothing carries `Closes #<epic>`.
-> 2. **The task list holds inline slices** (`- [ ]` describing work, no `#N`) —
->    a supported pattern, realized by separate PRs. **Confirm a merged PR for
->    each slice.** All slices confirmed → E4 + E5 the same way as case 1. **Any
->    slice unrealized → halt** (below): do not run E4, do not close.
+> | `total` | `completed` | State | Action |
+> |---|---|---|---|
+> | `0` | `0` | Not decomposed — or not backfilled | **Never proceed as-is** (classify below) |
+> | `N` | `< N` | In progress | Resolve the open children |
+> | `N` | `N` | Genuinely done | Do no child work → **E4**, then **E5** |
+>
+> The `total: N, completed: N` row is the genuine terminal case — and the step
+> that's easy to miss: such an epic still sits OPEN until E5 closes it, because
+> nothing carries `Closes #<epic>`. Native children closed against the epic
+> **are** the positive evidence of merged work that closing requires.
+>
+> **`total: 0` never proceeds as-is — classify which zero it is first.
+> Case 1 backfills and continues; cases 2-unrealized and 3 halt:**
+>
+> 1. **The body's task list holds `#N` children but none are native
+>    sub-issues** — an **un-backfilled epic** (its children were declared
+>    before #802's contract). Do **not** fall back to parsing the markdown:
+>    run the backfill —
+>    `"<skill-base-dir>/scripts/backfill-sub-issues.zsh" --repo "$REPO"
+>    --epic <N>` (idempotent). **Always `--dry-run` first and sanity-check
+>    the plan against the body**: a slice line whose `#N` is a parenthetical
+>    *context* ref (e.g. "validation on the #717 constellation") is case 2,
+>    not a child declaration — migrating it would misparent the referenced
+>    issue (one parent only). **When the dry-run's `would_add` contains any
+>    ref that is not a genuine child declaration, do NOT run the live
+>    backfill** — halt and report (interactively: ask the human to fix the
+>    body's task list so only child declarations remain), then re-dry-run
+>    before migrating. After a live run, **gate on its outcome**: continue
+>    only on exit 0 with every markdown child accounted for in
+>    `added`/`already_present` **and `skipped_cross_repo` empty** — then
+>    re-read through the shared reader and take the table's row for the new
+>    `summary` (that continuation is what keeps E3's "all children, one
+>    invocation" true). Otherwise **halt** with a summary comment naming the
+>    unattached children: on exit 5 (partial) or 1, and equally whenever
+>    `skipped_cross_repo` is non-empty — cross-repo children are
+>    unmigratable here, and even when same-repo children attached fine
+>    (`total > 0`), an epic with unattached cross-repo children must never
+>    reach the `N == N` row's E4/E5 licence (the human attaches them
+>    natively cross-repo, or descopes them from the task list). A partial
+>    child set must never license closure. This is the migration hazard the
+>    contract documents: treating an un-backfilled epic as "done" would
+>    close never-started work en masse.
+> 2. **The task list holds inline slices** (`- [ ]` describing work rather
+>    than listing a child issue — no `#N`, or a `#N` that is only a context
+>    ref, not the slice's own issue) — a supported pattern, realized by
+>    separate PRs; slices are not issues, so nothing native can represent
+>    them. **Confirm a merged PR for each slice.** All slices confirmed →
+>    E4 + E5 as the `N == N` row. **Any slice unrealized → halt**: do not run
+>    E4, do not close.
 > 3. **No children were ever filed / no task list at all** — the epic has not
 >    been decomposed. → **halt** and report that decomposition comes first.
 >    Never invent children ("don't decide the user's issues for them").
 >
 > **Positive-evidence rule — never close an epic without evidence its work
-> merged.** That evidence is closed `#N` children referencing the epic (case 1)
-> or a confirmed merged PR per inline slice (case 2). Zero children is an
-> *absence* of evidence and by itself licenses **nothing**. Do not look to E4
-> for this: E4 verifies that existing behaviour didn't regress, and a
-> never-started epic passes it trivially — the suite is green because nothing
-> changed, and there is no behaviour to exercise end-to-end because the feature
-> doesn't exist. A verification gate cannot tell "the feature works" from "the
-> feature was never built"; only positive merge evidence can.
+> merged.** That evidence is native children all closed (`total == completed`,
+> `total > 0`) or a confirmed merged PR per inline slice (case 2). Zero
+> children is an *absence* of evidence and by itself licenses **nothing**. Do
+> not look to E4 for this: E4 verifies that existing behaviour didn't regress,
+> and a never-started epic passes it trivially — the suite is green because
+> nothing changed, and there is no behaviour to exercise end-to-end because the
+> feature doesn't exist. A verification gate cannot tell "the feature works"
+> from "the feature was never built"; only positive merge evidence can.
 >
 > **The halt (cases 2 and 3).** Mirror E1b's halt: post a summary comment on the
 > epic naming which slices are unrealized (case 2) or that no children are filed
 > and decomposition is needed (case 3), build nothing, leave the epic **OPEN**,
-> and stop. Re-running after a human files the children — or after the missing
+> and stop. Re-running after a human files the children (as native sub-issues —
+> new epics declare parenthood natively from the start) — or after the missing
 > slices' PRs merge — resumes the flow normally.
 
 ### E1b. Readiness pre-flight — gate ALL children before building anything
@@ -662,10 +716,11 @@ state is legible at a glance. Then:
 
 - **All children merged** → proceed to **E4** (holistic verification) and **E5**
   (close the epic). A re-run that finds **zero open children** does no child work
-  — but it goes to E4 + E5 **only** once E1's classification confirms the
-  children were filed and merged (case 1), or every inline slice's PR is
-  confirmed merged (case 2). Zero children on its own is never the licence;
-  cases 2-unrealized and 3 halt there instead.
+  — but it goes to E4 + E5 **only** once E1 confirms the children were filed and
+  merged (the table's `total == completed > 0` row — native children all
+  closed), or every inline slice's PR is confirmed merged (case 2). Zero
+  children on its own is never the licence; cases 2-unrealized and 3 halt
+  there instead.
 - **Some escalated/parked** → the epic stays **open**; re-running after the human
   resolves an escalation (the decision lands in the child's comment thread, which
   the implement step re-reads) resumes the parked dependents and any remaining

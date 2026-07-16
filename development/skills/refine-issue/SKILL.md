@@ -30,9 +30,17 @@ specified, and a durable machine-readable `story-spec/v1` block rides along.
 print `/development:refine-issue <issue-number|url>` and stop.
 
 **Epic or single issue? (#580)** First classify the target
-(`gh issue view <N> --json labels,body`): it is an **epic** when its body holds a
-task list of child issues (`- [ ] #N`) or it carries the `epic` label. An epic →
-the **Epic walk** below; anything else → the single-issue flow (Steps 0–7).
+(`gh issue view <N> --json labels,body`): it is an **epic** when it has
+**native sub-issues** (the resolve-issue shared reader,
+`read-sub-issues.zsh --repo "$REPO" --epic <N>`, reports `summary.total > 0` —
+the authoritative signal, #802), when it carries the `epic` label, or when its
+body holds a task list of child issues (`- [ ] #N` — the un-backfilled shape).
+A **failed** reader call (nonzero exit) is a classification failure — report
+it and stop; never fall back to the label/task-list signals as if the native
+signal were checked and absent (a native-only epic would misclassify as a
+single issue, and you'd refine the epic body itself — which the guardrails
+forbid). An epic → the **Epic walk** below; anything else → the single-issue
+flow (Steps 0–7).
 
 ## Epic walk — refine every needs-refinement child (#580)
 
@@ -41,16 +49,38 @@ When pointed at an epic, you don't refine the epic itself — you **walk its
 story-readiness epic pre-flight (#559) can park several children at once, and
 this is the guided pass that clears them.
 
-1. **Enumerate the refinable children** with the enumerator (it parses the epic's
-   task-list children — not every `#N` mention — and keeps the **open** ones
-   carrying `needs-refinement`, in body order):
+1. **Enumerate the refinable children** with the enumerator (it reads the
+   epic's **native sub-issues** through the shared reader — the #802 contract;
+   the body's markdown task list is only the human-readable view — and keeps
+   the **open** ones carrying `needs-refinement`, in sub-issue order):
 
    ```bash
    "<skill-base-dir>/scripts/list-refinement-children.zsh" --repo "$REPO" --epic <N>
    ```
 
-   **No children returned** → tell the human the epic has no `needs-refinement`
-   children to refine, and stop.
+   **Branch on the exit code, not just the output.** A **nonzero** exit (3:
+   gh/jq/reader failed) is an enumeration **failure** — report it and stop
+   *without* claiming the epic has no refinable children; an empty result is
+   only meaningful on exit 0.
+
+   **Exit 0 with no children returned** → classify the zero before concluding
+   (#798's lesson — an un-backfilled epic and a nothing-to-refine epic
+   enumerate identically). Read
+   `read-sub-issues.zsh --repo "$REPO" --epic <N>`: when `summary.total == 0`
+   **and** the body still holds `- [ ] #N` task-list lines, the epic is
+   **un-backfilled** — its `needs-refinement` children are invisible to the
+   native enumerator. Run resolve-issue's
+   `backfill-sub-issues.zsh --repo "$REPO" --epic <N>` (`--dry-run` first and
+   vet the plan, per resolve-issue E1's hazard note — context refs are not
+   children), then **gate on its outcome exactly as E1 does**: re-enumerate
+   only after the backfill exits 0 with every markdown child accounted for in
+   `added`/`already_present` and `skipped_cross_repo` empty. On exit 5
+   (partial) or 1, or with cross-repo leftovers, report the **backfill
+   failure** to the human, naming the unattached children — never the
+   "no children to refine" terminal, which a failed backfill would satisfy
+   vacuously — and stop. Only when a *clean* backfill's re-enumeration is
+   still empty tell the human the epic has no `needs-refinement` children to
+   refine, and stop.
 
 2. **Walk each child in turn** through the **single-issue flow** (Steps 0–7) —
    reuse it as written, one child fully before the next. A child either reaches
