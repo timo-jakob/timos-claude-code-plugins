@@ -109,6 +109,43 @@ plan() {  # $1 = languages json ; rest = extra flags
   [ "$(echo "$output" | jq -r .repo_type)" = "java" ]
 }
 
+# ---- claude-plugin fallback repo_type (#809): a plugin repo detects no
+# language, so is_claude_plugin selects the plugin panel — but ONLY as a
+# fallback: a language always wins, and ambiguity is never defused by it.
+
+@test "plan: #809 no language + is_claude_plugin maps to the plugin panel" {
+  plan '{"languages":[],"is_claude_plugin":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-claude-plugin:review" ]
+}
+
+@test "plan: #809 a language always wins over the plugin fallback (no regression)" {
+  plan '{"languages":["python"],"is_claude_plugin":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "python" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-python:review" ]
+}
+
+@test "plan: #809 no language and is_claude_plugin false stays a typed error" {
+  plan '{"languages":[],"is_claude_plugin":false}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+}
+
+@test "plan: #809 absent is_claude_plugin key defaults to false, no crash" {
+  # an older detect-stack that omits the key must fall through cleanly
+  plan '{"languages":[]}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+}
+
+@test "plan: #809 the plugin fallback does not defuse language ambiguity" {
+  plan '{"languages":["python","java"],"is_claude_plugin":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+}
+
 # ---- scope-findings: findings outside the story's diff do not appear
 
 @test "scope-findings: drops findings in untouched files, keeps in-diff ones" {
