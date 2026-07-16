@@ -886,6 +886,15 @@ fields:
 language may extend the enum with its own dimension the same way; the core five
 never change meaning.
 
+The claude-plugin panel (`development-claude-plugin:review`, the fallback
+`repo_type` for repos that detect no language — epic #810) extends the enum the
+same way: `prose_logic` (`claude-plugin-prose-logic`), `contract`
+(`claude-plugin-contract-integrity`), `script_quality`
+(`claude-plugin-script-reviewer`), and `manifest` (`claude-plugin-manifest-check`)
+are its extension, while `tests` **reuses** the core dimension and its
+`*-test-reviewer` convention (`claude-plugin-test-reviewer`) — five claude-plugin
+dimensions in total.
+
 ### Aggregation (per round)
 
 Each review skill's synthesis step concatenates every agent's JSON array into a
