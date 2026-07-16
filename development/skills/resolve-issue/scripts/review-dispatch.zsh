@@ -19,8 +19,12 @@
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, round, base, findings_path, changed_files[] }
-#       repo_type ∈ {swift, python, java}; review_skill is the /development-<lang>:review
-#       skill the orchestrator invokes, passing changed_files as the review scope.
+#       repo_type ∈ {swift, python, java, claude-plugin}; review_skill is the
+#       review skill the orchestrator invokes (development-<repo_type>:review),
+#       passing changed_files as the review scope. claude-plugin is a FALLBACK
+#       repo_type (#809): selected only when no supported language matched and
+#       detect-stack reports is_claude_plugin — a language always wins, and the
+#       fallback never participates in the ambiguity tiebreak.
 #       The panel writes its aggregate findings JSON (issue #558 schema) to
 #       findings_path. On an unsupported or ambiguous repo type, print a typed
 #       error object and exit 3 (see Exit codes).
@@ -34,7 +38,8 @@
 #
 # Seams (for tests / non-PATH installs):
 #   DETECT_STACK_BIN  overrides the detect-stack.sh binary (must emit the same
-#                     JSON, at least the `.languages` array).
+#                     JSON, at least the `.languages` array; `.is_claude_plugin`
+#                     is read with a false default when absent).
 #   GIT_BIN           overrides the `git` binary.
 #
 # Exit codes:
@@ -65,13 +70,13 @@ _changed_files() {
   } | sed -E 's#^\./##' | sort -u | sed '/^$/d'
 }
 
-# --- detected languages (JSON array) via the reused detection logic ---------
-_languages_json() {
+# --- full detection JSON via the reused detection logic ---------------------
+_detect_json() {
   local repo="$1" out
   if ! out=$( cd "$repo" && "$detect_bin" 2>/dev/null ); then
     print -u2 -- "review-dispatch: detect-stack failed for $repo"; return 1
   fi
-  print -r -- "$out" | jq -c '.languages // []' 2>/dev/null || {
+  print -r -- "$out" | jq -c . 2>/dev/null || {
     print -u2 -- "review-dispatch: could not parse detect-stack output"; return 1
   }
 }
@@ -98,7 +103,11 @@ cmd_plan() {
   [[ -n "$repo" ]] || die_usage "plan: --repo is required"
   [[ -d "$repo" ]] || { print -u2 -- "plan: --repo not a directory: $repo"; exit 1 }
 
-  local langs_json; langs_json=$(_languages_json "$repo") || exit 1
+  local detect_json; detect_json=$(_detect_json "$repo") || exit 1
+  local langs_json; langs_json=$(print -r -- "$detect_json" | jq -c '.languages // []')
+  # `// false` default: an older detect-stack without the key falls through to
+  # the clean typed error below rather than crashing (#809).
+  local is_plugin; is_plugin=$(print -r -- "$detect_json" | jq -r '.is_claude_plugin // false')
 
   # supported review languages present, preserving nothing but membership
   local -a supported
@@ -111,10 +120,18 @@ cmd_plan() {
 
   local repo_type=""
   if (( ${#supported} == 0 )); then
-    jq -nc --argjson langs "$langs_json" \
-      '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java"],
-        detail:"no review panel exists for the detected languages"}'
-    exit 3
+    # Fallback ONLY (#809): a claude-plugin repo detects no language — its
+    # content is prose, agent definitions, zsh scripts, and JSON manifests.
+    # A detected language always wins, and this never joins the ambiguity
+    # tiebreak above it.
+    if [[ "$is_plugin" == "true" ]]; then
+      repo_type="claude-plugin"
+    else
+      jq -nc --argjson langs "$langs_json" \
+        '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java"],
+          detail:"no review panel exists for the detected languages"}'
+      exit 3
+    fi
   elif (( ${#supported} == 1 )); then
     repo_type="${supported[1]}"
   else

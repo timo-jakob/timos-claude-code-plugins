@@ -375,8 +375,10 @@ WARNING)`). It ties the pieces together and you provide three hooks for the
 model-driven steps:
 
 - **`--review-cmd`** — run the diff-scoped review panel for this round: use the
-  dispatch plan from `review-dispatch.zsh` (§#560) to pick `development-<lang>:review`,
-  invoke it scoped to `$REVIEW_SCOPE_FILE`, and write the aggregate findings JSON
+  dispatch plan from `review-dispatch.zsh` (§#560) and invoke the skill its
+  descriptor names in `review_skill` (a language panel, or
+  `development-claude-plugin:review` for a plugin repo — #809), scoped to
+  `$REVIEW_SCOPE_FILE`, and write the aggregate findings JSON
   (the #558 schema) to `$REVIEW_FINDINGS`.
 - **`--fix-cmd`** — read `$REVIEW_BLOCKERS` (the consolidated Critical+High
   items) and implement the fixes, exactly as step 2 implements — Low
