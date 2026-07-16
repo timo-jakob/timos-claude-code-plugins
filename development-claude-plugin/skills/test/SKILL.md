@@ -158,14 +158,25 @@ Inputs:
 Do this:
 1. Snapshot the clone's clean state: `git -C <CLONE> rev-parse HEAD` and
    `git -C <CLONE> status --porcelain`.
-2. Launch the child via the wrapper (include `--gh-repo <GH_REPO_SLUG>` only
-   when the slug is non-empty, so gh-based gathers resolve the real repo):
+2. Launch the child DETACHED via the wrapper (include `--gh-repo <GH_REPO_SLUG>`
+   only when the slug is non-empty, so gh-based gathers resolve the real repo):
      <REPO_ROOT>/development-claude-plugin/skills/test/scripts/run-headless.zsh \
+       --detach \
        --cwd <CLONE> --out <OUT> --plugins "<PLUGINS_CSV>" \
        --gh-repo "<GH_REPO_SLUG>" \
        --permission-mode <PERMISSION_MODE> --prompt "<TASK>"
-   Capture its exit code. If it is non-zero, the verdict is FAIL unless the task
-   was *expected* to exit non-zero.
+   This returns immediately, printing `exit_marker=<OUT>.exit`. NEVER launch the
+   wrapper as a harness background task (`run_in_background: true`) and NEVER
+   rely on a foreground call finishing: a real child can run past the 10-minute
+   foreground cap, and a background task is killed the instant your turn ends —
+   SIGTERM-ing the child mid-run (#811). `--detach` is the only launch mode that
+   survives your turn boundaries.
+2b. Wait for the marker file with a Monitor until-loop (generous timeout — a
+   full panel run takes 10–20 minutes):
+     until [ -f "<OUT>.exit" ]; do sleep 10; done; echo "child_exit=$(cat <OUT>.exit)"
+   When the marker appears, read the child's exit code from it. If it is
+   non-zero, the verdict is FAIL unless the task was *expected* to exit
+   non-zero. (`<OUT>.log` holds the wrapper's stderr banner if you need it.)
 3. Parse the transcript <OUT> (newline-delimited JSON, one event per line).
    Extract: which skills/slash-commands fired, which subagents/agents the child
    spawned (Task tool uses), which tools it used, the final `result` text, and
@@ -188,6 +199,12 @@ Do this:
    mismatch: <if FAIL, the specific way reality diverged from the expectation; else "n/a">
 ```
 
+> **Waiting on the judge (#811):** the judge's tasks and Monitors are
+> context-local — their ids are NOT addressable from this session, so never
+> try `TaskOutput` on a task id the judge mentions. Wait for the judge
+> subagent itself (its task notification); if it stopped without a verdict,
+> `SendMessage` it to resume — the detached child keeps running either way.
+
 ## Step 6 — Surface the verdict and clean up
 
 Show the subagent's verdict block verbatim to the user, then add a one-line
@@ -195,7 +212,7 @@ interpretation (what to do next: re-run with a different `--task`, file a findin
 etc.). Finally remove the temp artifacts:
 
 ```bash
-rm -rf "$(dirname "$CLONE")" "$OUT"
+rm -rf "$(dirname "$CLONE")" "$OUT" "$OUT.exit" "$OUT.log"
 ```
 
 If the subagent could not launch the child at all (the undocumented
