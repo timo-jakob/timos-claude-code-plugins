@@ -109,7 +109,8 @@ These are operator errors, not PR problems.
 
 ## Hotfix special case
 
-If the PR title starts with `hotfix:` / `hotfix(...):`, post
+Read the PR title live (`gh pr view "$PR_NUMBER" --json title`); if it
+starts with `hotfix:` / `hotfix(...):`, post
 `REQUEST_CHANGES` immediately: hotfixes are emergencies and the
 confidence model is not calibrated for them — a human makes the merge
 call. Standard JSON block with `"type_detected": "hotfix"`,
@@ -147,8 +148,10 @@ pipeline already ran tests + tool verification in the worktree.
    the toolchain is present — a `swift build` smoke (SwiftPM) to
    confirm the tree still compiles. LSP cross-reference lookups for
    any public symbol the diff touches.
-6. **Linked issue (for `feat:` only)**: read the `Closes #N` issue and
-   judge whether the diff visibly addresses the story.
+6. **Linked issue (for `feat:` only)**: read the linked issue (any
+   GitHub closing keyword in the body — `Closes`/`Fixes`/`Resolves
+   #N` and case/tense variants) and judge whether the diff visibly
+   addresses the story.
 7. **Test-quality detection** (XCTest): `XCTAssertTrue(true)`-style
    filler, assertions only on stub/mock returns, tests that stub the
    unit under test, names promising behaviour the assertions don't
@@ -191,7 +194,35 @@ pipeline already ran tests + tool verification in the worktree.
     risks (with dimensions) + calibration notes, AND the hidden
     HTML-comment JSON block (schema below). Every JSON finding has a
     prose counterpart; the JSON is the contract.
-13. **Post or dry-run.** `DRY_RUN == "true"` → print the body to
+13. **Post or dry-run.** **Live-state verification for
+    metadata-grounded findings (#788):** before the review is posted
+    or printed (dry-run included), if any finding contributing to a
+    non-`APPROVE` verdict (`REQUEST_CHANGES` or `COMMENT`) rests on PR
+    **metadata** — the body, title, or labels, as opposed to code
+    findings from the diff — re-fetch the live PR object (`gh pr view
+    "$PR_NUMBER" --json title,body,labels`) and confirm **every** such
+    finding against that fresh read; the step-2 snapshot may be stale
+    or a bad fetch (a stale body read once produced a false "duplicate
+    body" `REQUEST_CHANGES` that cost a review round-trip). If the
+    successful re-fetch contradicts the earlier read, **live state
+    governs** — drop or amend the finding; when the corrected metadata
+    feeds an earlier step (type detection, the linked-issue lookup, a
+    baseline criterion), re-run that step and everything downstream
+    against the live values; then re-derive the verdict — never an
+    `APPROVE` from the calibration mapping alone.
+    Live state governs only when the re-fetch **succeeds**: on failure
+    retry once with the user's stored auth for this read-only call
+    (`env -u GH_TOKEN gh pr view …` — a per-invocation unset, so the
+    App token stays in your environment for the post; this is step 1
+    of the #654 fallback, whose canned `approver_permission` finding
+    applies only to an actual 403, not to network/rate-limit
+    failures); if it still fails, treat it as a tool
+    failure — keep the derived non-`APPROVE` verdict, record the
+    failure as a finding, keep the metadata finding marked
+    unverified, and never `APPROVE` on a failed read. (The
+    hotfix special case is exempt — its title read is already live at
+    post time.) Then:
+    `DRY_RUN == "true"` → print the body to
     stdout and exit 0; the calling skill displays it. Otherwise post
     with the App token:
 

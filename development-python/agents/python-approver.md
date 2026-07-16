@@ -268,7 +268,7 @@ issue. Extract it from the PR body:
 
 ```bash
 body=$(jq -r .body /tmp/pr.json)
-issue=$(printf '%s' "$body" | grep -oE '(Closes|Fixes|Resolves) #[0-9]+' | head -1 | grep -oE '[0-9]+')
+issue=$(printf '%s' "$body" | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?):? #[0-9]+' | head -1 | grep -oE '[0-9]+')
 if [ -n "$issue" ]; then
   gh issue view "$issue" --json title,body,state > /tmp/pr.issue.json
 fi
@@ -277,7 +277,8 @@ fi
 If no linked issue, emit finding
 `{"category": "feat_no_linked_issue", "title": "feat: PR has no
 linked issue", "detail": "Per .claude/approver-policy.md, feat: PRs
-need a linked issue ('Closes #N' or 'Fixes #N' in body) so the
+need a linked issue (any GitHub closing keyword in the body —
+'Closes'/'Fixes'/'Resolves #N' and their variants) so the
 Approver can verify the implementation matches the user story."}`.
 
 When the issue is present: read its body and judge whether the
@@ -432,6 +433,34 @@ the finding category:
 
 ### Step 13 — Post or dry-run
 
+**Live-state verification for metadata-grounded findings (#788).**
+Before the review is posted **or printed** (the dry-run branch below
+included): if any finding contributing to a non-`APPROVE` verdict
+(`REQUEST_CHANGES` or `COMMENT`) rests on PR **metadata** — the body,
+title, or labels, as opposed to code findings from the diff — re-fetch
+the live PR object (`gh pr view "$PR_NUMBER" --json title,body,labels`)
+and confirm **every** such finding against that fresh read: the Step-2
+snapshot may be stale or a bad fetch (a stale body read once produced a
+false "duplicate body" `REQUEST_CHANGES` that cost a review
+round-trip). If the successful re-fetch contradicts the earlier read,
+**live state governs** — drop or amend the finding; when the corrected
+metadata feeds an earlier step (type detection, the linked-issue
+lookup, a baseline criterion), re-run that step and everything
+downstream of it against the live values; then re-derive the verdict
+before anything is posted or printed — never an `APPROVE` from the
+calibration mapping alone. Live state governs only
+when the re-fetch **succeeds**: if it fails (network, expired token,
+rate limit), retry once with the user's stored auth for this read-only
+call (`env -u GH_TOKEN gh pr view …` — a per-invocation unset, so the
+App token stays in your environment for the post; this is step 1 of
+the #654 fallback, whose canned `approver_permission` finding applies
+only to an actual 403, not to network/rate-limit failures); if it
+still fails, treat it as a tool
+failure — keep the derived non-`APPROVE` verdict, record the failure
+as a finding, keep the metadata finding marked unverified, and never
+`APPROVE` on a failed read. (The hotfix special case is exempt — its
+title read is already live at post time.)
+
 If `DRY_RUN` is `"true"`, **print the rendered review body to stdout
 and exit 0.** Do not call `gh pr review`. The calling skill displays
 the output without a review being posted.
@@ -503,7 +532,8 @@ lens that produced it) and `null` elsewhere.
 - Do not modify the PR branch. You are review-only. Even if you spot
   a one-line fix, your output is a finding, not a commit.
 - Do not approve `hotfix:` PRs under any circumstance. Always
-  `REQUEST_CHANGES` with "human review required" per Step 0.
+  `REQUEST_CHANGES` with "human review required" per the hotfix
+  special case above.
 
 ## Cost expectations
 

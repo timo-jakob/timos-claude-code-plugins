@@ -58,6 +58,24 @@ For every PR the approve skill is invoked on:
 If type cannot be unambiguously determined, the Approver emits an
 "ambiguous type" finding and `REQUEST_CHANGES`.
 
+**Metadata claims are verified against live state before they block.**
+Before any non-`APPROVE` verdict (`REQUEST_CHANGES` or `COMMENT`) is
+posted or printed (dry-run included), **every** finding grounded in PR
+**metadata** — the body, title, or labels, as opposed to code findings
+from the diff — is re-verified: the Approver re-fetches the live PR
+object and confirms each such claim against that fresh read; an
+earlier fetch may be stale or wrong. When the successful re-fetch
+contradicts the earlier read, **live state governs**: the finding is
+dropped or amended; when the corrected metadata feeds an earlier step
+(type detection, the linked-issue lookup, a baseline criterion), that
+step and everything downstream re-runs against the live values; then
+the verdict is re-derived before anything is posted or printed — never
+an `APPROVE` from the calibration mapping alone. A failed re-fetch is a
+tool failure, never a contradiction — the finding stays (marked
+unverified) and no verdict is upgraded on a failed read. A stale
+metadata read must never cost a review round-trip. (The hotfix special
+case is exempt — its title read is already live at post time.)
+
 ---
 
 ## Type detection
@@ -190,7 +208,8 @@ below; apply core + overlay together.
 
 **Must-haves:**
 
-- A linked GitHub issue (`Closes #N` or `Fixes #N` in the body).
+- A linked GitHub issue (any GitHub closing keyword in the body —
+  `Closes`/`Fixes`/`Resolves #N` and their case/tense variants).
 - The implementation visibly addresses the user story from the issue
   body.
 - New code paths have **meaningful tests** per *Test
@@ -496,6 +515,7 @@ for this language — is listed in the overlay):
   "findings": [
     {
       "category": "test_quality | api_stability | coverage | risk | type_ambiguity | baseline | …",
+      "dimension": "bugs | security | performance | code_quality | tests | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation",
       "suggested_agent": "<an agent from the overlay's vocabulary> | null",
