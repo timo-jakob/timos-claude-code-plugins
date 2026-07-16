@@ -34,6 +34,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history: build-golden-798-target.zsh extracts its fixture from
+          # a historical commit (4202beb), which a shallow checkout lacks (#808).
+          fetch-depth: 0
       - name: Install test dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
