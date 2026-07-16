@@ -344,6 +344,9 @@ EOF
     grep -q "approver-policy: core" "$CORE"
     grep -q "approver-policy: overlay ($lang)" "$OVERLAY"
     grep -q "/development-$lang:approve" "$CORE"
+    # the #788 live-state metadata re-verification rule must survive renders
+    grep -q "live state governs" "$CORE"
+    grep -q "tool failure, never a contradiction" "$CORE"
     # concatenated single-file shape: core then overlay, no leftovers
     cat "$CORE" "$OVERLAY" > "$BATS_TEST_TMPDIR/policy-$lang.md"
     ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$BATS_TEST_TMPDIR/policy-$lang.md"

@@ -91,8 +91,9 @@ operator's summary.
    --collect-only` to confirm tests still collect, LSP cross-reference
    lookups for any public symbol the diff touches.
 
-6. **Linked issue (for `feat:` only).** Extracts `Closes #N` /
-   `Fixes #N` from the body and reads the issue. Judges whether the
+6. **Linked issue (for `feat:` only).** Extracts any GitHub closing
+   keyword (`Closes`/`Fixes`/`Resolves #N` and case/tense variants)
+   from the body and reads the issue. Judges whether the
    implementation in the diff visibly addresses the user story. This
    is the one moment of model-driven intent matching.
 
@@ -115,8 +116,13 @@ operator's summary.
    author does), no conflict markers in the diff, no bare TODO /
    FIXME without issue link, no new secrets, no unattested dep.
 
-10. **Risk register** — top-3 things that could still go wrong even
-    with everything green. Opus judgement, three is a cap not a floor.
+10. **Risk register — fed by the review dimensions (#449).** Walks
+    the five lenses of the `/development-python:review` panel — bugs,
+    security, performance, code quality, tests — one focused pass
+    each over the diff, and emits at most the top 3 risks overall,
+    each tagged with the `dimension` that produced it. Fable
+    judgement; three is a cap, not a floor — an empty lens
+    contributes nothing.
 
 11. **Confidence calibration** — start `HIGH`, apply policy
     adjustments. Verdict mapping:
@@ -129,7 +135,18 @@ operator's summary.
     findings + top risks + calibration notes, AND a hidden HTML-comment
     JSON block at the bottom (see *Output* below).
 
-13. **Post or dry-run.** If `DRY_RUN=true`, prints to stdout and
+13. **Post or dry-run.** Before the review is posted or printed
+    (dry-run included), every finding contributing to a non-`APPROVE`
+    verdict that rests on PR **metadata** (body, title, labels — as
+    opposed to code findings) is re-verified against a fresh fetch of
+    the live PR object; if the successful re-fetch contradicts the
+    earlier read, live state governs — the finding is dropped or
+    amended (re-running any earlier evaluation step the corrected
+    metadata feeds, and everything downstream of it) and the verdict
+    re-derived before anything is
+    posted. A
+    failed re-fetch is a tool failure, never a contradiction (#788).
+    Then: if `DRY_RUN=true`, prints to stdout and
     exits. Otherwise `gh pr review --approve | --request-changes |
     --comment --body-file <tmpfile>`. The App token in `GH_TOKEN`
     attributes the review to `claude-approver[bot]`.
@@ -230,6 +247,7 @@ Don't strip it; don't reformat it; don't substitute prose for it.
   "findings": [
     {
       "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy",
+      "dimension": "bugs | security | performance | code_quality | tests | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation citing the policy clause that drove this finding.",
       "suggested_agent": "python-coverage-improver | python-semgrep-triage | python-sonar-triage | null",
