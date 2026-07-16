@@ -18,6 +18,7 @@ setopt err_exit nounset pipefail
 #     --prompt "<task, e.g. /development:maintenance --dry-run --tool version_sync>" \
 #     [--gh-repo <owner/repo>]     # give the child GitHub context (see note below)
 #     [--permission-mode <mode>]   # default: bypassPermissions (see note below)
+#     [--detach]                   # detach the child; signal via <out>.exit (see note below)
 #
 # NOTE on --gh-repo: the clone's `origin` is a local filesystem path, so the
 # child's `gh` calls can't resolve a GitHub host and every gh-based gather
@@ -37,10 +38,22 @@ setopt err_exit nounset pipefail
 # because the harness always runs against a throwaway clone with --dry-run; the
 # blast radius is a disposable copy. Override with --permission-mode acceptEdits
 # plus your own allow-listing if you want a tighter run.
+#
+# NOTE on --detach (#811): a judge subagent can hold a foreground Bash call for
+# at most 10 minutes, and a harness *background* task is killed the moment the
+# subagent's turn ends — SIGTERM-ing a child claude mid-run. So for children
+# that outlive one turn, the script must own the detaching: with --detach it
+# relaunches itself under nohup, disowned, with all stdio off the caller's
+# descriptors, prints `detached_pid=` / `exit_marker=` / `wrapper_log=` on
+# stdout, and exits 0 immediately. When the child finishes, its exit code is
+# written to `<out>.exit` (removed first if a stale one exists) and the
+# foreground run's stderr banner lands in `<out>.log`. Callers wait on the
+# marker file (e.g. a Monitor until-loop), then read transcript + exit code.
 
 emulate -L zsh
 
 local cwd="" out="" plugins="" prompt="" permission_mode="bypassPermissions" gh_repo=""
+local detach=0
 
 while (( $# )); do
   case "$1" in
@@ -50,6 +63,7 @@ while (( $# )); do
     --prompt)          prompt="$2";          shift 2 ;;
     --gh-repo)         gh_repo="$2";         shift 2 ;;
     --permission-mode) permission_mode="$2"; shift 2 ;;
+    --detach)          detach=1;             shift   ;;
     *) print -u2 "run-headless.zsh: unknown argument: $1"; exit 2 ;;
   esac
 done
@@ -79,6 +93,29 @@ for d in ${(s/,/)plugins}; do
   [[ -d "$d" ]] || { print -u2 "run-headless.zsh: plugin dir does not exist: $d"; exit 2 }
   plugin_flags+=(--plugin-dir "$d")
 done
+
+# --- detach (#811) -----------------------------------------------------------
+# Relaunch self in foreground mode under nohup, disowned, stdio detached from
+# the caller, and record the foreground run's exit code in the marker file.
+# Validation above already ran, so a detached launch still fails fast on bad
+# arguments before anything forks.
+if (( detach )); then
+  local marker="$out.exit" wrapper_log="$out.log"
+  rm -f "$marker"
+  local -a fwd=(--cwd "$cwd" --out "$out" --plugins "$plugins" --prompt "$prompt"
+                --permission-mode "$permission_mode")
+  [[ -n "$gh_repo" ]] && fwd+=(--gh-repo "$gh_repo")
+  # One nohup'd shell owns both the foreground run AND the marker write, so the
+  # marker appears if and only if the child actually finished.
+  nohup zsh -c 'marker="$1"; shift; zsh "$@"; print -r -- $? > "$marker"' \
+    _ "$marker" "$0" "${fwd[@]}" < /dev/null > "$wrapper_log" 2>&1 &!
+  local pid=$!
+  print -u2 "run-headless.zsh: detached child launcher (pid $pid)"
+  print "detached_pid=$pid"
+  print "exit_marker=$marker"
+  print "wrapper_log=$wrapper_log"
+  exit 0
+fi
 
 # --- run -------------------------------------------------------------------
 print -u2 "run-headless.zsh: launching headless claude"
