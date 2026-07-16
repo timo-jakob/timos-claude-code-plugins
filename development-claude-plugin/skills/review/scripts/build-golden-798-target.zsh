@@ -39,7 +39,7 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
 
 local snapshot
 snapshot="$(git -C "$repo_root" show "${FIXTURE_COMMIT}:${FIXTURE_PATH}" 2>/dev/null)" \
-  || { print -u2 "error: cannot read ${FIXTURE_PATH} at ${FIXTURE_COMMIT} — wrong repo?"; exit 3; }
+  || { print -u2 "error: cannot read ${FIXTURE_PATH} at ${FIXTURE_COMMIT} — wrong repo, or a shallow clone missing the fixture commit (fetch full history)?"; exit 3; }
 
 # Guard the fixture's premise: the snapshot must still contain the defective
 # terminal case. If this ever fails, the fixture's known answer is gone and
