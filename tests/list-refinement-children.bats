@@ -1,10 +1,16 @@
 #!/usr/bin/env bats
 #
-# Behavioral tests for list-refinement-children.zsh (#580, epic #573) — the
-# enumerator epic-aware refine-issue uses to find an epic's children that still
-# need refinement. The contract: parse the epic body's task-list children (not
-# every #N mention), and keep the OPEN ones carrying `needs-refinement`, in body
-# order. `gh` is shadowed via PATH with a fake keyed on issue number.
+# Behavioral tests for list-refinement-children.zsh (#580, epic #573; source
+# swapped to native sub-issues by #802) — the enumerator epic-aware
+# refine-issue uses to find an epic's children that still need refinement. The
+# contract: read the epic's children from the shared sub-issues reader (the
+# markdown task list is never parsed here — fence/first-ref semantics are the
+# reader's and backfill's business), and keep the OPEN ones carrying
+# `needs-refinement`, in sub-issue order.
+#
+# The shared reader is stubbed via the SUBISSUES_BIN seam (canned reader JSON);
+# `gh` is shadowed via PATH with a fake keyed on issue number for the per-child
+# label lookups.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -12,136 +18,164 @@ setup() {
   STUB="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$STUB"
 
-  # Epic #500 body: a task list (#601 open+needs-refinement, #602 open no-label,
-  # #603 closed+needs-refinement, #604 open+needs-refinement) plus a NON-child
-  # cross-reference (#999) in prose that must be ignored.
-  cat > "$STUB/epic-body.txt" <<'EOF'
-This epic tracks the work. See also #999 for context (not a child).
-
-## Children
-- [ ] #601 — first child
-- [ ] #602 — second child
-- [x] #603 — done child
-- [ ] owner/repo#604 — fourth child
-
-Some trailing prose mentioning #999 again.
+  # Epic #500's native children: #601 open+needs-refinement, #602 open
+  # no-label, #603 closed+needs-refinement, #604 open+needs-refinement.
+  cat > "$STUB/reader-output.json" <<'EOF'
+{"epic":500,"summary":{"total":4,"completed":1},
+ "children":[{"number":601,"state":"OPEN","open":true},
+             {"number":602,"state":"OPEN","open":true},
+             {"number":603,"state":"CLOSED","open":false},
+             {"number":604,"state":"OPEN","open":true}],
+ "open_children":[601,602,604]}
 EOF
 
-  # Fake gh: `issue view <epic> --json body` returns the epic body; `issue view
-  # <n> --json state,labels` returns per-child metadata from env-like cases.
-  cat > "$STUB/gh" <<EOF
+  # Fake shared reader: serves the canned JSON (or fails when told to).
+  cat > "$STUB/read-sub-issues.zsh" <<EOF
+#!/usr/bin/env zsh
+[[ -f "$STUB/reader-fails" ]] && { print -u2 "reader: boom"; exit 1 }
+cat "$STUB/reader-output.json"
+EOF
+  chmod +x "$STUB/read-sub-issues.zsh"
+
+  # Fake gh: `issue view <n> --json labels` returns per-child labels.
+  cat > "$STUB/gh" <<'EOF'
 #!/usr/bin/env bash
-# args: issue view <N> --repo <r> --json <fields> [-q .body]
-num="\$3"
-if printf '%s' "\$*" | grep -q -- '--json body'; then
-  cat "$STUB/epic-body.txt"; exit 0
-fi
-case "\$num" in
-  601) echo '{"state":"OPEN","labels":[{"name":"needs-refinement"},{"name":"feat"}]}' ;;
-  602) echo '{"state":"OPEN","labels":[{"name":"feat"}]}' ;;
-  603) echo '{"state":"CLOSED","labels":[{"name":"needs-refinement"}]}' ;;
-  604) echo '{"state":"OPEN","labels":[{"name":"needs-refinement"}]}' ;;
-  *)   echo '{"state":"OPEN","labels":[]}' ;;
+num="$3"
+case "$num" in
+  601) echo '{"labels":[{"name":"needs-refinement"},{"name":"feat"}]}' ;;
+  602) echo '{"labels":[{"name":"feat"}]}' ;;
+  604) echo '{"labels":[{"name":"needs-refinement"}]}' ;;
+  *)   echo '{"labels":[]}' ;;
 esac
 exit 0
 EOF
   chmod +x "$STUB/gh"
 }
-run_list() { run env PATH="$STUB:$PATH" zsh "$S" "$@"; }
+run_list() {
+  run env PATH="$STUB:$PATH" SUBISSUES_BIN="$STUB/read-sub-issues.zsh" zsh "$S" "$@"
+}
 
-@test "lists only OPEN children carrying needs-refinement, in body order" {
+@test "lists only OPEN children carrying needs-refinement, in sub-issue order" {
   run_list --repo o/r --epic 500
   [ "$status" -eq 0 ]
-  # 601 (open+label) and 604 (open+label) qualify; 602 (no label), 603 (closed),
-  # and the non-child #999 do not.
+  # 601 (open+label) and 604 (open+label) qualify; 602 (no label) and 603
+  # (closed — never even label-checked, the reader already filtered it) do not.
   [ "$output" = "$(printf '601\n604')" ]
-}
-
-@test "the non-child cross-reference (#999 in prose) is never included" {
-  run_list --repo o/r --epic 500
-  [[ "$output" != *"999"* ]]
-}
-
-@test "an epic with no refinable children prints nothing (clean exit 0 — terminal case)" {
-  # rewrite the body so every listed child is a plain closed/no-label one
-  cat > "$STUB/epic-body.txt" <<'EOF'
-## Children
-- [x] #602 — merged
-EOF
-  run_list --repo o/r --epic 500
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
 }
 
 @test "closed children are excluded even when they carry needs-refinement" {
-  cat > "$STUB/epic-body.txt" <<'EOF'
-- [ ] #603 — closed but labelled
+  cat > "$STUB/reader-output.json" <<'EOF'
+{"epic":500,"summary":{"total":1,"completed":1},
+ "children":[{"number":603,"state":"CLOSED","open":false}],
+ "open_children":[]}
 EOF
   run_list --repo o/r --epic 500
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "regression: an epic-labelled body with ZERO checklist lines is a clean exit 0 (no children)" {
-  # prose-only body (children referenced only in prose / tracked elsewhere) —
-  # must not abort under pipefail; the terminal case is a clean empty exit 0.
-  cat > "$STUB/epic-body.txt" <<'EOF'
-This epic is tracked on the project board.
-See #601, #602, #604 for context.
+@test "an epic with no refinable children prints nothing (clean exit 0 — terminal case)" {
+  cat > "$STUB/reader-output.json" <<'EOF'
+{"epic":500,"summary":{"total":1,"completed":0},
+ "children":[{"number":602,"state":"OPEN","open":true}],
+ "open_children":[602]}
 EOF
   run_list --repo o/r --epic 500
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "regression: a checklist line inside a code fence is not parsed as a child" {
-  cat > "$STUB/epic-body.txt" <<'EOF'
-Here is how to write a task list:
-
-```
-- [ ] #601 example syntax
-```
-
-## Children
-- [ ] #604 — real child
+@test "an epic with ZERO native children (un-backfilled / never decomposed) is a clean empty exit 0" {
+  cat > "$STUB/reader-output.json" <<'EOF'
+{"epic":500,"summary":{"total":0,"completed":0},"children":[],"open_children":[]}
 EOF
   run_list --repo o/r --epic 500
   [ "$status" -eq 0 ]
-  # only the real (unfenced) #604 qualifies; the fenced #601 is ignored
-  [ "$output" = "604" ]
+  [ -z "$output" ]
 }
 
-@test "regression: only the FIRST #N on a checklist line is taken (a trailing dep ref is ignored)" {
-  cat > "$STUB/epic-body.txt" <<'EOF'
-- [ ] #604 — the child, which depends on #999
-EOF
-  run_list --repo o/r --epic 500
-  [ "$status" -eq 0 ]
-  [ "$output" = "604" ]        # 999 (a dependency ref) must not appear
-  [[ "$output" != *"999"* ]]
-}
-
-@test "regression: asterisk and plus bullet task-list items are recognised" {
-  cat > "$STUB/epic-body.txt" <<'EOF'
-* [ ] #601 — asterisk bullet
-+ [ ] #604 — plus bullet
-EOF
-  run_list --repo o/r --epic 500
-  [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '601\n604')" ]
-}
-
-@test "regression: a failed epic-body fetch is the documented runtime error (exit 3)" {
-  # a gh that fails the body fetch must surface exit 3, not a bare set -e abort
+@test "a child whose label fetch fails is skipped (with a stderr notice), not fatal" {
+  # gh fails for #601; #604 must still be listed
   cat > "$STUB/gh" <<'EOF'
 #!/usr/bin/env bash
-if printf '%s' "$*" | grep -q -- '--json body'; then echo "gh: 404" >&2; exit 1; fi
-echo '{"state":"OPEN","labels":[]}'
+num="$3"
+case "$num" in
+  601) echo "gh: 500" >&2; exit 1 ;;
+  604) echo '{"labels":[{"name":"needs-refinement"}]}' ;;
+  *)   echo '{"labels":[]}' ;;
+esac
+EOF
+  chmod +x "$STUB/gh"
+  run_list --repo o/r --epic 500
+  [ "$status" -eq 0 ]
+  # stdout carries only the qualifying child; the skip is noted on stderr
+  # (bats merges the streams into $output, so assert on lines)
+  [[ "$output" == *"skipping #601"* ]]
+  [ "$(echo "$output" | grep -v 'skipping')" = "604" ]
+}
+
+@test "EVERY label fetch failing is a systemic gh failure (exit 3), never a false 'nothing to refine'" {
+  cat > "$STUB/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh: auth required" >&2; exit 1
 EOF
   chmod +x "$STUB/gh"
   run_list --repo o/r --epic 500
   [ "$status" -eq 3 ]
-  [[ "$output" == *"failed to fetch epic"* ]]
+  [[ "$output" == *"every child's label fetch failed"* ]]
+}
+
+@test "a gh response missing the labels key skips that child without aborting the walk" {
+  cat > "$STUB/gh" <<'EOF'
+#!/usr/bin/env bash
+num="$3"
+case "$num" in
+  601) echo '{}' ;;
+  604) echo '{"labels":[{"name":"needs-refinement"}]}' ;;
+  *)   echo '{"labels":[]}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$STUB/gh"
+  run_list --repo o/r --epic 500
+  [ "$status" -eq 0 ]
+  [ "$output" = "604" ]
+}
+
+@test "the default SUBISSUES_BIN resolves to the real shared reader (the #802 cross-skill wiring)" {
+  # No SUBISSUES_BIN override: the script must find
+  # ../../resolve-issue/scripts/read-sub-issues.zsh relative to itself, and that
+  # real reader calls `gh api graphql` — served by the PATH stub below.
+  cat > "$STUB/gh" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
+  cat <<'JSON'
+{"data":{"repository":{"issue":{"number":500,
+  "subIssuesSummary":{"total":1,"completed":0},
+  "subIssues":{"nodes":[{"number":604,"state":"OPEN",
+    "repository":{"nameWithOwner":"o/r"}}]}}}}}
+JSON
+  exit 0
+fi
+echo '{"labels":[{"name":"needs-refinement"}]}'
+EOF
+  chmod +x "$STUB/gh"
+  run env PATH="$STUB:$PATH" zsh "$S" --repo o/r --epic 500
+  [ "$status" -eq 0 ]
+  [ "$output" = "604" ]
+}
+
+@test "regression: a failed reader run is the documented runtime error (exit 3)" {
+  touch "$STUB/reader-fails"
+  run_list --repo o/r --epic 500
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"failed to read sub-issues"* ]]
+}
+
+@test "a missing shared reader is the documented runtime error (exit 3)" {
+  run env PATH="$STUB:$PATH" SUBISSUES_BIN="$STUB/does-not-exist.zsh" zsh "$S" --repo o/r --epic 500
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"shared reader not found"* ]]
 }
 
 @test "missing --repo is a usage error (exit 2)" {
@@ -166,6 +200,12 @@ EOF
   run_list --epic 500 --repo
   [ "$status" -eq 2 ]
   [[ "$output" == *"--repo needs a value"* ]]
+}
+
+@test "a dangling --epic (no value) is a usage error (exit 2)" {
+  run_list --repo o/r --epic
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--epic needs a value"* ]]
 }
 
 @test "unknown arg is a usage error (exit 2)" {

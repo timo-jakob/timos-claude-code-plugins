@@ -1144,7 +1144,8 @@ nothing can enforce it, and it drifts. So the contract is:
 The helper (`read-dependencies.zsh --repo OWNER/NAME --issue N`) emits one JSON
 object: the issue's **transitive** open blockers (`blocked`, `open_blockers`),
 every distinct blocker reached with `state`/`open`/`depth` and a `kind` of
-`epic` (the `epic` label, tracked issues, or a task-list body) vs `issue` —
+`epic` (native sub-issues (#802), the `epic` label, tracked issues, or a
+task-list body) vs `issue` —
 the hook #587 uses to require a whole epic resolved before its dependent — and
 **cycles reported explicitly** as the paths that closed them. A CLOSED blocker
 is recorded but not recursed into: a met prerequisite's own history can't block
@@ -1173,6 +1174,55 @@ children plus the holistic E4 verification and the explicit E5 close, reused
 as written — and the dependent stays queued until the blocking epic is
 **closed**, not merely children-merged; autonomous runs still reject +
 escalate rather than auto-running the epic.
+
+## Epic→child model (#802)
+
+**GitHub-native sub-issues are the single source of truth for epic→child
+parenthood** — the same contract the dependency model above established for
+`blockedBy` (#583): declare it natively or it doesn't exist. An epic's markdown
+task list (`- [ ] #N`) stays in the body as the **human-readable view** — it
+renders, people read it — but it is never authoritative, exactly as prose
+dependencies stopped being after #583.
+
+- **Parenthood ≠ dependency — two relationships, two owners.** A native
+  sub-issue says a child is *part of* an epic; `blockedBy` says an issue
+  *waits for* something. They never substitute for each other: sequencing
+  between an epic's children is still declared as `blockedBy` edges and
+  enforced by the dependency precheck (#585), while membership — what E1
+  enumerates, what the terminal case counts — is read only from sub-issues.
+  #583's model is unchanged by this contract.
+- **Why native wins over markdown.** Markdown parsing cannot distinguish "no
+  children were ever filed" from "all children are closed" — both enumerate
+  zero, which is exactly how #798's terminal case closed a never-started epic.
+  `subIssuesSummary { total, completed }` answers it deterministically:
+  `total: 0` is *not decomposed* (halt), `completed < total` is *in progress*,
+  `completed == total > 0` is *genuinely done* (E4 → E5). And the reverse
+  lookup — which epic does this child belong to — is a single GraphQL query
+  (`Issue.parent`, GraphQL-only; the REST issue payload has no parent field)
+  instead of a scan over every epic's body.
+- **One shared reader.** Every parenthood consumer — resolve-issue's E1 (and
+  its step-0 epic classification), refine-issue's epic walk
+  (`list-refinement-children.zsh`, via its `SUBISSUES_BIN` seam) — reads
+  through `development/skills/resolve-issue/scripts/read-sub-issues.zsh`, so
+  enumeration semantics cannot drift between them. `--epic N` emits the native
+  children in sub-issue order plus `summary`; `--child N` emits the parent or
+  takes the **typed no-parent exit 3**. `GH_BIN` is the test seam; exits are
+  0 (result), 2 (usage), 3 (no parent, `--child` only), 1 (gh/GraphQL failure
+  or nonexistent issue).
+- **The backfill (one-time migration).**
+  `development/skills/resolve-issue/scripts/backfill-sub-issues.zsh --repo R
+  --epic N [--dry-run]` converts an existing epic's markdown task-list
+  children into native sub-issues — idempotent (already-attached children are
+  skipped; a second run is a no-op), dry-run-able, cross-repo refs reported
+  but never migrated. The migration hazard it exists for: a native-only reader
+  meeting an un-backfilled epic enumerates zero children and would look
+  never-decomposed — which is why E1's `total: 0` branch **never proceeds
+  as-is**: when the body still holds `#N` task-list lines it runs this
+  backfill (dry-run vetted) and, only on a clean fully-accounted run,
+  re-reads and continues; otherwise — partial/failed backfill, cross-repo
+  leftovers, or no task list at all — it **halts** rather than ever
+  concluding "done". New epics declare children natively from the start;
+  the backfill is for the pre-#802 stock.
 
 ## Story-spec contract (`story-spec/v1`, #574)
 

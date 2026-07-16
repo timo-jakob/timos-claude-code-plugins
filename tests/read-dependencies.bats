@@ -36,13 +36,18 @@ EOF
   chmod +x "$STUB"
 }
 
-# mk <num> <state> <labels-json> <trackedIssuesCount> <body> <blockers-json>
-# writes the raw GraphQL response fixture for one issue.
+# mk <num> <state> <labels-json> <trackedIssuesCount> <body> <blockers-json> [sub-total]
+# writes the raw GraphQL response fixture for one issue. subIssuesSummary is
+# ALWAYS present (default total 0) — the live API always sends it, and a
+# fixture omitting it would test the epic classifier against a shape
+# production never sees (null-coercion instead of {total: 0}).
 mk() {
   jq -n --argjson num "$1" --arg state "$2" --argjson labels "$3" \
         --argjson tracked "$4" --arg body "$5" --argjson blockers "$6" \
+        --argjson subtotal "${7:-0}" \
     '{data:{repository:{issue:{
         number:$num, state:$state, body:$body, trackedIssuesCount:$tracked,
+        subIssuesSummary:{total:$subtotal},
         labels:{nodes:($labels|map({name:.}))},
         blockedBy:{nodes:($blockers|map({number:.}))}}}}}' \
     > "$FIXTURE_DIR/issue-$1.json"
@@ -74,6 +79,18 @@ deps() {  # $1 = issue number ; rest = extra flags
 @test "usage: non-numeric --issue exits 2" {
   run zsh "$S" --repo owner/repo --issue abc
   [ "$status" -eq 2 ]
+}
+
+@test "usage: non-numeric --max-depth exits 2 before any traversal" {
+  run zsh "$S" --repo owner/repo --issue 5 --max-depth abc
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--max-depth must be a number"* ]]
+}
+
+@test "usage: a dangling value flag exits 2, not a nounset abort" {
+  run zsh "$S" --repo owner/repo --issue
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--issue needs a value"* ]]
 }
 
 # ---- the trivial and error base cases --------------------------------------
@@ -119,6 +136,24 @@ deps() {  # $1 = issue number ; rest = extra flags
   mk 20 OPEN '["epic"]' 0 "" '[]'
   deps 10
   [ "$(echo "$output" | jq -r '.blockers[0].kind')" = "epic" ]
+}
+
+@test "a blocker with native sub-issues is kind=epic (#802)" {
+  mk 10 OPEN '[]' 0 "" '[20]'
+  # native-only epic: no label, no tracked issues, no task-list body — only
+  # subIssuesSummary marks it (the post-#802 shape once markdown lists fade)
+  mk 20 OPEN '[]' 0 "" '[]' 3
+  deps 10
+  [ "$(echo "$output" | jq -r '.blockers[0].kind')" = "epic" ]
+}
+
+@test "a blocker with subIssuesSummary total 0 and no other epic marker is kind=issue" {
+  # the live API always sends subIssuesSummary — {total: 0} must classify as a
+  # plain issue (guards against a null-coercion rewrite of the #802 clause)
+  mk 10 OPEN '[]' 0 "" '[20]'
+  mk 20 OPEN '[]' 0 "" '[]' 0
+  deps 10
+  [ "$(echo "$output" | jq -r '.blockers[0].kind')" = "issue" ]
 }
 
 @test "a blocker with tracked issues is kind=epic" {
@@ -204,5 +239,7 @@ deps() {  # $1 = issue number ; rest = extra flags
   deps 10 --max-depth 2
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .truncated)" = "true" ]
-  [ "$(echo "$output" | jq '.blockers | length < 3')" = "true" ]
+  # traversal proceeds UP TO the cap, then stops: exactly the depth-1 and
+  # depth-2 blockers are recorded, never an empty set nor the depth-3 one
+  [ "$(echo "$output" | jq -c '[.blockers[].number]')" = '[11,12]' ]
 }

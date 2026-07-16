@@ -20,8 +20,9 @@
 #     "open_blockers": [numbers],   # the open ones, dedup'd, discovery order
 #     "blockers": [                 # every distinct blocker reached
 #       { "number": M, "state": "OPEN"|"CLOSED", "open": bool,
-#         "kind": "epic"|"issue",   # epic := `epic` label, tracked issues,
-#                                   #         or a task-list body (`- [ ] #N`)
+#         "kind": "epic"|"issue",   # epic := native sub-issues (#802), `epic`
+#                                   #         label, tracked issues, or a
+#                                   #         task-list body (`- [ ] #N`)
 #         "depth": 1.. }            # 1 = direct blocker of the named issue
 #     ],
 #     "cycles": [[a,b,a], ...],     # each cycle as the path that closed it
@@ -53,9 +54,9 @@ die_usage() { print -u2 -- "$1"; exit 2 }
 local repo="" issue="" max_depth=20
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --repo) repo="$2"; shift 2 ;;
-  --issue) issue="$2"; shift 2 ;;
-  --max-depth) max_depth="$2"; shift 2 ;;
+  --repo) (( $# >= 2 )) || die_usage "--repo needs a value"; repo="$2"; shift 2 ;;
+  --issue) (( $# >= 2 )) || die_usage "--issue needs a value"; issue="$2"; shift 2 ;;
+  --max-depth) (( $# >= 2 )) || die_usage "--max-depth needs a value"; max_depth="$2"; shift 2 ;;
   -h|--help)
     print -r -- "usage: read-dependencies.zsh --repo OWNER/NAME --issue N [--max-depth D]"; exit 0 ;;
   *) die_usage "unknown argument: $1" ;;
@@ -65,6 +66,7 @@ done
 [[ -n "$issue" ]] || die_usage "--issue N is required"
 [[ "$repo" == */* ]] || die_usage "--repo must be OWNER/NAME, got: $repo"
 [[ "$issue" == <-> ]] || die_usage "--issue must be a number, got: $issue"
+[[ "$max_depth" == <-> ]] || die_usage "--max-depth must be a number, got: $max_depth"
 local owner="${repo%%/*}" name="${repo#*/}"
 
 # One GraphQL round-trip per issue, memoized. Each node is normalized to
@@ -80,6 +82,7 @@ _fetch_node() {
       repository(owner:$owner,name:$name){
         issue(number:$number){
           number state body trackedIssuesCount
+          subIssuesSummary{total}
           labels(first:100){nodes{name}}
           blockedBy(first:100){nodes{number}}
         }
@@ -92,7 +95,8 @@ _fetch_node() {
   node=$(print -r -- "$raw" | jq -ce '
     .data.repository.issue
     | { number, state,
-        epic: (([.labels.nodes[].name] | index("epic") != null)
+        epic: ((.subIssuesSummary.total > 0)
+               or ([.labels.nodes[].name] | index("epic") != null)
                or (.trackedIssuesCount > 0)
                or ((.body // "") | test("(?m)^[[:space:]]*[-*][[:space:]]\\[[ xX]\\][[:space:]].*#[0-9]+"))),
         blocked_by: [.blockedBy.nodes[].number] }' 2>/dev/null) || {
