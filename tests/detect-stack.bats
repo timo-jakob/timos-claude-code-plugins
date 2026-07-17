@@ -494,3 +494,245 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index("mkdocs.yml")' <<<"$out")" = "null" ]
   [ "$(jq -r '.missing_artifacts | index("docs/index.md")' <<<"$out")" = "null" ]
 }
+
+# --- container + contract detection (issue #799) -----------------------------
+# Additive structural detection: named deployable images across the family's
+# blessed mechanisms, committed API contracts, and a complete/inconclusive
+# confidence flag. has_dockerfile keeps its exact prior semantics.
+
+@test "detect-stack #799: a Dockerfile emits a container with its path as evidence, has_dockerfile true" {
+  printf 'FROM alpine\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.containers | length' <<<"$out")" = "1" ]
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "dockerfile" ]
+  [ "$(jq -r '.containers[0].evidence' <<<"$out")" = "./Dockerfile" ]
+  [ "$(jq -r '.has_dockerfile' <<<"$out")" = "true" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "complete" ]
+}
+
+@test "detect-stack #799: a Containerfile is detected identically, has_dockerfile stays false" {
+  printf 'FROM alpine\n' > Containerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "containerfile" ]
+  [ "$(jq -r '.containers[0].evidence' <<<"$out")" = "./Containerfile" ]
+  [ "$(jq -r '.has_dockerfile' <<<"$out")" = "false" ]
+}
+
+@test "detect-stack #799: multiple Dockerfiles all emit, named by their directory" {
+  mkdir -p services/api services/worker
+  printf 'FROM x\n' > services/api/Dockerfile
+  printf 'FROM x\n' > services/worker/Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.containers[].name] | sort | join(",")' <<<"$out")" = "api,worker" ]
+  [ "$(jq -r 'all(.containers[]; .source=="dockerfile")' <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #799: docker-compose emits each service name; a repo with none emits no compose entries" {
+  printf 'services:\n  web:\n    image: nginx\n  db:\n    image: postgres\nvolumes:\n  data:\n' > docker-compose.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.containers[] | select(.source=="compose") | .name] | sort | join(",")' <<<"$out")" = "db,web" ]
+  # the volumes: key is not a service
+  [ "$(jq -r 'any(.containers[]; .name=="data")' <<<"$out")" = "false" ]
+}
+
+@test "detect-stack #799: bootBuildImage with NO Dockerfile emits a bootBuildImage container and has_dockerfile false" {
+  printf 'rootProject.name = "tick-client-snapper"\n' > settings.gradle.kts
+  printf 'plugins {\n  id("org.springframework.boot") version "3.2.0"\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "tick-client-snapper" ]
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "bootBuildImage" ]
+  [ "$(jq -r '.has_dockerfile' <<<"$out")" = "false" ]
+}
+
+@test "detect-stack #799: a Jib-configured build emits a jib-sourced container" {
+  printf 'rootProject.name = "jibby"\n' > settings.gradle.kts
+  printf 'plugins {\n  id("com.google.cloud.tools.jib") version "3.4.0"\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "jib" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "jibby" ]
+}
+
+@test "detect-stack #799: committed OpenAPI spec and .proto files are emitted as contracts; neither -> empty" {
+  mkdir -p proto
+  printf 'openapi: 3.0.0\n' > openapi.yaml
+  printf 'syntax="proto3";\n' > proto/orders.proto
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.contracts[].type] | sort | join(",")' <<<"$out")" = "openapi,proto" ]
+  [ "$(jq -r '.contracts[] | select(.type=="proto") | .evidence' <<<"$out")" = "proto/orders.proto" ]
+}
+
+@test "detect-stack #799: a repo with no contract files emits contracts: []" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.contracts' <<<"$out")" = "[]" ]
+}
+
+@test "detect-stack #799: a repo with no container evidence emits containers [] + detection_confidence complete" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.containers' <<<"$out")" = "[]" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "complete" ]
+}
+
+@test "detect-stack #799: unresolvable container evidence (build-push-action, no local mechanism) -> inconclusive, not []" {
+  mkdir -p .github/workflows
+  printf 'jobs:\n  build:\n    steps:\n      - uses: docker/build-push-action@v5\n' > .github/workflows/ci.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.containers' <<<"$out")" = "[]" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "inconclusive" ]
+}
+
+@test "detect-stack #799: a resolved Dockerfile alongside a build-push-action stays complete (the action builds it)" {
+  mkdir -p .github/workflows
+  printf 'FROM alpine\n' > Dockerfile
+  printf 'jobs:\n  build:\n    steps:\n      - uses: docker/build-push-action@v5\n' > .github/workflows/ci.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "complete" ]
+}
+
+@test "detect-stack #799: --containers overrides detection outright with source 'user override'" {
+  printf 'FROM alpine\n' > Dockerfile
+  out=$(bash "$DETECT" --containers "alpha,beta" 2>/dev/null)
+  [ "$(jq -r '[.containers[].name] | join(",")' <<<"$out")" = "alpha,beta" ]
+  [ "$(jq -r 'all(.containers[]; .source=="user override")' <<<"$out")" = "true" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "complete" ]
+}
+
+@test "detect-stack #799: the full output is still valid JSON with all pre-existing keys (additive contract)" {
+  printf 'FROM alpine\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  echo "$out" | jq -e . >/dev/null
+  for k in git_initialized has_github_remote languages has_dockerfile interfaces language_meta \
+           is_claude_plugin existing_artifacts missing_artifacts github_state containers \
+           detection_confidence contracts; do
+    [ "$(jq --arg k "$k" 'has($k)' <<<"$out")" = "true" ]
+  done
+}
+
+# --- #799 round-2: naming, all inconclusive triggers, override precedence ----
+
+@test "detect-stack #799: a root Dockerfile is named by the repo directory" {
+  printf 'FROM x\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "$(basename "$WORK")" ]
+}
+
+@test "detect-stack #799: a docker/Dockerfile is named by the repo directory, not 'docker'" {
+  mkdir -p docker; printf 'FROM x\n' > docker/Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "$(basename "$WORK")" ]
+}
+
+@test "detect-stack #799: a sub/docker/Dockerfile is named by the module dir (parent of docker/)" {
+  mkdir -p svc/docker; printf 'FROM x\n' > svc/docker/Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "svc" ]
+}
+
+@test "detect-stack #799: Helm Chart.yaml (unresolvable image ref) -> inconclusive" {
+  printf 'name: x\nversion: 0.1.0\n' > Chart.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.containers' <<<"$out")" = "[]" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "inconclusive" ]
+}
+
+@test "detect-stack #799: a PaaS/builder marker file (fly.toml) -> inconclusive" {
+  printf 'app = "x"\n' > fly.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "inconclusive" ]
+}
+
+@test "detect-stack #799: a Maven jib-maven-plugin pom.xml (unresolved by this family) -> inconclusive" {
+  printf '<project><build><plugins><plugin><artifactId>jib-maven-plugin</artifactId></plugin></plugins></build></project>\n' > pom.xml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.containers' <<<"$out")" = "[]" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "inconclusive" ]
+}
+
+@test "detect-stack #799: --containers forces complete even over otherwise-inconclusive evidence" {
+  mkdir -p .github/workflows
+  printf 'jobs:\n  b:\n    steps:\n      - uses: docker/build-push-action@v5\n' > .github/workflows/ci.yml
+  out=$(bash "$DETECT" --containers "alpha" 2>/dev/null)
+  [ "$(jq -r '[.containers[].name] | join(",")' <<<"$out")" = "alpha" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "complete" ]
+}
+
+@test "detect-stack #799: contracts are detected independently of the --containers override" {
+  printf 'openapi: 3.0.0\n' > openapi.yaml
+  out=$(bash "$DETECT" --containers "alpha" 2>/dev/null)
+  [ "$(jq -r '[.contracts[].type] | join(",")' <<<"$out")" = "openapi" ]
+}
+
+@test "detect-stack #799: --containers does not pathname-expand a glob field" {
+  touch aaa bbb
+  out=$(bash "$DETECT" --containers '*' 2>/dev/null)
+  [ "$(jq -r '[.containers[].name] | join(",")' <<<"$out")" = "*" ]
+}
+
+@test "detect-stack #799: compose service extraction is indent-agnostic and skips nested keys" {
+  printf 'services:\n    web:\n        build: .\n        ports:\n          - "80:80"\n    db:\n        image: postgres\n' > compose.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.containers[]|select(.source=="compose")|.name] | sort | join(",")' <<<"$out")" = "db,web" ]
+}
+
+@test "detect-stack #799: bootBuildImage without a settings file falls back to the repo dir name" {
+  printf 'plugins {\n  id("org.springframework.boot")\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "bootBuildImage" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "$(basename "$WORK")" ]
+}
+
+@test "detect-stack #799: an 'apply false' root aggregator is NOT a container; only the applied module is" {
+  printf 'rootProject.name = "myroot"\n' > settings.gradle.kts
+  printf 'plugins {\n  id("org.springframework.boot") version "3.2.0" apply false\n}\n' > build.gradle.kts
+  mkdir -p app; printf 'plugins {\n  id("org.springframework.boot")\n}\n' > app/build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.containers[].name] | join(",")' <<<"$out")" = "app" ]
+  [ "$(jq -r 'any(.containers[]; .name=="myroot")' <<<"$out")" = "false" ]
+}
+
+@test "detect-stack #799: a Spring Boot dependency coordinate (BOM use, no plugin) is NOT a container" {
+  printf 'dependencies {\n  implementation("org.springframework.boot:spring-boot-starter-web")\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.containers' <<<"$out")" = "[]" ]
+}
+
+# --- #799 round-3: Groovy plugin form, dedup, getenv fallback, apply(false) ---
+
+@test "detect-stack #799: the paren-less Groovy plugins-DSL form id 'org.springframework.boot' is detected" {
+  printf "rootProject.name = 'groovyapp'\n" > settings.gradle
+  printf "plugins {\n  id 'org.springframework.boot' version '3.2.0'\n}\n" > build.gradle
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "bootBuildImage" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "groovyapp" ]
+}
+
+@test "detect-stack #799: a repo with both ./Dockerfile and ./docker/Dockerfile dedupes to one container" {
+  mkdir -p docker
+  printf 'FROM x\n' > Dockerfile
+  printf 'FROM x\n' > docker/Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.containers[]|select(.source=="dockerfile")] | length' <<<"$out")" = "1" ]
+}
+
+@test "detect-stack #799: a non-literal rootProject.name (System.getenv) falls back to the repo dir name" {
+  printf 'rootProject.name = System.getenv("APP_NAME")\n' > settings.gradle.kts
+  printf 'plugins {\n  id("org.springframework.boot")\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "$(basename "$WORK")" ]
+}
+
+@test "detect-stack #799: an apply-false aggregator that also mentions bootBuildImage in subprojects{} is NOT a container" {
+  printf 'rootProject.name = "aggroot"\n' > settings.gradle.kts
+  printf 'plugins {\n  id("org.springframework.boot") version "3.2.0" apply false\n}\nsubprojects {\n  tasks.named("bootBuildImage") { }\n}\n' > build.gradle.kts
+  mkdir -p app; printf 'plugins {\n  id("org.springframework.boot")\n}\n' > app/build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.containers[].name] | join(",")' <<<"$out")" = "app" ]
+}
+
+@test "detect-stack #799: the Kotlin apply(false) method form is treated as not-applied" {
+  printf 'plugins {\n  id("org.springframework.boot").version("3.2.0").apply(false)\n}\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.containers' <<<"$out")" = "[]" ]
+}
