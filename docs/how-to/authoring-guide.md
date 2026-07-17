@@ -72,9 +72,10 @@ decisions. It's what you read on the sofa, not at the keyboard.
 
 ### Architecture (`docs/architecture/`)
 
-C4 architecture diagrams (Mermaid) live here — a specialized reference. Delivered
-by documentation epic 3/3 ([#746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/746));
-today it holds a placeholder.
+C4 architecture diagrams (Mermaid) live here — a specialized reference: a System
+Context and a Container diagram, seeded from the code and kept true by the
+pipeline. See [The C4 architecture docs](../explanation/c4-architecture-docs.md)
+for the why and [Amend a C4 diagram](amend-a-c4-diagram.md) for the how.
 
 ## Mechanics specific to this repo
 
