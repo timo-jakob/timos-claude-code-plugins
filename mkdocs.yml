@@ -101,3 +101,5 @@ nav:
       - The target-repo docs stack: explanation/target-repo-docs-stack.md
   - Architecture:
       - architecture/index.md
+      - System Context: architecture/c4-context.md
+      - Container Diagram: architecture/c4-container.md
