@@ -342,14 +342,53 @@ applies and run it:
   (plugin repos), `pytest` (Python — the whole suite, **not** `pytest
   tests/unit`), `./gradlew test` / `build` (Java/Gradle), etc.,
 - any repo-specific check named in `CLAUDE.md`,
-- **the docs build, when the user-docs step ran (#767)**: a docs page that
-  doesn't compile is a red gate, same as a failing test. Run the target repo's
-  own pinned toolchain — `pip install -r requirements-docs.txt` into a
-  venv/scratch environment (never the system Python), then
-  `mkdocs build --strict` at the repo root — so the PR-time `docs` check
-  (#766's gate) can't fail on something the local gate passed. When the docs
-  step no-oped (no plan / no machinery), there is nothing to build and the
-  gate is unchanged.
+- **the same-PR C4 currency check (#746 child (c), #792)**: if the change
+  altered the system's **structure**, `docs/architecture/c4-container.md` must be
+  revisited in this same PR. The trigger is **working-tree detection, not the
+  `elevated` risk gate** — `elevated` means security/auth/public-API/migrations/
+  concurrency, which is orthogonal to structure (an auth fix is `elevated` but
+  structurally neutral; a new service can score `normal`). Run detection on the
+  working tree (writing to a scratch path **outside** the repo, so `detect.json`
+  is never committed) and hand it to the comparator, which calls #790's parser for
+  the declared set and compares it to #799's detected set:
+
+  ```bash
+  # Actually skip on a detection failure — never run the comparator on a
+  # truncated/stale /tmp/detect.json.
+  if "<skill-base-dir>/../bootstrap/scripts/detect-stack.sh" > /tmp/detect.json; then
+    "<skill-base-dir>/scripts/check-c4-currency.zsh" --repo . --detect-json /tmp/detect.json
+  else
+    echo "detection failed — C4 check skipped; do NOT touch the diagram"
+  fi
+  #   0 + non-empty plan naming docs/architecture/c4-container.md → REVISIT it:
+  #       update the Container diagram to match the new structure, in THIS PR
+  #       (re-seed via bootstrap's seed-c4-diagrams.zsh, or edit by hand), then
+  #       re-run the docs build (below) so the strict gate proves it coherent.
+  #   0 + [] → no-op (neutral change, or detection inconclusive — the reason is
+  #       on stderr). Touch nothing under docs/architecture/.
+  #   1 → the repo has no docs/architecture/c4-container.md (hasn't adopted C4) —
+  #       a reported no-op, not a failure.
+  #   2 → usage error (fix the invocation).
+  #   3 → a HARD error — read stderr: the parser named the declared block → fix
+  #       docs/architecture/c4-container.md; otherwise the detection input is
+  #       bad (bad/wrong-shape detect.json, jq missing) → fix that, NOT the diagram.
+  ```
+
+  When the plan demanded a revisit, updating the page is a docs change that the
+  `mkdocs build --strict` bullet below must then gate (a page missing from nav, or
+  a broken link, fails it) — so **run the docs build after this check whenever it
+  demanded a revisit, even if the user-docs step (#767) no-oped**. Report which
+  path fired in the PR body (the page touched, or the no-op reason).
+- **the docs build, when the user-docs step ran (#767) OR the C4 check above
+  demanded a revisit (#792)** — and, either way, only when the repo **has the
+  docs machinery** (`mkdocs.yml` at the root, #766; a C4-only repo without it
+  can't be built, so note it and skip): a docs page that doesn't compile is a red
+  gate, same as a failing test. Run the target repo's own pinned toolchain —
+  `pip install -r requirements-docs.txt` into a venv/scratch environment (never
+  the system Python), then `mkdocs build --strict` at the repo root — so the
+  PR-time `docs` check (#766's gate) can't fail on something the local gate
+  passed. When **neither** trigger fired (no user-docs plan, and no C4 revisit),
+  or the machinery is absent, there is nothing to build and the gate is unchanged.
 
 **Run the full suite — unit *and* integration — not a unit-only subset.** A green
 local gate must mean the **whole** suite is green: a subset run (e.g. `pytest
