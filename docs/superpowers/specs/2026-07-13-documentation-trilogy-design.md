@@ -36,7 +36,7 @@ machine-readable architecture context (C4) in every repo it works on.
 | PDF/ePub toolchain | **pandoc**, chapter order derived from the mkdocs nav (single source of structure); pinned official `pandoc/latex` container in CI |
 | Publication | **GitHub Pages** (browsing) + **rolling `docs-latest` pre-release** (PDF/ePub assets) + **OCI image** to GHCR (`<repo>-docs`, nginx-alpine, offline/portable bundle) |
 | C4 tooling | **Mermaid C4 blocks in Markdown** under `docs/architecture/` — renders natively on GitHub and in MkDocs, zero repo tooling, Claude-authorable. Context + Container required; Component optional |
-| C4 lifecycle | **Bootstrap seeds + pipelines maintain**: resolve-issue updates C4 in the same PR (risk-gated), maintenance gains a `c4_drift` finding source, CLAUDE.md points agents at it |
+| C4 lifecycle | **Bootstrap seeds + pipelines maintain**: resolve-issue updates C4 in the same PR (working-tree-triggered — declared vs detected containers, #792; `elevated` was rejected), maintenance gains a `c4_drift` finding source, CLAUDE.md points agents at it |
 | Packaging | **Trilogy A → B → C**, native blocked-by chained; machinery is built in this repo (A) before bootstrap templates it for target repos (B); C renders through B's site |
 
 Constraints: no third-party dependencies in the plugins themselves (all doc
@@ -128,9 +128,15 @@ speculative NLP drift detection.
 - **(b)** Bootstrap seeding: a generator analyzes the repo (services,
   Dockerfiles, deps, contracts) and writes the initial Context + Container
   diagrams; State-D path included.
-- **(c)** resolve-issue same-PR C4 update, **risk-gated**: a story classified
-  `elevated` (architecture-touching) requires the PR to revisit
-  `docs/architecture/`.
+- **(c)** resolve-issue same-PR C4 update, **working-tree-triggered** (#792): at
+  step 3 (validate), a comparator (`check-c4-currency.zsh`) compares the
+  containers the diagram *declares* (via (a)'s parser) against what detection
+  *finds* in the working tree; when they differ under a `complete` detection the
+  change was structural and the PR must revisit `docs/architecture/c4-container.md`.
+  **`elevated` was rejected as the trigger**: it means security/auth/public-API/
+  migrations/concurrency — orthogonal to structure (an auth fix is `elevated` but
+  structurally neutral; a new service can score `normal`), so it would both
+  over- and under-fire. An `inconclusive` detection never demands a revisit.
 - **(d)** Maintenance `c4_drift` finding source: mechanical comparison of
   declared containers vs detected reality (Dockerfiles, compose services,
   main dependencies); findings dispatch like any other tool's.
