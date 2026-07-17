@@ -26,6 +26,7 @@ Read more: [Motivation & current gaps](docs/explanation/motivation.md) ·
 | **development-swift** | Full Swift maintenance tier — incl. Swift 6 migration |
 | **development-spring** | Topic plugin for Spring Boot 4+ (composes alongside development-java) |
 | **development-claude-plugin** | Topic plugin for repos that *are* Claude Code plugins — validators + test harness |
+| **development-docs** | Topic plugin for documentation (C4 architecture docs; marker `docs/architecture/`) — dispatch path only in v1 |
 
 Full command + agent inventory: **[docs/reference/plugins.md](docs/reference/plugins.md)**.
 

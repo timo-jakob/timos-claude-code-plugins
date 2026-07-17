@@ -247,6 +247,7 @@ manifest. Known topics:
 | --- | --- | --- |
 | `claude-plugin` | a `.claude-plugin/` dir holding `plugin.json` (an individual plugin) **or** `marketplace.json` (a marketplace of plugins, like this repo) | `gather-claude-plugin-findings.zsh` |
 | `spring` | an `org.springframework.boot` Gradle plugin **or** a `spring-boot-starter-*` dependency in `build.gradle.kts` (composes alongside `java` — only meaningful when Java is also detected) | `gather-spring-findings.zsh` |
+| `docs` | a `docs/architecture/` **directory** (the C4 architecture docs home — language-agnostic, so it composes with any language, or none) | `gather-docs-findings.zsh` |
 
 **Detecting a marker — use these exact recipes, don't improvise.** A
 *file-presence* marker (the `claude-plugin` dir) is robust to test with
@@ -266,10 +267,30 @@ test -f .claude-plugin/plugin.json || test -f .claude-plugin/marketplace.json
 grep -REl --include='build.gradle.kts' \
   'org\.springframework\.boot|spring-boot-starter-' . \
   2>/dev/null | grep -q .
+
+# docs marker (directory presence — robust):
+test -d docs/architecture
 ```
 
 The `spring` topic is **only meaningful when `java` is also detected** —
-require both before composing `development-spring`.
+require both before composing `development-spring`. The `docs` topic has no such
+language gate: `docs/architecture/` is language-agnostic (every bootstrapped repo
+can have one), so it composes with any detected language — or on its own. Its
+marker is the **directory**, not `docs/architecture/c4-container.md`: tying the
+whole topic to one tool's artifact would fail to dispatch a repo that has docs
+concerns but no container diagram yet, and any second docs tool would have to
+widen the marker retroactively. The narrow "is there a container diagram to
+compare?" check belongs one level down, in `c4_drift`'s own per-tool `configured`
+gate (#793) — `tooling_configured` answers "does this tool have something to look
+at?" while the marker answers "does this topic apply to this repo at all?".
+
+**`gather-docs-findings.zsh` ships in #793, not yet.** Until it lands, the
+partition below places `docs` in **`unsupported_topics`** on every run (marker
+present, no gather script) — the expected intermediate state: #801 stood up the
+`development-docs` dispatcher and this marker so #793 adds only the gather + the
+`c4_drift` tool, not a whole plugin. A repo whose only maintainable surface is
+`docs/architecture/` therefore has nothing to dispatch yet and halts with the
+usual "detected but not built yet" note, exactly as any other unsupported topic.
 
 For each known topic whose marker is present, check for its gather script:
 
@@ -760,7 +781,9 @@ differences:
   dispatch target; topic dispatchers don't branch on it.
 - `dispatch_mode`: `"primary"` if this topic == the declared `primary` (or no
   declaration); else `"auxiliary"` — same rule as language payloads (Phase 1).
-- `language_meta`: `{ "version": null, "manifests": ["<the topic marker file>"] }`.
+- `language_meta`: `{ "version": null, "manifests": ["<the topic marker>"] }` —
+  the marker path, whether a file (`claude-plugin`, `spring`) or a directory
+  (`docs` → `"docs/architecture"`).
 - `coverage`: `null` (the topic gather already emits `null`).
 - `tooling_configured` / `findings_by_tool`: straight from `findings-<topic>.json`.
 - `policy`, `worktree`: same as language payloads.

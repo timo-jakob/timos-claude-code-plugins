@@ -295,3 +295,27 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 > child session (tens of thousands of tokens). Narrow `--task` to one
 > tool + `--dry-run` for cheap iteration, or use the no-arg plumbing
 > smoke test to verify plugin loading first.
+
+## development-docs
+
+Topic plugin for **documentation** (marker: a `docs/architecture/` directory —
+language-agnostic, so it composes with any language or none). Like the other
+topic plugins, `/development:maintenance` dispatches to it *alongside* the
+language plugin when a repo matches.
+
+**What's built (v1):** the plugin skeleton and its maintenance **dispatch
+path** — nothing more. The dispatch table is deliberately empty: this plugin was
+stood up ([#801](https://github.com/timo-jakob/timos-claude-code-plugins/issues/801))
+so the `c4_drift` finding source (declared C4 containers vs detected reality) can
+land as *one tool* rather than a whole plugin. Its gather
+(`gather-docs-findings.zsh`) and first tool arrive in
+[#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793); until
+then the `docs` topic reports as an unsupported topic (marker present, no gather
+yet) and the dispatcher is not on the dispatch path. Future docs-site and
+docs-freshness tooling will live under this one topic.
+
+**Skills:**
+
+| Skill | Command | Description |
+| ------- | --------- | ------------- |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for documentation findings. Validates the v2 payload and returns a plan routing each finding group to a docs agent. Empty dispatch table in v1 — always an empty plan until [#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793) registers `c4_drift`. |

@@ -31,6 +31,12 @@ For the narrative overview of what each plugin is for, see the
 | `/development-claude-plugin:review` | Perform a comprehensive Claude-plugin review using 5 specialized parallel agents |
 | `/development-claude-plugin:test` | Test a Claude Code plugin's behaviour end-to-end against a real reference project. Spawns a fresh-context judge subagent that drives a *separate* headless `claude` session — with the LOCAL (uncommitted) plugins loaded via --plugin-dir — against an isolated clone of the target repo, then returns a structured PASS/FAIL verdict plus a transcript digest without flooding the authoring context. Use it to verify a skill/agent/command you just edited actually does what you intend, in any language the family supports. Pass `--target <path>`, `--task "<prompt>"`, and optionally `--expect "<...>"`. |
 
+## development-docs
+
+| Command | Description |
+| --- | --- |
+| `/development-docs:maintenance` | Documentation-topic maintenance dispatcher (from #793 onward; NOT on the dispatch path in v1 — the docs gather ships in #793). Receives a v2 maintenance payload (a file path in $ARGUMENTS) that /development:maintenance built from the docs topic gather, validates it, and returns a plan routing each finding group to a documentation agent. A TOPIC plugin: it composes alongside the language plugin, not instead of it, triggered by the docs/architecture/ marker. Its dispatch table is deliberately EMPTY in v1 — it owns nothing but the dispatch path; the c4_drift finding source (#793) adds the first tool. A single invocation returns the plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection or validation. See ARCHITECTURE.md for the schema and dispatch contract. |
+
 ## development-java
 
 | Command | Description |
