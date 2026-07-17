@@ -17,29 +17,32 @@ C4Context
     Person(developer, "Developer / Maintainer", "Invokes the plugins from Claude Code")
 
     Enterprise_Boundary(family, "Claude Code plugin family") {
-        System(plugins, "timos-claude-code-plugins", "Plugin marketplace: bootstrap, maintenance, review, resolve-issue, and open-pr pipelines")
-        System(maint_app, "Maintenance App", "GitHub App identity — mints writer tokens, authors bot PRs, arms auto-merge")
-        System(approver_app, "Approver App", "GitHub App identity — synthesis-layer PR review and approval")
+        System(plugins, "timos-claude-code-plugins", "Plugin marketplace: bootstrap, maintenance, review, resolve-issue, open-pr")
+        System(maint_app, "Maintenance App", "GitHub App — writer tokens, bot PRs, auto-merge")
+        System(approver_app, "Approver App", "GitHub App — PR review + approval")
     }
 
-    System_Ext(github, "GitHub", "Repositories, pull requests, Actions CI, branch protection")
-    System_Ext(sonar, "SonarCloud", "Static analysis and quality gate")
-    System_Ext(snyk, "Snyk", "Dependency and container CVE scanning")
-    System_Ext(target_repos, "Target repositories", "ai-doc-organizer, tick-client-snapper, … — the repos the pipelines bootstrap and maintain")
-    System_Ext(reporting, "Reporting repo (planned, #740)", "Telemetry hand-off to a Grafana dashboard")
+    System_Boundary(saas, "External services the pipelines read") {
+        System_Ext(github, "GitHub", "Repos, PRs, Actions CI")
+        System_Ext(sonar, "SonarCloud", "Static analysis / quality gate")
+        System_Ext(snyk, "Snyk", "Dependency + container CVEs")
+    }
 
-    Rel(developer, plugins, "Runs /development:* skills in Claude Code")
-    Rel(plugins, target_repos, "Bootstraps and maintains")
-    Rel(plugins, maint_app, "Mints writer tokens via")
-    Rel(plugins, approver_app, "Mints Approver token via /development-<lang>:approve")
-    Rel(maint_app, github, "Authors bot PRs, arms auto-merge on")
-    Rel(approver_app, github, "Posts reviews, approves PRs on")
-    Rel(plugins, github, "Reads CI status, opens PRs on")
-    Rel(plugins, sonar, "Reads findings from")
-    Rel(plugins, snyk, "Reads findings from")
-    Rel(plugins, reporting, "Emits telemetry to (planned, #740)")
+    System_Ext(target_repos, "Target repositories", "ai-doc-organizer, tick-client-snapper, … — bootstrapped + maintained")
+    System_Ext(reporting, "Reporting repo (planned, #740)", "Telemetry → Grafana")
 
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
+    Rel(developer, plugins, "runs /development:* skills")
+    Rel(plugins, target_repos, "bootstraps + maintains")
+    Rel(plugins, github, "opens PRs, reads CI")
+    Rel(plugins, sonar, "reads findings")
+    Rel(plugins, snyk, "reads findings")
+    Rel(plugins, reporting, "emits telemetry (planned)")
+    Rel(plugins, maint_app, "mints writer token via")
+    Rel(plugins, approver_app, "mints approver token via")
+    Rel(maint_app, github, "authors bot PRs on")
+    Rel(approver_app, github, "posts reviews on")
+
+    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
 ```
 
 The diagram renders natively on GitHub and through the MkDocs Material +

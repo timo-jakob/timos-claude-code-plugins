@@ -32,37 +32,42 @@ fire; a topic plugin composes alongside the language plugin for that run.
 C4Container
     title Container diagram — timos-claude-code-plugins
 
-    Person(developer, "Developer / Maintainer", "Invokes the plugins from Claude Code")
+    Person(developer, "Developer / Maintainer", "Invokes plugins from Claude Code")
 
     Container_Boundary(marketplace, "timos-claude-code-plugins marketplace") {
-        Container(development, "development", "Claude Code plugin", "Orchestrator plus core skills: bootstrap, maintenance dispatch, resolve-issue, open-pr, commit")
-        Container(development-python, "development-python", "Claude Code plugin", "Python maintenance and review pipeline")
-        Container(development-java, "development-java", "Claude Code plugin", "Java / Gradle maintenance and review pipeline")
-        Container(development-swift, "development-swift", "Claude Code plugin", "Swift maintenance and review pipeline")
-        Container(development-spring, "development-spring", "Claude Code plugin", "Spring Boot topic overlay, composes onto development-java")
-        Container(development-claude-plugin, "development-claude-plugin", "Claude Code plugin", "Plugin-repo topic overlay — reviews plugin repos like this one")
-        Container(development-docs, "development-docs", "Claude Code plugin", "C4 architecture-docs topic — owns the c4_drift finding source")
+        Container(development, "development", "Claude Code plugin", "Orchestrator + core skills: bootstrap, maintenance, resolve-issue, open-pr, commit")
+
+        Container_Boundary(langs, "Language plugins (dispatched per language)") {
+            Container(development-python, "development-python", "Claude Code plugin", "Python pipeline")
+            Container(development-java, "development-java", "Claude Code plugin", "Java / Gradle pipeline")
+            Container(development-swift, "development-swift", "Claude Code plugin", "Swift pipeline")
+        }
+
+        Container_Boundary(topics, "Topic plugins (dispatched by marker)") {
+            Container(development-spring, "development-spring", "Claude Code plugin", "Spring Boot overlay")
+            Container(development-claude-plugin, "development-claude-plugin", "Claude Code plugin", "Plugin-repo overlay")
+            Container(development-docs, "development-docs", "Claude Code plugin", "C4 docs topic — owns c4_drift")
+        }
     }
 
-    Container(tests, "tests", "Docker image", "bats-in-Docker test runner (tests/Dockerfile, #263) — the one container the detector finds here")
+    Container(tests, "tests", "Docker image", "bats-in-Docker test runner (tests/Dockerfile, #263)")
 
-    System_Ext(github, "GitHub", "Repositories, pull requests, Actions CI")
-    System_Ext(maint_app, "Maintenance App", "GitHub App identity — mints writer tokens, authors bot PRs")
+    System_Ext(github, "GitHub", "Repos, PRs, Actions CI")
+    System_Ext(maint_app, "Maintenance App", "GitHub App — writer tokens, bot PRs")
 
     Rel(developer, development, "Runs /development:* skills")
-    Rel(development, development-python, "Dispatches payload to (language)")
-    Rel(development, development-java, "Dispatches payload to (language)")
-    Rel(development, development-swift, "Dispatches payload to (language)")
-    Rel(development, development-spring, "Dispatches payload to (topic: Spring)")
-    Rel(development, development-claude-plugin, "Dispatches payload to (topic: plugin repo)")
-    Rel(development, development-docs, "Dispatches payload to (topic: docs/architecture/)")
-    Rel(development-spring, development-java, "Composes onto")
-    Rel(developer, tests, "Runs the bats suite in")
-    Rel(github, tests, "Builds + runs on CI")
-    Rel(development, maint_app, "Mints writer token via")
-    Rel(maint_app, github, "Authors PRs, arms auto-merge on")
+    Rel(development, development-python, "dispatches")
+    Rel(development, development-java, "dispatches")
+    Rel(development, development-swift, "dispatches")
+    Rel(development, development-spring, "dispatches")
+    Rel(development, development-claude-plugin, "dispatches")
+    Rel(development, development-docs, "dispatches")
+    Rel(development-spring, development-java, "composes onto")
+    Rel(development, maint_app, "mints token via")
+    Rel(maint_app, github, "authors PRs on")
+    Rel(github, tests, "builds + runs")
 
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
 ```
 
 The **declared container set** is the eight `Container(...)` entries above — the
