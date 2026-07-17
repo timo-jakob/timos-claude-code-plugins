@@ -24,6 +24,8 @@ separate.
 - [Write docs in a bootstrapped repo](how-to/write-docs-in-a-target-repo.md)
 - [Install and use the plugins](how-to/install-and-use-plugins.md)
 - [Adopt the Claude Approver on your repo](how-to/adopt-the-approver.md)
+- [Adopt C4 architecture docs on an existing repo](how-to/adopt-c4-architecture-docs.md)
+- [Amend a C4 diagram by hand](how-to/amend-a-c4-diagram.md)
 - [Maintain this repo (quarterly template refresh)](how-to/maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](how-to/contributing.md)
 - [Add support for a new language plugin](adding-a-language-plugin.md)
@@ -32,6 +34,7 @@ separate.
 
 - [Reference overview](reference/index.md)
 - [Plugin & command inventory](reference/plugins.md)
+- [`c4_drift` findings](reference/c4-drift-findings.md)
 - [Repo scripts](reference/repo-scripts.md)
 - [Requirements](reference/requirements.md)
 
@@ -41,6 +44,7 @@ separate.
 - [Motivation & current gaps](explanation/motivation.md)
 - [Why per-language plugins?](explanation/why-per-language-plugins.md)
 - [The Claude Approver — design summary](explanation/claude-approver.md)
+- [The C4 architecture docs](explanation/c4-architecture-docs.md)
 - [The target-repo docs stack](explanation/target-repo-docs-stack.md)
 
 ## 🏗 Architecture

@@ -22,7 +22,7 @@ toolchain around it:
 
 | Artifact | Job |
 | --- | --- |
-| `docs/` tree (`index.md` MOC + `tutorials/`, `how-to/`, `reference/`, `explanation/`, `architecture/`) | The Diátaxis skeleton, seeded with the project name; `architecture/` is a placeholder until the C4 epic (#746) |
+| `docs/` tree (`index.md` MOC + `tutorials/`, `how-to/`, `reference/`, `explanation/`, `architecture/`) | The Diátaxis skeleton, seeded with the project name; `architecture/` holds the seeded C4 Context + Container diagrams, kept true by the pipeline |
 | `docs/how-to/use-the-<surface>.md` | One how-to stub per **detected interface** (cli / rest / web-ui) — a CLI-only project gets no REST stub |
 | `mkdocs.yml` | MkDocs-Material config; its `nav:` is the single source of structure for the site **and** the manuals |
 | `.github/workflows/docs.yml` | The PR gate: `mkdocs build --strict` + a pandoc PDF/ePub build |
