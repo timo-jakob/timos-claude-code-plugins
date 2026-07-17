@@ -3,6 +3,18 @@
 Repo-wide rules for Claude Code sessions in this repository. Architecture and
 schema contracts live in ARCHITECTURE.md; template maintenance in MAINTAINING.md.
 
+## Read `docs/architecture/` before structural changes
+
+Before a **structural** change — adding, removing, or renaming a service,
+container, datastore, message broker, or external integration — read
+[`docs/architecture/`](docs/architecture/) first: this repo's architecture home,
+whose `index.md` routes to the authoritative reference (`ARCHITECTURE.md`) today
+and to the C4 diagrams (System Context and Containers, as Mermaid blocks) of the
+deployable units once child #795 seeds them. **Keep it true in the same PR** — a
+change that adds, removes, or renames any of the above, or changes what talks to
+what, updates `docs/architecture/` alongside the code, not as a follow-up; the
+maintenance pipeline flags drift between the declared containers and reality.
+
 ## Definition of "green CI" on a PR
 
 A PR is **GREEN** when, after all checks have settled (none pending), **zero

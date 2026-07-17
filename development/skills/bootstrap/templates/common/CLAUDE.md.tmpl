@@ -41,3 +41,20 @@ complete.
 - Language-specific tests + coverage report.
 - Semgrep + secret scanning.
 - CodeQL (public repos only).
+
+## Read `docs/architecture/` before structural changes
+
+Before a **structural** change — adding, removing, or renaming a service,
+container, datastore, message broker, or external integration — read
+[`docs/architecture/`](docs/architecture/) first. It holds this project's C4
+diagrams (System Context and Containers, as Mermaid blocks): the authoritative
+picture of the deployable units and how they connect. Reading it first beats
+re-deriving the system shape from the code every session — which is exactly what
+the diagrams exist to prevent.
+
+**Keep it true in the same PR.** A change that adds, removes, or renames any of
+the above — or changes what talks to what — updates `docs/architecture/` in the
+**same PR**, not a follow-up: the diagrams are part of the change, not a chore
+that trails it. The maintenance pipeline compares the declared containers
+against the code and flags drift, so a stale diagram is a defect it will
+surface.
