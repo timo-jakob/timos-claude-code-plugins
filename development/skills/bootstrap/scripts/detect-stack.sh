@@ -9,7 +9,17 @@
 #   default_branch        string  ("" if not detectable)
 #   visibility            "public" | "private" | "unknown"
 #   languages             []string  subset of [swift, typescript, python, go, java]
-#   has_dockerfile        bool
+#   has_dockerfile        bool     (unchanged semantics: an exact `Dockerfile`
+#                                  exists — now a NARROWER fact than `containers`,
+#                                  since a bootBuildImage repo has a container yet
+#                                  has_dockerfile=false; that is correct, #799)
+#   containers            []object  named deployable images this repo builds, each
+#                                  {name, source, evidence} — see shape below (#799)
+#   detection_confidence  string   "complete" | "inconclusive" — "inconclusive"
+#                                  when the repo shows container-ish evidence that
+#                                  resists resolution into a named image (#799)
+#   contracts             []object  committed API contracts (OpenAPI specs, .proto
+#                                  files), each {type, evidence} — see shape (#799)
 #   interfaces            []object  runtime interface(s) a deployed build is
 #                                  exercised through, each with its detection
 #                                  evidence — see shape below (#242)
@@ -80,6 +90,43 @@
 # detected. A `--interfaces cli,rest` flag overrides detection outright (every
 # named interface then carries "user override" as its evidence).
 #
+# containers shape (added 2026-07-17 per issue #799 — the named deployable units
+# in this repo's container topology, consumed by C4 seeding (#791) and c4_drift
+# (#793)). Mostly images the repo BUILDS (Dockerfile / Containerfile /
+# bootBuildImage / Jib); the `compose` source additionally reports every service
+# a compose file DECLARES, which for a Container diagram legitimately includes a
+# pulled datastore/queue (e.g. `db: image: postgres`) — such a service is a real
+# container in the deployed system even though this repo doesn't build its image.
+# Each entry pairs the container's name (its real deployable identifier — compose
+# service, image name, gradle project) with the mechanism that detected it and
+# the on-disk evidence, mirroring the #242 `interfaces` precedent:
+#   [{"name":"aido","source":"dockerfile","evidence":"./Dockerfile"},
+#    {"name":"tick-client-snapper","source":"bootBuildImage",
+#     "evidence":"bootBuildImage via the Spring Boot Gradle plugin in build.gradle.kts"}]
+#   source ∈ {dockerfile, containerfile, compose, bootBuildImage, jib, user override}
+# Detection is ADVISORY (like `interfaces`); `--containers a,b` overrides it
+# outright (each carries "user override" as its source and evidence). The
+# enumeration is deliberately bounded — "what image does this repo produce" has no
+# general solution — so unrecognised mechanisms (ko, pack/project.toml, Nixpacks,
+# PaaS manifests, k8s/Helm image refs) are NOT emitted as containers; they instead
+# flip `detection_confidence` to "inconclusive" (below).
+#
+# detection_confidence (#799): "complete" | "inconclusive". "No containers
+# detected" and "this repo has no containers" are DIFFERENT claims. It is
+# "inconclusive" when the repo shows container-ish evidence that could not be
+# resolved into a named image (a docker/build-push-action CI step, a Helm chart's
+# image: ref, an unrecognised builder) AND no local mechanism resolved anything —
+# so consumers (#791/#793) can decline to assert rather than assert wrongly:
+# #791 must not fabricate a container on "inconclusive", and #793 must emit no
+# declared-but-not-detected drift on "inconclusive". A `--containers` override is
+# always "complete".
+#
+# contracts shape (#799): committed API-contract artifacts — the external-boundary
+# signal a Context diagram needs. Each entry is {type, evidence}:
+#   [{"type":"openapi","evidence":"api/openapi.yaml"},
+#    {"type":"proto","evidence":"proto/orders.proto"}]
+#   type ∈ {openapi, proto}. Independent of the `--containers` override.
+#
 # github_state shape (added 2026-06-04 per issue #90 — keeps detection
 # honest about GitHub-side configuration the on-disk artifacts don't see):
 #   branch_protection.state                "applied" | "missing" | "forbidden" | "unknown" | "skipped"
@@ -112,6 +159,7 @@ cwd="$(pwd)"
 # confirm/correct before rendering acceptance workflows — #242). Unknown args
 # are ignored so the JSON contract stays additive for existing callers.
 interfaces_override=""
+containers_override=""
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--interfaces)
@@ -122,6 +170,14 @@ while [[ $# -gt 0 ]]; do
 		interfaces_override="${1#*=}"
 		shift
 		;;
+	--containers)
+		containers_override="${2:-}"
+		shift 2 2>/dev/null || shift
+		;;
+	--containers=*)
+		containers_override="${1#*=}"
+		shift
+		;;
 	*)
 		shift
 		;;
@@ -129,7 +185,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 json_bool() { [[ "$1" == "true" ]] && printf "true" || printf "false"; }
-json_str() { printf '"%s"' "${1//\"/\\\"}"; }
+# Escape backslash FIRST, then double-quote — #799 widened this helper's input
+# domain to filesystem/content-derived values (dir names, evidence paths,
+# rootProject.name), so an unescaped backslash would emit invalid JSON.
+json_str() {
+	local s="${1//\\/\\\\}"
+	s="${s//\"/\\\"}"
+	# escape the control chars that can appear in filesystem-derived values; a raw
+	# tab/newline/CR in a JSON string is invalid and breaks jq-consuming callers.
+	s="${s//$'\t'/\\t}"
+	s="${s//$'\n'/\\n}"
+	s="${s//$'\r'/\\r}"
+	printf '"%s"' "$s"
+}
 
 # --- git ---------------------------------------------------------------------
 if git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
@@ -631,6 +699,248 @@ if [[ -f "$cwd/Dockerfile" ]] ||
 	has_dockerfile="true"
 fi
 
+# --- containers + contracts (issue #799) -------------------------------------
+# The named deployable images this repo builds, detected across the family's
+# blessed mechanisms and emitted as evidence-bearing entries (not a boolean), so
+# C4 seeding (#791) and c4_drift (#793) can name real containers. Purely additive:
+# has_dockerfile keeps its exact prior semantics.
+
+# emit_containers_json: newline-separated "name|source|evidence" -> JSON array.
+emit_containers_json() {
+	local pairs="$1" out="[" first=1 line nm rest src ev
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		nm="${line%%|*}"
+		rest="${line#*|}"
+		src="${rest%%|*}"
+		ev="${rest#*|}"
+		[[ $first -eq 1 ]] && first=0 || out+=","
+		out+="$(printf '{"name":%s,"source":%s,"evidence":%s}' \
+			"$(json_str "$nm")" "$(json_str "$src")" "$(json_str "$ev")")"
+	done <<<"$pairs"
+	out+="]"
+	printf '%s' "$out"
+}
+
+# emit_contracts_json: newline-separated "type|evidence" -> JSON array.
+emit_contracts_json() {
+	local pairs="$1" out="[" first=1 line ty ev
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		ty="${line%%|*}"
+		ev="${line#*|}"
+		[[ $first -eq 1 ]] && first=0 || out+=","
+		out+="$(printf '{"type":%s,"evidence":%s}' "$(json_str "$ty")" "$(json_str "$ev")")"
+	done <<<"$pairs"
+	out+="]"
+	printf '%s' "$out"
+}
+
+# The gradle root project name (the deployable identifier for a bootBuildImage /
+# Jib image), falling back to the repo directory name.
+gradle_project_name() {
+	local sf line val
+	for sf in "$cwd/settings.gradle.kts" "$cwd/settings.gradle"; do
+		[[ -f "$sf" ]] || continue
+		# first uncommented rootProject.name assignment
+		line="$(grep -E '^[[:space:]]*rootProject\.name[[:space:]]*=' "$sf" 2>/dev/null | head -1 || true)"
+		[[ -z "$line" ]] && continue
+		# the value must be a quoted LITERAL directly after '=' — this rejects a
+		# non-literal form like `= System.getenv("APP_NAME")` (whose first quote
+		# would otherwise be mistaken for the name), falling through to basename.
+		val="${line#*=}"
+		val="${val#"${val%%[![:space:]]*}"}" # strip leading whitespace
+		case "$val" in
+		\"*)
+			val="${val#\"}"
+			val="${val%%\"*}"
+			;;
+		\'*)
+			val="${val#\'}"
+			val="${val%%\'*}"
+			;;
+		*) val="" ;;
+		esac
+		[[ -n "$val" ]] && {
+			printf '%s' "$val"
+			return
+		}
+	done
+	basename "$cwd"
+}
+
+# gradle_plugin_applied: true when a Gradle build file APPLIES the given plugin
+# id and NOT merely declares it `apply false` (the multi-module root aggregator
+# pattern, which builds no image on the root). Matches the Kotlin `id("<id>")`,
+# the paren-less Groovy `id '<id>'`, and the `apply plugin: "<id>"` forms; a
+# dependency coordinate (`<id>:artifact`) never matches because it has a `:`
+# where the closing quote would be. $2 is a dot-escaped literal.
+gradle_plugin_applied() {
+	local f="$1" pid="$2" lines
+	lines="$(grep -E "id[[:space:]]*\\(?[[:space:]]*[\"']${pid}[\"']|apply plugin:[[:space:]]*[\"']${pid}[\"']" "$f" 2>/dev/null || true)"
+	[[ -z "$lines" ]] && return 1
+	# applied iff at least one matching line is NOT an `apply false` / `apply(false)`
+	printf '%s\n' "$lines" | grep -qvE 'apply[[:space:]]*\(?[[:space:]]*false'
+}
+
+# extract_compose_services: the service names under a compose file's top-level
+# `services:` key, indentation-agnostic (locks to the first service's indent).
+extract_compose_services() {
+	awk '
+		BEGIN { inservices=0; svc_indent=-1 }
+		/^[^[:space:]#]/ { if (inservices) inservices=0 }
+		/^services:/ { inservices=1; svc_indent=-1; next }
+		inservices {
+			if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) next
+			match($0, /^[[:space:]]*/); ind=RLENGTH
+			if (svc_indent==-1) svc_indent=ind
+			if (ind==svc_indent && $0 ~ /^[[:space:]]*["'\'']?[A-Za-z0-9._-]+["'\'']?:/) {
+				name=$0
+				sub(/^[[:space:]]*/,"",name)
+				sub(/:.*$/,"",name)
+				gsub(/["'\'']/,"",name)
+				print name
+			} else if (ind < svc_indent) { inservices=0 }
+		}
+	' "$1" 2>/dev/null || true
+}
+
+container_pairs="" # name|source|evidence, newline-separated
+contract_pairs=""  # type|evidence, newline-separated
+detection_confidence="complete"
+
+if [[ -n "$containers_override" ]]; then
+	# The user's set wins outright (mirrors --interfaces). Split into an array so
+	# a field like '*' is NOT pathname-expanded against the cwd (read -a is
+	# bash-3.2-safe and does no globbing).
+	IFS=',' read -r -a override_names <<<"$containers_override"
+	# bash 3.2: an empty array under set -u errors on "${arr[@]}" — guard it.
+	for cnm in ${override_names[@]+"${override_names[@]}"}; do
+		cnm="$(printf '%s' "$cnm" | tr -d '[:space:]')"
+		[[ -z "$cnm" ]] && continue
+		container_pairs+="$cnm|user override|user override"$'\n'
+	done
+else
+	# --- Dockerfile / Containerfile (paths, not presence) ---
+	while IFS= read -r df; do
+		[[ -z "$df" ]] && continue
+		rel="${df#"$cwd"/}"
+		d="$(dirname "$rel")"
+		bn="$(basename "$df")"
+		if [[ "$d" == "." || "$d" == "docker" ]]; then
+			cname="$(basename "$cwd")"
+		else
+			pdir="$(basename "$d")"
+			if [[ "$pdir" == "docker" ]]; then cname="$(basename "$(dirname "$d")")"; else cname="$pdir"; fi
+		fi
+		if [[ "$bn" == "Containerfile" ]]; then csrc="containerfile"; else csrc="dockerfile"; fi
+		container_pairs+="$cname|$csrc|./$rel"$'\n'
+	done < <(find "$cwd" -maxdepth 3 \( -name Dockerfile -o -name Containerfile \) \
+		-not -path '*/node_modules/*' -not -path '*/.git/*' -print 2>/dev/null | sort)
+
+	# --- compose services ---
+	while IFS= read -r cf; do
+		[[ -z "$cf" ]] && continue
+		crel="${cf#"$cwd"/}"
+		while IFS= read -r svc; do
+			[[ -z "$svc" ]] && continue
+			container_pairs+="$svc|compose|$crel#services.$svc"$'\n'
+		done < <(extract_compose_services "$cf")
+	done < <(find "$cwd" -maxdepth 2 \
+		\( -name 'docker-compose.yml' -o -name 'docker-compose.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' \) \
+		-not -path '*/node_modules/*' -not -path '*/.git/*' -print 2>/dev/null | sort)
+
+	# --- bootBuildImage (Spring Boot Gradle plugin, no Dockerfile) + Jib ---
+	while IFS= read -r bf; do
+		[[ -z "$bf" ]] && continue
+		brel="${bf#"$cwd"/}"
+		bdir="$(dirname "$brel")"
+		if [[ "$bdir" == "." ]]; then bname="$(gradle_project_name)"; else bname="$(basename "$bdir")"; fi
+		if gradle_plugin_applied "$bf" 'com\.google\.cloud\.tools\.jib'; then
+			container_pairs+="$bname|jib|Jib plugin applied in $brel"$'\n'
+		fi
+		# bootBuildImage is available when the Spring Boot plugin is APPLIED (not
+		# `apply false`, not a dependency coordinate), or configured explicitly via
+		# a bootBuildImage task block. The literal fallback is GATED so it does not
+		# re-admit an `apply false` aggregator root (which may still mention the
+		# task in a subprojects{} block or a comment) that builds no image itself.
+		if gradle_plugin_applied "$bf" 'org\.springframework\.boot' ||
+			{ grep -qE 'bootBuildImage' "$bf" 2>/dev/null &&
+				! grep -qE 'org\.springframework\.boot.*apply[[:space:]]*\(?[[:space:]]*false' "$bf" 2>/dev/null; }; then
+			container_pairs+="$bname|bootBuildImage|bootBuildImage via the Spring Boot Gradle plugin in $brel"$'\n'
+		fi
+	done < <(find "$cwd" -maxdepth 2 \( -name 'build.gradle.kts' -o -name 'build.gradle' \) \
+		-not -path '*/build/*' -not -path '*/.git/*' -print 2>/dev/null | sort)
+fi
+
+# --- contracts (OpenAPI + proto), independent of the --containers override ---
+while IFS= read -r sp; do
+	[[ -z "$sp" ]] && continue
+	contract_pairs+="openapi|${sp#"$cwd"/}"$'\n'
+done < <(find "$cwd" -maxdepth 3 \
+	\( -iname 'openapi.yaml' -o -iname 'openapi.yml' -o -iname 'openapi.json' \
+	-o -iname 'swagger.yaml' -o -iname 'swagger.yml' -o -iname 'swagger.json' \
+	-o -iname '*.openapi.yaml' -o -iname '*.openapi.yml' -o -iname '*.openapi.json' \) \
+	-not -path '*/node_modules/*' -not -path '*/.git/*' \
+	-not -path '*/build/*' -not -path '*/.build/*' -not -path '*/dist/*' -not -path '*/target/*' \
+	-print 2>/dev/null | sort)
+while IFS= read -r pr; do
+	[[ -z "$pr" ]] && continue
+	contract_pairs+="proto|${pr#"$cwd"/}"$'\n'
+done < <(find "$cwd" -maxdepth 4 -name '*.proto' \
+	-not -path '*/node_modules/*' -not -path '*/.git/*' \
+	-not -path '*/build/*' -not -path '*/.build/*' -not -path '*/dist/*' -not -path '*/target/*' \
+	-print 2>/dev/null | sort)
+
+# Dedupe by the identity consumers care about. For containers that is (name,
+# source): a repo carrying both ./Dockerfile and ./docker/Dockerfile resolves the
+# same name+source under two evidence paths — one container node, not two. (Two
+# different sources for one name, e.g. jib + bootBuildImage, are kept: they are
+# genuinely distinct mechanisms.) Contracts dedupe on the whole line (a path is a
+# contract's identity). Order is preserved.
+container_pairs="$(printf '%s' "$container_pairs" | awk -F'|' 'NF && !seen[$1 FS $2]++')"
+contract_pairs="$(printf '%s' "$contract_pairs" | awk 'NF && !seen[$0]++')"
+
+containers_json="$(emit_containers_json "$container_pairs")"
+contracts_json="$(emit_contracts_json "$contract_pairs")"
+
+# --- detection_confidence ----------------------------------------------------
+# "complete" unless the repo shows container-ish evidence we could NOT resolve
+# into a named image AND we resolved nothing locally. A user override is always
+# complete; anything we DID resolve makes the soft signal moot (it plausibly
+# refers to what we found).
+if [[ -n "$containers_override" || "$containers_json" != "[]" ]]; then
+	detection_confidence="complete"
+else
+	detection_confidence="complete"
+	if [[ -d "$cwd/.github/workflows" ]] &&
+		grep -rqE 'docker/build-push-action|buildx|docker[[:space:]]+build' "$cwd/.github/workflows" 2>/dev/null; then
+		detection_confidence="inconclusive"
+	elif find "$cwd" -maxdepth 3 -name 'Chart.yaml' -not -path '*/.git/*' -print -quit 2>/dev/null | grep -q .; then
+		detection_confidence="inconclusive"
+	else
+		for m in project.toml nixpacks.toml Procfile fly.toml heroku.yml app.yaml .ko.yaml; do
+			if [[ -e "$cwd/$m" ]]; then
+				detection_confidence="inconclusive"
+				break
+			fi
+		done
+	fi
+	# Maven container mechanisms (jib-maven-plugin, spring-boot-maven-plugin's
+	# build-image) are NOT resolved here — this family is Gradle-first — but their
+	# presence means "this repo has no containers" would be a false claim, so flip
+	# to inconclusive rather than assert complete+[].
+	if [[ "$detection_confidence" == "complete" ]]; then
+		while IFS= read -r pf; do
+			[[ -z "$pf" ]] && continue
+			if grep -qE 'jib-maven-plugin|spring-boot-maven-plugin' "$pf" 2>/dev/null; then
+				detection_confidence="inconclusive"
+				break
+			fi
+		done < <(find "$cwd" -maxdepth 2 -name pom.xml -not -path '*/target/*' -not -path '*/.git/*' -print 2>/dev/null)
+	fi
+fi
+
 # --- existing artifacts ------------------------------------------------------
 # Files we would generate. We mark which already exist so the skill can
 # skip/diff. The candidate list is derived dynamically from the templates
@@ -936,6 +1246,9 @@ cat <<EOF
   "visibility": $(json_str "$visibility"),
   "languages": $languages_json,
   "has_dockerfile": $(json_bool "$has_dockerfile"),
+  "containers": $containers_json,
+  "detection_confidence": $(json_str "$detection_confidence"),
+  "contracts": $contracts_json,
   "interfaces": $interfaces_json,
   "language_meta": $language_meta_json,
   "is_claude_plugin": $(json_bool "$is_claude_plugin"),
