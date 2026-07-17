@@ -1,9 +1,18 @@
 # Architecture
 
-The architecture home for {{PROJECT_NAME}}. C4 architecture documentation
-(Mermaid `C4Context` / `C4Container` diagrams, maintained alongside the code)
-will live here — the machinery that seeds and maintains it ships separately;
-until then this page is a deliberate placeholder.
+The architecture home for {{PROJECT_NAME}}. This project's structure is
+documented as [C4](https://c4model.com/) diagrams (Mermaid `C4Context` /
+`C4Container` blocks), seeded at bootstrap from the detected structure and kept
+current alongside the code:
 
-In the meantime, structural decisions worth recording can live on this page
-or in [Explanation](../explanation/index.md).
+- [System Context](c4-context.md) — who uses {{PROJECT_NAME}} and the systems it
+  talks to.
+- [Containers](c4-container.md) — the deployable units that make it up.
+
+The diagrams are **seeded, not final**: refine the labels, technologies, actors,
+and relationships as the architecture settles. The maintenance pipeline compares
+the declared containers against the code and flags drift, so keeping them true is
+part of the normal change flow.
+
+Structural decisions worth recording in prose can live on this page or in
+[Explanation](../explanation/index.md).

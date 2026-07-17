@@ -240,6 +240,16 @@ flow. Stop and ask for input wherever marked; do not guess.
    renders nothing. Then enable the Pages source (§3h's
    `gh api … build_type=workflow` call, also idempotent).
 
+   **The two C4 pages are the exception within this set — SEED them, don't
+   render them.** `missing_artifacts` also lists
+   `docs/architecture/c4-context.md` and `docs/architecture/c4-container.md`
+   (#791), but these have **no `.md.tmpl`** and carry **no provenance marker**
+   (they are analysis output, #793 polices them by content). Do **not** hunt for
+   a template or stamp them — satisfy these two gaps by running
+   `seed-c4-diagrams.zsh` exactly as §3h describes (from the final detect-stack
+   JSON), and gate the seed on `mkdocs.yml`'s C4 nav entries the same way §3h
+   does. Skip-if-present keeps it idempotent.
+
    **Docs adoption must also reconcile pre-existing configs (#777, #781)** —
    the hook reconciler only appends missing providers, never edits hook args,
    so apply these edits directly (each idempotent — skip when already
@@ -1267,8 +1277,53 @@ pages:
   chmod-then-stamp and stamp-then-chmod both work.
 - The docs checks are **path-conditional** — never add them to branch
   protection's required contexts (Step 4b), or every non-docs PR wedges.
-- `architecture/` ships as a placeholder page — the C4 machinery is a separate
-  epic (#746); don't seed diagrams here.
+- **Seed the C4 architecture diagrams** (#746 child (b), #791). After rendering
+  the docs set above, generate `docs/architecture/c4-context.md` and
+  `docs/architecture/c4-container.md` from the **detected structure** — the
+  **final, user-confirmed** `detect-stack.sh` JSON from Step 1 (the one whose
+  `interfaces` reflect the confirmed/overridden set, not a superseded first pass;
+  it carries `containers`, `detection_confidence`, `interfaces`, `language_meta`,
+  #799). These are analysis **output**, not templates, and carry **no provenance
+  marker** (so #793's content-policed drift check ignores them).
+  `architecture/index.md` (rendered above) links the two pages instead of being a
+  placeholder.
+
+  ```bash
+  # detect.json is a WORKING INPUT — write it to a scratch path OUTSIDE the
+  # staging dir so it is never copied into the target repo. Re-run with the SAME
+  # --interfaces override the user confirmed in §3g if you regenerate it here.
+  "<skill-base-dir>/scripts/detect-stack.sh" [--interfaces "<confirmed set>"] > "<scratch>/detect.json"
+  "<skill-base-dir>/scripts/seed-c4-diagrams.zsh" \
+    --project-name "<name>" \
+    --detect-json "<scratch>/detect.json" \
+    --out "<staging-dir>"
+  ```
+
+  The Container diagram conforms to the c4/v1 declared-container shape (#790), so
+  `extract-declared-containers.zsh` parses it and #793's `c4_drift` can compare it
+  to reality. Seeding is honest about detection: a `complete` detection with no
+  container gets exactly one container (project + primary interface); an
+  `inconclusive` detection seeds **no** fabricated container — it seeds what it can
+  evidence and leaves a note.
+  - **The seed is mandatory once its nav is rendered — handle a non-zero exit.**
+    The two pages are registered in `mkdocs.yml`'s nav and the `docs/index.md` MOC
+    (both rendered above), so once the docs set is rendered the strict build
+    **requires** both pages. If `seed-c4-diagrams.zsh` exits non-zero (1 = no/absent
+    `--detect-json`; 2 = usage error — fix the invocation; 3 = unreadable/invalid
+    JSON, jq missing, or a write failure), do **not** proceed with the docs commit —
+    fix the cause and re-run until it exits 0.
+  - **The seed is gated on `mkdocs.yml`'s C4 nav entries, and the two files move as
+    one unit.** On a **re-bootstrap of a pre-#791 repo** the existing `mkdocs.yml` /
+    `docs/index.md` differ (they lack the C4 entries) → idempotency rule 3,
+    diff-and-ask; the C4 pages don't exist → rule 1, write. Accept or skip
+    `mkdocs.yml` and `docs/index.md` **together as one unit** (never one without the
+    other). **Seed the C4 pages iff the C4 nav entries land in `mkdocs.yml`** — if
+    that update is skipped, skip the seed too (a seeded page with no nav entry is an
+    orphan that fails the strict build); if it is accepted, the seed is mandatory
+    (a nav entry with no page is a broken link). The `docs/index.md` MOC link
+    follows the same accept/skip answer but does not itself gate the seed.
+  - Apply the same **idempotency rules** as every other file write (skip if
+    identical, diff-and-ask if it differs) — an immediate re-bootstrap is a no-op.
 - **Enable the Pages source** so `docs-deploy.yml`'s first run doesn't fail
   (idempotent — POST 409s when Pages already exists, then verify/fix the
   build type):
