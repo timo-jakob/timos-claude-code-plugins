@@ -7,6 +7,10 @@
 # pre-commit CI job as an error). These tests pin the spec in one place:
 # the placeholder table, the conditional-block stripping rules, the loud
 # leftover-placeholder failure, and byte-identical reruns.
+#
+# `run !` (negated assertions that must fail the test regardless of position)
+# needs bats >= 1.5.0; declare it so BW02 doesn't warn on every use.
+bats_require_minimum_version 1.5.0
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -117,7 +121,7 @@ setup() {
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --security-contact-email sec@example.org s.md.tmpl
   [ "$status" -eq 0 ]
   grep -q 'Email \*\*sec@example.org\*\*' "$OUT/s.md"
-  ! grep -q 'SECURITY_CONTACT_BLOCK' "$OUT/s.md"
+  run ! grep -q 'SECURITY_CONTACT_BLOCK' "$OUT/s.md"
 }
 
 @test "render: SECURITY_CONTACT_BLOCK with empty email renders the no-email fallback" {
@@ -146,8 +150,8 @@ EOF
   make_blocky
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "java" b.yml.tmpl
   [ "$status" -eq 0 ]
-  ! grep -q 'python: yes' "$OUT/b.yml"
-  ! grep -q 'PYTHON-START' "$OUT/b.yml"
+  run ! grep -q 'python: yes' "$OUT/b.yml"
+  run ! grep -q 'PYTHON-START' "$OUT/b.yml"
   grep -q 'java: yes' "$OUT/b.yml"
   grep -q 'JAVA-START' "$OUT/b.yml"
   grep -q 'JAVA-END' "$OUT/b.yml"
@@ -161,7 +165,7 @@ EOF
   rm -rf "$OUT"; mkdir -p "$OUT"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "swift" l.tmpl
   [ "$status" -eq 0 ]
-  ! grep -q 'linux: yes' "$OUT/l"
+  run ! grep -q 'linux: yes' "$OUT/l"
 }
 
 @test "render: nested SWIFT_SWIFTPM/SWIFT_XCODE resolve inside a kept SWIFT block" {
@@ -180,7 +184,7 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'swift: yes' "$OUT/n"
   grep -q 'xcode: yes' "$OUT/n"
-  ! grep -q 'spm: yes' "$OUT/n"
+  run ! grep -q 'spm: yes' "$OUT/n"
 }
 
 @test "render: a stripped outer block swallows its inner markers entirely" {
@@ -194,8 +198,8 @@ after: yes
 EOF
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "java" n.tmpl
   [ "$status" -eq 0 ]
-  ! grep -q 'spm' "$OUT/n"
-  ! grep -q 'SWIFT' "$OUT/n"
+  run ! grep -q 'spm' "$OUT/n"
+  run ! grep -q 'SWIFT' "$OUT/n"
   grep -q 'after: yes' "$OUT/n"
 }
 
@@ -207,7 +211,7 @@ EOF
   rm -rf "$OUT"; mkdir -p "$OUT"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --claude-plugin false c.tmpl
   [ "$status" -eq 0 ]
-  ! grep -q 'plugin: yes' "$OUT/c"
+  run ! grep -q 'plugin: yes' "$OUT/c"
 }
 
 @test "render: PRIVATE block follows --visibility" {
@@ -221,7 +225,7 @@ EOF
   printf '# --- DOCKER-START ---\ndocker: yes\n# --- DOCKER-END ---\n' > "$T/d.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --docker false d.tmpl
   [ "$status" -eq 0 ]
-  ! grep -q 'docker: yes' "$OUT/d"
+  run ! grep -q 'docker: yes' "$OUT/d"
 }
 
 @test "render: unknown block tag fails loudly with file:line" {
@@ -308,12 +312,12 @@ EOF
   grep -q 'python-version: "3.12"' "$Q"
   # java kept, other language lanes stripped
   grep -q 'JAVA-START' "$Q"
-  ! grep -q 'PYTHON-START' "$Q"
-  ! grep -q 'TYPESCRIPT-START' "$Q"
+  run ! grep -q 'PYTHON-START' "$Q"
+  run ! grep -q 'TYPESCRIPT-START' "$Q"
   # docker lane kept, with the #547 split intact
   grep -q 'push-and-sign:' "$Q"
   # no uppercase placeholder survives
-  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$Q"
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$Q"
 }
 
 @test "render: real pre-commit template for a non-plugin java repo drops the CLAUDE-PLUGIN hooks" {
@@ -321,7 +325,7 @@ EOF
     --languages "java" common/.pre-commit-config.yaml.tmpl
   [ "$status" -eq 0 ]
   P="$OUT/common/.pre-commit-config.yaml"
-  ! grep -q 'CLAUDE-PLUGIN' "$P"
+  run ! grep -q 'CLAUDE-PLUGIN' "$P"
   grep -q 'JAVA-START' "$P"
 }
 
@@ -349,7 +353,7 @@ EOF
     grep -q "tool failure, never a contradiction" "$CORE"
     # concatenated single-file shape: core then overlay, no leftovers
     cat "$CORE" "$OVERLAY" > "$BATS_TEST_TMPDIR/policy-$lang.md"
-    ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$BATS_TEST_TMPDIR/policy-$lang.md"
+    run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$BATS_TEST_TMPDIR/policy-$lang.md"
     grep -q "suggested_agent" "$BATS_TEST_TMPDIR/policy-$lang.md"
   done
 }
@@ -368,7 +372,7 @@ EOF
   grep -q 'if: always()' "$A"
   grep -q 'testsuites' "$A"
   # no uppercase placeholder survives
-  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$A"
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$A"
 }
 
 @test "render: acceptance.yml without --acceptance-interfaces fails the leftover check (#697)" {
@@ -401,7 +405,7 @@ EOF
   grep -q 'python-version: "3.13"' "$A"
   grep -q 'pytest tests/acceptance/cli/' "$A"
   grep -q -- '--junitxml="acceptance-report/acceptance-cli.xml"' "$A"
-  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$A"
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$A"
 }
 
 @test "render: cli acceptance smoke test substitutes the entry point (#698)" {
@@ -411,7 +415,7 @@ EOF
   [ "$status" -eq 0 ]
   S="$OUT/languages/python/tests/acceptance/cli/test_smoke.py"
   grep -q 'ENTRY_POINT = "aido"' "$S"
-  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$S"
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$S"
   # valid Python
   python3 -m py_compile "$S"
 }
@@ -436,8 +440,8 @@ EOF
   printf '# T\n\n<!-- --- SURFACE_REST-START --- -->\n- [REST](use-the-rest-api.md)\n<!-- --- SURFACE_REST-END --- -->\nafter\n' > "$T/m.md.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" m.md.tmpl
   [ "$status" -eq 0 ]
-  ! grep -q "SURFACE_REST" "$OUT/m.md"
-  ! grep -q "use-the-rest-api" "$OUT/m.md"
+  run ! grep -q "SURFACE_REST" "$OUT/m.md"
+  run ! grep -q "use-the-rest-api" "$OUT/m.md"
   grep -q "after" "$OUT/m.md"
 }
 
@@ -466,14 +470,14 @@ TMPL
   [ "$status" -eq 0 ]
   grep -q "use-the-cli.md" "$OUT/nav.yml"
   grep -q "use-the-web-ui.md" "$OUT/nav.yml"
-  ! grep -q "use-the-rest-api.md" "$OUT/nav.yml"
+  run ! grep -q "use-the-rest-api.md" "$OUT/nav.yml"
 }
 
 @test "render: #766 no --acceptance-interfaces -> every SURFACE block is stripped" {
   printf '# --- SURFACE_CLI-START ---\nx\n# --- SURFACE_CLI-END ---\n# --- SURFACE_GRPC-START ---\ny\n# --- SURFACE_GRPC-END ---\nkeep\n' > "$T/s.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" s.tmpl
   [ "$status" -eq 0 ]
-  ! grep -qE '^(x|y)$' "$OUT/s"
+  run ! grep -qE '^(x|y)$' "$OUT/s"
   grep -q "keep" "$OUT/s"
 }
 
