@@ -45,7 +45,9 @@ separate.
 
 ## 🏗 Architecture
 
-- [Architecture overview (C4 — placeholder)](architecture/index.md)
+- [Architecture overview](architecture/index.md)
+- [System Context (C4)](architecture/c4-context.md)
+- [Container Diagram (C4)](architecture/c4-container.md)
 - [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
   — the authoritative contributor/Claude-facing architecture & schema contract
   (kept at repo root).

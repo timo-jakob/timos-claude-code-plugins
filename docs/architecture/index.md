@@ -1,34 +1,29 @@
 # Architecture
 
-This section is the future home of **C4 architecture diagrams** (system context,
-containers, and — where useful — components), authored as Mermaid C4 blocks that
-render natively on GitHub and in the docs site.
+This repo's structure is documented as **[C4](https://c4model.com/) diagrams** —
+Mermaid `C4Context` / `C4Container` blocks in Markdown that render natively on
+GitHub and through the docs site. They are authored by hand against the `c4/v1`
+contract and kept true alongside the code (the maintenance pipeline compares the
+declared containers against reality and flags drift).
 
-> **Placeholder.** The C4 diagrams are delivered by documentation epic 3/3
-> ([#746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/746)).
-> Until then, the authoritative architecture reference is the repo-root
-> [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
-> — the contributor/Claude-facing contract covering the maintenance dispatch
-> schema, the plugin composition model, and the scripting conventions.
+- [**System Context**](c4-context.md) — who uses timos-claude-code-plugins and
+  the systems it talks to: the plugins, both GitHub Apps (Maintenance and
+  Approver), the target repositories, the external services (GitHub, SonarCloud,
+  Snyk), and the planned reporting repo.
+- [**Container Diagram**](c4-container.md) — the deployable units: the
+  orchestrator, the language plugins, the topic plugins, and the JSON dispatch
+  payload flow between them.
 
-The illustrative sketch below is a placeholder for the real C4 diagrams (#746);
-it also confirms the docs site renders Mermaid. It shows the dispatch layering
-— the orchestrator hands a JSON payload to a language plugin, which composes
-with any matching topic plugins:
-
-```mermaid
-flowchart LR
-    U([Developer]) -->|/development:maintenance| ORCH[Orchestrator]
-    ORCH -->|JSON payload| LANG[Language plugin<br/>python / java / swift]
-    LANG -.compose.-> SPRING[development-spring]
-    LANG -.compose.-> PLUGIN[development-claude-plugin]
-    LANG -->|worktree PRs| GH[(GitHub)]
-```
-
-Related:
+The diagrams cover the **Context** and **Container** levels (Component is
+optional and not yet authored; Code-level C4 is never authored). Deeper,
+prose-level architecture and the schema contracts live in the repo-root
+references:
 
 - [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
-  — authoritative architecture & schema contract (repo root).
+  — the authoritative contributor/Claude-facing architecture & schema contract
+  (maintenance dispatch schema, plugin composition model, scripting conventions,
+  and the `c4/v1` contract these diagrams follow).
 - [`MAINTAINING.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/MAINTAINING.md)
   — quarterly template-refresh procedure (repo root).
-- [Why per-language plugins?](../explanation/why-per-language-plugins.md) — the composition rationale.
+- [Why per-language plugins?](../explanation/why-per-language-plugins.md) — the
+  composition rationale.
