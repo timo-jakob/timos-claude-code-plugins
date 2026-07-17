@@ -17,6 +17,7 @@ development-…            ← future: go, rust, …
 development-container    ← topic: containers / OCI images
 development-claude-plugin ← topic: projects that ARE Claude Code plugins
 development-spring       ← topic: Spring framework (composes with development-java)
+development-docs         ← topic: documentation (C4 architecture docs; marker docs/architecture/)
 development-…            ← future topics: kubernetes, terraform, …
 ```
 
@@ -29,7 +30,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, …) | `development-container`, `development-claude-plugin`, `development-spring`, future: `development-kubernetes`, `development-terraform` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, …) | `development-container`, `development-claude-plugin`, `development-spring`, `development-docs`, future: `development-kubernetes`, `development-terraform` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree

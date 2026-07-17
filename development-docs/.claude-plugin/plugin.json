@@ -1,0 +1,16 @@
+{
+  "name": "development-docs",
+  "description": "Language-agnostic documentation topic plugin. Composes ALONGSIDE the language plugin via /development:maintenance (a TOPIC plugin, like development-spring / development-claude-plugin), triggered by the docs/architecture/ marker. Owns the docs-maintenance dispatch path; the c4_drift finding source (declared C4 containers vs detected reality) lands here in #793. Future docs-site and docs-freshness tooling will live under this one topic.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Timo Jakob"
+  },
+  "license": "MIT",
+  "keywords": [
+    "documentation",
+    "architecture",
+    "c4",
+    "maintenance",
+    "topic-plugin"
+  ]
+}
