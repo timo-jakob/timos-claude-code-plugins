@@ -1867,6 +1867,183 @@ reads, test runs, possibly fable on the major-upgrade branch). This
 is intentional — the alternative is the user spending an afternoon
 clicking through findings.
 
+## C4 architecture docs contract (`c4/v1`, #746)
+
+Bootstrapped repos carry **C4 architecture documentation** — for human
+contributors and for Claude, which reads it instead of re-deriving the system
+shape every session. The make-or-break is not drawing the diagrams but keeping
+them true, so the family seeds them (bootstrap, #791), keeps them current in the
+same PR as the change (`resolve-issue`, #792), and reports drift in maintenance
+(`c4_drift`, #793). Every one of those steps needs a single settled answer to
+"what containers does this diagram *declare*?" — this contract is that answer,
+and it ships an executable parser so nobody re-implements it.
+
+### File layout
+
+Diagrams live under `docs/architecture/`, as Mermaid C4 blocks in Markdown (they
+render natively on GitHub and through the MkDocs Material + `superfences`
+pipeline, #744/#766 — zero repo tooling):
+
+| Path                                        | Level     | Required? |
+|---------------------------------------------|-----------|-----------|
+| `docs/architecture/c4-context.md`           | Context   | required  |
+| `docs/architecture/c4-container.md`          | Container | required  |
+| `docs/architecture/c4-component-<area>.md`  | Component | optional  |
+
+### Level policy
+
+**Context + Container required, Component optional, Code never.** A reviewer can
+decide whether a given `docs/architecture/` tree complies from this rule alone:
+the two required pages must exist; any number of `c4-component-<area>.md` pages
+may exist; a Code-level C4 diagram must never be authored (it duplicates the
+source and rots immediately). Constellation/landscape C4 across repos is out of
+scope here (#687 territory).
+
+### Mermaid C4 style rules
+
+- Each diagram is a fenced ` ```mermaid ` block whose first directive is
+  `C4Context` (in `c4-context.md`) or `C4Container` (in `c4-container.md`).
+- Containers use Mermaid's `C4Container` element macros — `Container`,
+  `ContainerDb`, `ContainerQueue`, and their `_Ext` variants — grouped with
+  `System_Boundary` / `Container_Boundary` / `Enterprise_Boundary` / `Node`.
+- The alias (first argument) is an identifier token — the deployable unit's real
+  name (compose service, image name, Gradle subproject): `web_app`, `spa`,
+  `database`. It is the join key against detected reality (below).
+- Blocks must render **both** natively on GitHub **and** through the MkDocs
+  pipeline. Mermaid C4 is experimental and GitHub's Mermaid version may lag, so a
+  non-rendering block is a contract defect — checked by a human, not a gate.
+
+**No gate validates Mermaid syntax, and none will.** A Mermaid linter was
+considered and declined (it would add a Node/`mermaid-cli` dependency for one
+diagram type). `mkdocs.yml` registers Mermaid only as a `pymdownx.superfences`
+`custom_fence` with `fence_code_format`, so the fence is emitted as a
+client-side-rendered div and `mkdocs build --strict` never parses the diagram
+body. The **declared-container shape below is therefore the epic's only
+mechanical diagram-validity signal** — which is exactly why it is pinned so
+precisely.
+
+### The declared-container shape
+
+**Membership.** The declared container set is exactly the `Container`,
+`ContainerDb`, and `ContainerQueue` entries inside the `C4Container` fenced block
+of `docs/architecture/c4-container.md`, counted at **any boundary nesting
+depth** (the boundary macros are grouping, never a membership filter — Mermaid's
+canonical example nests every container inside a `Container_Boundary`, so a
+nesting-blind rule would extract nothing). Deliberately **excluded**:
+
+- the **`_Ext` variants** (`Container_Ext`, `ContainerDb_Ext`,
+  `ContainerQueue_Ext`) — external means *we do not build it*, so detection
+  (#799) can never find it; counting it would guarantee a permanent, unfixable
+  drift finding. An external dependency drawn in the Container diagram is
+  deliberately invisible to `c4_drift`.
+- every `System*`, `Person*`, and `Component*` entry (wrong level), and all of
+  `c4-context.md`.
+
+**Per-entry fields** — `Container(<alias>, "<label>", "<technology>")` with an
+optional 4th description argument:
+
+- **`alias`** — required, unique within the block, and the **join key**. It is
+  compared against the detected side (`detected.name`, #799) with **case and
+  `-`/`_` folded**, so a declared `web_app` matches a detected `web-app`. The
+  alias is emitted verbatim; the fold happens at comparison time in the
+  consumers, not in the parser.
+- **`label`** — required, double-quoted, human prose, **never compared** (Mermaid
+  labels read "Single-Page Application" while detection sees `web-app` — joining
+  on the label would report a correct diagram as drifted forever).
+- **`technology`** — required, double-quoted. Mermaid allows omitting it; this
+  contract does not, because it is the signal seeding writes and `c4_drift`
+  reports.
+- **`description`** — optional 4th argument, recovered but not compared;
+  `null` when absent.
+
+**Lexical rules, so the parse needs no Mermaid engine:**
+
+- **One entry per line; no line breaks inside the parens** — a deliberate
+  restriction of what Mermaid tolerates, so the rule stays a per-line regex.
+- **`label` / `technology` / `description` must be double-quoted** (Mermaid
+  tolerates bare single-word labels; this contract forbids them). Aliases are
+  unquoted.
+- **Commas are legal inside quoted fields, so the parse is quote-aware.**
+  Mermaid's own canonical examples use `"Java, Spring MVC"` and
+  `"JavaScript, Angular"` — a naive comma-split extractor breaks on the canonical
+  example, which is the single likeliest way two independent parsers would
+  diverge. That is precisely why there is only one.
+
+### One parser, called twice
+
+The rule ships **executable**, as a shared script both consumers call, so the
+same diagram yields the same declared set at PR time and at maintenance time —
+one comparison rule, two moments:
+
+- **Home:**
+  `development/skills/bootstrap/scripts/extract-declared-containers.zsh`, beside
+  `detect-stack.sh` (which #799 extends with the *detected* half) — keeping both
+  halves of "declared vs detected" in one directory. It is called cross-**skill**
+  as `<skill-base-dir>/../bootstrap/scripts/…`, established practice inside
+  `development` (not the cross-*plugin* hazard the "Shared helpers" section below
+  warns about).
+- **Consumers:** (c) `resolve-issue`'s
+  `check-c4-currency.zsh` (#792) and (d) `maintenance`'s
+  `gather-docs-findings.zsh` (#793).
+- **stdout (exit 0):** a JSON array of
+  `{alias, label, technology, description}` (`description: null` when the 4th
+  argument is absent). The declared side says `label`; the detected side (#799)
+  says `name` — distinct vocabularies so a reader never assumes `declared.label`
+  joins to `detected.name`. The join is `declared.alias` ↔ `detected.name`,
+  folded.
+- **Exit codes** (`plan-user-docs.zsh`'s idiom, which #792 already reuses):
+  `0` success · `1` no `docs/architecture/c4-container.md` (the repo hasn't
+  adopted the Container diagram yet — a reported no-op, not an error) · `2` usage
+  error · `3` unparseable declared block / runtime error, naming the page (never
+  a silent skip, never a partial set).
+
+### Worked example
+
+The `C4Container` block below is **byte-identical** to the checked-in fixture
+`tests/fixtures/c4/c4-container.md`, so the contract and the parser cannot drift
+(a bats case diffs them):
+
+<!-- c4/v1:example:start -->
+```mermaid
+C4Container
+    title Container diagram for the Internet Banking System
+
+    Person(customer, "Personal Banking Customer", "A retail customer of the bank")
+
+    Container_Boundary(c1, "Internet Banking") {
+        Container(web_app, "Web Application", "Java, Spring MVC", "Serves the SPA and the JSON API")
+        Container(spa, "Single-Page Application", "JavaScript, Angular")
+        ContainerDb(database, "Database", "SQL Database")
+        ContainerQueue(events, "Event Bus", "ActiveMQ Artemis")
+        Container_Ext(backend_api, "Mainframe Banking System API", "Java, Docker")
+    }
+
+    System_Ext(email_system, "E-Mail System", "Microsoft Exchange")
+
+    Rel(customer, web_app, "Uses", "HTTPS")
+    Rel(web_app, database, "Reads/writes", "JDBC")
+```
+<!-- c4/v1:example:end -->
+
+From it `extract-declared-containers.zsh` emits exactly the four in-scope
+containers — `backend_api` (`_Ext`), `email_system` (`System_Ext`), and
+`customer` (`Person`) are excluded:
+
+<!-- c4/v1:example-output:start -->
+```json
+[
+  {"alias": "web_app", "label": "Web Application", "technology": "Java, Spring MVC", "description": "Serves the SPA and the JSON API"},
+  {"alias": "spa", "label": "Single-Page Application", "technology": "JavaScript, Angular", "description": null},
+  {"alias": "database", "label": "Database", "technology": "SQL Database", "description": null},
+  {"alias": "events", "label": "Event Bus", "technology": "ActiveMQ Artemis", "description": null}
+]
+```
+<!-- c4/v1:example-output:end -->
+
+Detection (#799) seeing `{name: "web-app", source: "compose", …}` matches alias
+`web_app` under the `-`/`_` + case fold, so no drift is reported on a correct
+diagram.
+
 ## Shared helpers — kept canonical in `development`
 
 `development` is the only plugin that ships `detect-stack.sh`,
