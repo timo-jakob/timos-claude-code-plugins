@@ -36,6 +36,12 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 | `claude-plugin-test-reviewer` | `opus` | Read, Grep, Glob | Testing specialist for Claude Code plugin repos — bats coverage for changed scripts, weak assertions, and untested failure branches. The tests dimension of /development-claude-plugin:review (reuses the core tests dimension and its *-test-reviewer convention). |
 | `claude-plugin-version-sync` | `haiku` | Bash, Read, Edit | Sync `.claude-plugin/marketplace.json` version entries to match each plugin's `plugin.json` (the source of truth). Mechanical for plain version mismatches; escalates add/remove-entry decisions to human review. Used by development-claude-plugin:maintenance. |
 
+## development-docs
+
+| Agent | Model | Tools | Description |
+| --- | --- | --- | --- |
+| `docs-c4-drift-advisor` | `opus` | Read, Edit, Bash, Grep | For each c4_drift finding (a container the C4 Container diagram declares but detection doesn't find, or detection finds but the diagram doesn't declare), reconcile docs/architecture/c4-container.md with reality — apply the mechanical, unambiguous edit and escalate the rest, since a drift can mean the diagram is stale, the container was renamed, or detection is incomplete, and which one it is needs judgment. Used by development-docs:maintenance. |
+
 ## development-java
 
 | Agent | Model | Tools | Description |

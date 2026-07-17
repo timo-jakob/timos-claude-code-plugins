@@ -1,14 +1,13 @@
 ---
 name: maintenance
 description: >
-  Documentation-topic maintenance dispatcher (from #793 onward; NOT on the
-  dispatch path in v1 — the docs gather ships in #793). Receives a v2 maintenance
-  payload (a file path in $ARGUMENTS) that /development:maintenance built from the
-  docs topic gather, validates it, and returns a plan routing each finding group
-  to a documentation agent. A TOPIC plugin: it composes alongside the language plugin,
-  not instead of it, triggered by the docs/architecture/ marker. Its dispatch
-  table is deliberately EMPTY in v1 — it owns nothing but the dispatch path; the
-  c4_drift finding source (#793) adds the first tool. A single invocation returns
+  Documentation-topic maintenance dispatcher. Receives a v2 maintenance payload
+  (a file path in $ARGUMENTS) that /development:maintenance built from the docs
+  topic gather (gather-docs-findings.zsh), validates it, and returns a plan
+  routing each finding group to a documentation agent. A TOPIC plugin: it composes
+  alongside the language plugin, not instead of it, triggered by the
+  docs/architecture/ marker. v1 handles one tool — c4_drift (C4 container-diagram
+  drift, declared vs detected) → docs-c4-drift-advisor. A single invocation returns
   the plan. The per-group work agents are the orchestrator's job, not the
   dispatcher's. Pure function of its JSON input; does not run its own detection or
   validation. See ARCHITECTURE.md for the schema and dispatch contract.
@@ -29,18 +28,13 @@ you have **no language coverage gate and no Phase A/B dance** — a topic has no
 application test suite of its own. This dispatcher is a single invocation
 returning one `plan`.
 
-**The dispatch table is deliberately empty in v1 — and in v1 this dispatcher is
-not yet on the orchestrator's dispatch path.** This plugin was stood up (#801) to
-own the docs-maintenance path *before* it has any tool, so that #793's `c4_drift`
-finding source can be reviewed as "add one tool" rather than "add a plugin and a
-tool at once". #793 ships the **gather** (`gather-docs-findings.zsh`) that produces
-docs findings; **until it lands, the orchestrator classifies `docs` as an
-*unsupported topic*** (marker present, no gather script — see
-`development/skills/maintenance/SKILL.md`) and does **not** invoke this dispatcher.
-If this dispatcher is handed a payload before #793 registers `c4_drift`, it
-returns an **empty plan** — a dispatcher with nothing to dispatch is a valid,
-testable state, not an error. (#793 both ships the gather that activates the path
-*and* registers the first tool, so once it lands the table is no longer empty.)
+This plugin was stood up (#801) to own the docs-maintenance dispatch path before
+it had any tool; **#793 registered its first tool, `c4_drift`** — the docs gather
+(`gather-docs-findings.zsh`) now emits it, so the orchestrator lists `docs` as a
+supported topic and dispatches here. A repo with `docs/architecture/` but no
+findings (a diagram that matches reality, or no `c4-container.md` yet) yields an
+**empty plan** — a dispatcher with nothing to dispatch is a valid, testable state,
+not an error.
 
 **Input:** `$ARGUMENTS` is the absolute path to a JSON file. Read it.
 
@@ -71,13 +65,15 @@ do" would be a silent failure).
 
 ## Step 2 — read the findings
 
-The tools this plugin handles live under `findings_by_tool`. **The table is empty
-in v1** — #793 adds the first row:
+The tools this plugin handles live under `findings_by_tool`:
 
 | Tool | Routed to | Character |
 | --- | --- | --- |
-| *(none yet)* | — | — |
-<!-- #793 adds: | `c4_drift` | `docs-c4-drift-advisor` (opus) | triage / judgment | -->
+| `c4_drift` | `docs-c4-drift-advisor` (opus) | triage / judgment |
+
+```bash
+jq '{c4_drift: (.findings_by_tool.c4_drift // [])}' "$ARGUMENTS"
+```
 
 Respect `dispatch_filter` if present: only build groups for tools listed in
 `.dispatch_filter.only_tools`. In practice the orchestrator **omits
@@ -89,15 +85,30 @@ did arrive, an empty plan is the correct result.
 ## Step 3 — build the plan
 
 For each handled tool with a **non-empty** finding list (and allowed by any
-`dispatch_filter`), emit **one group** — at most one per tool — and number
-`group_id` sequentially across the groups you actually emit. **With no tools
-registered, there is never a group to emit, so the plan is always `[]` in v1.**
-When #793 adds `c4_drift`, its group follows the same one-group-per-tool shape as
-the other topic dispatchers (a `claude-plugin-maintenance-planner`-style planner
-is only warranted if grouping ever grows beyond one-group-per-tool).
+`dispatch_filter`), emit **one group** — at most one per tool. In v1 the only
+tool is `c4_drift`, so the plan is either one group (findings present) or `[]`
+(none). A `claude-plugin-maintenance-planner`-style planner is only warranted if
+grouping ever grows beyond one-group-per-tool.
 
-`isolation: true` for any future group whose agent edits files (the diagram
-pages), so it runs in a worktree.
+Group for `c4_drift` (emit **only** when `findings_by_tool.c4_drift` is non-empty):
+
+```json
+{
+  "group_id": 1,
+  "tool": "c4_drift",
+  "description": "Triage <N> C4 container-diagram drift finding(s)",
+  "findings": ["<finding id>", "..."],
+  "files": ["docs/architecture/c4-container.md"],
+  "rationale": "declared-vs-detected container drift triaged together by docs-c4-drift-advisor",
+  "agent": "docs-c4-drift-advisor",
+  "isolation": true,
+  "suggested_pr_title": "docs(architecture): reconcile the C4 Container diagram with detected reality",
+  "priority_score": 0.5
+}
+```
+
+`isolation: true` — the agent edits `docs/architecture/c4-container.md`, so it
+runs in a worktree. Pass the finding ids through faithfully (no trimming).
 
 ## Step 4 — return the response
 
@@ -108,7 +119,7 @@ coverage pre-flight.
 {
   "schema_version": "2",
   "ci_fixer_agent": null,
-  "plan": [ /* the group(s) from Step 3 — [] in v1, no tools registered */ ],
+  "plan": [ /* the group(s) from Step 3 — the c4_drift group, or [] when no findings */ ],
   "missing_tooling": []
 }
 ```
@@ -118,9 +129,9 @@ Notes on the fields:
 - **`ci_fixer_agent: null`** — v1 has no dedicated docs CI-fixer. If a future
   topic PR's CI fails, the orchestrator escalates to the user rather than
   auto-fixing. A `docs-ci-fixer` can be added later.
-- **Empty `plan`** — a repo with no docs findings (and, in v1, *every* repo)
-  returns `"plan": []`, and the orchestrator simply records "nothing to do" for
-  this topic.
+- **Empty `plan`** — a repo whose C4 diagram matches reality (or has no
+  `c4-container.md` yet) returns `"plan": []`, and the orchestrator simply records
+  "nothing to do" for this topic.
 - **`missing_tooling`** — reserved for when a validator's prerequisite is absent
   (none in v1).
 

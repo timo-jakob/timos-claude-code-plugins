@@ -85,6 +85,8 @@ docs_marker() { test -d docs/architecture; }
   grep -Fq 'schema_version == "2"' "$REPO_ROOT/development-docs/skills/maintenance/SKILL.md"
 }
 
-@test "the dispatcher's v1 dispatch table is empty (no tool rows yet)" {
-  grep -Fq '(none yet)' "$REPO_ROOT/development-docs/skills/maintenance/SKILL.md"
+@test "the dispatcher registers the c4_drift tool routing to docs-c4-drift-advisor (#793)" {
+  local skill="$REPO_ROOT/development-docs/skills/maintenance/SKILL.md"
+  grep -Fq 'c4_drift' "$skill"
+  grep -Fq 'docs-c4-drift-advisor' "$skill"
 }
