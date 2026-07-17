@@ -736,3 +736,23 @@ setup() {
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(jq -c '.containers' <<<"$out")" = "[]" ]
 }
+
+# --- C4 pages in State-D adoption path (#791) ---------------------------------
+
+@test "detect-stack #791: a repo lacking the C4 pages flags both as missing_artifacts (State-D adoption)" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("docs/architecture/c4-context.md")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/architecture/c4-container.md")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack #791: once the C4 pages exist they are existing_artifacts, not gaps (idempotent re-run)" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  mkdir -p docs/architecture
+  printf '# ctx\n' > docs/architecture/c4-context.md
+  printf '# cont\n' > docs/architecture/c4-container.md
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts["docs/architecture/c4-context.md"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.existing_artifacts["docs/architecture/c4-container.md"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("docs/architecture/c4-context.md")' <<<"$out")" = "null" ]
+}

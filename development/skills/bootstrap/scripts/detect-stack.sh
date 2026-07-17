@@ -1003,6 +1003,21 @@ candidate_paths+=(".gitignore" "LICENSE")
 # shellcheck disable=SC2207
 candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 
+# The two seeded C4 pages (#791) are generated OUTPUT, not templates, so they are
+# never collected from templates/ above — append them explicitly so State-D
+# gap-fill adopts them on an already-bootstrapped repo. The guard keys on the docs
+# machinery being in scope (the collected architecture/index.md candidate). Note:
+# the #766 docs tree is UNIVERSAL — collect_from always adds
+# architecture/index.md.tmpl for every repo — so this guard is true on every
+# reachable input today; it is defensive, staying correct if the docs tree ever
+# becomes conditionally scoped (then the C4 pages would follow it out of scope,
+# never appearing as phantom gaps on a repo that legitimately has no docs tree).
+# When in scope, the C4 pages are unconditionally-expected gaps (not held out), so
+# a docs repo missing them is flagged for adoption.
+if printf '%s\n' "${candidate_paths[@]}" | grep -qx 'docs/architecture/index.md'; then
+	candidate_paths+=("docs/architecture/c4-context.md" "docs/architecture/c4-container.md")
+fi
+
 # A few templates render to a deploy path that differs from their location in
 # the templates tree, so the 1:1 mapping above produces the wrong (bare-root)
 # candidate — and the existence probe then checks a path the file never lands at,

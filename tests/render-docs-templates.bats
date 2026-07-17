@@ -38,7 +38,13 @@ render_docs() { # render_docs <interfaces-csv-or-empty> [extra stub relpaths...]
   local -a flags=(--templates "$TEMPLATES" --out "$OUT"
     --project-name "Demo Project" --project-slug "owner/demo-repo")
   [ -n "$ifaces" ] && flags+=(--acceptance-interfaces "$ifaces")
-  zsh "$RENDER" "${flags[@]}" "${DOCS_BASE_SET[@]}" "$@"
+  zsh "$RENDER" "${flags[@]}" "${DOCS_BASE_SET[@]}" "$@" || return
+  # §3h also SEEDS the two C4 pages the nav now references (#791) — render + seed
+  # are one step, so the nav<->files lockstep the asserts below check holds.
+  local seed="$REPO_ROOT/development/skills/bootstrap/scripts/seed-c4-diagrams.zsh"
+  local dj="$BATS_TEST_TMPDIR/detect-docs.json"
+  printf '%s' '{"languages":["python"],"language_meta":{"python":{"version":"3.12"}},"containers":[{"name":"demo","source":"dockerfile","evidence":"./Dockerfile"}],"detection_confidence":"complete","interfaces":[{"interface":"cli","evidence":"x"}]}' > "$dj"
+  zsh "$seed" --project-name "Demo Project" --detect-json "$dj" --out "$OUT/common"
 }
 
 # Assert every nav entry of the rendered mkdocs.yml exists as a rendered file —
@@ -69,6 +75,13 @@ assert_no_orphan_pages() {
       return 1
     }
   done < <(find "$OUT/common/docs" -name '*.md' -type f)
+}
+
+@test "docs templates: the seeded C4 pages are registered in the docs/index.md MOC (#791)" {
+  run render_docs "cli" common/docs/how-to/use-the-cli.md.tmpl
+  [ "$status" -eq 0 ]
+  grep -Fq 'architecture/c4-context.md' "$OUT/common/docs/index.md"
+  grep -Fq 'architecture/c4-container.md' "$OUT/common/docs/index.md"
 }
 
 @test "docs templates: cli-only render seeds a coherent tree (nav <-> files in lockstep)" {
