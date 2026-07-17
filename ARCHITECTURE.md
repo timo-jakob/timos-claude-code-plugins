@@ -1998,6 +1998,29 @@ one comparison rule, two moments:
   error · `3` unparseable declared block / runtime error, naming the page (never
   a silent skip, never a partial set).
 
+### The `c4_drift` maintenance source (#793)
+
+The maintenance side of "keep the diagram true" is the **`c4_drift`** finding
+source, owned by the **`development-docs`** topic plugin (#801) and gathered by
+`development/skills/maintenance/scripts/gather-docs-findings.zsh`. It is a
+mechanical comparison — the *same* fold as (c)'s currency check, so both agree
+about the same diagram — of the declared set (this parser) against the detected
+set (#799's `detect-stack.sh`, consumed, not re-derived), surfaced as a normal
+maintenance finding rather than discovered stale:
+
+- **`detected_not_declared`** — a container the repo builds but the diagram omits.
+- **`declared_not_detected`** — a container the diagram declares but detection
+  can't find. **Suppressed when `detection_confidence` is `inconclusive`** (#799):
+  absence of detection is not evidence of absence, and a false finding would train
+  users to ignore the source. A suppression note is emitted instead.
+
+`tooling_configured.c4_drift` is the presence of `docs/architecture/`; when true
+but `c4-container.md` is absent or unparseable, the gather degrades to `[]` + a
+note rather than crashing the payload. The `development-docs` dispatcher routes a
+non-empty finding list to the **`docs-c4-drift-advisor`** agent (one group), which
+applies the mechanical `detected_not_declared` additions and escalates the
+judgment calls (removals/renames) to `actions_requiring_review`.
+
 ### Worked example
 
 The `C4Container` block below is **byte-identical** to the checked-in fixture

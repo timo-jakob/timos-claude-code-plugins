@@ -19,7 +19,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills.",
-      "version": "1.105.0",
+      "version": "1.106.0",
       "author": {
         "name": "Timo Jakob"
       },
@@ -68,8 +68,8 @@
     },
     {
       "name": "development-docs",
-      "description": "Language-agnostic documentation topic plugin. Composes ALONGSIDE the language plugin via /development:maintenance (a TOPIC plugin, like development-spring), triggered by the docs/architecture/ marker. Owns the docs-maintenance dispatch path; the c4_drift finding source (declared C4 containers vs detected reality) lands here in #793.",
-      "version": "0.1.0",
+      "description": "Language-agnostic documentation topic plugin. Composes ALONGSIDE the language plugin via /development:maintenance (a TOPIC plugin, like development-spring), triggered by the docs/architecture/ marker. Ships the c4_drift finding source (declared C4 containers vs detected reality \u2192 docs-c4-drift-advisor).",
+      "version": "0.2.0",
       "author": {
         "name": "Timo Jakob"
       },
