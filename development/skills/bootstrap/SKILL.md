@@ -1074,9 +1074,13 @@ Behaviour summary:
   the image came from this workflow on this repo — defeats the
   same-tag-substitution attack the SBOM and provenance alone don't address.
   Verifiable with `cosign verify --certificate-identity-regexp ... --certificate-oidc-issuer https://token.actions.githubusercontent.com`.
-- Image visibility is **inherited from the repo** but requires a one-time
-  manual flip in package settings after first publish (GHCR defaults new
-  packages to private). The generated `SETUP.md` walks the user through this.
+- Image visibility: GHCR defaults new packages to **private**, and GitHub offers
+  **no API or CLI to change package visibility** — it is web-UI-only (and making
+  a package public is **irreversible**). So this stays a one-time **manual** step
+  after first publish; the generated `SETUP.md` (§5.2) gives the exact Danger-Zone
+  path for both user- and org-owned repos. Do **not** attempt to automate it via
+  `gh api` — no such endpoint exists (unlike the §3h Pages source, which is
+  API-settable).
 
 ### CI trigger surface
 

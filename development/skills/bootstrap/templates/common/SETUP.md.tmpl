@@ -685,12 +685,21 @@ grants the required scope (only that job holds it; PR runs never execute it).
 
 ### 5.2 Image visibility — one-time manual step
 
-GHCR creates new container packages as **private** by default. After your
-first publish:
+GHCR creates new container packages as **private** by default, and GitHub
+provides **no API or CLI to change package visibility** — it is web-UI-only, so
+this step is genuinely manual (there is nothing to automate). After your first
+publish:
 
-- **Public repos that want a public image** — go to:
-  `https://github.com/users/<owner>/packages/container/<repo>/settings`
-  Scroll to "Danger Zone" → "Change visibility" → Public.
+- **Public repos that want a public image** — open the package settings:
+  - user-owned repo:
+    `https://github.com/users/<owner>/packages/container/<repo>/settings`
+  - org-owned repo:
+    `https://github.com/orgs/<owner>/packages/container/<repo>/settings`
+
+  Scroll to "Danger Zone" → "Change visibility" → Public. **⚠️ Making a package
+  public is irreversible** — GitHub does not allow changing it back to private.
+  If this repo also publishes a docs image (the `<repo>-docs` package), repeat
+  the flip for that package at the same URL pattern.
 - **Private repos** — no action needed; private is the right default.
 
 This is a one-time flip; subsequent publishes preserve the visibility you set.
