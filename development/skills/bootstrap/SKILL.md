@@ -1648,8 +1648,30 @@ check is unverified until the first CI run.
 
 ### 4d. Initial commit
 
-Commit the generated files (and any 4c build-script wiring, plus the 4a.5
-normalization fixups to pre-existing files) using the `/development:commit`
+**Before committing — land on a convention-conforming branch (#835).** The
+commit and its PR must come from a branch named per `/development:git-branch-naming`.
+Check HEAD first:
+
+- HEAD is **already a convention-conforming feature branch** (a real
+  `<type>/<...>` name) → use it as-is.
+- **Anything else → branch first.** That covers the **default branch**
+  (`main`/`master`), a harness **`worktree-*`** branch (the auto-generated
+  `EnterWorktree` name — it slips past a naive "not the default branch" check),
+  **any other nonconforming name**, and a **detached HEAD**. Create a
+  `<type>/<short-description>` branch (the no-issue form; `type` from the delta —
+  `docs` for a docs-only delta like seeding the C4 pages, else `chore`, e.g.
+  `chore/bootstrap-gap-fill`) and commit from it. In a worktree do this **in
+  place** — the worktree stays (isolation is fine), only the branch is corrected:
+
+  ```bash
+  git switch -c "<type>/<short-description>"
+  ```
+
+Never commit or open the PR from anything but a convention-conforming feature
+branch — in particular never from `main`/`master` or a `worktree-*` branch.
+
+Then **commit** the generated files (and any 4c build-script wiring, plus the
+4a.5 normalization fixups to pre-existing files) using the `/development:commit`
 flow with a suggested message like `Bootstrap project with quality and
 security toolchain`. Whether pushing follows is the **Step 4e finishing
 flow**'s decision — do not push here.
@@ -1872,6 +1894,58 @@ check, a merge hold + the clearing action, the credits gate + resume command, or
 REQUEST_CHANGES + what to fix) — never a silent stop, never an approve on a red
 PR, and never a "merged" claim without verifying `state`.
 
+### 4g. Post-merge workspace closure (worktree runs) (#835)
+
+When bootstrap ran inside a harness **worktree** (the `EnterWorktree` case), a
+merged PR leaves a worktree and its main checkout behind — closing them was a
+manual step the user had to ask for. The flow closes the workspace itself.
+
+**Applies only when the run is in a worktree** (`git rev-parse
+--git-common-dir` is outside the current toplevel — the #833 signal). In the
+**main checkout** there is nothing to close: skip 4g.
+
+**Runs once the PR has actually merged — from whichever step completed the
+merge**, so it's reachable on every path: 4f driving it in-session
+(Approver-wired gap-fill); 4f's **deferred** drive completing after Step
+4.5/Step 5 stored the secrets and re-triggered CI (full initial bootstrap — the
+deferred-4f step there ends by returning here); or a **human-only** approval
+merging it later. Confirm the merge first (`gh pr view <pr> --json state` →
+`MERGED`); **never close the workspace on an unmerged PR** — if you reach 4g in
+sequence with the PR still open (deferred, or human-only), do **not** block:
+leave the closure as the step that runs when the merge is confirmed (the
+deferred-4f step reaches it, and a re-run performs it). On a re-run that opened
+no PR of its own, find the PR by its branch (`gh pr list --head <branch> --state
+all`).
+
+Then, **operating from the main checkout** (you cannot remove the worktree you
+are standing in — `cd` to the main checkout, `dirname` of `git rev-parse
+--git-common-dir`, first):
+
+1. **Sync the main checkout** to the merged commit:
+
+   ```bash
+   git -C "<main-checkout>" switch "<default-branch>"
+   git -C "<main-checkout>" pull --ff-only
+   ```
+
+   If either fails — the main checkout has **uncommitted changes** (switch
+   refuses) or its local default branch has **diverged** (`--ff-only` refuses) —
+   **stop and report it**; do not `--force`, reset, or proceed to the removal
+   against an unsynced main. The merge is safe on the remote; closure just needs
+   a clean main the user resolves.
+
+2. **Remove the worktree** (the squash merge's `--delete-branch` removed the
+   **remote** branch; the local branch may linger harmlessly — `worktree remove`
+   still succeeds, and you may `git -C "<main-checkout>" branch -D` it after):
+
+   ```bash
+   git -C "<main-checkout>" worktree remove "<worktree-path>"
+   ```
+
+   If the worktree still holds **uncommitted changes** (there should be none
+   after a clean finish), do **not** `--force` silently — report them and let
+   the user decide. Report the closed workspace: main synced, worktree removed.
+
 ## Step 4.5: Offer Automation (macOS + Homebrew only)
 
 The bootstrap skill ships scripts that automate most of the manual steps in
@@ -2002,6 +2076,8 @@ secrets landed and CI could go green. Now that the re-trigger has run, **return
 to Step 4f** and run its await → approve → verify procedure so the PR reaches
 **merged** — this is what closes the loop for a full initial bootstrap. (A State
 D gap-fill already ran 4f right after 4e; a human-only repo has no 4f to run.)
+Once it merges, **run Step 4g** if this is a worktree run — the workspace
+closure belongs at the end of whichever path completed the merge.
 
 ### `--claude-approver true` extension
 
@@ -2150,6 +2226,8 @@ NEXT STEPS:
    green, run the deferred **Step 4f** drive — `/development-<APPROVER_LANG>:approve <pr>`
    — so the armed PR gets its local approval and merges. (Human-only repos skip
    this — a human approves instead.)
+8. **Worktree runs only**: once the PR has merged (step 7, or a human's
+   approval), run **Step 4g** — sync the main checkout and remove the worktree.
 ```
 
 > The Step 4e finishing flow already opened the bot PR with auto-merge armed —
