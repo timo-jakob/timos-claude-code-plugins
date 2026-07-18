@@ -205,7 +205,9 @@ flow. Stop and ask for input wherever marked; do not guess.
 
    For each path in `missing_artifacts`, **render it from its template and
    stamp the provenance marker** (Step 3 + Step 3.6), writing into the working
-   tree for the user to commit. These are the unconditionally-expected gaps
+   tree. This working-tree delta flows on through the plan (Step 2) to Step 4d
+   (commit) and the **Step 4e finishing flow**, which lands it as a bot PR —
+   don't stop at rendered files. These are the unconditionally-expected gaps
    only — `detect-stack.sh` deliberately **holds out** files whose render is
    gated by a signal it can't observe (the `--claude-approver` Approver pair,
    the language-spec-gated `api-stability.yml`, the non-selected
@@ -339,7 +341,10 @@ flow. Stop and ask for input wherever marked; do not guess.
       array: `drifted` (the template changed since this file was rendered — a
       stale toolchain, the #166 bug) and `unknown_provenance` (no marker —
       rendered pre-#213 or hand-made). An **empty array means no drift** —
-      report "toolchain is current" and stop; there is nothing to reconcile.
+      report "toolchain is current" and stop; there is nothing to reconcile,
+      nothing to commit, and so no Step 4e finishing flow runs. (If this run
+      *also* rendered gap-fill files above, that delta still flows to Step 4d/4e
+      as usual — "no drift" only means the already-present files are current.)
 
       > **The sha256 is the drift signal — not the version label.** A marker
       > records both the template hash AND the plugin version at render time.
@@ -430,9 +435,20 @@ Bootstrap plan:
     - <list of files left alone>
   Will offer diff for (mismatched existing files):
     - <list of files that exist but differ from template>
+  Finish:           commit the delta → open a bot-authored PR with squash
+                    auto-merge armed (merges only on green CI + approval).
+                    No further prompt guards the finish; confirming the plan
+                    authorizes it.
 ```
 
 Ask for confirmation. Do not proceed until the user explicitly approves.
+Confirming this plan **is** the consent for the Step 4e finishing flow — which
+is why the finish line is disclosed here: it is the single gate for the
+commit/push/PR, so it must name the commit + bot PR + auto-merge it authorizes.
+It does **not** waive the per-action prompts elsewhere: the Step 4c
+build-file confirmation (and Groovy→Kotlin offer), the Step 4e writer-App
+install offer, and the Step 4.5 automation offer still apply — "no further
+prompt" scopes to the finish, not to those.
 
 ### Docker pre-flight (when a Dockerfile is present — run BEFORE presenting the plan)
 
@@ -1632,10 +1648,126 @@ check is unverified until the first CI run.
 
 ### 4d. Initial commit
 
-Offer to commit the generated files (and any 4c build-script wiring, plus
-the 4a.5 normalization fixups to pre-existing files) using
-the `/development:commit` flow with a suggested message like `Bootstrap
-project with quality and security toolchain`. Do not push.
+Commit the generated files (and any 4c build-script wiring, plus the 4a.5
+normalization fixups to pre-existing files) using the `/development:commit`
+flow with a suggested message like `Bootstrap project with quality and
+security toolchain`. Whether pushing follows is the **Step 4e finishing
+flow**'s decision — do not push here.
+
+**Skip 4d when nothing was written.** If this run rendered, repaired, or
+generated nothing in the working tree — a **GitHub-side-only gap-fill**
+(branch protection, secrets) or a no-drift **"toolchain is current"** run —
+there is nothing to commit: skip 4d (don't launch the commit flow against a
+clean tree) and, consequently, skip 4e (its precondition, below, fails too).
+
+### 4e. Finishing flow — open the bot-authored PR
+
+The blessed way to land the work is a **bot-authored PR with squash
+auto-merge armed**, exactly as `/development:resolve-issue` finishes. This
+mirrors that mindset for bootstrap deltas: after the Step 2 plan
+confirmation, drive to an open PR without further per-step prompts.
+
+**When this step runs — always, whenever there is a committable delta.** There
+is no opt-in and no manual-PR path: a bootstrap that changed anything finishes
+by opening the bot PR itself. This holds for **every** delta — a full initial
+bootstrap the same as a State D gap-fill or a template-drift repair. The **Step
+2 plan confirmation is the single consent gate**; after it, drive to the bot PR
+with no further prompts. (A first bootstrap's larger blast radius needs no extra
+gate here: the finishing flow only *opens* a bot PR with auto-merge *armed* —
+auto-merge fires solely on green CI **and** approval, so shaky first-run CI
+simply keeps it waiting; nothing merges recklessly, and nothing is ever handed
+back for the user to push by hand.)
+
+- **Precondition — a committable delta must exist.** 4e opens a PR only when
+  Step 4d produced a commit (files were rendered, repaired, or generated in the
+  working tree). A **GitHub-side-only gap-fill** (branch protection, secrets —
+  which by design *do not touch the working tree*) and a no-drift **"toolchain
+  is current"** run commit nothing, so there is no PR to open: **skip 4e** and
+  just report the GitHub-side reconciliation. Never manufacture an empty commit
+  or a no-delta PR to satisfy this step.
+
+**How it runs — delegate to `/development:open-pr`, never a hand-rolled PR:**
+
+Follow the `/development:open-pr` procedure — mint the writer token, push the
+branch **as the bot**, open the PR **as the bot**, then arm squash auto-merge
+with branch deletion (`gh pr merge <n> --auto --squash --delete-branch` under
+the bot token). The PR body follows open-pr's template (Type / Summary / Test
+plan) and summarizes the bootstrap delta.
+
+> **Never open the PR by hand.** Do **not** run a plain `gh pr create` under
+> your own identity — that PR is self-authored (you can't approve it) and
+> **auto-merge is never armed**, which is exactly the failure this step exists
+> to prevent. The *only* PR-opening path is `/development:open-pr`. (open-pr
+> itself calls `gh pr create` under the **bot** token with auto-merge arming —
+> that is the delegated call, not a hand-rolled one.)
+
+**The finishing flow lands a bot PR or nothing — never a user-authored PR.**
+The writer App (the Claude Maintenance App) is the **prerequisite** of the
+finishing flow, not an optional nicety: a bot-authored, auto-merge-armed PR is
+the entire point, and a user-authored PR silently re-introduces the exact manual
+merge this step exists to remove. So `/development:open-pr`'s own
+degrade-to-user-authored fallbacks (writer App absent, and the #750
+`workflows`-grant push rejection) are **not** acceptable outcomes here — when
+open-pr would degrade, bootstrap fixes the prerequisite or stops. Handle each
+bot-path blocker, in order:
+
+1. **Writer App not registered / installed** → **offer to install it** with the
+   same machinery the rest of bootstrap uses: `register-claude-apps.zsh`
+   (registers the App on this machine — the Step 4.5 preflight offers it too)
+   and `install-claude-apps.zsh --writer-only` (installs it on the repo, the
+   `--claude-plugin` extension). Once installed, the finishing flow takes the
+   bot path.
+2. **Push rejected with the #750 stale `workflows` grant** → the App is
+   installed but the installation hasn't accepted `workflows: write`; point the
+   user at `install-claude-apps.zsh --verify` (it prints the re-accept steps).
+   A re-accept, not a fresh install.
+3. **The user declines / can't install, or any step through *opening* the PR
+   still fails** → **stop and report the specific blocker as the outstanding
+   action**, leaving the branch at the 4d commit. That committed delta lands
+   later via **`/development:open-pr` on this branch** (which opens the bot PR
+   straight from the existing commit) — never via a user-authored PR.
+
+**Report the actual outcome — three cases (mind whether a PR now exists):**
+
+- **Bot PR, auto-merge armed** (the blessed, expected outcome) → report the PR
+  URL, that it's bot-authored, and that auto-merge is armed. On an
+  Approver-capable repo the Approver auto-approves and it merges on green CI;
+  on a human-only repo a human approves and it merges.
+- **Bot PR opened, but arming failed** (the PR exists — e.g. `allow_auto_merge`
+  was never enabled because Step 4b's `branch-protection.sh` hit a 403 and
+  continued) → report the PR URL and that auto-merge is **not** armed; the fix
+  is to enable `allow_auto_merge` (re-run `branch-protection.sh` or the repo
+  setting) and re-arm with `gh pr merge <n> --auto --squash --delete-branch`,
+  or just approve + merge it. Do **not** send the user to re-run open-pr — the
+  commit is already pushed, so its "no commits to PR" precondition would fail.
+- **Blocked before a PR exists** (writer App not installed, #750 grant not
+  re-accepted, or a push/create failure) → no PR was opened; name the specific
+  blocker and its fix (install / `--verify` / the reported error), and say the
+  4d commit stays on the branch to be landed via `/development:open-pr` once the
+  blocker clears. Never report success when no bot PR exists, and never
+  substitute a user-authored PR.
+
+> **First-run CI vs secrets — the PR opens before the secrets exist, so
+> re-trigger CI once they land.** On a **full initial bootstrap** the bot PR's
+> first CI run happens here, *before* Step 4.5 stores `SONAR_TOKEN` /
+> `SNYK_TOKEN` (or before the user completes the manual Step 5 secret steps), so
+> the token-gated checks (Sonar, Snyk) will be **red on that first run**. This
+> is expected and correct: the bot PR is open with auto-merge armed (the right
+> end state), and armed auto-merge simply **waits** — nothing merges red. But a
+> stored secret does **not** retroactively re-run a failed check, so whenever
+> the secrets land (Step 4.5 automation below, or a manual Step 5 step)
+> **re-trigger the PR's CI** so the now-available secrets take effect:
+>
+> ```bash
+> "<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh" --grace 0 <pr-number>
+> ```
+>
+> Report this explicitly — "bot PR open, auto-merge armed; token-gated checks
+> are red until you add the secrets in the checklist, then CI is re-triggered
+> and it merges itself" — never a bare "it merges itself" that hides the
+> secrets-then-retrigger dependency. (A **State D re-bootstrap** on an
+> already-configured repo already has its secrets, so its first run is normally
+> green and no re-trigger is needed.)
 
 ## Step 4.5: Offer Automation (macOS + Homebrew only)
 
@@ -1748,6 +1880,19 @@ This handles:
 If the user declines automation at any step, fall back to the manual
 instructions in `SETUP.md` for the remaining steps.
 
+**After automation stores the secrets, re-trigger the finishing-flow PR's CI.**
+If Step 4e already opened the bot PR (the normal case — 4e runs before this
+step), its first CI run predates these secrets, so its token-gated checks
+(Sonar, Snyk) are red. Now that `SONAR_TOKEN` / `SNYK_TOKEN` are stored,
+re-trigger the PR's CI so they re-run green and armed auto-merge can fire:
+
+```bash
+"<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh" --grace 0 <pr-number>
+```
+
+(On a State D re-bootstrap the secrets already existed, so its first run was
+green and no re-trigger is needed.)
+
 ### `--claude-approver true` extension
 
 When the orchestrator was invoked with `--claude-approver true`, both
@@ -1813,8 +1958,28 @@ first.
 Print a clear, ordered checklist of everything the user **still** has to do
 manually — i.e., only the steps that automation didn't cover (or that the user
 declined). If automation in Step 4.5 ran end-to-end, this checklist may be very
-short ("push a branch and open a PR"). Reference `SETUP.md` for full details.
+short. Reference `SETUP.md` for full details.
 
+> **Key the checklist item on Step 4e's actual outcome — and always point at
+> the blessed finish (the bot PR), never a manual "push and open a PR
+> yourself."** Four cases:
+>
+> - **4e opened a bot PR with auto-merge armed** → the work is landing; omit any
+>   PR/merge item entirely.
+> - **Bot PR opened but arming failed** (the PR exists, auto-merge not armed) →
+>   **keep** "enable `allow_auto_merge` (re-run `branch-protection.sh`) and
+>   re-arm `gh pr merge <n> --auto --squash --delete-branch`, or approve +
+>   merge PR #N." (Do not tell the user to re-run open-pr — the PR already
+>   exists.)
+> - **Blocked before a PR exists** (writer App not installed, #750 grant not
+>   re-accepted, or a push/create failure) → **keep** "clear the blocker
+>   (install the writer App / re-accept via `install-claude-apps.zsh --verify` /
+>   fix the reported error), then run `/development:open-pr` on the bootstrap
+>   branch to land the 4d commit as a bot PR." (Never a user-authored-PR item.)
+> - **4e was skipped because there was no committable delta** (GitHub-side-only
+>   gap-fill, or a no-drift "toolchain is current" run) → nothing was staged
+>   and nothing is outstanding on the PR axis; **omit** the item entirely.
+>
 > **Only list genuinely outstanding work.** A checklist item is a TODO the
 > user must act on — never a status report. Do **not** render an
 > already-satisfied check (e.g. "nebula-release already applied ✅",
@@ -1854,8 +2019,17 @@ NEXT STEPS:
    UI step (Snyk org → Integrations → GitHub → Edit Settings → toggle on).
    Required because Snyk's API gates this behind paid plan; UI is the only
    path on free.
-6. Push the branch and open a PR — CI will run.
+6. After the secrets above are in place, re-trigger the open bot PR's CI so the
+   token-gated checks (Sonar, Snyk) re-run with them:
+   `<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh --grace 0 <pr>`.
 ```
+
+> The Step 4e finishing flow already opened the bot PR with auto-merge armed —
+> there is **no** "push the branch and open a PR" step. On a first bootstrap the
+> token-gated checks are red until the secrets above are added, so step 6
+> re-triggers CI once they are; after that (and the PR's approval) it merges
+> itself. The list is only the secrets/UI setup and the one re-trigger that are
+> genuinely outstanding.
 
 For private path the checklist additionally includes:
 
@@ -1877,7 +2051,18 @@ first bootstraps. Surface the agent's report to the user verbatim.
 ## Important Rules
 
 - NEVER overwrite a user's file without explicit confirmation.
-- NEVER push to remote unless the user explicitly asks.
+- The **only** push bootstrap makes is the Step 4e finishing flow's — **as the
+  bot**, to a PR branch, to open the auto-merge-armed PR. It is the normal end
+  of every run that produced a committable delta, not an exception: the **Step 2
+  plan confirmation is the consent** (it discloses the commit → bot PR →
+  auto-merge, so confirming the plan authorizes the push). This *replaces* the
+  old "never push unless the user asks" stop-at-staged behavior — confirming the
+  plan **is** the ask. The genuine NEVERs are narrower: **never** push under the
+  user's identity (the writer App is a prerequisite — installed when absent,
+  never bypassed with a user-authored PR); **never** push before the Step 2
+  confirmation; and a run with **no committable delta** (a GitHub-side-only
+  gap-fill, or a no-drift "toolchain is current" run) pushes nothing, because
+  there is nothing to land.
 - NEVER commit secrets or tokens to the repo. All credentials go to GitHub
   Actions secrets only.
 - If the visibility detection fails or `gh` is not authenticated, ask the user
