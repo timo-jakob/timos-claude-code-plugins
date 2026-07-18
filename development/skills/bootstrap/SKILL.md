@@ -1730,9 +1730,10 @@ bot-path blocker, in order:
 **Report the actual outcome — three cases (mind whether a PR now exists):**
 
 - **Bot PR, auto-merge armed** (the blessed, expected outcome) → report the PR
-  URL, that it's bot-authored, and that auto-merge is armed. On an
-  Approver-capable repo the Approver auto-approves and it merges on green CI;
-  on a human-only repo a human approves and it merges.
+  URL, that it's bot-authored, and that auto-merge is armed, then **continue to
+  Step 4f**, which drives the cycle to merged: on an Approver-capable repo 4f
+  awaits green CI and runs the local approver; on a human-only repo 4f skips and
+  a human approves + merges.
 - **Bot PR opened, but arming failed** (the PR exists — e.g. `allow_auto_merge`
   was never enabled because Step 4b's `branch-protection.sh` hit a 403 and
   continued) → report the PR URL and that auto-merge is **not** armed; the fix
@@ -1768,6 +1769,108 @@ bot-path blocker, in order:
 > secrets-then-retrigger dependency. (A **State D re-bootstrap** on an
 > already-configured repo already has its secrets, so its first run is normally
 > green and no re-trigger is needed.)
+
+### 4f. Drive the approve → merge cycle (Approver-capable repos)
+
+4e ends at "bot PR open, auto-merge armed" — but an armed PR still needs its
+approving review, and on an **Approver-decentralized** repo the Approver runs
+**locally** (the CI Approver was removed in #479), so a human-present bootstrap
+session is the only place that review can happen. Bootstrap owns the drive here
+— the same one the maintenance orchestrator's `merge-pr-cycle.zsh` performs — so
+the run reaches a **merged** PR with no input after the Step 2 plan confirmation.
+
+**Runs only when the Approver is actually WIRED for this repo** — i.e. this run
+installed it: `--claude-approver true` **and** §3e resolved an `{{APPROVER_LANG}}`
+(`python`/`java`/`swift`). **Otherwise skip cleanly, no drive** — a human-only
+repo (a plugin repo, a **`--claude-approver false`** run, or one where no/multiple
+Approver-capable language resolves) has a human approve, so report that the armed
+PR merges on their approval and move on. It also needs 4e to have actually opened
+a bot PR with auto-merge **armed** (not the arming-failed or blocked-before-a-PR
+cases — there's nothing to drive there). Never drive an approver that isn't
+installed.
+
+**When to run it** — the drive needs **green** CI, so run it at the point CI can
+actually be green:
+
+- **State D gap-fill** (the repo's secrets already exist) → run it **now**, right
+  after 4e.
+- **Full initial bootstrap** (the bot PR's token-gated Sonar/Snyk checks are red
+  until the secrets are stored — see the 4e note) → **defer**: do not fail here;
+  continue the bootstrap. The drive resumes once the secrets land and the
+  re-trigger makes CI green — from **Step 4.5's re-trigger step** when its
+  automation ran, or, if Step 4.5 didn't run (declined / non-macOS), from the
+  **Step 5 checklist's secret + re-trigger item**, which surfaces the drive
+  (`/development-<APPROVER_LANG>:approve <pr>` after green) as outstanding work.
+  Either entry runs the same procedure below.
+
+The procedure is the same from either entry point:
+
+**1. Await CI settle — reuse the poller, never hand-roll `gh pr checks`:**
+
+```bash
+"<skill-base-dir>/../maintenance/scripts/await-pr-checks.zsh" <pr-number>
+```
+
+Exit 0 = settled (prints `… — GREEN|NOT-GREEN`, CANCELLED/STALE **neutral** per
+the CLAUDE.md "green CI" definition — never re-derive it); 3 = timeout; 1 = gh
+error.
+
+- **GREEN** → go to step 2.
+- **NOT-GREEN** → do **not** approve a red PR, and note that on an Approver repo
+  **auto-merge will not fire on its own** — it still needs step 2's approval, so
+  the drive must **return to step 1 once CI is green**. If the red is the
+  token-gated checks still awaiting secrets (full initial bootstrap), this is the
+  *defer* case: report "waiting on secrets — the drive resumes after Step
+  4.5/Step 5 and the re-trigger," and **continue the bootstrap** (do not end the
+  session). Otherwise (a genuine failure) report the failing check as the blocker.
+- **timeout (3) / gh error (1)** → report it and stop the drive (not the
+  session); the resume command is **re-running this step** — `await-pr-checks.zsh
+  <pr-number>`, then the approve in step 2. Do not loop.
+
+**2. On GREEN, invoke the local approve skill, then verify the merge:**
+
+```text
+/development-<APPROVER_LANG>:approve <pr-number>
+```
+
+Its APPROVE verdict is the review the armed auto-merge is waiting for. **Then
+confirm the merge actually completed** — but give armed auto-merge a moment: it
+fires up to ~1 minute *after* the approving review lands, so an immediate check
+usually catches it mid-merge. Re-check `gh pr view` a few times over that window:
+
+```bash
+gh pr view <pr-number> --json state,mergeStateStatus -q '.state + " / " + .mergeStateStatus'
+```
+
+- `state == "MERGED"` → report the PR **merged** (the blessed outcome).
+- `OPEN` with `mergeStateStatus` **`CLEAN`/`UNKNOWN`** → not a hold — auto-merge
+  is still computing/firing; **keep waiting** and re-check, don't report a
+  phantom hold.
+- `OPEN` with a **genuine hold** (`BEHIND`/`BLOCKED`/`DIRTY`/`UNSTABLE`, or it
+  stays put past the window) → report that exact hold and the one action that
+  clears it (`gh pr update-branch <pr-number>` for `BEHIND`; the failing/pending
+  required check for `BLOCKED`/`UNSTABLE`; a conflict for `DIRTY`; and for a
+  persisted `CLEAN`/`UNKNOWN` that never fired, verify the approving review
+  landed and, if needed, re-arm `gh pr merge <pr-number> --auto --squash
+  --delete-branch`). **Never report "merged" for an open PR.**
+
+**3. Graceful degradation — distinguish the credits gate from a review verdict:**
+
+- **Credits/billing gate** — the approve agent spawn dies with a *terminal API
+  error* (e.g. `Usage credits are required for this model`) **before** any
+  verdict. **Retry once.** If it fails the same way again, **stop the drive and
+  report** the exact blocker and the one-line resume command
+  (`/development-<APPROVER_LANG>:approve <pr-number>`) — never a silent stop.
+- **REQUEST_CHANGES** — a genuine review verdict, **not** a spawn error. Do
+  **not** retry. Report the requested changes; the PR stays open for the human,
+  auto-merge still armed for when the fix lands and re-approval passes.
+
+**"Stop the drive" ≠ end the session** — it means stop *this cycle* with a report
+and continue the rest of bootstrap (Step 4.5/Step 5). Terminal states of the
+drive: **merged**, or a **precise, actionable blocker report** (red CI + which
+check, a merge hold + the clearing action, the credits gate + resume command, or
+REQUEST_CHANGES + what to fix) — never a silent stop, never an approve on a red
+PR, and never a "merged" claim without verifying `state`.
 
 ## Step 4.5: Offer Automation (macOS + Homebrew only)
 
@@ -1893,6 +1996,13 @@ re-trigger the PR's CI so they re-run green and armed auto-merge can fire:
 (On a State D re-bootstrap the secrets already existed, so its first run was
 green and no re-trigger is needed.)
 
+**Then run the deferred Step 4f drive.** On an Approver-wired repo
+(`--claude-approver true`), Step 4f deferred its approve → merge cycle until the
+secrets landed and CI could go green. Now that the re-trigger has run, **return
+to Step 4f** and run its await → approve → verify procedure so the PR reaches
+**merged** — this is what closes the loop for a full initial bootstrap. (A State
+D gap-fill already ran 4f right after 4e; a human-only repo has no 4f to run.)
+
 ### `--claude-approver true` extension
 
 When the orchestrator was invoked with `--claude-approver true`, both
@@ -1962,10 +2072,24 @@ short. Reference `SETUP.md` for full details.
 
 > **Key the checklist item on Step 4e's actual outcome — and always point at
 > the blessed finish (the bot PR), never a manual "push and open a PR
-> yourself."** Four cases:
+> yourself."** Five cases:
 >
-> - **4e opened a bot PR with auto-merge armed** → the work is landing; omit any
->   PR/merge item entirely.
+> - **4e opened a bot PR with auto-merge armed, and Step 4f already merged it**
+>   (gap-fill, or 4f ran after Step 4.5's re-trigger) → the work landed; omit any
+>   PR/merge item.
+> - **Bot PR armed but Step 4f hasn't completed** (deferred, or it ran and
+>   stopped on a blocker) → key it on the repo's approval model. **Human-only
+>   repo** (plugin / `--claude-approver false` / no Approver language): "approve
+>   PR #N — armed auto-merge then merges it." **Approver-wired repo whose 4f
+>   drive was deferred** (full initial bootstrap, secrets not yet in when 4e ran,
+>   and Step 4.5 didn't run the drive): **keep** "after the secrets + re-trigger
+>   item below, run the Step 4f drive — `await-pr-checks.zsh <pr>` then
+>   `/development-<APPROVER_LANG>:approve <pr>` — so it merges" (an Approver repo
+>   does **not** "merge itself" on the arm alone; it needs that local approval).
+>   **Approver-wired repo whose 4f drive stopped on a blocker** (credits gate,
+>   REQUEST_CHANGES, or a genuine red): carry 4f's own terminal blocker report as
+>   the outstanding item (its resume command / the requested changes / the
+>   failing check).
 > - **Bot PR opened but arming failed** (the PR exists, auto-merge not armed) →
 >   **keep** "enable `allow_auto_merge` (re-run `branch-protection.sh`) and
 >   re-arm `gh pr merge <n> --auto --squash --delete-branch`, or approve +
@@ -2022,14 +2146,20 @@ NEXT STEPS:
 6. After the secrets above are in place, re-trigger the open bot PR's CI so the
    token-gated checks (Sonar, Snyk) re-run with them:
    `<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh --grace 0 <pr>`.
+7. **Approver-wired repo only** (`--claude-approver true`): once that CI is
+   green, run the deferred **Step 4f** drive — `/development-<APPROVER_LANG>:approve <pr>`
+   — so the armed PR gets its local approval and merges. (Human-only repos skip
+   this — a human approves instead.)
 ```
 
 > The Step 4e finishing flow already opened the bot PR with auto-merge armed —
 > there is **no** "push the branch and open a PR" step. On a first bootstrap the
 > token-gated checks are red until the secrets above are added, so step 6
-> re-triggers CI once they are; after that (and the PR's approval) it merges
-> itself. The list is only the secrets/UI setup and the one re-trigger that are
-> genuinely outstanding.
+> re-triggers CI once they are. What merges it then depends on the approval
+> model: a **human-only** repo merges on the human's approval; an
+> **Approver-wired** repo needs step 7's local approve (armed auto-merge alone
+> won't merge it). The list is only the secrets/UI setup, the re-trigger, and
+> (Approver repos) the approve drive that are genuinely outstanding.
 
 For private path the checklist additionally includes:
 
