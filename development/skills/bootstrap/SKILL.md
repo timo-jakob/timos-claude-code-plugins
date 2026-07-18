@@ -435,20 +435,24 @@ Bootstrap plan:
     - <list of files left alone>
   Will offer diff for (mismatched existing files):
     - <list of files that exist but differ from template>
-  Finish:           commit the delta → open a bot-authored PR with squash
-                    auto-merge armed (merges only on green CI + approval).
-                    No further prompt guards the finish; confirming the plan
+  Finish:           commit the delta → open a bot-authored PR, squash auto-merge
+                    armed. On an Approver-wired repo bootstrap then runs the
+                    local approve and merges in-session (Step 4f); on a
+                    human-only repo the armed PR waits for your approval. No
+                    further prompt guards the finish; confirming the plan
                     authorizes it.
 ```
 
 Ask for confirmation. Do not proceed until the user explicitly approves.
-Confirming this plan **is** the consent for the Step 4e finishing flow — which
+Confirming this plan **is** the consent for the Step 4e/4f finishing flow — which
 is why the finish line is disclosed here: it is the single gate for the
-commit/push/PR, so it must name the commit + bot PR + auto-merge it authorizes.
-It does **not** waive the per-action prompts elsewhere: the Step 4c
-build-file confirmation (and Groovy→Kotlin offer), the Step 4e writer-App
-install offer, and the Step 4.5 automation offer still apply — "no further
-prompt" scopes to the finish, not to those.
+commit/push/PR **and the approve → merge drive**, so it must name the commit, the
+bot PR, the armed auto-merge, **and** that on an Approver-wired repo the flow
+runs the local approver and merges in-session (Step 4f) rather than waiting. It
+does **not** waive the per-action prompts elsewhere: the Step 4c build-file
+confirmation (and Groovy→Kotlin offer), the Step 4e writer-App install offer, and
+the Step 4.5 automation offer still apply — "no further prompt" scopes to the
+finish, not to those.
 
 ### Docker pre-flight (when a Dockerfile is present — run BEFORE presenting the plan)
 
@@ -1801,24 +1805,34 @@ session is the only place that review can happen. Bootstrap owns the drive here
 — the same one the maintenance orchestrator's `merge-pr-cycle.zsh` performs — so
 the run reaches a **merged** PR with no input after the Step 2 plan confirmation.
 
-**Runs only when the Approver is actually WIRED for this repo** — i.e. this run
-installed it: `--claude-approver true` **and** §3e resolved an `{{APPROVER_LANG}}`
-(`python`/`java`/`swift`). **Otherwise skip cleanly, no drive** — a human-only
-repo (a plugin repo, a **`--claude-approver false`** run, or one where no/multiple
-Approver-capable language resolves) has a human approve, so report that the armed
-PR merges on their approval and move on. It also needs 4e to have actually opened
-a bot PR with auto-merge **armed** (not the arming-failed or blocked-before-a-PR
-cases — there's nothing to drive there). Never drive an approver that isn't
-installed.
+**Runs only when the Approver is WIRED for this repo — detected from repo
+state, not this invocation's flag.** The repo is wired when the Approver
+policy/App is installed (**`.claude/approver-policy.md` present** — from this
+run's `--claude-approver true` **or** a prior bootstrap) **and** an
+`{{APPROVER_LANG}}` resolves (§3e: `python`/`java`/`swift`). This is the same
+condition 4e calls an "Approver-capable repo" — one definition, not three.
+**Otherwise skip cleanly, no drive** — a **human-only repo** (a plugin repo, or
+one with no Approver policy / no-or-multiple Approver-capable language) has a
+human approve, so report that the armed PR merges on their approval and move on.
+Keying on the repo's **wiring** rather than `--claude-approver` on *this* run is
+deliberate: a **State D re-bootstrap** of an already-wired repo re-runs with the
+flag defaulting `false`, and it must still drive its PR home. It also needs 4e to
+have actually opened a bot PR with auto-merge **armed** (not the arming-failed or
+blocked-before-a-PR cases — there's nothing to drive there). Never drive an
+approver that isn't installed.
 
 **When to run it** — the drive needs **green** CI, so run it at the point CI can
-actually be green:
+actually be green, which turns on whether **this run stored secrets *after* the
+PR opened** (not on gap-fill vs full bootstrap):
 
-- **State D gap-fill** (the repo's secrets already exist) → run it **now**, right
-  after 4e.
-- **Full initial bootstrap** (the bot PR's token-gated Sonar/Snyk checks are red
-  until the secrets are stored — see the 4e note) → **defer**: do not fail here;
-  continue the bootstrap. The drive resumes once the secrets land and the
+- **CI can already go green** — the token-gated secrets (`SONAR_TOKEN` /
+  `SNYK_TOKEN`) were already present when the PR opened (the common State D
+  gap-fill case) → run it **now**, right after 4e.
+- **This run stores secrets after the PR opened** — a full initial bootstrap,
+  **or** a State D run whose gaps included **missing secrets** (State D's gap
+  list explicitly can — see Step 1) → the bot PR's token-gated checks are red
+  until those secrets land and CI is re-triggered, so **defer**: do not fail
+  here; continue the bootstrap. The drive resumes once the secrets land and the
   re-trigger makes CI green — from **Step 4.5's re-trigger step** when its
   automation ran, or, if Step 4.5 didn't run (declined / non-macOS), from the
   **Step 5 checklist's secret + re-trigger item**, which surfaces the drive
@@ -1883,6 +1897,13 @@ gh pr view <pr-number> --json state,mergeStateStatus -q '.state + " / " + .merge
   verdict. **Retry once.** If it fails the same way again, **stop the drive and
   report** the exact blocker and the one-line resume command
   (`/development-<APPROVER_LANG>:approve <pr-number>`) — never a silent stop.
+- **Approver App not installed** — the wiring test keys on the **policy**
+  (`.claude/approver-policy.md`), but the App install (Step 4e writer / Step 4.5
+  approver) can have been declined, so a policy-present repo may still lack the
+  App the approve skill needs to mint its token; the spawn then dies for lack of
+  the App, not credits. **Do not retry** — report it as the blocker with the
+  install action (`install-claude-apps.zsh`), then the resume command. (Same
+  shape as the credits gate: stop the drive, report, resume once installed.)
 - **REQUEST_CHANGES** — a genuine review verdict, **not** a spawn error. Do
   **not** retry. Report the requested changes; the PR stays open for the human,
   auto-merge still armed for when the fix lands and re-approval passes.
@@ -2067,17 +2088,23 @@ re-trigger the PR's CI so they re-run green and armed auto-merge can fire:
 "<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh" --grace 0 <pr-number>
 ```
 
-(On a State D re-bootstrap the secrets already existed, so its first run was
-green and no re-trigger is needed.)
+(When **no secrets were stored this run** — the common State D re-bootstrap,
+where they already existed — the first CI run was already green, so there is
+nothing to re-trigger and the 4f drive, if any, already ran right after 4e. This
+step applies only when *this run* stored secrets after the PR opened, whatever
+the state.)
 
-**Then run the deferred Step 4f drive.** On an Approver-wired repo
-(`--claude-approver true`), Step 4f deferred its approve → merge cycle until the
-secrets landed and CI could go green. Now that the re-trigger has run, **return
-to Step 4f** and run its await → approve → verify procedure so the PR reaches
-**merged** — this is what closes the loop for a full initial bootstrap. (A State
-D gap-fill already ran 4f right after 4e; a human-only repo has no 4f to run.)
-Once it merges, **run Step 4g** if this is a worktree run — the workspace
-closure belongs at the end of whichever path completed the merge.
+**Then run the deferred Step 4f drive.** On an **Approver-wired repo** (per 4f's
+repo-state test — `.claude/approver-policy.md` present + a resolvable
+`{{APPROVER_LANG}}`, *not* `--claude-approver` on this run), Step 4f deferred its
+approve → merge cycle until the secrets landed and CI could go green. Now that
+the re-trigger has run, **return to Step 4f** and run its await → approve →
+verify procedure so the PR reaches **merged**. (This is the completion for any
+run that stored secrets after the PR opened — a full initial bootstrap **or** a
+State D run whose gaps included missing secrets. A run that stored **no** secrets
+already ran 4f right after 4e; a human-only repo has no 4f to run.) Once it
+merges, **run Step 4g** if this is a worktree run — the workspace closure belongs
+at the end of whichever path completed the merge.
 
 ### `--claude-approver true` extension
 
@@ -2154,12 +2181,15 @@ short. Reference `SETUP.md` for full details.
 >   (gap-fill, or 4f ran after Step 4.5's re-trigger) → the work landed; omit any
 >   PR/merge item.
 > - **Bot PR armed but Step 4f hasn't completed** (deferred, or it ran and
->   stopped on a blocker) → key it on the repo's approval model. **Human-only
->   repo** (plugin / `--claude-approver false` / no Approver language): "approve
->   PR #N — armed auto-merge then merges it." **Approver-wired repo whose 4f
->   drive was deferred** (full initial bootstrap, secrets not yet in when 4e ran,
->   and Step 4.5 didn't run the drive): **keep** "after the secrets + re-trigger
->   item below, run the Step 4f drive — `await-pr-checks.zsh <pr>` then
+>   stopped on a blocker) → key it on the repo's approval model **per 4f's
+>   repo-state test** (`.claude/approver-policy.md` present + a resolvable
+>   `{{APPROVER_LANG}}`), not this run's `--claude-approver` flag. **Human-only
+>   repo** (a plugin repo, or no Approver policy / no-or-multiple Approver
+>   language): "approve PR #N — armed auto-merge then merges it." **Approver-wired
+>   repo whose 4f drive was deferred** (this run stored secrets after the PR
+>   opened — a full initial bootstrap **or** a State D run with missing-secret
+>   gaps — and Step 4.5 didn't run the drive): **keep** "after the secrets +
+>   re-trigger item below, run the Step 4f drive — `await-pr-checks.zsh <pr>` then
 >   `/development-<APPROVER_LANG>:approve <pr>` — so it merges" (an Approver repo
 >   does **not** "merge itself" on the arm alone; it needs that local approval).
 >   **Approver-wired repo whose 4f drive stopped on a blocker** (credits gate,
@@ -2222,7 +2252,8 @@ NEXT STEPS:
 6. After the secrets above are in place, re-trigger the open bot PR's CI so the
    token-gated checks (Sonar, Snyk) re-run with them:
    `<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh --grace 0 <pr>`.
-7. **Approver-wired repo only** (`--claude-approver true`): once that CI is
+7. **Approver-wired repo only** (per 4f's repo-state test — `.claude/approver-policy.md`
+   present + a resolvable `<APPROVER_LANG>`, not this run's flag): once that CI is
    green, run the deferred **Step 4f** drive — `/development-<APPROVER_LANG>:approve <pr>`
    — so the armed PR gets its local approval and merges. (Human-only repos skip
    this — a human approves instead.)
