@@ -756,3 +756,57 @@ setup() {
   [ "$(jq -r '.existing_artifacts["docs/architecture/c4-container.md"]' <<<"$out")" = "true" ]
   [ "$(jq -r '.missing_artifacts | index("docs/architecture/c4-context.md")' <<<"$out")" = "null" ]
 }
+
+# --- #833: worktree-safe container/project naming -----------------------------
+# Inside a git worktree, `basename "$cwd"` is the worktree dir, not the repo —
+# which named a seeded container after the worktree (session c2561459). The name
+# must derive from the MAIN checkout. Two call sites: the root/docker Dockerfile
+# branch, and gradle_project_name's fallback (bootBuildImage/Jib).
+
+@test "detect-stack #833: a root Dockerfile run from a worktree is named by the repo, not the worktree dir" {
+  printf 'FROM x\n' > Dockerfile
+  git -c user.email=t@e -c user.name=t add -A
+  git -c user.email=t@e -c user.name=t commit -qm init
+  main_name=$(bash "$DETECT" 2>/dev/null | jq -r '.containers[0].name')
+  [ "$main_name" = "$(basename "$WORK")" ]
+
+  wt="$BATS_TEST_TMPDIR/worktree-fizzy-booping-kitten"
+  git worktree add -q "$wt" HEAD
+  cd "$wt"
+  out=$(bash "$DETECT" 2>/dev/null)
+  # named after the REPO, identical to the main-checkout run — never the worktree
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "$main_name" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" != "$(basename "$wt")" ]
+}
+
+@test "detect-stack #833: a gradle project with no rootProject.name run from a worktree is named by the repo, not the worktree dir" {
+  # no settings.gradle rootProject.name -> gradle_project_name falls back to repo_dir_name
+  printf 'plugins {\n  id("org.springframework.boot") version "3.2.0"\n}\n' > build.gradle.kts
+  git -c user.email=t@e -c user.name=t add -A
+  git -c user.email=t@e -c user.name=t commit -qm init
+  main_name=$(bash "$DETECT" 2>/dev/null | jq -r '.containers[0].name')
+  [ "$main_name" = "$(basename "$WORK")" ]
+
+  wt="$BATS_TEST_TMPDIR/worktree-zesty-otter"
+  git worktree add -q "$wt" HEAD
+  cd "$wt"
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "bootBuildImage" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "$main_name" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" != "$(basename "$wt")" ]
+}
+
+@test "detect-stack #833: outside a git repo (State A, pre git-init) a root Dockerfile falls back to the cwd dir name" {
+  # exercises repo_dir_name's non-git fallback (else branch): no git repo -> basename "$cwd"
+  ng="$BATS_TEST_TMPDIR/nogit-alpha"
+  mkdir -p "$ng"
+  cd "$ng"
+  # Hermetic: stop `git rev-parse` from discovering an ancestor repo if TMPDIR is
+  # itself nested inside a checkout (bats-in-Docker with a mounted repo).
+  export GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR"
+  printf 'FROM x\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  # self-verify the non-git branch was actually taken, then the fallback name
+  [ "$(jq -r '.git_initialized' <<<"$out")" = "false" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "nogit-alpha" ]
+}
