@@ -104,6 +104,12 @@
 #    {"name":"tick-client-snapper","source":"bootBuildImage",
 #     "evidence":"bootBuildImage via the Spring Boot Gradle plugin in build.gradle.kts"}]
 #   source ∈ {dockerfile, containerfile, compose, bootBuildImage, jib, user override}
+# When a name has no intrinsic source — a root-level (or `docker/`-dir) Dockerfile,
+# or a gradle root project with no `rootProject.name` — it falls back to the
+# REPOSITORY directory name. That name is derived worktree-safely from the MAIN
+# checkout via `git rev-parse --git-common-dir` (#833), NEVER `basename "$cwd"`,
+# which inside a git worktree is the worktree dir (e.g. a resolve-issue worktree),
+# not the repo — the bug that named a seeded container after the worktree.
 # Detection is ADVISORY (like `interfaces`); `--containers a,b` overrides it
 # outright (each carries "user override" as its source and evidence). The
 # enumeration is deliberately bounded — "what image does this repo produce" has no
@@ -736,6 +742,31 @@ emit_contracts_json() {
 	printf '%s' "$out"
 }
 
+# repo_dir_name: the repository's directory name, worktree-SAFE (#833). Inside a
+# git worktree (e.g. a resolve-issue worktree under .claude/worktrees/<name>),
+# `basename "$cwd"` is the WORKTREE's name, not the repo — which wrongly named a
+# seeded container after the worktree dir (session c2561459). `git rev-parse
+# --git-common-dir` resolves to the MAIN repo's .git regardless of which worktree
+# we're in; its parent directory is the main checkout's toplevel, whose basename
+# is the repo name. Falls back to `basename "$cwd"` only when cwd is not a git
+# repo at all (State A, before `git init`).
+repo_dir_name() {
+	local common_dir root
+	# --git-common-dir resolves to the MAIN repo's .git even from a linked
+	# worktree (--path-format=absolute guarantees an absolute path; needs git
+	# >= 2.31). Only the standard "<root>/.git" shape lets us take its PARENT as
+	# the repo toplevel — a submodule (".git/modules/<p>"), a --separate-git-dir,
+	# or a bare setup does NOT, so those fall back to the checkout dir name
+	# (correct for a submodule, and .claude/worktrees don't apply to them here).
+	if common_dir="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" &&
+		[[ -n "$common_dir" && "$(basename "$common_dir")" == ".git" ]]; then
+		root="$(dirname "$common_dir")"
+		basename "$root"
+	else
+		basename "$cwd"
+	fi
+}
+
 # The gradle root project name (the deployable identifier for a bootBuildImage /
 # Jib image), falling back to the repo directory name.
 gradle_project_name() {
@@ -766,7 +797,7 @@ gradle_project_name() {
 			return
 		}
 	done
-	basename "$cwd"
+	repo_dir_name
 }
 
 # gradle_plugin_applied: true when a Gradle build file APPLIES the given plugin
@@ -828,7 +859,7 @@ else
 		d="$(dirname "$rel")"
 		bn="$(basename "$df")"
 		if [[ "$d" == "." || "$d" == "docker" ]]; then
-			cname="$(basename "$cwd")"
+			cname="$(repo_dir_name)"
 		else
 			pdir="$(basename "$d")"
 			if [[ "$pdir" == "docker" ]]; then cname="$(basename "$(dirname "$d")")"; else cname="$pdir"; fi
