@@ -1495,8 +1495,17 @@ hook). Running a plain `pre-commit install` would only install the
 default type and silently leave pre-push (and any other stage) wired
 up in config but missing from `.git/hooks/`.
 
-If `pre-commit` is not installed, tell the user how to install it
-(`brew install pre-commit` or `pip install pre-commit`) and skip.
+If `pre-commit` is not installed, **install it** before running this step —
+offer a confirmed `brew install pre-commit` (consistent with the macOS +
+Homebrew scope; the Step 4.5 preflight batch-installs it the same way) — then
+run the hook installation above, so the hooks and the 4a.5 normalization
+actually execute rather than silently not firing until the first push. Only a
+genuine failure to install *pre-commit itself* degrades: a declined install, a
+failed `brew install`, or Homebrew/macOS being unavailable (the same host
+refusal the Step 4.5 preflight makes — never fall back to `pip`/`apt`, which is
+out of the macOS + Homebrew scope). On any of those, surface a one-line reason
+and skip. (A failure of the hook-installation script itself is different —
+surface it, but still run 4a.5, which works without wired hooks.)
 
 Run this step again whenever `.pre-commit-config.yaml` changes — the
 script is idempotent, and a refresh that adds a new stage won't fire
@@ -1523,10 +1532,21 @@ committed or pushed:
    finding in a pre-existing file), surface it to the user instead of
    guessing a fix — that's a genuine finding, not normalization.
 
-Skip only when `pre-commit` isn't installed locally (then 4a was skipped
-too); in that case warn the user that the first CI run may fail on
-pre-existing files and that running these commands after installing
-pre-commit closes the gap.
+Skip only when `pre-commit` couldn't be installed in 4a (a genuine install
+failure, the user declined, or Homebrew/macOS was unavailable — so 4a was
+skipped too); in that case warn the user that the first CI run may fail on
+pre-existing files and that running these commands after installing pre-commit
+closes the gap. **If the Step 4.5 preflight later installs `pre-commit`** (it
+batch-installs the missing tools, pre-commit among them), return to 4a (hook
+installation) and here (normalization) **immediately after that batch-install,
+before the per-path automation and its CI re-trigger** — so the normalization
+fixups ride the bot PR the re-trigger then drives green. Push those fixups to
+the open bot PR branch; if the PR has already merged (the gap-fill case where
+the drive ran right after 4e), land them through the normal 4d/4e finishing flow
+as a `chore/` delta **on a fresh branch off up-to-date `origin/main` — never by
+reusing the merged PR's branch (the squash rewrote its SHAs, so a PR from it
+would replay the whole merged delta)**. The skip is only permanent if pre-commit
+is still absent when bootstrap ends.
 
 ### 4b. Branch protection on `main`
 
