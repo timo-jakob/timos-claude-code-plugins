@@ -152,9 +152,23 @@ flow. Stop and ask for input wherever marked; do not guess.
 1. Inform: **"I see a GitHub remote but `gh` isn't authenticated. I need to
    know the repo's visibility (public vs private) since they take different
    bootstrap paths."**
-2. Suggest the user run `gh auth login` once, then re-run the skill. If they
-   prefer to proceed without authenticating, fall through to the **shared
-   questions** to ask visibility manually.
+2. **Offer to run `gh auth login` inline** — the same install-the-prerequisite
+   mindset as the Step 4.5 preflight, which already offers it (`gh auth status`
+   check). On success, **continue this same run**: `gh` is now authenticated, so
+   **re-run `detect-stack.sh`** — the Step 1 output's `github_state` is empty and
+   its `missing_artifacts` was computed with `visibility=unknown` (path-scoped
+   files omitted), so both are stale and must be regenerated now that `gh` is
+   authenticated (normalize the resolved visibility to lowercase
+   `public`/`private`) — then **proceed as State D** on the fresh detection
+   output. Do **not** ask the user to re-invoke the skill.
+3. If the user **declines** the offer, the login **fails**, or visibility still
+   can't be resolved after a successful login, fall through to the **shared
+   questions** to ask visibility manually, with a clear one-line reason — that is
+   the fallback, not the default path. On this unauthenticated continuation the
+   GitHub-side Step 4 actions (4b branch protection, 4b.5 labels, secret storage)
+   will fail without auth: degrade each to its `SETUP.md` manual instruction
+   rather than re-prompting mid-run — the Step 4.5 preflight makes one more
+   `gh auth login` offer before the setup automation.
 
 #### State D: git repo with GitHub remote, `gh` authenticated
 
