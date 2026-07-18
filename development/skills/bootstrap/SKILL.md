@@ -441,6 +441,17 @@ Bootstrap plan:
                     human-only repo the armed PR waits for your approval. No
                     further prompt guards the finish; confirming the plan
                     authorizes it.
+  Setup automation: on this macOS + Homebrew host, runs after the finish
+                    (Step 4.5) — SonarCloud/Snyk (or local SonarQube) setup,
+                    GitHub Actions secrets, branch protection[, self-hosted
+                    runner on the private path]. Prompts only for its remaining
+                    interactive steps — browser imports/auth, token pastes, and
+                    the scripts' per-step Y/N confirmations (e.g. runner
+                    registration, branch protection)[, plus the Claude
+                    App-install click when --claude-approver]; degrades to
+                    SETUP.md on failure. Confirming the plan authorizes it too.
+                    (Omit this line on a non-macOS host — automation can't run
+                    there; the manual SETUP.md checklist covers it.)
 ```
 
 Ask for confirmation. Do not proceed until the user explicitly approves.
@@ -450,9 +461,13 @@ commit/push/PR **and the approve → merge drive**, so it must name the commit, 
 bot PR, the armed auto-merge, **and** that on an Approver-wired repo the flow
 runs the local approver and merges in-session (Step 4f) rather than waiting. It
 does **not** waive the per-action prompts elsewhere: the Step 4c build-file
-confirmation (and Groovy→Kotlin offer), the Step 4e writer-App install offer, and
-the Step 4.5 automation offer still apply — "no further prompt" scopes to the
-finish, not to those.
+confirmation (and Groovy→Kotlin offer) and the Step 4e writer-App install offer
+still apply — "no further prompt" scopes to the finish, not to those. The Step
+4.5 setup automation, by contrast, **is** covered by this approval: it runs by
+default on a supported host, prompting only for its own irreducible steps (e.g.
+the SonarCloud import / token paste on the public path, the App-install click
+under `--claude-approver`, and the scripts' per-step Y/N confirmations), not for
+a separate "whether to run automation" opt-in.
 
 ### Docker pre-flight (when a Dockerfile is present — run BEFORE presenting the plan)
 
@@ -1834,7 +1849,8 @@ PR opened** (not on gap-fill vs full bootstrap):
   until those secrets land and CI is re-triggered, so **defer**: do not fail
   here; continue the bootstrap. The drive resumes once the secrets land and the
   re-trigger makes CI green — from **Step 4.5's re-trigger step** when its
-  automation ran, or, if Step 4.5 didn't run (declined / non-macOS), from the
+  automation ran, or, if Step 4.5 didn't store secrets (preflight failed /
+  non-macOS / automation degraded before storing secrets), from the
   **Step 5 checklist's secret + re-trigger item**, which surfaces the drive
   (`/development-<APPROVER_LANG>:approve <pr>` after green) as outstanding work.
   Either entry runs the same procedure below.
@@ -1967,10 +1983,25 @@ are standing in — `cd` to the main checkout, `dirname` of `git rev-parse
    after a clean finish), do **not** `--force` silently — report them and let
    the user decide. Report the closed workspace: main synced, worktree removed.
 
-## Step 4.5: Offer Automation (macOS + Homebrew only)
+## Step 4.5: Run Setup Automation (macOS + Homebrew only)
 
 The bootstrap skill ships scripts that automate most of the manual steps in
-`SETUP.md`. Offer them whenever the host can support them.
+`SETUP.md`. On a supported host they **run by default** — the Step 2 plan
+approval is their consent, exactly as it is for the Step 4e/4f finishing flow
+(the Step 2 plan template discloses the automation on its `Setup automation:`
+line, so the approval names what it authorizes). There is no separate "do you
+want to run the automation?" opt-in: preflight validates the host, and if it
+passes, the path automation runs. It is not prompt-free, though — the
+interactions that remain are the irreducible ones: the external actions (the
+SonarCloud browser import + token paste, the App-install click), the preflight's
+own install/auth offers (brew install, `gh auth login`,
+`register-claude-apps.zsh`), the automate scripts' own per-step Y/N confirmations
+for high-consequence actions (self-hosted runner registration, branch
+protection, Snyk auth), and the per-asset confirmations kept elsewhere (the Step
+4c build-file edit, the idempotency file-overwrite rule). Removing that separate
+opt-in is this step's change; tightening the scripts' per-step confirmations is
+out of scope here — the automate scripts are unchanged. The manual `SETUP.md`
+path is the **degrade-on-failure** fallback, not a co-equal opt-out.
 
 ### Preflight check
 
@@ -2011,7 +2042,8 @@ entirely and go straight to Step 5 (manual checklist).
 
 ### Per-path automation
 
-If preflight passed, ask the user whether to run the path-specific automation.
+If preflight passed, run the path-specific automation — it is covered by the
+Step 2 plan approval, not a separate opt-in prompt.
 
 **Public path:**
 
@@ -2075,8 +2107,15 @@ This handles:
   launchd service.
 - Applying branch protection.
 
-If the user declines automation at any step, fall back to the manual
-instructions in `SETUP.md` for the remaining steps.
+If an automation step fails — or the user declines one of the irreducible
+external actions (the SonarCloud import / token paste) — degrade to the manual
+instructions in `SETUP.md` for the remaining **automate-script** steps, with a
+clear one-line reason. Degrading exits the per-path scripts only; it does **not**
+skip the re-trigger + deferred-4f-drive blocks below — those still run **iff this
+run stored any token-gated secret before failing** (the re-trigger's
+precondition). If the failure came *before* any secret was stored, leave both to
+the Step 5 checklist (no secrets means nothing to re-trigger). This is the fallback path, not a routine
+opt-out: on a supported host the automation otherwise runs to completion.
 
 **After automation stores the secrets, re-trigger the finishing-flow PR's CI.**
 If Step 4e already opened the bot PR (the normal case — 4e runs before this
@@ -2169,9 +2208,10 @@ first.
 ## Step 5: Print the Manual-Setup Checklist
 
 Print a clear, ordered checklist of everything the user **still** has to do
-manually — i.e., only the steps that automation didn't cover (or that the user
-declined). If automation in Step 4.5 ran end-to-end, this checklist may be very
-short. Reference `SETUP.md` for full details.
+manually — i.e., only the steps that automation didn't cover (a step that failed
+or degraded to manual, or an irreducible external action not yet done). If
+automation in Step 4.5 ran end-to-end, this checklist may be very short.
+Reference `SETUP.md` for full details.
 
 > **Key the checklist item on Step 4e's actual outcome — and always point at
 > the blessed finish (the bot PR), never a manual "push and open a PR
