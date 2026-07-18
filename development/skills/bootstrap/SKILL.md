@@ -475,8 +475,10 @@ commit/push/PR **and the approve → merge drive**, so it must name the commit, 
 bot PR, the armed auto-merge, **and** that on an Approver-wired repo the flow
 runs the local approver and merges in-session (Step 4f) rather than waiting. It
 does **not** waive the per-action prompts elsewhere: the Step 4c build-file
-confirmation (and Groovy→Kotlin offer) and the Step 4e writer-App install offer
-still apply — "no further prompt" scopes to the finish, not to those. The Step
+confirmations (Java's `build.gradle.kts` edit and Groovy→Kotlin offer, and
+Python's `pyproject.toml`/`requirements-dev.txt` pytest-cov edit) and the Step 4e
+writer-App install offer still apply — "no further prompt" scopes to the finish,
+not to those. The Step
 4.5 setup automation, by contrast, **is** covered by this approval: it runs by
 default on a supported host, prompting only for its own irreducible steps (e.g.
 the SonarCloud import / token paste on the public path, the App-install click
@@ -641,17 +643,60 @@ The table below documents where each placeholder's **value** comes from:
 
 ### Python-specific recommendation (when applicable)
 
-If `language_meta.python.has_cov=false` from detection AND Python is in the detected languages,
-surface a TODO to the user during Step 5 (manual checklist):
+If `language_meta.python.has_cov=false` from detection AND Python is in the
+detected languages, **offer a confirmed, idempotent edit** to wire the coverage
+prerequisite — the Python analogue of Step 4c's `build.gradle.kts` edit (a
+CI/hook prerequisite the generated workflow and the coverage pre-push hook
+depend on). Apply it **during Step 4, before the 4d bootstrap commit** (so the
+dependency lands in that commit, exactly as 4c's does), following the same
+confirmed-edit model:
+
+1. **Determine what's missing.** If `pytest-cov` is already declared (in
+   `[project.optional-dependencies].dev`, a `[dependency-groups].dev`, or
+   `requirements-dev.txt`), print one line ("pytest-cov already declared —
+   nothing to do") and skip — **do not** turn a satisfied check into a prompt
+   or a TODO.
+2. **Pick the edit target from what the project already uses**, then confirm
+   before editing — show exactly what you'll add (`pytest-cov>=5.0.0`) and ask
+   (a confirmed edit to the user's file, exactly as Step 4c is for
+   `build.gradle.kts`):
+   - `[dependency-groups].dev` (PEP 735) when the project declares dev deps
+     there;
+   - else `[project.optional-dependencies].dev` when `pyproject.toml` exists
+     **and already has a `[project]` table**;
+   - else append to `requirements-dev.txt` when it exists;
+   - else **do not create a file or a `[project]` table** — this covers both a
+     no-manifest repo and a `[build-system]`-only `pyproject.toml` (setup.py-
+     driven) with no `requirements-dev.txt`, where adding
+     `[project.optional-dependencies]` would introduce a `[project]` table with
+     no `name` and break pip/build on a previously-working repo. Skip the edit
+     and surface the Step 5 TODO below.
+3. **Apply the missing entry only**, preserving the file's existing formatting;
+   create the chosen dev-deps table only when its parent file already exists.
+   **Capture the target file's exact pre-edit content first** — Step 4a.5 runs
+   before this and may have left its own uncommitted fixups in `pyproject.toml`,
+   so a failure must restore *that snapshot*, not `git checkout -- pyproject.toml`
+   (which would discard the 4a.5 fixups the 4d commit still needs).
+4. **Validate the file still parses** (for `pyproject.toml`) — `python3 -c
+   "import tomllib, pathlib;
+   tomllib.loads(pathlib.Path('pyproject.toml').read_text())"` (tomllib is stdlib
+   on 3.11+; on an older interpreter, skip the parse check). No parse check is
+   needed for a `requirements-dev.txt` append. If it fails, **restore the
+   captured pre-edit content** and surface the wiring as the Step 5 TODO below
+   instead of leaving the file malformed.
+
+If the user **declines** the edit (or it was rolled back), surface it as a Step 5
+(manual checklist) TODO instead:
 
 > 🐍 **Add `pytest-cov` to your project's dev deps.** The generated workflow
 > installs it inline in CI so coverage works there, but for local
 > `pytest --cov` to work you need it in `[project.optional-dependencies].dev`
-> in `pyproject.toml`, or in your `requirements-dev.txt`. Recommended pin:
-> `pytest-cov>=5.0.0`.
+> or `[dependency-groups].dev` in `pyproject.toml`, or in your
+> `requirements-dev.txt`. Recommended pin: `pytest-cov>=5.0.0`.
 
-Do not modify the user's `pyproject.toml` automatically — that's their file.
-Just call it out.
+This mirrors Step 4c: the Java and Python coverage-prerequisite wiring now use
+one consistent confirmed-edit model, rather than Java editing its build file
+while Python only printed a TODO.
 
 ### Java-specific recommendation (when applicable)
 
@@ -1615,7 +1660,7 @@ use-time-created by their skills via the same ensure-label idiom — this step
 exists because an autonomous rejection should not depend on label-creation
 permissions at rejection time.
 
-### 4c. Build script — enforce Kotlin DSL, then wire Java build plugins (Java only)
+### 4c (Java). Build script — enforce Kotlin DSL, then wire Java build plugins (Java only)
 
 **Only when `java` is in the detected languages.** Two parts: first the
 family's **Kotlin-DSL-only** policy is enforced on the build script, then the
@@ -1678,10 +1723,24 @@ CI run and push fail):
    surface the wiring as a Step 5 TODO instead of leaving the build broken.
    Do **not** run the full build here.
 
-These are the **only** edits bootstrap makes to a hand-authored build file,
-and only because the family policy (Kotlin DSL) and the artifacts it just
-generated require them. The nebula / full-gRPC / dependency-locking items
-stay recommendations (Step 5) — never auto-applied.
+These are the **only** edits bootstrap makes to a hand-authored
+`build.gradle.kts`, and only because the family policy (Kotlin DSL) and the
+artifacts it just generated require them. The nebula / full-gRPC /
+dependency-locking items stay recommendations (Step 5) — never auto-applied.
+
+### 4c (Python). Coverage prerequisite — offer the confirmed `pytest-cov` edit (Python only)
+
+The Python analogue of Part 2 above. When Python is detected and
+`language_meta.python.has_cov=false`, apply the confirmed, idempotent edit
+described under *Python-specific recommendation* — adding `pytest-cov>=5.0.0` to
+`pyproject.toml`'s dev deps (or `requirements-dev.txt`) so local `pytest --cov`
+and the coverage pre-push hook work. Same model as the Java 4c edit: idempotent
+skip when already declared, confirm before editing, validate `pyproject.toml`
+still parses (not needed for a `requirements-dev.txt` append), restore the
+pre-edit snapshot + Step 5 TODO on failure or decline. Skip entirely for
+non-Python repos, and never create a manifest that doesn't already exist. This is
+the **only** edit bootstrap makes to a hand-authored
+`pyproject.toml` / `requirements-dev.txt`.
 
 ### 4c.5. Docker build smoke test (when a Dockerfile is present)
 
@@ -1723,7 +1782,8 @@ Check HEAD first:
 Never commit or open the PR from anything but a convention-conforming feature
 branch — in particular never from `main`/`master` or a `worktree-*` branch.
 
-Then **commit** the generated files (and any 4c build-script wiring, plus the
+Then **commit** the generated files (and any 4c (Java) build-script wiring, any
+4c (Python) `pyproject.toml`/`requirements-dev.txt` edit, plus the
 4a.5 normalization fixups to pre-existing files) using the `/development:commit`
 flow with a suggested message like `Bootstrap project with quality and
 security toolchain`. Whether pushing follows is the **Step 4e finishing
@@ -2032,7 +2092,8 @@ own install/auth offers (brew install, `gh auth login`,
 `register-claude-apps.zsh`), the automate scripts' own per-step Y/N confirmations
 for high-consequence actions (self-hosted runner registration, branch
 protection, Snyk auth), and the per-asset confirmations kept elsewhere (the Step
-4c build-file edit, the idempotency file-overwrite rule). Removing that separate
+4c build-file edits — Java and Python — the idempotency file-overwrite rule).
+Removing that separate
 opt-in is this step's change; tightening the scripts' per-step confirmations is
 out of scope here — the automate scripts are unchanged. The manual `SETUP.md`
 path is the **degrade-on-failure** fallback, not a co-equal opt-out.
