@@ -476,9 +476,10 @@ bot PR, the armed auto-merge, **and** that on an Approver-wired repo the flow
 runs the local approver and merges in-session (Step 4f) rather than waiting. It
 does **not** waive the per-action prompts elsewhere: the Step 4c build-file
 confirmations (Java's `build.gradle.kts` edit and Groovy→Kotlin offer, and
-Python's `pyproject.toml`/`requirements-dev.txt` pytest-cov edit) and the Step 4e
-writer-App install offer still apply — "no further prompt" scopes to the finish,
-not to those. The Step
+Python's `pyproject.toml`/`requirements-dev.txt` pytest-cov edit), the Step 4e
+writer-App install offer, and 4a's `brew install pre-commit` still apply — "no
+further prompt" scopes to the finish, not to those (see the Step 4 intro for the
+authoritative retained set). The Step
 4.5 setup automation, by contrast, **is** covered by this approval: it runs by
 default on a supported host, prompting only for its own irreducible steps (e.g.
 the SonarCloud import / token paste on the public path, the App-install click
@@ -1527,7 +1528,28 @@ The stamper is idempotent — running it a second time on an
 already-stamped file is a silent no-op. Safe to call unconditionally
 on every re-bootstrap.
 
-## Step 4: Post-Write Actions (each with explicit confirmation)
+## Step 4: Post-Write Actions (covered by the Step 2 plan approval)
+
+Once the Step 2 plan is approved, the pure-automation sub-steps below run
+**without a second confirmation** — the plan approval is their consent, the same
+one-gate model as the Step 4e/4f finishing flow and the Step 4.5 setup
+automation. That covers **4a** hook installation, **4a.5** normalization,
+**4b** branch protection, **4b.5** labels, and the **4d** commit.
+
+A discrete confirmation is retained **only** where a real user asset or the
+user's machine is at stake (this list is authoritative — the Step 2 and Step 4.5
+restatements defer to it):
+
+- **Tool / App installs on the user's machine** — 4a's `brew install pre-commit`
+  when it's missing, and the **4e** writer-App install offer
+  (`register-claude-apps.zsh` / `install-claude-apps.zsh`) — the same class as
+  the Step 4.5 preflight's own install offers.
+- **The 4c build-file edits** — Java's `build.gradle.kts` (and the Groovy→Kotlin
+  offer) and Python's `pyproject.toml` / `requirements-dev.txt` pytest-cov edit.
+- **The idempotency file-overwrite rule** — never *render a template over* a
+  user's existing file without confirmation (the Step 2.4 per-file review).
+  Mechanical 4a.5 fixer-hook normalization is **not** an overwrite and stays
+  folded (its fixups ride the 4d commit and are visible in the PR).
 
 ### 4a. Install pre-commit hooks
 
@@ -1599,7 +1621,8 @@ is still absent when bootstrap ends.
 
 ### 4b. Branch protection on `main`
 
-Confirm with the user, then call the helper script:
+Call the helper script (no separate prompt — covered by the Step 2 plan
+approval):
 
 ```bash
 "<skill-base-dir>/scripts/branch-protection.sh" \
@@ -2096,8 +2119,8 @@ own install/auth offers (brew install, `gh auth login`,
 `register-claude-apps.zsh`), the automate scripts' own per-step Y/N confirmations
 for high-consequence actions (self-hosted runner registration, branch
 protection, Snyk auth), and the per-asset confirmations kept elsewhere (the Step
-4c build-file edits — Java and Python — the idempotency file-overwrite rule).
-Removing that separate
+4c build-file edits — Java and Python — the idempotency file-overwrite rule; see
+the Step 4 intro for the authoritative retained set). Removing that separate
 opt-in is this step's change; tightening the scripts' per-step confirmations is
 out of scope here — the automate scripts are unchanged. The manual `SETUP.md`
 path is the **degrade-on-failure** fallback, not a co-equal opt-out.
