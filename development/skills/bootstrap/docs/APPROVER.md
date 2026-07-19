@@ -166,14 +166,20 @@ GitHub with no local record. Recover by:
 
 ## Per-repo setup
 
-In each repo where you want the Approver:
+Once the **One-time (per-machine) setup** above has registered the two Apps,
+bootstrap **auto-detects** the default: `--claude-approver` resolves to `true`
+whenever the Apps are registered on this machine, so on those machines you do
+**not** need to pass the flag — the Approver is wired by default. Pass it
+explicitly only to override:
 
 ```sh
 cd /path/to/repo
-/development:bootstrap --review --signed-commits --claude-approver true
+/development:bootstrap --signed-commits              # Apps registered → Approver auto-wired
+/development:bootstrap --signed-commits --claude-approver false   # keep THIS repo human-only
 ```
 
-The `--claude-approver true` flag tells bootstrap to:
+When `--claude-approver` resolves to `true` (explicitly or auto-detected),
+bootstrap will:
 
 1. Render `.claude/approver-policy.md` (the per-PR-type criteria the
    agent reads).

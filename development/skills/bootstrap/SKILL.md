@@ -21,23 +21,40 @@ quality + security surroundings for a project.
 
 Supported flags:
 
-- `--review` — run the opt-in senior-review agent (Step 6) after the bootstrap
-  completes. Adds a fable pass for high-stakes first bootstraps.
 - `--signed-commits` — additionally enforce cryptographically signed commits
   (GPG or SSH) on the default branch. Off by default because every
   contributor must register a signing key. When set, the orchestrator
   invokes `branch-protection.sh --require-signed-commits true` in Step 4b.
 - `--claude-approver true|false` — install the two Claude GitHub Apps
   (Claude Approver + Claude Maintenance) on this repo and store the
-  per-repo secrets + variables the Approver workflow needs. Defaults to
-  `false`. Requires the Apps to be registered on this machine first via
-  `scripts/register-claude-apps.zsh` (the preflight in Step 4.5 will offer
-  to run it when missing). When `true`, the Approver is wired for the
-  repo's Approver-capable language (currently Python, Java, or Swift); it
-  warn-and-skips when neither resolves as the review target (§3e).
+  per-repo secrets + variables the Approver workflow needs. **The default is
+  auto-detected**: `true` when both Claude Apps are already registered on this
+  machine (`~/.config/claude-plugins/apps.json` plus the matching Keychain
+  private keys — the same check `register-claude-apps.zsh` and the Step 4.5
+  preflight use), else `false`. Rationale: the user who registered the Apps has
+  already opted into the Approver ecosystem, so it is the blessed default *for
+  them*; nobody else pays the App-install + credential-storage commitment by
+  default. An explicit `--claude-approver true|false` overrides the
+  auto-detected default (the preflight still offers `register-claude-apps.zsh`
+  when the resolved value is `true` but the Apps aren't registered yet). When the
+  resolved value is `true`, the Approver is wired for the repo's Approver-capable
+  language (currently Python, Java, or Swift); it warn-and-skips when neither
+  resolves as the review target (§3e). A **plugin repo** never installs the
+  Approver regardless (see `--claude-plugin` — the two are mutually exclusive),
+  so the resolved value is forced to `false` there. **Throughout this skill,
+  "`--claude-approver true`" (and "with the flag" / "was set") means the
+  *resolved* value — the explicit flag or the auto-detected default — not the
+  literal invocation; the off-switch on an Apps-registered machine is an explicit
+  `--claude-approver false`.**
 - `--claude-plugin true|false` — bootstrap this repo as a **Claude Code plugin
-  repository** (a marketplace of plugins, not an application). Defaults to
-  `false`. When `true`:
+  repository** (a marketplace of plugins, not an application). **The default is
+  auto-detected** from the repo: `true` when `.claude-plugin/plugin.json` or
+  `.claude-plugin/marketplace.json` is present (the same signal the `{{PRIMARY}}`
+  inference uses), else `false`. Pass `--claude-plugin true|false` only as a
+  **rare override** — a greenfield plugin repo that has no markers yet, or to
+  force it off. **Throughout this skill, "`--claude-plugin true`" means the
+  *resolved* plugin-repo mode** (the explicit flag, or the auto-detected marker
+  signal). When the resolved value is `true`:
   - sets `primary: claude-plugin` in `.maintenance.yml` (overrides `{{PRIMARY}}`
     inference);
   - uses **Renovate** instead of Dependabot — plugin repos are templates, not
@@ -46,9 +63,11 @@ Supported flags:
   - installs the **plugin-repo lint** pre-commit hooks (shellcheck / shfmt /
     markdownlint) — the `CLAUDE_PLUGIN` block in `.pre-commit-config.yaml`;
   - **does NOT install the Approver.** A plugin repo is the origin of every other
-    repo and requires **human-only** approval (no AI auto-approval). If
-    `--claude-approver true` is also passed, warn and **skip the Approver** — the
-    two are mutually exclusive for a plugin repo.
+    repo and requires **human-only** approval (no AI auto-approval). Whatever
+    `--claude-approver` resolved to, **skip the Approver** — the two are mutually
+    exclusive for a plugin repo. Warn only when `--claude-approver true` was
+    passed **explicitly** (an auto-detected `true` needs no warning — nothing was
+    requested).
   See `docs/CLAUDE-APPS.md` for the design and the Apps' permissions.
 
 ## Guiding Principles
@@ -631,7 +650,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated detected languages |
-| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`). Determine: **(0)** if `--claude-plugin true` → `claude-plugin` (the flag is the explicit declaration); **(1)** else if `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(2)** else if exactly one language was detected → that language; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
+| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language; **(2)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`language_meta.python.version`) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `language_meta.python.version.replace('.', '')`. |
@@ -1149,11 +1168,13 @@ For each detected language, merge in the appropriate config from
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
 
 **Plugin-repo exclusion:** if `--claude-plugin true` was set, **skip this section
-entirely** — render no Approver workflow or policy, even if `--claude-approver
-true` was also passed. A plugin repo is the origin of every other repo and is
-**human-only approval** (no AI auto-approval); warn the user that the Approver
-flag was ignored because of `--claude-plugin`. Set up human approval the normal
-way (Step 4b branch protection requires 1 review; no Approver bot to satisfy it).
+entirely** — render no Approver workflow or policy, regardless of how
+`--claude-approver` resolved. A plugin repo is the origin of every other repo and
+is **human-only approval** (no AI auto-approval). Warn that the Approver flag was
+ignored because of `--claude-plugin` **only when `--claude-approver true` was
+passed explicitly**; an auto-detected `true` needs no warning (nothing was
+requested). Set up human approval the normal way (Step 4b branch protection
+requires 1 review; no Approver bot to satisfy it).
 
 When the orchestrator was invoked with `--claude-approver true` **and**
 an **Approver-capable language** is in scope (currently `python`,
@@ -1224,13 +1245,16 @@ the primary is a topic / no-approver language with no single
 Approver-capable language to fall back to), do **not** render the
 policy file. Warn the user:
 
-> `--claude-approver true` was requested, but no Approver-capable language
-> (currently Python, Java, or Swift) resolves as this repo's review target. The
+> `--claude-approver` resolved `true` (explicitly or auto-detected), but no
+> Approver-capable language (currently Python, Java, or Swift) resolves as this
+> repo's review target. The
 > Claude Approver ships per-language; for other languages the policy file
-> would be a no-op. Re-run without the flag, or wait for that language's
-> Approver agent to ship.
+> would be a no-op. Re-run with `--claude-approver false` (on a machine where the
+> Apps are registered the default otherwise resolves `true` again), or wait for
+> that language's Approver agent to ship.
 
-Offer to drop the flag and continue, or abort. The Step 4.5 install path
+Offer to continue with the Approver skipped (or re-run with
+`--claude-approver false`), or abort. The Step 4.5 install path
 also skips when no Approver-capable language resolves — the Approver App
 would be installed with no approve skill to serve it.
 
@@ -1951,8 +1975,9 @@ condition 4e calls an "Approver-capable repo" — one definition, not three.
 one with no Approver policy / no-or-multiple Approver-capable language) has a
 human approve, so report that the armed PR merges on their approval and move on.
 Keying on the repo's **wiring** rather than `--claude-approver` on *this* run is
-deliberate: a **State D re-bootstrap** of an already-wired repo re-runs with the
-flag defaulting `false`, and it must still drive its PR home. It also needs 4e to
+deliberate: a **State D re-bootstrap** of an already-wired repo re-runs with
+`--claude-approver` resolving to whatever this machine/flags yield now — not
+necessarily what wired the repo originally — and it must still drive its PR home. It also needs 4e to
 have actually opened a bot PR with auto-merge **armed** (not the arming-failed or
 blocked-before-a-PR cases — there's nothing to drive there). Never drive an
 approver that isn't installed.
@@ -2138,11 +2163,13 @@ anything missing:
   --claude-approver "<true|false>"
 ```
 
-Pass `--claude-approver true` whenever the orchestrator was invoked with
-`--claude-approver true` (so the preflight can verify the two Claude
-GitHub Apps are registered locally and offer to run `register-claude-apps.zsh`
-when they aren't). When the orchestrator was invoked without the flag, pass
-`false` or omit it.
+Pass the **resolved** `--claude-approver` value (the explicit flag, or the
+auto-detected default — see the flag list): `true` whenever it resolved `true`
+(so the preflight can verify the two Claude GitHub Apps are registered locally
+and offer to run `register-claude-apps.zsh` when they aren't), `false` when it
+resolved `false` — including the plugin-repo forced `false`. A flagless run on a
+machine where the Apps are already registered resolves `true`, so it passes
+`true`, not `false`.
 
 The script will:
 
@@ -2290,19 +2317,22 @@ which (idempotent):
   before #476 it flags the leftover CI-era secrets/variables;
   `--verify --fix` deletes the unambiguous ones.
 
-**No-approver-language warning.** If `--claude-approver true` is set but no
-Approver-capable language resolves as the review target (no `python`/`java`
+**No-approver-language warning.** If `--claude-approver` resolves `true` but no
+Approver-capable language resolves as the review target (no `python`/`java`/`swift`
 in scope — see §3e's `{{APPROVER_LANG}}` resolution), warn the user the
 flag will be a no-op:
 
-> `--claude-approver true` requested but no Approver-capable language
-> (currently Python, Java, or Swift) resolves as this repo's review target. The
+> `--claude-approver` resolved `true` (explicitly or auto-detected) but no
+> Approver-capable language (currently Python, Java, or Swift) resolves as this
+> repo's review target. The
 > Approver ships per-language; the Apps would be installed but no approve
-> skill would ever invoke them. Re-run without the flag to skip, or wait
-> for that language's Approver agent to ship.
+> skill would ever invoke them. Re-run with `--claude-approver false` to skip (on
+> a machine where the Apps are registered the default otherwise resolves `true`
+> again), or wait for that language's Approver agent to ship.
 
-Offer the user to drop the flag and continue, or abort. Do not silently
-install Apps that would never be invoked.
+Offer the user to continue with the Approver skipped (or re-run with
+`--claude-approver false`), or abort. Do not silently install Apps that would
+never be invoked.
 
 ### `--claude-plugin true` extension — install the WRITER App
 
@@ -2437,17 +2467,6 @@ For private path the checklist additionally includes:
 - Start SonarQube: `cd infra/sonarqube && docker compose up -d`
 - Register self-hosted runner (see `infra/github-runner/README.md`).
 - Mint SonarQube project token, store as `SONAR_TOKEN` secret.
-
-## Step 6: Final Senior Review (opt-in, only if `--review` was passed)
-
-If the user invoked the skill with `--review`, run the `bootstrap-reviewer`
-agent (fable). It reads the full set of generated files and produces a
-short senior-engineer critique covering coherence, operability,
-maintainability, and first-impression.
-
-This is **opt-in** because the other three review agents already cover the
-common-case risks; the senior review is a deeper pass for high-stakes
-first bootstraps. Surface the agent's report to the user verbatim.
 
 ## Important Rules
 
