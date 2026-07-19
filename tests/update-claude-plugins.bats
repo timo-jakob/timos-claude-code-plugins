@@ -4,6 +4,8 @@
 # invocation, so we can assert it refreshes + updates the family WITHOUT ever
 # touching enabled/disabled state.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/bootstrap/templates/common/scripts/update-claude-plugins.zsh"
@@ -40,13 +42,13 @@ run_it() { run env CLAUDE_BIN="$FAKE" zsh "$S" "$@"; }
 @test "never changes activeness (no enable/disable calls)" {
   run_it
   [ "$status" -eq 0 ]
-  ! grep -qE '(^| )(enable|disable)( |$)' "$LOG"
+  run ! grep -qE '(^| )(enable|disable)( |$)' "$LOG"
 }
 
 @test "only touches the family marketplace, not others" {
   run_it
   [ "$status" -eq 0 ]
-  ! grep -q "claude-plugins-official" "$LOG"
+  run ! grep -q "claude-plugins-official" "$LOG"
 }
 
 @test "updates disabled family plugins too (without enabling them)" {
@@ -54,15 +56,15 @@ run_it() { run env CLAUDE_BIN="$FAKE" zsh "$S" "$@"; }
   # the disabled family plugin IS updated...
   grep -qx "plugin update development@timos-claude-code-plugins --scope user" "$LOG"
   # ...but never enabled.
-  ! grep -q "enable" "$LOG"
+  run ! grep -q "enable" "$LOG"
 }
 
 @test "--dry-run mutates nothing (no marketplace update, no plugin update)" {
   run_it --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"[dry-run]"* ]]
-  ! grep -q "marketplace update" "$LOG"
-  ! grep -q "plugin update" "$LOG"
+  run ! grep -q "marketplace update" "$LOG"
+  run ! grep -q "plugin update" "$LOG"
 }
 
 @test "no installed family plugins -> still refreshes marketplace, exits 0 with a note" {

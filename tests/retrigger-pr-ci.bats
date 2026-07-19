@@ -9,6 +9,8 @@
 # re-arming native auto-merge that closing disarmed. Drives the script against a
 # FAKE gh (the GH_BIN seam) so every path is deterministic and offline.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/maintenance/scripts/retrigger-pr-ci.zsh"
@@ -56,8 +58,8 @@ retrig() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "CI-RUNNING"
   # the close+reopen dance must NOT have run
-  ! grep -q "pr close" "$LOG"
-  ! grep -q "pr reopen" "$LOG"
+  run ! grep -q "pr close" "$LOG"
+  run ! grep -q "pr reopen" "$LOG"
 }
 
 @test "no checks + --grace 0 -> NUDGED immediately (close, reopen)" {
@@ -73,7 +75,7 @@ retrig() {
   run env GH_BIN="$FAKE_GH" zsh "$S" --grace 0 86
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "NUDGED"
-  ! grep -q "pr merge" "$LOG"
+  run ! grep -q "pr merge" "$LOG"
 }
 
 @test "auto-merge armed (SQUASH) -> nudge re-arms with --squash --delete-branch" {

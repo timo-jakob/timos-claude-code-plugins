@@ -12,6 +12,8 @@
 # the script (its `main` is guarded, so sourcing has no side effects) and
 # drive the function against a PATH-shimmed fake `gh`.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/bootstrap/scripts/install-claude-apps.zsh"
@@ -96,5 +98,5 @@ cleanup_run() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Not auto-deleted"* ]]
   [[ "$output" == *"gh secret delete ANTHROPIC_API_KEY"* ]]
-  ! grep -q "ANTHROPIC_API_KEY" "$CALLS"
+  run ! grep -q "ANTHROPIC_API_KEY" "$CALLS"
 }

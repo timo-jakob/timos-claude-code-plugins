@@ -10,6 +10,8 @@
 # `gh` is shadowed via PATH with a fake that logs every subcommand, so the whole
 # reconcile is exercised deterministically without network.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/refine-issue/scripts/test-case-spinout.zsh"
@@ -179,7 +181,7 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   grep -q '^#56 ::' "$CLOSE_LOG"
   grep -q 'tc-error-oversized' "$CLOSE_LOG"
   # #55 kept (edited), not closed
-  ! grep -q '^#55 ::' "$CLOSE_LOG"
+  run ! grep -q '^#55 ::' "$CLOSE_LOG"
   grep -q '=== edit #55 ===' "$EDIT_LOG"
 }
 
