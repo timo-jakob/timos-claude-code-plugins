@@ -70,6 +70,30 @@
 #                                         for SwiftPM — so unlike JaCoCo there is no
 #                                         dependency to declare; test presence is the
 #                                         real coverage precondition)
+#   language_meta.go.version             string  ("1.26", "1.24", ...; default 1.26.
+#                                         NORMALIZED to major.minor: a modern
+#                                         `go 1.24.5` directive emits "1.24" —
+#                                         full precision lives in `toolchain`)
+#   language_meta.go.version_source      "parsed" | "default"  (parsed from the
+#                                         root go.mod `go` directive — the module's
+#                                         minimum Go version; "default" is a guess,
+#                                         #258. Downstream consumers read `version`
+#                                         as the language version; runtime-upgrade
+#                                         (#876) bumps BOTH `version` and `toolchain`)
+#   language_meta.go.toolchain           string  (the root go.mod `toolchain`
+#                                         directive, quote/CR-stripped, e.g.
+#                                         "go1.25.1". When the directive is
+#                                         absent but the `go` directive is
+#                                         three-part, the EFFECTIVE default
+#                                         toolchain Go itself applies is
+#                                         synthesized — `go 1.24.5` with no
+#                                         toolchain line means go1.24.5, per
+#                                         the Go module spec — so the patch
+#                                         pin survives into the JSON; "" only
+#                                         when neither carries patch precision)
+#   language_meta.go.module              string  (the root go.mod `module` path,
+#                                         e.g. "github.com/acme/tenant-management";
+#                                         "" when unparseable)
 #
 # interfaces shape (added 2026-07-11 per issue #242 — the runtime interface(s)
 # through which a deployed build is exercised, so bootstrap can render
@@ -268,7 +292,17 @@ langs=()
 [[ -n "$(detect_lang swift Package.swift '*.xcodeproj' '*.xcworkspace')" ]] && langs+=("swift")
 [[ -n "$(detect_lang typescript package.json tsconfig.json)" ]] && langs+=("typescript")
 [[ -n "$(detect_lang python pyproject.toml requirements.txt setup.py)" ]] && langs+=("python")
-[[ -n "$(detect_lang go go.mod)" ]] && langs+=("go")
+# Go (#870): a ROOT go.mod carrying a `module` directive — filename presence
+# alone is not enough (a malformed/empty go.mod must not emit a false token).
+# Nested go.mod files don't count; known slice-A limitation: a go.work
+# workspace with only nested modules detects as not-Go — a PURE-Go workspace
+# then lands in the bootstrap no-language question (that is the surfacing
+# mechanism); a polyglot workspace is NOT surfaced in slice A (no go.work
+# signal exists yet). go.sum is deliberately ignored — neither required nor
+# consulted.
+if [[ -f "$cwd/go.mod" ]] && grep -qE '^[[:space:]]*module[[:space:]]+[^[:space:]]+' "$cwd/go.mod" 2>/dev/null; then
+	langs+=("go")
+fi
 [[ -n "$(detect_lang java build.gradle 'build.gradle.kts' settings.gradle 'settings.gradle.kts' pom.xml)" ]] && langs+=("java")
 
 languages_json="["
@@ -544,6 +578,58 @@ if [[ "$swift_in_langs" == "true" ]]; then
 	fi
 fi
 
+# --- go version + toolchain + module (#870, slice A of #868) -----------------
+# Only meaningful when Go is detected. All three come from the ROOT go.mod —
+# the same root-manifest rule as Python's pyproject.toml. `version` is the
+# `go` directive (the module's minimum Go version); `toolchain` is the
+# optional pinned toolchain, kept verbatim (e.g. "go1.25.1") because
+# runtime-upgrade (#876) bumps both. Plain greps: a malformed go.mod yields
+# empty matches and falls through to defaults — never a crash (#271 lesson).
+go_version=""
+go_version_source="default"
+go_toolchain=""
+go_module=""
+
+go_in_langs="false"
+for l in ${langs[@]+"${langs[@]}"}; do
+	[[ "$l" == "go" ]] && go_in_langs="true"
+done
+
+if [[ "$go_in_langs" == "true" ]]; then
+	gomod="$cwd/go.mod"
+	# Same directive regex as the language gate above, so a matched gate can
+	# never yield an empty module; strip quotes (go.mod allows a quoted path)
+	# and CRs (CRLF-authored files) so json_str never embeds them.
+	go_module="$(grep -E '^[[:space:]]*module[[:space:]]+[^[:space:]]+' "$gomod" 2>/dev/null |
+		head -n1 | awk '{print $2}' | tr -d '"\r' || true)"
+	# Capture the FULL `go` directive first (modern `go mod tidy` writes
+	# three-part directives, `go 1.24.5`), then NORMALIZE `version` to
+	# major.minor (the python parse pattern) — consumers compare it as
+	# major.minor; patch precision lives in `toolchain` (below).
+	go_full="$(grep -E '^[[:space:]]*go[[:space:]]+[0-9]+\.[0-9]+' "$gomod" 2>/dev/null |
+		head -n1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1 || true)"
+	go_version="$(printf '%s' "$go_full" | grep -oE '^[0-9]+\.[0-9]+' || true)"
+	go_toolchain="$(grep -E '^[[:space:]]*toolchain[[:space:]]+[^[:space:]]+' "$gomod" 2>/dev/null |
+		head -n1 | awk '{print $2}' | tr -d '"\r' || true)"
+	# No toolchain directive + a three-part go directive: per the Go module
+	# spec the go directive IS the effective toolchain pin (go1.24.5) —
+	# synthesize it so the patch precision #876 acts on survives into the
+	# JSON instead of silently degrading to "".
+	if [[ -z "$go_toolchain" ]] && printf '%s' "$go_full" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+		go_toolchain="go$go_full"
+	fi
+
+	# Default to a recent stable Go (update alongside runtime-upgrade #876).
+	# Track parsed-vs-guessed (#258 reliability) — toolchain bumps need the
+	# real declared version, not this fallback.
+	if [[ -n "$go_version" ]]; then
+		go_version_source="parsed"
+	else
+		go_version="1.26"
+		go_version_source="default"
+	fi
+fi
+
 # --- interfaces (issue #242) -------------------------------------------------
 # The runtime interface(s) through which a deployed build is exercised — the
 # signal that lets bootstrap render interface-appropriate acceptance tests
@@ -694,6 +780,11 @@ if [[ "$swift_in_langs" == "true" ]]; then
 	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
 	language_meta_json+="$(printf '"swift":{"version":%s,"version_source":%s,"build_system":%s,"has_cov":%s}' \
 		"$(json_str "$swift_version")" "$(json_str "$swift_version_source")" "$(json_str "$swift_build_system")" "$(json_bool "$has_swift_cov")")"
+fi
+if [[ "$go_in_langs" == "true" ]]; then
+	[[ $lm_first -eq 1 ]] && lm_first=0 || language_meta_json+=","
+	language_meta_json+="$(printf '"go":{"version":%s,"version_source":%s,"toolchain":%s,"module":%s}' \
+		"$(json_str "$go_version")" "$(json_str "$go_version_source")" "$(json_str "$go_toolchain")" "$(json_str "$go_module")")"
 fi
 language_meta_json+="}"
 

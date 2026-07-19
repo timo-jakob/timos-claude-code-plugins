@@ -210,6 +210,116 @@ setup() {
   [ "$(jq -r '.language_meta.swift // "absent"' <<<"$out")" = "absent" ]
 }
 
+# --- Go detection (#870, slice A of #868) -------------------------------------
+
+@test "detect-stack: #870 root go.mod with module+go+toolchain -> go token, parsed meta" {
+  printf 'module github.com/acme/tenant-management\n\ngo 1.25\n\ntoolchain go1.25.1\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.go.version <<<"$out")" = "1.25" ]
+  [ "$(jq -r .language_meta.go.version_source <<<"$out")" = "parsed" ]
+  [ "$(jq -r .language_meta.go.toolchain <<<"$out")" = "go1.25.1" ]
+  [ "$(jq -r .language_meta.go.module <<<"$out")" = "github.com/acme/tenant-management" ]
+}
+
+@test "detect-stack: #870 no go.mod -> go not detected, no language_meta.go, others unaffected" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.language_meta.go // "absent"' <<<"$out")" = "absent" ]
+  [ "$(jq -r '.languages | index("python")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #870 go.mod without toolchain directive -> toolchain empty" {
+  printf 'module example.com/svc\n\ngo 1.24\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.go.version <<<"$out")" = "1.24" ]
+  [ "$(jq -r .language_meta.go.version_source <<<"$out")" = "parsed" ]
+  [ "$(jq -r .language_meta.go.toolchain <<<"$out")" = "" ]
+}
+
+@test "detect-stack: #870 malformed go.mod (no module directive) -> no crash, no false go token" {
+  printf 'this is not a valid go.mod at all\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.language_meta.go // "absent"' <<<"$out")" = "absent" ]
+}
+
+@test "detect-stack: #870 go.mod with module but no go directive -> default version 1.26" {
+  printf 'module example.com/minimal\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.go.version <<<"$out")" = "1.26" ]
+  [ "$(jq -r .language_meta.go.version_source <<<"$out")" = "default" ]
+}
+
+@test "detect-stack: #870 three-part go directive (go 1.24.5) -> version 1.24, toolchain synthesized" {
+  printf 'module example.com/modern\n\ngo 1.24.5\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # Modern `go mod tidy` writes three-part directives; the contract emits
+  # major.minor. With no toolchain directive, the go directive IS the
+  # effective toolchain pin (Go module spec) -> synthesized go1.24.5.
+  [ "$(jq -r .language_meta.go.version <<<"$out")" = "1.24" ]
+  [ "$(jq -r .language_meta.go.version_source <<<"$out")" = "parsed" ]
+  [ "$(jq -r .language_meta.go.toolchain <<<"$out")" = "go1.24.5" ]
+}
+
+@test "detect-stack: #870 explicit toolchain + three-part go directive -> explicit wins, no synthesis clobber" {
+  printf 'module example.com/both\n\ngo 1.24.5\n\ntoolchain go1.25.1\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # The -z guard is load-bearing: an explicit toolchain directive must never
+  # be overwritten by the value synthesized from the go directive.
+  [ "$(jq -r .language_meta.go.toolchain <<<"$out")" = "go1.25.1" ]
+  [ "$(jq -r .language_meta.go.version <<<"$out")" = "1.24" ]
+}
+
+@test "detect-stack: #870 quoted module path -> quotes stripped from module" {
+  printf 'module "github.com/acme/quoted"\n\ngo 1.25\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # go.mod's lexer permits quoted directive arguments; the value must not
+  # keep the quotes.
+  [ "$(jq -r .language_meta.go.module <<<"$out")" = "github.com/acme/quoted" ]
+}
+
+@test "detect-stack: #870 CRLF go.mod -> no carriage returns leak into values" {
+  printf 'module example.com/crlf\r\n\r\ngo 1.24\r\ntoolchain go1.24.5\r\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  jq -e . <<<"$out" >/dev/null
+  [ "$(jq -r .language_meta.go.module <<<"$out")" = "example.com/crlf" ]
+  [ "$(jq -r .language_meta.go.toolchain <<<"$out")" = "go1.24.5" ]
+  [ "$(jq -r .language_meta.go.version <<<"$out")" = "1.24" ]
+}
+
+@test "detect-stack: #870 go + python coexist -> valid JSON, both language_meta entries" {
+  printf 'module example.com/poly\n\ngo 1.25\n' > go.mod
+  printf '[project]\nname = "x"\nversion = "0.1.0"\nrequires-python = ">=3.13"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # The go entry is the last comma-joined language_meta branch — a broken
+  # separator only shows up in a polyglot repo (cf. the python+java test).
+  jq -e . <<<"$out" >/dev/null
+  [ "$(jq -r .language_meta.go.version <<<"$out")" = "1.25" ]
+  [ "$(jq -r .language_meta.go.module <<<"$out")" = "example.com/poly" ]
+  [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.13" ]
+}
+
+@test "detect-stack: #870 nested-only go.mod (no root) -> go not detected (root-manifest rule)" {
+  mkdir -p examples/demo
+  printf 'module example.com/demo\n\ngo 1.25\n' > examples/demo/go.mod
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" = "null" ]
+}
+
 # --- #406 missing_artifacts: gap-fill detection that drift can't see ----------
 
 @test "detect-stack: #406 missing_artifacts flags every-repo templates that are absent" {
