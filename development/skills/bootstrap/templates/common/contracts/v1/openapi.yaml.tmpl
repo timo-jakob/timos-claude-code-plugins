@@ -1,0 +1,50 @@
+# Authoritative API contract — major v1. THIS FILE IS THE SOURCE OF TRUTH.
+#
+# Per-major layout (contracts/vN/openapi.yaml): one directory per LIVE major.
+# A breaking change is NEVER an in-place edit to this file — it is a new major
+# published alongside (add contracts/v2/openapi.yaml; /v1/ and /v2/ stay live),
+# and v1 gets a sunset date. Old majors are frozen (patch/editorial only); the
+# mechanical freeze + bump-classification gate arrives with issue #693.
+#
+# The version triangle (issue #693 enforces it mechanically): `info.version`,
+# the npm spec-package version, and the URL major in `servers:` (/v1) MUST agree.
+# The npm publish workflow reads `info.version` from this file as the package
+# version, so keep them in lockstep.
+openapi: 3.1.0
+info:
+  title: "{{PROJECT_NAME}} API"
+  version: "1.0.0"
+  description: >
+    The public REST contract for {{PROJECT_NAME}}, major v1. Consumers pin the
+    published npm spec package and generate their own typed client + mocks from
+    it — no consumer ever reaches into this repo for the spec file.
+servers:
+  - url: /v1
+    description: >
+      Major v1. The URL major segment MUST match info.version's major (1).
+      The generated client targets the gateway, not the service directly.
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe.
+      description: Returns the service liveness status. Replace with the real API.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The service is live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Health:
+      type: object
+      description: Liveness status envelope.
+      required: ["status"]
+      properties:
+        status:
+          type: string
+          description: Liveness indicator.
+          enum: ["ok"]

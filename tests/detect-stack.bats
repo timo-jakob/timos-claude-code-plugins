@@ -853,3 +853,82 @@ setup() {
   [ "$(jq -r '.git_initialized' <<<"$out")" = "false" ]
   [ "$(jq -r '.containers[0].name' <<<"$out")" = "nogit-alpha" ]
 }
+
+# --- #692 API contracts machinery: detection + conditional gap-fill -----------
+# The per-major contracts/vN/ layout must be detected as an OpenAPI surface, and
+# the machinery's Spectral ruleset + lint/publish workflows are held out of
+# missing_artifacts UNLESS such a surface is present (the same conditional
+# pattern as the acceptance stage, #714). The SEED spec (contracts/v1/openapi.yaml)
+# is held out UNCONDITIONALLY — it is a scaffold, never blind-gap-filled.
+
+@test "detect-stack #692: a per-major contracts/v1/openapi.yaml is detected as an openapi contract" {
+  mkdir -p contracts/v1
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '[.contracts[] | select(.type=="openapi") | .evidence] | join(",")' <<<"$out")" = "contracts/v1/openapi.yaml" ]
+}
+
+@test "detect-stack #692: two live majors (v1 + v2) are both detected as openapi contracts" {
+  mkdir -p contracts/v1 contracts/v2
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  printf 'openapi: 3.1.0\n' > contracts/v2/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.contracts[] | select(.type=="openapi") | .evidence] | sort | join(",")' <<<"$out")" = "contracts/v1/openapi.yaml,contracts/v2/openapi.yaml" ]
+}
+
+@test "detect-stack #692: OpenAPI surface present -> the ruleset + two workflows ARE missing_artifacts when absent" {
+  mkdir -p contracts/v1
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  # only the seed spec exists; the ruleset + workflows do not
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-lint.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" != "null" ]
+  # the present seed spec is tracked, and is NEVER a gap (held out unconditionally)
+  [ "$(jq -r '.existing_artifacts["contracts/v1/openapi.yaml"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/v1/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack #692: surface present but ALL machinery present -> nothing re-flagged as a gap (idempotent)" {
+  mkdir -p contracts/v1 .github/workflows
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  printf 'extends: ["spectral:oas"]\n' > .spectral.yaml
+  printf 'name: Contracts Lint\n' > .github/workflows/contracts-lint.yml
+  printf 'name: Spec Publish\n' > .github/workflows/spec-publish.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-lint.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.existing_artifacts[".spectral.yaml"]' <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #692: seed spec is held out UNCONDITIONALLY even when the surface lives elsewhere" {
+  # real spec at api/openapi.yaml, NO contracts/v1/ — the stub must NOT be a gap
+  # (blind-rendering it would publish a placeholder as the authoritative contract)
+  mkdir -p api
+  printf 'openapi: 3.1.0\n' > api/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("contracts/v1/openapi.yaml")' <<<"$out")" = "null" ]
+  # but the surface IS detected, so the ruleset + workflows are legitimate gaps
+  [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack #692: no OpenAPI surface -> the contracts machinery is held out of missing_artifacts" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.missing_artifacts | index("contracts/v1/openapi.yaml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-lint.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack #692: a proto-only surface does NOT trigger the OpenAPI contracts machinery" {
+  mkdir -p proto
+  printf 'syntax="proto3";\n' > proto/orders.proto
+  out=$(bash "$DETECT" 2>/dev/null)
+  # proto is a contract, but the openapi-gated machinery stays held out
+  [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" = "null" ]
+}

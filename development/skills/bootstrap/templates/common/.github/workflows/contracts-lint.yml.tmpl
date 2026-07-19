@@ -1,0 +1,46 @@
+# Contracts Lint — Spectral over the versioned OpenAPI contracts (issue #692).
+#
+# The API contract is a published, versioned artifact, so it must stay clean.
+# Spectral lints every contracts/vN/openapi.yaml against the ruleset at
+# .spectral.yaml (repo root). The ruleset CONTENT is replaceable (the org
+# styleguide epic #689 swaps it) — this workflow references it BY PATH, so a
+# ruleset change never touches this wiring.
+name: Contracts Lint
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths:
+      - "contracts/**"
+      - ".spectral.yaml"
+      - ".github/workflows/contracts-lint.yml"
+
+# Least privilege: linting only reads the checked-out tree.
+permissions:
+  contents: read
+
+jobs:
+  spectral:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+
+      - name: Lint OpenAPI contracts with Spectral
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          specs=(contracts/v[0-9]*/openapi.yaml)
+          if [[ ${#specs[@]} -eq 0 ]]; then
+            echo "No contracts/vN/openapi.yaml found — nothing to lint."
+            exit 0
+          fi
+          echo "Linting: ${specs[*]}"
+          npx --yes @stoplight/spectral-cli@6 lint \
+            --ruleset .spectral.yaml \
+            --fail-severity error \
+            "${specs[@]}"

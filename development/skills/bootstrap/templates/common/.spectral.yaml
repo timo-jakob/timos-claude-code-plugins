@@ -1,0 +1,18 @@
+# Spectral ruleset — API styleguide (STARTER, issue #692).
+#
+# This is a minimal starter ruleset. Its CONTENT is meant to be replaced: the
+# org API styleguide epic (#689) swaps in the shared org ruleset. The CI wiring
+# (.github/workflows/contracts-lint.yml) references this file BY PATH, so
+# replacing the ruleset never touches the pipeline — swap content freely.
+extends: ["spectral:oas"]
+rules:
+  # Every operation needs a stable operationId — the consumer's client
+  # generator and the deprecation -> @deprecated mapping (#707) key off it.
+  operation-operationId: error
+  operation-operationId-unique: error
+  # Descriptions ARE the governance-portal docs (the APIM channel, #706), so
+  # a missing one is worth a warning, not a hard failure, in the starter.
+  info-description: warn
+  operation-description: warn
+  # Tags give the portal and the generated client a stable grouping.
+  operation-tags: warn
