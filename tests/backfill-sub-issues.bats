@@ -12,6 +12,8 @@
 # appends every POST to $POST_LOG — the write-detector the no-op and dry-run
 # assertions rely on.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/backfill-sub-issues.zsh"
@@ -136,7 +138,7 @@ backfill() {
   backfill
   [ "$status" -eq 0 ]
   [[ "$(echo "$output" | jq -c '.markdown_children')" != *999* ]]
-  ! grep -q 'sub_issue_id=1999' "$POST_LOG"
+  run ! grep -q 'sub_issue_id=1999' "$POST_LOG"
 }
 
 @test "a checklist line inside a code fence is not migrated" {

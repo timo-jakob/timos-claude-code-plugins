@@ -10,6 +10,8 @@
 # #410 adds --scan: after wiring, run each newly-wired hook repo-wide so
 # pre-existing violations are discovered before the commit, not at push.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/bootstrap/scripts/reconcile-precommit-hooks.zsh"
@@ -173,12 +175,13 @@ YAML
   write_fake_precommit
   run_scan ""           # nothing fails -> clean
   [ "$status" -eq 0 ]
+  echo "$output" | grep -q "safe to commit"
   # The newly-wired hooks were scanned --all-files...
   grep -qx "run yamllint --all-files" "$PC_LOG"
   grep -qx "run trailing-whitespace --all-files" "$PC_LOG"
-  # ...but the already-present gitleaks was NOT.
-  ! grep -qx "run gitleaks --all-files" "$PC_LOG"
-  echo "$output" | grep -q "safe to commit"
+  # ...but the already-present gitleaks was NOT. ($output is now grep's, so this
+  # position-independent `run !` assertion comes last — after the $output check.)
+  run ! grep -qx "run gitleaks --all-files" "$PC_LOG"
 }
 
 @test "scan: #410 a violation in a newly-wired hook surfaces before commit (exit 3)" {
@@ -325,7 +328,7 @@ YAML
   # The over-firing files: filter is gone; the diff guard + always_run replace it.
   grep -qF 'git diff --name-only' "$CONFIG"
   grep -qE '^\s*always_run: true' "$CONFIG"
-  ! grep -qE '^\s*files:' "$CONFIG"
+  run ! grep -qE '^\s*files:' "$CONFIG"
   grep -qE 'stages: \[pre-push\]' "$CONFIG"
 }
 
@@ -394,7 +397,7 @@ YAML
   before="$(cat "$CONFIG")"
   run_it
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "migrated stale coverage-floor"
+  run ! grep -q "migrated stale coverage-floor" <<<"$output"
   [ "$(cat "$CONFIG")" = "$before" ]   # byte-for-byte unchanged
 }
 
@@ -413,7 +416,7 @@ YAML
   write_rendered_cf
   run_it
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "migrated stale coverage-floor"
+  run ! grep -q "migrated stale coverage-floor" <<<"$output"
   grep -qE '^\s*files: \\\.py\$' "$CONFIG"   # untouched
 }
 

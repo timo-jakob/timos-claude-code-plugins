@@ -9,6 +9,8 @@
 # moves the guard into the entry, keyed on the same origin/<default>...HEAD diff
 # CI uses. These tests render the REAL template and run its extracted entry.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   RENDER="$REPO_ROOT/development/skills/bootstrap/scripts/render.zsh"
@@ -50,7 +52,7 @@ run_entry() { PATH="$STUB:$PATH" run bash -c "$ENTRY"; }
 @test "coverage-floor #713: entry carries the origin/main...HEAD diff guard, no files: filter" {
   grep -q 'git diff --name-only --diff-filter=d "$base...HEAD" -- "\*.py"' "$CFG"
   grep -q 'always_run: true' "$CFG"
-  ! grep -qE '^        files: ' "$CFG"
+  run ! grep -qE '^        files: ' "$CFG"
 }
 
 @test "coverage-floor #713: new-branch Dockerfile-only push -> hook no-ops (exit 0), no diff-cover" {
