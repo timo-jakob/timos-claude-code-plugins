@@ -19,8 +19,10 @@ setup() {
 CONTRACTS_SET=(
   common/contracts/v1/openapi.yaml.tmpl
   common/.spectral.yaml
+  common/.github/scripts/check-contracts-semver.sh
   common/.github/workflows/contracts-lint.yml.tmpl
   common/.github/workflows/spec-publish.yml.tmpl
+  common/.github/workflows/contracts-semver.yml.tmpl
 )
 
 render_contracts() {
@@ -38,13 +40,28 @@ assert_valid_yaml() {
   python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$1"
 }
 
-@test "#692 contracts: the four templates render to their deploy paths" {
+@test "#692 contracts: the templates render to their deploy paths" {
   run render_contracts
   [ "$status" -eq 0 ]
   [ -f "$OUT/common/contracts/v1/openapi.yaml" ]
   [ -f "$OUT/common/.spectral.yaml" ]
   [ -f "$OUT/common/.github/workflows/contracts-lint.yml" ]
   [ -f "$OUT/common/.github/workflows/spec-publish.yml" ]
+  # #693 semver gate
+  [ -f "$OUT/common/.github/workflows/contracts-semver.yml" ]
+  [ -f "$OUT/common/.github/scripts/check-contracts-semver.sh" ]
+}
+
+@test "#693 contracts: the semver workflow gates via the wrapper, installs pinned oasdiff, and is path-conditional" {
+  render_contracts
+  local wf="$OUT/common/.github/workflows/contracts-semver.yml"
+  assert_valid_yaml "$wf"
+  # oasdiff is installed pinned (not floating), and the wrapper produces the verdict
+  grep -Eq 'OASDIFF_VERSION: "[0-9]+\.[0-9]+\.[0-9]+"' "$wf"
+  grep -q 'bash .github/scripts/check-contracts-semver.sh' "$wf"
+  grep -q -- '--base-ref "origin/main"' "$wf"
+  # path-conditional (never a required context)
+  grep -q 'contracts/\*\*' "$wf"
 }
 
 @test "#692 contracts: no {{PLACEHOLDER}} survives the render (render.zsh leftover check)" {
