@@ -1496,6 +1496,13 @@ The installed set:
   frozen** (editorial-only), and deleting a live major is rejected (retirement is
   #708). Also **path-conditional** (`paths: contracts/**` plus its own wiring
   files) — never a required context, same as contracts-lint.
+- `CONTRACTS.md` (#695) — the top-level **contract + policy index**: URL-path
+  versioning, the semver-triangle rules, and the **deprecation lifecycle** (spec
+  signal `deprecated: true` + `x-sunset`; runtime `Deprecation` (RFC 9745) +
+  `Sunset` (RFC 8594) header advice; a **minimum-deprecation-window** knob,
+  default 6 months). The `.spectral.yaml` ruleset also gains a
+  `deprecation-has-sunset` rule (#695) enforcing that a `deprecated: true`
+  element carries `x-sunset`. Documentation/policy — never provenance-stamped.
 
 ```bash
 "<skill-base-dir>/scripts/render.zsh" \
@@ -1503,6 +1510,7 @@ The installed set:
   --project-name "<name>" --default-branch "<branch>" \
   common/contracts/v1/openapi.yaml.tmpl \
   common/.spectral.yaml \
+  common/CONTRACTS.md.tmpl \
   common/.github/scripts/check-contracts-semver.sh \
   common/.github/workflows/contracts-lint.yml.tmpl \
   common/.github/workflows/spec-publish.yml.tmpl \
@@ -1525,9 +1533,9 @@ lint/publish/semver workflows still install — they no-op cleanly on an empty
 that in the Step 5 checklist.
 
 (An **already-bootstrapped** repo that predates this stage adopts it on
-re-bootstrap: `detect-stack.sh` lists `.spectral.yaml`, the three workflows, and
-`check-contracts-semver.sh` in `missing_artifacts` when an OpenAPI surface is
-detected — the **seed spec is held out unconditionally**, so gap-fill never
+re-bootstrap: `detect-stack.sh` lists `.spectral.yaml`, `CONTRACTS.md`, the three
+workflows, and `check-contracts-semver.sh` in `missing_artifacts` when an OpenAPI
+surface is detected — the **seed spec is held out unconditionally**, so gap-fill never
 blind-installs a stub contract — and State-D renders that set with the core flags
 above. This set is **not** a blind gap-fill: apply the advisory confirmation
 first — a vendored or fixture `openapi.yaml` (e.g. under `tests/fixtures/`) is a

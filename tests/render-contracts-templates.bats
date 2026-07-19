@@ -19,6 +19,7 @@ setup() {
 CONTRACTS_SET=(
   common/contracts/v1/openapi.yaml.tmpl
   common/.spectral.yaml
+  common/CONTRACTS.md.tmpl
   common/.github/scripts/check-contracts-semver.sh
   common/.github/workflows/contracts-lint.yml.tmpl
   common/.github/workflows/spec-publish.yml.tmpl
@@ -50,6 +51,64 @@ assert_valid_yaml() {
   # #693 semver gate
   [ -f "$OUT/common/.github/workflows/contracts-semver.yml" ]
   [ -f "$OUT/common/.github/scripts/check-contracts-semver.sh" ]
+  # #695 policy index
+  [ -f "$OUT/common/CONTRACTS.md" ]
+}
+
+@test "#695 contracts: CONTRACTS.md documents the versioning + deprecation policy and the 6-month window" {
+  render_contracts
+  local md="$OUT/common/CONTRACTS.md"
+  # project name substituted, not left as a token
+  grep -q 'Demo Project' "$md"
+  # deprecation spec signal
+  grep -q 'deprecated: true' "$md"
+  grep -q 'x-sunset' "$md"
+  # runtime headers with their RFCs
+  grep -q 'Deprecation' "$md" && grep -q 'RFC 9745' "$md"
+  grep -q 'Sunset' "$md" && grep -q 'RFC 8594' "$md"
+  # the minimum-deprecation-window knob, default 6 months
+  grep -qi '6 months' "$md"
+  # versioning policy present
+  grep -qi 'version triangle' "$md"
+}
+
+@test "#695 contracts: the Spectral deprecation-has-sunset rule is structurally sound" {
+  render_contracts
+  local rs="$OUT/common/.spectral.yaml"
+  assert_valid_yaml "$rs"
+  # parse the rule (not substring greps) so a neutered rule fails the test
+  [ "$(yq -r '.rules.deprecation-has-sunset.then.field' "$rs")" = "x-sunset" ]
+  [ "$(yq -r '.rules.deprecation-has-sunset.then.function' "$rs")" = "truthy" ]
+  [ "$(yq -r '.rules.deprecation-has-sunset.severity' "$rs")" = "warn" ]
+  yq -r '.rules.deprecation-has-sunset.given' "$rs" | grep -q '@.deprecated === true'
+}
+
+# Executable Spectral check when the CLI is present (it is NOT in the plugin's
+# macOS toolchain, so this skips locally — the rule's runtime behaviour is
+# validated by the target repo's contracts-lint CI, mirroring the oasdiff seam).
+@test "#695 contracts: a deprecated+x-sunset spec passes Spectral lint (when spectral is present)" {
+  command -v spectral >/dev/null 2>&1 || skip "spectral not installed (validated in the target repo's contracts-lint CI)"
+  render_contracts
+  local rs="$OUT/common/.spectral.yaml"
+  cat > "$OUT/ok.yaml" <<'EOF'
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+servers:
+  - url: /v1
+paths:
+  /w:
+    get:
+      operationId: getW
+      deprecated: true
+      x-sunset: "2026-12-31"
+      responses:
+        "200":
+          description: ok
+EOF
+  run spectral lint --ruleset "$rs" --fail-severity error "$OUT/ok.yaml"
+  [ "$status" -eq 0 ]
 }
 
 @test "#693 contracts: the semver workflow gates via the wrapper, installs pinned oasdiff, and is path-conditional" {

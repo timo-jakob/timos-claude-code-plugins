@@ -1,0 +1,97 @@
+# API contracts — {{PROJECT_NAME}}
+
+This repo's **published, versioned API contracts** live under
+[`contracts/`](contracts/) — one directory per live major
+(`contracts/v1/openapi.yaml`, `contracts/v2/openapi.yaml`, …). The contract is
+the authoritative artifact: consumers pin the published npm spec package and
+generate their own client from it, so no consumer ever reads this repo's code.
+This file records the **versioning and deprecation policy** those contracts
+follow; the policy is enforced mechanically in CI, not by convention.
+
+## Versioning policy
+
+- **URL-path major versioning.** Each major is served under its own path
+  (`/v1/`, `/v2/`) and authored in its own `contracts/vN/` directory.
+- **The version triangle.** For every live major, the spec's `info.version`
+  major, the `vN` directory, and the `servers:` URL major must agree — enforced
+  by the `Contract Semver` check (`.github/workflows/contracts-semver.yml`).
+- **Strict semver, mechanically classified.** `oasdiff` classifies every spec
+  change and the build fails unless the `info.version` bump matches:
+  - **breaking** → never an in-place edit; ship a **new major** directory
+    (`contracts/v(N+1)/`) alongside the old one, which keeps serving until its
+    sunset date.
+  - **additive** (e.g. a new optional field or operation) → at least a **minor**
+    bump.
+  - **editorial** (descriptions, examples) → at least a **patch** bump, so the
+    change republishes.
+- **Old majors are frozen.** Once a newer major exists, older majors accept
+  **editorial** changes only — **with one exception: marking the major
+  deprecated** (below) is allowed, because that is how an old major is retired.
+
+## Deprecation lifecycle
+
+An operation (or a whole major) moves through **active → deprecated → retired**.
+Deprecation is a producer statement that lives in two places.
+
+### 1. In the spec (for tooling)
+
+Mark the dying operation `deprecated: true`, record when the deprecation took
+effect (`x-deprecated-at`), and give it a retirement date (`x-sunset`).
+Deprecation is itself a versioned contract change — a **minor** bump — so it
+publishes to consumers like any other change (and it is the one change a frozen
+old major is allowed to take):
+
+```yaml
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      deprecated: true
+      x-deprecated-at: "2026-07-01"   # when deprecation took effect
+      x-sunset: "2026-12-31"          # earliest retirement date (RFC 3339 date)
+      # …
+```
+
+The Spectral ruleset flags a `deprecated: true` element that omits `x-sunset`
+(see `.spectral.yaml` → `deprecation-has-sunset`). A date-only `x-sunset` means
+**end of that day, UTC**.
+
+### 2. On the wire (for running consumers)
+
+When the service serves a deprecated operation, emit the standard HTTP response
+headers so a running client sees the deprecation without re-reading the spec:
+
+- **`Deprecation`** (RFC 9745) — announces the resource is deprecated, carrying
+  the moment deprecation took effect as a Structured-Field Date
+  (`@<unix-timestamp>`) sourced from `x-deprecated-at`, e.g.
+  `Deprecation: @1751328000`.
+- **`Sunset`** (RFC 8594) — the retirement date as an HTTP-date, mirrored from
+  the operation's `x-sunset`, e.g. `Sunset: Thu, 31 Dec 2026 23:59:59 GMT`.
+- Optionally a **`Link`** header with `rel="sunset"` (RFC 8594) pointing at the
+  migration guide.
+
+Wiring these headers is framework-specific (a Spring interceptor, a FastAPI
+dependency, an Express middleware). The rule of thumb: for any operation whose
+spec entry has `x-sunset`, set `Sunset` from that date and `Deprecation` from
+`x-deprecated-at`.
+
+### 3. Retirement
+
+When a major passes its sunset date it is retired: its adapter and spec are
+removed and the gateway returns `410 Gone`. Retirement is a separate,
+destructive step handled by the maintenance pipeline's sunset-window
+enforcement — deprecation only *announces* it.
+
+## Minimum deprecation window
+
+**Policy knob (default: 6 months).** A major must stay deprecated — `deprecated:
+true` published, with the runtime headers live — for at least this window
+**before its `x-sunset` date**, so consumers have a bounded, known time to
+migrate. Concretely: the gap between the deprecation-marking publish and the
+`x-sunset` date must be at least the window. Set the window your org commits to
+here; the maintenance pipeline's window-enforcement finding reads it, and a
+sunset date may be **extended** (a later date) but not silently **shortened**.
+
+| Knob | Default | Meaning |
+| --- | --- | --- |
+| Minimum deprecation window | **6 months** | Least gap between the `deprecated: true` publish and the `x-sunset` date. |

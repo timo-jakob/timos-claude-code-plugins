@@ -111,7 +111,9 @@ run_gate() { run bash "$GATE" --base-ref HEAD --output "$WORK/findings.json"; }
   mkspec contracts/v1 "1.0.0" 1
   mkspec contracts/v2 "2.0.0" 2
   git add -A && git commit -qm base
-  mkspec contracts/v1 "1.1.0" 1   # editing the FROZEN v1
+  # a REAL additive change to the frozen v1 (a new operation), not deprecation
+  mkspec contracts/v1 "1.1.0" 1
+  yq -i '.paths."/new".get.operationId = "getNew"' contracts/v1/openapi.yaml
   OASDIFF_CLASS=additive run_gate
   [ "$status" -eq 1 ]
   [ "$(jq -r '.violations[]' "$WORK/findings.json" | grep -c 'frozen')" -ge 1 ]
@@ -238,6 +240,48 @@ EOF
   git add -A && git commit -qm base
   run bash "$GATE" --base-ref does-not-exist --output "$WORK/findings.json"
   [ "$status" -eq 2 ]
+}
+
+# write a v<major> spec with one operation; pass a 4th arg to mark it deprecated
+mkspec_op() {
+  mkdir -p "contracts/v$3"
+  {
+    printf 'openapi: 3.1.0\ninfo:\n  title: T\n  version: "%s"\nservers:\n  - url: /v%s\npaths:\n  /w:\n    get:\n      operationId: getW\n' "$1" "$3"
+    if [[ -n "${4:-}" ]]; then
+      printf '      deprecated: true\n      x-sunset: "2026-12-31"\n'
+    fi
+    printf '      responses:\n        "200":\n          description: ok\n'
+  } > "contracts/v$3/openapi.yaml"
+}
+
+@test "#695 gate: deprecating a FROZEN major (deprecated + x-sunset, minor bump) is allowed" {
+  mkspec_op "1.0.0" x 1          # v1 operation, not deprecated
+  mkspec_op "2.0.0" x 2          # v2 newest
+  git add -A && git commit -qm base
+  mkspec_op "1.1.0" x 1 deprecate  # deprecate frozen v1 with a minor bump
+  OASDIFF_CLASS=additive run_gate
+  [ "$status" -eq 0 ]
+}
+
+@test "#695 gate: deprecating a frozen major still needs at least a MINOR bump (not patch)" {
+  mkspec_op "1.0.0" x 1
+  mkspec_op "2.0.0" x 2
+  git add -A && git commit -qm base
+  mkspec_op "1.0.1" x 1 deprecate  # deprecation shipped as a PATCH
+  OASDIFF_CLASS=additive run_gate
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.violations[]' "$WORK/findings.json" | grep -c 'at least a MINOR')" -eq 1 ]
+}
+
+@test "#695 gate: a NON-deprecation additive change to a frozen major is still rejected" {
+  mkspec_op "1.0.0" x 1
+  mkspec_op "2.0.0" x 2
+  git add -A && git commit -qm base
+  # a real additive change to frozen v1 (not deprecation) — the stub says additive
+  mkspec contracts/v1 "1.1.0" 1  # replaces v1 with a different (non-deprecation) shape
+  OASDIFF_CLASS=additive run_gate
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.violations[]' "$WORK/findings.json" | grep -c 'frozen')" -ge 1 ]
 }
 
 @test "#693 gate: an oasdiff tool error fails CLOSED (exit 3), not silently editorial" {

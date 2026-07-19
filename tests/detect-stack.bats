@@ -888,6 +888,8 @@ setup() {
   # #693 semver gate (workflow + wrapper) is surfaced on the same signal
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-semver.yml")' <<<"$out")" != "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/scripts/check-contracts-semver.sh")' <<<"$out")" != "null" ]
+  # #695 CONTRACTS.md policy index is surfaced on the same signal
+  [ "$(jq -r '.missing_artifacts | index("CONTRACTS.md")' <<<"$out")" != "null" ]
   # the present seed spec is tracked, and is NEVER a gap (held out unconditionally)
   [ "$(jq -r '.existing_artifacts["contracts/v1/openapi.yaml"]' <<<"$out")" = "true" ]
   [ "$(jq -r '.missing_artifacts | index("contracts/v1/openapi.yaml")' <<<"$out")" = "null" ]
@@ -927,6 +929,7 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" = "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-semver.yml")' <<<"$out")" = "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/scripts/check-contracts-semver.sh")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("CONTRACTS.md")' <<<"$out")" = "null" ]
 }
 
 @test "detect-stack #692: a proto-only surface does NOT trigger the OpenAPI contracts machinery" {
