@@ -10,6 +10,8 @@
 # explicit that nothing validates the diagram body; the declared-container parse is
 # the only mechanical diagram-validity signal.)
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   CTX="$REPO_ROOT/docs/architecture/c4-context.md"
@@ -85,9 +87,9 @@ setup() {
 
 @test "the landing page dropped the placeholder framing (#795)" {
   # no self-description as a placeholder, no #746 future-work pointer, no sketch
-  ! grep -Eqi 'placeholder' "$INDEX"
-  ! grep -Fq '#746' "$INDEX"
-  ! grep -Fq 'flowchart LR' "$INDEX"
+  run ! grep -Eqi 'placeholder' "$INDEX"
+  run ! grep -Fq '#746' "$INDEX"
+  run ! grep -Fq 'flowchart LR' "$INDEX"
 }
 
 @test "the landing page keeps ARCHITECTURE.md + MAINTAINING.md as absolute repo URLs (#795)" {
@@ -98,7 +100,7 @@ setup() {
 @test "the docs MOC no longer frames architecture as a placeholder (#795)" {
   # broadened from the exact legacy string to the concept, so any reworded
   # placeholder label is caught too
-  ! grep -Fqi 'placeholder' "$MOC"
+  run ! grep -Fqi 'placeholder' "$MOC"
   # and it now links both diagrams
   grep -Fq 'architecture/c4-context.md' "$MOC"
   grep -Fq 'architecture/c4-container.md' "$MOC"

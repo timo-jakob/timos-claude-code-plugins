@@ -12,6 +12,8 @@
 # extract that entry (folding the YAML `>-` scalar the way YAML does) and drive
 # it in a sandbox repo against a stubbed diff-cover.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   TMPL="$REPO_ROOT/development/skills/bootstrap/templates/common/.pre-commit-config.yaml.tmpl"
@@ -57,7 +59,7 @@ run_hook() { run bash -c "cd \"$SANDBOX\" || exit 9; export PATH=\"$STUB:\$PATH\
   [ "$status" -eq 1 ]
   echo "$output" | grep -q "not this worktree"
   echo "$output" | grep -q "python -m venv .venv"
-  ! echo "$output" | grep -q "diff-cover-invoked"
+  run ! grep -q "diff-cover-invoked" <<<"$output"
 }
 
 @test "#518 in-tree <source> -> judged normally (diff-cover runs with the real flags)" {
