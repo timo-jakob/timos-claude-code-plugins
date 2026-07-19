@@ -12,7 +12,6 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 | --- | --- | --- | --- |
 | `bootstrap-config-consistency` | `opus` | Read, Grep, Glob | Cross-references planned bootstrap files to catch mismatched project keys, missing referenced secrets, and inconsistent job IDs before any file is written |
 | `bootstrap-idempotency-reviewer` | `opus` | Read, Grep, Glob | For each existing file that conflicts with a bootstrap template, recommends skip/overwrite/merge with a clear rationale |
-| `bootstrap-reviewer` | `fable` | Read, Grep, Glob, Bash | Senior-engineer-style final review of the bootstrap output. Opt-in via the --review flag — not run by default. |
 | `bootstrap-security-reviewer` | `fable` | Read, Grep, Glob | Reviews proposed GitHub Actions workflows and bootstrap configuration for security risks before any file is written |
 | `bootstrap-validator` | `haiku` | Read, Grep, Glob, Bash | Post-write syntactic and cross-reference validation of files the bootstrap skill has just written |
 | `commit-message` | `sonnet` | Read, Grep, Glob, Bash | Generates clear, concise git commit messages from code diffs, ignoring formatting and linting changes |
