@@ -5,6 +5,8 @@
 # detect-stack's structural model (#799), conforming to the c4/v1 declared-
 # container shape (#790) so extract-declared-containers.zsh parses the result.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SEED="$REPO_ROOT/development/skills/bootstrap/scripts/seed-c4-diagrams.zsh"
@@ -67,7 +69,7 @@ DOCKERFILE_CLI='{"languages":["python"],"language_meta":{"python":{"version":"3.
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
   # and no dangling Rel against an undefined alias (invalid mermaid)
-  ! grep -q 'Rel(user,' "$OUT/docs/architecture/c4-container.md"
+  run ! grep -q 'Rel(user,' "$OUT/docs/architecture/c4-container.md"
 }
 
 @test "seed: a bootBuildImage container (no Dockerfile) is seeded from detection, not synthesized" {
@@ -120,8 +122,8 @@ DOCKERFILE_CLI='{"languages":["python"],"language_meta":{"python":{"version":"3.
 @test "seed: the pages carry NO provenance marker (so #793's content drift check ignores them, AC6)" {
   put "$DOCKERFILE_CLI"
   seed "AI Doc Organizer"
-  ! grep -Fq 'claude-bootstrap:' "$OUT/docs/architecture/c4-context.md"
-  ! grep -Fq 'claude-bootstrap:' "$OUT/docs/architecture/c4-container.md"
+  run ! grep -Fq 'claude-bootstrap:' "$OUT/docs/architecture/c4-context.md"
+  run ! grep -Fq 'claude-bootstrap:' "$OUT/docs/architecture/c4-container.md"
 }
 
 @test "seed: a mixed-case container name folds to a valid lowercased c4/v1 alias, and a space-bearing name is sanitized" {

@@ -11,6 +11,8 @@
 # path it names resolves in the tree (the mechanical guard against a dangling
 # pointer ever being reintroduced).
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   TMPL="$REPO_ROOT/development/skills/bootstrap/templates/common/CLAUDE.md.tmpl"
@@ -40,8 +42,8 @@ setup() {
 @test "the pointer is directory-level — no individual c4-*.md file named (#794)" {
   # naming a c4-*.md file would dangle before children (b) #791 / (f) #795 land;
   # the pointer must stay at the always-present directory
-  ! grep -Eq 'c4-[a-z]+\.md' "$TMPL"
-  ! grep -Eq 'c4-[a-z]+\.md' "$REPO_CLAUDE"
+  run ! grep -Eq 'c4-[a-z]+\.md' "$TMPL"
+  run ! grep -Eq 'c4-[a-z]+\.md' "$REPO_CLAUDE"
 }
 
 @test "link integrity (template): docs/architecture/ resolves in the templates tree (#794)" {
@@ -71,8 +73,8 @@ setup() {
   grep -Eqi 'adding, removing, or renaming' "$rendered"
   grep -Eqi 'same PR' "$rendered"
   # no uppercase placeholder survives, and no c4-*.md file is named
-  ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$rendered"
-  ! grep -Eq 'c4-[a-z]+\.md' "$rendered"
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$rendered"
+  run ! grep -Eq 'c4-[a-z]+\.md' "$rendered"
 }
 
 @test "the rendered docs/architecture/ path resolves in a full rendered tree (#794)" {
