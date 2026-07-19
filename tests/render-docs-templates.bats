@@ -7,6 +7,8 @@
 # script), surface stubs and nav lines stay in lockstep, and the templated
 # copy of docs-nav-to-chapters.zsh cannot drift from the repo's own.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   RENDER="$REPO_ROOT/development/skills/bootstrap/scripts/render.zsh"
@@ -94,9 +96,9 @@ assert_no_orphan_pages() {
   assert_nav_files_exist
   assert_no_orphan_pages
   # The nav and the MOC both dropped the undetected surfaces.
-  ! grep -q "use-the-rest-api" "$OUT/common/mkdocs.yml"
-  ! grep -q "use-the-web-ui" "$OUT/common/mkdocs.yml"
-  ! grep -q "use-the-rest-api" "$OUT/common/docs/index.md"
+  run ! grep -q "use-the-rest-api" "$OUT/common/mkdocs.yml"
+  run ! grep -q "use-the-web-ui" "$OUT/common/mkdocs.yml"
+  run ! grep -q "use-the-rest-api" "$OUT/common/docs/index.md"
 }
 
 @test "docs templates: all-surfaces render seeds every stub and its nav/MOC entries" {
@@ -119,8 +121,8 @@ assert_no_orphan_pages() {
   run render_docs ""
   [ "$status" -eq 0 ]
   [ -f "$OUT/common/docs/index.md" ]
-  ! grep -q "use-the-" "$OUT/common/mkdocs.yml"
-  ! grep -q "use-the-" "$OUT/common/docs/index.md"
+  run ! grep -q "use-the-" "$OUT/common/mkdocs.yml"
+  run ! grep -q "use-the-" "$OUT/common/docs/index.md"
   assert_nav_files_exist
   assert_no_orphan_pages
 }
@@ -132,7 +134,7 @@ assert_no_orphan_pages() {
   grep -q "site_url: https://owner.github.io/demo-repo/" "$OUT/common/mkdocs.yml"
   grep -q "branches: \[main\]" "$OUT/common/.github/workflows/docs-deploy.yml"
   # Rendered markdown carries no heading-style marker pollution.
-  ! grep -q "^# --- " "$OUT/common/docs/index.md"
+  run ! grep -q "^# --- " "$OUT/common/docs/index.md"
 }
 
 @test "docs templates: all three docs workflows are path-conditional on the docs surface" {
@@ -198,7 +200,7 @@ assert_no_orphan_pages() {
   grep -qE "^[[:space:]]+superpowers/" "$OUT/common/mkdocs.yml"
   # The nav derives no chapter from the superpowers tree…
   chapters="$(zsh "$OUT/common/scripts/docs-nav-to-chapters.zsh" "$OUT/common/mkdocs.yml")"
-  ! grep -q "superpowers" <<<"$chapters"
+  run ! grep -q "superpowers" <<<"$chapters"
   # …and the nav<->files lockstep still holds for the published pages.
   assert_nav_files_exist
 }

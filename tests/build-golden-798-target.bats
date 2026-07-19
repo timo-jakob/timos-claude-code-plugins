@@ -10,6 +10,8 @@
 #   - argument abuse and running outside a git worktree fail with typed codes
 #     (2 usage, 3 runtime), never a half-built target on stdout.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development-claude-plugin/skills/review/scripts/build-golden-798-target.zsh"
@@ -44,7 +46,7 @@ teardown() {
   # children"; the fixed version replaced this phrasing entirely.
   grep -q 'skip straight to \*\*E4\*\*' "$TARGET/development/skills/resolve-issue/SKILL.md"
   # And the fix's positive-evidence rule must NOT be present.
-  ! grep -q 'Positive-evidence rule' "$TARGET/development/skills/resolve-issue/SKILL.md"
+  run ! grep -q 'Positive-evidence rule' "$TARGET/development/skills/resolve-issue/SKILL.md"
 }
 
 @test "target repo has exactly one commit containing the fixture" {
