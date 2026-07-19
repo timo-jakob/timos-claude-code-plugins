@@ -655,6 +655,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`language_meta.python.version`) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `language_meta.python.version.replace('.', '')`. |
 | `{{JAVA_VERSION}}` | from `detect-stack.sh` (`language_meta.java.version`) — the JDK major (e.g. `21`, `17`). Defaults to the current LTS `21` when Java isn't detected or the build declares no toolchain (`language_meta.java.version_source == "default"`). Used in `setup-java`'s `java-version`. Substitute as-is. |
+| `{{API_MAJOR}}` | multi-major adapter skeleton only (§3j, #694) — an old major `vN` from `detect-stack.sh`'s `live_majors` (e.g. `v1`). Render the skeleton once per old major with `--api-major`. `{{API_MAJOR_UPPER}}` (`V1`) is derived from it for the Java class name. |
 | `{{XCODE_SCHEME}}` | Swift/Xcode only (`language_meta.swift.build_system == "xcode"`) — the scheme `xcodebuild test` runs. Resolve at render time via `xcodebuild -list -json` (take the single shared scheme; if several, ask the user which one carries the tests). Not used on SwiftPM repos — there the `SWIFT_XCODE` block is stripped and `swift test` needs no scheme. |
 | `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
 | `{{ACCEPTANCE_INTERFACES}}` | comma-joined runtime interfaces from `detect-stack.sh`'s `interfaces` (#242), **minus `library`** — e.g. `cli` or `cli, web-ui`. Rendered inside literal brackets in the template (`interface: [{{ACCEPTANCE_INTERFACES}}]`, the `{{CODEQL_LANGUAGES}}` pattern) → a matrix leg per interface. Pass via `render.zsh --acceptance-interfaces`; **only** when rendering `acceptance.yml` (§3g). No default — omit it and the placeholder trips the leftover check, so the acceptance workflow is never rendered with an empty interface set. |
@@ -1542,6 +1543,44 @@ first — a vendored or fixture `openapi.yaml` (e.g. under `tests/fixtures/`) is
 detected surface but not a genuine one, so confirm the contract's type + evidence
 path before adopting. The deprecation lifecycle spans issues #695, #707, and #708
 (the APIM portal + `apim/` deploy is #706).)
+
+### 3j. Multi-major anti-corruption adapter (when >1 live major — #694)
+
+When a repo serves **more than one live major**, the service should natively
+implement only the **newest** major; each **older** major is served by an
+**anti-corruption adapter** that translates old-shape requests onto the current
+domain and back (one codebase, N majors live — design spec §4.2). Bootstrap
+scaffolds a green-but-minimal adapter skeleton per old major.
+
+**Renders when** `detect-stack.sh`'s **`live_majors`** array has **more than one**
+entry (`["v1","v2",…]` — the distinct `contracts/vN/` dirs carrying a canonical
+openapi spec) **and** the primary backend is **Java/Spring** (the only backends
+with contract-first generator machinery today; other languages are deferred with
+the drift half). A single (or zero) major scaffolds **nothing**.
+
+Scaffold one skeleton per **old** major — every `vN` in `live_majors` except the
+highest (the newest is implemented natively, not adapted):
+
+```bash
+# for each OLD major vN (all but the newest in live_majors):
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --api-major "vN" \
+  languages/java/src/api/OldMajorAdapter.java.tmpl
+# then place the rendered file at src/api/vN/<Vn>MajorAdapter.java in the repo.
+```
+
+The skeleton is a **scaffold seed**, not a drift-tracked artifact — never
+provenance-stamped, and `detect-stack.sh` never reports it as a `missing`/
+`existing` artifact (it is a per-major, not a fixed-path, file). **Do not
+clobber** an existing `src/api/<vN>/` adapter (idempotency rule 3).
+
+**The per-live-major drift gate is deferred to the language plugins** (the second
+half of #694): the `java-openapi-advisor` / `spring-api-advisor` wire
+`openapi-generator` to produce an interface from **each** `contracts/vN/openapi.yaml`
+into its own source set, so the adapter `implements <Vn>Api` and a spec/adapter
+drift **fails the build** — run once per live major. Until that lands, this
+skeleton is illustrative; note it in the Step 5 checklist.
 
 ### Idempotency rules (apply for every file write)
 

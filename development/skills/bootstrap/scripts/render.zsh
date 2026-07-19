@@ -56,6 +56,9 @@
 #                                 compact form {{PYTHON_VERSION_COMPACT}} is
 #                                 always derived from it)
 #   --java-version <n>            {{JAVA_VERSION}} (default: 21)
+#   --api-major <vN>             {{API_MAJOR}} (+ derived {{API_MAJOR_UPPER}}) —
+#                                the multi-major adapter skeleton (#694), rendered
+#                                once per OLD major
 #   --xcode-scheme <s>            {{XCODE_SCHEME}}
 #   --codeql-languages <csv>      {{CODEQL_LANGUAGES}} (default: mapped from
 #                                 --languages when that was passed)
@@ -140,6 +143,7 @@ while (($# > 0)); do
 	--coverage-threshold) vals[COVERAGE_THRESHOLD]="$2" && shift 2 ;;
 	--python-version) vals[PYTHON_VERSION]="$2" && shift 2 ;;
 	--java-version) vals[JAVA_VERSION]="$2" && shift 2 ;;
+	--api-major) vals[API_MAJOR]="$2" && shift 2 ;;
 	--xcode-scheme) vals[XCODE_SCHEME]="$2" && shift 2 ;;
 	--codeql-languages) vals[CODEQL_LANGUAGES]="$2" && shift 2 ;;
 	--acceptance-interfaces) vals[ACCEPTANCE_INTERFACES]="$2" && shift 2 ;;
@@ -162,6 +166,14 @@ done
 [[ -d "$templates" ]] || die "template root not found: $templates"
 
 # --- derived values ----------------------------------------------------------
+
+# The multi-major adapter skeleton (#694) is rendered once per OLD major with
+# --api-major vN; {{API_MAJOR_UPPER}} (V1, V2, …) is derived for the class name.
+# Reject a malformed value loudly rather than blanking the package/class name.
+if (( ${+vals[API_MAJOR]} )); then
+	[[ "${vals[API_MAJOR]}" == v<-> ]] || die "--api-major must be vN (e.g. v1), got: '${vals[API_MAJOR]}'"
+	vals[API_MAJOR_UPPER]="${vals[API_MAJOR]:u}"
+fi
 
 typeset -a langs
 langs=(${=languages})
