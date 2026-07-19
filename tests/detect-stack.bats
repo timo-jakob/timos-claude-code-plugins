@@ -591,6 +591,49 @@ setup() {
   [ "$(jq -r '.detection_confidence' <<<"$out")" = "complete" ]
 }
 
+@test "detect-stack #859: compose service that builds from the repo's own Dockerfile collapses to ONE container (block build form)" {
+  # The ai-doc-organizer case: a bare ./Dockerfile AND a compose service that
+  # builds from it (context: .) are one deployable, not two. The compose service
+  # name is authoritative; the repo-dir-name Dockerfile entry must be dropped.
+  printf 'FROM alpine\n' > Dockerfile
+  printf 'services:\n  aido:\n    build:\n      context: .\n    image: aido:latest\n' > docker-compose.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers | length' <<<"$out")" = "1" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "aido" ]
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "compose" ]
+  # no phantom dockerfile-source entry named after the repo directory
+  [ "$(jq -r 'any(.containers[]; .source=="dockerfile")' <<<"$out")" = "false" ]
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "complete" ]
+}
+
+@test "detect-stack #859: inline 'build: .' scalar form also collapses" {
+  printf 'FROM alpine\n' > Dockerfile
+  printf 'services:\n  app:\n    build: .\n    image: app:latest\n' > docker-compose.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers | length' <<<"$out")" = "1" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "app" ]
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "compose" ]
+}
+
+@test "detect-stack #859: a Dockerfile NOT referenced by any compose build stays its own container" {
+  # Guard against over-collapsing: the compose service pulls a prebuilt image and
+  # does not build; the standalone Dockerfile is a genuinely separate deployable.
+  printf 'FROM alpine\n' > Dockerfile
+  printf 'services:\n  cache:\n    image: redis:7\n' > docker-compose.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '[.containers[].source] | sort | join(",")' <<<"$out")" = "compose,dockerfile" ]
+}
+
+@test "detect-stack #859: subdir Dockerfile built by a compose service in the same dir collapses" {
+  mkdir -p svc
+  printf 'FROM alpine\n' > svc/Dockerfile
+  printf 'services:\n  svc:\n    build:\n      context: .\n    image: svc:latest\n' > svc/docker-compose.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.containers | length' <<<"$out")" = "1" ]
+  [ "$(jq -r '.containers[0].name' <<<"$out")" = "svc" ]
+  [ "$(jq -r '.containers[0].source' <<<"$out")" = "compose" ]
+}
+
 @test "detect-stack #799: --containers overrides detection outright with source 'user override'" {
   printf 'FROM alpine\n' > Dockerfile
   out=$(bash "$DETECT" --containers "alpha,beta" 2>/dev/null)

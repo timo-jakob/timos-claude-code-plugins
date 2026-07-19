@@ -836,6 +836,55 @@ extract_compose_services() {
 	' "$1" 2>/dev/null || true
 }
 
+# extract_compose_builds: for each service that BUILDS (rather than only pulling a
+# prebuilt `image:`), emit "context|dockerfile" — the build context and the
+# Dockerfile name it builds. Both the inline scalar (`build: .`) and the block
+# (`build:` / `context:` / `dockerfile:`) forms are handled. Empty fields mean the
+# compose defaults (context ".", dockerfile "Dockerfile"). Used by #859 to collapse
+# a compose service that builds from a Dockerfile we ALSO detected as its own
+# `dockerfile`-source container — one deployable, not two.
+extract_compose_builds() {
+	awk '
+		BEGIN { inservices=0; svc_indent=-1; buildseen=0; inbuild=0; ctx=""; dfile="" }
+		function flush() {
+			if (buildseen) print ctx "|" dfile
+			buildseen=0; inbuild=0; ctx=""; dfile=""
+		}
+		/^[^[:space:]#]/ { if (inservices) { flush(); inservices=0 } }
+		/^services:/ { inservices=1; svc_indent=-1; next }
+		inservices {
+			if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) next
+			match($0, /^[[:space:]]*/); ind=RLENGTH
+			if (svc_indent==-1) svc_indent=ind
+			if (ind==svc_indent && $0 ~ /^[[:space:]]*["'\'']?[A-Za-z0-9._-]+["'\'']?:/) {
+				flush()   # entering a new service — close the previous one
+			} else if (ind < svc_indent) { flush(); inservices=0; next }
+			# inline scalar: build: <ctx>
+			if ($0 ~ /^[[:space:]]*build:[[:space:]]*[^[:space:]#]/) {
+				buildseen=1; inbuild=0
+				v=$0; sub(/^[[:space:]]*build:[[:space:]]*/,"",v); sub(/[[:space:]]*(#.*)?$/,"",v); gsub(/["'\'']/,"",v)
+				ctx=v
+			} else if ($0 ~ /^[[:space:]]*build:[[:space:]]*$/) {
+				buildseen=1; inbuild=1
+			} else if (inbuild && $0 ~ /^[[:space:]]*context:/) {
+				v=$0; sub(/^[[:space:]]*context:[[:space:]]*/,"",v); sub(/[[:space:]]*(#.*)?$/,"",v); gsub(/["'\'']/,"",v); ctx=v
+			} else if (inbuild && $0 ~ /^[[:space:]]*dockerfile:/) {
+				v=$0; sub(/^[[:space:]]*dockerfile:[[:space:]]*/,"",v); sub(/[[:space:]]*(#.*)?$/,"",v); gsub(/["'\'']/,"",v); dfile=v
+			}
+		}
+		END { if (inservices) flush() }
+	' "$1" 2>/dev/null || true
+}
+
+# normalize_relpath: collapse "//", "/./", and leading "./" in a repo-relative
+# path so a built Dockerfile path can be matched against a detected one. Uses sed
+# (the bash `${p//\/.\//\/}` form inserts a literal backslash in the replacement).
+# "../" is left as-is: a compose context above its own dir is vanishingly rare and
+# never matches a repo-local Dockerfile entry anyway.
+normalize_relpath() {
+	printf '%s' "$1" | sed -e 's#//*#/#g' -e 's#/\./#/#g' -e 's#^\(\./\)*##' -e 's#/\.$##'
+}
+
 container_pairs="" # name|source|evidence, newline-separated
 contract_pairs=""  # type|evidence, newline-separated
 detection_confidence="complete"
@@ -870,16 +919,43 @@ else
 		-not -path '*/node_modules/*' -not -path '*/.git/*' -print 2>/dev/null | sort)
 
 	# --- compose services ---
+	# compose_built_df collects the repo-relative Dockerfile path each building
+	# service compiles, so #859 can drop a `dockerfile`-source entry that is the
+	# same deployable as a compose service that builds it.
+	compose_built_df=""
 	while IFS= read -r cf; do
 		[[ -z "$cf" ]] && continue
 		crel="${cf#"$cwd"/}"
+		cdir="$(dirname "$crel")"
 		while IFS= read -r svc; do
 			[[ -z "$svc" ]] && continue
 			container_pairs+="$svc|compose|$crel#services.$svc"$'\n'
 		done < <(extract_compose_services "$cf")
+		while IFS='|' read -r bctx bdfile; do
+			[[ -z "$bctx" ]] && bctx="."
+			[[ -z "$bdfile" ]] && bdfile="Dockerfile"
+			compose_built_df+="$(normalize_relpath "$cdir/$bctx/$bdfile")"$'\n'
+		done < <(extract_compose_builds "$cf")
 	done < <(find "$cwd" -maxdepth 2 \
 		\( -name 'docker-compose.yml' -o -name 'docker-compose.yaml' -o -name 'compose.yml' -o -name 'compose.yaml' \) \
 		-not -path '*/node_modules/*' -not -path '*/.git/*' -print 2>/dev/null | sort)
+
+	# #859: a compose service that builds from a Dockerfile we also emitted as a
+	# `dockerfile`/`containerfile` container is ONE deployable — drop the Dockerfile
+	# entry (its name is a repo-dir-name guess) and keep the compose service (whose
+	# name is the real image identity). Match on the resolved Dockerfile path
+	# (a dockerfile entry's evidence `./<rel>` vs the built `<rel>`).
+	if [[ -n "$compose_built_df" ]]; then
+		# Pass the built-Dockerfile set through the environment, not `-v`: a `-v`
+		# value carrying newlines aborts BSD awk ("newline in string").
+		container_pairs="$(printf '%s' "$container_pairs" | COMPOSE_BUILT_DF="$compose_built_df" awk -F'|' '
+			BEGIN { n=split(ENVIRON["COMPOSE_BUILT_DF"], a, "\n"); for (i=1;i<=n;i++) if (a[i]!="") B[a[i]]=1 }
+			NF {
+				ev=$3; sub(/^\.\//,"",ev)
+				if (($2=="dockerfile" || $2=="containerfile") && (ev in B)) next
+				print
+			}')"
+	fi
 
 	# --- bootBuildImage (Spring Boot Gradle plugin, no Dockerfile) + Jib ---
 	while IFS= read -r bf; do
