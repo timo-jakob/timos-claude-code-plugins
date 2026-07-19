@@ -23,8 +23,11 @@
 #     A major UNCHANGED vs the base ref has no bump requirement (an unrelated
 #     major on a multi-major PR is not forced to bump). Old (non-newest) majors
 #     are FROZEN: only editorial changes are allowed; a breaking or additive
-#     in-place edit is rejected (ship a new major instead). Deleting a major that
-#     was live at the base ref is rejected here — retirement is the #708 flow.
+#     in-place edit is rejected (ship a new major instead). The ONE exception is
+#     DEPRECATION — marking a frozen major deprecated (deprecated: true + x-sunset,
+#     a minor bump) is the sanctioned lifecycle action (the old major gets a
+#     sunset date), so it is allowed. Deleting a major that was live at the base
+#     ref is rejected here — retirement is the #708 flow.
 #
 # The version bump itself is normalized OUT of the classification diff (info.version
 # is not an oasdiff --exclude-elements element), so a bumped editorial change
@@ -184,6 +187,33 @@ classify() {
     fi
 }
 
+# is_deprecation_only BASE HEAD -> 0 when BASE and HEAD differ ONLY by deprecation
+# markers (deprecated / x-sunset / x-deprecated-at) and the version. Deprecating a
+# major is a real (additive/minor) change, so it classifies "additive" — but it is
+# the SANCTIONED way to retire an old major (the design's "the old major gets a
+# sunset date"), so a frozen major must be allowed to take it. Pure yq (no
+# oasdiff), so it is locally testable and never fails open. The `_STRIP` deletes
+# the deprecation keys from every map; the version is neutralized because a
+# deprecation ships with a bump.
+_DEP_STRIP='(.. | select(tag == "!!map")) |= (del(.deprecated) | del(.["x-sunset"]) | del(.["x-deprecated-at"]))'
+is_deprecation_only() {
+    local base="$1" head="$2" b s rc=1
+    b="$(mktemp)"
+    s="$(mktemp)"
+    cp "$base" "$b"
+    cp "$head" "$s"
+    if yq -i "$_DEP_STRIP" "$b" 2>/dev/null && yq -i "$_DEP_STRIP" "$s" 2>/dev/null; then
+        yq -i '.info.version = "0.0.0"' "$b" 2>/dev/null || true
+        yq -i '.info.version = "0.0.0"' "$s" 2>/dev/null || true
+        if diff -q <(yq -P 'sort_keys(..)' "$b" 2>/dev/null) \
+            <(yq -P 'sort_keys(..)' "$s" 2>/dev/null) >/dev/null 2>&1; then
+            rc=0
+        fi
+    fi
+    rm -f "$b" "$s"
+    return "$rc"
+}
+
 # --- discover majors ---------------------------------------------------------
 
 shopt -s nullglob
@@ -316,8 +346,8 @@ for m in "${majors[@]}"; do
         fi
         ;;
     additive)
-        if ((frozen)); then
-            add_violation "${spec}: major ${m} is frozen (not newest) — an additive change is not allowed; ship a new major"
+        if ((frozen)) && ! is_deprecation_only "${tmp}/base.yaml" "$spec"; then
+            add_violation "${spec}: major ${m} is frozen (not newest) — an additive change is not allowed; ship a new major (deprecating it is the exception)"
         elif [[ "$bump" != "major" && "$bump" != "minor" ]]; then
             add_violation "${spec}: additive change requires at least a MINOR bump, got ${bump} (${base_version} -> ${version})"
         fi

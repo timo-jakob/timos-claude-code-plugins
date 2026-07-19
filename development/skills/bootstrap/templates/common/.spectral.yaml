@@ -16,3 +16,18 @@ rules:
   operation-description: warn
   # Tags give the portal and the generated client a stable grouping.
   operation-tags: warn
+  # Deprecation is a producer signal with a deadline (#695): anything the spec
+  # marks `deprecated: true` should also declare `x-sunset: <date>` (RFC 8594),
+  # so a dying operation always announces WHEN it dies. The recursive null-safe
+  # filter mirrors spectral:oas's own `duplicated-entry-in-enum` given; because
+  # it also matches deprecated parameters/schemas (and any `deprecated: true`
+  # inside example data), it is a WARN in the starter — the org styleguide (#689)
+  # can scope it to operations and raise it to error.
+  deprecation-has-sunset:
+    description: A deprecated element should declare an x-sunset date (RFC 8594).
+    message: "deprecated but missing x-sunset: <date> (RFC 8594)"
+    severity: warn
+    given: "$..[?(@ && @.deprecated === true)]"
+    then:
+      field: x-sunset
+      function: truthy
