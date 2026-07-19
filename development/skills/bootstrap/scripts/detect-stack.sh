@@ -20,6 +20,10 @@
 #                                  resists resolution into a named image (#799)
 #   contracts             []object  committed API contracts (OpenAPI specs, .proto
 #                                  files), each {type, evidence} — see shape (#799)
+#   live_majors           []string  the per-major dirs carrying a canonical
+#                                  contracts/vN/openapi spec, e.g. ["v1","v2"]
+#                                  (#694). >1 => an anti-corruption adapter is
+#                                  scaffolded per OLD major.
 #   interfaces            []object  runtime interface(s) a deployed build is
 #                                  exercised through, each with its detection
 #                                  evidence — see shape below (#242)
@@ -1011,6 +1015,33 @@ contract_pairs="$(printf '%s' "$contract_pairs" | awk 'NF && !seen[$0]++')"
 containers_json="$(emit_containers_json "$container_pairs")"
 contracts_json="$(emit_contracts_json "$contract_pairs")"
 
+# live_majors (#694): the distinct per-major dirs under contracts/ that carry the
+# canonical (lowercase) openapi spec — contracts/vN/openapi.{yaml,yml,json}. This
+# is the signal that decides whether bootstrap scaffolds an anti-corruption
+# adapter — a repo serving >1 live major needs one adapter per OLD major (the
+# service natively implements only the newest; older majors are served by a
+# translating adapter). A single (or zero) major needs no adapter.
+live_majors_lines=""
+while IFS= read -r _cp; do
+	[[ "$_cp" == openapi\|* ]] || continue
+	_ev="${_cp#openapi|}"
+	if [[ "$_ev" =~ ^contracts/(v[0-9]+)/openapi\.(yaml|yml|json)$ ]]; then
+		live_majors_lines+="${BASH_REMATCH[1]}"$'\n'
+	fi
+done <<<"$contract_pairs"
+# Build the array by hand (json_str, no jq — detect-stack degrades gracefully
+# when jq is absent, so the core output never depends on it), deduped and sorted
+# NUMERICALLY on the digits after `v`: a lexical sort orders v10 before v2, and a
+# consumer reading "the highest" as the newest major would then pick the wrong one.
+live_majors_json="["
+_lm_first=1
+while IFS= read -r _m; do
+	[[ -z "$_m" ]] && continue
+	[[ $_lm_first -eq 1 ]] && _lm_first=0 || live_majors_json+=","
+	live_majors_json+="$(json_str "$_m")"
+done < <(printf '%s' "$live_majors_lines" | awk 'NF && !seen[$0]++' | sort -t v -k2,2n)
+live_majors_json+="]"
+
 # --- detection_confidence ----------------------------------------------------
 # "complete" unless the repo shows container-ish evidence we could NOT resolve
 # into a named image AND we resolved nothing locally. A user override is always
@@ -1073,6 +1104,10 @@ collect_from() {
 		rel="${tmpl_path#"$dir"/}"              # strip prefix
 		rel="${rel%.tmpl}"                      # strip .tmpl suffix if present
 		[[ "$rel" == "gitignore" ]] && continue # fragment, not a target file
+		# The multi-major anti-corruption adapter (#694) is a per-OLD-major
+		# scaffold seed (rendered to src/api/<vN>/… once per OLD major by SKILL
+		# §3j), not a fixed 1:1 artifact — never a gap-fill candidate.
+		[[ "$rel" == src/api/* ]] && continue
 		candidate_paths+=("$rel")
 	done < <(find "$dir" -type f 2>/dev/null)
 }
@@ -1403,6 +1438,7 @@ cat <<EOF
   "containers": $containers_json,
   "detection_confidence": $(json_str "$detection_confidence"),
   "contracts": $contracts_json,
+  "live_majors": $live_majors_json,
   "interfaces": $interfaces_json,
   "language_meta": $language_meta_json,
   "is_claude_plugin": $(json_bool "$is_claude_plugin"),

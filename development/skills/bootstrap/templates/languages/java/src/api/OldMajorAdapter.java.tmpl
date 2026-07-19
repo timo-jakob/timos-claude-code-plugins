@@ -1,0 +1,33 @@
+package api.{{API_MAJOR}};
+
+// Anti-corruption adapter for API major {{API_MAJOR}} — {{PROJECT_NAME}} (issue #694).
+//
+// The service natively implements ONLY the newest major. This adapter keeps the
+// frozen {{API_MAJOR}} contract alive by translating {{API_MAJOR}}-shape requests
+// onto the current-major domain and mapping the responses back — one codebase,
+// N majors live, no forked business logic (design spec §4.2). It exists once per
+// OLD major (bootstrap scaffolds it only when >1 live major is detected).
+//
+// It is meant to implement the interface openapi-generator produces from
+// contracts/{{API_MAJOR}}/openapi.yaml, so that a drift between this adapter and
+// the frozen {{API_MAJOR}} spec fails the build. That per-major generator wiring
+// (the src/api source set + the openApiGenerate{{API_MAJOR_UPPER}} task, run per
+// live major) is installed by the java-openapi / spring-api advisor — the drift
+// half of #694. Until you wire it, this is a green-but-minimal starting point.
+//
+// TODO(you):
+//   - make this `implements {{API_MAJOR_UPPER}}Api` (the generated interface),
+//   - constructor-inject the current-major domain service,
+//   - translate each operation's request/response shape to/from the current major.
+public class {{API_MAJOR_UPPER}}MajorAdapter {
+
+    // private final CurrentDomainService domain;   // TODO(you): inject.
+
+    // Example once the generated {{API_MAJOR_UPPER}}Api interface is on the
+    // classpath (delete this and add @Override implementations):
+    //
+    //   @Override
+    //   public {{API_MAJOR_UPPER}}Widget getWidget(String id) {
+    //       return to{{API_MAJOR_UPPER}}Shape(domain.getWidget(id));
+    //   }
+}

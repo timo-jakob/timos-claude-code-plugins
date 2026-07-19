@@ -940,3 +940,86 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" = "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" = "null" ]
 }
+
+# --- #694 live_majors: the multi-major-serving signal -------------------------
+# live_majors is the sorted set of contracts/vN/ dirs carrying a canonical
+# openapi spec — bootstrap scaffolds an anti-corruption adapter per OLD major
+# only when there is more than one. The producer-side adapter skeleton is a
+# per-major scaffold seed, never a fixed gap-fill artifact.
+
+@test "detect-stack #694: no OpenAPI surface -> live_majors is []" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -c '.live_majors' <<<"$out")" = "[]" ]
+}
+
+@test "detect-stack #694: a single contracts/v1 -> live_majors [\"v1\"]" {
+  mkdir -p contracts/v1
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.live_majors' <<<"$out")" = '["v1"]' ]
+}
+
+@test "detect-stack #694: contracts/v1 + contracts/v2 -> live_majors [\"v1\",\"v2\"] (multi-major)" {
+  mkdir -p contracts/v1 contracts/v2
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  printf 'openapi: 3.1.0\n' > contracts/v2/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.live_majors' <<<"$out")" = '["v1","v2"]' ]
+  [ "$(jq -r '.live_majors | length' <<<"$out")" -eq 2 ]
+}
+
+@test "detect-stack #694: a non-per-major spec (api/openapi.yaml) is NOT a live major" {
+  mkdir -p api
+  printf 'openapi: 3.1.0\n' > api/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  # it is still a detected contract, but not a contracts/vN/ live major
+  [ "$(jq -c '.live_majors' <<<"$out")" = "[]" ]
+  [ "$(jq -r '[.contracts[].evidence] | index("api/openapi.yaml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack #694: the multi-major adapter skeleton is never a missing/existing artifact" {
+  mkdir -p contracts/v1 contracts/v2
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  printf 'openapi: 3.1.0\n' > contracts/v2/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  # nothing under src/api/ is a gap-fill candidate (it is a per-major scaffold)
+  [ "$(jq -r '[.missing_artifacts[] | select(startswith("src/api/"))] | length' <<<"$out")" -eq 0 ]
+  [ "$(jq -r '[.existing_artifacts | keys[] | select(startswith("src/api/"))] | length' <<<"$out")" -eq 0 ]
+}
+
+@test "detect-stack #694: live_majors is sorted NUMERICALLY (v10 after v2, not lexically)" {
+  mkdir -p contracts/v1 contracts/v2 contracts/v10
+  for d in v1 v2 v10; do printf 'openapi: 3.1.0\n' > "contracts/$d/openapi.yaml"; done
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.live_majors' <<<"$out")" = '["v1","v2","v10"]' ]
+}
+
+@test "detect-stack #694: a contracts/vN/openapi.json (or .yml) major counts too" {
+  mkdir -p contracts/v1 contracts/v3
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.json
+  printf 'openapi: 3.1.0\n' > contracts/v3/openapi.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.live_majors' <<<"$out")" = '["v1","v3"]' ]
+}
+
+@test "detect-stack #694: a non-canonical filename in a vN dir is a contract but NOT a live major" {
+  mkdir -p contracts/v4
+  printf 'openapi: 3.1.0\n' > contracts/v4/orders.openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.live_majors' <<<"$out")" = "[]" ]
+  [ "$(jq -r '[.contracts[].evidence] | index("contracts/v4/orders.openapi.yaml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack #694: live_majors does not require jq (core output degrades gracefully without it)" {
+  mkdir -p contracts/v1 contracts/v2
+  printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
+  printf 'openapi: 3.1.0\n' > contracts/v2/openapi.yaml
+  # run detection with jq removed from PATH; the JSON (incl. live_majors) must
+  # still be produced (json_str-built, no jq dependency in the core output)
+  out=$(PATH=/usr/bin:/bin bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # parse with the real jq (back on PATH) to assert the field is correct JSON
+  [ "$(jq -c '.live_majors' <<<"$out")" = '["v1","v2"]' ]
+}
