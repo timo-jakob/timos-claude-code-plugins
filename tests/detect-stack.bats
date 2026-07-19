@@ -877,14 +877,17 @@ setup() {
   [ "$(jq -r '[.contracts[] | select(.type=="openapi") | .evidence] | sort | join(",")' <<<"$out")" = "contracts/v1/openapi.yaml,contracts/v2/openapi.yaml" ]
 }
 
-@test "detect-stack #692: OpenAPI surface present -> the ruleset + two workflows ARE missing_artifacts when absent" {
+@test "detect-stack #692: OpenAPI surface present -> the ruleset + workflows + semver gate ARE missing_artifacts when absent" {
   mkdir -p contracts/v1
   printf 'openapi: 3.1.0\n' > contracts/v1/openapi.yaml
-  # only the seed spec exists; the ruleset + workflows do not
+  # only the seed spec exists; the ruleset + workflows + gate do not
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" != "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-lint.yml")' <<<"$out")" != "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" != "null" ]
+  # #693 semver gate (workflow + wrapper) is surfaced on the same signal
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-semver.yml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/scripts/check-contracts-semver.sh")' <<<"$out")" != "null" ]
   # the present seed spec is tracked, and is NEVER a gap (held out unconditionally)
   [ "$(jq -r '.existing_artifacts["contracts/v1/openapi.yaml"]' <<<"$out")" = "true" ]
   [ "$(jq -r '.missing_artifacts | index("contracts/v1/openapi.yaml")' <<<"$out")" = "null" ]
@@ -922,6 +925,8 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index(".spectral.yaml")' <<<"$out")" = "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-lint.yml")' <<<"$out")" = "null" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/spec-publish.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-semver.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/scripts/check-contracts-semver.sh")' <<<"$out")" = "null" ]
 }
 
 @test "detect-stack #692: a proto-only surface does NOT trigger the OpenAPI contracts machinery" {

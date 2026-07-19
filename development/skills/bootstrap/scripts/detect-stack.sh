@@ -1270,6 +1270,7 @@ if [[ "$openapi_surface" != "true" ]]; then
 	held_out+=(
 		".spectral.yaml"
 		".github/workflows/contracts-lint.yml" ".github/workflows/spec-publish.yml"
+		".github/workflows/contracts-semver.yml" ".github/scripts/check-contracts-semver.sh"
 	)
 fi
 artifacts_json="{"

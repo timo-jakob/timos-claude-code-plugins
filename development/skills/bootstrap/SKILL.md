@@ -1459,7 +1459,7 @@ pages:
   If the token lacks admin on the repo, surface it in the Step 5 checklist
   instead (Settings → Pages → Source: GitHub Actions).
 
-### 3i. API contracts machinery (when an OpenAPI surface is detected — #692)
+### 3i. API contracts machinery (when an OpenAPI surface is detected — #692, #693)
 
 A backend's API contract must be a **published, versioned artifact**, not a file
 consumers reach into the repo for. When `detect-stack.sh`'s `contracts` array
@@ -1487,6 +1487,15 @@ The installed set:
   Its APIM governance step (#706) is a clean extension point: it runs only when
   an `apim/` directory exists and **skips with no failure otherwise**, so a repo
   without APIM gets the full drift guarantee from the npm channel alone.
+- `.github/workflows/contracts-semver.yml` + `.github/scripts/check-contracts-semver.sh`
+  (#693) — the **mechanical API-semver gate**: the version triangle (info.version
+  major == `vN` directory == `servers:` URL major) plus an oasdiff
+  bump-classification per **changed** major (breaking → ship a **new major
+  directory**, never an in-place edit; additive → at least a minor bump;
+  editorial → at least a patch bump so the spec republishes). **Old majors are
+  frozen** (editorial-only), and deleting a live major is rejected (retirement is
+  #708). Also **path-conditional** (`paths: contracts/**` plus its own wiring
+  files) — never a required context, same as contracts-lint.
 
 ```bash
 "<skill-base-dir>/scripts/render.zsh" \
@@ -1494,8 +1503,10 @@ The installed set:
   --project-name "<name>" --default-branch "<branch>" \
   common/contracts/v1/openapi.yaml.tmpl \
   common/.spectral.yaml \
+  common/.github/scripts/check-contracts-semver.sh \
   common/.github/workflows/contracts-lint.yml.tmpl \
-  common/.github/workflows/spec-publish.yml.tmpl
+  common/.github/workflows/spec-publish.yml.tmpl \
+  common/.github/workflows/contracts-semver.yml.tmpl
 ```
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
@@ -1508,18 +1519,21 @@ second spec: if the repo's detected spec lives elsewhere (e.g. `api/openapi.yaml
 or a different major is already live, **omit `common/contracts/v1/openapi.yaml.tmpl`
 from the render** and instead recommend a confirmed `git mv` of the real spec
 under `contracts/v<major-of-its-info.version>/` (the #693 version triangle
-requires the directory major to match `info.version`). The ruleset + both
-workflows still install — both workflows no-op cleanly on an empty `contracts/`,
-so the pipeline is inert (not failing) until a spec lands; note that in the
-Step 5 checklist.
+requires the directory major to match `info.version`). The ruleset + the
+lint/publish/semver workflows still install — they no-op cleanly on an empty
+`contracts/`, so the pipeline is inert (not failing) until a spec lands; note
+that in the Step 5 checklist.
 
 (An **already-bootstrapped** repo that predates this stage adopts it on
-re-bootstrap: `detect-stack.sh` lists `.spectral.yaml` + the two workflows in
-`missing_artifacts` when an OpenAPI surface is detected — the **seed spec is held
-out unconditionally**, so gap-fill never blind-installs a stub contract — and
-State-D renders that three-file set with the core flags above. The semver/freeze
-gate is #693; the deprecation lifecycle spans issues #695, #707, and #708; the
-APIM portal + `apim/` deploy is #706.)
+re-bootstrap: `detect-stack.sh` lists `.spectral.yaml`, the three workflows, and
+`check-contracts-semver.sh` in `missing_artifacts` when an OpenAPI surface is
+detected — the **seed spec is held out unconditionally**, so gap-fill never
+blind-installs a stub contract — and State-D renders that set with the core flags
+above. This set is **not** a blind gap-fill: apply the advisory confirmation
+first — a vendored or fixture `openapi.yaml` (e.g. under `tests/fixtures/`) is a
+detected surface but not a genuine one, so confirm the contract's type + evidence
+path before adopting. The deprecation lifecycle spans issues #695, #707, and #708
+(the APIM portal + `apim/` deploy is #706).)
 
 ### Idempotency rules (apply for every file write)
 
