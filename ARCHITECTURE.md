@@ -270,7 +270,46 @@ without the right signal is automatic `REQUEST_CHANGES` — not a separate
 judgement call, just the mechanical gate raised to a review verdict.
 
 The full bootstrap-and-Approver scope for this is tracked in
-[#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174).
+[#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174),
+now **superseded by epic
+[#684](https://github.com/timo-jakob/timos-claude-code-plugins/issues/684)**
+(see the contract-lifecycle section below) — no residual #174 scope remains.
+
+### API contract lifecycle — the versioned spec artifact (epic #684)
+
+For REST/OpenAPI surfaces the contract is not merely *diffed* for breakage — it
+is **published as a versioned artifact** and its whole lifecycle is mechanical.
+Design:
+[`docs/superpowers/specs/2026-07-10-webui-plugin-family-design.md`](docs/superpowers/specs/2026-07-10-webui-plugin-family-design.md)
+§3 (contract flow) and §4 (versioning, multi-major serving, deprecation). The
+model, and the children of #684 that deliver each piece:
+
+- **Per-major `contracts/` layout, dual publication (#692, #706).** The producer
+  owns `contracts/vN/openapi.yaml` — one directory per live major, the single
+  source of truth. Each major is published as an **npm spec package** (the
+  machine channel: consumers pin it in `package.json` and Renovate bumps it, so
+  drift is structurally impossible, not policed) and, optionally, to an
+  **APIM developer portal** with rendered docs (the governance channel, #706).
+  A repo without an `apim/` directory gets the full drift guarantee from the npm
+  channel alone. Bootstrap installs the layout, the publish workflow, and a
+  replaceable Spectral starter ruleset when it detects an OpenAPI surface (#692);
+  the org styleguide epic (#689) swaps the ruleset content only.
+- **Strict semver, the version triangle (#693).** `info.version`, the npm
+  package version, and the URL major in `servers:` (`/v2/`) must agree; `oasdiff`
+  classifies every spec diff (breaking / additive / editorial) and the build
+  fails unless the bump matches. A breaking change is never an in-place edit — a
+  new major is published alongside and the old major gets a sunset date.
+- **Multiple live majors via an in-service anti-corruption adapter (#694).** The
+  service natively implements only the newest major; each older supported major
+  is served by an adapter that translates old-shape requests onto the new domain
+  and back. The impl-matches-spec drift gate runs **per live major**.
+- **Deprecation lifecycle: active → deprecated (sunset) → retired
+  (#695/#707/#708).** `deprecated: true` + `x-sunset: <date>` in the spec (a
+  versioned contract change); `Deprecation` (RFC 9745) + `Sunset` (RFC 8594)
+  runtime headers; the consumer client generator maps `deprecated: true` to
+  TypeScript `@deprecated` so ESLint warns at every call site; a maintenance
+  finding fires when a major is served past its sunset, and retirement deletes
+  the adapter + spec and the gateway returns 410.
 
 ### Cross-repo Claude: the big-picture problem
 

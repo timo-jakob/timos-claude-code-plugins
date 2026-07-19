@@ -1,0 +1,135 @@
+# Spec Publish — publish each live API major as an npm spec package (issue #692).
+#
+# npm is the MACHINE channel: consumers pin the package in package.json and
+# Renovate bumps it, so a frontend can only ever see a published, versioned,
+# backward-compat-gated contract — drift is structurally impossible, not policed.
+# The default package name is the unscoped `<repo>-api-spec`; rename it (and add
+# an npm scope) to suit your org.
+#
+# ONE version line PER LIVE MAJOR (contracts/vN/): this workflow discovers the
+# majors at runtime and publishes each under a `major-vN` dist-tag (a bare `vN`
+# is rejected by npm as a valid semver range), so the 1.x and 2.x consumer
+# populations are both served natively — no re-bootstrap when a new major added.
+#
+# The npm package version IS the spec's info.version (the version triangle, #693),
+# and this workflow refuses to publish a major whose info.version major disagrees
+# with its vN directory. Re-publishing an already-published version is a clean
+# no-op (a routine app release with no contract change stays green).
+#
+# The optional APIM governance channel (#706) is a CLEAN EXTENSION POINT: the
+# portal-publish step below runs only when an apim/ directory exists and SKIPS
+# with no failure otherwise. A repo without apim/ gets the full drift guarantee
+# from the npm channel alone.
+#
+# Requires an `NPM_TOKEN` repository secret with publish rights.
+name: Spec Publish
+
+on:
+  release:
+    types: ["published"]
+  workflow_dispatch:
+
+# Least privilege at workflow scope; jobs only read the tree.
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      majors: ${{ steps.find.outputs.majors }}
+      has_majors: ${{ steps.find.outputs.has_majors }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Discover live API majors
+        id: find
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          majors=()
+          # v[0-9]* only — a per-major dir is v1, v2, …; never contracts/vendor/.
+          for d in contracts/v[0-9]*/; do
+            [[ -f "${d}openapi.yaml" ]] && majors+=("$(basename "$d")")
+          done
+          if [[ ${#majors[@]} -eq 0 ]]; then
+            echo "has_majors=false" >> "$GITHUB_OUTPUT"
+            echo "majors=[]" >> "$GITHUB_OUTPUT"
+            echo "No contracts/vN/openapi.yaml found — nothing to publish."
+            exit 0
+          fi
+          json="$(printf '%s\n' "${majors[@]}" | jq -R . | jq -cs .)"
+          echo "has_majors=true" >> "$GITHUB_OUTPUT"
+          echo "majors=${json}" >> "$GITHUB_OUTPUT"
+          echo "Live majors: ${json}"
+
+  publish:
+    needs: discover
+    if: needs.discover.outputs.has_majors == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        major: ${{ fromJson(needs.discover.outputs.majors) }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish the ${{ matrix.major }} spec package to npm
+        env:
+          MAJOR: ${{ matrix.major }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          spec="contracts/${MAJOR}/openapi.yaml"
+          pkg="${REPO_NAME}-api-spec"
+          # The npm version IS the spec's info.version (the version triangle).
+          # yq ships on the GitHub-hosted ubuntu runner; js-yaml's CLI prints a
+          # util.inspect dump, not JSON, so it can't be piped to jq.
+          version="$(yq -r '.info.version' "$spec")"
+          if [[ -z "$version" || "$version" == "null" ]]; then
+            echo "::error::$spec has no info.version"
+            exit 1
+          fi
+          # Enforce the version triangle at publish: info.version's major must
+          # match the vN directory (#693 makes this a full pre-merge gate).
+          if [[ "${version%%.*}" != "${MAJOR#v}" ]]; then
+            echo "::error::$spec info.version ($version) disagrees with directory $MAJOR"
+            exit 1
+          fi
+          # Idempotent: a routine app release with no contract change re-runs this
+          # with an already-published version. Skip cleanly instead of failing.
+          if npm view "${pkg}@${version}" version >/dev/null 2>&1; then
+            echo "${pkg}@${version} already published — nothing to do."
+            exit 0
+          fi
+          pkgdir="$(mktemp -d)"
+          cp "$spec" "$pkgdir/openapi.yaml"
+          jq -n --arg n "$pkg" --arg v "$version" --arg m "$MAJOR" \
+            '{name: $n, version: $v,
+              description: ("OpenAPI contract for " + $n + " (" + $m + ")"),
+              files: ["openapi.yaml"], publishConfig: {access: "public"}}' \
+            > "$pkgdir/package.json"
+          # dist-tag "major-vN": a bare "vN" is a valid semver range, which npm
+          # rejects as a dist-tag.
+          echo "Publishing ${pkg}@${version} (dist-tag major-${MAJOR})"
+          npm publish "$pkgdir" --tag "major-${MAJOR}"
+
+      # Governance channel (#706) — CLEAN EXTENSION POINT. Runs only when an
+      # apim/ directory exists; skips with no failure otherwise. #706 fills in
+      # the portal publication + proxy config-as-code deploy here.
+      - name: Publish ${{ matrix.major }} to the APIM governance portal
+        if: ${{ hashFiles('apim/**') != '' }}
+        env:
+          MAJOR: ${{ matrix.major }}
+        run: |
+          set -euo pipefail
+          echo "apim/ present — portal publication + proxy deploy land in #706."

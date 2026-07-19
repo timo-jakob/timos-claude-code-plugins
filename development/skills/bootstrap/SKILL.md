@@ -1459,6 +1459,68 @@ pages:
   If the token lacks admin on the repo, surface it in the Step 5 checklist
   instead (Settings → Pages → Source: GitHub Actions).
 
+### 3i. API contracts machinery (when an OpenAPI surface is detected — #692)
+
+A backend's API contract must be a **published, versioned artifact**, not a file
+consumers reach into the repo for. When `detect-stack.sh`'s `contracts` array
+carries a `type: "openapi"` entry, install the contract-lifecycle foundation
+(the npm machine channel — consumer pinning + Renovate bumps; drift is
+structurally impossible, not policed):
+
+Detection here is **advisory** (mirror §3g): present the detected contract
+entry (type + evidence path) in the Step 2 plan and render §3i only for a
+confirmed genuine API surface — a vendored or fixture `openapi.yaml` is not one.
+The installed set:
+
+- `contracts/v1/openapi.yaml` — the **per-major layout** SEED (one directory per
+  live major; old majors frozen by convention here, mechanically with #693). A
+  **scaffold**, not a drift-tracked artifact — never provenance-stamped.
+- `.spectral.yaml` — a **replaceable** starter ruleset; the org styleguide epic
+  (#689) later swaps its *content* only. Scaffold — never stamped.
+- `.github/workflows/contracts-lint.yml` — Spectral lints `contracts/` in CI,
+  referencing `.spectral.yaml` **by path** so a ruleset swap never touches the
+  wiring. Its check is **path-conditional** (`paths: contracts/**`) — like the
+  docs checks (§3h), **never add it to branch protection's required contexts**,
+  or every PR that doesn't touch `contracts/` wedges.
+- `.github/workflows/spec-publish.yml` — publishes **each live major** as its own
+  npm spec package (version = the spec's `info.version`, dist-tag `major-vN`).
+  Its APIM governance step (#706) is a clean extension point: it runs only when
+  an `apim/` directory exists and **skips with no failure otherwise**, so a repo
+  without APIM gets the full drift guarantee from the npm channel alone.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --default-branch "<branch>" \
+  common/contracts/v1/openapi.yaml.tmpl \
+  common/.spectral.yaml \
+  common/.github/workflows/contracts-lint.yml.tmpl \
+  common/.github/workflows/spec-publish.yml.tmpl
+```
+
+`spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
+surface it in the Step 5 checklist (and, on State-D adoption, expect it in the
+secrets gap check alongside `SONAR_TOKEN`/`SNYK_TOKEN`).
+
+**Seed the layout only when the repo has no per-major spec yet.** Do not clobber
+an existing `contracts/vN/openapi.yaml` (idempotency rule 3), and do not seed a
+second spec: if the repo's detected spec lives elsewhere (e.g. `api/openapi.yaml`)
+or a different major is already live, **omit `common/contracts/v1/openapi.yaml.tmpl`
+from the render** and instead recommend a confirmed `git mv` of the real spec
+under `contracts/v<major-of-its-info.version>/` (the #693 version triangle
+requires the directory major to match `info.version`). The ruleset + both
+workflows still install — both workflows no-op cleanly on an empty `contracts/`,
+so the pipeline is inert (not failing) until a spec lands; note that in the
+Step 5 checklist.
+
+(An **already-bootstrapped** repo that predates this stage adopts it on
+re-bootstrap: `detect-stack.sh` lists `.spectral.yaml` + the two workflows in
+`missing_artifacts` when an OpenAPI surface is detected — the **seed spec is held
+out unconditionally**, so gap-fill never blind-installs a stub contract — and
+State-D renders that three-file set with the core flags above. The semver/freeze
+gate is #693; the deprecation lifecycle spans issues #695, #707, and #708; the
+APIM portal + `apim/` deploy is #706.)
+
 ### Idempotency rules (apply for every file write)
 
 For each target file path:

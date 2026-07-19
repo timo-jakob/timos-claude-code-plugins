@@ -1241,6 +1241,37 @@ done
 [[ "$cli_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-cli.md")
 [[ "$rest_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-rest-api.md")
 [[ "$webui_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-web-ui.md")
+# The API contracts machinery (#692) is held out CONDITIONALLY on an OpenAPI
+# surface — the same pattern as the acceptance stage (#714). Its gating signal,
+# a committed OpenAPI contract, IS in this script's own `contracts` output, so a
+# repo that exposes one can legitimately be told the Spectral ruleset and the
+# lint + publish workflows are an expected gap; a repo with no OpenAPI surface
+# never sees them as gaps (and State-D never blind-installs an API contract
+# pipeline into a repo that has no API). When surfaced, those three render NOT
+# blind — the set renders with core flags detection already supplies
+# (--project-name, --default-branch), and both workflows no-op on an empty
+# contracts/. See SKILL.md §3i.
+#
+# The per-major SEED spec (contracts/v1/openapi.yaml) is held out
+# UNCONDITIONALLY: it is a scaffold, not a drift-tracked artifact, and blind-
+# rendering a stub v1 contract is actively wrong when the repo's real spec lives
+# elsewhere (e.g. api/openapi.yaml) or when v1 was retired and only
+# contracts/v2/ is live — in both cases the stub would then be published as the
+# authoritative contract. §3i seeds it only under human/model judgment on a
+# fresh bootstrap, never via State-D gap-fill. (`^openapi|` matches only the
+# openapi contract lines, built as `openapi|<path>` above; the here-string
+# avoids a SIGPIPE from grep -q short-circuiting a large proto-heavy pipe.)
+openapi_surface="false"
+if grep -q '^openapi|' <<<"$contract_pairs"; then
+	openapi_surface="true"
+fi
+held_out+=("contracts/v1/openapi.yaml")
+if [[ "$openapi_surface" != "true" ]]; then
+	held_out+=(
+		".spectral.yaml"
+		".github/workflows/contracts-lint.yml" ".github/workflows/spec-publish.yml"
+	)
+fi
 artifacts_json="{"
 missing_json="["
 first=1
