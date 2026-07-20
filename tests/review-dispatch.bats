@@ -63,6 +63,20 @@ plan() {  # $1 = languages json ; rest = extra flags
   [ "$(echo "$output" | jq -r .review_skill)" = "development-java:review" ]
 }
 
+@test "plan: go repo maps to development-go:review (#872)" {
+  # Slice C gave Go a conforming panel; without `go` in the supported set the
+  # review loop would escalate a Go repo as unsupported_repo_type instead.
+  plan '{"languages":["go"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-go:review" ]
+}
+
+@test "plan: the unsupported-repo-type error advertises go among the supported panels (#872)" {
+  plan '{"languages":["rust"]}'
+  [ "$status" -eq 3 ]
+  echo "$output" | jq -e '.supported | index("go") != null' >/dev/null
+}
+
 @test "plan: findings_path is a well-known per-round path in the worktree" {
   plan '{"languages":["python"]}' --round 2
   [ "$status" -eq 0 ]
@@ -83,10 +97,20 @@ plan() {  # $1 = languages json ; rest = extra flags
 
 # ---- unsupported / ambiguous repo type is a TYPED escalation, not a crash
 
-@test "plan: unsupported repo type (go/ts) exits 3 with a typed error" {
-  plan '{"languages":["go","typescript"]}'
+@test "plan: unsupported repo type (rust/ts) exits 3 with a typed error" {
+  # Was go/typescript until #872 gave Go a panel; the case still needs a pair
+  # with no panel on either side, so it moved to rust/typescript.
+  plan '{"languages":["rust","typescript"]}'
   [ "$status" -eq 3 ]
   [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+}
+
+@test "plan: a supported language alongside an unsupported one still dispatches (#872)" {
+  # go+typescript is no longer the unsupported case: go has a panel, typescript
+  # does not, so the single supported language wins rather than escalating.
+  plan '{"languages":["go","typescript"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-go:review" ]
 }
 
 @test "plan: no detected languages exits 3 with a typed error" {

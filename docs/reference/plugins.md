@@ -331,11 +331,17 @@ to its siblings, which is exactly what the contract-driven dispatch
 ([#249](https://github.com/timo-jakob/timos-claude-code-plugins/issues/249))
 exists to make possible.
 
-**What's built (Slice B,
-[#871](https://github.com/timo-jakob/timos-claude-code-plugins/issues/871)):**
+**What's built.** Slice B
+([#871](https://github.com/timo-jakob/timos-claude-code-plugins/issues/871)) —
 the plugin scaffold, the gather script, the maintenance dispatcher, the planner,
-the CI fixer, and the mechanical `format_lint` fixer — i.e. a runnable
-lint/format → CI-fix → PR loop. Static-analysis triage
+the CI fixer, and the mechanical `format_lint` fixer, i.e. a runnable
+lint/format → CI-fix → PR loop. Slice C
+([#872](https://github.com/timo-jakob/timos-claude-code-plugins/issues/872)) —
+the **review panel**: `/development-go:review` running five specialists in
+parallel (bugs, security, performance, code quality, tests), built to double as
+risk-register lenses for the Slice H approver (the
+[#449](https://github.com/timo-jakob/timos-claude-code-plugins/issues/449)
+pattern). Static-analysis triage
 ([#873](https://github.com/timo-jakob/timos-claude-code-plugins/issues/873)),
 coverage ([#874](https://github.com/timo-jakob/timos-claude-code-plugins/issues/874)),
 bootstrap templates ([#875](https://github.com/timo-jakob/timos-claude-code-plugins/issues/875)),
@@ -371,3 +377,14 @@ alternative.
 | Skill | Command | Description |
 | --- | --- | --- |
 | Maintenance dispatcher | `/development-go:maintenance <json>` | Validates the v2 payload, plans the per-tool groups via `go-maintenance-planner`, returns the plan + `ci_fixer_agent`. Single-phase: no coverage pre-flight until Slice E, so it never emits `improver_result`. |
+| Review panel | `/development-go:review [scope]` | Comprehensive Go review with 5 parallel read-only agents (bugs, security, performance, code quality, tests). Emits #558-schema findings alongside the prose report. Generated `*.pb.go` / `*.pb.gw.go` are excluded — the fix for those belongs in the proto or the codegen config. |
+
+**Agents (review panel):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `go-bug-hunter` | fable | Goroutine leaks, races (incl. the Go 1.22 loop-variable boundary), nil-map writes, typed-nil errors, unchecked errors, context misuse |
+| `go-security-reviewer` | fable | Injection, unsafe deserialization, secret leaks, crypto/TLS misuse, and the `unsafe`/cgo surface |
+| `go-performance-reviewer` | opus | Allocation pressure, N+1 I/O, lock contention, unbounded goroutine/channel growth, `defer`-in-loop |
+| `go-code-quality` | opus | Idiomatic Go (Effective Go norms), consumer-side interfaces, API design, error-wrapping discipline (`%w` vs `%v`) |
+| `go-test-reviewer` | opus | Coverage gaps, assertions that cannot fail, table-test quality, flakiness, and a missing `-race` in CI |

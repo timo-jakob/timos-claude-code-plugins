@@ -19,7 +19,7 @@
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, round, base, findings_path, changed_files[] }
-#       repo_type ∈ {swift, python, java, claude-plugin}; review_skill is the
+#       repo_type ∈ {swift, python, java, go, claude-plugin}; review_skill is the
 #       review skill the orchestrator invokes (development-<repo_type>:review),
 #       passing changed_files as the review scope. claude-plugin is a FALLBACK
 #       repo_type (#809): selected only when no supported language matched and
@@ -112,7 +112,7 @@ cmd_plan() {
   # supported review languages present, preserving nothing but membership
   local -a supported
   local l
-  for l in swift python java; do
+  for l in swift python java go; do
     if print -r -- "$langs_json" | jq -e --arg l "$l" 'index($l) != null' >/dev/null 2>&1; then
       supported+=("$l")
     fi
@@ -128,7 +128,7 @@ cmd_plan() {
       repo_type="claude-plugin"
     else
       jq -nc --argjson langs "$langs_json" \
-        '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java"],
+        '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java","go"],
           detail:"no review panel exists for the detected languages"}'
       exit 3
     fi

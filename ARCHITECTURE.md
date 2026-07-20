@@ -918,7 +918,8 @@ skill to post the verdict. The orchestrator detects the posted review and procee
 
 ## Review finding schema (review panels → consolidator)
 
-The `development-<lang>:review` panels (Swift 6 agents, Python 5, Java 5 — #449)
+The `development-<lang>:review` panels (Swift 6 agents, Python 5, Java 5,
+Go 5 — #449)
 report findings as prose in the native `[CRITICAL|WARNING|SUGGESTION]` format,
 for humans. The autonomous story-delivery loop (#557) also needs those findings
 in a form a consolidator can parse, deduplicate, and count. So the review panel
@@ -1018,7 +1019,7 @@ of the worktree with two subcommands.
 
 - **Repo-type detection reuses the maintenance logic** — it runs
   `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
-  review types are `swift` | `python` | `java`, each mapping to that language's
+  review types are `swift` | `python` | `java` | `go`, each mapping to that language's
   `:review` skill. When several apply, `.maintenance.yml`'s `primary`
   disambiguates.
 - **The review scope is the story's diff, never the whole repo.** `changed_files`

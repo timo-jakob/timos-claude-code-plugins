@@ -42,6 +42,7 @@ For the narrative overview of what each plugin is for, see the
 | Command | Description |
 | --- | --- |
 | `/development-go:maintenance` | Go project maintenance dispatcher. Receives findings from /development:maintenance (or equivalent JSON input), validates the payload, and invokes `go-maintenance-planner` to return a PR-grouped plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection. Mirrors development-python / development-java / development-swift. Tool universe so far (#868 epic, Slice B #871): format_lint (golangci-lint v2 — one pinned binary doing both `fmt` and `run --fix`). Static-analysis triage (Slice D #873), coverage (Slice E #874), and the vendor-PR sources (Slice G #876) arrive in later slices. See ARCHITECTURE.md for the schema and dispatch contract. |
+| `/development-go:review` | Perform a comprehensive Go code review using 5 specialized parallel agents |
 
 ## development-java
 
