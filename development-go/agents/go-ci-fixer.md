@@ -106,7 +106,7 @@ no Go CI check is literally named `format_lint`:
 | --- | --- | --- |
 | Failing check is **this PR's tool's** check, per the mapping above | **in scope**, regardless of which files it names | Fix (step 4) |
 | A scanner check for a tool **other than** `pr_scope.tool` (e.g. a CodeQL check on a `sonarcloud` PR) whose log names files **in this PR's diff** | **in scope as escalation** — this PR's edits newly tripped another tool's check | `resolved: false` + `escalation_recommendation` naming the owning triage agent; do NOT attempt the fix yourself |
-| A scanner check for a tool **other than** `pr_scope.tool` with **no** diff overlap, or a coverage check (no coverage gate until Slice E, #874) | **out of scope** — pre-existing / another tool's concern | `out_of_scope_failures` (safe to merge w.r.t. this PR) |
+| A scanner check for a tool **other than** `pr_scope.tool` with **no** diff overlap, or a coverage-gate check (raising coverage means writing tests — the `go-coverage-improver`'s job, not a CI fix) | **out of scope** — pre-existing / another tool's concern | `out_of_scope_failures` (safe to merge w.r.t. this PR) |
 | Other generic project check (`go build` / `go test`) referencing files **in the PR's diff** — *except* a `-race` failure, see § 3.5 | **in scope** — cross-tool damage caused by this PR's edits | Fix (step 4) |
 | Other generic check referencing files **outside the diff AND outside `pr_scope.files`** | **out of scope** — pre-existing project issue | `out_of_scope_failures` |
 
@@ -174,10 +174,10 @@ Categories you'll commonly see on a Go project:
 `semgrep`) has its own triage agents as of Slice D (#873), so a failing
 scanner check on a PR whose `pr_scope.tool` is that same scanner is **in
 scope** (per the mapping above); a scanner check for a *different* tool is
-out of scope. Coverage has **no gate until Slice E (#874)** — a coverage-
-check failure this slice is always out of scope: record it in
-`out_of_scope_failures` with the recommendation in its `reason`, rather than
-iterating.
+out of scope. A **coverage-gate** check failure is likewise out of scope for
+you — raising coverage means writing new tests, which is `go-coverage-improver`
+territory, not a CI fix: record it in `out_of_scope_failures` with the
+recommendation in its `reason`, rather than iterating.
 
 ### 4. Apply the fix in the worktree
 

@@ -349,15 +349,22 @@ Go's coverage deep in each (Sonar's Go analyzer, CodeQL's first-class `go`
 extractor, semgrep's GA Go rules with cross-file dataflow), so none was
 deferred the way Swift's semgrep was for an empty registry
 ([#443](https://github.com/timo-jakob/timos-claude-code-plugins/issues/443)).
-Coverage ([#874](https://github.com/timo-jakob/timos-claude-code-plugins/issues/874)),
-bootstrap templates ([#875](https://github.com/timo-jakob/timos-claude-code-plugins/issues/875)),
+Slice E
+([#874](https://github.com/timo-jakob/timos-claude-code-plugins/issues/874)) —
+**coverage**: `go test ./... -coverprofile` (**per-package**, not `-coverpkg` —
+the conservative "is *this* function directly tested?" signal the region-scoped
+gate wants), parsed by `parse-go-coverage.py` into per-function regions with
+generated `*.pb.go` / `*.pb.gw.go` excluded, plus `go-coverage-improver` and the
+dispatcher coverage pre-flight that now gates the static-analysis triple. First-
+party tooling makes the figure reliable by construction, but it is still
+withheld (`null`, `reliable: false`, with a reason) on any failure rather than
+guessed (#258). Bootstrap templates
+([#875](https://github.com/timo-jakob/timos-claude-code-plugins/issues/875)),
 vendor PRs + upgrades ([#876](https://github.com/timo-jakob/timos-claude-code-plugins/issues/876)),
 the approver ([#877](https://github.com/timo-jakob/timos-claude-code-plugins/issues/877)),
 and the proto-first platform advisors
 ([#878](https://github.com/timo-jakob/timos-claude-code-plugins/issues/878))
-arrive in the remaining slices. Until coverage lands, the gather **withholds**
-the figure (`null`, `reliable: false`, with a reason) rather than guessing it,
-and the dispatcher has no coverage pre-flight.
+arrive in the remaining slices.
 
 > **Blessed toolchain (one default each).** Go modules; **Taskfile** as a thin
 > orchestrator; **golangci-lint v2** (pinned) as the *single* binary for both
@@ -402,3 +409,9 @@ alternative.
 | `go-sonar-triage` | opus | SonarCloud/SonarQube Go findings — LSP-first investigation, fix when behaviour-preserving, never suppress a BLOCKER/CRITICAL security finding |
 | `go-code-scanning-triage` | opus | CodeQL `go` + Scorecard alerts — Tier-A mechanical fixes (SHA-pin actions), dataflow findings escalated by category, repo-policy findings informational-only |
 | `go-semgrep-triage` | opus | semgrep Go findings — fix / `// nosemgrep`-suppress with justification / escalate only when an exported API or interface would change |
+
+**Agent (coverage, Slice E):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `go-coverage-improver` | fable | Raises per-package coverage on an under-covered affected function (or whole package) to Required by writing meaningful table-driven Go tests; never modifies production code under test. Spawned by the dispatcher's coverage pre-flight. |

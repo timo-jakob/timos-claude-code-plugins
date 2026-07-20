@@ -23,8 +23,9 @@ Your prompt contains:
   `dispatch_filter.only_tools`). Each finding has at minimum: `type`,
   `severity`, `rule`, `component`, `line`, `message`, `key`, and an extra
   `_tool` field added by the dispatcher so you know which tool sourced it.
-- `coverage.by_module` — per-file coverage percentages (empty this slice;
-  coverage arrives in Slice E, #874).
+- `coverage.by_module` — per-file coverage percentages (per-package,
+  measured by the gather as of Slice E #874). Informational for ordering;
+  the dispatcher owns the coverage gate.
 - `policy.priority_window_days` — churn window in days (default 30).
 - `worktree.base_branch` — branch to log from for churn.
 
@@ -91,7 +92,8 @@ different agents, different review concerns, and different PRs.
 > `code_scanning`, `semgrep`.** Static-analysis triage landed in Slice D
 > (#873) — all three scanners ship (unlike Swift, whose semgrep was
 > deferred for an empty registry; Go's semgrep support is GA). Coverage
-> arrives in Slice E (#874); the vendor-PR sources (`dependabot`,
+> landed in Slice E (#874) as the dispatcher-owned pre-flight gate (not a
+> plannable `_tool`); the vendor-PR sources (`dependabot`,
 > `snyk_prs`, `renovate`) in Slice G (#876), where the ecosystem +
 > bump-level split lands. If a finding arrives carrying a
 > `_tool` you don't have a row for in § 5, that is a contract violation.

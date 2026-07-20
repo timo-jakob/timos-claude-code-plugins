@@ -7,30 +7,26 @@
 #
 # Output (stdout, JSON):
 #   {
-#     "tooling_configured": {
-#       "format_lint": true|false   # golangci-lint v2 (the blessed stack)
-#     },
-#     "findings_by_tool": {
-#       "format_lint": [ ... or omitted when not configured ... ]
-#     },
-#     "coverage": {                 # WITHHELD this slice — arrives in Slice E (#874)
-#       "overall": null,
-#       "by_module": {},
-#       "regions": [],
+#     "tooling_configured": { "format_lint", "sonarcloud", "code_scanning", "semgrep" },
+#     "findings_by_tool":   { <key per CONFIGURED tool; code_scanning -> code_scanning_alerts> },
+#     "coverage": {                 # MEASURED (per-package) as of Slice E (#874)
+#       "overall":   <float|null>,  #   null + reliable:false when withheld
+#       "by_module": { "<rel path>": <pct>, ... },
+#       "regions":   [ { "file", "name", "start_line", "end_line", "pct" }, ... ],
 #       "measurement": { "source", "reliable", "reason" }
 #     },
+#     "sonar_quality_gate": <object|null>,
 #     "notes": [ ... ]
 #   }
 #
-# SCOPE (#871, the core-loop slice of the #868 epic). Tool universe so far:
-#   - format_lint (golangci-lint v2)  — this slice (the runnable loop)
-# Later slices add: sonarcloud / code_scanning / semgrep (Slice D, #873),
-# coverage via `go test -coverprofile` (Slice E, #874), and the vendor-PR
-# sources dependabot + snyk_prs + renovate (Slice G, #876). Each new tool
-# extends `tooling_configured` + `findings_by_tool` the same way the Swift and
-# Java gathers grew across their slices. Declaring only the tools this plugin
-# actually supports is deliberate: reporting an unsupported tool as
-# `configured: false` would imply development-go can process it once set up.
+# SCOPE — the tool universe grows one slice at a time (#868 epic):
+#   - format_lint (golangci-lint v2)                       — Slice B (#871)
+#   - sonarcloud / code_scanning / semgrep triage          — Slice D (#873)
+#   - coverage via `go test -coverprofile` (per-package)   — Slice E (#874)
+# Still to come: the vendor-PR sources dependabot + snyk_prs + renovate
+# (Slice G, #876). Declaring only the tools this plugin actually supports is
+# deliberate: reporting an unsupported tool as `configured: false` would imply
+# development-go can process it once set up.
 #
 # format_lint = ONE pinned binary, golangci-lint v2, covering both halves of
 # the mechanical layer:
@@ -339,19 +335,103 @@ if [[ "$has_semgrep_config" == "true" ]]; then
 	fi
 fi
 
-# --- coverage — WITHHELD until Slice E (#874) --------------------------------
-# Go coverage is `go test -coverprofile` + `go tool cover`, and the enforced
-# number's semantics (per-package profile vs -coverpkg) is an explicit Slice E
-# decision (#868 hard part 4). Until that decision is made and the parser
-# exists, the figure is WITHHELD rather than guessed — trustworthy-or-withheld
-# (#258). `regions` is always present (the region-scoped gate consumes it) and
-# empty while coverage is unmeasured.
+# --- coverage — measured via first-party tooling (Slice E, #874) -------------
+# ENFORCED SEMANTICS: per-PACKAGE coverage (`go test ./... -coverprofile`, the
+# default — deliberately NOT `-coverpkg=./...`). Rationale (epic #868 hard part
+# 4): the region-scoped gate asks "is THIS function directly tested before an
+# agent edits it?" Per-package credits only a package's own tests, so an
+# integration test that incidentally executes a function elsewhere does not mask
+# a genuinely untested unit; `-coverpkg` would inflate exactly that. The
+# go-coverage-improver writes package-local tests, which per-package credits.
+# The number is the same one the improver targets and the pre-flight gates.
+#
+# Coverage is trustworthy-or-withheld (#258): first-party tooling makes the
+# figure reliable BY CONSTRUCTION when the suite runs and the profile parses,
+# but we still emit provenance + a reliability verdict, and WITHHOLD (null,
+# reliable=false, with a reason) on any failure rather than guessing. `regions`
+# is always present (the gate consumes it). Generated sources (*.pb.go,
+# *.pb.gw.go) are excluded by the parser. Measurement is gated on test presence
+# so the hermetic bats fixtures never trigger a real `go test`.
 coverage_overall="null"
 coverage_by_module="{}"
 coverage_regions="[]"
 coverage_source="none"
 coverage_reliable="false"
-coverage_reason="Go coverage measurement arrives in Slice E (#874); no figure is produced or guessed this slice."
+coverage_reason="Coverage was not measured."
+
+# Test presence: any *_test.go anywhere under the module (Go's coverage is
+# toolchain-built-in, so there's no config to detect — tests are the gate).
+go_has_tests="false"
+if find . -path '*/.git' -prune -o -name '*_test.go' -print -quit 2>/dev/null | grep -q .; then
+	go_has_tests="true"
+fi
+
+cov_tmp="$(mktemp -d)"
+if [[ "$go_has_tests" != "true" ]]; then
+	coverage_reason="no *_test.go files found; coverage was not measured — there is nothing to cover."
+elif ! command -v go >/dev/null 2>&1; then
+	coverage_reason="Go tests exist but 'go' is not on PATH; coverage was not measured (e.g. CI without the toolchain)."
+elif ! command -v python3 >/dev/null 2>&1; then
+	coverage_reason="Go tests exist but 'python3' (the coverage parser's interpreter) is not on PATH; coverage was not measured."
+else
+	coverage_source="go-test-coverprofile"
+	go_module="$(grep -E '^[[:space:]]*module[[:space:]]+' go.mod 2>/dev/null | head -1 |
+		sed -E 's/^[[:space:]]*module[[:space:]]+//; s/[[:space:]]+$//' | tr -d '"' || true)"
+	[[ -z "$go_module" ]] && notes+=("coverage: go.mod has no 'module' directive; coverage paths may not be repo-relative.")
+	cov_profile="$cov_tmp/cover.out"
+	cov_func="$cov_tmp/cover.func.txt"
+	test_exit=0
+	# Per-package (no -coverpkg). Discard test stdout; the signal is the profile.
+	go test ./... -coverprofile="$cov_profile" >"$cov_tmp/test.log" 2>&1 || test_exit=$?
+	# A package that failed to COMPILE or SET UP is different from a red
+	# assertion: `go test` prints `FAIL <pkg> [build failed]` / `[setup failed]`,
+	# and that package contributes NO blocks — its files silently vanish from the
+	# figure, an incomplete measurement presented as valid. Withhold. Anchor the
+	# patterns to go's REAL line shapes: a bare `[build failed]` or a loose `^# `
+	# would also match a red test replaying `# HELP`/`# TYPE` metrics, a `# TODO`,
+	# or a markdown heading in an expected/actual diff (the metrics/gRPC test-bed
+	# makes that plausible), misdiagnosing a merely-red suite as a build break —
+	# so the `^# ` arm requires an import-path-shaped token (a `/` or `.`), which
+	# a package header always has and prose almost never does.
+	build_failed="false"
+	grep -qE '^(FAIL|ok|----)[[:space:]].*\[(build|setup) failed\]$|^# [^[:space:]]*[./][^[:space:]]*([[:space:]]\[[^]]+\])?$|^go: .*cannot find|build constraints exclude all Go files' "$cov_tmp/test.log" 2>/dev/null && build_failed="true"
+	if [[ "$build_failed" == "true" ]]; then
+		coverage_reason="a package failed to compile or set up during 'go test ./...' ($(tail -1 "$cov_tmp/test.log" 2>/dev/null)); the profile would omit that package entirely, so coverage is withheld rather than reported incomplete."
+	elif [[ -s "$cov_profile" ]]; then
+		# `go tool cover -func` re-reads each source file to find function
+		# boundaries, so it can fail independently of the profile. Capture its
+		# rc: a failure means `regions` is unavailable (the gate's primary
+		# input), which must be disclosed, not silently emitted as [].
+		func_rc=0
+		go tool cover -func="$cov_profile" >"$cov_func" 2>/dev/null || func_rc=$?
+		parsed="$(python3 "$SCRIPT_DIR/parse-go-coverage.py" "$cov_profile" "$cov_func" "$go_module" 2>/dev/null || true)"
+		if [[ -n "$parsed" ]] && jq -e . >/dev/null 2>&1 <<<"$parsed"; then
+			maybe_overall="$(jq '.overall' <<<"$parsed")"
+			if [[ "$maybe_overall" != "null" ]]; then
+				coverage_overall="$maybe_overall"
+				coverage_by_module="$(jq -c '.by_module' <<<"$parsed")"
+				coverage_regions="$(jq -c '.regions // []' <<<"$parsed")"
+				coverage_reliable="true"
+				# Disclose the per-package scope: packages with NO *_test.go
+				# contribute no statements, so `overall` is over the tested
+				# packages only — not the whole repo. The improver targets the
+				# untested ones separately.
+				coverage_reason="measured via 'go test ./... -coverprofile' (per-package; packages without any *_test.go contribute no statements to this figure), parsed by parse-go-coverage.py."
+				if ((func_rc > 0)) || [[ "$coverage_regions" == "[]" ]]; then
+					notes+=("coverage: per-function regions could not be derived (go tool cover -func exit $func_rc); by_module/overall are valid but the region-scoped gate has no regions to resolve against.")
+				fi
+				((test_exit > 0)) && notes+=("Go test suite exited $test_exit during coverage measurement; the figure covers the packages that compiled and ran — the suite is currently red.")
+			else
+				coverage_reason="coverage profile parsed but contained no measurable (non-generated) statements; figure withheld."
+			fi
+		else
+			coverage_reason="coverage profile produced but could not be parsed by parse-go-coverage.py; coverage withheld."
+		fi
+	else
+		coverage_reason="ran 'go test ./... -coverprofile' (exit $test_exit) but no non-empty profile was produced ($(tail -1 "$cov_tmp/test.log" 2>/dev/null)); coverage withheld."
+	fi
+fi
+rm -rf "$cov_tmp"
 
 # Emit one provenance note ALWAYS, so the figure's trust level is never silent.
 notes+=("coverage measurement: source=$coverage_source, reliable=$coverage_reliable — $coverage_reason")
