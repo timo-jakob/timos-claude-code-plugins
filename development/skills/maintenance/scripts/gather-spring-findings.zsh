@@ -195,14 +195,29 @@ if [[ -n "${build_files[1]}" ]] &&
   grep -rqE 'spring-boot-starter-web(flux)?' \
     --include='build.gradle.kts' . 2>/dev/null; then
   has_spring_api="true"
+  # Per-major layout (#694): the live majors under contracts/vN/. With >1, the
+  # impl-matches-spec drift gate must run PER major — the advisor recommends one
+  # openApiGenerate<Vn> task per contracts/vN/openapi.yaml. The `|| true` guards
+  # `find` failing when there is no contracts/ dir at all (a no-match `sed -n`
+  # already exits 0). `-type f` keeps a *directory* named openapi.yaml from
+  # counting as a live major. Canonical lowercase filenames only.
+  local sa_majors sa_major_count sa_suffix=""
+  sa_majors="$( (find contracts -maxdepth 2 -type f \
+    \( -name 'openapi.yaml' -o -name 'openapi.yml' -o -name 'openapi.json' \) 2>/dev/null || true) |
+    sed -nE 's#^contracts/(v[0-9]+)/openapi\.(yaml|yml|json)$#\1#p' | sort -t v -k2,2n -u | tr '\n' ' ')"
+  sa_majors="${sa_majors% }"
+  sa_major_count="$(printf '%s' "$sa_majors" | wc -w | tr -d ' ')"
+  if [[ "$sa_major_count" -gt 1 ]]; then
+    sa_suffix=" Multi-major layout detected (${sa_majors// /, }) — recommend one openApiGenerate task per LIVE major (contracts/vN/), so the impl-matches-spec drift gate runs per major (#694)."
+  fi
   local -a api_objs=()
   local bf_api
   for bf_api in "${build_files[@]}"; do
     [[ -n "$bf_api" && -f "$bf_api" ]] || continue
-    api_objs+=("$(jq -n --arg c "${bf_api#./}" \
+    api_objs+=("$(jq -n --arg c "${bf_api#./}" --arg s "$sa_suffix" \
       '{type:"config", severity:"MINOR", rule:"spring:api-audit",
         component:$c, line:0,
-        message:("Audit the contract-first API wiring for `" + $c + "` — a committed OpenAPI spec as the authoritative HTTP-surface definition, with openapi-generator producing Spring interfaces the controllers implement (so code/spec drift fails the build)."),
+        message:("Audit the contract-first API wiring for `" + $c + "` — a committed OpenAPI spec as the authoritative HTTP-surface definition, with openapi-generator producing Spring interfaces the controllers implement (so code/spec drift fails the build)." + $s),
         key:("spring_api:audit:" + $c)}')")
   done
   [[ ${#api_objs[@]} -gt 0 ]] && api_findings="$(printf '%s\n' "${api_objs[@]}" | jq -s '.')"

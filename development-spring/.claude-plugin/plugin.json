@@ -1,10 +1,17 @@
 {
   "name": "development-spring",
   "description": "Spring framework TOPIC plugin — composes alongside development-java (#296) for Java + Spring Boot 4+ repos (baseline Spring Framework 7 / Jakarta EE 11; older Boot lines out of scope). A maintenance dispatcher that audits Spring configuration via the spring-config-advisor agent (deprecated/relocated Spring Boot 4 property keys, actuator over-exposure). Holds zero Java-foundation logic and reuses java-ci-fixer for CI. Incremental: config audit in v0.1; a Spring Boot version-upgrade agent, bootBuildImage container generation, and the contract-first API drift gate land in later slices of the #296 epic.",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "author": {
     "name": "Timo Jakob"
   },
   "license": "MIT",
-  "keywords": ["spring", "spring-boot", "java", "gradle", "topic", "maintenance"]
+  "keywords": [
+    "spring",
+    "spring-boot",
+    "java",
+    "gradle",
+    "topic",
+    "maintenance"
+  ]
 }
