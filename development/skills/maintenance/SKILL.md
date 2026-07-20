@@ -752,13 +752,15 @@ detect-stack's nested `language_meta.<lang>` block:
 - python → `language_meta.python.version` from detect-stack (default `3.12`)
 - java → `language_meta.java.version` from detect-stack (default LTS `21`)
 - (future) typescript → Node version from package.json `engines.node`
-- (future) go → Go version from `go.mod`
+- go → `language_meta.go.version` from detect-stack (#870: the `go`
+  directive normalized to major.minor; default `1.26`) — detection ships,
+  the development-go dispatch side is epic #868 slice B
 - etc.
 
 `language_meta.manifests` — list whichever manifest files exist that
 are conventional for that language (Python: pyproject.toml,
-requirements.txt, setup.py, setup.cfg). Don't include files that
-don't exist.
+requirements.txt, setup.py, setup.cfg; Go: go.mod). Don't include
+files that don't exist.
 
 **Construction discipline.** Copy `tooling_configured`,
 `findings_by_tool`, and `coverage` straight out of

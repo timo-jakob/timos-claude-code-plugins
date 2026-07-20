@@ -638,18 +638,50 @@ of detect-stack's nested `language_meta` registry. detect-stack emits
 `language_meta` keyed by every detected language — e.g.
 `{"python": {"version": "3.13", "version_source": "parsed", "has_cov":
 true}, "java": {"version": "21", "version_source": "default",
-"build_system": "gradle", "gradle_dsl": "kotlin", "has_cov": false}}` —
+"build_system": "gradle", "gradle_dsl": "kotlin", "has_cov": false},
+"go": {"version": "1.25", "version_source": "parsed", "toolchain":
+"go1.25.1", "module": "github.com/acme/svc"}}` —
 and the orchestrator copies the dispatched language's `version` into this
 payload, adding the `manifests` it found. Detection-only fields
-(`version_source`, `has_cov`, `build_system`, `gradle_dsl`) stay in
-detect-stack output for the bootstrap skill and are not forwarded here.
+(`version_source`, `has_cov`, `build_system`, `gradle_dsl`, and go's
+`toolchain`/`module`) stay in detect-stack output for the bootstrap skill and
+are not forwarded here — the development-go dispatch contract (epic #868
+slice B) decides what it forwards; until then a go maintenance agent that
+needs the toolchain pin re-reads the repo's `go.mod` (it is in `manifests`).
 `version_source` is `"parsed"` | `"default"` — `"default"` flags a version
-that fell back to the LTS guess because the build declared no toolchain
-(#258 reliability). `gradle_dsl` (`"kotlin" | "groovy" | ""`) drives the
+that fell back to the recent-stable/LTS guess because the manifest declared
+no language version (#258 reliability). `gradle_dsl` (`"kotlin" | "groovy" | ""`) drives the
 bootstrap build-system gate; the maintenance dispatchers don't receive it,
 so they infer the same Groovy/Maven/Kotlin distinction from the forwarded
 `manifests` to apply the "§ Build policy" halt — keeping the gate inside
 the language plugins with zero generic-orchestrator edits.
+
+**Go detection (#870, slice A of #868):** the `go` language token requires a
+**root** `go.mod` carrying a `module` directive — filename presence alone
+never emits the token (a malformed `go.mod` must not classify a repo as Go),
+and nested `go.mod` files don't either. Known limitation, deliberate for
+slice A: a `go.work` **workspace** whose modules are all nested (root
+`go.work`, no root `go.mod`) detects as not-Go — a **pure-Go** workspace then
+lands in bootstrap's no-language question (that is the surfacing mechanism);
+a **polyglot** workspace is *not* surfaced in slice A (no `go.work` signal
+exists yet — a later slice may add one). `go.sum` is deliberately ignored —
+neither required nor consulted. `language_meta.go` carries `version` (the
+`go` directive **normalized to major.minor**, e.g. a `go 1.24.5` directive
+emits `"1.24"` — the module's minimum Go language version, which consumers
+read as *the* version and may compare as major.minor), `version_source`
+(`"parsed" | "default"`), `toolchain` (the `toolchain` directive
+quote/CR-stripped, e.g. `"go1.25.1"`; when the directive is absent but the
+`go` directive is three-part, the **effective** default toolchain Go itself
+applies is synthesized — `go 1.24.5` with no toolchain line means `go1.24.5`
+per the Go module spec — so patch precision always survives here; `""` only
+when neither carries it), and `module` (the module path). Toolchain bumps
+(`go-runtime-upgrade`, #876) update **both** `version` and `toolchain`, plus
+any **pinned** `setup-go` version/matrix in CI — bootstrapped repos render
+`go-version: "stable"`, which floats and needs no CI edit. When the repo
+builds images with ko there is no Dockerfile leg, but a Go repo that ships a
+`FROM golang:X` Dockerfile gets a base-image leg like any other language —
+check the detected `containers` for a dockerfile-source entry before
+skipping it.
 
 **`dispatch_filter` is optional** and added by the orchestrator only
 when the user passed `--tool=<name>` (a testing aid). When present,
