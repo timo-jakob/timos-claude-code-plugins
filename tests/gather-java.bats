@@ -208,3 +208,57 @@ EOF
   # by_module/overall unchanged by the regions addition
   [ "$(jq '.overall' <<<"$out")" = "55.6" ]
 }
+
+@test "gather-java #694: multi-major contracts/vN -> openapi finding notes per-major wiring" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.0.0\n' > "$WORK/contracts/v1/openapi.yaml"
+  printf 'openapi: 3.0.0\n' > "$WORK/contracts/v2/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.openapi <<<"$output")" = "true" ]
+  msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
+  [[ "$msg" == *"Multi-major layout detected (v1, v2)"* ]]
+  [[ "$msg" == *"per LIVE major"* ]]
+}
+
+@test "gather-java #694: a single major does NOT get the per-major note" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1"
+  printf 'openapi: 3.0.0\n' > "$WORK/contracts/v1/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  # assert the finding EXISTS first — otherwise `jq -r` yields the string
+  # "null" and the no-note assertion below would pass vacuously
+  [ "$(jq -r '.findings_by_tool.openapi | length' <<<"$output")" = "1" ]
+  msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
+  [[ "$msg" == *"contract-first"* ]]
+  [[ "$msg" != *"Multi-major"* ]]
+}
+
+@test "gather-java #694: majors are listed NUMERICALLY (v10 after v2, not lexically)" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2" "$WORK/contracts/v10"
+  for d in v1 v2 v10; do printf 'openapi: 3.0.0\n' > "$WORK/contracts/$d/openapi.yaml"; done
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
+  [[ "$msg" == *"Multi-major layout detected (v1, v2, v10)"* ]]
+}
+
+@test "gather-java #694: a non-canonical filename under contracts/vN does NOT trigger the note" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  # a canonical spec elsewhere configures the tool (the finding must exist)...
+  mkdir -p "$WORK/src/main/resources"
+  printf 'openapi: 3.0.0\n' > "$WORK/src/main/resources/openapi.yaml"
+  # ...while the per-major dirs hold NON-canonical filenames, so they are not
+  # live majors and must not produce the per-major note
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.0.0\n' > "$WORK/contracts/v1/orders.openapi.yaml"
+  printf 'openapi: 3.0.0\n' > "$WORK/contracts/v2/orders.openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings_by_tool.openapi | length' <<<"$output")" = "1" ]
+  msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
+  [[ "$msg" != *"Multi-major"* ]]
+}

@@ -404,11 +404,26 @@ if [[ "$has_openapi_config" == "true" ]]; then
 	echo "[]" >"$findings_dir/openapi.json"
 	oa_build="$(find . -maxdepth 2 -path '*/build/*' -prune -o \
 		-name 'build.gradle.kts' -print 2>/dev/null | head -n1)"
+	# Per-major layout (#694): the live majors under contracts/vN/. With >1, the
+	# impl-matches-spec drift gate must run PER major — the advisor recommends one
+	# openApiGenerate<Vn> task per contracts/vN/openapi.yaml. The `|| true` guards
+	# `find` failing when there is no contracts/ dir at all (a no-match `sed -n`
+	# already exits 0). `-type f` keeps a *directory* named openapi.yaml from
+	# counting as a live major. Canonical lowercase filenames only.
+	oa_majors="$( (find contracts -maxdepth 2 -type f \
+		\( -name 'openapi.yaml' -o -name 'openapi.yml' -o -name 'openapi.json' \) 2>/dev/null || true) |
+		sed -nE 's#^contracts/(v[0-9]+)/openapi\.(yaml|yml|json)$#\1#p' | sort -t v -k2,2n -u | tr '\n' ' ')"
+	oa_majors="${oa_majors% }"
+	oa_major_count="$(printf '%s' "$oa_majors" | wc -w | tr -d ' ')"
+	oa_msg="Audit the contract-first OpenAPI wiring (non-Spring) — a committed OpenAPI spec as the authoritative HTTP surface, with openapi-generator producing JAX-RS (jaxrs-spec) interfaces the resources implement, so code/spec drift fails the build."
+	if [[ "$oa_major_count" -gt 1 ]]; then
+		oa_msg="${oa_msg} Multi-major layout detected (${oa_majors// /, }) — recommend one openApiGenerate task per LIVE major (contracts/vN/), so the impl-matches-spec drift gate runs per major (#694)."
+	fi
 	if [[ -n "$oa_build" ]]; then
-		jq -n --arg c "${oa_build#./}" '[{
+		jq -n --arg c "${oa_build#./}" --arg m "$oa_msg" '[{
 			type: "config", severity: "MINOR", rule: "openapi:contract-audit",
 			component: $c, line: 0,
-			message: "Audit the contract-first OpenAPI wiring (non-Spring) — a committed OpenAPI spec as the authoritative HTTP surface, with openapi-generator producing JAX-RS (jaxrs-spec) interfaces the resources implement, so code/spec drift fails the build.",
+			message: $m,
 			key: ("openapi:contract-audit:" + $c)
 		}]' >"$findings_dir/openapi.json"
 	fi

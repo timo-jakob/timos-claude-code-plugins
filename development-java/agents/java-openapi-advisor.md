@@ -91,9 +91,13 @@ Stop here — do not touch any files.
 
 First establish the contract-first state:
 
-1. **Locate the committed OpenAPI spec.** Search conventional locations:
-   `src/main/resources/**/openapi.{yaml,yml,json}`, `api/**`,
-   `openapi/**`, `**/openapi.{yaml,yml,json}`. Note whether one exists.
+1. **Locate the committed OpenAPI spec(s).** Prefer the **per-major layout**
+   `contracts/vN/openapi.{yaml,yml,json}` (`contracts/v1/…`, `contracts/v2/…`);
+   otherwise search the conventional single-spec locations
+   `src/main/resources/**/openapi.{yaml,yml,json}`, `api/**`, `openapi/**`,
+   `**/openapi.{yaml,yml,json}`. **Enumerate ALL live majors** — a repo serving
+   `>1` major (multiple `contracts/vN/` dirs) needs the drift gate wired **per
+   major** (see the multi-major case below), not a single `openApiGenerate`.
 2. **Check the openapi-generator wiring** in `build.gradle.kts`: is the
    `org.openapi.generator` plugin applied? Is there an `openApiGenerate`
    task with `generatorName = "jaxrs-spec"` (**NOT** `"spring"` — that's
@@ -113,12 +117,16 @@ category **small**:
 - **Floating plugin version.** Pin the `org.openapi.generator` plugin to
   a specific version when it floats (no version declared / a dynamic
   range). This stabilizes the generator without changing the contract.
-- **Missing compile dependency.** When the plugin **and** the
-  `openApiGenerate` task already exist but `compileJava` doesn't depend
-  on it, add
+- **Missing compile dependency (single-major repos only).** When the plugin
+  **and** the `openApiGenerate` task already exist but `compileJava` doesn't
+  depend on it, add
   `tasks.named("compileJava") { dependsOn(tasks.named("openApiGenerate")) }`.
   This makes the existing setup correct — the generated interfaces will
   be present before compilation — without changing the contract.
+  **Do NOT apply this in a multi-major repo** (`>1` live `contracts/vN/`): the
+  whole wiring is restructured under the multi-major `human-review` bullet
+  below, so this one-liner would entrench the single-spec shape that
+  recommendation then asks to replace.
 
 The build file is Kotlin DSL (`build.gradle.kts`). Prefer `human-review`
 whenever you're unsure.
@@ -135,7 +143,10 @@ auto-apply:
   the `org.openapi.generator` plugin generating JAX-RS interfaces, and
   switch the resources to implement the generated `*Api` interfaces.
   This is a structural change — recommend with the concrete wiring
-  snippet (the example block below); do **not** auto-migrate.
+  snippet (the example block below); do **not** auto-migrate. **If the repo
+  already serves `>1` live major, recommend the per-major example instead of
+  the single-spec one** — adopting the single-spec shape there would just have
+  to be undone.
 - **Wrong generator.** The wiring uses `generatorName = "spring"` in a
   non-Spring repo. The project has no Spring runtime to satisfy the
   Spring interfaces — recommend switching to `jaxrs-spec`. Conversely,
@@ -148,6 +159,18 @@ auto-apply:
   the shape is more involved than the safe one-liner), or the resources
   don't implement the generated `*Api` interfaces — so drift wouldn't
   fail the build. Recommend the specific fix.
+- **Multi-major layout, not wired per major (#694).** The repo carries `>1`
+  live major (multiple `contracts/vN/openapi.yaml`) — the multi-major serving
+  pattern where the newest major is implemented natively and each older major
+  is served by an anti-corruption adapter — but the build does **not** wire one
+  generate task per live major (fewer tasks than majors, **including none at
+  all**, and including a task whose major has since been retired). The
+  **impl-matches-spec drift gate must run per live
+  major**: recommend **one `openApiGenerate<Vn>` task per major** (each with its
+  own `inputSpec = contracts/vN/openapi.yaml`, its own `outputDir`/source set),
+  all wired into `compileJava` — so each major's resources/adapter implement
+  their own generated `*Api` and a per-major drift fails the build. See the
+  per-major example below. This is structural — recommend, don't auto-apply.
 
 ### `unable_to_fix` when
 
@@ -191,6 +214,56 @@ interface) — so when a resource and the committed spec drift apart, the
 interface no longer matches and compilation fails. That is the drift
 gate. (For a client SDK rather than a server contract, swap
 `generatorName = "java"`.)
+
+### Multi-major layout (per-major drift gate, #694)
+
+When `>1` live major is served (`contracts/v1/openapi.yaml`,
+`contracts/v2/openapi.yaml`, …), register **one generate task per major** so the
+drift gate runs per major. The newest major is implemented natively; each older
+major's anti-corruption adapter (`src/api/vN/`) `implements <Vn>Api`:
+
+```kotlin
+// the live majors served from contracts/vN/ — one list, used by both loops
+val liveMajors = listOf("v1", "v2")
+
+liveMajors.forEach { major ->
+    tasks.register<org.openapitools.generator.gradle.plugin.tasks.GenerateTask>(
+        "openApiGenerate${major.replaceFirstChar { it.uppercase() }}",
+    ) {
+        generatorName = "jaxrs-spec"
+        inputSpec = "$rootDir/contracts/$major/openapi.yaml"
+        outputDir = layout.buildDirectory.dir("generated/openapi/$major").get().asFile.toString()
+        // MANDATORY per major: without distinct packages every major emits the
+        // SAME FQCNs (org.openapitools.api.*) into the one main source set —
+        // a duplicate-class compile failure, not a drift gate.
+        apiPackage = "api.$major"
+        modelPackage = "api.$major.model"
+        configOptions = mapOf("interfaceOnly" to "true", "useJakartaEe" to "true")
+    }
+    sourceSets["main"].java.srcDir(
+        layout.buildDirectory.dir("generated/openapi/$major/src/gen/java"),
+    )
+}
+
+// The anti-corruption adapters (#694) live in src/api/<vN>/, OUTSIDE
+// src/main/java. They must be on the source set too — otherwise they are never
+// compiled, nothing implements the generated interfaces, and the drift gate
+// passes vacuously.
+sourceSets["main"].java.srcDir("src/api")
+
+tasks.named("compileJava") {
+    liveMajors.forEach { dependsOn("openApiGenerate${it.replaceFirstChar { c -> c.uppercase() }}") }
+}
+```
+
+Each old major's adapter in `src/api/<vN>/` implements the `*Api` interface
+generated into its own `api.<vN>` package (the generator names interfaces from
+the spec's tags — e.g. `api.v1.WidgetsApi` — not after the major). So an old
+major's adapter drifting from its frozen spec fails compilation independently of
+the newest major. **The gate only exists once `src/api` is on the source set** —
+without that line the adapters never compile and every "drift fails the build"
+claim is vacuous. When converting from a single-spec setup, remove the leftover
+`openApiGenerate { … }` extension block so only the per-major tasks remain.
 
 ## Procedure
 
