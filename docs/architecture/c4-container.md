@@ -41,6 +41,7 @@ C4Container
             Container(development-python, "development-python", "Claude Code plugin", "Python pipeline")
             Container(development-java, "development-java", "Claude Code plugin", "Java / Gradle pipeline")
             Container(development-swift, "development-swift", "Claude Code plugin", "Swift pipeline")
+            Container(development-go, "development-go", "Claude Code plugin", "Go pipeline (core loop)")
         }
 
         Container_Boundary(topics, "Topic plugins (dispatched by marker)") {
@@ -59,6 +60,7 @@ C4Container
     Rel(development, development-python, "dispatches")
     Rel(development, development-java, "dispatches")
     Rel(development, development-swift, "dispatches")
+    Rel(development, development-go, "dispatches")
     Rel(development, development-spring, "dispatches")
     Rel(development, development-claude-plugin, "dispatches")
     Rel(development, development-docs, "dispatches")

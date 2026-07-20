@@ -24,6 +24,7 @@ Read more: [Motivation & current gaps](docs/explanation/motivation.md) ·
 | **development-python** | Full Python maintenance tier — triage, autonomous upgrades, coverage, review, Approver |
 | **development-java** | Full Java/Gradle maintenance tier (Gradle + Kotlin DSL only) |
 | **development-swift** | Full Swift maintenance tier — incl. Swift 6 migration |
+| **development-go** | Go maintenance — core-loop tier (golangci-lint v2 format/lint); triage, coverage, bootstrap in later [#868](https://github.com/timo-jakob/timos-claude-code-plugins/issues/868) slices |
 | **development-spring** | Topic plugin for Spring Boot 4+ (composes alongside development-java) |
 | **development-claude-plugin** | Topic plugin for repos that *are* Claude Code plugins — validators + test harness |
 | **development-docs** | Topic plugin for documentation (C4 architecture docs; marker `docs/architecture/`) — dispatch path only in v1 |

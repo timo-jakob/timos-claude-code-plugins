@@ -27,9 +27,12 @@ skill + reviewer agents) and **full-maintenance** (`development-python`,
 
 A language can also be in a **partial** state: a language with bootstrap
 templates but **no gather script** is *bootstrappable but not maintained* (today
-`go` and `typescript` — `detect-stack` finds them and bootstrap can scaffold
-them, but no `development-<L>` plugin processes them yet). That's a legitimate
-stopping point; you don't have to build everything at once.
+`typescript` — `detect-stack` finds it and bootstrap can scaffold it, but no
+`development-<L>` plugin processes it yet). That's a legitimate stopping point;
+you don't have to build everything at once. `go` crossed that line in #871:
+`gather-go-findings.sh` landed, so it is now maintained — at the **core-loop**
+tier (`format_lint` only), with triage, coverage, and the rest arriving in the
+remaining #868 slices.
 
 ## 2. Anatomy — the components you create or extend
 
@@ -158,7 +161,15 @@ false` with a documented reason; don't ship a triager that finds nothing.
 
 A full language plugin is too big for one PR. Both worked epics sliced it the
 same way — **each slice a full, independently-testable vertical, one PR, merged
-before the next** (in human-merge repos, one slice per invocation):
+before the next** (in human-merge repos, one slice per invocation).
+
+> **The letters below are the shape, not a fixed numbering.** Each epic assigns
+> its own — the Go epic ([#868](https://github.com/timo-jakob/timos-claude-code-plugins/issues/868))
+> splits review out as its own slice and merges vendor PRs with runtime
+> upgrades, so its letters run A detection, B core loop, C review panel,
+> D triage, E coverage, F bootstrap, G vendor+runtime, H approver, I advisors.
+> Read the epic for the authoritative mapping rather than inferring issue
+> numbers from this list.
 
 1. **A — Detection.** `detect-stack.sh` classifies `L` + emits `language_meta.<L>`.
    Smallest; unblocks everything.
