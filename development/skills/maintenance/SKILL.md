@@ -167,7 +167,7 @@ Validate from `detect.json`:
   repo (worktree-based agents require it). Initialize with `git init`
   and re-run."
 - `languages` is non-empty — if not, halt: "No supported languages
-  detected (swift / typescript / python / go / java). If your project uses
+  detected (swift / javascript / python / go / java). If your project uses
   one of these, ensure manifest files (pyproject.toml, package.json,
   build.gradle, etc.) are present."
 
@@ -752,7 +752,9 @@ detect-stack's nested `language_meta.<lang>` block:
 
 - python → `language_meta.python.version` from detect-stack (default `3.12`)
 - java → `language_meta.java.version` from detect-stack (default LTS `21`)
-- (future) typescript → Node version from package.json `engines.node`
+- javascript → detection + format_lint dispatch ship (#729); the
+  `language_meta.javascript.version` population (Node version from
+  package.json `engines.node`) is a later #683 slice, so it is not sourced yet
 - go → `language_meta.go.version` from detect-stack (#870: the `go`
   directive normalized to major.minor; default `1.26`) — detection ships,
   the development-go dispatch side is epic #868 slice B

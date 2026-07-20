@@ -91,11 +91,11 @@ setup() {
   [ "$(cat "$OUT/f")" = "j=21 t=90" ]
 }
 
-@test "render: CODEQL_LANGUAGES is mapped from --languages (typescript -> javascript-typescript)" {
+@test "render: CODEQL_LANGUAGES is mapped from --languages (javascript -> javascript-typescript)" {
   # Comma+space join (#781): the value sits in a YAML flow sequence, where a
   # bare comma is a yamllint `commas` error on the rendered workflow.
   echo 'langs: [{{CODEQL_LANGUAGES}}]' > "$T/f.tmpl"
-  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "typescript python" f.tmpl
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "javascript python" f.tmpl
   [ "$status" -eq 0 ]
   [ "$(cat "$OUT/f")" = "langs: [javascript-typescript, python]" ]
 }
@@ -313,7 +313,7 @@ EOF
   # java kept, other language lanes stripped
   grep -q 'JAVA-START' "$Q"
   run ! grep -q 'PYTHON-START' "$Q"
-  run ! grep -q 'TYPESCRIPT-START' "$Q"
+  run ! grep -q 'JAVASCRIPT-START' "$Q"
   # docker lane kept, with the #547 split intact
   grep -q 'push-and-sign:' "$Q"
   # no uppercase placeholder survives

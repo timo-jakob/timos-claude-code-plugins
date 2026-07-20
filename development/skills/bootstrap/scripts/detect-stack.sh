@@ -8,7 +8,7 @@
 #   github_repo           string  (owner/repo or "")
 #   default_branch        string  ("" if not detectable)
 #   visibility            "public" | "private" | "unknown"
-#   languages             []string  subset of [swift, typescript, python, go, java]
+#   languages             []string  subset of [swift, javascript, python, go, java]
 #   has_dockerfile        bool     (unchanged semantics: an exact `Dockerfile`
 #                                  exists — now a NARROWER fact than `containers`,
 #                                  since a bootBuildImage repo has a container yet
@@ -294,7 +294,7 @@ detect_lang() {
 
 langs=()
 [[ -n "$(detect_lang swift Package.swift '*.xcodeproj' '*.xcworkspace')" ]] && langs+=("swift")
-[[ -n "$(detect_lang typescript package.json tsconfig.json)" ]] && langs+=("typescript")
+[[ -n "$(detect_lang javascript package.json tsconfig.json jsconfig.json)" ]] && langs+=("javascript")
 [[ -n "$(detect_lang python pyproject.toml requirements.txt setup.py)" ]] && langs+=("python")
 # Go (#870): a ROOT go.mod carrying a `module` directive — filename presence
 # alone is not enough (a malformed/empty go.mod must not emit a false token).

@@ -6,7 +6,7 @@
 #   branch-protection.sh --visibility public|private \
 #                        --has-dockerfile true|false \
 #                        --has-codeql true|false \
-#                        [--codeql-languages "python typescript ..."] \
+#                        [--codeql-languages "python javascript ..."] \
 #                        --default-branch main \
 #                        [--require-signed-commits true|false]
 #
@@ -92,7 +92,7 @@ public)
 			warn "--has-codeql=true but --codeql-languages was not provided."
 			warn "Skipping CodeQL contexts — without language list, the bare"
 			warn "'analyze' context would never resolve. Pass --codeql-languages"
-			warn "\"python typescript ...\" (space-separated) to enable them."
+			warn "\"python javascript ...\" (space-separated) to enable them."
 		fi
 	fi
 	;;

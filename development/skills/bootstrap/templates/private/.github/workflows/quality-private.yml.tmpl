@@ -64,15 +64,21 @@ jobs:
           # and a shallow PR checkout has none (its parent link is cut).
           fetch-depth: 0
 
-      # --- TYPESCRIPT-START ------------------------------------------------
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      # --- JAVASCRIPT-START ------------------------------------------------
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
-      - run: |
-          npm ci
-          npm test -- --coverage
-      # --- TYPESCRIPT-END --------------------------------------------------
+      - name: Install (npm ci)
+        run: npm ci
+      - name: Lint (ESLint)
+        run: npx eslint .
+      - name: Format check (Prettier)
+        run: npx prettier --check .
+      - name: Test + coverage (vitest)
+        run: npx vitest run --coverage
+      # --- JAVASCRIPT-END --------------------------------------------------
 
       # --- PYTHON-START ----------------------------------------------------
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
