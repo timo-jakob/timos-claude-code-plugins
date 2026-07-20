@@ -45,9 +45,14 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 
 | Agent | Model | Tools | Description |
 | --- | --- | --- | --- |
+| `go-bug-hunter` | `fable` | Read, Grep, Glob | Expert Go bug hunter that finds logic errors, goroutine leaks, race conditions, nil-map/nil-pointer panics, unchecked errors, and context misuse in Go code. The bugs dimension of /development-go:review; also a future risk-register lens for the Slice H `go-approver` (#877, per the #449 pattern). |
 | `go-ci-fixer` | `opus` | Bash, Read, Edit, Grep | Triage and fix a failing CI run on an open Go PR. Reads `gh pr checks` output, identifies the failing check(s), edits the worktree to fix the root cause, runs the Go build/test locally to confirm, commits, and pushes. Used by the development:maintenance orchestrator's per-group PR cycle, up to 3 invocations per PR before the orchestrator escalates. |
+| `go-code-quality` | `opus` | Read, Grep, Glob | Go code quality and design specialist that evaluates naming, structure, idiomatic Go (Effective Go norms), API design, and error-wrapping discipline. The code-quality dimension of /development-go:review; also a future risk-register lens for the Slice H `go-approver` (#877, per the #449 pattern). |
 | `go-format-lint-fixer` | `haiku` | Bash, Read, Edit | Apply golangci-lint v2 formatting and autofixable lint rules to a Go project, report what changed. Mechanical; no judgment required. Used by development-go:maintenance. |
 | `go-maintenance-planner` | `opus` | Bash, Read, Grep | Pre-dispatch planner. Reads a set of Go maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-go:maintenance. |
+| `go-performance-reviewer` | `opus` | Read, Grep, Glob | Go performance specialist that identifies allocation pressure, N+1 I/O, lock contention, unbounded goroutine/channel growth, and defer-in-loop costs. The performance dimension of /development-go:review; also a future risk-register lens for the Slice H `go-approver` (#877, per the #449 pattern). |
+| `go-security-reviewer` | `fable` | Read, Grep, Glob | Go security specialist that identifies vulnerabilities, injection risks, unsafe deserialization, secret leaks, and the unsafe/cgo surface. The security dimension of /development-go:review; also a future risk-register lens for the Slice H `go-approver` (#877, per the #449 pattern). |
+| `go-test-reviewer` | `opus` | Read, Grep, Glob | Go testing specialist that identifies coverage gaps, weak assertions, table-test quality problems, flaky tests, and a missing -race in CI. The tests dimension of /development-go:review; also a future risk-register lens for the Slice H `go-approver` (#877, per the #449 pattern). |
 
 ## development-java
 

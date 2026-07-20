@@ -1,10 +1,18 @@
 {
   "name": "development-go",
-  "description": "Go maintenance plugin — the core loop of the #868 full-maintenance epic. Dispatches findings from /development:maintenance to per-tool agents: go-format-lint-fixer (golangci-lint v2, one pinned binary doing both `fmt` and `run --fix`), go-maintenance-planner, and go-ci-fixer. Blessed toolchain: Go modules, Taskfile, golangci-lint v2, go test -coverprofile, buf + grpc-gateway, ko. Static-analysis triage, coverage, bootstrap, vendor PRs, the approver, and the platform advisors land in later slices of #868.",
-  "version": "0.1.0",
+  "description": "Go maintenance + review plugin. Review panel: /development-go:review runs 5 specialist agents in parallel (bugs, security, performance, code quality, tests) with Go-specific lenses — goroutine leaks, races, nil-map writes, unchecked errors, context misuse. Maintenance: dispatches findings from /development:maintenance to go-format-lint-fixer (golangci-lint v2, one pinned binary doing both `fmt` and `run --fix`), go-maintenance-planner, and go-ci-fixer. Blessed toolchain: Go modules, Taskfile, golangci-lint v2, go test -coverprofile, buf + grpc-gateway, ko. Static-analysis triage, coverage, bootstrap, vendor PRs, the approver, and the platform advisors land in later slices of #868.",
+  "version": "0.2.0",
   "author": {
     "name": "Timo Jakob"
   },
   "license": "MIT",
-  "keywords": ["go", "golang", "golangci-lint", "gofumpt", "maintenance", "modules"]
+  "keywords": [
+    "go",
+    "golang",
+    "golangci-lint",
+    "gofumpt",
+    "code-review",
+    "maintenance",
+    "modules"
+  ]
 }
