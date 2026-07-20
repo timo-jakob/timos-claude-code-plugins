@@ -95,3 +95,48 @@ dependencies { implementation("org.springframework.boot:spring-boot-starter-web"
   msg="$(jq -r '.findings_by_tool.spring_api[0].message' <<<"$output")"
   [[ "$msg" != *"Multi-major"* ]]
 }
+
+@test "gather-spring #708: a major past its x-sunset -> sunset-passed finding" {
+  printf '%s' "$SPRING_WEB" > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.1.0\nx-sunset: "2020-01-01"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  printf 'openapi: 3.1.0\ninfo:\n  title: T\n  version: "2.0.0"\n' > "$WORK/contracts/v2/openapi.yaml"
+  run zsh "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed")] | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed") | .component' <<<"$output")" = "contracts/v1/openapi.yaml" ]
+  msg="$(jq -r '.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed") | .message' <<<"$output")"
+  [[ "$msg" == *"410 Gone"* ]]
+}
+
+@test "gather-spring #708: a not-yet-expired sunset produces NO sunset-passed finding" {
+  printf '%s' "$SPRING_WEB" > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1"
+  printf 'openapi: 3.1.0\nx-sunset: "2099-12-31"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  run zsh "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.findings_by_tool.spring_api[] | select(.rule=="spring:api-audit")] | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '[.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed")] | length' <<<"$output")" = "0" ]
+}
+
+@test "gather-spring #708: mixed majors — ONLY the expired one is reported (non-vacuous)" {
+  printf '%s' "$SPRING_WEB" > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.1.0\nx-sunset: "2020-01-01"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  printf 'openapi: 3.1.0\nx-sunset: "2099-12-31"\ninfo:\n  title: T\n  version: "2.0.0"\n' > "$WORK/contracts/v2/openapi.yaml"
+  run zsh "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed")] | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed") | .component' <<<"$output")" = "contracts/v1/openapi.yaml" ]
+}
+
+@test "gather-spring #708: two expired majors -> one finding each, with unique keys" {
+  printf '%s' "$SPRING_WEB" > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.1.0\nx-sunset: "2020-01-01"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  printf 'openapi: 3.1.0\nx-sunset: "2021-01-01"\ninfo:\n  title: T\n  version: "2.0.0"\n' > "$WORK/contracts/v2/openapi.yaml"
+  run zsh "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed")] | length' <<<"$output")" = "2" ]
+  [ "$(jq -r '[.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed") | .key] | unique | length' <<<"$output")" = "2" ]
+}

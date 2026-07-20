@@ -192,3 +192,22 @@ EOF
   # — the exact regression a bare hashFiles() grep can't catch.
   grep -A2 'APIM governance portal' "$wf" | grep -Eq "if: .*hashFiles\('apim/\*\*'\) != ''"
 }
+
+@test "#708 contracts: CONTRACTS.md documents the mechanical retirement path + 410" {
+  render_contracts
+  local md="$OUT/common/CONTRACTS.md"
+  # major-level sunset convention (distinct from the per-operation one)
+  grep -qi 'major-level' "$md"
+  # the enforcement finding is named, and matches the rule the gathers emit
+  grep -q 'sunset-passed' "$md"
+  # Assert the numbered procedure itself, extracted from the Retirement section —
+  # loose whole-file greps would still pass if the steps were deleted and only
+  # the surrounding prose kept the tokens.
+  local steps
+  steps="$(awk '/^### 3\. Retirement/{f=1} /^## Minimum deprecation window/{f=0} f' "$md")"
+  [ -n "$steps" ]
+  grep -q 'src/api/<vN>/' <<<"$steps"          # 1. adapter removal
+  grep -q 'openApiGenerate<Vn>' <<<"$steps"    # 2. generate wiring removal
+  grep -q 'contracts/<vN>/' <<<"$steps"        # 3. spec removal
+  grep -q '410 Gone' <<<"$steps"               # 4. gateway
+}

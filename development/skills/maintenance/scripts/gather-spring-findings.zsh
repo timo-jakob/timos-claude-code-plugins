@@ -47,6 +47,9 @@ emulate -L zsh
 local repo="${1:-}"
 [[ -n "$repo" && -d "$repo" ]] || { print -u2 -- "usage: $0 <repo_path>"; exit 2 }
 command -v jq >/dev/null 2>&1 || { print -u2 -- "jq required, not on PATH."; exit 2 }
+# Resolve this script's own dir BEFORE cd'ing into the target repo, so sibling
+# helpers (scan-contracts-sunset.zsh, #708) stay locatable.
+local SCRIPT_DIR="${0:A:h}"
 cd "$repo"
 
 local -a notes=()
@@ -221,6 +224,29 @@ if [[ -n "${build_files[1]}" ]] &&
         key:("spring_api:audit:" + $c)}')")
   done
   [[ ${#api_objs[@]} -gt 0 ]] && api_findings="$(printf '%s\n' "${api_objs[@]}" | jq -s '.')"
+  # Sunset enforcement (#708): a live major whose spec carries a major-level
+  # x-sunset that has already passed is still being served — it should have been
+  # retired. Append one sunset-passed finding per expired major. The scan
+  # degrades to [] if the helper or yq is unavailable.
+  local sa_sunset='[]' sa_rc=0
+  if [[ -x "${SCRIPT_DIR}/scan-contracts-sunset.zsh" ]]; then
+    sa_sunset="$(zsh "${SCRIPT_DIR}/scan-contracts-sunset.zsh" --repo . 2>/dev/null)" || sa_rc=$?
+    if [[ "$sa_rc" -ne 0 || -z "$sa_sunset" ]]; then
+      sa_sunset='[]'
+      # NEVER let a tool failure read as "nothing to enforce" — that is a silent
+      # false negative on the one check whose point is enforcement.
+      notes+=("spring_api: sunset scan failed (scan-contracts-sunset.zsh exit ${sa_rc}; is yq installed?) — expired-major enforcement was NOT evaluated.")
+    fi
+  else
+    notes+=("spring_api: sunset scan skipped (scan-contracts-sunset.zsh missing or not executable) — expired-major enforcement was NOT evaluated.")
+  fi
+  api_findings="$(jq -c --argjson sunset "$sa_sunset" '
+    . + ($sunset | map(select(.expired == true) | {
+      type: "config", severity: "MAJOR", rule: "spring:sunset-passed",
+      component: .spec, line: 0,
+      message: ("Major " + .major + " passed its sunset date (" + .sunset + ") but is still served — it should have been retired. Retirement removes the anti-corruption adapter (src/api/" + .major + "/) and " + .spec + ", and the gateway returns 410 Gone for /" + .major + "/. See CONTRACTS.md > Retirement (#708)."),
+      key: ("spring_api:sunset-passed:" + .major)
+    }))' <<<"$api_findings")"
 fi
 
 # --- emit --------------------------------------------------------------------

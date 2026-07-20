@@ -77,10 +77,41 @@ spec entry has `x-sunset`, set `Sunset` from that date and `Deprecation` from
 
 ### 3. Retirement
 
-When a major passes its sunset date it is retired: its adapter and spec are
-removed and the gateway returns `410 Gone`. Retirement is a separate,
-destructive step handled by the maintenance pipeline's sunset-window
-enforcement — deprecation only *announces* it.
+Retirement is the mechanical inverse of the multi-major scaffold: what adding a
+major creates, retiring it removes. It is **destructive and contract-breaking** —
+never do it before the sunset date has passed.
+
+**Sunsetting a whole major** (rather than one operation) is declared with a
+**major-level** `x-sunset` at the root of that major's spec:
+
+```yaml
+# contracts/v1/openapi.yaml
+openapi: 3.1.0
+x-sunset: "2026-12-31"   # the whole v1 major retires on this date
+info:
+  title: "{{PROJECT_NAME}} API"
+  version: "1.4.2"
+```
+
+The maintenance pipeline **enforces** it: once that date has passed while the
+major is still served, it raises a **`sunset-passed`** finding naming the major —
+a sunset date nobody enforces is just a comment.
+
+**The retirement steps**, once the sunset date has passed and consumers have
+migrated off the major:
+
+1. Delete the major's anti-corruption adapter — `src/api/<vN>/`.
+2. Delete its generate wiring — the `openApiGenerate<Vn>` task and its source-set
+   entry.
+3. Delete its contract — `contracts/<vN>/`.
+4. Make the gateway return **`410 Gone`** for that major's URL prefix (`/vN/`), so
+   a straggling consumer gets an unambiguous, permanent answer rather than a 404
+   or a silent fallback to another major.
+5. Leave npm alone — already-published spec-package versions stay immutable; the
+   `major-vN` dist-tag simply stops moving.
+
+After step 3 the major is no longer a live major, so the semver gate stops running
+for it and the `sunset-passed` finding clears on the next maintenance run.
 
 ## Minimum deprecation window
 
