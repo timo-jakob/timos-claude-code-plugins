@@ -1,0 +1,19 @@
+{
+  "name": "development-javascript",
+  "description": "JavaScript/TypeScript maintenance plugin (foundation slice, #729). Receives findings from /development:maintenance, validates its JSON payload, and dispatches the format_lint group to js-format-lint-fixer (ESLint --fix + Prettier --write), with js-ci-fixer handling CI-failure remediation on the resulting PRs. Blessed toolchain installed by /development:bootstrap: flat eslint.config.js, Prettier @120, vitest + v8 coverage, a strict tsconfig base, npm, and Node 24 LTS. The contract-consumer machinery (orval typed client + MSW), the review panel, static-analysis triage, coverage, vendor PRs, and the approver land in later slices of #683.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Timo Jakob"
+  },
+  "license": "MIT",
+  "keywords": [
+    "javascript",
+    "typescript",
+    "eslint",
+    "prettier",
+    "vitest",
+    "npm",
+    "node",
+    "maintenance"
+  ]
+}

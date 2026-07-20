@@ -99,16 +99,16 @@ plan() {  # $1 = languages json ; rest = extra flags
 
 @test "plan: unsupported repo type (rust/ts) exits 3 with a typed error" {
   # Was go/typescript until #872 gave Go a panel; the case still needs a pair
-  # with no panel on either side, so it moved to rust/typescript.
-  plan '{"languages":["rust","typescript"]}'
+  # with no panel on either side, so it moved to rust/javascript.
+  plan '{"languages":["rust","javascript"]}'
   [ "$status" -eq 3 ]
   [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
 }
 
 @test "plan: a supported language alongside an unsupported one still dispatches (#872)" {
-  # go+typescript is no longer the unsupported case: go has a panel, typescript
+  # go+javascript is no longer the unsupported case: go has a panel, javascript
   # does not, so the single supported language wins rather than escalating.
-  plan '{"languages":["go","typescript"]}'
+  plan '{"languages":["go","javascript"]}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .review_skill)" = "development-go:review" ]
 }

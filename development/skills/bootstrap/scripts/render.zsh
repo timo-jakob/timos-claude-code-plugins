@@ -190,7 +190,7 @@ if ((languages_set)); then
 		typeset l
 		for l in "${langs[@]}"; do
 			case "$l" in
-			typescript) codeql+=("javascript-typescript") ;;
+			javascript) codeql+=("javascript-typescript") ;;
 			python | go | swift | java) codeql+=("$l") ;;
 			esac
 		done
@@ -246,12 +246,12 @@ fi
 keep_block() {
 	local tag="${1//-/_}" # CLAUDE-PLUGIN (template) == CLAUDE_PLUGIN (table)
 	case "$tag" in
-	TYPESCRIPT) has_lang typescript ;;
+	JAVASCRIPT) has_lang javascript ;;
 	PYTHON) has_lang python ;;
 	GO) has_lang go ;;
 	JAVA) has_lang java ;;
 	SWIFT) has_lang swift ;;
-	LINUX_TESTS) has_lang typescript || has_lang python || has_lang go || has_lang java ;;
+	LINUX_TESTS) has_lang javascript || has_lang python || has_lang go || has_lang java ;;
 	SWIFT_SWIFTPM) has_lang swift && [[ "$swift_build_system" == "swiftpm" ]] ;;
 	SWIFT_XCODE) has_lang swift && [[ "$swift_build_system" == "xcode" ]] ;;
 	DOCKER) [[ "$docker" == "true" ]] ;;

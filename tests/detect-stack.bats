@@ -1133,3 +1133,37 @@ setup() {
   # parse with the real jq (back on PATH) to assert the field is correct JSON
   [ "$(jq -c '.live_majors' <<<"$out")" = '["v1","v2"]' ]
 }
+
+# --- JavaScript detection (#729, slice 1 of #683) ----------------------------
+# The token was renamed typescript -> javascript; package.json is the primary
+# marker, tsconfig.json / jsconfig.json strengthen it.
+
+@test "detect-stack #729: package.json -> javascript token (never typescript)" {
+  printf '{ "name": "x", "version": "0.1.0" }\n' > package.json
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.languages | index("typescript")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack #729: tsconfig.json alone also detects javascript (never typescript)" {
+  printf '{ "compilerOptions": {} }\n' > tsconfig.json
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.languages | index("typescript")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack #729: jsconfig.json (pure-JS repo) detects javascript (never typescript)" {
+  printf '{ "compilerOptions": {} }\n' > jsconfig.json
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.languages | index("typescript")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack #729: no JS markers -> javascript not detected" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" = "null" ]
+}

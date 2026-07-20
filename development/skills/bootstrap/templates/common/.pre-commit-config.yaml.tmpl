@@ -71,7 +71,7 @@ repos:
       - id: markdownlint
   # --- CLAUDE-PLUGIN-END -----------------------------------------------------
 
-  # --- TYPESCRIPT-START ------------------------------------------------------
+  # --- JAVASCRIPT-START ------------------------------------------------------
   - repo: https://github.com/pre-commit/mirrors-eslint
     rev: v10.4.0
     hooks:
@@ -82,7 +82,17 @@ repos:
           - eslint@10.4.0
           - "@typescript-eslint/parser@8.59.4"
           - "@typescript-eslint/eslint-plugin@8.59.4"
-  # --- TYPESCRIPT-END --------------------------------------------------------
+  # Prettier runs from the project's OWN pinned version (npx --no-install) rather
+  # than a separate pinned mirror, so pre-commit, CI, and local runs agree on one
+  # version — the pin lives in the repo's package.json devDependencies.
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier (write)
+        entry: npx --no-install prettier --write
+        language: system
+        files: \.(js|jsx|ts|tsx|json|css|scss|md|ya?ml)$
+  # --- JAVASCRIPT-END --------------------------------------------------------
 
   # --- PYTHON-START ----------------------------------------------------------
   - repo: https://github.com/astral-sh/ruff-pre-commit

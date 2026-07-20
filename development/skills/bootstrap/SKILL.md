@@ -103,7 +103,7 @@ The script reports:
 - `git_initialized` — is this a git repo
 - `has_github_remote` — is there an `origin` pointing at github.com
 - `visibility` — `public`, `private`, or `unknown` (via `gh repo view`)
-- `languages` — array of detected languages (`swift`, `typescript`, `python`, `go`, `java`)
+- `languages` — array of detected languages (`swift`, `javascript`, `python`, `go`, `java`)
 - `has_dockerfile` — whether a Dockerfile exists at the repo root or in common locations
 - `interfaces` — the runtime interface(s) a deployed build is exercised through,
   each with its detection evidence: `[{"interface": "...", "evidence": "..."}]`,
@@ -432,7 +432,7 @@ wording so behavior stays consistent:
 | **Q1: Create GitHub repo now?** | State A, or State B without a GitHub remote | "Do you want me to create a GitHub repo for this and connect it as `origin` now?" | If yes → Q2 + Q3 + run `gh repo create <name> --<vis> --source=. --remote=origin`. If no → Q3 only. |
 | **Q2: Repo name** | Only if Q1=yes | "What should the GitHub repo be named? (default: `<current-directory-name>`)" | Used in `gh repo create`. |
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the toolchain path — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the path for the rest of the skill. |
-| **Q4: Languages** | Whenever detected `languages=[]` | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / typescript / python / go / java — choose one or more)" | Selects per-language fragments and CodeQL matrix. |
+| **Q4: Languages** | Whenever detected `languages=[]` | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)" | Selects per-language fragments and CodeQL matrix. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
 
@@ -456,7 +456,7 @@ Before writing anything, present a clear summary:
 ```text
 Bootstrap plan:
   Visibility:       <public | private>
-  Languages:        <swift, typescript, ...>
+  Languages:        <swift, javascript, ...>
   Docker scanning:  <yes | no>
   Docker pre-flight: <clean | artifact build steps planned (<command>) | base image stale → bump to <tag> proposed>   # Dockerfile repos only
   Coverage gate:    90% on new code, enforced by CI `coverage-floor` step + pre-push hook
@@ -657,7 +657,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{JAVA_VERSION}}` | from `detect-stack.sh` (`language_meta.java.version`) — the JDK major (e.g. `21`, `17`). Defaults to the current LTS `21` when Java isn't detected or the build declares no toolchain (`language_meta.java.version_source == "default"`). Used in `setup-java`'s `java-version`. Substitute as-is. |
 | `{{API_MAJOR}}` | multi-major adapter skeleton only (§3j, #694) — an old major `vN` from `detect-stack.sh`'s `live_majors` (e.g. `v1`). Render the skeleton once per old major with `--api-major`. `{{API_MAJOR_UPPER}}` (`V1`) is derived from it for the Java class name. |
 | `{{XCODE_SCHEME}}` | Swift/Xcode only (`language_meta.swift.build_system == "xcode"`) — the scheme `xcodebuild test` runs. Resolve at render time via `xcodebuild -list -json` (take the single shared scheme; if several, ask the user which one carries the tests). Not used on SwiftPM repos — there the `SWIFT_XCODE` block is stripped and `swift test` needs no scheme. |
-| `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `typescript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
+| `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `javascript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
 | `{{ACCEPTANCE_INTERFACES}}` | comma-joined runtime interfaces from `detect-stack.sh`'s `interfaces` (#242), **minus `library`** — e.g. `cli` or `cli, web-ui`. Rendered inside literal brackets in the template (`interface: [{{ACCEPTANCE_INTERFACES}}]`, the `{{CODEQL_LANGUAGES}}` pattern) → a matrix leg per interface. Pass via `render.zsh --acceptance-interfaces`; **only** when rendering `acceptance.yml` (§3g). No default — omit it and the placeholder trips the leftover check, so the acceptance workflow is never rendered with an empty interface set. |
 | `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
 | `{{APPROVER_LANG}}` | the resolved Approver language from Step 3e (`python` / `java` / `swift`) — used by `common/approver-policy-core.md.tmpl` for the `/development-<lang>:approve` and `<lang>-approver` references. Pass via `render.zsh --approver-lang`; only needed when rendering the Approver policy (#241). |
@@ -875,11 +875,11 @@ in the same PR:
 
 | Tag | Keep when |
 | --- | --- |
-| `TYPESCRIPT` | typescript detected |
+| `JAVASCRIPT` | javascript detected |
 | `PYTHON` | python detected |
 | `GO` | go detected |
 | `JAVA` | java detected |
-| `LINUX_TESTS` | any of typescript / python / go / java detected (the Linux `test-and-coverage` job — Swift has its own macOS job instead) |
+| `LINUX_TESTS` | any of javascript / python / go / java detected (the Linux `test-and-coverage` job — Swift has its own macOS job instead) |
 | `SWIFT` | swift detected (in the quality workflows this is the whole macOS `test-and-coverage-swift` job) |
 | `SWIFT_SWIFTPM` | swift detected AND `language_meta.swift.build_system == "swiftpm"` |
 | `SWIFT_XCODE` | swift detected AND `language_meta.swift.build_system == "xcode"` |
@@ -1272,7 +1272,7 @@ the language plugin per the language-first principle in
 | Language | Plugin spec file | Renders when |
 | --- | --- | --- |
 | Python | `development-python/docs/api-stability.md` | `pyproject.toml` has a `[project]` table with `name` |
-| *(future)* TypeScript / Go / Rust / Swift | *(per the plugin once it ships)* | … |
+| *(future)* JavaScript / Go / Rust / Swift | *(per the plugin once it ships)* | … |
 
 The Python plugin's API-stability spec is independent of
 `--claude-approver`: it renders for any Python project that publishes a
@@ -2327,7 +2327,7 @@ Step 2 plan approval, not a separate opt-in prompt.
   --default-branch "<DEFAULT_BRANCH>" \
   --has-dockerfile "<true|false>" \
   --has-codeql "true" \
-  --codeql-languages "<space-separated languages, e.g. 'python typescript'>" \
+  --codeql-languages "<space-separated languages, e.g. 'python javascript'>" \
   --claude-approver "<true|false>"
 ```
 

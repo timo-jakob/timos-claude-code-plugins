@@ -4,7 +4,7 @@
 #
 # Usage:
 #   preflight.sh --visibility public|private \
-#                --languages "swift typescript python go" \
+#                --languages "swift javascript python go" \
 #                --has-dockerfile true|false \
 #                [--assume-yes]
 #
@@ -84,7 +84,7 @@ for lang in $LANGUAGES; do
 	swift) required_brews+=("swiftlint" "swiftformat") ;;
 	python) required_brews+=("ruff") ;;
 	go) required_brews+=("golangci-lint") ;;
-	typescript) : ;; # eslint is per-project via npm
+	javascript) : ;; # eslint is per-project via npm
 	esac
 done
 
