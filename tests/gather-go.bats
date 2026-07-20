@@ -29,7 +29,7 @@ setup() {
   mkdir -p "$WORK" "$STUB" "$ISO"
   # bash/env/cat are needed to *launch* the gather (and the stub) under the
   # isolated PATH, not just by the gather's own body.
-  for util in bash env cat rm dirname ls mktemp grep sed sort tail cut head tr jq; do
+  for util in bash env cat rm dirname ls find mktemp grep sed sort tail cut head tr jq; do
     ln -sf "$(command -v "$util")" "$ISO/$util"
   done
   printf 'module github.com/timo-jakob/testbed\n\ngo 1.24\n' > "$WORK/go.mod"
@@ -267,14 +267,6 @@ stub_zsh() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.tooling_configured | has("dependabot")' <<<"$output")" = "false" ]
   [ "$(jq -r '.findings_by_tool | has("dependabot")' <<<"$output")" = "false" ]
-}
-
-@test "gather-go: coverage is withheld honestly (null, reliable=false) until Slice E (#874)" {
-  no_binary "$WORK"
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.coverage.overall // "null"' <<<"$output")" = "null" ]
-  [ "$(jq -r .coverage.measurement.reliable <<<"$output")" = "false" ]
-  echo "$output" | jq -e '.coverage.measurement.reason | test("Slice E")' >/dev/null
 }
 
 @test "gather-go: coverage carries a regions array (empty while withheld)" {
@@ -533,4 +525,182 @@ stub_zsh() {
   with_stub "$WORK"
   [ "$status" -eq 0 ]
   [ "$(jq -r '[.findings_by_tool.format_lint[].component] | join(",")' <<<"$output")" = "b/tool.go" ]
+}
+
+# --- coverage: withheld paths (hermetic, no Go toolchain) --------------------
+
+@test "gather-go: no *_test.go -> coverage withheld honestly (null, reliable=false) (#874)" {
+  # Measurement is gated on test presence, so a repo with nothing to cover
+  # withholds rather than running a heavy, pointless `go test`.
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.coverage.overall == null' >/dev/null
+  [ "$(jq -r .coverage.measurement.reliable <<<"$output")" = "false" ]
+  [ "$(jq -r .coverage.measurement.source <<<"$output")" = "none" ]
+  echo "$output" | jq -e '.coverage.measurement.reason | test("nothing to cover")' >/dev/null
+}
+
+@test "gather-go: *_test.go present but no toolchain -> coverage withheld with the honest reason (#874)" {
+  # ISO has no `go`, so a repo WITH a test still withholds — measured only where
+  # the toolchain exists (the Go test-bed), never guessed.
+  mkdir -p "$WORK/calc"
+  printf 'package calc\nfunc Add(a,b int) int { return a+b }\n' > "$WORK/calc/calc.go"
+  printf 'package calc\nimport "testing"\nfunc TestAdd(t *testing.T){ if Add(1,2)!=3 {t.Fatal("x")} }\n' > "$WORK/calc/calc_test.go"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.coverage.overall == null' >/dev/null
+  [ "$(jq -r .coverage.measurement.reliable <<<"$output")" = "false" ]
+  echo "$output" | jq -e '.coverage.measurement.reason | test("go. is not on PATH")' >/dev/null
+}
+
+@test "gather-go: coverage always carries the region-gate keys (#874)" {
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.coverage | has("overall") and has("by_module") and has("regions")' <<<"$output")" = "true" ]
+  [ "$(jq -r '.coverage.regions | type' <<<"$output")" = "array" ]
+  [ "$(jq -r '.coverage.by_module | type' <<<"$output")" = "object" ]
+}
+
+# --- parse-go-coverage.py unit checks (#874) --------------------------------
+# The measured `go test` path needs the Go toolchain (exercised on the test-bed),
+# but the PARSER is toolchain-free text parsing — fully covered here with real
+# `go test -coverprofile` + `go tool cover -func` output captured as fixtures.
+
+@test "parse-go-coverage: per-package by_module + overall, generated files excluded (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n%s\n%s\n%s\n' \
+    'github.com/acme/svc/internal/store/persons.go:10.20,13.2 2 1' \
+    'github.com/acme/svc/internal/store/persons.go:15.30,20.2 4 0' \
+    'github.com/acme/svc/internal/gen/api.pb.go:5.1,9.2 3 0' > "$WORK/cover.out"
+  printf '%s\n%s\n%s\n%s\n' \
+    'github.com/acme/svc/internal/store/persons.go:10:	List	100.0%' \
+    'github.com/acme/svc/internal/store/persons.go:15:	Save	0.0%' \
+    'github.com/acme/svc/internal/gen/api.pb.go:5:	Marshal	0.0%' \
+    'total:					(statements)	33.3%' > "$WORK/cover.func.txt"
+  out=$(python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" github.com/acme/svc)
+  # by_module: 2 covered of 6 total statements in persons.go = 33.3; .pb.go dropped.
+  [ "$(jq -r '.by_module | keys | join(",")' <<<"$out")" = "internal/store/persons.go" ]
+  [ "$(jq '.by_module["internal/store/persons.go"] == 33.3' <<<"$out")" = "true" ]
+  # overall counts only non-generated statements.
+  [ "$(jq '.overall == 33.3' <<<"$out")" = "true" ]
+  # generated Marshal region excluded.
+  [ "$(jq '[.regions[] | select(.name=="Marshal")] | length == 0' <<<"$out")" = "true" ]
+}
+
+@test "parse-go-coverage: per-function regions with derived end_line and pct (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n%s\n%s\n' \
+    'github.com/acme/svc/calc.go:10.1,14.2 3 1' \
+    'github.com/acme/svc/calc.go:15.1,25.2 6 0' > "$WORK/cover.out"
+  printf '%s\n%s\n%s\n' \
+    'github.com/acme/svc/calc.go:10:	Add	100.0%' \
+    'github.com/acme/svc/calc.go:15:	Sub	0.0%' \
+    'total:					(statements)	33.3%' > "$WORK/cover.func.txt"
+  out=$(python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" github.com/acme/svc)
+  # Add: start 10, end = next func start - 1 = 14; pct from -func.
+  [ "$(jq '[.regions[] | select(.name=="Add")][0] | .start_line==10 and .end_line==14 and .pct==100.0' <<<"$out")" = "true" ]
+  # Sub: last func in file, end = max block end-line the profile shows (25).
+  [ "$(jq '[.regions[] | select(.name=="Sub")][0] | .start_line==15 and .end_line==25 and .pct==0.0' <<<"$out")" = "true" ]
+  [ "$(jq -r '.regions[0].file' <<<"$out")" = "calc.go" ]
+}
+
+@test "parse-go-coverage: empty profile -> overall null, empty by_module/regions (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n' > "$WORK/cover.out"
+  printf 'total:\t(statements)\t0.0%%\n' > "$WORK/cover.func.txt"
+  out=$(python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" github.com/acme/svc)
+  [ "$(jq -r '.overall' <<<"$out")" = "null" ]
+  [ "$(jq -c '.by_module' <<<"$out")" = "{}" ]
+  [ "$(jq -c '.regions' <<<"$out")" = "[]" ]
+}
+
+@test "parse-go-coverage: missing args -> valid empty JSON, exit 0 (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  run python3 "$PARSE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.overall == null and (.by_module == {}) and (.regions == [])' >/dev/null
+}
+
+@test "parse-go-coverage: a nonexistent profile path -> withheld, not a crash (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  run python3 "$PARSE" "$WORK/nope.out" "$WORK/nope.func.txt" github.com/acme/svc
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.overall == null' >/dev/null
+}
+
+@test "parse-go-coverage: tabwriter multi-tab padding in -func output is parsed (#874)" {
+  # Real `go tool cover -func` pads columns with tabs (tabwriter, padchar \t),
+  # so short names get 2+ tabs. The parser must tolerate that, not assume one.
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n%s\n' 'github.com/acme/svc/calc.go:10.1,14.2 3 1' > "$WORK/cover.out"
+  printf 'github.com/acme/svc/calc.go:10:\tAdd\t\t100.0%%\n' > "$WORK/cover.func.txt"
+  out=$(python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" github.com/acme/svc)
+  [ "$(jq -r '.regions[0].name' <<<"$out")" = "Add" ]
+  [ "$(jq '.regions[0].pct == 100.0' <<<"$out")" = "true" ]
+}
+
+@test "parse-go-coverage: single-function file -> end_line from the profile's max block (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n%s\n' 'github.com/acme/svc/only.go:5.1,40.2 8 1' > "$WORK/cover.out"
+  printf 'github.com/acme/svc/only.go:5:\tSolo\t100.0%%\n' > "$WORK/cover.func.txt"
+  out=$(python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" github.com/acme/svc)
+  [ "$(jq '.regions[0] | .start_line==5 and .end_line==40' <<<"$out")" = "true" ]
+}
+
+@test "parse-go-coverage: out-of-source-order -func lines still sort into correct spans (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n%s\n%s\n' \
+    'github.com/acme/svc/x.go:10.1,14.2 2 1' \
+    'github.com/acme/svc/x.go:20.1,30.2 4 0' > "$WORK/cover.out"
+  # Second function listed FIRST in the -func output (%% -> % in the format).
+  printf 'github.com/acme/svc/x.go:20:\tSecond\t0.0%%\ngithub.com/acme/svc/x.go:10:\tFirst\t100.0%%\n' > "$WORK/cover.func.txt"
+  out=$(python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" github.com/acme/svc)
+  # First: end = Second's start - 1 = 19, despite being listed second.
+  [ "$(jq '[.regions[] | select(.name=="First")][0] | .start_line==10 and .end_line==19' <<<"$out")" = "true" ]
+}
+
+@test "parse-go-coverage: empty module path -> paths left unstripped, no crash (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n%s\n' 'github.com/acme/svc/calc.go:10.1,14.2 3 1' > "$WORK/cover.out"
+  printf 'github.com/acme/svc/calc.go:10:\tAdd\t100.0%%\n' > "$WORK/cover.func.txt"
+  out=$(python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" "")
+  # Unstripped import-path key (the gather notes this degradation).
+  [ "$(jq -r '.by_module | keys | join(",")' <<<"$out")" = "github.com/acme/svc/calc.go" ]
+}
+
+@test "parse-go-coverage: non-UTF-8 bytes in a profile don't crash the parser (#874)" {
+  PARSE="$REPO_ROOT/development/skills/maintenance/scripts/parse-go-coverage.py"
+  printf 'mode: set\n' > "$WORK/cover.out"
+  printf 'github.com/acme/svc/calc.go:10.1,14.2 3 1\n' >> "$WORK/cover.out"
+  printf '\xff\xfe bad bytes\n' >> "$WORK/cover.out"
+  printf 'github.com/acme/svc/calc.go:10:\tAdd\t100.0%%\n' > "$WORK/cover.func.txt"
+  run python3 "$PARSE" "$WORK/cover.out" "$WORK/cover.func.txt" github.com/acme/svc
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.by_module["calc.go"] == 100' >/dev/null
+}
+
+@test "gather-go: build-failure detection matches a real build-failed line, not red-suite metrics output (#874)" {
+  # The withhold-on-compile-failure grep must not misfire on a merely-red suite
+  # that replays `# HELP`/`# TYPE` metrics or `# comment` diff lines. This pins
+  # the anchored pattern (extracted verbatim from the gather) directly.
+  pat='^(FAIL|ok|----)[[:space:]].*\[(build|setup) failed\]$|^# [^[:space:]]*[./][^[:space:]]*([[:space:]]\[[^]]+\])?$|^go: .*cannot find|build constraints exclude all Go files'
+  # Real compile/setup-failure shapes -> MATCH.
+  printf 'FAIL\tgithub.com/acme/svc/broken [build failed]\n' | grep -qE "$pat"
+  printf 'FAIL\tgithub.com/acme/svc/broken [setup failed]\n' | grep -qE "$pat"
+  printf '# github.com/acme/svc/broken\n' | grep -qE "$pat"
+  printf '# github.com/acme/svc/broken [github.com/acme/svc/broken.test]\n' | grep -qE "$pat"
+  printf 'build constraints exclude all Go files in /x\n' | grep -qE "$pat"
+  # Red-suite / metrics / prose output a naive `^# ` or bare `[build failed]`
+  # would wrongly match -> must NOT match (the `^# ` arm requires a /-or-.
+  # import-path token, which these lack).
+  run grep -qE "$pat" <<<'# HELP http_requests_total The total number of HTTP requests.'
+  [ "$status" -ne 0 ]
+  run grep -qE "$pat" <<<'# TYPE http_requests_total counter'
+  [ "$status" -ne 0 ]
+  run grep -qE "$pat" <<<'# TODO'
+  [ "$status" -ne 0 ]
+  run grep -qE "$pat" <<<'# Overview'
+  [ "$status" -ne 0 ]
+  run grep -qE "$pat" <<<'    got: "the [build failed] marker in a string literal"'
+  [ "$status" -ne 0 ]
 }

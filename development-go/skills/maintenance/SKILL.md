@@ -3,17 +3,18 @@ name: maintenance
 description: >
   Go project maintenance dispatcher. Receives findings from
   /development:maintenance (or equivalent JSON input), validates the payload,
-  and invokes `go-maintenance-planner` to return a PR-grouped plan. The
-  per-group work agents are the orchestrator's job, not the dispatcher's. Pure
-  function of its JSON input; does not run its own detection. Mirrors
-  development-python / development-java / development-swift. Tool universe so
-  far (#868 epic): format_lint (golangci-lint v2 — one pinned binary doing
-  both `fmt` and `run --fix`, Slice B #871) plus the static-analysis triple
-  sonarcloud + code_scanning + semgrep (Slice D #873 — all three ship, Go's
-  support in each is deep). Coverage (Slice E #874) and the vendor-PR sources
-  (Slice G #876) arrive in later slices; there is no coverage pre-flight yet,
-  so every invocation returns a plan. See ARCHITECTURE.md for the schema and
-  dispatch contract.
+  runs a coverage pre-flight (may spawn `go-coverage-improver` in a worktree
+  when affected code sits below Required), and otherwise invokes
+  `go-maintenance-planner` to return a PR-grouped plan. The per-group work
+  agents are the orchestrator's job, not the dispatcher's. Pure function of its
+  JSON input; does not run its own detection. Mirrors development-python /
+  development-java / development-swift. Tool universe so far (#868 epic):
+  format_lint (golangci-lint v2 — one pinned binary doing both `fmt` and `run
+  --fix`, Slice B #871) plus the static-analysis triple sonarcloud +
+  code_scanning + semgrep (Slice D #873 — all three ship, Go's support in each
+  is deep), gated by the per-package coverage pre-flight (Slice E #874). The
+  vendor-PR sources (Slice G #876) arrive in a later slice. See ARCHITECTURE.md
+  for the schema and dispatch contract.
 disable-model-invocation: false
 ---
 
@@ -22,30 +23,64 @@ tools yourself**, and you **do not spawn the per-group work agents** —
 that's the orchestrator's job (one PR per planner group, sequential
 through Phase 8 of `development:maintenance`).
 
-**This slice still has a single phase — deliberately.** The sibling
-dispatchers (`development-python`, `development-java`, `development-swift`)
-split into a Phase A coverage-improver invocation and a Phase B planning
-invocation, and they **gate the code-editing static-analysis triagers
-(`sonarcloud` / `code_scanning` / `semgrep`) on coverage** before dispatch:
-a change to under-covered code halts until the improver raises coverage.
-Go coverage measurement arrives only in **Slice E (#874)**, so this
-dispatcher has **no coverage pre-flight and no `go-coverage-improver` to
-spawn**: every invocation is a planning invocation that returns `plan`, and
-`improver_result` is never emitted.
+Your role splits into **two phases** the orchestrator invokes you for. The
+payload is **identical** across the two invocations, so it cannot tell them
+apart — **detect the phase by whether you have already produced an
+`improver_result` in this session**: if you have (a prior Phase A ran), this is
+Phase B; otherwise run the pre-flight and, only if it spawns the improver, this
+becomes Phase A. When the pre-flight spawns no improver, Phase A and Phase B
+collapse into one invocation that returns `plan`.
 
-> **Design decision (for the Slice E author).** Slice D ships the
-> static-analysis triple **without** the coverage safety gate, because the
-> gate's measurement doesn't exist yet. In the interim the safety net is
-> the same one `format_lint` already relies on: the per-issue test run each
-> triage agent performs before committing, plus the human/Approver review
-> on every PR. This is the sibling dispatchers' own "greenfield / no tests"
-> path (they plan directly when there is no trustworthy coverage signal),
-> made structural here because coverage is universally absent this slice.
-> **Slice E must add the coverage pre-flight that gates `sonarcloud` /
-> `code_scanning` / `semgrep`** — they are coverage-**respecting** tools
-> (they edit real code under test), and once a trustworthy figure exists
-> they should be gated exactly as the siblings gate them. `format_lint`
-> stays coverage-**exempt** (behavior-preserving) forever.
+**Phase A — coverage improver (when needed):**
+
+1. Validate the payload.
+2. Run the coverage pre-flight. If its branch 2 fires, spawn
+   `go-coverage-improver` in a worktree.
+3. **Only if the improver actually committed tests** (its `actions_taken` is
+   non-empty), **return immediately** with `improver_result` and **no `plan`**.
+   The orchestrator pushes the branch, opens + merges a PR, monitors CI
+   (running `go-ci-fixer` up to 3×), syncs main, then re-invokes you for
+   Phase B. **If the improver committed nothing** — every entry came back in
+   `unable_to_fix` (a red baseline, or a suite it couldn't green without
+   touching production code) — do **not** return an `improver_result`: there is
+   no diff to push, and a no-diff PR can't be opened. Instead **collapse into
+   Phase B in this same invocation**, carrying those regions as escalations in
+   `human_action_required` and excluding their findings from the plan.
+
+**Phase B — planning (always, possibly after Phase A merged):**
+
+1. Validate the payload.
+2. Run the coverage pre-flight again. **The orchestrator re-invokes you with
+   the same payload**, so `coverage.regions` still carries the
+   *pre-improvement* figures — do **not** read a stale region figure as an
+   escalation. Reconcile against the Phase A `improver_result` you produced
+   (still in context). For each region you spawned the improver on:
+   - **cleared** — the improver's `actions_taken` shows `coverage_after ≥
+     target` for it → treat as branch 1 (proceeds to planning), even though the
+     stale payload figure is below Required.
+   - **escalated** — the region is in the improver's `unable_to_fix` **with a
+     coverage that never reached `target`**, *or* it appears in neither
+     `actions_taken` nor `unable_to_fix` at all → record it in
+     `human_action_required` **and exclude its findings from the set you pass
+     to the planner** (exactly as the Step-1 partial halt withholds them). An
+     escalated region is *not* coverage-protected, so its findings must not be
+     planned — otherwise Phase 8 would dispatch a work agent to edit the
+     under-covered function the gate exists to protect. (An `unable_to_fix`
+     entry for a *skipped line* on a region that still cleared its target is
+     **informational, not an escalation** — the region cleared, its findings
+     proceed.)
+
+   Do **not** re-spawn the improver this invocation.
+3. Run the planner (`go-maintenance-planner`).
+4. Return `plan` + `missing_tooling`. No `improver_result`.
+
+If coverage already clears (or there are no coverage-respecting findings),
+Phase A and Phase B collapse into a single invocation that returns `plan` only.
+`format_lint` is behavior-preserving and **coverage-exempt**, so a format-only
+run never triggers the pre-flight; the **coverage-respecting** tools —
+`sonarcloud`, `semgrep`, and a file-bearing `code_scanning` alert — do (they
+edit real code under test). This is what Slice D's dispatcher note promised
+Slice E would add.
 
 ### Auxiliary mode — check `dispatch_mode` FIRST
 
@@ -69,17 +104,25 @@ product (see ARCHITECTURE.md § "Primary / auxiliary model"). So:
   constructing the group yourself would omit `priority_score`,
   `suggested_pr_title`, and `isolation`, which Phase 8 reads for the
   commit subject and the worktree decision.
+- **Skip the coverage pre-flight entirely** — no Phase A, no
+  `go-coverage-improver`, no coverage gate. An auxiliary Go isn't the
+  product, so its coverage is not maintained.
 - The non-mechanical triagers (`sonarcloud`, `code_scanning`, `semgrep`)
   and the dependency work later slices add are **skipped** in auxiliary
-  mode — an auxiliary Go isn't the product, so only its mechanical,
-  behavior-preserving layer is maintained, exactly as development-java
-  does. Concretely: pass the planner **only the `format_lint` findings**
-  (intersect the supported set with `{format_lint}`), even when the
-  payload also carries Sonar / Code Scanning / semgrep findings. List the
-  skipped tools in the **rendered plan summary** (the text you print to
-  the user), not in the response JSON, whose keys are fixed.
+  mode — only its mechanical, behavior-preserving layer is maintained,
+  exactly as development-java does. Concretely: pass the planner **only
+  the `format_lint` findings** (intersect the supported set with
+  `{format_lint}`), even when the payload also carries Sonar / Code
+  Scanning / semgrep findings. List the skipped tools in the **rendered
+  plan summary** (the text you print to the user), not in the response
+  JSON, whose keys are fixed.
 - Return `plan` + `ci_fixer_agent` + `missing_tooling`. **Never**
   `improver_result`.
+
+Then run **Validation and the Planning step in both modes**; the **Coverage
+pre-flight section runs only in primary mode** — auxiliary skips it entirely
+(per the first bullet above), returning the `format_lint`-only plan and never
+`improver_result`.
 
 Then proceed with the flow below **in both modes** — `"primary"` (or an
 absent `dispatch_mode`) skips nothing: all four tools (`format_lint` plus
@@ -130,10 +173,14 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
 > ship — Go's support in each is deep, unlike Swift, whose semgrep was
 > deferred for an empty rule registry (#443). Non-autofixable golangci-lint
 > diagnostics are **not** `format_lint`; the triple's agents own the
-> judgment-bearing findings. Coverage (Slice E, #874) and the vendor-PR
-> sources `dependabot` / `snyk_prs` / `renovate` (Slice G, #876) are **not
-> yet in the universe** and the gather does not emit keys for them.
-> Validate and route against the supported set only.
+> judgment-bearing findings. **Coverage (Slice E, #874) is measured** —
+> per-package (`go test ./... -coverprofile`) — but it is a **gate, not a
+> `findings_by_tool` key**: the gather emits it in the `coverage` block, and
+> the coverage pre-flight below gates the coverage-respecting tools on it (an
+> empty/unreliable coverage block is a *signal to halt*, per Step 1, not the
+> expected steady state). The vendor-PR sources `dependabot` / `snyk_prs` /
+> `renovate` (Slice G, #876) are the only tools still outside the universe,
+> with no gather keys. Validate and route against the supported set only.
 
 ## Validation
 
@@ -186,7 +233,7 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
    - Either way, **name each later-slice tool in the rendered plan
      summary** (the text you print to the user — *not* the response
      JSON, whose keys are fixed), together with the slice that adds it:
-     coverage → #874, `dependabot` / `snyk_prs` / `renovate` → #876. For
+     `dependabot` / `snyk_prs` / `renovate` → #876. For
      `container_scan` say **"not scheduled for Go — the blessed image
      path is ko, which has no Dockerfile to scan"**; do not invent an
      issue number for it.
@@ -204,7 +251,153 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
    > branch above is what keeps a `--concern` run from aborting in the
    > meantime.
 
-## Planning step
+## Coverage pre-flight
+
+Before planning any **non-mechanical** work, check whether coverage clears the
+bar for the changes a work agent might make. `format_lint` is behavior-
+preserving and **exempt** — it never triggers the gate. The
+**coverage-respecting** tools are the ones that edit real code: `sonarcloud`,
+`semgrep`, and a file-bearing `code_scanning` alert. A format-only run has an
+empty affected set, so the pre-flight is a no-op and it goes straight to
+planning.
+
+**Enforced coverage semantics — per-package (#868 hard part 4).** The gather
+measures with `go test ./... -coverprofile` (the default, **not**
+`-coverpkg`), so a function's coverage credits only its own package's tests.
+The gate, the `coverage.regions`/`by_module` figures, and the improver's target
+all read that same number. This is the conservative signal the region-scoped
+gate wants: "is THIS function directly tested?", not "did some integration test
+incidentally execute it?". Never re-measure with `-coverpkg` here — that would
+gate on a different number than the gather produced.
+
+### Step 1 — coverage data must exist *and* be trustworthy
+
+If `coverage.by_module` is empty `{}`, `coverage.overall` is `null`, **or**
+`coverage.measurement.reliable` is `false`, there is no trustworthy coverage
+signal (and therefore no `coverage.regions`). `coverage.measurement.reason`
+states the cause (no `*_test.go`, no toolchain, a build error, an unparseable
+profile).
+
+**Exception — coverage-exempt findings:** do **not** halt when **every** finding
+is coverage-exempt (`format_lint`). Return a plan routing them to their agent.
+
+Only halt when at least one **coverage-respecting** finding is present
+(`sonarcloud`, `semgrep`, or a file-bearing `code_scanning` alert) **and**
+coverage is missing/unreliable:
+
+```json
+{
+  "schema_version": "2",
+  "ci_fixer_agent": "go-ci-fixer",
+  "actions_taken": [],
+  "actions_requiring_review": [],
+  "missing_tooling": [],
+  "human_action_required": [{
+    "reason": "Coverage is unavailable or untrustworthy — maintenance requires a reliable per-function coverage measurement as the safety signal for autonomous changes. Cause (from coverage.measurement.reason): <echo it here>.",
+    "recommendation": "Add *_test.go tests and ensure the suite runs under the Go toolchain (go test ./... -coverprofile), then re-run /development:maintenance."
+  }],
+  "unable_to_fix": []
+}
+```
+
+You may still plan the coverage-exempt `format_lint` group and halt only the
+coverage-respecting ones (partial halt).
+
+### Step 2 — resolve each finding's region and gate on it
+
+Build the **affected set**: every coverage-respecting finding that names a file
+(`sonarcloud.component`, a file-bearing `code_scanning_alerts.file`, a `semgrep`
+finding's `path`). `format_lint` and file-less `code_scanning` findings
+(Scorecard repo-policy) contribute nothing. When `dispatch_filter.only_tools`
+is set, restrict to the filtered tools.
+
+For each affected finding, resolve its **enclosing region** from
+`coverage.regions` (emitted by the gather): the entry whose `file` matches and
+whose `start_line ≤ finding.line ≤ end_line`. On overlap (a closure inside a
+function), pick the **innermost** — the smallest line span. If **no** region
+contains the finding's line (a file/package-level finding, or a parser gap),
+**fall back to the whole-file figure** from `coverage.by_module[file]`.
+
+Gate each finding's region (or file fallback) against a **fixed Required
+threshold of 80%** — there is no Floor tier here, and this is **not**
+`policy.coverage_threshold` (the project-wide new-code gate, typically 90):
+the region gate is deliberately 80, a lower bar because it protects one
+function's edit, not the whole diff. The unit is the **enclosing function**,
+not the whole file: a 40%-covered file is fine to edit inside a well-tested
+function; a 95%-covered file is correctly blocked at its one untested function.
+
+Branches (evaluated per finding, then **deduped by region** — many findings in
+one under-covered function yield ONE improver work-item, not one per finding):
+
+1. **Region ≥ Required (80%)** → the change is protected; the finding proceeds
+   to planning. The whole-file figure is irrelevant.
+2. **Region < Required, with coverage data** → this is Phase A. Spawn
+   `go-coverage-improver` scoped to **that function**, `target = Required`:
+
+   ```text
+   Agent(
+     subagent_type="go-coverage-improver",
+     description="Raise coverage on under-covered affected functions to Required",
+     isolation="worktree",
+     prompt="""
+       repo_path: <repo.path>
+       policy.coverage_threshold: 80
+       modules_to_improve: [
+         { "file": "internal/store/persons.go", "function": "Save",
+           "start_line": 78, "end_line": 95, "current": 40, "target": 80 }
+       ]
+       commit_subject: "test(coverage): cover <function> in <file>"
+
+       Add meaningful table-driven Go tests for the named function(s); do NOT
+       modify production code under test. Run the suite + coverage in the
+       worktree; only return success if tests pass. Commit on the worktree branch.
+     """
+   )
+   ```
+
+   Each `modules_to_improve` entry is built from the under-covered region:
+   `function` = `region.name`, `start_line`/`end_line`/`current` = the region's
+   fields, `target` = Required (80). One work-item **per under-covered region**
+   (deduped). When the improver finishes, **hand off per Phase A step 3**:
+   return `improver_result` (no `plan`) **only if it committed tests**
+   (non-empty `actions_taken`); if it committed nothing (every region came back
+   `unable_to_fix`), do **not** return an `improver_result` — collapse into
+   Phase B in this same invocation, carrying those regions as escalations in
+   `human_action_required` and excluding their findings from the plan. Either
+   way, do **not** loop or re-spawn.
+
+   **File-fallback entry (a finding that resolved to no region).** When the
+   gated unit was the whole-file figure (`by_module[file]`, no enclosing
+   region), the finding has no `function`/`start_line`/`end_line` to send.
+   Build a **file-scoped** entry instead — `{ "file": <file>, "current":
+   <by_module figure>, "target": 80 }` — and tell the improver it covers the
+   file's untested functions (the improver accepts this file shape alongside
+   the function-scoped and whole-package ones). Never fabricate a
+   function-scoped entry with placeholder line numbers.
+
+   **Greenfield (no tests anywhere)** is normal: every affected region is 0%, so
+   each becomes a small region-scoped improver PR.
+3. **The finding's file is missing entirely from `coverage`** (no region **and**
+   no `by_module` entry) → halt; you can't target what isn't measured:
+
+   ```json
+   {
+     "schema_version": "2",
+     "ci_fixer_agent": "go-ci-fixer",
+     "actions_taken": [], "actions_requiring_review": [], "missing_tooling": [],
+     "human_action_required": [{
+       "reason": "<file> is named by a finding but has no coverage data (no region, no by_module entry) — it can't be measured or improved automatically.",
+       "recommendation": "Confirm the package is built and exercised by a *_test.go (not excluded as generated), then re-run /development:maintenance."
+     }],
+     "unable_to_fix": []
+   }
+   ```
+
+> **The gate is a pre-flight heuristic, not a full-diff predictor.** It protects
+> the function the finding sits in; if the fix agent edits beyond that function,
+> the agent's own test run + human/Approver review catch out-of-region damage.
+
+## Planning step (Phase B)
 
 Spawn the **planner** to compute a prioritized, PR-grouped plan. It only
 reads; **no worktree** (`isolation` omitted).
@@ -280,16 +473,44 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
   "schema_version": "2",
   "ci_fixer_agent": "go-ci-fixer",
   "plan": [ /* the planner's full output array, unchanged */ ],
+  "improver_result": { /* present only after a Phase A coverage-improver spawn */ },
+  "human_action_required": [ /* present only when a Phase B reconciliation left a region escalated */ ],
   "missing_tooling": [ /* see below */ ]
 }
 ```
 
 - `ci_fixer_agent` is **required** and always `"go-ci-fixer"` — the
   orchestrator spawns it in Phase 8's CI cycle when a PR's checks fail.
-  Emit it on **every** response.
-- `plan` is **required** (may be empty when there are no findings).
-- `improver_result` is **never** emitted this slice — there is no
-  coverage improver until Slice E (#874). Omit the key entirely.
+  Emit it on **every** response, including the Phase A `improver_result`-only
+  response.
+- `plan` is **required** in a Phase B response (may be empty when there are
+  no findings).
+- `improver_result` is **omitted entirely** when the improver did not run.
+  In a Phase A response, emit `improver_result` and omit `plan` (the planner
+  hasn't run yet):
+
+  You **assemble** `improver_result` — the improver doesn't return it verbatim.
+  Its fields come from two places: `worktree_branch` / `worktree_path` are the
+  **runtime's worktree-isolation envelope** for the spawn you made (the
+  Agent-tool `isolation="worktree"` result), not the improver's JSON;
+  `modules_improved[].before`/`after` map from the improver's
+  `actions_taken[].coverage_before`/`coverage_after`; `summary` is a one-line
+  digest you compose from its `actions_taken`.
+
+  ```json
+  {
+    "schema_version": "2",
+    "ci_fixer_agent": "go-ci-fixer",
+    "improver_result": {
+      "worktree_branch": "<from the worktree-isolation envelope>",
+      "worktree_path":   "<from the worktree-isolation envelope>",
+      "summary": "<one-line digest you compose from the improver's actions_taken>",
+      "modules_improved": [ { "file": "internal/store/persons.go", "before": 40, "after": 84 } ]
+    },
+    "human_action_required": [ /* present ONLY when the improver escalated a region it couldn't reach */ ]
+  }
+  ```
+
 - `missing_tooling` lists tools the project hasn't configured. For every
   key in `tooling_configured` with value `false`, emit an entry:
 
@@ -350,15 +571,19 @@ per-group work agents the orchestrator spawns in Phase 8.
   registry; Go's is deep, so `go-semgrep-triage` ships like Java's. All
   three reuse the language-agnostic gather helpers (`gather-sonarcloud.zsh`,
   `gather-github-security.zsh`) exactly as Java and Swift do.
-- **Coverage** is withheld, not guessed, until Slice E (#874) decides the
-  enforced number's semantics (per-package profile vs `-coverpkg` — epic
-  #868 hard part 4) and ships the parser. The gather emits
-  `coverage.overall: null` with `reliable: false` and a reason, per the
-  trustworthy-or-withheld discipline (#258). **Consequence for Slice D:**
-  the static-analysis triple edits real code but ships **without** the
-  coverage safety gate the siblings apply, because the measurement doesn't
-  exist yet — Slice E must add the pre-flight that gates them (see the
-  single-phase note above).
+- **Coverage — measured, per-package (Slice E, #874).** Epic hard part 4
+  (per-package profile vs `-coverpkg`) is **decided: per-package**
+  (`go test ./... -coverprofile`, not `-coverpkg`), because the region-scoped
+  gate asks "is THIS function directly tested?" and per-package credits only a
+  package's own tests — an integration test incidentally hitting a function
+  doesn't mask a genuinely untested unit, which `-coverpkg` would. The one
+  number is read identically by the gather (`parse-go-coverage.py`), the gate,
+  and the improver's target. Generated sources (`*.pb.go`, `*.pb.gw.go`) are
+  excluded. First-party tooling makes the figure reliable by construction, but
+  it is still withheld (`null`, `reliable: false`, with a reason) on any
+  failure rather than guessed (#258). The static-analysis triple is now gated
+  on this measurement (the coverage pre-flight above) — the gate Slice D's note
+  promised. `format_lint` stays coverage-exempt (behavior-preserving) forever.
 - **No Dockerfile.** The blessed image path is **ko** (`.ko.yaml` with a
   digest-pinned static base image), so the runtime-upgrade agent Slice G
   (#876) adds will bump the `go`/`toolchain` directives in `go.mod` and
@@ -369,7 +594,8 @@ per-group work agents the orchestrator spawns in Phase 8.
 - Run detection (orchestrator's job).
 - Call `golangci-lint`, `go build`, or `go test` yourself (the work
   agents' job).
-- **Spawn work agents** — the orchestrator spawns one agent per planner
-  group in Phase 8. The planner is the only agent you spawn.
+- **Spawn work agents** other than `go-coverage-improver` in Phase A — the
+  orchestrator spawns one agent per planner group in Phase 8. The planner and
+  the coverage-improver are the only agents you spawn.
 - Push, open, or merge PRs (orchestrator's job).
 - Call back into `/development:*` helpers (the contract is one-directional).

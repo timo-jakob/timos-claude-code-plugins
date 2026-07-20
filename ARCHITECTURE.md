@@ -1843,11 +1843,11 @@ blocked at its one untested function. It also collapses the Floor/Required
 tiers (a single function is small enough to reach Required in one improver
 pass) and removes the dead-end where bootstrapping a from-zero class to a
 Floor never cleared the finding's Required bar. The `swift-coverage-improver`
-is correspondingly **function-scoped**. **Java** (#466) and **Python** (#467)
-adopt the same gate for their refactor findings — the `*-coverage-improver`
-takes a method/function-scoped entry, while a *major dependency upgrade* (which
-has no per-finding line) keeps the whole-class/module Floor/Required scan. With
-all three languages done, the region-scoped gate is the family-wide model; the
+is correspondingly **function-scoped**. **Java** (#466), **Python** (#467), and
+**Go** (#874) adopt the same gate for their refactor findings — the
+`*-coverage-improver` takes a method/function-scoped entry, while a *major
+dependency upgrade* (which has no per-finding line) keeps the whole-class/module
+Floor/Required scan. Across the family the region-scoped gate is the model; the
 whole-file thresholds above remain only for the major-upgrade path.
 **Adding region coverage to a new language** follows a fixed vertical (parser
 emits `regions[]` → gather → dispatcher containment → function-scoped improver
