@@ -7,11 +7,13 @@ description: >
   per-group work agents are the orchestrator's job, not the dispatcher's. Pure
   function of its JSON input; does not run its own detection. Mirrors
   development-python / development-java / development-swift. Tool universe so
-  far (#868 epic, Slice B #871): format_lint (golangci-lint v2 — one pinned
-  binary doing both `fmt` and `run --fix`). Static-analysis triage (Slice D
-  #873), coverage (Slice E #874), and the vendor-PR sources (Slice G #876)
-  arrive in later slices. See ARCHITECTURE.md for the schema and dispatch
-  contract.
+  far (#868 epic): format_lint (golangci-lint v2 — one pinned binary doing
+  both `fmt` and `run --fix`, Slice B #871) plus the static-analysis triple
+  sonarcloud + code_scanning + semgrep (Slice D #873 — all three ship, Go's
+  support in each is deep). Coverage (Slice E #874) and the vendor-PR sources
+  (Slice G #876) arrive in later slices; there is no coverage pre-flight yet,
+  so every invocation returns a plan. See ARCHITECTURE.md for the schema and
+  dispatch contract.
 disable-model-invocation: false
 ---
 
@@ -20,21 +22,30 @@ tools yourself**, and you **do not spawn the per-group work agents** —
 that's the orchestrator's job (one PR per planner group, sequential
 through Phase 8 of `development:maintenance`).
 
-**This slice has a single phase.** The sibling dispatchers
-(`development-python`, `development-java`, `development-swift`) split
-into a Phase A coverage-improver invocation and a Phase B planning
-invocation. Go coverage measurement arrives in **Slice E (#874)**, so
-there is **no coverage pre-flight here and no `go-coverage-improver` to
-spawn**: every invocation is a planning invocation that returns `plan`.
-Never emit `improver_result` this slice — there is no improver to
-produce one.
+**This slice still has a single phase — deliberately.** The sibling
+dispatchers (`development-python`, `development-java`, `development-swift`)
+split into a Phase A coverage-improver invocation and a Phase B planning
+invocation, and they **gate the code-editing static-analysis triagers
+(`sonarcloud` / `code_scanning` / `semgrep`) on coverage** before dispatch:
+a change to under-covered code halts until the improver raises coverage.
+Go coverage measurement arrives only in **Slice E (#874)**, so this
+dispatcher has **no coverage pre-flight and no `go-coverage-improver` to
+spawn**: every invocation is a planning invocation that returns `plan`, and
+`improver_result` is never emitted.
 
-That is consistent rather than a gap: `format_lint` is
-behavior-preserving and **coverage-exempt** in every sibling dispatcher
-too, so a format-only run never triggers the pre-flight anywhere. Since
-`format_lint` is currently the *only* tool in this plugin's universe,
-the pre-flight would be a guaranteed no-op. Slice E adds both the
-measurement and the gate together.
+> **Design decision (for the Slice E author).** Slice D ships the
+> static-analysis triple **without** the coverage safety gate, because the
+> gate's measurement doesn't exist yet. In the interim the safety net is
+> the same one `format_lint` already relies on: the per-issue test run each
+> triage agent performs before committing, plus the human/Approver review
+> on every PR. This is the sibling dispatchers' own "greenfield / no tests"
+> path (they plan directly when there is no trustworthy coverage signal),
+> made structural here because coverage is universally absent this slice.
+> **Slice E must add the coverage pre-flight that gates `sonarcloud` /
+> `code_scanning` / `semgrep`** — they are coverage-**respecting** tools
+> (they edit real code under test), and once a trustworthy figure exists
+> they should be gated exactly as the siblings gate them. `format_lint`
+> stays coverage-**exempt** (behavior-preserving) forever.
 
 ### Auxiliary mode — check `dispatch_mode` FIRST
 
@@ -58,18 +69,22 @@ product (see ARCHITECTURE.md § "Primary / auxiliary model"). So:
   constructing the group yourself would omit `priority_score`,
   `suggested_pr_title`, and `isolation`, which Phase 8 reads for the
   commit subject and the worktree decision.
-- The non-mechanical triagers and dependency work that later slices add
-  are **skipped** in auxiliary mode (an auxiliary Go isn't the product),
-  exactly as development-java does. This slice ships none of them, so
-  auxiliary and primary currently produce the same plan — state that in
-  the **rendered plan summary** (the text you print to the user), not in
-  the response JSON, whose keys are fixed.
+- The non-mechanical triagers (`sonarcloud`, `code_scanning`, `semgrep`)
+  and the dependency work later slices add are **skipped** in auxiliary
+  mode — an auxiliary Go isn't the product, so only its mechanical,
+  behavior-preserving layer is maintained, exactly as development-java
+  does. Concretely: pass the planner **only the `format_lint` findings**
+  (intersect the supported set with `{format_lint}`), even when the
+  payload also carries Sonar / Code Scanning / semgrep findings. List the
+  skipped tools in the **rendered plan summary** (the text you print to
+  the user), not in the response JSON, whose keys are fixed.
 - Return `plan` + `ci_fixer_agent` + `missing_tooling`. **Never**
   `improver_result`.
 
 Then proceed with the flow below **in both modes** — `"primary"` (or an
-absent `dispatch_mode`) simply has no tools to skip this slice, since
-`format_lint` is the whole universe.
+absent `dispatch_mode`) skips nothing: all four tools (`format_lint` plus
+the `sonarcloud` / `code_scanning` / `semgrep` triple) are planned.
+Auxiliary mode is the only one that narrows the set, to `format_lint`.
 
 **User input:** $ARGUMENTS
 
@@ -86,33 +101,39 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "go",
   "dispatch_mode": "primary",
   "language_meta": { "version": "1.24", "manifests": ["go.mod"] },
-  "tooling_configured": { "format_lint": true },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true },
   "findings_by_tool": {
-    "format_lint": [ /* golangci-lint fmt findings: type, severity, rule, component, line, message, key */ ]
+    "format_lint":          [ /* golangci-lint fmt findings: type, severity, rule, component, line, message, key */ ],
+    "sonarcloud":           [ /* normalized Sonar Go findings: type, severity, rule, component, line, message, key */ ],
+    "code_scanning_alerts": [ /* CodeQL go + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ],
+    "semgrep":              [ /* semgrep results: check_id, path, start/end, extra.message, extra.severity */ ]
   },
   "coverage": { "overall": null, "by_module": {}, "regions": [], "measurement": { "source": "none", "reliable": false, "reason": "..." } },
   "policy": { "coverage_threshold": 90, "severity_gate": "high", "allow_nosemgrep_with_justification": true },
   "worktree": { "available": true, "base_branch": "main" },
-  "dispatch_filter": { "only_tools": ["format_lint"] }
+  "dispatch_filter": { "only_tools": ["sonarcloud"] }
 }
 ```
 
 `tooling_configured` lists every tool this plugin cares about, even ones
 not set up for this project. `findings_by_tool` only contains keys for
-configured tools (zero findings → `[]`; unconfigured → absent).
+configured tools (zero findings → `[]`; unconfigured → absent). Note the
+Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
+`sonar_quality_gate` (top-level, from the gather) rides alongside.
 `dispatch_filter` is optional — added only when the user passed `--tool`.
 
 > **Tool universe (so far).** `development-go` supports **`format_lint`**
-> only — golangci-lint v2, a single pinned binary covering both the
-> formatters (`golangci-lint fmt`: gofumpt + import ordering via
-> gci/goimports) and the autofixable lint subset (`golangci-lint run
-> --fix`). Non-autofixable golangci-lint diagnostics are deliberately
-> **not** `format_lint`; they belong to the Slice D (#873) triage agents.
-> `sonarcloud` / `code_scanning` / `semgrep` (Slice D, #873), coverage
-> (Slice E, #874) and the vendor-PR sources `dependabot` / `snyk_prs` /
-> `renovate` (Slice G, #876) are **not yet in the universe** and the
-> gather does not emit keys for them. Validate and route against the
-> supported set only.
+> (golangci-lint v2 — one pinned binary for both `fmt` and `run --fix`)
+> and the **static-analysis triple** (Slice D, #873): **`sonarcloud`**
+> (Sonar's Go analyzer), **`code_scanning`** (CodeQL `go` + Scorecard),
+> and **`semgrep`** (`--config=auto`, which covers Go). All three scanners
+> ship — Go's support in each is deep, unlike Swift, whose semgrep was
+> deferred for an empty rule registry (#443). Non-autofixable golangci-lint
+> diagnostics are **not** `format_lint`; the triple's agents own the
+> judgment-bearing findings. Coverage (Slice E, #874) and the vendor-PR
+> sources `dependabot` / `snyk_prs` / `renovate` (Slice G, #876) are **not
+> yet in the universe** and the gather does not emit keys for them.
+> Validate and route against the supported set only.
 
 ## Validation
 
@@ -139,33 +160,33 @@ configured tools (zero findings → `[]`; unconfigured → absent).
 3. Confirm `language == "go"`. If not, error — the orchestrator misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). This slice's supported
-   set is exactly `format_lint`. `only_tools` is a **list**, so classify
-   every name first, then act on the partition as a whole — a
-   `--concern` expansion routinely mixes categories:
+   set is `format_lint`, `sonarcloud`, `code_scanning`, `semgrep`.
+   `only_tools` is a **list**, so classify every name first, then act on
+   the partition as a whole — a `--concern` expansion routinely mixes
+   categories:
 
    - **Outside the family's tool vocabulary** (not one of `format_lint`,
      `sonarcloud`, `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`,
      `renovate`, `container_scan`) → **halt**, whatever else the list
      holds: "Unknown tool '`<X>`' in dispatch_filter.only_tools;
-     development-go supports: format_lint." That really is a malformed
-     payload.
+     development-go supports: format_lint, sonarcloud, code_scanning,
+     semgrep." That really is a malformed payload.
    - Otherwise, **scope the planner to the intersection** of `only_tools`
-     with this slice's supported set — i.e. plan `format_lint` whenever
-     it appears, even alongside names this slice doesn't have. Dropping
-     real `format_lint` findings because `semgrep` rode along in the same
+     with this slice's supported set — i.e. plan the supported tools that
+     appear, even alongside names this slice doesn't have. Dropping real
+     `sonarcloud` findings because `dependabot` rode along in the same
      filter would silently under-deliver.
    - **When that intersection is empty** (the filter named only
      later-slice tools) → **do not halt.** Skip the Planning step and
      return the normal response with `plan: []`. Halting would abort the
      whole `/development:maintenance` run whenever a user scopes it with
-     `--concern=security` on a repo that happens to contain Go — the
+     `--concern=dependencies` on a repo that happens to contain Go — the
      concern expands to tools this slice doesn't have, which is "nothing
      to do for Go", not an error.
    - Either way, **name each later-slice tool in the rendered plan
      summary** (the text you print to the user — *not* the response
      JSON, whose keys are fixed), together with the slice that adds it:
-     `sonarcloud` / `code_scanning` / `semgrep` → #873, coverage →
-     #874, `dependabot` / `snyk_prs` / `renovate` → #876. For
+     coverage → #874, `dependabot` / `snyk_prs` / `renovate` → #876. For
      `container_scan` say **"not scheduled for Go — the blessed image
      path is ko, which has no Dockerfile to scan"**; do not invent an
      issue number for it.
@@ -195,7 +216,10 @@ Agent(
   prompt="""
     repo_path: <repo.path>
     findings: <union of every CONFIGURED tool's findings, each augmented
-              with a `_tool` field naming its source>
+              with a `_tool` field naming its source — use the ROUTING tool
+              name, not the findings_by_tool key: the `code_scanning_alerts`
+              findings are tagged `_tool: "code_scanning"` (the planner's §5
+              routes on that), the others tag with their own key>
     coverage.by_module: <coverage.by_module>
     policy.priority_window_days: <policy.priority_window_days or 30>
     worktree.base_branch: <worktree.base_branch>
@@ -280,7 +304,11 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
 
   Each tool's `summary` / `what_it_provides` / `how_to_add` copy lives in
   its agent file's `missing_tool_recommendation` block (`format_lint` →
-  `go-format-lint-fixer.md`); reuse it verbatim.
+  `go-format-lint-fixer.md`, `sonarcloud` → `go-sonar-triage.md`,
+  `code_scanning` → `go-code-scanning-triage.md`, `semgrep` →
+  `go-semgrep-triage.md`); reuse it verbatim. Every supported tool has a
+  real agent file — none is emitted inline (contrast Swift, whose deferred
+  semgrep has no agent, so its entry is inlined in the Swift dispatcher).
 
 `actions_taken`, `actions_requiring_review`, and `unable_to_fix` are
 **not** the dispatcher's responsibility — they're produced by the
@@ -312,11 +340,25 @@ per-group work agents the orchestrator spawns in Phase 8.
   are scaffolds until platform M1/M2, which would gate Slices C–I on
   milestones this repo does not control. The platform services remain the
   *driving consumer*; they are not the *test-bed*.
+- **Static-analysis triple — all three ship (Slice D, #873).** The
+  support-depth gate the issue mandated was run and recorded: Sonar's Go
+  analyzer (dozens of rules across bugs / smells / vulns / hotspots),
+  CodeQL `go` (first-class core language, own Go-written extractor,
+  module-aware, full dataflow), and semgrep Go (GA maturity, cross-file
+  dataflow, community Go rules that `--config=auto` finds). **None was
+  deferred** — the Swift lesson (#443) was semgrep's *empty* Swift
+  registry; Go's is deep, so `go-semgrep-triage` ships like Java's. All
+  three reuse the language-agnostic gather helpers (`gather-sonarcloud.zsh`,
+  `gather-github-security.zsh`) exactly as Java and Swift do.
 - **Coverage** is withheld, not guessed, until Slice E (#874) decides the
   enforced number's semantics (per-package profile vs `-coverpkg` — epic
   #868 hard part 4) and ships the parser. The gather emits
   `coverage.overall: null` with `reliable: false` and a reason, per the
-  trustworthy-or-withheld discipline (#258).
+  trustworthy-or-withheld discipline (#258). **Consequence for Slice D:**
+  the static-analysis triple edits real code but ships **without** the
+  coverage safety gate the siblings apply, because the measurement doesn't
+  exist yet — Slice E must add the pre-flight that gates them (see the
+  single-phase note above).
 - **No Dockerfile.** The blessed image path is **ko** (`.ko.yaml` with a
   digest-pinned static base image), so the runtime-upgrade agent Slice G
   (#876) adds will bump the `go`/`toolchain` directives in `go.mod` and

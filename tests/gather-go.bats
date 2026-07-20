@@ -29,7 +29,7 @@ setup() {
   mkdir -p "$WORK" "$STUB" "$ISO"
   # bash/env/cat are needed to *launch* the gather (and the stub) under the
   # isolated PATH, not just by the gather's own body.
-  for util in bash env cat rm mktemp grep sed sort tail jq; do
+  for util in bash env cat rm dirname ls mktemp grep sed sort tail cut head tr jq; do
     ln -sf "$(command -v "$util")" "$ISO/$util"
   done
   printf 'module github.com/timo-jakob/testbed\n\ngo 1.24\n' > "$WORK/go.mod"
@@ -51,6 +51,18 @@ stub_golangci() {
 # Run with ONLY the stubbed golangci-lint visible (never the host's).
 with_stub() { run env PATH="$STUB:$ISO" bash "$GATHER" "$@"; }
 
+# Install a fake `zsh` that IGNORES the helper script it's handed and prints $1,
+# exiting $2. The sonar/code_scanning helpers carry a `#!/usr/bin/env zsh`
+# shebang, so shadowing `zsh` on PATH lets a test exercise the gather's
+# helper-invocation + parse path deterministically — without the real zsh
+# helpers, `gh`, a keychain token, or the network. (`with_stub`'s PATH is
+# `$STUB:$ISO`, so `env zsh` finds this stub.)
+stub_zsh() {
+  printf '%s\n' "$1" > "$STUB/zsh-out.json"
+  printf '#!/usr/bin/env bash\ncat %q\nexit %d\n' "$STUB/zsh-out.json" "$2" > "$STUB/zsh"
+  chmod +x "$STUB/zsh"
+}
+
 @test "gather-go: no golangci config -> format_lint not configured, valid JSON" {
   no_binary "$WORK"
   [ "$status" -eq 0 ]
@@ -66,6 +78,7 @@ with_stub() { run env PATH="$STUB:$ISO" bash "$GATHER" "$@"; }
   [ "$(jq -r 'has("tooling_configured")' <<<"$output")" = "true" ]
   [ "$(jq -r 'has("findings_by_tool")' <<<"$output")" = "true" ]
   [ "$(jq -r 'has("coverage")' <<<"$output")" = "true" ]
+  [ "$(jq -r 'has("sonar_quality_gate")' <<<"$output")" = "true" ]
   [ "$(jq -r 'has("notes")' <<<"$output")" = "true" ]
 }
 
@@ -134,18 +147,115 @@ with_stub() { run env PATH="$STUB:$ISO" bash "$GATHER" "$@"; }
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 
-@test "gather-go: tool universe is format_lint ONLY this slice (#871)" {
-  # Slice B declares exactly the tools development-go can actually process.
-  # Later slices add sonarcloud/code_scanning/semgrep (#873), coverage (#874),
-  # and the vendor-PR sources (#876) — emitting them as `false` now would imply
-  # this plugin handles them once configured.
+@test "gather-go: tool universe is the format_lint + static-analysis-triple this slice (#873)" {
+  # Slice D adds sonarcloud/code_scanning/semgrep to the format_lint of Slice B.
+  # The vendor-PR sources (#876) are still NOT in the universe — emitting them
+  # as `false` now would imply this plugin handles them once configured.
   no_binary "$WORK"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "1" ]
-  [ "$(jq -r '.tooling_configured | has("format_lint")' <<<"$output")" = "true" ]
-  for tool in sonarcloud code_scanning semgrep dependabot snyk_prs renovate; do
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "4" ]
+  for tool in format_lint sonarcloud code_scanning semgrep; do
+    [ "$(jq -r ".tooling_configured | has(\"$tool\")" <<<"$output")" = "true" ]
+  done
+  for tool in dependabot snyk_prs renovate; do
     [ "$(jq -r ".tooling_configured | has(\"$tool\")" <<<"$output")" = "false" ]
   done
+}
+
+@test "gather-go: semgrep SHIPS for Go (not deferred like Swift) — configured when a hook is present (#873)" {
+  # The Swift lesson (#443) was semgrep's EMPTY Swift registry. Go's semgrep is
+  # GA, so unlike Swift the tool is real: a semgrep hook makes it configured,
+  # and with the binary absent the key is present as an empty array.
+  printf 'repos:\n  - repo: https://github.com/semgrep/semgrep\n' > "$WORK/.pre-commit-config.yaml"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.semgrep <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.semgrep | type' <<<"$output")" = "array" ]
+  echo "$output" | jq -e '[.notes[] | select(test("semgrep is configured but"))] | length == 1' >/dev/null
+}
+
+@test "gather-go: sonar-project.properties present -> sonarcloud configured; helper unavailable degrades to [] (#873)" {
+  printf 'sonar.organization=acme\nsonar.projectKey=acme_svc\n' > "$WORK/sonar-project.properties"
+  # no_binary: zsh is absent from the isolated PATH, so the zsh-shebang'd helper
+  # can't exec (env exits 127) and the gather takes its else branch — configured
+  # true, findings an empty array. This is the deliberate degraded branch.
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.sonarcloud <<<"$output")" = "true" ]
+  [ "$(jq -c '.findings_by_tool.sonarcloud' <<<"$output")" = "[]" ]
+}
+
+@test "gather-go: sonarcloud helper output is parsed — findings + quality gate propagate (#873)" {
+  printf 'sonar.organization=acme\nsonar.projectKey=acme_svc\n' > "$WORK/sonar-project.properties"
+  stub_zsh '{"findings":[{"type":"CODE_SMELL","severity":"MAJOR","rule":"go:S1192","component":"main.go","line":3,"message":"m","key":"k"}],"quality_gate":{"status":"ERROR"}}' 0
+  with_stub "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings_by_tool.sonarcloud | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.sonarcloud[0].rule' <<<"$output")" = "go:S1192" ]
+  # The top-level sonar_quality_gate propagates from the helper.
+  [ "$(jq -r '.sonar_quality_gate.status' <<<"$output")" = "ERROR" ]
+}
+
+@test "gather-go: a failing sonarcloud helper (exit 1) degrades to [] without aborting the gather (#873)" {
+  printf 'sonar.organization=acme\nsonar.projectKey=acme_svc\n' > "$WORK/sonar-project.properties"
+  stub_zsh '' 1
+  with_stub "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.findings_by_tool.sonarcloud' <<<"$output")" = "[]" ]
+  [ "$(jq -r '.sonar_quality_gate' <<<"$output")" = "null" ]
+}
+
+@test "gather-go: a helper that exits 0 with EMPTY stdout still yields valid JSON (#873)" {
+  # The slurp guard: non-slurped jq on empty input emits nothing and exits 0,
+  # so the || fallback wouldn't fire and the final --argjson would abort the
+  # whole emit. jq -s makes empty input resolve to []/null.
+  printf 'sonar.organization=acme\nsonar.projectKey=acme_svc\n' > "$WORK/sonar-project.properties"
+  stub_zsh '' 0
+  with_stub "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e . >/dev/null
+  [ "$(jq -c '.findings_by_tool.sonarcloud' <<<"$output")" = "[]" ]
+  [ "$(jq -r '.sonar_quality_gate' <<<"$output")" = "null" ]
+}
+
+@test "gather-go: sonar-project.properties missing org/key -> configured but an honest note (#873)" {
+  printf '# no org or projectKey here\n' > "$WORK/sonar-project.properties"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.sonarcloud <<<"$output")" = "true" ]
+  echo "$output" | jq -e '[.notes[] | select(test("missing .sonar.organization. or .sonar.projectKey."))] | length == 1' >/dev/null
+}
+
+@test "gather-go: a CodeQL workflow present -> code_scanning configured; helper unavailable degrades to [] (#873)" {
+  mkdir -p "$WORK/.github/workflows"
+  printf 'name: CodeQL\non: [push]\njobs: {}\n' > "$WORK/.github/workflows/codeql.yml"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.code_scanning <<<"$output")" = "true" ]
+  # The findings key is code_scanning_alerts, not code_scanning.
+  [ "$(jq -c '.findings_by_tool.code_scanning_alerts' <<<"$output")" = "[]" ]
+}
+
+@test "gather-go: code_scanning helper output is parsed into code_scanning_alerts (#873)" {
+  mkdir -p "$WORK/.github/workflows"
+  printf 'name: CodeQL\non: [push]\njobs: {}\n' > "$WORK/.github/workflows/codeql.yml"
+  stub_zsh '{"code_scanning_alerts":[{"number":7,"rule_id":"go/sql-injection","severity":"high","tool":"CodeQL","file":"internal/store/orders.go","line":81,"message":"m","html_url":"u"}]}' 0
+  with_stub "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings_by_tool.code_scanning_alerts | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.code_scanning_alerts[0].rule_id' <<<"$output")" = "go/sql-injection" ]
+}
+
+@test "gather-go: bare project -> the static-analysis triple reports not-configured, no findings keys (#873)" {
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  for tool in sonarcloud code_scanning semgrep; do
+    [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
+  done
+  # Unconfigured -> absent from findings_by_tool (contract for the whole family).
+  [ "$(jq -r '.findings_by_tool | has("sonarcloud")' <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("code_scanning_alerts")' <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("semgrep")' <<<"$output")" = "false" ]
 }
 
 @test "gather-go: a dependabot.yml does NOT make the vendor sources appear (#876 not this slice)" {
@@ -356,12 +466,14 @@ with_stub() { run env PATH="$STUB:$ISO" bash "$GATHER" "$@"; }
   echo "$output" | jq -e '[.notes[] | select(test("not on PATH"))] | length == 0' >/dev/null
 }
 
-@test "gather-go: two config files present -> still exactly one format_lint key" {
+@test "gather-go: two golangci config files present -> format_lint still configured once" {
   printf 'version: "2"\n' > "$WORK/.golangci.yml"
   printf 'version = "2"\n' > "$WORK/.golangci.toml"
   no_binary "$WORK"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "1" ]
+  # tooling_configured keys are unique by construction; the guard is that two
+  # config spellings don't confuse the boolean or add a spurious key.
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "4" ]
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 

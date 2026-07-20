@@ -98,13 +98,27 @@ no Go CI check is literally named `format_lint`:
 | `pr_scope.tool` | Check names that ARE "this PR's tool" |
 | --- | --- |
 | `format_lint` | any check whose name mentions `golangci-lint`, `lint`, `fmt`, or `format` (including the pre-commit job that runs them) |
+| `sonarcloud` | any check mentioning `sonar`, `SonarCloud`, or the quality gate |
+| `code_scanning` | any check mentioning `CodeQL`, `Code scanning`, or `Scorecard` |
+| `semgrep` | any check mentioning `semgrep` |
 
 | Failure shape | Classification | Action |
 | --- | --- | --- |
 | Failing check is **this PR's tool's** check, per the mapping above | **in scope**, regardless of which files it names | Fix (step 4) |
-| Failing check is for a **different tool** (a static-analysis or coverage check owned by a later slice) | **out of scope** — that tool has its own agent | Escalate, do NOT fix |
+| A scanner check for a tool **other than** `pr_scope.tool` (e.g. a CodeQL check on a `sonarcloud` PR) whose log names files **in this PR's diff** | **in scope as escalation** — this PR's edits newly tripped another tool's check | `resolved: false` + `escalation_recommendation` naming the owning triage agent; do NOT attempt the fix yourself |
+| A scanner check for a tool **other than** `pr_scope.tool` with **no** diff overlap, or a coverage check (no coverage gate until Slice E, #874) | **out of scope** — pre-existing / another tool's concern | `out_of_scope_failures` (safe to merge w.r.t. this PR) |
 | Other generic project check (`go build` / `go test`) referencing files **in the PR's diff** — *except* a `-race` failure, see § 3.5 | **in scope** — cross-tool damage caused by this PR's edits | Fix (step 4) |
-| Other generic check referencing files **outside the diff AND outside `pr_scope.files`** | **out of scope** — pre-existing project issue | Escalate, do NOT fix |
+| Other generic check referencing files **outside the diff AND outside `pr_scope.files`** | **out of scope** — pre-existing project issue | `out_of_scope_failures` |
+
+Why the split on the two scanner rows: `failing_checks` already excludes
+checks that were red on the base branch, so a *new* scanner failure whose log
+names files this PR touched was most likely **caused** by this PR's edits (a
+`go-sonar-triage` fix that introduces a fresh CodeQL or semgrep finding, say).
+Marking that `out_of_scope_failures` would declare the PR safe to merge while
+its own commit turned a required check red — the same mistake the `-race` and
+lint bullets guard against. So escalate it (`resolved: false`) rather than
+waving it through; only a scanner failure with no overlap to this PR's diff is
+genuinely someone else's problem.
 
 The first row is deliberately **not** narrowed to the PR's diff. On a
 `format_lint` PR the commonest real failure is CI's golangci-lint being a
@@ -133,12 +147,13 @@ Categories you'll commonly see on a Go project:
   one, or pre-commit didn't run. Run `golangci-lint fmt` and
   `golangci-lint run --fix`, then re-verify. Do **not** silence a
   remaining diagnostic with a `//nolint` directive or a `.golangci.yml`
-  edit; if it isn't autofixable, it belongs to a Slice D (#873) triage
-  agent — escalate it via **`resolved: false` +
-  `escalation_recommendation`**, never via `out_of_scope_failures`. The
-  failing check is still *this PR's tool's* check, and
-  `out_of_scope_failures` declares the PR **safe to merge** — which it is
-  not while its own required lint check is red.
+  edit; if it isn't autofixable, it belongs to one of the static-analysis
+  triage agents (`go-sonar-triage` / `go-code-scanning-triage` /
+  `go-semgrep-triage`), not to a format-lint PR — escalate it via
+  **`resolved: false` + `escalation_recommendation`**, never via
+  `out_of_scope_failures`. The failing check is still *this PR's tool's*
+  check, and `out_of_scope_failures` declares the PR **safe to merge** —
+  which it is not while its own required lint check is red.
 - **Compile error** — a missing import, an unused variable (a Go compile
   error, not a lint warning), or a signature mismatch. Run
   `go build ./...` to reproduce, then fix.
@@ -155,10 +170,13 @@ Categories you'll commonly see on a Go project:
   exception to classification row 3: a `-race` failure is **not** fixed
   here even when it names files in the PR's diff.
 
-This slice (#871) has **no coverage gate and no triage agents** — if a
-failure clearly originates from work outside the mechanical format/lint
-scope (a static-analysis or coverage check that arrives in a later
-slice), escalate it with an actionable recommendation rather than
+**Scope note.** The static-analysis triple (`sonarcloud`, `code_scanning`,
+`semgrep`) has its own triage agents as of Slice D (#873), so a failing
+scanner check on a PR whose `pr_scope.tool` is that same scanner is **in
+scope** (per the mapping above); a scanner check for a *different* tool is
+out of scope. Coverage has **no gate until Slice E (#874)** — a coverage-
+check failure this slice is always out of scope: record it in
+`out_of_scope_failures` with the recommendation in its `reason`, rather than
 iterating.
 
 ### 4. Apply the fix in the worktree
@@ -232,7 +250,7 @@ Or when the failure was classified out of scope:
 ```json
 {
   "resolved": true,
-  "summary": "The failing check is a static-analysis check owned by a later slice's triage agent; its log points at a file this PR didn't touch. Out of scope.",
+  "summary": "The failing check is a static-analysis check owned by a different tool's triage agent; its log points at a file this PR didn't touch. Out of scope.",
   "commit_sha": null,
   "files_changed": [],
   "out_of_scope_failures": [

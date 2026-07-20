@@ -37,11 +37,15 @@ Your prompt contains:
 - **Severity component** (normalize each tool's scale, case-insensitively):
   - golangci-lint format findings: `ERROR` → 0.7,
     `WARNING` / `MINOR` → 0.35, `INFO` → 0.1.
+  - Sonar: `BLOCKER` → 1.0, `CRITICAL` → 0.85, `MAJOR` → 0.6,
+    `MINOR` → 0.35, `INFO` → 0.1.
+  - Code Scanning (CodeQL/Scorecard): `critical` → 0.85, `high` → 0.7,
+    `medium` → 0.5, `low` → 0.3, `warning` → 0.2, `note`/`null` → 0.1.
+  - semgrep: `ERROR` → 0.7, `WARNING` → 0.4, `INFO` → 0.1.
   - Unmapped / missing severity → 0.3 (a sensible mid-low default so a
     finding is never dropped to zero priority for an unknown scale).
 
-  Later slices add more scales (Sonar and Code Scanning in Slice D,
-  #873); until then `format_lint` is the only source.
+  The vendor-PR sources add their own handling in Slice G (#876).
 
 - **Churn component (0–1):** for each finding's `component`, run
 
@@ -83,11 +87,13 @@ when they span different rules, files, or severities.
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
-> **Tool universe so far (#868 epic): `format_lint` only.** Static-analysis
-> triage (`sonarcloud`, `code_scanning`, `semgrep`) arrives in Slice D
-> (#873); coverage in Slice E (#874); the vendor-PR sources
-> (`dependabot`, `snyk_prs`, `renovate`) in Slice G (#876), where the
-> ecosystem + bump-level split lands. If a finding arrives carrying a
+> **Tool universe so far (#868 epic): `format_lint`, `sonarcloud`,
+> `code_scanning`, `semgrep`.** Static-analysis triage landed in Slice D
+> (#873) — all three scanners ship (unlike Swift, whose semgrep was
+> deferred for an empty registry; Go's semgrep support is GA). Coverage
+> arrives in Slice E (#874); the vendor-PR sources (`dependabot`,
+> `snyk_prs`, `renovate`) in Slice G (#876), where the ecosystem +
+> bump-level split lands. If a finding arrives carrying a
 > `_tool` you don't have a row for in § 5, that is a contract violation.
 > **Never guess an agent for it.** Exclude it from `plan` and from
 > `summary.total_findings`, and record it in the optional
@@ -109,11 +115,18 @@ Order groups by descending priority. Ties broken by:
 | Source tool | Agent for this group | `isolation` |
 | --- | --- | --- |
 | `format_lint` | `go-format-lint-fixer` | `true` |
+| `sonarcloud` | `go-sonar-triage` | `true` |
+| `code_scanning` | `go-code-scanning-triage` | `true` |
+| `semgrep` | `go-semgrep-triage` | `true` |
 
-`go-format-lint-fixer` edits local files, so its group is
-`isolation: true`. Later slices extend this table — notably the
-vendor-PR agents, which act on GitHub PRs via `gh` rather than the
-working tree and therefore carry `isolation: false` (#876).
+Every agent in this table edits local files, so each group is
+`isolation: true`. Later slices extend it — notably the vendor-PR
+agents, which act on GitHub PRs via `gh` rather than the working tree
+and therefore carry `isolation: false` (#876).
+
+The `findings_by_tool` key for Code Scanning is `code_scanning_alerts`
+(not `code_scanning`); the dispatcher augments each finding with
+`_tool: "code_scanning"` so you route it by the tool name, not the key.
 
 No group in this slice carries a `pre_dispatch_hook`; omit the field.
 

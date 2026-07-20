@@ -341,9 +341,15 @@ the **review panel**: `/development-go:review` running five specialists in
 parallel (bugs, security, performance, code quality, tests), built to double as
 risk-register lenses for the Slice H approver (the
 [#449](https://github.com/timo-jakob/timos-claude-code-plugins/issues/449)
-pattern). Static-analysis triage
-([#873](https://github.com/timo-jakob/timos-claude-code-plugins/issues/873)),
-coverage ([#874](https://github.com/timo-jakob/timos-claude-code-plugins/issues/874)),
+pattern). Slice D
+([#873](https://github.com/timo-jakob/timos-claude-code-plugins/issues/873)) —
+**static-analysis triage**: `go-sonar-triage`, `go-code-scanning-triage`, and
+`go-semgrep-triage`. All three scanners ship — the support-depth gate found
+Go's coverage deep in each (Sonar's Go analyzer, CodeQL's first-class `go`
+extractor, semgrep's GA Go rules with cross-file dataflow), so none was
+deferred the way Swift's semgrep was for an empty registry
+([#443](https://github.com/timo-jakob/timos-claude-code-plugins/issues/443)).
+Coverage ([#874](https://github.com/timo-jakob/timos-claude-code-plugins/issues/874)),
 bootstrap templates ([#875](https://github.com/timo-jakob/timos-claude-code-plugins/issues/875)),
 vendor PRs + upgrades ([#876](https://github.com/timo-jakob/timos-claude-code-plugins/issues/876)),
 the approver ([#877](https://github.com/timo-jakob/timos-claude-code-plugins/issues/877)),
@@ -388,3 +394,11 @@ alternative.
 | `go-performance-reviewer` | opus | Allocation pressure, N+1 I/O, lock contention, unbounded goroutine/channel growth, `defer`-in-loop |
 | `go-code-quality` | opus | Idiomatic Go (Effective Go norms), consumer-side interfaces, API design, error-wrapping discipline (`%w` vs `%v`) |
 | `go-test-reviewer` | opus | Coverage gaps, assertions that cannot fail, table-test quality, flakiness, and a missing `-race` in CI |
+
+**Agents (static-analysis triage, Slice D):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `go-sonar-triage` | opus | SonarCloud/SonarQube Go findings — LSP-first investigation, fix when behaviour-preserving, never suppress a BLOCKER/CRITICAL security finding |
+| `go-code-scanning-triage` | opus | CodeQL `go` + Scorecard alerts — Tier-A mechanical fixes (SHA-pin actions), dataflow findings escalated by category, repo-policy findings informational-only |
+| `go-semgrep-triage` | opus | semgrep Go findings — fix / `// nosemgrep`-suppress with justification / escalate only when an exported API or interface would change |
