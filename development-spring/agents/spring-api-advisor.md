@@ -45,7 +45,9 @@ Your prompt contains:
 - `findings` — the `api-audit` findings array (only when
   `configured == true`), each with:
   - `component` — a build file path (`build.gradle.kts`)
-  - `rule` — `spring:api-audit`
+  - `rule` — `spring:api-audit`, or `spring:sunset-passed` (#708 — a live
+    major past its major-level `x-sunset`, still served; `component` is that
+    major's spec path)
 - `commit_subject` — the suggested PR title for this group.
 - `policy.severity_gate` — informational.
 
@@ -158,6 +160,18 @@ auto-apply:
   generating the spec FROM code is present. Recommend migrating to
   contract-first (the committed spec becomes authoritative). Note this is
   the rejected direction per #296 — flag it, don't auto-change.
+
+- **Sunset passed, major still served (`spring:sunset-passed`, #708).** The
+  finding names a major whose spec carries a **major-level** `x-sunset` that has
+  already passed, yet the major is still wired and served. Retirement is
+  **destructive and contract-breaking** — recommend, **never** auto-apply, and
+  never before confirming consumers have migrated (a published spec package can
+  still be pinned by someone). Recommend the documented steps (CONTRACTS.md >
+  Retirement): delete the major's anti-corruption adapter (`src/api/<vN>/`), its
+  `openApiGenerate<Vn>` task + source-set entry, and its `contracts/<vN>/` spec;
+  then make the gateway return `410 Gone` for `/vN/`. Once `contracts/<vN>/` is
+  gone the major is no longer live, so the per-major gate stops running for it
+  and the finding clears.
 
 ### `unable_to_fix` when
 

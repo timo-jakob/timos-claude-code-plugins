@@ -419,14 +419,43 @@ if [[ "$has_openapi_config" == "true" ]]; then
 	if [[ "$oa_major_count" -gt 1 ]]; then
 		oa_msg="${oa_msg} Multi-major layout detected (${oa_majors// /, }) — recommend one openApiGenerate task per LIVE major (contracts/vN/), so the impl-matches-spec drift gate runs per major (#694)."
 	fi
+	# Sunset enforcement (#708): a live major whose spec carries a major-level
+	# x-sunset that has already passed is still being served — it should have
+	# been retired. Emit one sunset-passed finding per expired major alongside
+	# the audit. The scan degrades to [] if the helper or yq/jq is unavailable.
+	oa_sunset='[]'
+	if [[ -x "$SCRIPT_DIR/scan-contracts-sunset.zsh" ]]; then
+		oa_sunset_rc=0
+		oa_sunset="$(zsh "$SCRIPT_DIR/scan-contracts-sunset.zsh" --repo . 2>/dev/null)" || oa_sunset_rc=$?
+		if [[ "$oa_sunset_rc" -ne 0 || -z "$oa_sunset" ]]; then
+			oa_sunset='[]'
+			# NEVER let a tool failure read as "nothing to enforce" — that is a
+			# silent false negative on the one check whose point is enforcement.
+			notes+=("openapi: sunset scan failed (scan-contracts-sunset.zsh exit ${oa_sunset_rc}; is yq installed?) — expired-major enforcement was NOT evaluated.")
+		fi
+	else
+		notes+=("openapi: sunset scan skipped (scan-contracts-sunset.zsh missing or not executable) — expired-major enforcement was NOT evaluated.")
+	fi
+	# The contract-audit finding needs a build file; the sunset findings do NOT
+	# (their component is the spec itself), so they must be emitted even when no
+	# root build.gradle.kts is found — otherwise an expired major goes unreported
+	# in exactly the repos whose build file sits deeper than maxdepth 2.
+	oa_audit='[]'
 	if [[ -n "$oa_build" ]]; then
-		jq -n --arg c "${oa_build#./}" --arg m "$oa_msg" '[{
+		oa_audit="$(jq -n --arg c "${oa_build#./}" --arg m "$oa_msg" '[{
 			type: "config", severity: "MINOR", rule: "openapi:contract-audit",
 			component: $c, line: 0,
 			message: $m,
 			key: ("openapi:contract-audit:" + $c)
-		}]' >"$findings_dir/openapi.json"
+		}]')"
 	fi
+	jq -n --argjson audit "$oa_audit" --argjson sunset "$oa_sunset" '$audit
+		+ ($sunset | map(select(.expired == true) | {
+			type: "config", severity: "MAJOR", rule: "openapi:sunset-passed",
+			component: .spec, line: 0,
+			message: ("Major " + .major + " passed its sunset date (" + .sunset + ") but is still served — it should have been retired. Retirement removes the anti-corruption adapter (src/api/" + .major + "/) and " + .spec + ", and the gateway returns 410 Gone for /" + .major + "/. See CONTRACTS.md > Retirement (#708)."),
+			key: ("openapi:sunset-passed:" + .major)
+		}))' >"$findings_dir/openapi.json"
 fi
 
 # --- coverage (JaCoCo) -------------------------------------------------------

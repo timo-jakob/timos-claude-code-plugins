@@ -262,3 +262,65 @@ EOF
   msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
   [[ "$msg" != *"Multi-major"* ]]
 }
+
+@test "gather-java #708: a major past its x-sunset -> sunset-passed finding" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.1.0\nx-sunset: "2020-01-01"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  printf 'openapi: 3.1.0\ninfo:\n  title: T\n  version: "2.0.0"\n' > "$WORK/contracts/v2/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed")] | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .component' <<<"$output")" = "contracts/v1/openapi.yaml" ]
+  [ "$(jq -r '.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .severity' <<<"$output")" = "MAJOR" ]
+  msg="$(jq -r '.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .message' <<<"$output")"
+  [[ "$msg" == *"410 Gone"* ]]
+}
+
+@test "gather-java #708: a not-yet-expired sunset produces NO sunset-passed finding" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1"
+  printf 'openapi: 3.1.0\nx-sunset: "2099-12-31"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  # the audit finding is still there; only the sunset one must be absent
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:contract-audit")] | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed")] | length' <<<"$output")" = "0" ]
+}
+
+@test "gather-java #708: mixed majors — ONLY the expired one is reported (non-vacuous)" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.1.0\nx-sunset: "2020-01-01"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  printf 'openapi: 3.1.0\nx-sunset: "2099-12-31"\ninfo:\n  title: T\n  version: "2.0.0"\n' > "$WORK/contracts/v2/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  # proves the scan RAN (one finding), that polarity is right, and that the
+  # future-dated major was excluded — none of which a bare "count == 0" shows
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed")] | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .component' <<<"$output")" = "contracts/v1/openapi.yaml" ]
+}
+
+@test "gather-java #708: sunset findings are emitted even with NO root build.gradle.kts" {
+  # the sunset finding's component is the spec, not the build file — so it must
+  # not be lost in repos whose build file sits deeper than the maxdepth-2 scan
+  mkdir -p "$WORK/app/sub" "$WORK/contracts/v1"
+  printf 'plugins { java }\n' > "$WORK/app/sub/build.gradle.kts"
+  printf 'openapi: 3.1.0\nx-sunset: "2020-01-01"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed")] | length' <<<"$output")" = "1" ]
+}
+
+@test "gather-java #708: two expired majors -> one finding each, with unique keys" {
+  printf 'plugins { java }\n' > "$WORK/build.gradle.kts"
+  mkdir -p "$WORK/contracts/v1" "$WORK/contracts/v2"
+  printf 'openapi: 3.1.0\nx-sunset: "2020-01-01"\ninfo:\n  title: T\n  version: "1.0.0"\n' > "$WORK/contracts/v1/openapi.yaml"
+  printf 'openapi: 3.1.0\nx-sunset: "2021-01-01"\ninfo:\n  title: T\n  version: "2.0.0"\n' > "$WORK/contracts/v2/openapi.yaml"
+  run bash "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed")] | length' <<<"$output")" = "2" ]
+  # key is the downstream dedup identity — it must differ per major
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .key] | unique | length' <<<"$output")" = "2" ]
+  [ "$(jq -r '[.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .key] | index("openapi:sunset-passed:v1")' <<<"$output")" != "null" ]
+}
