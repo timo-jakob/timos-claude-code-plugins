@@ -1165,6 +1165,17 @@ For each detected language, merge in the appropriate config from
   nebula versioning TODO in the Java-specific recommendation above (the
   workflow assumes the plugin is applied + no hardcoded `version`). Apply the
   standard idempotency rules (skip/diff if either exists).
+- **JavaScript contract-consumer note (#727):** render the base
+  `eslint.config.js` and `vitest.config.ts` **normally here** — unconditionally,
+  with no dependence on the §3k seeder verdict. When the repo is a contract
+  consumer, §3k **supersedes** them: it *overwrites* both with the consumer
+  variants (each is the base config **plus** the ACL boundary / MSW wiring), a
+  deliberate upgrade that §3k applies as an explicit overwrite when the on-disk
+  file matches the base template (falling back to rule 3's prompt if the user
+  customized it — see §3k for the full rule). Rendering the base here first is
+  intentional and load-bearing: if §3k does not complete (not a consumer, or
+  activation fails after seeding), the base configs are already in place, so the
+  repo is **never left config-less**.
 
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
 
@@ -1581,6 +1592,182 @@ half of #694): the `java-openapi-advisor` / `spring-api-advisor` wire
 into its own source set, so the adapter `implements <Vn>Api` and a spec/adapter
 drift **fails the build** — run once per live major. Until that lands, this
 skeleton is illustrative; note it in the Step 5 checklist.
+
+### 3k. API contract-consumer machinery (JS/TS repo consuming a spec — #727)
+
+The mirror of §3i: where §3i makes a **producer** publish a versioned contract,
+this makes a JavaScript/TypeScript **consumer** talk to that contract through a
+**generated, drift-proof** client — with **zero repo-to-repo dependency**. A
+consumer pins the producer's published `*-api-spec` npm package (the #684 machine
+channel) and the plugin scaffolds generation of a typed `fetch` client + MSW
+mocks from it. It is **framework-agnostic** — it owns *generation*; the Angular
+`HttpClient` / React Query *binding* is the topic plugins' job (#685/#686).
+
+**Detection is the seed script's exit code, not a `detect-stack` field**, and it
+slots into the Step 1→2→2.5→3 pipeline like every other artifact:
+
+- **Step 2 (plan) — detect in `--plan` mode (writes NOTHING).** The seeder must
+  run to build the plan entry, but it must not mutate the repo before approval,
+  so run it read-only:
+
+  ```bash
+  "<skill-base-dir>/scripts/seed-orval-targets.zsh" --plan "<repo-path>"
+  #   0 → ≥1 *-api-spec dependency found → this repo IS a contract consumer;
+  #       plan §3k. The JSON `targets[]` are what WOULD be seeded (nothing written).
+  #   3 → no *-api-spec dependency → NOT a consumer. Skip §3k (common case, not
+  #       an error). Plan nothing below; the base javascript configs §3d renders
+  #       unconditionally (independent of this verdict) simply remain the final state.
+  #   2 → usage/precondition error (no package.json, malformed package.json, jq
+  #       missing). Report it; do NOT treat as "not a consumer". Fix and re-run,
+  #       or (if unfixable, e.g. the user won't install jq) skip §3k and record it
+  #       in the Step 5 checklist as un-scaffolded.
+  #   any other code → treat as a §3k failure: report it, render nothing for §3k,
+  #       and note the skipped machinery in the Step 5 checklist.
+  ```
+
+  §3d renders the **base** javascript configs unconditionally; §3k (below)
+  *overwrites* `eslint.config.js`/`vitest.config.ts` with the consumer variants
+  when it completes. There is no ordering dependency between §3d and this plan
+  run — the base configs are the floor, the consumer variants the upgrade.
+
+- **Report the plan honestly from the JSON** (`planned`, `seeded`, `targets[]`,
+  `reason` — the reliable-reporting principle): `seeded:false, planned:true`
+  with a `reason` naming an existing `orval.config.ts` → present it as
+  "existing `orval.config.ts` left untouched; detected spec deps: …", **not** as
+  freshly-seeded targets. Otherwise present `targets[]` as what will be seeded.
+
+- **Step 3 (write, after approval) — seed for real.** Run the seeder WITHOUT
+  `--plan` so it writes `orval.config.ts`:
+
+  ```bash
+  "<skill-base-dir>/scripts/seed-orval-targets.zsh" "<repo-path>"
+  ```
+
+  **Re-check this run's exit code.** The real run is as fallible as the plan run
+  (exit 2 if `package.json` broke or `jq` vanished between plan and write; exit 3
+  if the spec dep was removed after approval). On **any** non-zero exit, **stop
+  and render nothing further for §3k** (do not render the consumer set with no
+  `orval.config.ts` on disk) and record it in the Step 5 checklist. There is no
+  config-gap risk: §3d already rendered the base `eslint.config.js`/`vitest.config.ts`,
+  and §3k only overwrites them on completion — so a stopped §3k simply leaves the
+  base configs in place.
+
+  `orval.config.ts` is a **starter**: authoritative and **editable** thereafter
+  (one target per spec; multiple specs → multiple targets). An existing one is
+  **left untouched without prompting** — stronger than idempotency rule 3, because
+  once seeded the file is the user's authoritative config, not a re-offerable
+  scaffold.
+
+Then render the consumer set. The two workflows carry `{{DEFAULT_BRANCH}}`; the
+TS/config files carry no `{{…}}` placeholders, **but the ACL and MSW scaffolds
+are NOT used byte-for-byte** — see the adaptation step below:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --default-branch "<branch>" \
+  languages/javascript/contract-consumer/src/api/client.ts \
+  languages/javascript/contract-consumer/src/api/index.ts \
+  languages/javascript/contract-consumer/src/api/client.test.ts \
+  languages/javascript/contract-consumer/src/test/msw-setup.ts \
+  languages/javascript/contract-consumer/eslint.config.js \
+  languages/javascript/contract-consumer/vitest.config.ts \
+  languages/javascript/contract-consumer/.github/workflows/contracts-drift.yml.tmpl \
+  languages/javascript/contract-consumer/.github/workflows/contracts-regen.yml.tmpl
+```
+
+**Adaptation step — retarget the illustrative `orders` scaffold.** `client.ts`
+and `msw-setup.ts` hardcode an illustrative `orders` target
+(`./generated/orders/…`, `getOrdersMock`). The seeder derives target names from
+the repo's **actual** specs (e.g. `billing-api-spec` → `billing`), so after
+rendering, **rewrite `orders` to the seeded `targets[].name`** from the JSON
+summary (for a single spec, its name; for multiple, one ACL seam + one
+`setupServer(...)` spread per target). Left unedited, the scaffold imports a
+`generated/orders/` that generation never creates.
+
+**Activation — generate the client so the committed tree is green.** Everything
+under the ACL/MSW scaffold imports generated code that does not exist until
+`npm run generate` runs, and the drift/regen workflows run it too — so §3k is
+completed by **generating and committing the client**, not just dropping the
+scaffold. After approval, in Step 3:
+
+```text
+npm i -D orval msw                       # the generator + the mock library
+# add "generate": "orval" to package.json "scripts" (a §4c-class confirmed edit)
+npm ci && npm run generate               # produce src/api/generated/
+# commit src/api/generated/ ALONGSIDE the scaffold
+```
+
+The committed tree then compiles, the MSW suite is green, and the drift gate
+passes — a clean bootstrap PR.
+
+**If `npm ci` or `npm run generate` fails** — e.g. the pinned `*-api-spec`
+package can't be resolved (a private registry isn't configured, or the producer
+hasn't published the version yet) — **do NOT commit a partial scaffold.** The
+ACL/MSW files and the drift workflow are all red without a generated client, and
+the finish-flow would arm auto-merge on that red PR. Instead **stop §3k, commit
+nothing for it**, and record a **prominent Step 5 follow-up**: "this repo pins
+`<spec-pkg>` but it isn't installable yet; once it resolves, re-run
+`/development:bootstrap` to scaffold + generate the contract-consumer machinery."
+The **base** `eslint.config.js`/`vitest.config.ts` §3d already rendered stay in
+place (§3k only overwrites them on completion), so the repo keeps working configs
+— it is never left config-less by an abort. `orval.config.ts` (already seeded, no
+imports) may stay too; nothing else §3k lands until generation succeeds.
+
+The installed set (all committed together, once generation succeeds):
+
+- `src/api/client.ts` + `src/api/index.ts` — the **anti-corruption layer (ACL)**:
+  a hand-written starter (configured client + one worked mapping seam) that is
+  the *only* module app code imports from. Adapt the target name (above); the
+  worked seam is illustrative and is replaced with the spec's real operations.
+- `src/test/msw-setup.ts` + `src/api/client.test.ts` — MSW wired into vitest so
+  the whole suite runs **with no backend**, plus a sample test that exercises the
+  ACL client against the generated handlers.
+- `eslint.config.js` — **supersedes** the base `languages/javascript/eslint.config.js`
+  (base config **plus** the ACL boundary rule: `no-restricted-imports` forbids
+  importing `src/api/generated/*` from anywhere except `src/api/**` (the ACL) and
+  `src/test/**` (the MSW harness, which must wire up the generated mock handlers
+  and has no ACL to route through), as an **error** so it fails CI). It
+  **overwrites** the base `eslint.config.js` §3d rendered — an explicit upgrade,
+  stronger than idempotency rule 3's default-skip: default to **overwrite** when
+  the on-disk file matches the base template, and fall back to rule 3's prompt
+  only if the user has customized it. **If that prompt resolves to skip** (or the
+  no-answer default), do **not** proceed with §3k at all: committing the ACL/MSW
+  scaffold beside the un-superseded base config would ship a red tree (no boundary
+  gate, no MSW `setupFiles`). Treat it like the activation-failure abort below —
+  commit no scaffold, keep the seeded `orval.config.ts` and the base configs, and
+  record a Step 5 follow-up offering rule 3's "merge manually" to unblock.
+- `vitest.config.ts` — **supersedes** the base one (base **plus** `setupFiles`
+  starting MSW, and generated code excluded from coverage). Same overwrite rule
+  as `eslint.config.js` above — it upgrades the base §3d rendered.
+- `.github/workflows/contracts-drift.yml` — the **drift gate**: CI regenerates
+  with orval and fails when `git diff --exit-code src/api/generated/` is dirty, so
+  "committed == pinned spec" is mechanical. **Path-conditional** (`paths:` on the
+  contract inputs) — like §3i's contracts-lint, **never a required context**, or
+  every PR that doesn't touch the contract wedges.
+- `.github/workflows/contracts-regen.yml` — **regenerate-and-commit-back**: on a
+  PR that bumps a `*-api-spec` dep, CI regenerates and pushes the diff back onto
+  the PR branch, so one PR shows the version bump **and** the API-surface change.
+  Needs `contents: write`; skips fork PRs (falls through to the drift gate).
+
+The generated client under `src/api/generated/` is **committed** (so a spec-bump
+PR diff shows the API-surface change) — do not gitignore it.
+
+**State-D adoption (already-bootstrapped consumer repos).** §3k's detection lives
+outside `detect-stack.sh`, so a State-D re-bootstrap won't surface it via
+`missing_artifacts`. To adopt §3k on an existing javascript repo, run the seeder
+in `--plan` mode as part of gap detection: exit 0 with the §3k artifacts absent
+(no `orval.config.ts`, no ACL, no drift/regen workflows) is an **adoption gap** —
+offer it in the plan and complete it (seed, render, generate + commit) exactly as
+a fresh bootstrap would. Such a repo already has the **base**
+`eslint.config.js`/`vitest.config.ts` on disk from its original bootstrap; the
+consumer variants **overwrite** them per the installed-set rule above (default
+overwrite when the on-disk file matches the base template, rule-3 prompt only if
+customized) — never commit the ACL scaffold alongside a kept base config, which
+would drop the boundary gate and the MSW wiring: if the prompt resolves to skip,
+abort §3k's scaffold exactly as the installed-set rule directs. A repo that
+already has the machinery present is not a gap; one whose generation previously
+failed (Step-5 follow-up pending) is re-completed once the spec resolves.
 
 ### Idempotency rules (apply for every file write)
 

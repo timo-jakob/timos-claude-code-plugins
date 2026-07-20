@@ -1,0 +1,39 @@
+# Contracts Drift Gate — the committed generated client MUST match the pinned
+# *-api-spec (development-javascript slice 2, #727). CI regenerates with orval
+# and fails if `src/api/generated/` comes out dirty, so "committed == pinned
+# spec" is mechanical, not policed.
+#
+# Path-conditional (like the producer's contracts-lint, §3i): it runs only when
+# the contract inputs or generated output change, so it must NEVER be added to
+# branch protection's required contexts — a required check that no-ops on most
+# PRs would wedge them.
+name: Contracts Drift
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths:
+      - "src/api/generated/**"
+      - "orval.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/contracts-drift.yml"
+
+# Least privilege: the drift gate only reads the checked-out tree.
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Regenerate the client from the pinned spec
+        run: npm run generate
+      - name: Fail if the committed client is stale vs the pinned spec
+        run: git diff --exit-code -- src/api/generated/

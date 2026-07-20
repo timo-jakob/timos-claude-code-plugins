@@ -1,0 +1,51 @@
+# Contracts Regenerate-and-Commit-Back — when a PR bumps a *-api-spec dependency
+# (Renovate, Dependabot, or a hand bump), regenerate the committed client and
+# push the diff back onto the PR branch, so ONE PR shows the version bump AND the
+# regenerated API-surface change (development-javascript slice 2, #727).
+#
+# Portable across hosting: it triggers on any PR touching package.json /
+# package-lock.json rather than a specific bot. It only pushes when regeneration
+# actually changes the committed output, and only for same-repo branches it can
+# write to — a fork PR falls through to the drift gate, which will (correctly)
+# fail until a maintainer regenerates.
+name: Contracts Regen
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+
+# Needs write to push the regenerated client back onto the PR branch.
+permissions:
+  contents: write
+
+jobs:
+  regen:
+    # Only same-repo PR branches are pushable; skip forks (no write access).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Regenerate the client from the (bumped) pinned spec
+        run: npm run generate
+      - name: Commit the regenerated client back to the PR branch
+        run: |
+          if git diff --quiet -- src/api/generated/; then
+            echo "generated client already matches the pinned spec — nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/api/generated/
+          git commit -m "chore(contracts): regenerate client for the bumped spec"
+          git push
