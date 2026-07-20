@@ -13,7 +13,8 @@ development-swift        ← language: Swift
 development-python       ← language: Python
 development-java         ← language: Java (Gradle); composes with development-spring
 development-javascript   ← language: JavaScript + TypeScript (combined)
-development-…            ← future: go, rust, …
+development-go           ← language: Go (modules; golangci-lint v2, ko, buf)
+development-…            ← future: rust, …
 development-container    ← topic: containers / OCI images
 development-claude-plugin ← topic: projects that ARE Claude Code plugins
 development-spring       ← topic: Spring framework (composes with development-java)
@@ -29,7 +30,7 @@ There are **three categories** of plugin:
 | Category | Purpose | Dispatched when | Examples |
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
-| **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift` |
+| **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
 | **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, …) | `development-container`, `development-claude-plugin`, `development-spring`, `development-docs`, future: `development-kubernetes`, `development-terraform` |
 
 Language plugins and topic plugins share the **same dispatch contract**
@@ -645,9 +646,11 @@ and the orchestrator copies the dispatched language's `version` into this
 payload, adding the `manifests` it found. Detection-only fields
 (`version_source`, `has_cov`, `build_system`, `gradle_dsl`, and go's
 `toolchain`/`module`) stay in detect-stack output for the bootstrap skill and
-are not forwarded here — the development-go dispatch contract (epic #868
-slice B) decides what it forwards; until then a go maintenance agent that
-needs the toolchain pin re-reads the repo's `go.mod` (it is in `manifests`).
+are not forwarded here. **Slice B of epic #868 settled the go case: the
+`development-go` dispatch contract forwards `version` + `manifests` only, like
+every other language** — a go maintenance agent that needs the toolchain pin or
+the module path re-reads the repo's `go.mod` (it is in `manifests`), rather than
+the payload growing language-specific keys.
 `version_source` is `"parsed"` | `"default"` — `"default"` flags a version
 that fell back to the recent-stable/LTS guess because the manifest declared
 no language version (#258 reliability). `gradle_dsl` (`"kotlin" | "groovy" | ""`) drives the

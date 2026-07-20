@@ -25,7 +25,7 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see [Requirements](requirements.md)). |
-| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
+| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
 | Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Spins out linked `test-case` issues for a surface-touching story's outside-in cases; takes a typed parked exit when a session can't converge; pointed at an **epic**, walks each `needs-refinement` child and posts an epic summary. |
@@ -318,3 +318,56 @@ docs-freshness tooling will live under this one topic.
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for documentation findings. Validates the v2 payload and returns a plan routing each finding group to a docs agent. Empty dispatch table in v1 — always an empty plan until [#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793) registers `c4_drift`. |
+
+## development-go
+
+Go maintenance — the **core-loop tier** so far, the MVP slice of the
+[#868](https://github.com/timo-jakob/timos-claude-code-plugins/issues/868) epic
+that brings Go into the family (the platform's backend stack). Pure function of
+its JSON input — dispatched by `/development:maintenance`; it runs no detection
+of its own. **Adding it required zero edits to the generic orchestrator**: Go
+became a *maintained* language purely by `gather-go-findings.sh` appearing next
+to its siblings, which is exactly what the contract-driven dispatch
+([#249](https://github.com/timo-jakob/timos-claude-code-plugins/issues/249))
+exists to make possible.
+
+**What's built (Slice B,
+[#871](https://github.com/timo-jakob/timos-claude-code-plugins/issues/871)):**
+the plugin scaffold, the gather script, the maintenance dispatcher, the planner,
+the CI fixer, and the mechanical `format_lint` fixer — i.e. a runnable
+lint/format → CI-fix → PR loop. Static-analysis triage
+([#873](https://github.com/timo-jakob/timos-claude-code-plugins/issues/873)),
+coverage ([#874](https://github.com/timo-jakob/timos-claude-code-plugins/issues/874)),
+bootstrap templates ([#875](https://github.com/timo-jakob/timos-claude-code-plugins/issues/875)),
+vendor PRs + upgrades ([#876](https://github.com/timo-jakob/timos-claude-code-plugins/issues/876)),
+the approver ([#877](https://github.com/timo-jakob/timos-claude-code-plugins/issues/877)),
+and the proto-first platform advisors
+([#878](https://github.com/timo-jakob/timos-claude-code-plugins/issues/878))
+arrive in the remaining slices. Until coverage lands, the gather **withholds**
+the figure (`null`, `reliable: false`, with a reason) rather than guessing it,
+and the dispatcher has no coverage pre-flight.
+
+> **Blessed toolchain (one default each).** Go modules; **Taskfile** as a thin
+> orchestrator; **golangci-lint v2** (pinned) as the *single* binary for both
+> format (`fmt` — gofumpt + import ordering via the gci/goimports formatters)
+> and lint (`run --fix`); `go test -coverprofile` for coverage; **govulncheck**
+> as the single source of truth for Go code vulnerabilities (Snyk OSS is
+> disabled for gomod — no double-triage); **buf** for proto tooling with
+> **grpc-go + grpc-gateway** realizing the family's "gRPC internal, REST
+> external" policy proto-first; and **ko** for images — which means **no
+> Dockerfile**, so the runtime-upgrade path bumps `go.mod`'s `go`/`toolchain`
+> directives and the CI `setup-go` matrix rather than a `FROM` line.
+
+**Test-bed:** a dedicated Go repo (the
+[#217](https://github.com/timo-jakob/timos-claude-code-plugins/issues/217)
+harness mechanism), mirroring `ai-doc-organizer` for Python and
+`tick-client-snapper` for Java. The timos-platform Go services are the *driving
+consumer*, not the test-bed — they are scaffolds until platform M1/M2, and
+gating these slices on milestones outside this repo was the rejected
+alternative.
+
+**Skills:**
+
+| Skill | Command | Description |
+| --- | --- | --- |
+| Maintenance dispatcher | `/development-go:maintenance <json>` | Validates the v2 payload, plans the per-tool groups via `go-maintenance-planner`, returns the plan + `ci_fixer_agent`. Single-phase: no coverage pre-flight until Slice E, so it never emits `improver_result`. |

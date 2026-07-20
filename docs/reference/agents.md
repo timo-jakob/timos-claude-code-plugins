@@ -41,6 +41,14 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 | --- | --- | --- | --- |
 | `docs-c4-drift-advisor` | `opus` | Read, Edit, Bash, Grep | For each c4_drift finding (a container the C4 Container diagram declares but detection doesn't find, or detection finds but the diagram doesn't declare), reconcile docs/architecture/c4-container.md with reality — apply the mechanical, unambiguous edit and escalate the rest, since a drift can mean the diagram is stale, the container was renamed, or detection is incomplete, and which one it is needs judgment. Used by development-docs:maintenance. |
 
+## development-go
+
+| Agent | Model | Tools | Description |
+| --- | --- | --- | --- |
+| `go-ci-fixer` | `opus` | Bash, Read, Edit, Grep | Triage and fix a failing CI run on an open Go PR. Reads `gh pr checks` output, identifies the failing check(s), edits the worktree to fix the root cause, runs the Go build/test locally to confirm, commits, and pushes. Used by the development:maintenance orchestrator's per-group PR cycle, up to 3 invocations per PR before the orchestrator escalates. |
+| `go-format-lint-fixer` | `haiku` | Bash, Read, Edit | Apply golangci-lint v2 formatting and autofixable lint rules to a Go project, report what changed. Mechanical; no judgment required. Used by development-go:maintenance. |
+| `go-maintenance-planner` | `opus` | Bash, Read, Grep | Pre-dispatch planner. Reads a set of Go maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-go:maintenance. |
+
 ## development-java
 
 | Agent | Model | Tools | Description |

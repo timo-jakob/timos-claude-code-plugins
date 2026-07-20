@@ -38,6 +38,7 @@ PLUGINS = [
     "development",
     "development-claude-plugin",
     "development-docs",
+    "development-go",
     "development-java",
     "development-python",
     "development-spring",
