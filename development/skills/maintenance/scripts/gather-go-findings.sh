@@ -57,6 +57,23 @@ if [[ -z "$repo" || ! -d "$repo" ]]; then
 	echo "usage: gather-go-findings.sh <repo_path>" >&2
 	exit 2
 fi
+# Resolve the script dir BEFORE cd'ing into the repo, so the sibling helpers
+# (gather-sonarcloud.zsh, gather-github-security.zsh) are found regardless of
+# the caller's cwd; and normalize `repo` to an absolute path so those helpers
+# get a stable argument even when the caller passed a relative one.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)" ||
+	{
+		echo "gather-go-findings.sh: cannot resolve its own script dir" >&2
+		exit 2
+	}
+# `-d` passed the guard, but cd can still fail (no execute bit, or removed
+# between the check and here) — surface it as the usage contract (exit 2), not
+# a bare set -e abort.
+repo="$(cd -- "$repo" 2>/dev/null && pwd)" ||
+	{
+		echo "usage: gather-go-findings.sh <repo_path>" >&2
+		exit 2
+	}
 cd "$repo"
 
 notes=()
@@ -200,6 +217,128 @@ if [[ "$has_format_lint_config" == "true" ]]; then
 	fi
 fi
 
+# --- sonarcloud (Sonar Go analyzer) — Slice D (#873) ------------------------
+# Configured when sonar-project.properties is present. Findings + the main
+# branch Quality Gate verdict come from the language-agnostic
+# gather-sonarcloud.zsh helper (org+project from the properties file; token
+# resolved inside the helper). Go rule keys look like `go:Sxxxx`. Sonar's Go
+# analyzer is mature (dozens of rules across bugs / code smells /
+# vulnerabilities / security hotspots), so the go-sonar-triage agent ships this
+# slice — no deferral (contrast Swift semgrep, #443).
+has_sonar_config="false"
+[[ -f "sonar-project.properties" ]] && has_sonar_config="true"
+sonar_json="null"
+sonar_quality_gate="null"
+if [[ "$has_sonar_config" == "true" ]]; then
+	# `|| true`: a properties file missing the key makes grep exit 1, which
+	# under `set -euo pipefail` would abort the script — but the missing-key
+	# branch below is exactly what must handle that, so tolerate the empty read.
+	sonar_org=$(grep -E '^[[:space:]]*sonar\.organization' sonar-project.properties 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \r' || true)
+	sonar_project=$(grep -E '^[[:space:]]*sonar\.projectKey' sonar-project.properties 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' \r' || true)
+	sonar_helper="$SCRIPT_DIR/gather-sonarcloud.zsh"
+	if [[ -z "$sonar_org" || -z "$sonar_project" ]]; then
+		sonar_json="[]"
+		notes+=("sonarcloud is configured but sonar-project.properties is missing 'sonar.organization' or 'sonar.projectKey'; live findings can't be fetched until both are set.")
+	elif [[ ! -x "$sonar_helper" ]]; then
+		sonar_json="[]"
+		notes+=("sonarcloud gather: helper script not found or not executable at $sonar_helper. Update your plugin install (cd to the marketplace dir, 'git pull').")
+	else
+		sonar_raw="$(mktemp)"
+		sonar_stderr="$(mktemp)"
+		if "$sonar_helper" "$sonar_org" "$sonar_project" >"$sonar_raw" 2>"$sonar_stderr"; then
+			# Guard the parses: a helper that exits 0 with unexpected stdout must
+			# not abort the whole gather under `set -e`, nor drop the findings
+			# key while the tool is configured (the configured-implies-key
+			# contract). `jq -s` (slurp) is load-bearing, not just `// []`:
+			# non-slurped jq on EMPTY stdout emits nothing and exits 0, so the
+			# `|| echo` fallback never fires and the var becomes "" — which the
+			# final --argjson then rejects, aborting the emit. Slurping yields
+			# `[]`/`null` for empty input and the real value otherwise.
+			sonar_json="$(jq -s '(.[0].findings) // []' "$sonar_raw" 2>/dev/null || echo '[]')"
+			sonar_quality_gate="$(jq -cs '(.[0].quality_gate) // null' "$sonar_raw" 2>/dev/null || echo 'null')"
+		else
+			sonar_json="[]"
+		fi
+		sonar_note="$(tail -1 "$sonar_stderr" 2>/dev/null || true)"
+		[[ -n "$sonar_note" ]] && notes+=("$sonar_note")
+		rm -f "$sonar_raw" "$sonar_stderr"
+	fi
+fi
+
+# --- code_scanning (CodeQL go + Scorecard) — Slice D (#873) ------------------
+# Configured when a CodeQL workflow is present (bootstrap generates
+# .github/workflows/codeql.yml). Alerts come from the language-agnostic
+# gather-github-security.zsh helper (gh API; free, no quota). The alert shape
+# is identical across languages — only the CodeQL rule IDs differ (go/...).
+# CodeQL's Go support is first-class (its own Go-written extractor, module-aware
+# extraction, full local + global dataflow), so go-code-scanning-triage ships.
+has_code_scanning_config="false"
+if ls .github/workflows/codeql*.yml >/dev/null 2>&1; then
+	has_code_scanning_config="true"
+fi
+code_scanning_json="null"
+if [[ "$has_code_scanning_config" == "true" ]]; then
+	cs_helper="$SCRIPT_DIR/gather-github-security.zsh"
+	if [[ ! -x "$cs_helper" ]]; then
+		code_scanning_json="[]"
+		notes+=("Code Scanning gather: helper script not found or not executable at $cs_helper. Update your plugin install (cd to the marketplace dir, 'git pull').")
+	else
+		cs_raw="$(mktemp)"
+		cs_stderr="$(mktemp)"
+		if "$cs_helper" "$repo" >"$cs_raw" 2>"$cs_stderr"; then
+			# Slurped (see the sonar parse): a missing key, unexpected stdout,
+			# or EMPTY stdout on exit 0 must not omit the findings key
+			# (configured-implies-key) or abort the gather.
+			code_scanning_json="$(jq -s '(.[0].code_scanning_alerts) // []' "$cs_raw" 2>/dev/null || echo '[]')"
+			cs_label="ok"
+		else
+			code_scanning_json="[]"
+			cs_label="failed"
+		fi
+		cs_content="$(tr '\n' ' ' <"$cs_stderr" 2>/dev/null | sed 's/[[:space:]]*$//' || true)"
+		[[ -n "$cs_content" ]] && notes+=("Code Scanning gather ($cs_label): $cs_content")
+		rm -f "$cs_raw" "$cs_stderr"
+	fi
+fi
+
+# --- semgrep (Go rules via --config=auto) — Slice D (#873) -------------------
+# Configured when a semgrep hook (pre-commit) or CI job is wired. Unlike Swift
+# (empty registry → deferred, #443), semgrep's Go support is GA with cross-file
+# dataflow and the community rules cover Go, so `--config=auto` finds real
+# findings and go-semgrep-triage ships — exactly as Java's does. `--error`
+# makes semgrep exit non-zero on findings, which we tolerate; normalize to the
+# results array.
+has_semgrep_config="false"
+if grep -qE 'returntocorp/semgrep|semgrep/semgrep' .pre-commit-config.yaml 2>/dev/null ||
+	grep -qE 'semgrep ci|returntocorp/semgrep|semgrep/semgrep' .github/workflows/*.yml 2>/dev/null; then
+	has_semgrep_config="true"
+fi
+semgrep_json="null"
+if [[ "$has_semgrep_config" == "true" ]]; then
+	if command -v semgrep >/dev/null 2>&1; then
+		semgrep_raw="$(mktemp)"
+		# `--error` exit codes: 0 = clean, 1 = findings, >1 = a real failure
+		# (bad rule fetch, no network to the registry, internal error). Only 0/1
+		# produce a parseable results document — never report a >1 failure as a
+		# clean repo (the header's graceful-degradation contract).
+		semgrep_rc=0
+		semgrep --config=auto --json --quiet --error --metrics=off . >"$semgrep_raw" 2>/dev/null || semgrep_rc=$?
+		if ((semgrep_rc > 1)); then
+			semgrep_json="[]"
+			notes+=("semgrep: 'semgrep --config=auto' failed (exit $semgrep_rc); findings can't be collected — check network access to the semgrep registry.")
+		else
+			# jq -s so a truncated/interleaved document can't emit a partial
+			# array followed by the `|| echo` fallback (two concatenated JSON
+			# values would make the final --argjson reject the whole payload).
+			semgrep_json="$(jq -s '(.[0].results) // []' "$semgrep_raw" 2>/dev/null || echo '[]')"
+		fi
+		rm -f "$semgrep_raw"
+	else
+		semgrep_json="[]"
+		notes+=("semgrep is configured but the 'semgrep' binary is not on PATH; install with 'brew install semgrep' or 'pip install semgrep'.")
+	fi
+fi
+
 # --- coverage — WITHHELD until Slice E (#874) --------------------------------
 # Go coverage is `go test -coverprofile` + `go tool cover`, and the enforced
 # number's semantics (per-package profile vs -coverpkg) is an explicit Slice E
@@ -227,7 +366,14 @@ fi
 # --- emit --------------------------------------------------------------------
 jq -n \
 	--argjson format_lint_cfg "$has_format_lint_config" \
+	--argjson sonar_cfg "$has_sonar_config" \
+	--argjson code_scanning_cfg "$has_code_scanning_config" \
+	--argjson semgrep_cfg "$has_semgrep_config" \
 	--argjson format_lint_findings "$format_lint_json" \
+	--argjson sonar_findings "$sonar_json" \
+	--argjson cs_findings "$code_scanning_json" \
+	--argjson semgrep_findings "$semgrep_json" \
+	--argjson sonar_quality_gate "$sonar_quality_gate" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
 	--argjson coverage_regions "$coverage_regions" \
@@ -237,11 +383,17 @@ jq -n \
 	--argjson notes "$notes_json" '
 {
   tooling_configured: {
-    format_lint: $format_lint_cfg
+    format_lint:   $format_lint_cfg,
+    sonarcloud:    $sonar_cfg,
+    code_scanning: $code_scanning_cfg,
+    semgrep:       $semgrep_cfg
   },
   findings_by_tool: (
     {} +
-    (if $format_lint_findings != null then {format_lint: $format_lint_findings} else {} end)
+    (if $format_lint_findings != null then {format_lint:          $format_lint_findings} else {} end) +
+    (if $sonar_findings       != null then {sonarcloud:           $sonar_findings}       else {} end) +
+    (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end) +
+    (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,
@@ -253,6 +405,7 @@ jq -n \
       reason:   $coverage_reason
     }
   },
+  sonar_quality_gate: $sonar_quality_gate,
   notes: $notes
 }
 '
