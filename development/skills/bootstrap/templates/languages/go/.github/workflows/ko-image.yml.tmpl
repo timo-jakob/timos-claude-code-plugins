@@ -1,0 +1,136 @@
+# ko container image pipeline (Go). The ko analogue of the shared DOCKER
+# pipeline: because Go's blessed image path is ko (no Dockerfile), this is a
+# SEPARATE workflow keyed on `.ko.yaml`, not the Dockerfile-keyed DOCKER block.
+#
+# Two jobs, same app-vs-container separation as the Dockerfile path (#386, #547):
+#   image (build)     → PR + push + release: build a local image. `contents:
+#                       read` only — a PR never runs a write-privileged job.
+#   push-and-sign     → push/release only (`needs: image`): GHCR login, multi-
+#                       arch publish, SPDX SBOM, cosign keyless signing. Holds
+#                       `packages: write` + `id-token: write` in a job PRs never
+#                       run (permissions can't be gated per-step).
+#
+# PR touching .ko.yaml or Go build inputs → build (gate), no publish.
+# PR NOT touching them → no build; the required `image` check passes through
+#                        (an app PR must not be blocked by image concerns it
+#                        doesn't touch).
+# push to {{DEFAULT_BRANCH}} / release   → build + publish + sign.
+#
+# `image` is ALWAYS a resolving required check: this workflow deliberately has
+# NO paths-ignore, so the `image` job runs on EVERY PR (doc-only ones included)
+# and the required check always reports — which is why, unlike the quality
+# workflow (paths-ignore + a `-noop` companion), it needs no noop mirror. The
+# heavy ko build inside is gated on `ko_decision`; `push-and-sign` never runs on
+# PRs at all.
+name: ko-image
+
+on:
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+  pull_request:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ko-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      # Decide whether the ko build should gate this run (the #386 rule, ko
+      # edition). Build gates ONLY when the change touches the image definition
+      # (.ko.yaml) or a Go build input (go.mod/go.sum/*.go). A docs/config PR
+      # that touches none skips the build and the required `image` check passes.
+      # Non-PR events always build. Fails SAFE: any diff error falls back to
+      # building. BASE_SHA via env: for semgrep's shell-injection rule.
+      - name: Decide whether to build the image
+        id: ko_decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "do_build=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event ($EVENT_NAME) — building the image."
+            exit 0
+          fi
+          ko_re='(^|/)\.ko\.ya?ml$|(^|/)go\.(mod|sum)$|\.go$'
+          if ! changed=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null); then
+            echo "do_build=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not compute the PR diff against $BASE_SHA — building to be safe."
+            exit 0
+          fi
+          if printf '%s\n' "$changed" | grep -qE "$ko_re"; then
+            echo "do_build=true" >> "$GITHUB_OUTPUT"
+            echo "Image-relevant files changed — running the ko build gate:"
+            printf '%s\n' "$changed" | grep -E "$ko_re" || true
+          else
+            echo "do_build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No image files changed; skipping ko build. Required 'image' check passes."
+          fi
+
+      - name: Setup Go
+        if: steps.ko_decision.outputs.do_build == 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "stable"
+      - name: Setup ko
+        if: steps.ko_decision.outputs.do_build == 'true'
+        uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
+      # PR gate: build a local image (no push). --sbom=spdx exercises the SBOM
+      # path; --push=false keeps it off GHCR.
+      - name: Build image (ko, local — PR gate)
+        if: steps.ko_decision.outputs.do_build == 'true'
+        run: ko build --sbom=spdx --push=false --local ./...
+
+  push-and-sign:
+    # Publish + sign only outside PRs. `image` must have passed first.
+    if: github.event_name == 'push' || github.event_name == 'release'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to GHCR
+      id-token: write   # cosign keyless (OIDC)
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # GHCR (and the OCI spec) require an all-lowercase repository name, but
+      # ${{ github.repository }} preserves the owner/name as registered, so any
+      # uppercase letter would make `ko build` push fail with "repository name
+      # must be lowercase". Lowercase it into KO_DOCKER_REPO for the publish
+      # step (the Dockerfile path gets this for free via docker/metadata-action).
+      - name: Compute lowercase KO_DOCKER_REPO
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: echo "KO_DOCKER_REPO=ghcr.io/$(echo "$GH_REPO" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "stable"
+      - name: Setup ko
+        uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | ko login ghcr.io --username "${{ github.actor }}" --password-stdin
+      # Publish multi-arch with an SPDX SBOM; capture the digest ref cosign signs.
+      - name: Publish image (ko, multi-arch + SBOM)
+        id: build
+        run: |
+          ref=$(ko build --sbom=spdx --platform=linux/amd64,linux/arm64 --bare ./...)
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: Sign the image (cosign keyless)
+        env:
+          REF: ${{ steps.build.outputs.ref }}
+        run: cosign sign --yes "$REF"

@@ -10,6 +10,7 @@
 #   automate-public.sh --project-key KEY --org-key ORG --project-name NAME \
 #                      --default-branch main \
 #                      --has-dockerfile true|false \
+#                      [--has-ko true|false] \
 #                      --has-codeql true|false
 
 set -euo pipefail
@@ -26,6 +27,7 @@ ORG_KEY=""
 PROJECT_NAME=""
 DEFAULT_BRANCH="main"
 HAS_DOCKERFILE="false"
+HAS_KO="false"
 HAS_CODEQL="false"
 CODEQL_LANGUAGES=""
 CLAUDE_APPROVER="false"
@@ -50,6 +52,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--has-dockerfile)
 		HAS_DOCKERFILE="$2"
+		shift 2
+		;;
+	--has-ko)
+		HAS_KO="$2"
 		shift 2
 		;;
 	--has-codeql)
@@ -367,6 +373,7 @@ if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; th
 	"$SCRIPT_DIR/branch-protection.sh" \
 		--visibility public \
 		--has-dockerfile "$HAS_DOCKERFILE" \
+		--has-ko "$HAS_KO" \
 		--has-codeql "$HAS_CODEQL" \
 		--codeql-languages "$CODEQL_LANGUAGES" \
 		--default-branch "$DEFAULT_BRANCH"

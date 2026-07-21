@@ -52,3 +52,28 @@ linters:
         linters:
           - gosec
           - errcheck
+
+# Formatters (v2 `formatters` section, driven by `golangci-lint fmt`). This is
+# the single mechanical format layer the blessed stack promises: `fmt` applies
+# gofumpt (a strict gofmt superset) and gci (deterministic import grouping), so
+# `golangci-lint fmt` + `golangci-lint run --fix` is the whole format+autofix
+# pass — no separate gofumpt/goimports invocation. Formatters are NOT controlled
+# via the `linters` section or `-E`/`-D`; they live here.
+formatters:
+  enable:
+    - gofumpt
+    - gci
+  settings:
+    gci:
+      # standard → third-party → this module's own packages, each a blank-line
+      # group. `localmodule` resolves the module path from go.mod, so no repo
+      # name is hardcoded here.
+      sections:
+        - standard
+        - default
+        - localmodule
+  exclusions:
+    # Generated buf output is not hand-written; formatting it is meaningless and
+    # would fight the codegen. `strict` follows the Go generated-file convention
+    # (the `// Code generated … DO NOT EDIT.` header).
+    generated: strict

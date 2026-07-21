@@ -320,6 +320,56 @@ EOF
   run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$Q"
 }
 
+@test "render: real quality-public.yml.tmpl for a go repo keeps the GO coverage-floor block (#875)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --project-name svc --project-slug o/svc --project-key o_svc --org-key o \
+    --languages "go" \
+    public/.github/workflows/quality-public.yml.tmpl
+  [ "$status" -eq 0 ]
+  Q="$OUT/public/.github/workflows/quality-public.yml"
+  # GO lane kept with -race + the coverage-floor step (#874/#875), others stripped.
+  grep -q 'Test (Go, -race)' "$Q"
+  grep -q 'go test -race ./\.\.\. -coverprofile=coverage.out' "$Q"
+  grep -q 'Coverage floor — 90% on new code (Go)' "$Q"
+  grep -q 'gocover-cobertura' "$Q"
+  run ! grep -q 'PYTHON-START' "$Q"
+  run ! grep -q 'JAVA-START' "$Q"
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$Q"
+}
+
+@test "render: real ko-image.yml.tmpl renders clean with DEFAULT_BRANCH substituted (#875)" {
+  # Pass a non-default branch so the assertion proves the caller-supplied
+  # --default-branch actually flows into {{DEFAULT_BRANCH}}, rather than merely
+  # coinciding with render.zsh's built-in 'main' default.
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --project-name svc --project-slug o/svc --project-key o_svc --org-key o \
+    --languages "go" --default-branch trunk \
+    languages/go/.github/workflows/ko-image.yml.tmpl
+  [ "$status" -eq 0 ]
+  K="$OUT/languages/go/.github/workflows/ko-image.yml"
+  grep -q 'name: ko-image' "$K"
+  grep -q 'branches: \["trunk"\]' "$K"          # caller's --default-branch propagated
+  grep -q 'ko build --sbom=spdx' "$K"
+  grep -q 'cosign sign --yes' "$K"
+  grep -q 'ko_decision' "$K"                    # path-conditional on .ko.yaml
+  # GHCR repo name is lowercased before ko push (a mixed-case owner would break
+  # the publish otherwise) — lock the fix in.
+  grep -q "tr '\[:upper:\]' '\[:lower:\]'" "$K"
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$K"
+}
+
+@test "render: real pre-commit template for a go repo keeps the coverage-floor-go hook (#875)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --languages "go" common/.pre-commit-config.yaml.tmpl
+  [ "$status" -eq 0 ]
+  P="$OUT/common/.pre-commit-config.yaml"
+  grep -q 'id: golangci-lint' "$P"
+  grep -q 'id: coverage-floor-go' "$P"
+  grep -q -- '-- "\*.go"' "$P"                  # diff guard keyed on Go files
+  run ! grep -q 'coverage-floor-swift' "$P"     # other languages' hooks stripped
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$P"
+}
+
 @test "render: real pre-commit template for a non-plugin java repo drops the CLAUDE-PLUGIN hooks" {
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
     --languages "java" common/.pre-commit-config.yaml.tmpl

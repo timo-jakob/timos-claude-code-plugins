@@ -1,0 +1,26 @@
+# ko config (https://ko.build). ko is the blessed Go image path: pure-Go,
+# daemonless, multi-arch, SBOMs for free — and NO Dockerfile (a cgo build or
+# non-Go assets are the documented Dockerfile exception, not the default).
+#
+# The Go RUNTIME version lives in go.mod (`go`/`toolchain`) and the CI
+# `setup-go` matrix — NOT in a base-image tag. So go-runtime-upgrade (Slice G,
+# #876) bumps go.mod + setup-go, never a FROM line, and this base is a minimal
+# STATIC base (no interpreter), pinned by DIGEST so it is reproducible and
+# CVE-patchable independently of the Go version.
+#
+# distroless static (nonroot, uid 65532) ships the CA bundle for outbound
+# HTTPS and nothing else. The digest is pinned so the image is reproducible;
+# Renovate / the ko-digest-freshness job (Slice G, #876) bumps the @sha256 as a
+# normal vendor PR. Update the digest, never drop the pin — an unpinned base
+# makes the image non-reproducible. The line exceeds 120 cols because a digest
+# reference cannot be wrapped; that single line is the documented exception.
+# yamllint disable-line rule:line-length
+defaultBaseImage: gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
+
+builds:
+  - id: main
+    # ko builds every `package main` under ./... by default; constrain here if
+    # the module has more than one binary. Strip the symbol table + DWARF for a
+    # smaller, reproducible binary.
+    ldflags:
+      - -s -w

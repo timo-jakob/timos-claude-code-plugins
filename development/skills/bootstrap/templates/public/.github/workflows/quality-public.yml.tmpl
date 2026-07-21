@@ -138,9 +138,32 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "stable"
-      - name: Test (Go)
+      # -race is the blessed default: Go's race detector is the primary defence
+      # against the concurrency bugs the review panel hunts. -covermode=atomic
+      # is required with -race (and safe without). Per-PACKAGE coverage (no
+      # -coverpkg), matching the development-go coverage gate's definition (#874).
+      - name: Test (Go, -race)
         run: |
-          go test ./... -coverprofile=coverage.out -covermode=atomic
+          go test -race ./... -coverprofile=coverage.out -covermode=atomic
+      # Convert the Go profile to cobertura so the shared diff-cover new-code
+      # gate reads it (diff-cover can't read a Go coverprofile). Pinned tool.
+      - name: Coverage → cobertura (Go)
+        if: github.event_name == 'pull_request'
+        run: |
+          go run github.com/boumenot/gocover-cobertura@v1.3.0 < coverage.out > coverage.xml
+      - name: Install diff-cover (Go — coverage floor)
+        if: github.event_name == 'pull_request'
+        run: pip install 'diff-cover>=9'
+      # BASE_REF via env: (not inlined) for semgrep's shell-injection rule.
+      - name: Coverage floor — 90% on new code (Go)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          diff-cover coverage.xml \
+            --compare-branch="origin/${BASE_REF}" \
+            --fail-under=90 \
+            --show-uncovered
       # --- GO-END ----------------------------------------------------------
 
       # --- JAVA-START ------------------------------------------------------
