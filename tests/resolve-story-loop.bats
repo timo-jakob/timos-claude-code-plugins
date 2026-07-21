@@ -261,3 +261,50 @@ seed_exhausted_wd() {
   grep -qx 'helper.py' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
   run ! grep -q '^\.loop-wd/' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
 }
+
+@test "mid-loop dispatch ambiguity exits typed ESCALATE_AMBIGUOUS, not a bare exit 1 (#912)" {
+  WD="$BATS_TEST_TMPDIR/wd-midamb"
+  # file-driven detection so the fix pass can flip it ambiguous mid-chain:
+  # round 1 sees python only; its fix pass adds a second supported language,
+  # so round 2's per-round dispatch returns rc=3.
+  LANGS_FILE="$BATS_TEST_TMPDIR/langs.json"
+  printf '%s' '{"languages":["python"]}' > "$LANGS_FILE"
+  DSTUB="$BATS_TEST_TMPDIR/detect-from-file.sh"
+  printf '#!/usr/bin/env bash\ncat "$LANGS_FILE_PATH"\n' > "$DSTUB"
+  chmod +x "$DSTUB"
+  run env DETECT_STACK_BIN="$DSTUB" LANGS_FILE_PATH="$LANGS_FILE" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
+    --status-file "$BATS_TEST_TMPDIR/midamb-status.json" \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'printf "%s" "{\"languages\":[\"python\",\"java\"]}" > "$LANGS_FILE_PATH"'
+  [ "$status" -eq 10 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_AMBIGUOUS" ]
+  echo "$output" | jq -e '.escalation_reasons | index("ambiguous_dispatch")' >/dev/null
+  # --status-file carries the SAME typed verdict, not the previous round's
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/midamb-status.json")" = "ESCALATE_AMBIGUOUS" ]
+  jq -e '.escalation_reasons | index("ambiguous_dispatch")' "$BATS_TEST_TMPDIR/midamb-status.json" >/dev/null
+  # round context is real: round 1 completed before the ambiguity struck
+  [ "$(echo "$output" | jq '.rounds')" -eq 1 ]
+  [ "$(echo "$output" | jq '.history | length')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists | length')" -eq 1 ]
+  # ...and the carried element is round 1's REAL changelist, not a placeholder
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
+}
+
+@test "--resume into ambiguous dispatch reports the prior run's rounds and changelists, not 0/[] (#912)" {
+  WD="$BATS_TEST_TMPDIR/wd-resume-amb"
+  seed_exhausted_wd "$WD"   # one completed round of history + changelist
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python","java"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --review-cmd 'true' --fix-cmd 'true'
+  [ "$status" -eq 10 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_AMBIGUOUS" ]
+  echo "$output" | jq -e '.escalation_reasons | index("ambiguous_dispatch")' >/dev/null
+  # the carried-over state rides out with the status: rounds/changelists agree
+  # with the populated history instead of rendering "0/N rounds" above it
+  [ "$(echo "$output" | jq '.rounds')" -eq 1 ]
+  [ "$(echo "$output" | jq '.history | length')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists | length')" -eq 1 ]
+  # ...and the carried element is the prior run's REAL round, not a placeholder
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
+}
