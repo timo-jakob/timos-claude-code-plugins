@@ -1,0 +1,57 @@
+# Fixture contract for the consumer deprecation surface (development-javascript
+# #707). It carries one DEPRECATED operation (with an x-sunset date, the #695
+# producer convention) and one active operation, so a consumer can prove the
+# end-to-end path: regenerate the client from this spec, then ESLint's
+# @typescript-eslint/no-deprecated warns at every call site of `getOrders`
+# (whose generated @deprecated JSDoc carries the sunset date) and stays silent
+# for `getHealth`.
+#
+# Point an orval target's input at this file to exercise the flow in a fixture
+# test, or bump a real *-api-spec package's operation to `deprecated: true`.
+openapi: 3.0.3
+info:
+  title: Deprecation fixture
+  version: 1.0.0
+paths:
+  /orders:
+    get:
+      operationId: getOrders
+      summary: List orders
+      description: Returns all orders.
+      deprecated: true
+      x-sunset: "2026-12-31"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      description: Liveness probe.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        total:
+          type: number
+    Health:
+      type: object
+      properties:
+        status:
+          type: string

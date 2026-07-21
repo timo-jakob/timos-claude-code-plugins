@@ -1672,18 +1672,32 @@ are NOT used byte-for-byte** — see the adaptation step below:
   languages/javascript/contract-consumer/src/test/msw-setup.ts \
   languages/javascript/contract-consumer/eslint.config.js \
   languages/javascript/contract-consumer/vitest.config.ts \
+  languages/javascript/contract-consumer/orval-deprecation-transformer.mjs \
   languages/javascript/contract-consumer/.github/workflows/contracts-drift.yml.tmpl \
   languages/javascript/contract-consumer/.github/workflows/contracts-regen.yml.tmpl
 ```
+
+(The fixture `contract-consumer/fixtures/deprecated-openapi.yaml` is **not
+rendered by default** — it is a self-contained manual test aid, not part of the
+running app, and nothing wires it automatically. Render it **only if the user
+asks** for a ready-made end-to-end deprecation test during plan approval; when
+you do, do not report it in the installed set as running machinery.)
 
 **Adaptation step — retarget the illustrative `orders` scaffold.** `client.ts`
 and `msw-setup.ts` hardcode an illustrative `orders` target
 (`./generated/orders/…`, `getOrdersMock`). The seeder derives target names from
 the repo's **actual** specs (e.g. `billing-api-spec` → `billing`), so after
-rendering, **rewrite `orders` to the seeded `targets[].name`** from the JSON
-summary (for a single spec, its name; for multiple, one ACL seam + one
-`setupServer(...)` spread per target). Left unedited, the scaffold imports a
-`generated/orders/` that generation never creates.
+rendering, **rewrite `orders` to the target name** — **in `client.ts` and
+`msw-setup.ts` only** (for a single spec, its name; for multiple, one ACL seam +
+one `setupServer(...)` spread per target). Take the name from the seeded
+`targets[].name` on the `seeded:true` path; on `seeded:false` take it from the
+**existing** `orval.config.ts`'s actual targets (its `output` dirs under
+`src/api/generated/`), since the JSON's would-be targets may not match what that
+config generates.
+The transformer is target-agnostic and the optional fixture is self-contained
+(it uses `/orders`/`getOrders` deliberately) — **do not** rewrite either. Left
+unedited, the scaffold imports a `generated/orders/` that generation never
+creates.
 
 **Activation — generate the client so the committed tree is green.** Everything
 under the ACL/MSW scaffold imports generated code that does not exist until
@@ -1705,14 +1719,25 @@ passes — a clean bootstrap PR.
 package can't be resolved (a private registry isn't configured, or the producer
 hasn't published the version yet) — **do NOT commit a partial scaffold.** The
 ACL/MSW files and the drift workflow are all red without a generated client, and
-the finish-flow would arm auto-merge on that red PR. Instead **stop §3k, commit
-nothing for it**, and record a **prominent Step 5 follow-up**: "this repo pins
-`<spec-pkg>` but it isn't installable yet; once it resolves, re-run
-`/development:bootstrap` to scaffold + generate the contract-consumer machinery."
-The **base** `eslint.config.js`/`vitest.config.ts` §3d already rendered stay in
-place (§3k only overwrites them on completion), so the repo keeps working configs
-— it is never left config-less by an abort. `orval.config.ts` (already seeded, no
-imports) may stay too; nothing else §3k lands until generation succeeds.
+the finish-flow would arm auto-merge on that red PR. The scaffold set was already
+rendered into the working tree before this activation step ran, so **commit
+disposition is explicit** — do not leave it to inference:
+
+- **Discard from the commit** — the ACL (`src/api/**`), `src/test/msw-setup.ts`,
+  the sample test, and both `contracts-*.yml` workflows: `git checkout`/remove
+  them from the staging + working tree (they import a client that doesn't exist).
+- **Commit only** the seeded `orval.config.ts` **and** its
+  `orval-deprecation-transformer.mjs` (both already rendered; the `.mjs` is
+  dependency-free and inert until `npm run generate`, and committing it keeps the
+  config's `input.override.transformer` reference from dangling on the next run).
+- The **base** `eslint.config.js`/`vitest.config.ts` §3d rendered stay in place
+  (§3k only overwrites them on completion), so the repo keeps working configs —
+  it is never left config-less by an abort.
+
+Record a **prominent Step 5 follow-up**: "this repo pins `<spec-pkg>` but it
+isn't installable yet; once it resolves, re-run `/development:bootstrap` to
+scaffold + generate the contract-consumer machinery." Nothing else §3k lands
+until generation succeeds.
 
 The installed set (all committed together, once generation succeeds):
 
@@ -1723,20 +1748,51 @@ The installed set (all committed together, once generation succeeds):
 - `src/test/msw-setup.ts` + `src/api/client.test.ts` — MSW wired into vitest so
   the whole suite runs **with no backend**, plus a sample test that exercises the
   ACL client against the generated handlers.
+- `orval-deprecation-transformer.mjs` + `eslint.config.js`'s deprecation rule —
+  the **consumer deprecation surface (#707)**. On the `seeded:true` path the seed
+  script wires the transformer (`input.override.transformer`) and
+  `output.override.useDeprecatedOperations`; the orval **input transformer** then
+  prepends a deprecation notice + the `x-sunset` date (the #695 producer
+  convention) to every operation the spec marks `deprecated: true`, so orval
+  renders it into the generated method's `@deprecated` JSDoc. The consumer
+  `eslint.config.js` enables **`@typescript-eslint/no-deprecated: "warn"`** in a
+  block **scoped to `src/**`** (typed linting — `parserOptions.projectService`,
+  which the rule **requires** — kept off the root config files the base tsconfig
+  doesn't include). So every call site of a dying operation warns the moment a
+  Renovate spec bump lands — fully generator-driven, no hand-written `@deprecated`.
+  The **sunset date rides in the generated `@deprecated` method's JSDoc** (editor
+  hover + the committed generated diff); orval emits a bare `@deprecated` tag, so
+  the date is not guaranteed inside the bare ESLint message string itself. It is
+  `warn`, not `error` — but note the bootstrapped pre-commit eslint hook runs
+  `--max-warnings=0`, so a warning **does gate commits** touching a deprecated
+  call site (deliberate migration pressure, consistent with `no-explicit-any:
+  "warn"` in this stack); a team wanting it advisory-only relaxes that hook.
+  **On the `seeded:false` path** (an existing `orval.config.ts` left untouched),
+  check the existing config for `input.override.transformer` /
+  `useDeprecatedOperations`: **if it already wires both**, the surface is
+  installed — report it so and do nothing further. **If either is missing**, the
+  rendered transformer is **unwired** — either offer the two-line edit (a §4c-class
+  confirmed change) or record a Step 5 follow-up, and report "rendered but
+  unwired" rather than installed.
+  `fixtures/deprecated-openapi.yaml` is **optional** (see the render note above)
+  and self-contained — a manual end-to-end fixture, not part of the running app.
 - `eslint.config.js` — **supersedes** the base `languages/javascript/eslint.config.js`
   (base config **plus** the ACL boundary rule: `no-restricted-imports` forbids
   importing `src/api/generated/*` from anywhere except `src/api/**` (the ACL) and
   `src/test/**` (the MSW harness, which must wire up the generated mock handlers
-  and has no ACL to route through), as an **error** so it fails CI). It
+  and has no ACL to route through), as an **error** so it fails CI — **and** the
+  #707 deprecation rule above). It
   **overwrites** the base `eslint.config.js` §3d rendered — an explicit upgrade,
   stronger than idempotency rule 3's default-skip: default to **overwrite** when
   the on-disk file matches the base template, and fall back to rule 3's prompt
   only if the user has customized it. **If that prompt resolves to skip** (or the
   no-answer default), do **not** proceed with §3k at all: committing the ACL/MSW
   scaffold beside the un-superseded base config would ship a red tree (no boundary
-  gate, no MSW `setupFiles`). Treat it like the activation-failure abort below —
-  commit no scaffold, keep the seeded `orval.config.ts` and the base configs, and
-  record a Step 5 follow-up offering rule 3's "merge manually" to unblock.
+  gate, no MSW `setupFiles`). Treat it like the activation-failure abort above —
+  discard the ACL/MSW scaffold + workflows from the commit, keep **and commit** the
+  seeded `orval.config.ts` and its `orval-deprecation-transformer.mjs` (so the
+  config's transformer reference isn't dangling) plus the base configs, and record
+  a Step 5 follow-up offering rule 3's "merge manually" to unblock.
 - `vitest.config.ts` — **supersedes** the base one (base **plus** `setupFiles`
   starting MSW, and generated code excluded from coverage). Same overwrite rule
   as `eslint.config.js` above — it upgrades the base §3d rendered.
