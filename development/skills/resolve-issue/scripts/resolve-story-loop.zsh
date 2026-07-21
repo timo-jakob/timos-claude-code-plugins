@@ -12,7 +12,8 @@
 # commands (or a headless `claude -p`) behind the same seam.
 #
 # Per-round flow:
-#   run review panel (diff-scoped) -> scope to diff -> consolidate
+#   re-dispatch (fresh scope; ambiguous => ESCALATE_AMBIGUOUS, #912)
+#     -> run review panel (diff-scoped) -> scope to diff -> consolidate
 #     -> no blockers            => CONVERGED
 #     -> surviving conflict     => ESCALATE_CONFLICT   (early exit)
 #     -> non_converging blocker => ESCALATE_NO_CONVERGENCE (early exit)
@@ -38,7 +39,8 @@
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
-#   10  ESCALATE_AMBIGUOUS        (dispatch could not pick a panel — #560)
+#   10  ESCALATE_AMBIGUOUS        (dispatch could not pick a panel — #560 —
+#                                  pre-loop or at any round's re-dispatch, #912)
 #   11  ESCALATE_CONFLICT         (a surviving reviewer conflict)
 #   12  ESCALATE_NO_CONVERGENCE   (a blocker survived two consecutive rounds)
 #   13  BUDGET_EXHAUSTED          (round budget spent with blockers remaining)
@@ -124,6 +126,21 @@ emit_and_exit() {
   exit "$code"
 }
 
+# build the ambiguous-dispatch carrier and emit the typed escalation (#912).
+# Shared by the pre-loop and per-round dispatch paths so exit 10's contract
+# (typed status JSON + code 10) holds wherever detection turns ambiguous.
+# `rounds` is the completed-round count — the prior run's on --resume, the
+# current round minus one mid-loop — so it always agrees with history.
+emit_ambiguous() {
+  local err_json="$1" rounds="$2" rtype="$3" rskill="$4"
+  local carrier="$work_dir/dispatch-error.json"
+  jq -nc --argjson e "$err_json" --argjson r "$rounds" \
+    '{escalation_reasons:["ambiguous_dispatch"], dispatch_error:$e,
+      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0}, blocking:[], suggestions:[],
+      conflicts:[], non_converging:false, round:$r}' > "$carrier"
+  emit_and_exit "ESCALATE_AMBIGUOUS" "$rounds" 10 "$rtype" "$rskill" "$carrier" "$history_file" "$changelists_file"
+}
+
 # --no-review is the fast path — it short-circuits before any other requirement.
 if (( no_review )); then
   emit_and_exit "SKIPPED" 0 0 "" "" "" "" ""
@@ -177,13 +194,10 @@ fi
 local plan rc
 plan=$("$DISPATCH" plan --repo "$repo" --base "$base" --round 1); rc=$?
 if (( rc == 3 )); then
-  # unsupported / ambiguous repo type — surface as an escalation
-  local tmpf="$work_dir/dispatch-error.json"; print -r -- "$plan" > "$tmpf"
-  # reshape the dispatch error into a changelist-ish carrier so it rides out
-  jq -nc --argjson e "$plan" '{escalation_reasons:["ambiguous_dispatch"], dispatch_error:$e,
-     summary:{critical:0,high:0,low:0,blocking:0,conflicts:0}, blocking:[], suggestions:[],
-     conflicts:[], non_converging:false, round:0}' > "$tmpf"
-  emit_and_exit "ESCALATE_AMBIGUOUS" 0 10 "" "" "$tmpf" "$history_file" ""
+  # unsupported / ambiguous repo type — surface as an escalation. On --resume
+  # the prior run's rounds and changelists are real state and must ride out
+  # with the status, never a hardcoded fresh-run zero (#912).
+  emit_ambiguous "$plan" "$resume_round" "" ""
 elif (( rc != 0 )); then
   print -u2 -- "resolve-story-loop: dispatch plan failed (rc=$rc)"; exit 1
 fi
@@ -213,8 +227,15 @@ local blocking conflict nonconv nconf
 local -a scope_lines
 while (( round <= max_rounds )); do
   # per-round dispatch: the round's well-known findings path AND a fresh scope
-  rp=$("$DISPATCH" plan --repo "$repo" --base "$base" --round "$round") || {
-    print -u2 -- "resolve-story-loop: dispatch plan failed at round $round"; exit 1 }
+  rp=$("$DISPATCH" plan --repo "$repo" --base "$base" --round "$round"); rc=$?
+  if (( rc == 3 )); then
+    # a fix pass changed what detection sees (e.g. added a second supported
+    # language) — the same typed escalation as the pre-loop path, not a bare
+    # exit 1 that leaves --status-file holding the previous verdict (#912)
+    emit_ambiguous "$rp" "$(( round - 1 ))" "$repo_type" "$review_skill"
+  elif (( rc != 0 )); then
+    print -u2 -- "resolve-story-loop: dispatch plan failed at round $round (rc=$rc)"; exit 1
+  fi
   findings_path=$(print -r -- "$rp" | jq -r '.findings_path')
   # refresh the scope from THIS round's plan (#911): a file the previous round's
   # fix pass created must be reviewed, not silently invisible behind a scope
