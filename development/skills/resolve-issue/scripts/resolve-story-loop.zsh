@@ -191,7 +191,17 @@ fi
 local repo_type review_skill scope_file="$work_dir/scope.txt"
 repo_type=$(print -r -- "$plan" | jq -r '.repo_type')
 review_skill=$(print -r -- "$plan" | jq -r '.review_skill')
-print -r -- "$plan" | jq -r '.changed_files[]?' > "$scope_file"
+# scope_file is written per round inside the loop (#911) — no pre-loop write,
+# so a stale copy can never be mistaken for the round's real scope.
+# A --work-dir INSIDE the repo would sweep the loop's own state files
+# (scope.txt, changelist-N.json, history.jsonl, …) into the refreshed scope as
+# untracked files — the dispatch's #909 exclusion only covers the default
+# artifact prefixes. Compute the work-dir's repo-relative prefix once so every
+# refresh filters it.
+local wd_rel=""
+if [[ "${work_dir:A}" == "${repo:A}"/* ]]; then
+  wd_rel="${${work_dir:A}#"${repo:A}"/}/"
+fi
 
 # --- the loop ---------------------------------------------------------------
 # All loop-locals are declared ONCE here: re-running a bare `local NAME` on a
@@ -200,11 +210,30 @@ print -r -- "$plan" | jq -r '.changed_files[]?' > "$scope_file"
 local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
 local rp findings_path scoped changelist blockers
 local blocking conflict nonconv nconf
+local -a scope_lines
 while (( round <= max_rounds )); do
-  # per-round dispatch just to get the round's well-known findings path
+  # per-round dispatch: the round's well-known findings path AND a fresh scope
   rp=$("$DISPATCH" plan --repo "$repo" --base "$base" --round "$round") || {
     print -u2 -- "resolve-story-loop: dispatch plan failed at round $round"; exit 1 }
   findings_path=$(print -r -- "$rp" | jq -r '.findings_path')
+  # refresh the scope from THIS round's plan (#911): a file the previous round's
+  # fix pass created must be reviewed, not silently invisible behind a scope
+  # frozen at invocation start (artifact paths stay excluded — #909 lives in
+  # the dispatch's _changed_files, which this recomputation goes through).
+  # This write is the review hook's ONLY scope source, so a failed extraction
+  # must abort the round, never leave a truncated scope behind.
+  print -r -- "$rp" | jq -r '.changed_files[]?' > "$scope_file" || {
+    print -u2 -- "resolve-story-loop: could not extract scope at round $round"; exit 1 }
+  # a repo-internal work-dir's own files are loop state, never story code
+  if [[ -n "$wd_rel" && -s "$scope_file" ]]; then
+    scope_lines=("${(@f)$(<"$scope_file")}")
+    scope_lines=(${scope_lines:#${(b)wd_rel}*})
+    if (( ${#scope_lines} )); then
+      print -rl -- "${scope_lines[@]}" > "$scope_file"
+    else
+      : > "$scope_file"
+    fi
+  fi
   mkdir -p "${findings_path:h}"
   : > "$findings_path"
 
