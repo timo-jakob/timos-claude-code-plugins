@@ -226,3 +226,38 @@ seed_exhausted_wd() {
   [ "$status" -eq 1 ]
   run ! grep -q 'CONVERGED' <<< "$output"
 }
+
+@test "scope refreshes each round: a file the fix pass creates is reviewed next round (#911)" {
+  WD="$BATS_TEST_TMPDIR/wd-scope-refresh"
+  # round 1: blocker + the fix pass creates helper.py; round 2: clean -> CONVERGED.
+  # The review hook snapshots its scope per round so we can assert the refresh.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = 1" > "$REVIEW_REPO/helper.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # round 1 reviewed the real pre-fix scope (positive assertion proves the
+  # snapshot captured content, so the negative one below discriminates)
+  grep -qx 'app.py' "$WD/scope-r1.txt"
+  run ! grep -qx 'helper.py' "$WD/scope-r1.txt"
+  # round 2 must see the fix's new file
+  grep -qx 'helper.py' "$WD/scope-r2.txt"
+  grep -qx 'app.py' "$WD/scope-r2.txt"
+}
+
+@test "a repo-internal --work-dir's own state files never enter the refreshed scope (#911)" {
+  WD="$R/.loop-wd"   # deliberately INSIDE the repo
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$BATS_TEST_TMPDIR" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/wdscope-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = 1" > "$REVIEW_REPO/helper.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # round 2's refreshed scope: the story files, but none of the loop's own state
+  grep -qx 'app.py' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
+  grep -qx 'helper.py' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
+  run ! grep -q '^\.loop-wd/' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
+}
