@@ -1,0 +1,47 @@
+# APIM governance channel — `apim/`
+
+This directory is the **switch and the source** for {{PROJECT_NAME}}'s optional
+API-management (APIM) governance channel (development #706).
+
+## What it does
+
+The contract in `contracts/vN/openapi.yaml` is published to **two** channels on
+every release, from the **same CI step** (`.github/workflows/spec-publish.yml`),
+so they can never drift:
+
+- **npm** — the *machine* channel: consumers pin `<repo>-api-spec` and Renovate
+  bumps it. Always on (#692).
+- **APIM portal** — the *governance / human* channel: the same spec + rendered
+  docs are pushed to a developer portal, and the API **proxy** defined here
+  (`apiproxy.yaml`) is deployed/updated. **On only when this `apim/` directory
+  exists** — its presence is the switch. Delete the directory to turn the
+  channel off; the npm channel alone still delivers the full drift guarantee.
+
+Deprecation signals a published spec carries (`deprecated: true` + `x-sunset`,
+the #695 convention) ride along verbatim and are rendered by the portal — no
+extra tooling.
+
+## What you must do
+
+The portal-publish and proxy-deploy commands are the **one org-specific seam**.
+The workflow ships them as clearly-marked **reference placeholders** (an
+Apigee-style `apigeecli` example) that log "would publish/deploy" and do nothing
+until you replace them:
+
+1. Replace the two placeholder `run:` blocks in `spec-publish.yml`'s APIM steps
+   with your platform's CLI (Apigee `apigeecli`, Azure `az apim`, AWS API
+   Gateway, Kong `deck`, …).
+2. Set the `APIM_ENDPOINT` and `APIM_TOKEN` repository secrets.
+3. Adapt `apiproxy.yaml` (below) to your gateway's config-as-code format.
+
+Org-level APIM *platform* infrastructure (standing up the gateway, portal, and
+key management) is **out of scope** for the plugin — this is the per-repo
+config-as-code that feeds it.
+
+## `apiproxy.yaml`
+
+The gateway proxy definition, versioned next to the spec it exposes. It carries
+one route per live major (base path + upstream target) plus starter gateway
+policies (CORS, quota, auth). The consumer's generated client targets the
+**gateway** (the spec's `servers:` URL), never the service — so keep the route
+base paths in step with the spec's `servers` block.

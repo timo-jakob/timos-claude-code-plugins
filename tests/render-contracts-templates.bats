@@ -193,6 +193,88 @@ EOF
   grep -A2 'APIM governance portal' "$wf" | grep -Eq "if: .*hashFiles\('apim/\*\*'\) != ''"
 }
 
+@test "#706 APIM: portal-publish + proxy-deploy are steps of the SAME publish job, each presence-gated" {
+  render_contracts
+  local wf="$OUT/common/.github/workflows/spec-publish.yml"
+  assert_valid_yaml "$wf"
+  # AC4: both APIM steps are MEMBERS of the existing `publish` job (yq proves job
+  # membership, not merely presence-somewhere-in-the-file).
+  local names
+  names="$(yq -r '.jobs.publish.steps[].name' "$wf")"
+  grep -q 'APIM governance portal' <<<"$names"
+  grep -q 'API proxy from apim/' <<<"$names"
+  # AC4: spec-publish.yml is the ONLY workflow that references APIM — no separate
+  # governance pipeline was added under any name (the guessed-filename check a
+  # regression could dodge is replaced by an exhaustive reference scan).
+  [ "$(grep -rlE 'APIM|apim/' "$OUT/common/.github/workflows" | wc -l | tr -d ' ')" -eq 1 ]
+  grep -rlE 'APIM|apim/' "$OUT/common/.github/workflows" | grep -q 'spec-publish.yml'
+  # each step's `if:` is bound to the presence gate in the run-when-present
+  # direction — a step losing the guard, or regressing to == '', fails HERE
+  # (binding guard->step, which a whole-file line count cannot).
+  local step ifval
+  for step in 'APIM governance portal' 'API proxy from apim'; do
+    ifval="$(yq -r ".jobs.publish.steps[] | select(.name | test(\"$step\")) | .if" "$wf")"
+    [[ "$ifval" == *"hashFiles('apim/**') != ''"* ]]
+  done
+}
+
+@test "#706 APIM: the PORTAL STEP reads the same spec as npm (no drift) and stays honest" {
+  render_contracts
+  local wf="$OUT/common/.github/workflows/spec-publish.yml"
+  # AC3: assert on the PORTAL STEP'S run body — the npm step has the identical
+  # spec= line, so a whole-file grep would pass even if the portal step read a
+  # stripped spec. Slice the portal step's run via yq, then assert within it.
+  local portal
+  portal="$(yq -r '.jobs.publish.steps[] | select(.name | test("APIM governance portal")) | .run' "$wf")"
+  grep -Fq 'spec="contracts/${MAJOR}/openapi.yaml"' <<<"$portal"
+  # honest placeholder WITHIN the portal step: logs "Would publish" + carries a
+  # REFERENCE PLACEHOLDER, and must NOT claim it actually published.
+  grep -Fq 'REFERENCE PLACEHOLDER' <<<"$portal"
+  grep -Fq 'Would publish' <<<"$portal"
+  run ! grep -qiE 'Published .* to the APIM' <<<"$portal"
+  # the APIM_* secrets contract is on the portal step's env
+  local penv
+  penv="$(yq -r '.jobs.publish.steps[] | select(.name | test("APIM governance portal")) | .env | keys | .[]' "$wf")"
+  grep -q 'APIM_ENDPOINT' <<<"$penv"
+  grep -q 'APIM_TOKEN' <<<"$penv"
+  # the proxy step is likewise an honest placeholder
+  local proxy_run
+  proxy_run="$(yq -r '.jobs.publish.steps[] | select(.name | test("API proxy from apim")) | .run' "$wf")"
+  grep -Fq 'Would deploy' <<<"$proxy_run"
+  grep -Fq 'REFERENCE PLACEHOLDER' <<<"$proxy_run"
+}
+
+@test "#706 APIM: the apim/ config-as-code scaffold renders coherently (opt-in)" {
+  # apim/ is opt-in (not in the core CONTRACTS_SET) — render it explicitly.
+  zsh "$RENDER" --templates "$TEMPLATES" --out "$OUT" \
+    --project-name "Demo Project" --default-branch "main" \
+    common/apim/apiproxy.yaml.tmpl common/apim/README.md.tmpl
+  local proxy="$OUT/common/apim/apiproxy.yaml"
+  local readme="$OUT/common/apim/README.md"
+  [ -f "$proxy" ]
+  [ -f "$readme" ]
+  assert_valid_yaml "$proxy"
+  # the load-bearing config-as-code model, PARSED (not substring-grepped) so a
+  # scaffold that drops the routes[] / target model fails.
+  [ "$(yq -r '.proxy.name' "$proxy")" = "api-proxy" ]
+  # one route per live major: basePath (== the seed spec's servers url /v1), major, target
+  [ "$(yq -r '.routes[0].basePath' "$proxy")" = "/v1" ]
+  [ "$(yq -r '.routes[0].major' "$proxy")" = "v1" ]
+  yq -r '.routes[0].target' "$proxy" | grep -qE '^https?://'
+  # gateway policies present as a mapping
+  local pols
+  pols="$(yq -r '.policies | keys | .[]' "$proxy")"
+  grep -q cors <<<"$pols"
+  grep -q quota <<<"$pols"
+  grep -q auth <<<"$pols"
+  # no leftover placeholders survived the render
+  run ! grep -q '{{' "$proxy"
+  run ! grep -q '{{' "$readme"
+  # the README states the two-channel model + the org-wires-the-platform seam
+  grep -q 'config-as-code' "$readme"
+  grep -qi 'APIM_ENDPOINT' "$readme"
+}
+
 @test "#708 contracts: CONTRACTS.md documents the mechanical retirement path + 410" {
   render_contracts
   local md="$OUT/common/CONTRACTS.md"

@@ -1,0 +1,41 @@
+# API proxy config-as-code (development #706) — the gateway definition for
+# {{PROJECT_NAME}}, versioned in the repo NEXT TO the contract it exposes, so the
+# proxy and the spec can never drift. The Spec Publish workflow's
+# "Deploy the vN API proxy from apim/" step deploys this bundle on every release
+# (presence-gated on this directory existing).
+#
+# This is a STARTER. It is intentionally platform-neutral and illustrative — the
+# design's reference platform is Apigee-style config-as-code; adapt the shape to
+# your gateway (Apigee proxy bundle, Azure APIM ARM/Bicep, AWS API Gateway
+# OpenAPI extensions, Kong decK). The load-bearing facts a real bundle must carry
+# are here: the proxy name, the per-major base paths, and the upstream target.
+
+proxy:
+  # Starter name — rename to suit your org (as with the npm package name).
+  name: api-proxy
+  description: "Gateway proxy for {{PROJECT_NAME}} — one route per live API major."
+
+# One route per live contracts/vN/ major. The consumer's generated client targets
+# the GATEWAY (the spec's `servers:` URL), never the service directly, so the
+# version path segment lives here and in the spec's servers block — keep them in
+# step. Add a route when a new major goes live; freeze/remove it at retirement.
+routes:
+  # basePath matches the spec's `servers: url` (/v1, the seed contract) — the
+  # generated client targets the gateway at exactly this path. The upstream
+  # `target` is the service's INTERNAL address (never seen by the frontend) and
+  # can use whatever path the service exposes.
+  - basePath: /v1
+    major: v1
+    target: https://backend.internal.example/api/v1
+
+# Policies applied at the gateway (auth, quota, CORS). Starter values — tighten to
+# your org's standard. Keys/quotas are an APIM-platform concern, configured here
+# as code rather than clicked in a console.
+policies:
+  cors:
+    allowOrigins: ["https://app.example.com"]
+  quota:
+    requestsPerMinute: 600
+  auth:
+    # The gateway validates the caller; the service trusts the gateway.
+    type: apikey
