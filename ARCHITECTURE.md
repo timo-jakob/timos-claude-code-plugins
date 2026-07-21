@@ -1107,8 +1107,12 @@ reliable but the merging needs semantics:
   `dimension` (most-detailed description kept, reviewers unioned, `agreement`
   counted, highest severity carried); a **conflict** item for co-located
   `performance`-vs-`code_quality` recommendations; and **non-convergence** —
-  a blocker whose fingerprint (`file`+`dimension`+normalized `title`) also
-  blocked the previous round (`--prev`) is marked `non_converging: true`. A
+  a blocker whose fingerprint (`file`+`dimension` with line proximity, ±10
+  lines; a missing line is a wildcard — deliberately NOT the free-text title,
+  #606) also blocked the previous round (`--prev`) is marked
+  `non_converging: true` and carries `matched_prior: {line, title}` — the first
+  prior-round blocker the fingerprint matched (#913), which the escalation
+  renders so a false trip of the proximity match is spottable. A
   surviving conflict and a non-converging blocker are both `escalation_reasons`.
 - **`review-consolidator`** (agent, opus) runs the engine, then adds the
   judgment the exact-key heuristics can't: merging findings that describe the

@@ -35,7 +35,10 @@ changelist with:
   description kept, reviewers unioned (`agreement` count);
 - **conflicts** — co-located `performance` vs `code_quality` recommendations;
 - **non-convergence** — a blocker whose fingerprint also blocked last round is
-  flagged `non_converging: true`.
+  flagged `non_converging: true`, with `matched_prior: {line, title}` naming
+  the first prior-round blocker the fingerprint matched (#913) — **preserve
+  `matched_prior` verbatim on any item that carries it**; the escalation
+  renders it so a human can spot a false trip of the proximity match.
 
 Take the engine's output as the source of truth for all of the above.
 
@@ -49,8 +52,12 @@ flagging, never inventing or dropping a real finding**:
    words, or on adjacent lines / across dimensions (a `bugs` and a `security`
    finding that are the same root cause), should be merged into one item —
    union their reviewers, keep the clearest description, keep the highest
-   severity. Read the cited code (`Read`/`Grep`) when you need to confirm they
-   are truly the same issue before merging.
+   severity. A merged item keeps `non_converging: true` if any constituent
+   carried it, and the `matched_prior` of the earliest-listed carrying
+   constituent — along with that same constituent's `file`/`line`, so the
+   escalation's at-line/file-wide rendering stays paired with the match it
+   describes (#913). Read the cited code (`Read`/`Grep`) when you need to
+   confirm they are truly the same issue before merging.
 2. **Conflict confirmation.** The engine flags only co-located
    performance-vs-code_quality pairs. Promote a genuine opposing pair the
    heuristic missed (e.g. recommendations a few lines apart that cannot both be
@@ -73,6 +80,8 @@ your judgment edits applied on top:
       "file": "src/app/checkout.py", "line": 42, "title": "…", "description": "…",
       "suggested_fix": "…", "reviewers": ["python-bug-hunter","python-security-reviewer"],
       "agreement": 2, "blocking": true, "non_converging": false }
+    /* a non-converging item additionally carries, verbatim from the engine:
+       "non_converging": true, "matched_prior": { "line": 40, "title": "…" } */
   ],
   "suggestions": [ /* Low items, logged, never loop */ ],
   "conflicts": [

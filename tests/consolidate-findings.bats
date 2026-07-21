@@ -105,6 +105,71 @@ EOF
   echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
 }
 
+@test "non-convergence: the match records WHICH prior blocker it hit (matched_prior, #913)" {
+  # the escalation needs "matched prior blocker at old line L" so a human can
+  # spot a false trip of the proximity window after a fix pass shifted lines
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":30,"title":"Race on shared counter","description":"d","reviewer":"python-bug-hunter"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  # round 1 has no prior — no blocker may carry matched_prior
+  [ "$(echo "$output" | jq '[.blocking[] | has("matched_prior")] | any')" = "false" ]
+
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":38,"title":"Counter increment still racy","description":"still here","reviewer":"python-bug-hunter"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" -eq 30 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].matched_prior.title')" = "Race on shared counter" ]
+}
+
+@test "non-convergence: with several matching prior blockers, matched_prior is the FIRST in prior blocking order (#913)" {
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":30,"title":"Race on shared counter","description":"d","reviewer":"python-bug-hunter"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":35,"title":"Unlocked read of counter","description":"d","reviewer":"python-bug-hunter"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  # both priors sit within the window of the round-2 line — the recorded match
+  # is deterministically the first of them in the prior blocking array
+  [ "$(echo "$output" | jq -r '.blocking[0].title')" = "Race on shared counter" ]
+
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":33,"title":"Counter still racy","description":"d","reviewer":"python-bug-hunter"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" -eq 30 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].matched_prior.title')" = "Race on shared counter" ]
+}
+
+@test "non-convergence: a line-less prior blocker matches as a wildcard and matched_prior.line is null (#913)" {
+  # the producer side of the render-side wildcard test: line_near treats a
+  # missing line as a wildcard, and matched_prior must carry line:null (not 0,
+  # not an omitted key) so the escalation renders the file-wide caveat
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","title":"Race somewhere in e.py","description":"d","reviewer":"python-bug-hunter"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":500,"title":"Counter still racy","description":"d","reviewer":"python-bug-hunter"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" = "null" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].matched_prior.title')" = "Race somewhere in e.py" ]
+}
+
 @test "non-convergence: a NEW same-file/dimension blocker far from the prior line does not fire" {
   # Line proximity guards against a false positive: round-1 blocker is fixed and
   # a genuinely different blocker of the same dimension appears elsewhere in the

@@ -308,3 +308,65 @@ seed_exhausted_wd() {
   # ...and the carried element is the prior run's REAL round, not a placeholder
   [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
 }
+
+@test "--resume truncates an orphaned changelist line left by a kill between the two appends (#913)" {
+  WD="$BATS_TEST_TMPDIR/wd-killwindow"
+  seed_exhausted_wd "$WD"
+  # simulate the kill window: round 2 ran, its changelist was appended, the run
+  # died before the history line — changelists is one valid line ahead
+  tail -n 1 "$WD/changelists.jsonl" >> "$WD/changelists.jsonl"
+  # resume with a clean round -> the orphaned round re-runs and converges.
+  # --separate-stderr: the notice must be OUT-OF-BAND — stdout stays exactly
+  # the one-line status JSON (the clean-path contract asserted above).
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(printf '%s' "$output" | grep -c '')" -eq 1 ]
+  # one entry per COMPLETED round — the orphan did not survive as a duplicate
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  [ "$(echo "$output" | jq '.history | length')" -eq 2 ]
+  [ "$(echo "$output" | jq '.round_changelists | length')" -eq 2 ]
+  # the truncation was announced on stderr, not silent and not on stdout
+  echo "$stderr" | grep -q 'orphaned changelist'
+}
+
+@test "--resume with a corrupt (partial) changelists line is an internal error (exit 1) (#913)" {
+  WD="$BATS_TEST_TMPDIR/wd-corrupt-clist"
+  seed_exhausted_wd "$WD"
+  # a kill DURING the changelist append leaves a partial line — the validity
+  # guard must catch it before any skew arithmetic runs on garbage
+  printf '{"round":' >> "$WD/changelists.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --review-cmd 'true' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'corrupt changelists'
+}
+
+@test "--resume with a changelists surplus beyond one line is an internal error, not a repair (#913)" {
+  WD="$BATS_TEST_TMPDIR/wd-surplus2"
+  seed_exhausted_wd "$WD"
+  # a surplus of 2+ cannot come from the single kill window — foreign
+  # corruption must error, never silently drop a completed round's record
+  tail -n 1 "$WD/changelists.jsonl" >> "$WD/changelists.jsonl"
+  tail -n 1 "$WD/changelists.jsonl" >> "$WD/changelists.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --review-cmd 'true' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  run ! grep -q 'CONVERGED' <<< "$output"
+}
+
+@test "--resume with history ahead of changelists is an internal error (exit 1), never silent repair (#913)" {
+  WD="$BATS_TEST_TMPDIR/wd-hist-ahead"
+  seed_exhausted_wd "$WD"
+  # the documented append order cannot produce this direction — a completed
+  # round losing its changelist record is corruption, not a kill-window orphan
+  : > "$WD/changelists.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --review-cmd 'true' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+}

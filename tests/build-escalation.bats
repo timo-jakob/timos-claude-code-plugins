@@ -32,6 +32,64 @@ EOF
   echo "$output" | grep -q '<!-- review-loop-escalation: ESCALATE_NO_CONVERGENCE -->'
 }
 
+@test "ESCALATE_NO_CONVERGENCE: matched_prior renders the prior blocker so a false trip is spottable (#913)" {
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_NO_CONVERGENCE","rounds":2,"max_rounds":3,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":true}],
+ "final_changelist":{"blocking":[{"priority":"Critical","dimension":"bugs","file":"app.py","line":50,"title":"Counter increment still racy","non_converging":true,"matched_prior":{"line":42,"title":"Race on shared counter"}}]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 601
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'matched prior-round blocker at line 42'
+  echo "$output" | grep -q 'Race on shared counter'
+  echo "$output" | grep -qi 'false trip'
+  # the summary render carries it too — the interactive extension shows this one
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'matched prior-round blocker at line 42'
+}
+
+@test "ESCALATE_NO_CONVERGENCE: a wildcard match (prior blocker without a line) says so, not a bogus line (#913)" {
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_NO_CONVERGENCE","rounds":2,"max_rounds":3,
+ "history":[{"round":2,"blocking":1,"conflicts":0,"non_converging":true}],
+ "final_changelist":{"blocking":[{"priority":"Critical","dimension":"bugs","file":"app.py","line":50,"title":"Counter still racy","non_converging":true,"matched_prior":{"line":null,"title":"Race somewhere in app.py"}}]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 601
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'no line recorded on one side — matched file-wide'
+  echo "$output" | grep -q 'Race somewhere in app.py'
+  run ! grep -q 'at line null' <<< "$output"
+}
+
+@test "ESCALATE_NO_CONVERGENCE: a CURRENT blocker without a line also discloses the file-wide match (#913)" {
+  # line_near treats a null line on EITHER side as a wildcard — claiming a
+  # tight at-line-N match when the current finding has no line would over-state
+  # the match to the human weighing the false-trip hint
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_NO_CONVERGENCE","rounds":2,"max_rounds":3,
+ "history":[{"round":2,"blocking":1,"conflicts":0,"non_converging":true}],
+ "final_changelist":{"blocking":[{"priority":"Critical","dimension":"bugs","file":"app.py","line":null,"title":"Counter still racy","non_converging":true,"matched_prior":{"line":42,"title":"Race on shared counter"}}]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 601
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'no line recorded on one side — matched file-wide'
+  run ! grep -q 'at line 42' <<< "$output"
+}
+
+@test "ESCALATE_NO_CONVERGENCE: a blocker without matched_prior renders as before (#913)" {
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_NO_CONVERGENCE","rounds":2,"max_rounds":3,
+ "history":[{"round":2,"blocking":1,"conflicts":0,"non_converging":true}],
+ "final_changelist":{"blocking":[{"priority":"Critical","dimension":"bugs","file":"app.py","line":42,"title":"Race","non_converging":true}]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 601
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'app.py:42'
+  run ! grep -q 'matched prior-round blocker' <<< "$output"
+}
+
 @test "ESCALATE_CONFLICT: names the conflicting dimensions + pick-a-winner option" {
   cat > "$ST" <<'EOF'
 {"status":"ESCALATE_CONFLICT","rounds":1,"max_rounds":3,
