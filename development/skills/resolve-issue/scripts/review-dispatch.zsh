@@ -61,13 +61,23 @@ die_usage() { print -u2 -- "$1"; exit 2 }
 # --- repo-relative changed files = the story's diff -------------------------
 # Everything that differs from the base ref (committed + staged + unstaged for
 # tracked files) plus new untracked files — the story's blast radius as seen in
-# the worktree. base defaults to origin/main.
+# the worktree. base defaults to origin/main. The loop's OWN outputs — the
+# per-round findings under .review/ and the telemetry JSONL (#566) — must never
+# enter the scope (#909): on a repeat/resumed run they are untracked files in
+# the repo, and without this exclusion the panel would be directed to review
+# prior rounds' findings as story code. The exclusion covers the DEFAULT
+# artifact locations only (a caller-overridden --findings-path elsewhere in the
+# repo is not followed), and it applies to tracked changes under these prefixes
+# too — runtime JSONL is never review scope. sed (not grep -v) so an
+# all-artifact scope yields empty output with exit 0 under pipefail, not a
+# pipeline failure.
 _changed_files() {
   local repo="$1" base="$2"
   {
     "$git_bin" -C "$repo" diff --name-only "$base" -- 2>/dev/null
     "$git_bin" -C "$repo" ls-files --others --exclude-standard 2>/dev/null
-  } | sed -E 's#^\./##' | sort -u | sed '/^$/d'
+  } | sed -E 's#^\./##' | sort -u \
+    | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d'
 }
 
 # --- full detection JSON via the reused detection logic ---------------------

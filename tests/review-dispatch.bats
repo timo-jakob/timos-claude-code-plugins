@@ -210,3 +210,57 @@ EOF
   run zsh "$S" frobnicate
   [ "$status" -eq 2 ]
 }
+
+# ---- loop-artifact exclusion (#909): the loop's own outputs never enter scope
+
+@test "plan: .review/ and .claude/telemetry/ artifacts are excluded from changed_files" {
+  # simulate a prior run's artifacts (untracked) alongside a real story file
+  mkdir -p "$R/.review" "$R/.claude/telemetry"
+  echo '[]' > "$R/.review/findings-round-1.json"
+  echo '{}' > "$R/.claude/telemetry/review-loop.jsonl"
+  echo "print(1)" > "$R/app.py"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.changed_files | index("app.py")' >/dev/null
+  echo "$output" | jq -e '.changed_files | map(select(startswith(".review/"))) | length == 0' >/dev/null
+  echo "$output" | jq -e '.changed_files | map(select(startswith(".claude/telemetry/"))) | length == 0' >/dev/null
+}
+
+@test "plan: the exclusion is start-anchored — nested/lookalike paths stay in scope" {
+  # a nested .review dir inside story code, and a top-level lookalike file,
+  # are legitimate story files — only the repo-root artifact dirs are excluded
+  mkdir -p "$R/src/.review"
+  echo "cfg" > "$R/src/.review/config.json"
+  echo "notes" > "$R/.review-notes.md"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.changed_files | index("src/.review/config.json")' >/dev/null
+  echo "$output" | jq -e '.changed_files | index(".review-notes.md")' >/dev/null
+}
+
+@test "plan: a scope that is ONLY artifacts yields empty changed_files, not an error" {
+  mkdir -p "$R/.review"
+  echo '[]' > "$R/.review/findings-round-1.json"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.changed_files == []' >/dev/null
+}
+
+@test "scope-findings: a finding filed against a loop artifact is dropped" {
+  mkdir -p "$R/.review"
+  echo '[]' > "$R/.review/findings-round-1.json"
+  echo "print(1)" > "$R/app.py"
+  F="$BATS_TEST_TMPDIR/findings.json"
+  cat > "$F" <<'JSON'
+[{"severity":"CRITICAL","dimension":"bugs","file":".review/findings-round-1.json","line":1,"title":"bogus","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"real","description":"d","reviewer":"r"}]
+JSON
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" scope-findings --repo "$R" --base main --findings "$F"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.[0].file')" = "app.py" ]
+}
