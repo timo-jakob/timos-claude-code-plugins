@@ -23,5 +23,13 @@
       "blocking": false,
       "summary": "the Python coverage-floor pre-push hook now withholds its verdict when coverage.xml was recorded against a different tree (shared-venv editable install in a git worktree) and names the per-worktree-venv remedy, instead of false-failing changed lines as 0% covered"
     }
+  ],
+  "common/.github/workflows/spec-publish.yml.tmpl": [
+    {
+      "version": "1.126.0",
+      "issue": 706,
+      "blocking": false,
+      "summary": "the spec-publish workflow gained the optional APIM governance channel: two presence-gated steps (in the same publish job) that publish the same contracts/vN/openapi.yaml spec + docs to a portal and deploy the apim/ proxy config-as-code — active only when an apim/ directory exists, with org-replaceable reference commands"
+    }
   ]
 }

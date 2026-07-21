@@ -16,12 +16,16 @@
 # with its vN directory. Re-publishing an already-published version is a clean
 # no-op (a routine app release with no contract change stays green).
 #
-# The optional APIM governance channel (#706) is a CLEAN EXTENSION POINT: the
-# portal-publish step below runs only when an apim/ directory exists and SKIPS
-# with no failure otherwise. A repo without apim/ gets the full drift guarantee
-# from the npm channel alone.
+# The optional APIM governance channel (#706) publishes the same spec + docs to a
+# human-facing portal and deploys the apim/ proxy config-as-code — in the SAME
+# job, so it can never drift from npm. It is PRESENCE-GATED: the two portal steps
+# below run only when an apim/ directory exists and SKIP with no failure
+# otherwise, so a repo without apim/ gets the full drift guarantee from the npm
+# channel alone. Its portal/proxy commands are org-specific reference placeholders
+# you replace with your platform's CLI (see the steps).
 #
-# Requires an `NPM_TOKEN` repository secret with publish rights.
+# Requires an `NPM_TOKEN` repository secret with publish rights; the APIM channel
+# additionally uses `APIM_ENDPOINT` + `APIM_TOKEN` (only when apim/ is present).
 name: Spec Publish
 
 on:
@@ -123,13 +127,50 @@ jobs:
           echo "Publishing ${pkg}@${version} (dist-tag major-${MAJOR})"
           npm publish "$pkgdir" --tag "major-${MAJOR}"
 
-      # Governance channel (#706) — CLEAN EXTENSION POINT. Runs only when an
-      # apim/ directory exists; skips with no failure otherwise. #706 fills in
-      # the portal publication + proxy config-as-code deploy here.
-      - name: Publish ${{ matrix.major }} to the APIM governance portal
+      # Governance channel (#706) — the human-facing publication, fed from the
+      # SAME contracts/${MAJOR}/openapi.yaml as the npm publish above and running
+      # in the SAME job (no separate pipeline), so the machine + governance
+      # channels can never drift. Presence-gated: both steps run only when an
+      # apim/ config-as-code bundle exists; a repo without apim/ skips them with
+      # no failure — npm alone is the full drift guarantee (#692).
+      #
+      # The portal-publish + proxy-deploy commands are the ONE org-specific seam.
+      # The design's reference is an Apigee-style config-as-code bundle deployed
+      # with apigeecli, shown commented below — REPLACE each placeholder `echo`
+      # with your platform's CLI (Azure `az apim`, AWS API Gateway, Kong `deck`,
+      # …). The plugin owns the wiring, the activation switch, the same-step
+      # guarantee, and the secrets contract; the platform command is yours. Set
+      # APIM_ENDPOINT + APIM_TOKEN repository secrets (surfaced in the Step 5
+      # checklist). Until you replace them, the steps are inert placeholders and
+      # say so in the log — nothing is actually published.
+      - name: Publish ${{ matrix.major }} spec + docs to the APIM governance portal
         if: ${{ hashFiles('apim/**') != '' }}
         env:
           MAJOR: ${{ matrix.major }}
+          APIM_ENDPOINT: ${{ secrets.APIM_ENDPOINT }}
+          APIM_TOKEN: ${{ secrets.APIM_TOKEN }}
         run: |
           set -euo pipefail
-          echo "apim/ present — portal publication + proxy deploy land in #706."
+          spec="contracts/${MAJOR}/openapi.yaml"
+          # Publish the FULL spec (the portal's docs source) VERBATIM, so every
+          # signal it carries — including deprecated: true + x-sunset (#695) —
+          # reaches the portal for rendering. Reference (adapt to your platform):
+          #   apigeecli apidocs create --title "orders ${MAJOR}" \
+          #     --openapi "$spec" --token "$APIM_TOKEN"
+          echo "[REFERENCE PLACEHOLDER — replace with your portal-publish CLI]"
+          echo "Would publish $spec (spec + rendered docs) to the APIM portal (${APIM_ENDPOINT:-<unset>}) — ${MAJOR}"
+      - name: Deploy the ${{ matrix.major }} API proxy from apim/
+        if: ${{ hashFiles('apim/**') != '' }}
+        env:
+          MAJOR: ${{ matrix.major }}
+          APIM_ENDPOINT: ${{ secrets.APIM_ENDPOINT }}
+          APIM_TOKEN: ${{ secrets.APIM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Deploy/update the config-as-code proxy bundle that lives in apim/ —
+          # gateway config versioned in the repo next to the spec it exposes.
+          # Reference (adapt to your platform):
+          #   apigeecli apis create bundle --name orders --proxy-folder apim/ \
+          #     --token "$APIM_TOKEN"
+          echo "[REFERENCE PLACEHOLDER — replace with your proxy-deploy CLI]"
+          echo "Would deploy apim/ proxy config-as-code to ${APIM_ENDPOINT:-<unset>} — ${MAJOR}"

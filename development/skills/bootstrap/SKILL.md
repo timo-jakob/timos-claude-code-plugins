@@ -1521,9 +1521,18 @@ The installed set:
   or every PR that doesn't touch `contracts/` wedges.
 - `.github/workflows/spec-publish.yml` — publishes **each live major** as its own
   npm spec package (version = the spec's `info.version`, dist-tag `major-vN`).
-  Its APIM governance step (#706) is a clean extension point: it runs only when
-  an `apim/` directory exists and **skips with no failure otherwise**, so a repo
-  without APIM gets the full drift guarantee from the npm channel alone.
+  Its **APIM governance channel (#706)** is two **presence-gated** steps in the
+  **same publish job** (never a separate pipeline): they publish the same
+  `contracts/${major}/openapi.yaml` spec + docs to a human-facing portal and
+  deploy the `apim/` proxy config-as-code — so once the org wires its portal CLI,
+  the machine (npm) and governance (portal) channels can't drift (same job, same
+  spec file). They run **only when an `apim/` directory
+  exists** and **skip with no failure otherwise**, so a repo without APIM gets the
+  full drift guarantee from the npm channel alone. The full spec is published
+  verbatim, so a `deprecated: true` + `x-sunset` signal (#695) rides along for the
+  portal to render. The portal/proxy commands are **org-specific reference
+  placeholders** (an Apigee-style `apigeecli` example) the repo replaces with its
+  platform's CLI — the plugin owns the wiring + activation, not the platform.
 - `.github/workflows/contracts-semver.yml` + `.github/scripts/check-contracts-semver.sh`
   (#693) — the **mechanical API-semver gate**: the version triangle (info.version
   major == `vN` directory == `servers:` URL major) plus an oasdiff
@@ -1558,6 +1567,43 @@ The installed set:
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the
 secrets gap check alongside `SONAR_TOKEN`/`SNYK_TOKEN`).
 
+**APIM governance channel — opt-in (#706).** The two portal steps ship in
+`spec-publish.yml` **always** (presence-gated), but the channel activates on the
+mere existence of an `apim/` directory. So the model's actions key on **the gate
+condition (`apim/` present), not on the opt-in question**:
+
+- **If `apim/` does NOT exist:** ask an **explicit** APIM question in the Step 2
+  plan, **default no**. Unlike §3g/§3i's advisory confirmations (detected sets
+  are included-by-default and the user corrects), APIM is default-off — **silence
+  or blanket plan approval is NOT an opt-in**. Render the scaffold (below) **only
+  on an explicit yes**.
+- **If `apim/` already exists** (a prior opt-in, or a directory that predates the
+  plugin): treat APIM as **already on** — the shipped steps *will* run. Do not
+  re-ask; add `APIM_ENDPOINT` + `APIM_TOKEN` to the Step 5 checklist and (on
+  State-D) expect them in the secrets gap check alongside `NPM_TOKEN`. If the user
+  says they *don't* want APIM, say plainly that the presence-gated steps run until
+  `apim/` is removed — declining does not disable them while the directory exists.
+
+Render the `apim/` scaffold (on the explicit-yes path, or to fill a gap in an
+already-`apim/` repo):
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --default-branch "<branch>" \
+  common/apim/apiproxy.yaml.tmpl \
+  common/apim/README.md.tmpl
+```
+
+`apim/apiproxy.yaml` is the gateway proxy **config-as-code** (one route per live
+major, base paths in step with the spec's `servers:` block, starter policies);
+`apim/README.md` explains the two-channel model + what the org must wire.
+Whenever APIM is active (opted in, or `apim/` already present), add
+`APIM_ENDPOINT` + `APIM_TOKEN` to the Step 5 checklist alongside `NPM_TOKEN`, and
+note the portal/proxy `run:` blocks are reference placeholders the org replaces
+with its platform's CLI (nothing is published until they do — the steps log
+"would publish/deploy" and exit clean).
+
 **Seed the layout only when the repo has no per-major spec yet.** Do not clobber
 an existing `contracts/vN/openapi.yaml` (idempotency rule 3), and do not seed a
 second spec: if the repo's detected spec lives elsewhere (e.g. `api/openapi.yaml`)
@@ -1577,8 +1623,14 @@ blind-installs a stub contract — and State-D renders that set with the core fl
 above. This set is **not** a blind gap-fill: apply the advisory confirmation
 first — a vendored or fixture `openapi.yaml` (e.g. under `tests/fixtures/`) is a
 detected surface but not a genuine one, so confirm the contract's type + evidence
-path before adopting. The deprecation lifecycle spans issues #695, #707, and #708
-(the APIM portal + `apim/` deploy is #706).)
+path before adopting. The deprecation lifecycle spans issues #695, #707, and #708;
+the APIM portal + `apim/` deploy is #706 (opt-in, above). The `apim/` scaffold is
+**not** in the auto-adopted `missing_artifacts` set — its presence is a user
+choice, so State-D never **creates** `apim/` unasked. When adopting the §3i set, **offer
+the APIM channel and render the scaffold only if the user says yes** — except on
+a repo that already has an `apim/` directory, where APIM is already active (per
+the opt-in rule above): there, fill any missing `apim/` scaffold file and add the
+APIM secrets to the gap check without re-asking.)
 
 ### 3j. Multi-major anti-corruption adapter (when >1 live major — #694)
 
