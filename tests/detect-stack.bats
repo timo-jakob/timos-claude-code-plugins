@@ -629,6 +629,38 @@ setup() {
   [ "$(jq -r '.has_dockerfile' <<<"$out")" = "false" ]
 }
 
+@test "detect-stack #875: a root .ko.yaml sets has_ko true (Dockerfile-less ko image path)" {
+  printf 'defaultBaseImage: gcr.io/distroless/static\n' > .ko.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.has_ko' <<<"$out")" = "true" ]
+  # ko is Dockerfile-LESS — has_dockerfile must stay false so the two never
+  # both drive the required `image` context in a normal Go repo.
+  [ "$(jq -r '.has_dockerfile' <<<"$out")" = "false" ]
+}
+
+@test "detect-stack #875: .ko.yml (the other spelling) also sets has_ko true" {
+  printf 'defaultBaseImage: gcr.io/distroless/static\n' > .ko.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.has_ko' <<<"$out")" = "true" ]
+  # Both ko spellings must flip detection_confidence to inconclusive — ko builds
+  # an image we don't resolve into a named container, so asserting complete+[]
+  # would be the false "this repo has no containers" claim #799 guards against.
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "inconclusive" ]
+}
+
+@test "detect-stack #875: a root .ko.yaml flips detection_confidence to inconclusive" {
+  printf 'defaultBaseImage: gcr.io/distroless/static\n' > .ko.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.detection_confidence' <<<"$out")" = "inconclusive" ]
+  [ "$(jq -r '.containers' <<<"$out")" = "[]" ]
+}
+
+@test "detect-stack #875: no .ko.yaml -> has_ko false, key always present" {
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.has_ko' <<<"$out")" = "false" ]
+  [ "$(jq -r 'has("has_ko")' <<<"$out")" = "true" ]
+}
+
 @test "detect-stack #799: multiple Dockerfiles all emit, named by their directory" {
   mkdir -p services/api services/worker
   printf 'FROM x\n' > services/api/Dockerfile

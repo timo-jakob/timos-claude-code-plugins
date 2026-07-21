@@ -13,7 +13,8 @@
 # Usage:
 #   automate-private.sh --project-key KEY --project-name NAME \
 #                       --default-branch main \
-#                       --has-dockerfile true|false
+#                       --has-dockerfile true|false \
+#                       [--has-ko true|false]
 
 set -euo pipefail
 
@@ -26,6 +27,7 @@ PROJECT_KEY=""
 PROJECT_NAME=""
 DEFAULT_BRANCH="main"
 HAS_DOCKERFILE="false"
+HAS_KO="false"
 SONAR_HOST="http://localhost:9000"
 CLAUDE_APPROVER="false"
 
@@ -45,6 +47,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--has-dockerfile)
 		HAS_DOCKERFILE="$2"
+		shift 2
+		;;
+	--has-ko)
+		HAS_KO="$2"
 		shift 2
 		;;
 	--sonar-host)
@@ -266,6 +272,7 @@ if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; th
 	"$SCRIPT_DIR/branch-protection.sh" \
 		--visibility private \
 		--has-dockerfile "$HAS_DOCKERFILE" \
+		--has-ko "$HAS_KO" \
 		--has-codeql "false" \
 		--default-branch "$DEFAULT_BRANCH"
 fi

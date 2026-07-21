@@ -124,7 +124,21 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "stable"
-      - run: go test ./... -coverprofile=coverage.out -covermode=atomic
+      # -race + per-package coverage (no -coverpkg), matching the #874 gate.
+      - run: go test -race ./... -coverprofile=coverage.out -covermode=atomic
+      # Cobertura conversion so the shared diff-cover new-code gate reads it.
+      - if: github.event_name == 'pull_request'
+        run: go run github.com/boumenot/gocover-cobertura@v1.3.0 < coverage.out > coverage.xml
+      - if: github.event_name == 'pull_request'
+        run: pip install 'diff-cover>=9'
+      - if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          diff-cover coverage.xml \
+            --compare-branch="origin/${BASE_REF}" \
+            --fail-under=90 \
+            --show-uncovered
       # --- GO-END ----------------------------------------------------------
 
       # --- JAVA-START ------------------------------------------------------

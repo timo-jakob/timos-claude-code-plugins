@@ -6,6 +6,7 @@
 #   preflight.sh --visibility public|private \
 #                --languages "swift javascript python go" \
 #                --has-dockerfile true|false \
+#                [--has-ko true|false] \
 #                [--assume-yes]
 #
 # Exits 0 if all required tools are present (or installed during this run).
@@ -36,6 +37,13 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--has-dockerfile)
 		HAS_DOCKERFILE="$2"
+		shift 2
+		;;
+	--has-ko)
+		# Accepted for call-signature parity with the automate-*.sh scripts, but
+		# intentionally unused: ko builds run only in CI (the ko-image workflow),
+		# never during local bootstrap, so a ko-only Go repo needs no local Docker
+		# daemon and adds nothing to the toolchain preflight. Consume + discard.
 		shift 2
 		;;
 	--assume-yes)

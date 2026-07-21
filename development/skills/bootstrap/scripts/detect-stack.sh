@@ -13,6 +13,10 @@
 #                                  exists — now a NARROWER fact than `containers`,
 #                                  since a bootBuildImage repo has a container yet
 #                                  has_dockerfile=false; that is correct, #799)
+#   has_ko                bool     (a root `.ko.yaml`/`.ko.yml` exists — Go's
+#                                  Dockerfile-less ko image path; drives the
+#                                  ko-image workflow's required `image` context
+#                                  the same way has_dockerfile drives DOCKER, #875)
 #   containers            []object  named deployable images this repo builds, each
 #                                  {name, source, evidence} — see shape below (#799)
 #   detection_confidence  string   "complete" | "inconclusive" — "inconclusive"
@@ -800,6 +804,16 @@ if [[ -f "$cwd/Dockerfile" ]] ||
 	has_dockerfile="true"
 fi
 
+# --- ko (Go's blessed, Dockerfile-less image path) — #875 -------------------
+# A committed root .ko.yaml means the repo builds its image with ko, not a
+# Dockerfile. This drives the ko-image workflow's required `image` context in
+# branch protection (the ko analogue of has_dockerfile), so bootstrap enforces
+# the ko image gate the same way it enforces the Dockerfile one.
+has_ko="false"
+if [[ -f "$cwd/.ko.yaml" || -f "$cwd/.ko.yml" ]]; then
+	has_ko="true"
+fi
+
 # --- containers + contracts (issue #799) -------------------------------------
 # The named deployable images this repo builds, detected across the family's
 # blessed mechanisms and emitted as evidence-bearing entries (not a boolean), so
@@ -1148,7 +1162,7 @@ else
 	elif find "$cwd" -maxdepth 3 -name 'Chart.yaml' -not -path '*/.git/*' -print -quit 2>/dev/null | grep -q .; then
 		detection_confidence="inconclusive"
 	else
-		for m in project.toml nixpacks.toml Procfile fly.toml heroku.yml app.yaml .ko.yaml; do
+		for m in project.toml nixpacks.toml Procfile fly.toml heroku.yml app.yaml .ko.yaml .ko.yml; do
 			if [[ -e "$cwd/$m" ]]; then
 				detection_confidence="inconclusive"
 				break
@@ -1526,6 +1540,7 @@ cat <<EOF
   "visibility": $(json_str "$visibility"),
   "languages": $languages_json,
   "has_dockerfile": $(json_bool "$has_dockerfile"),
+  "has_ko": $(json_bool "$has_ko"),
   "containers": $containers_json,
   "detection_confidence": $(json_str "$detection_confidence"),
   "contracts": $contracts_json,

@@ -1,0 +1,45 @@
+# Taskfile — the blessed thin orchestrator for Go repos (https://taskfile.dev).
+#
+# Deliberately THIN: each task is a one-liner delegating to the real tool. CI,
+# pre-commit, and the development-go agents keep calling the tools DIRECTLY (go
+# test, golangci-lint, ko) — this file is a human convenience so a developer
+# runs `task test` instead of remembering the flags, not a layer anything
+# depends on. Install: `brew install go-task`.
+version: "3"
+
+tasks:
+  fmt:
+    desc: Format (gofumpt + import ordering via golangci-lint fmt)
+    cmds:
+      - golangci-lint fmt
+
+  lint:
+    desc: Lint (golangci-lint run, autofixable subset applied)
+    cmds:
+      - golangci-lint run --fix
+
+  test:
+    desc: Test with the race detector + per-package coverage, exported to cobertura
+    cmds:
+      # -race + per-package (no -coverpkg), matching the coverage gate's number.
+      - go test -race ./... -coverprofile=coverage.out -covermode=atomic
+      # Cobertura export so the local coverage-floor pre-push hook (and diff-cover)
+      # can read it — Go's coverprofile isn't a format diff-cover understands.
+      - go run github.com/boumenot/gocover-cobertura@v1.3.0 < coverage.out > coverage.xml
+
+  generate:
+    desc: Regenerate code from protos (buf) and go:generate directives
+    cmds:
+      - buf generate
+      - go generate ./...
+
+  build:
+    desc: Build all packages
+    cmds:
+      - go build ./...
+
+  image:
+    desc: Build + publish the container image with ko (SBOM on, digest-pinned base)
+    cmds:
+      # ko reads .ko.yaml; publishes to $KO_DOCKER_REPO. See .ko.yaml.
+      - ko build --sbom=spdx ./...

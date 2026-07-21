@@ -1165,6 +1165,31 @@ For each detected language, merge in the appropriate config from
   nebula versioning TODO in the Java-specific recommendation above (the
   workflow assumes the plugin is applied + no hardcoded `version`). Apply the
   standard idempotency rules (skip/diff if either exists).
+- **Go only (#875):** the `.golangci.yml` (with its `formatters:` section —
+  gofumpt + gci) and the pre-commit GO block (golangci-lint + the
+  `coverage-floor-go` hook) merge via the standard fragment + pre-commit
+  merge above. **Additionally copy** three files (no placeholders in the first
+  two; render the third):
+  - `templates/languages/go/Taskfile.yml` → `Taskfile.yml` (the thin
+    orchestrator — `fmt`/`lint`/`test`/`generate`/`build`/`image` one-liners;
+    verbatim).
+  - `templates/languages/go/.ko.yaml` → `.ko.yaml` (the digest-pinned static
+    `defaultBaseImage`; verbatim — Renovate/Slice G #876 owns the digest bump).
+  - `templates/languages/go/.github/workflows/ko-image.yml.tmpl` →
+    `.github/workflows/ko-image.yml` (substitute `{{DEFAULT_BRANCH}}`) — the
+    ko build+publish+sign pipeline, path-conditional on `.ko.yaml` (the ko
+    analogue of the Dockerfile-keyed DOCKER pipeline; **no Dockerfile**).
+    Its `image` job becomes a required branch-protection context in Step 4,
+    exactly like the DOCKER `image` job — a Go repo uses ko OR (the cgo
+    exception) a Dockerfile, not both. `branch-protection.sh` backs that up at
+    runtime: it requires the ko `image` context only when the `ko-image.yml`
+    workflow that provides it is actually present, and `warn`s if a Dockerfile
+    and a `.ko.yaml` are ever detected together (they share the `image` check
+    name). Apply the standard idempotency rules (skip/diff if any exists).
+    Go's coverage is measured **per-package** (`go test ./...
+    -coverprofile`, matching the #874 gate) and its new-code figure feeds the
+    same 90% `diff-cover` gate as the other languages, via a
+    `gocover-cobertura` conversion the CI + Taskfile perform.
 - **JavaScript contract-consumer note (#727):** render the base
   `eslint.config.js` and `vitest.config.ts` **normally here** — unconditionally,
   with no dependence on the §3k seeder verdict. When the repo is a contract
@@ -2018,6 +2043,7 @@ approval):
 "<skill-base-dir>/scripts/branch-protection.sh" \
   --visibility "<public|private>" \
   --has-dockerfile "<true|false>" \
+  --has-ko "<true|false — whether a root .ko.yaml exists (Go ko image path, #875)>" \
   --has-codeql "<true|false — whether codeql.yml was generated>" \
   --codeql-languages "<comma-separated CodeQL language list, when has-codeql=true>" \
   --default-branch "<DEFAULT_BRANCH>" \
@@ -2526,6 +2552,7 @@ anything missing:
   --visibility "<public|private>" \
   --languages "<space-separated detected languages>" \
   --has-dockerfile "<true|false>" \
+  --has-ko "<true|false — root .ko.yaml, #875>" \
   --claude-approver "<true|false>"
 ```
 
@@ -2569,6 +2596,7 @@ Step 2 plan approval, not a separate opt-in prompt.
   --project-name "<PROJECT_NAME>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --has-dockerfile "<true|false>" \
+  --has-ko "<true|false — root .ko.yaml, #875>" \
   --has-codeql "true" \
   --codeql-languages "<space-separated languages, e.g. 'python javascript'>" \
   --claude-approver "<true|false>"
@@ -2603,6 +2631,7 @@ This walks the user through:
   --project-name "<PROJECT_NAME>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --has-dockerfile "<true|false>" \
+  --has-ko "<true|false — root .ko.yaml, #875>" \
   --claude-approver "<true|false>"
 ```
 

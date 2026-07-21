@@ -5,6 +5,7 @@
 # Usage:
 #   branch-protection.sh --visibility public|private \
 #                        --has-dockerfile true|false \
+#                        [--has-ko true|false] \
 #                        --has-codeql true|false \
 #                        [--codeql-languages "python javascript ..."] \
 #                        --default-branch main \
@@ -25,6 +26,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 VISIBILITY=""
 HAS_DOCKERFILE="false"
+HAS_KO="false"
 HAS_CODEQL="false"
 CODEQL_LANGUAGES=""
 DEFAULT_BRANCH="main"
@@ -38,6 +40,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--has-dockerfile)
 		HAS_DOCKERFILE="$2"
+		shift 2
+		;;
+	--has-ko)
+		HAS_KO="$2"
 		shift 2
 		;;
 	--has-codeql)
@@ -69,6 +75,39 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 # These names must match the `jobs.<id>` keys in the generated workflow files.
 checks=("test-and-coverage" "semgrep" "pre-commit")
 
+# --- does any workflow actually PROVIDE the shared `image` check? -------------
+# Both the Docker lane (quality-*.yml's `image` job) and the ko lane
+# (ko-image.yml's `image` job) report a status check literally named `image`.
+# A repo has one provider or the other, never both — a Go repo uses ko OR, for
+# the documented cgo exception, a Dockerfile instead of ko. The Docker lane
+# ships in quality-*.yml whenever a Dockerfile exists (any language), so
+# HAS_DOCKERFILE alone is a sufficient provider signal. The ko lane, though, is
+# rendered only for Go repos, so a raw `.ko.yaml` is NOT proof its workflow
+# exists: a stray root .ko.yaml in a non-Go repo, or a Go repo whose ko-image
+# install was declined, would otherwise make `image` a required context that no
+# workflow ever reports — the permanent stuck-on-`expected` state the Snyk note
+# below exists to avoid. So gate the ko half on the workflow file actually
+# being present. branch-protection.sh always runs from the target repo root
+# (the automate-*.sh callers set REPO_ROOT=$(pwd) and never cd), so the path is
+# repo-relative.
+image_required="false"
+[[ "$HAS_DOCKERFILE" == "true" ]] && image_required="true"
+[[ "$HAS_KO" == "true" && -f .github/workflows/ko-image.yml ]] && image_required="true"
+# Surface the fail-open path rather than silently dropping the gate: a repo that
+# advertised .ko.yaml but has no ko-image workflow gets no `image` requirement,
+# and the operator should know why it's absent from the printed check list.
+if [[ "$HAS_KO" == "true" && ! -f .github/workflows/ko-image.yml ]]; then
+	warn ".ko.yaml was detected but .github/workflows/ko-image.yml is absent —"
+	warn "NOT requiring the \`image\` check (no workflow would ever report it)."
+fi
+if [[ "$HAS_DOCKERFILE" == "true" && "$HAS_KO" == "true" ]]; then
+	warn "Both a Dockerfile and a root .ko.yaml were detected. The Docker and ko"
+	warn "image lanes both report a check named \`image\`, so their two workflows"
+	warn "would collide — GitHub keeps only the most recent \`image\` result for a"
+	warn "required context, which can mask a red build. Use ko OR a Dockerfile,"
+	warn "not both."
+fi
+
 case "$VISIBILITY" in
 public)
 	# Note: `snyk-code` and `snyk-open-source` are NOT workflow jobs in the
@@ -78,7 +117,7 @@ public)
 	# Snyk source-code + open-source scans ---` comment block. Listing
 	# them here would produce a permanent stuck-on-expected state.
 	checks+=("sonarcloud" "license-fs")
-	[[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
+	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
 	if [[ "$HAS_CODEQL" == "true" ]]; then
 		# CodeQL's `analyze` job is a matrix over `language`, so GitHub
 		# reports one check per language as `analyze (<lang>)`. The bare
@@ -98,7 +137,7 @@ public)
 	;;
 private)
 	checks+=("sonarqube" "trivy-fs" "license-fs")
-	[[ "$HAS_DOCKERFILE" == "true" ]] && checks+=("image")
+	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
 	;;
 esac
 
