@@ -9,3 +9,9 @@ coverage/
 .nyc_output/
 .env
 .env.local
+
+# Review-loop telemetry (git-ignored; #566)
+.claude/telemetry/
+
+# Review-loop working files (per-round findings; #909)
+.review/
