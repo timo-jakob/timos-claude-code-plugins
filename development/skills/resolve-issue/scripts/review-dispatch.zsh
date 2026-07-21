@@ -73,11 +73,32 @@ die_usage() { print -u2 -- "$1"; exit 2 }
 # pipeline failure.
 _changed_files() {
   local repo="$1" base="$2"
+  # A failed diff or ls-files must FAIL the scope computation (#910) — the old
+  # 2>/dev/null swallow let an unresolvable base degrade to an empty/garbage
+  # scope on which the loop happily CONVERGED. Base resolvability is validated
+  # up front by _verify_base, so a failure here is a genuine git error.
   {
-    "$git_bin" -C "$repo" diff --name-only "$base" -- 2>/dev/null
-    "$git_bin" -C "$repo" ls-files --others --exclude-standard 2>/dev/null
+    "$git_bin" -C "$repo" diff --name-only "$base" -- || return 1
+    "$git_bin" -C "$repo" ls-files --others --exclude-standard || return 1
   } | sed -E 's#^\./##' | sort -u \
     | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d'
+}
+
+# --- base ref must resolve before it scopes anything (#910) -----------------
+# An unresolvable --base (a typo, an unfetched remote, a worktree before its
+# first fetch) must be a fast, named failure — not a silently empty scope that
+# lets the loop exit CONVERGED on code no panel ever saw.
+_verify_base() {
+  local repo="$1" base="$2"
+  # name the actual culprit: a non-repo path must not read as a bad ref
+  "$git_bin" -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || {
+    print -u2 -- "review-dispatch: --repo is not a git repository: $repo"
+    return 1
+  }
+  "$git_bin" -C "$repo" rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&1 || {
+    print -u2 -- "review-dispatch: --base does not resolve to a commit in $repo: $base"
+    return 1
+  }
 }
 
 # --- full detection JSON via the reused detection logic ---------------------
@@ -112,6 +133,7 @@ cmd_plan() {
   done
   [[ -n "$repo" ]] || die_usage "plan: --repo is required"
   [[ -d "$repo" ]] || { print -u2 -- "plan: --repo not a directory: $repo"; exit 1 }
+  _verify_base "$repo" "$base" || exit 1
 
   local detect_json; detect_json=$(_detect_json "$repo") || exit 1
   local langs_json; langs_json=$(print -r -- "$detect_json" | jq -c '.languages // []')
@@ -189,6 +211,7 @@ cmd_scope_findings() {
   done
   [[ -n "$repo" ]] || die_usage "scope-findings: --repo is required"
   [[ -n "$findings" ]] || die_usage "scope-findings: --findings is required"
+  _verify_base "$repo" "$base" || exit 1
 
   # missing or empty findings file → nothing in scope
   if [[ ! -s "$findings" ]]; then print -r -- '[]'; return 0; fi

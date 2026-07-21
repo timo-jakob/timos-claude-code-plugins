@@ -11,6 +11,8 @@
 # deterministic and needs no git/gh probing; git itself runs against real temp
 # repos so the diff-scoping is exercised for real.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/review-dispatch.zsh"
@@ -263,4 +265,32 @@ JSON
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq 'length')" -eq 1 ]
   [ "$(echo "$output" | jq -r '.[0].file')" = "app.py" ]
+}
+
+# ---- base-ref validation (#910): a bad base must fail fast, never mis-scope
+
+@test "plan: an unresolvable --base exits 1 naming the ref, not a degraded scope" {
+  echo "print(1)" > "$R/app.py"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base refs/heads/does-not-exist
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'does-not-exist'
+}
+
+@test "scope-findings: an unresolvable --base exits 1, not a silently-empty scope" {
+  echo "print(1)" > "$R/app.py"
+  F="$BATS_TEST_TMPDIR/findings-910.json"
+  echo '[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"t","description":"d","reviewer":"r"}]' > "$F"
+  run zsh "$S" scope-findings --repo "$R" --base refs/heads/does-not-exist --findings "$F"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'does-not-exist'
+}
+
+@test "plan: a non-git --repo exits 1 naming the repo, not the ref" {
+  NR="$BATS_TEST_TMPDIR/not-a-repo"; mkdir -p "$NR"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$NR" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'not a git repository'
+  run ! grep -q 'does not resolve' <<< "$output"
 }
