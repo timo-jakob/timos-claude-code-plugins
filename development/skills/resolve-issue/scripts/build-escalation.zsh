@@ -107,8 +107,20 @@ ESCALATE_CONFLICT)
   detail=$(jq -r '(.final_changelist.conflicts // []) | if length==0 then "" else
     (.[] | "- `\(.file):\(.line)` — \(.between | join(" vs "))") end' "$status_file") ;;
 ESCALATE_NO_CONVERGENCE)
+  # matched_prior (#913): name the prior-round blocker the fingerprint matched
+  # (line proximity, or file-wide when a side has no line), so a false trip — a
+  # DIFFERENT finding that merely landed inside the match window after a fix
+  # pass shifted lines — is spottable. Deliberately option-agnostic: a false
+  # trip means the blocker is FRESH, not stuck — how to act on it (fix, grant
+  # rounds, or waive on its own merits) belongs to the surrounding options,
+  # which differ between the comment and the interactive summary.
   detail=$(jq -r '((.final_changelist.blocking // []) | map(select(.non_converging))) | if length==0 then "" else
-    (.[] | "- `\(.file):\(.line)` [\(.dimension)] \(.title)") end' "$status_file") ;;
+    (.[] | "- `\(.file):\(.line)` [\(.dimension)] \(.title)"
+      + (if .matched_prior then
+          "\n  - matched prior-round blocker "
+          + (if ((.matched_prior.line | type) != "number" or (.line | type) != "number") then "(no line recorded on one side — matched file-wide)" else "at line \(.matched_prior.line)" end)
+          + " (\"\(.matched_prior.title)\") — if this is a DIFFERENT finding that only landed inside the match window, the non-convergence flag is a false trip: treat this as a fresh blocker on its own merits, not a stuck one"
+        else "" end)) end' "$status_file") ;;
 BUDGET_EXHAUSTED)
   detail=$(jq -r '(.final_changelist.blocking // []) | if length==0 then "" else
     (.[] | "- `\(.file):\(.line)` [\(.dimension)/\(.priority)] \(.title)") end' "$status_file") ;;

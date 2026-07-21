@@ -175,6 +175,28 @@ if (( resume )); then
     jq -e -sc '.' "$changelists_file" >/dev/null 2>&1 || {
       print -u2 -- "resolve-story-loop: --resume found corrupt changelists in $changelists_file"; exit 1 }
   fi
+  # kill-window skew (#913): each round appends its changelist BEFORE its
+  # history line, so a run killed between the two appends leaves changelists
+  # EXACTLY ONE valid line ahead of history — both accumulators individually
+  # valid JSONL, so the checks above pass. The orphaned round re-runs on resume;
+  # keeping its stale line would duplicate the round in .round_changelists,
+  # skewing the dossier (#563) and the SKILL soft-cap read. Truncate that one
+  # orphan. Any OTHER skew (surplus >1, or history ahead) cannot come from the
+  # single kill window — it is foreign corruption, and silently repairing it
+  # could drop a completed round's record, so it errors like the corrupt-JSONL
+  # cases above.
+  local hist_n clist_n
+  hist_n=$(jq -sc 'length' "$history_file")
+  clist_n=0
+  [[ -s "$changelists_file" ]] && clist_n=$(jq -sc 'length' "$changelists_file")
+  if (( clist_n == hist_n + 1 )); then
+    print -u2 -- "resolve-story-loop: --resume dropping 1 orphaned changelist line — prior run killed mid-append"
+    local clist_trunc="$work_dir/.changelists-trunc"
+    head -n "$hist_n" "$changelists_file" > "$clist_trunc" && mv "$clist_trunc" "$changelists_file" || {
+      print -u2 -- "resolve-story-loop: --resume could not truncate $changelists_file"; exit 1 }
+  elif (( clist_n != hist_n )); then
+    print -u2 -- "resolve-story-loop: --resume accumulator skew beyond the kill window (history $hist_n vs changelists $clist_n) in $work_dir — corrupt work-dir"; exit 1
+  fi
   resume_round=$(tail -n 1 "$history_file" | jq -r '.round')
   [[ "$resume_round" == <-> ]] || {
     print -u2 -- "resolve-story-loop: --resume could not read a round number from $history_file"; exit 1 }

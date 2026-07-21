@@ -82,9 +82,12 @@ def line_near($a;$b):
   then ((($a) - ($b)) | (if . < 0 then -. else . end) <= LINEWIN)
   else true end;
 
-# previous round blockers projected to [file, dimension, line] (empty on round 1)
+# previous round blockers projected to [file, dimension, line] (empty on round
+# 1); title rides along only to label a match for the human (#913), it is never
+# part of the identity (#606)
 ( ($prev // {}) | (.blocking // [])
-  | map({ file: (.file | normfile), dimension: (.dimension // ""), line: .line }) ) as $prevblk
+  | map({ file: (.file | normfile), dimension: (.dimension // ""), line: .line,
+          title: (.title // "") }) ) as $prevblk
 
 # normalize this round
 | [ .[] | {
@@ -125,12 +128,19 @@ def line_near($a;$b):
   ) ) as $conflicts
 
 # mark non-converging blockers (a matching blocker blocked last round too).
-# Match on [file, dimension] + line proximity via any(gen; cond) over the
-# prior round blockers — NOT the title (#606). NB: keep this jq program free of
-# apostrophes; it lives in a zsh single-quoted string.
-| ( $items | map( . as $cur | . + { non_converging: (
-      .blocking and any($prevblk[];
-        .file == $cur.file and .dimension == $cur.dimension and line_near(.line; $cur.line)) ) } ) ) as $items
+# Match on [file, dimension] + line proximity — NOT the title (#606). A match
+# also records the FIRST matching prior blocker (matched_prior: its line +
+# title, in prior blocking-array order), so the escalation can show the human
+# what the match window hit and a false trip — a genuinely different finding
+# that merely landed inside the window after a fix pass shifted lines — is
+# spottable (#913). NB: keep this jq program free of apostrophes; it lives in a
+# zsh single-quoted string.
+| ( $items | map( . as $cur
+    | [ $prevblk[] | select(
+          .file == $cur.file and .dimension == $cur.dimension and line_near(.line; $cur.line)) ] as $m
+    | . + (if (.blocking and ($m | length) > 0)
+           then { non_converging: true, matched_prior: ($m[0] | {line, title}) }
+           else { non_converging: false } end) ) ) as $items
 
 | ( [ $items[] | select(.priority=="Critical") ] ) as $crit
 | ( [ $items[] | select(.priority=="High") ] ) as $high
