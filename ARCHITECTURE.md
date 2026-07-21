@@ -686,6 +686,28 @@ builds images with ko there is no Dockerfile leg, but a Go repo that ships a
 check the detected `containers` for a dockerfile-source entry before
 skipping it.
 
+**Go vulnerability + dependency layer (#876, slice G of #868).**
+`govulncheck` is the **single source of truth for Go code vulnerabilities**:
+the gather runs it (`govulncheck -json ./...`), and its findings — the
+vulnerable module and the version that fixes each, distinguished by whether
+the vulnerable symbol is actually *called* vs merely *imported* — route to
+`go-major-upgrade` to apply the fix. Correspondingly, **Snyk Open Source is
+disabled for gomod** (no double-triage): the Go gather emits **no** Snyk-OSS
+vuln key, so `snyk_prs` denotes Snyk's *version-bump PRs* only, triaged
+alongside Dependabot/Renovate — never a vuln scan. This is a *policy*
+realized in the gather + a Snyk-UI target exclusion, not a repo config file
+(the `.snyk` policy governs container ignores only, and Dependabot/Renovate
+gomod *version* bumps are unaffected — only Snyk OSS *vuln scanning* for
+gomod is). Container-image and GitHub-Actions scanning are unchanged. Kept
+in sync with `docs/reference/plugins.md`'s blessed-toolchain callout. The
+vendor-PR sources (`dependabot` / `snyk_prs` / `renovate`) split by
+ecosystem + bump level across three agents: patch/minor →
+`go-dependabot-snyk-triage` (auto-merge-if-green vs human-review, never
+self-approves), gomod majors → `go-major-upgrade` (which performs the
+**semantic-import-versioning** rewrite — a `/vN` major changes the import
+path, so import sites are rewritten across the tree, not just `go.mod`), and
+Go-toolchain bumps → `go-runtime-upgrade` (the no-Dockerfile path above).
+
 **`dispatch_filter` is optional** and added by the orchestrator only
 when the user passed `--tool=<name>` (a testing aid). When present,
 the language plugin scopes dispatch to the listed tools only — every

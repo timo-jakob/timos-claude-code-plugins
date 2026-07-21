@@ -1168,13 +1168,21 @@ For each detected language, merge in the appropriate config from
 - **Go only (#875):** the `.golangci.yml` (with its `formatters:` section —
   gofumpt + gci) and the pre-commit GO block (golangci-lint + the
   `coverage-floor-go` hook) merge via the standard fragment + pre-commit
-  merge above. **Additionally copy** three files (no placeholders in the first
-  two; render the third):
+  merge above. **Additionally copy** four files (no placeholders in the first
+  two; render the last two):
   - `templates/languages/go/Taskfile.yml` → `Taskfile.yml` (the thin
     orchestrator — `fmt`/`lint`/`test`/`generate`/`build`/`image` one-liners;
     verbatim).
   - `templates/languages/go/.ko.yaml` → `.ko.yaml` (the digest-pinned static
-    `defaultBaseImage`; verbatim — Renovate/Slice G #876 owns the digest bump).
+    `defaultBaseImage`; verbatim — the `ko-base-digest-refresh` job below owns
+    the periodic digest bump, Slice G #876).
+  - `templates/languages/go/.github/workflows/ko-base-digest-refresh.yml.tmpl`
+    → `.github/workflows/ko-base-digest-refresh.yml` (substitute
+    `{{DEFAULT_BRANCH}}`) — the scheduled job that re-resolves the pinned
+    base tag's digest and opens a digest-only refresh PR (epic hard part 6:
+    neither Dependabot nor Renovate reliably bumps a `.ko.yaml` digest, so
+    this owns it). Not a required check (scheduled, not PR-triggered); no
+    branch-protection or detection change.
   - `templates/languages/go/.github/workflows/ko-image.yml.tmpl` →
     `.github/workflows/ko-image.yml` (substitute `{{DEFAULT_BRANCH}}`) — the
     ko build+publish+sign pipeline, path-conditional on `.ko.yaml` (the ko

@@ -51,6 +51,18 @@ stub_golangci() {
 # Run with ONLY the stubbed golangci-lint visible (never the host's).
 with_stub() { run env PATH="$STUB:$ISO" bash "$GATHER" "$@"; }
 
+# Install a fake `govulncheck` that emits $1 (a canned -json message stream) on
+# stdout and exits $2 — lets a test drive the gather's govulncheck jq parse
+# (streaming slurp, osv-join, called-over-imported preference, finding schema)
+# with no Go toolchain or network. Payload to a side file (the stream contains
+# braces/quotes an unquoted heredoc would mangle).
+stub_govulncheck() {
+  printf '%s\n' "$1" > "$STUB/gv-stream.json"
+  printf '#!/usr/bin/env bash\ncat %q\nexit %d\n' "$STUB/gv-stream.json" "$2" \
+    > "$STUB/govulncheck"
+  chmod +x "$STUB/govulncheck"
+}
+
 # Install a fake `zsh` that IGNORES the helper script it's handed and prints $1,
 # exiting $2. The sonar/code_scanning helpers carry a `#!/usr/bin/env zsh`
 # shebang, so shadowing `zsh` on PATH lets a test exercise the gather's
@@ -147,19 +159,138 @@ stub_zsh() {
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 
-@test "gather-go: tool universe is the format_lint + static-analysis-triple this slice (#873)" {
-  # Slice D adds sonarcloud/code_scanning/semgrep to the format_lint of Slice B.
-  # The vendor-PR sources (#876) are still NOT in the universe — emitting them
-  # as `false` now would imply this plugin handles them once configured.
+@test "gather-go: tool universe is format_lint + triple + govulncheck + vendor-PR sources (#876)" {
+  # Slice B: format_lint. Slice D: sonarcloud/code_scanning/semgrep. Slice G
+  # (#876): govulncheck (the Go vuln source of truth) plus the vendor-PR sources
+  # dependabot/snyk_prs/renovate — eight keys, all always present in the map.
   no_binary "$WORK"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "4" ]
-  for tool in format_lint sonarcloud code_scanning semgrep; do
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "8" ]
+  for tool in format_lint sonarcloud code_scanning semgrep govulncheck dependabot snyk_prs renovate; do
     [ "$(jq -r ".tooling_configured | has(\"$tool\")" <<<"$output")" = "true" ]
   done
+}
+
+@test "gather-go #876: govulncheck is configured whenever the repo is a Go module (go.mod present)" {
+  # setup() writes a go.mod, so govulncheck is 'configured'; its binary is absent
+  # under the isolated PATH, so findings degrade to [] with an honest note.
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.govulncheck <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.govulncheck | type' <<<"$output")" = "array" ]
+  echo "$output" | jq -e '[.notes[] | select(test("govulncheck is the Go vulnerability source of truth but its binary is not on PATH"))] | length == 1' >/dev/null
+}
+
+@test "gather-go #876: govulncheck -json stream is parsed into the finding-shape contract" {
+  printf 'version: "2"\n' > "$WORK/.golangci.yml"   # keep other tools quiet/off
+  stub_golangci "" 0
+  # Two distinct vulns: GO-2024-0001 is CALLED (top trace frame has a function),
+  # GO-2024-0002 is only imported (no function). Streamed osv + finding messages.
+  stream='{"osv":{"id":"GO-2024-0001","summary":"vuln in x/net"}}
+{"osv":{"id":"GO-2024-0002","summary":"vuln in foo/bar"}}
+{"finding":{"osv":"GO-2024-0001","fixed_version":"v0.23.0","trace":[{"module":"golang.org/x/net","version":"v0.17.0","package":"golang.org/x/net/http2","function":"readFrame"}]}}
+{"finding":{"osv":"GO-2024-0002","fixed_version":"v1.9.1","trace":[{"module":"github.com/foo/bar","version":"v1.9.0"}]}}'
+  stub_govulncheck "$stream" 0
+  with_stub "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings_by_tool.govulncheck | length' <<<"$output")" = "2" ]
+  # The called vuln: severity called, module/versions/fixed carried, key + cve.
+  called="$(jq -c '.findings_by_tool.govulncheck[] | select(.rule=="GO-2024-0001")' <<<"$output")"
+  [ "$(jq -r '.severity' <<<"$called")" = "called" ]
+  [ "$(jq -r '.component' <<<"$called")" = "golang.org/x/net" ]
+  [ "$(jq -r '.package' <<<"$called")" = "golang.org/x/net" ]
+  [ "$(jq -r '.current_version' <<<"$called")" = "v0.17.0" ]
+  [ "$(jq -r '.target_version' <<<"$called")" = "v0.23.0" ]
+  [ "$(jq -r '.key' <<<"$called")" = "govulncheck:GO-2024-0001" ]
+  [ "$(jq -r '.cve_reference' <<<"$called")" = "GO-2024-0001" ]
+  [ "$(jq -r '.message' <<<"$called")" = "vuln in x/net" ]
+  # The imported-only vuln: severity imported.
+  [ "$(jq -r '.findings_by_tool.govulncheck[] | select(.rule=="GO-2024-0002") | .severity' <<<"$output")" = "imported" ]
+}
+
+@test "gather-go #876: a vuln seen both called and imported collapses to ONE 'called' record" {
+  printf 'version: "2"\n' > "$WORK/.golangci.yml"
+  stub_golangci "" 0
+  # Same osv appears twice — once imported (no function), once called. group_by
+  # + sort_by(.called)|reverse must keep exactly the called one.
+  stream='{"osv":{"id":"GO-2024-0009","summary":"dup vuln"}}
+{"finding":{"osv":"GO-2024-0009","fixed_version":"v2.0.1","trace":[{"module":"github.com/x/y","version":"v1.5.0"}]}}
+{"finding":{"osv":"GO-2024-0009","fixed_version":"v2.0.1","trace":[{"module":"github.com/x/y","version":"v1.5.0","package":"github.com/x/y","function":"Do"}]}}'
+  stub_govulncheck "$stream" 0
+  with_stub "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings_by_tool.govulncheck | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.govulncheck[0].severity' <<<"$output")" = "called" ]
+}
+
+@test "gather-go #876: govulncheck exit!=0 (and !=3) is WITHHELD as [] with a diagnostic note, not reported clean" {
+  printf 'version: "2"\n' > "$WORK/.golangci.yml"
+  stub_golangci "" 0
+  # A real failure (e.g. no network to the vuln DB) exits 1 under -json (found
+  # vulns exit 0). The gather must WITHHOLD, never report a clean [].
+  stub_govulncheck "" 1
+  with_stub "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings_by_tool.govulncheck | length' <<<"$output")" = "0" ]
+  echo "$output" | jq -e '[.notes[] | select(test("govulncheck: exited 1"))] | length == 1' >/dev/null
+}
+
+@test "gather-go #876: no go.mod -> govulncheck not configured, findings key absent" {
+  rm -f "$WORK/go.mod"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .tooling_configured.govulncheck <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("govulncheck")' <<<"$output")" = "false" ]
+}
+
+@test "gather-go #876: a lone .snyk flips ONLY snyk_prs" {
+  printf 'version: v1.25.0\nignore: {}\n' > "$WORK/.snyk"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.snyk_prs' <<<"$output")" = "true" ]
+  [ "$(jq -r '.tooling_configured.dependabot' <<<"$output")" = "false" ]
+  [ "$(jq -r '.tooling_configured.renovate' <<<"$output")" = "false" ]
+}
+
+@test "gather-go #876: a lone renovate config flips ONLY renovate (any of the accepted spellings)" {
+  # Exercise a non-default spelling to guard the whole filename matrix, not just
+  # renovate.json.
+  mkdir -p "$WORK/.github"
+  printf '{ "extends": ["config:base"] }\n' > "$WORK/.github/renovate.json5"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.renovate' <<<"$output")" = "true" ]
+  [ "$(jq -r '.tooling_configured.dependabot' <<<"$output")" = "false" ]
+  [ "$(jq -r '.tooling_configured.snyk_prs' <<<"$output")" = "false" ]
+}
+
+@test "gather-go #876: no vendor config -> dependabot/snyk_prs/renovate configured=false, findings keys absent" {
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
   for tool in dependabot snyk_prs renovate; do
-    [ "$(jq -r ".tooling_configured | has(\"$tool\")" <<<"$output")" = "false" ]
+    [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "false" ]
+    [ "$(jq -r ".findings_by_tool | has(\"$tool\")" <<<"$output")" = "false" ]
   done
+}
+
+@test "gather-go #876: vendor config files flip dependabot/snyk_prs/renovate to configured" {
+  # Config-file presence is what drives 'configured' (the gh PR listing needs a
+  # network/auth we don't have here, so findings degrade to [] with a note).
+  mkdir -p "$WORK/.github"
+  printf 'version: 2\nupdates: []\n' > "$WORK/.github/dependabot.yml"
+  printf 'version: v1.25.0\nignore: {}\n'   > "$WORK/.snyk"
+  printf '{ "extends": ["config:base"] }\n' > "$WORK/renovate.json"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  for tool in dependabot snyk_prs renovate; do
+    [ "$(jq -r ".tooling_configured.$tool" <<<"$output")" = "true" ]
+    [ "$(jq -r ".findings_by_tool.$tool | type" <<<"$output")" = "array" ]
+  done
+  # gh is absent under the isolated PATH, so each vendor source records an
+  # honest can't-list note rather than silently reporting an empty PR set.
+  echo "$output" | jq -e '[.notes[] | select(test("dependabot is configured but .gh."))] | length == 1' >/dev/null
+  echo "$output" | jq -e '[.notes[] | select(test(".snyk file present but .gh."))] | length == 1' >/dev/null
+  echo "$output" | jq -e '[.notes[] | select(test("renovate is configured but .gh."))] | length == 1' >/dev/null
 }
 
 @test "gather-go: semgrep SHIPS for Go (not deferred like Swift) — configured when a hook is present (#873)" {
@@ -258,15 +389,19 @@ stub_zsh() {
   [ "$(jq -r '.findings_by_tool | has("semgrep")' <<<"$output")" = "false" ]
 }
 
-@test "gather-go: a dependabot.yml does NOT make the vendor sources appear (#876 not this slice)" {
-  # Guards the boundary above against a copy-paste of the Swift gather's
-  # vendor-PR block landing early: config presence must not conjure a tool key.
+@test "gather-go #876: a dependabot.yml makes ONLY dependabot configured (snyk_prs/renovate stay false)" {
+  # Slice G landed vendor-PR sources: dependabot config presence flips just its
+  # own key; the other two stay false without their own config files.
   mkdir -p "$WORK/.github"
   printf 'version: 2\nupdates: []\n' > "$WORK/.github/dependabot.yml"
   no_binary "$WORK"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.tooling_configured | has("dependabot")' <<<"$output")" = "false" ]
-  [ "$(jq -r '.findings_by_tool | has("dependabot")' <<<"$output")" = "false" ]
+  [ "$(jq -r '.tooling_configured.dependabot' <<<"$output")" = "true" ]
+  [ "$(jq -r '.tooling_configured.snyk_prs' <<<"$output")" = "false" ]
+  [ "$(jq -r '.tooling_configured.renovate' <<<"$output")" = "false" ]
+  # findings degrade to [] (gh absent under the isolated PATH), key present.
+  [ "$(jq -r '.findings_by_tool.dependabot | type' <<<"$output")" = "array" ]
+  [ "$(jq -r '.findings_by_tool | has("snyk_prs")' <<<"$output")" = "false" ]
 }
 
 @test "gather-go: coverage carries a regions array (empty while withheld)" {
@@ -447,15 +582,17 @@ stub_zsh() {
   # Key PRESENT and an empty array — not absent, which would mean "unconfigured".
   [ "$(jq -r '.findings_by_tool | has("format_lint")' <<<"$output")" = "true" ]
   [ "$(jq -r '.findings_by_tool.format_lint | length' <<<"$output")" = "0" ]
-  echo "$output" | jq -e '[.notes[] | select(test("not on PATH"))] | length == 1' >/dev/null
+  # Scope to the format_lint note specifically — other tools (govulncheck, #876)
+  # also legitimately emit a "not on PATH" note under the isolated PATH.
+  echo "$output" | jq -e '[.notes[] | select(test("format_lint is configured but"))] | length == 1' >/dev/null
 }
 
-@test "gather-go: with the binary present, the not-on-PATH note is absent" {
+@test "gather-go: with the binary present, the format_lint not-on-PATH note is absent" {
   printf 'version: "2"\n' > "$WORK/.golangci.yml"
   stub_golangci "" 0
   with_stub "$WORK"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '[.notes[] | select(test("not on PATH"))] | length == 0' >/dev/null
+  echo "$output" | jq -e '[.notes[] | select(test("format_lint is configured but"))] | length == 0' >/dev/null
 }
 
 @test "gather-go: two golangci config files present -> format_lint still configured once" {
@@ -465,7 +602,7 @@ stub_zsh() {
   [ "$status" -eq 0 ]
   # tooling_configured keys are unique by construction; the guard is that two
   # config spellings don't confuse the boolean or add a spurious key.
-  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "4" ]
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "8" ]
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 

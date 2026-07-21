@@ -7,7 +7,9 @@
 #
 # Output (stdout, JSON):
 #   {
-#     "tooling_configured": { "format_lint", "sonarcloud", "code_scanning", "semgrep" },
+#     "tooling_configured": { "format_lint", "sonarcloud", "code_scanning",
+#                             "semgrep", "govulncheck", "dependabot",
+#                             "snyk_prs", "renovate" },
 #     "findings_by_tool":   { <key per CONFIGURED tool; code_scanning -> code_scanning_alerts> },
 #     "coverage": {                 # MEASURED (per-package) as of Slice E (#874)
 #       "overall":   <float|null>,  #   null + reliable:false when withheld
@@ -23,10 +25,13 @@
 #   - format_lint (golangci-lint v2)                       — Slice B (#871)
 #   - sonarcloud / code_scanning / semgrep triage          — Slice D (#873)
 #   - coverage via `go test -coverprofile` (per-package)   — Slice E (#874)
-# Still to come: the vendor-PR sources dependabot + snyk_prs + renovate
-# (Slice G, #876). Declaring only the tools this plugin actually supports is
-# deliberate: reporting an unsupported tool as `configured: false` would imply
-# development-go can process it once set up.
+#   - govulncheck (Go vuln source of truth) + vendor-PR    — Slice G (#876)
+#     sources dependabot + snyk_prs + renovate
+# govulncheck is authoritative for Go code vulns; Snyk OSS is disabled for
+# gomod (no double-triage) — so there is NO Snyk-OSS vuln key here, and
+# `snyk_prs` is Snyk's version-bump PRs only. Declaring only the tools this
+# plugin actually supports is deliberate: reporting an unsupported tool as
+# `configured: false` would imply development-go can process it once set up.
 #
 # format_lint = ONE pinned binary, golangci-lint v2, covering both halves of
 # the mechanical layer:
@@ -436,6 +441,141 @@ rm -rf "$cov_tmp"
 # Emit one provenance note ALWAYS, so the figure's trust level is never silent.
 notes+=("coverage measurement: source=$coverage_source, reliable=$coverage_reliable — $coverage_reason")
 
+# --- govulncheck — the single source of truth for Go code vulns (Slice G #876)
+# DECISION (epic #868, 2026-07-19): govulncheck is authoritative for Go code
+# vulnerabilities; Snyk OSS is DISABLED for gomod (no double-triage) — so this
+# gather emits NO Snyk-OSS vuln source, only govulncheck. Container-image +
+# GitHub-Actions scanning are unchanged (Go's blessed image path is ko, which
+# has no Dockerfile to scan). govulncheck ships WITH the Go toolchain and needs
+# no config file, so it is "configured" whenever the repo is a Go module
+# (go.mod present). Findings route to go-major-upgrade (the advised fixed
+# version clears the vuln). Graceful: binary/network failure → [] + a note.
+has_govulncheck_config="false"
+if [[ -f "go.mod" ]]; then
+	has_govulncheck_config="true"
+fi
+govulncheck_json="null"
+if [[ "$has_govulncheck_config" == "true" ]]; then
+	if command -v govulncheck >/dev/null 2>&1; then
+		gv_raw="$(mktemp)"
+		gv_err="$(mktemp)"
+		# govulncheck -json emits a STREAM of {config|progress|osv|finding}
+		# messages, not one document. jq -s slurps them; we join each `finding`
+		# to its `osv` advisory and reduce to one record per vuln, preferring the
+		# CALLED occurrence (its top trace frame carries a non-null function) over
+		# a merely-imported one.
+		#
+		# EXIT CODES (govulncheck docs): with -json/-format=json it exits **0
+		# even when vulns are found** (exit 3 = ErrVulnerabilitiesFound is
+		# text-mode only). A non-zero code therefore means a REAL failure —
+		# package-load error, no network to vuln.go.dev, a bad module — which must
+		# be WITHHELD, not reported as a clean []. So treat any rc other than 0
+		# (tolerating 3 defensively, in case a future/text invocation leaks it) as
+		# a failure, and surface the captured stderr so the cause is diagnosable
+		# rather than a hardcoded guess (#258 trustworthy-or-withheld).
+		gv_rc=0
+		govulncheck -json ./... >"$gv_raw" 2>"$gv_err" || gv_rc=$?
+		if ((gv_rc != 0 && gv_rc != 3)); then
+			govulncheck_json="[]"
+			gv_detail="$(tail -1 "$gv_err" 2>/dev/null || true)"
+			[[ -z "$gv_detail" ]] && gv_detail="no error detail captured"
+			notes+=("govulncheck: exited $gv_rc; vulnerabilities NOT measured (withheld, not reported clean) — $gv_detail.")
+		else
+			govulncheck_json="$(jq -s '
+				(map(select(.osv) | {(.osv.id): (.osv.summary // .osv.details // "")}) | add // {}) as $sum
+				| [ .[] | select(.finding) | .finding
+					| (.trace[0]) as $t
+					| { osv: .osv,
+						fixed_version: (.fixed_version // null),
+						module: ($t.module // null),
+						version: ($t.version // null),
+						called: (($t.function // null) != null) } ]
+				| group_by(.osv)
+				| map((sort_by(.called) | reverse) | .[0])
+				# Two severity buckets: called|imported. govulncheck also emits
+				# module-level findings for required-but-unimported modules
+				# (trace[0].package null); those coarsen to "imported" here — a
+				# slight over-statement the planner tolerates (both route to the
+				# same upgrade agent). Refine to a 3rd "required" bucket if the
+				# planner ever needs to deprioritize them.
+				| map({
+					type: "vulnerability",
+					rule: .osv,
+					key: ("govulncheck:" + .osv),
+					severity: (if .called then "called" else "imported" end),
+					component: .module,
+					line: null,
+					message: ($sum[.osv] // .osv),
+					package: .module,
+					current_version: .version,
+					target_version: .fixed_version,
+					cve_reference: .osv
+				})
+			' "$gv_raw" 2>/dev/null || echo '[]')"
+		fi
+		rm -f "$gv_raw" "$gv_err"
+	else
+		govulncheck_json="[]"
+		notes+=("govulncheck is the Go vulnerability source of truth but its binary is not on PATH; install with 'go install golang.org/x/vuln/cmd/govulncheck@latest'.")
+	fi
+fi
+
+# --- vendor-PR sources: dependabot / snyk_prs / renovate (Slice G #876) -------
+# Raw open-PR records for the planner's ecosystem + bump-level classification
+# (go-maintenance-planner § 5a). NOTE: `snyk_prs` here is Snyk's auto-Fix/Upgrade
+# *PRs* (version bumps) — NOT an OSS-vuln scan (that is govulncheck's job, above;
+# Snyk OSS is disabled for gomod). Requires gh authenticated; degrades to []
+# plus a note otherwise.
+has_dependabot_config="false"
+[[ -f ".github/dependabot.yml" ]] && has_dependabot_config="true"
+
+has_snyk_prs_config="false"
+[[ -f ".snyk" ]] && has_snyk_prs_config="true"
+
+has_renovate_config="false"
+if [[ -f "renovate.json" || -f "renovate.json5" || -f ".github/renovate.json" ||
+	-f ".github/renovate.json5" || -f ".renovaterc" || -f ".renovaterc.json" ||
+	-f ".renovaterc.json5" || -f ".gitlab/renovate.json" ]]; then
+	has_renovate_config="true"
+fi
+
+dependabot_json="null"
+if [[ "$has_dependabot_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		dependabot_json="$(gh pr list --author "app/dependabot" --state open \
+			--json number,title,body,headRefName 2>/dev/null || echo "[]")"
+	else
+		dependabot_json="[]"
+		notes+=("dependabot is configured but 'gh' is not available/authenticated; can't list open Dependabot PRs.")
+	fi
+fi
+
+snyk_prs_json="null"
+if [[ "$has_snyk_prs_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		snyk_prs_json="$({
+			gh pr list --state open --search "head:snyk-fix-" \
+				--json number,title,body,headRefName 2>/dev/null || echo "[]"
+			gh pr list --state open --search "head:snyk-upgrade-" \
+				--json number,title,body,headRefName 2>/dev/null || echo "[]"
+		} | jq -s 'add // []' 2>/dev/null || echo "[]")"
+	else
+		snyk_prs_json="[]"
+		notes+=(".snyk file present but 'gh' is not available/authenticated; can't list open Snyk PRs.")
+	fi
+fi
+
+renovate_json="null"
+if [[ "$has_renovate_config" == "true" ]]; then
+	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+		renovate_json="$(gh pr list --author "app/renovate" --state open \
+			--json number,title,body,headRefName 2>/dev/null || echo "[]")"
+	else
+		renovate_json="[]"
+		notes+=("renovate is configured but 'gh' is not available/authenticated; can't list open Renovate PRs.")
+	fi
+fi
+
 # --- notes -> JSON -----------------------------------------------------------
 if [[ ${#notes[@]} -gt 0 ]]; then
 	notes_json=$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s '.')
@@ -449,10 +589,18 @@ jq -n \
 	--argjson sonar_cfg "$has_sonar_config" \
 	--argjson code_scanning_cfg "$has_code_scanning_config" \
 	--argjson semgrep_cfg "$has_semgrep_config" \
+	--argjson govulncheck_cfg "$has_govulncheck_config" \
+	--argjson dependabot_cfg "$has_dependabot_config" \
+	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
+	--argjson renovate_cfg "$has_renovate_config" \
 	--argjson format_lint_findings "$format_lint_json" \
 	--argjson sonar_findings "$sonar_json" \
 	--argjson cs_findings "$code_scanning_json" \
 	--argjson semgrep_findings "$semgrep_json" \
+	--argjson govulncheck_findings "$govulncheck_json" \
+	--argjson dependabot_findings "$dependabot_json" \
+	--argjson snyk_prs_findings "$snyk_prs_json" \
+	--argjson renovate_findings "$renovate_json" \
 	--argjson sonar_quality_gate "$sonar_quality_gate" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
@@ -466,14 +614,22 @@ jq -n \
     format_lint:   $format_lint_cfg,
     sonarcloud:    $sonar_cfg,
     code_scanning: $code_scanning_cfg,
-    semgrep:       $semgrep_cfg
+    semgrep:       $semgrep_cfg,
+    govulncheck:   $govulncheck_cfg,
+    dependabot:    $dependabot_cfg,
+    snyk_prs:      $snyk_prs_cfg,
+    renovate:      $renovate_cfg
   },
   findings_by_tool: (
     {} +
     (if $format_lint_findings != null then {format_lint:          $format_lint_findings} else {} end) +
     (if $sonar_findings       != null then {sonarcloud:           $sonar_findings}       else {} end) +
     (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end) +
-    (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end)
+    (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end) +
+    (if $govulncheck_findings != null then {govulncheck:          $govulncheck_findings} else {} end) +
+    (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
+    (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end) +
+    (if $renovate_findings    != null then {renovate:             $renovate_findings}    else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,

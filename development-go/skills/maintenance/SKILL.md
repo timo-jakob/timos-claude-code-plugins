@@ -12,9 +12,10 @@ description: >
   format_lint (golangci-lint v2 — one pinned binary doing both `fmt` and `run
   --fix`, Slice B #871) plus the static-analysis triple sonarcloud +
   code_scanning + semgrep (Slice D #873 — all three ship, Go's support in each
-  is deep), gated by the per-package coverage pre-flight (Slice E #874). The
-  vendor-PR sources (Slice G #876) arrive in a later slice. See ARCHITECTURE.md
-  for the schema and dispatch contract.
+  is deep), gated by the per-package coverage pre-flight (Slice E #874), plus
+  govulncheck (the Go vuln source of truth) and the vendor-PR sources
+  dependabot + snyk_prs + renovate (Slice G #876). See ARCHITECTURE.md for the
+  schema and dispatch contract.
 disable-model-invocation: false
 ---
 
@@ -107,8 +108,9 @@ product (see ARCHITECTURE.md § "Primary / auxiliary model"). So:
 - **Skip the coverage pre-flight entirely** — no Phase A, no
   `go-coverage-improver`, no coverage gate. An auxiliary Go isn't the
   product, so its coverage is not maintained.
-- The non-mechanical triagers (`sonarcloud`, `code_scanning`, `semgrep`)
-  and the dependency work later slices add are **skipped** in auxiliary
+- The non-mechanical triagers (`sonarcloud`, `code_scanning`, `semgrep`),
+  the `govulncheck` vuln work, and the vendor-PR sources
+  (`dependabot`/`snyk_prs`/`renovate`) are **skipped** in auxiliary
   mode — only its mechanical, behavior-preserving layer is maintained,
   exactly as development-java does. Concretely: pass the planner **only
   the `format_lint` findings** (intersect the supported set with
@@ -125,8 +127,9 @@ pre-flight section runs only in primary mode** — auxiliary skips it entirely
 `improver_result`.
 
 Then proceed with the flow below **in both modes** — `"primary"` (or an
-absent `dispatch_mode`) skips nothing: all four tools (`format_lint` plus
-the `sonarcloud` / `code_scanning` / `semgrep` triple) are planned.
+absent `dispatch_mode`) skips nothing: all eight tools (`format_lint`, the
+`sonarcloud` / `code_scanning` / `semgrep` triple, `govulncheck`, and the
+`dependabot` / `snyk_prs` / `renovate` vendor-PR sources) are planned.
 Auxiliary mode is the only one that narrows the set, to `format_lint`.
 
 **User input:** $ARGUMENTS
@@ -144,12 +147,16 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "go",
   "dispatch_mode": "primary",
   "language_meta": { "version": "1.24", "manifests": ["go.mod"] },
-  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true, "govulncheck": true, "dependabot": true, "snyk_prs": false, "renovate": false },
   "findings_by_tool": {
     "format_lint":          [ /* golangci-lint fmt findings: type, severity, rule, component, line, message, key */ ],
     "sonarcloud":           [ /* normalized Sonar Go findings: type, severity, rule, component, line, message, key */ ],
     "code_scanning_alerts": [ /* CodeQL go + Scorecard alerts: number, rule_id, severity, tool, file, line, message, html_url */ ],
-    "semgrep":              [ /* semgrep results: check_id, path, start/end, extra.message, extra.severity */ ]
+    "semgrep":              [ /* semgrep results: check_id, path, start/end, extra.message, extra.severity */ ],
+    "govulncheck":          [ /* Go vuln findings: rule (GO-id), severity (called|imported), component (module), package, current_version, target_version, cve_reference, key */ ],
+    "dependabot":           [ /* open Dependabot PR records: number, title, body, headRefName */ ],
+    "snyk_prs":             [ /* open Snyk auto-Fix/Upgrade PR records: same shape */ ],
+    "renovate":             [ /* open Renovate PR records: same shape */ ]
   },
   "coverage": { "overall": null, "by_module": {}, "regions": [], "measurement": { "source": "none", "reliable": false, "reason": "..." } },
   "policy": { "coverage_threshold": 90, "severity_gate": "high", "allow_nosemgrep_with_justification": true },
@@ -178,9 +185,16 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
 > `findings_by_tool` key**: the gather emits it in the `coverage` block, and
 > the coverage pre-flight below gates the coverage-respecting tools on it (an
 > empty/unreliable coverage block is a *signal to halt*, per Step 1, not the
-> expected steady state). The vendor-PR sources `dependabot` / `snyk_prs` /
-> `renovate` (Slice G, #876) are the only tools still outside the universe,
-> with no gather keys. Validate and route against the supported set only.
+> expected steady state). **Slice G (#876) added the vuln + dependency
+> layer:** **`govulncheck`** — the **single source of truth for Go code
+> vulnerabilities** (Snyk OSS is disabled for gomod, so there is no
+> Snyk-OSS key; container-image + GitHub-Actions scanning are unchanged) —
+> and the vendor-PR sources **`dependabot`** / **`snyk_prs`** (Snyk's
+> version-bump PRs, *not* an OSS scan) / **`renovate`**, which the planner
+> splits by ecosystem + bump level (§ 5a) across the triager, the
+> semantic-import-versioning major-upgrade agent, and the (no-Dockerfile)
+> runtime-upgrade agent. `container_scan` remains **out of scope for Go** —
+> the blessed image path is ko, which has no Dockerfile to scan.
 
 ## Validation
 
@@ -207,36 +221,36 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
 3. Confirm `language == "go"`. If not, error — the orchestrator misrouted.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). This slice's supported
-   set is `format_lint`, `sonarcloud`, `code_scanning`, `semgrep`.
+   set is `format_lint`, `sonarcloud`, `code_scanning`, `semgrep`,
+   `govulncheck`, `dependabot`, `snyk_prs`, `renovate`.
    `only_tools` is a **list**, so classify every name first, then act on
    the partition as a whole — a `--concern` expansion routinely mixes
    categories:
 
    - **Outside the family's tool vocabulary** (not one of `format_lint`,
-     `sonarcloud`, `code_scanning`, `semgrep`, `dependabot`, `snyk_prs`,
-     `renovate`, `container_scan`) → **halt**, whatever else the list
-     holds: "Unknown tool '`<X>`' in dispatch_filter.only_tools;
+     `sonarcloud`, `code_scanning`, `semgrep`, `govulncheck`, `dependabot`,
+     `snyk_prs`, `renovate`, `container_scan`) → **halt**, whatever else
+     the list holds: "Unknown tool '`<X>`' in dispatch_filter.only_tools;
      development-go supports: format_lint, sonarcloud, code_scanning,
-     semgrep." That really is a malformed payload.
+     semgrep, govulncheck, dependabot, snyk_prs, renovate." That really is
+     a malformed payload.
    - Otherwise, **scope the planner to the intersection** of `only_tools`
      with this slice's supported set — i.e. plan the supported tools that
      appear, even alongside names this slice doesn't have. Dropping real
-     `sonarcloud` findings because `dependabot` rode along in the same
+     `sonarcloud` findings because `container_scan` rode along in the same
      filter would silently under-deliver.
    - **When that intersection is empty** (the filter named only
-     later-slice tools) → **do not halt.** Skip the Planning step and
+     out-of-scope tools) → **do not halt.** Skip the Planning step and
      return the normal response with `plan: []`. Halting would abort the
-     whole `/development:maintenance` run whenever a user scopes it with
-     `--concern=dependencies` on a repo that happens to contain Go — the
-     concern expands to tools this slice doesn't have, which is "nothing
-     to do for Go", not an error.
-   - Either way, **name each later-slice tool in the rendered plan
+     whole `/development:maintenance` run whenever a user scopes it with a
+     concern that expands only to tools this slice doesn't have (e.g.
+     `container_scan` on a Go repo) — that is "nothing to do for Go", not
+     an error.
+   - Either way, **name each out-of-scope tool in the rendered plan
      summary** (the text you print to the user — *not* the response
-     JSON, whose keys are fixed), together with the slice that adds it:
-     `dependabot` / `snyk_prs` / `renovate` → #876. For
-     `container_scan` say **"not scheduled for Go — the blessed image
-     path is ko, which has no Dockerfile to scan"**; do not invent an
-     issue number for it.
+     JSON, whose keys are fixed). For `container_scan` say **"not
+     scheduled for Go — the blessed image path is ko, which has no
+     Dockerfile to scan"**; do not invent an issue number for it.
 
    Independently, a supported name with
    `tooling_configured.<name> == false` halts with: "Cannot scope to
@@ -255,9 +269,15 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
 
 Before planning any **non-mechanical** work, check whether coverage clears the
 bar for the changes a work agent might make. `format_lint` is behavior-
-preserving and **exempt** — it never triggers the gate. The
-**coverage-respecting** tools are the ones that edit real code: `sonarcloud`,
-`semgrep`, and a file-bearing `code_scanning` alert. A format-only run has an
+preserving and **exempt** — it never triggers the gate. The **vendor-PR
+sources** (`dependabot`, `snyk_prs`, `renovate`) and **`govulncheck`** are
+**exempt too**: they don't name a repo function for a work agent to edit —
+they act on GitHub PRs (the triager, via `gh`) or drive a dependency
+upgrade whose own agent runs a full `go build ./... && go test ./...` as its
+safety net (the semantic-import-versioning major-upgrade agent, the
+no-Dockerfile runtime-upgrade agent). The **coverage-respecting** tools are
+the ones that edit real in-repo code: `sonarcloud`, `semgrep`, and a
+file-bearing `code_scanning` alert. A run whose findings are all exempt has an
 empty affected set, so the pre-flight is a no-op and it goes straight to
 planning.
 
@@ -279,7 +299,8 @@ states the cause (no `*_test.go`, no toolchain, a build error, an unparseable
 profile).
 
 **Exception — coverage-exempt findings:** do **not** halt when **every** finding
-is coverage-exempt (`format_lint`). Return a plan routing them to their agent.
+is coverage-exempt (`format_lint`, `govulncheck`, `dependabot`, `snyk_prs`,
+`renovate`). Return a plan routing them to their agent.
 
 Only halt when at least one **coverage-respecting** finding is present
 (`sonarcloud`, `semgrep`, or a file-bearing `code_scanning` alert) **and**
@@ -527,9 +548,24 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
   its agent file's `missing_tool_recommendation` block (`format_lint` →
   `go-format-lint-fixer.md`, `sonarcloud` → `go-sonar-triage.md`,
   `code_scanning` → `go-code-scanning-triage.md`, `semgrep` →
-  `go-semgrep-triage.md`); reuse it verbatim. Every supported tool has a
-  real agent file — none is emitted inline (contrast Swift, whose deferred
-  semgrep has no agent, so its entry is inlined in the Swift dispatcher).
+  `go-semgrep-triage.md`, and the three vendor-PR keys `dependabot` /
+  `snyk_prs` / `renovate` → the shared `missing_tool_recommendation` block
+  in `go-dependabot-snyk-triage.md`, whose `configured == false` case
+  covers all three collectively); reuse it verbatim.
+
+  Two Slice-G keys have no dedicated agent file, so emit their copy
+  **inline** (the pattern Swift uses for its deferred semgrep):
+
+  - **`govulncheck`** is configured whenever the repo is a Go module, so a
+    `false` value effectively never occurs for a Go project (a non-module
+    repo wouldn't be routed here). If it ever is false, emit:
+    `summary: "govulncheck (the Go vulnerability scanner) could not be
+    run — no go.mod found."`, `what_it_provides: "govulncheck is the
+    single source of truth for Go code vulnerabilities (Snyk OSS is
+    disabled for gomod); it reports vulnerable modules and the version
+    that fixes each, which route to go-major-upgrade."`, `how_to_add:
+    "Ensure the project is a Go module (go.mod at the root) and install
+    the scanner: go install golang.org/x/vuln/cmd/govulncheck@latest."`.
 
 `actions_taken`, `actions_requiring_review`, and `unable_to_fix` are
 **not** the dispatcher's responsibility — they're produced by the
@@ -584,10 +620,22 @@ per-group work agents the orchestrator spawns in Phase 8.
   failure rather than guessed (#258). The static-analysis triple is now gated
   on this measurement (the coverage pre-flight above) — the gate Slice D's note
   promised. `format_lint` stays coverage-exempt (behavior-preserving) forever.
-- **No Dockerfile.** The blessed image path is **ko** (`.ko.yaml` with a
-  digest-pinned static base image), so the runtime-upgrade agent Slice G
-  (#876) adds will bump the `go`/`toolchain` directives in `go.mod` and
-  the CI `setup-go` matrix — there is no Docker `FROM` leg to bump.
+- **No Dockerfile (Slice G, #876).** The blessed image path is **ko**
+  (`.ko.yaml` with a digest-pinned static base image), so `go-runtime-upgrade`
+  bumps the `go`/`toolchain` directives in `go.mod` and the CI `setup-go`
+  matrix — there is **no** Docker `FROM golang:` leg to bump. The planner
+  attaches a `runtime_availability` pre_dispatch_hook
+  (`development-go/scripts/pre-dispatch-runtime-upgrade.zsh`) to each
+  `go-runtime-upgrade` group; because Go's `GOTOOLCHAIN=auto` fetches the
+  target toolchain on demand, that probe usually resolves to
+  `local_verification_mode: "auto"` even when the exact version isn't
+  pre-installed.
+- **govulncheck is the single source of truth for Go vulns (Slice G, #876).**
+  Snyk OSS is disabled for gomod (no double-triage); the gather emits **no**
+  Snyk-OSS key, and govulncheck findings (vulnerable module + fixed version)
+  route to `go-major-upgrade`. `snyk_prs` here means Snyk's *version-bump PRs*,
+  triaged like Dependabot/Renovate — not a vuln scan. Container-image +
+  GitHub-Actions scanning are unchanged.
 
 ## What you will NOT do
 

@@ -358,6 +358,21 @@ EOF
   run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$K"
 }
 
+@test "render: real ko-base-digest-refresh.yml.tmpl renders clean (#876)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --project-name svc --project-slug o/svc --project-key o_svc --org-key o \
+    --languages "go" --default-branch trunk \
+    languages/go/.github/workflows/ko-base-digest-refresh.yml.tmpl
+  [ "$status" -eq 0 ]
+  K="$OUT/languages/go/.github/workflows/ko-base-digest-refresh.yml"
+  grep -q 'name: ko-base-digest-refresh' "$K"
+  grep -q 'schedule:' "$K"                          # scheduled, not PR-triggered
+  grep -q 'defaultBaseImage:' "$K"                  # reads the .ko.yaml pin
+  grep -q 'imagetools inspect' "$K"                 # resolves the current digest
+  grep -q -- '--base "trunk"' "$K"                   # caller's --default-branch propagated
+  run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$K"
+}
+
 @test "render: real pre-commit template for a go repo keeps the coverage-floor-go hook (#875)" {
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
     --languages "go" common/.pre-commit-config.yaml.tmpl

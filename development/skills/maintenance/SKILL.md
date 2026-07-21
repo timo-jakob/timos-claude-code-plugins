@@ -29,15 +29,17 @@ Supported flags in `$ARGUMENTS`:
   for manual inspection + merge.
 - `--tool=<name>` — scope dispatch to a single tool (testing aid).
   `<name>` must be one of: `ruff`, `semgrep`, `code_scanning`,
-  `snyk_prs`, `sonarcloud`, `dependabot`, `renovate`, `container_scan`. The gather phase still runs
+  `snyk_prs`, `sonarcloud`, `dependabot`, `renovate`, `container_scan`,
+  `govulncheck`. The gather phase still runs
   for every tool (the payload stays complete), but the language plugin
   only spawns the agent(s) for the chosen tool. Other agents are
   skipped entirely — no work, no missing-tool recommendation.
-  Combinable with `--dry-run` and `--no-merge`.
+  (`govulncheck` is Go-only — the Go vuln source of truth, #876 — just as
+  `ruff` is Python-only.) Combinable with `--dry-run` and `--no-merge`.
 - `--concern=<name>` — scope dispatch to a whole **concern** (a named
   group of tools); the coarse-grained sibling of `--tool`. `<name>` must
   be one of:
-  - `security` → `snyk_prs`, `code_scanning`, `semgrep`, `container_scan`
+  - `security` → `snyk_prs`, `code_scanning`, `semgrep`, `container_scan`, `govulncheck`
   - `dependencies` → `dependabot`, `renovate`
   - `codequality` → `sonarcloud`, `ruff`
 
@@ -45,7 +47,7 @@ Supported flags in `$ARGUMENTS`:
   just to several tools at once — the gather phase still runs for
   everything, only dispatch is narrowed. Combinable with `--dry-run` and
   `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
-  other). The three concerns partition all eight tools, so
+  other). The three concerns partition all nine tools, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
   together cover the same set as an unscoped run.
 - `--batch=N` — cap how much of the plan this run processes. After the
@@ -90,7 +92,7 @@ arguments" and stop.
 When `--tool=<name>` is set, validate `<name>` against the known set
 above before proceeding. On a mismatch, halt with: "Unknown --tool
 '`<name>`'; supported: ruff, semgrep, code_scanning, snyk_prs,
-sonarcloud, dependabot, renovate, container_scan."
+sonarcloud, dependabot, renovate, container_scan, govulncheck."
 
 When `--concern=<name>` is set, validate `<name>` against `security`,
 `dependencies`, `codequality`. On a mismatch, halt with: "Unknown
@@ -737,7 +739,7 @@ entirely otherwise):
 
 `only_tools` is the scoped tool set: a single-element list for `--tool`,
 or the concern's expanded tool set for `--concern` (e.g.
-`["snyk_prs", "code_scanning", "semgrep", "container_scan"]` for `--concern=security`).
+`["snyk_prs", "code_scanning", "semgrep", "container_scan", "govulncheck"]` for `--concern=security`).
 The field shape is identical either way — the language plugin already
 treats `only_tools` as a set, so no plugin change is needed to support
 multi-tool scoping.
@@ -2259,11 +2261,14 @@ Body is capped at the top 50 findings (per-group cap is
 `50 / num_groups` so one giant group can't eat the cap). The
 remainder is summarized with a `+ N more — see source tool` footer.
 
-PR-based tools (`dependabot`, `snyk_prs`, `renovate`) are **not mirrored
-finding-for-finding** here — an open vendor PR is already a first-class
-PR, and duplicating it as a checklist item creates two states to keep in
-sync. But when one is **deferred** to human review rather than merged, that
-*outcome* does get a follow-up issue in 10b below (the gap #384 closes).
+PR-based tools (`dependabot`, `snyk_prs`, `renovate`, and the Go-only
+`govulncheck`) are **not mirrored finding-for-finding** here — an open
+vendor PR is already a first-class PR, and a `govulncheck` finding surfaces
+as a `go-major-upgrade` PR tracked by the per-group PR cycle, not as
+persistent scanner debt; duplicating either as a checklist item creates two
+states to keep in sync. But when one is **deferred** to human review rather
+than merged, that *outcome* does get a follow-up issue in 10b below (the
+gap #384 closes).
 
 ### 10b — PR-cycle outcome issues (deferrals, escalations, suppressions)
 
