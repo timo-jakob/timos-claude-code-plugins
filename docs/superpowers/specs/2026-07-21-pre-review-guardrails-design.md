@@ -94,11 +94,12 @@ The review loop remains the owner of judgment (test *quality*, forwarding
   risk (dynamic exits, sourced helpers); promote to failing only after a few
   weeks of clean signal. Local invocation offers `--strict` for a non-zero exit
   on findings.
-- Complemented by one added line in
-  `development-claude-plugin/agents/claude-plugin-contract-integrity.md` making
-  prose-vs-script **exit-code drift** an explicit review target. This touches
-  plugin content → requires the `plugin.json` + `marketplace.json` version bump
-  per repo convention.
+- ~~Complemented by an added line in `claude-plugin-contract-integrity.md`
+  making exit-code drift an explicit review target.~~ **Dropped during
+  planning:** the agent's *Prose-vs-script drift* section already lists
+  "Documented exit codes or typed-error strings that differ from what the
+  script actually emits" — the review target exists; no plugin content change
+  (and therefore no version bump) is needed in this epic.
 
 ### 4. Wiring and documentation
 
