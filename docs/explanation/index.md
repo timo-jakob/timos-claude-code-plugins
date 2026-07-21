@@ -12,3 +12,6 @@ behind the plugins. Read these to understand *why* things are the way they are.
 - [The target-repo docs stack](target-repo-docs-stack.md) — what bootstrap
   installs into every repo, the three publication channels, and the same-PR
   lifecycle that keeps target-repo docs from rotting.
+- [The local review loop](review-loop.md) — the pre-push review→fix→test loop
+  `/development:resolve-issue` runs before any PR, and the interactive
+  escalation that lets a present human grant more rounds or give guidance.

@@ -11,7 +11,10 @@ description: >
   holistic end-to-end test over the merged epic and explicitly close the epic
   issue (nothing auto-closes it). Repo-type-agnostic (Python / Java /
   Claude-plugin). Composes git-branch-naming, commit, and open-pr; never pushes
-  to the default branch.
+  to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
+  non-converging review-loop exit becomes an interactive extension (offer more
+  rounds, give guidance, ask questions) — see [The local review
+  loop](../explanation/review-loop.md).
 disable-model-invocation: false
 ---
 
@@ -436,7 +439,11 @@ model-driven steps:
 
 Pass `--issue <N>` too: the loop appends one JSONL telemetry record per run to
 `.claude/telemetry/review-loop.jsonl` (git-ignored, #566) — evidence for
-convergence rate, rounds-to-converge, and escalation breakdown.
+convergence rate, rounds-to-converge, and escalation breakdown. **Always pass an
+explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
+is the loop's resumable state and the status file its verdict — the interactive
+extension below re-invokes the loop with `--resume` on the *same* work-dir, and
+a defaulted `mktemp` dir is unrecoverable after the run exits.
 
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
@@ -449,6 +456,9 @@ with a status JSON + code:
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
   *Escalation* below. Opening a PR here would spend CI on unconverged work.
+  On an interactive run, `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first
+  enter the **interactive extension** (offer more rounds / guidance) before any
+  comment; the others, and all autonomous runs, go straight to the typed comment.
 
 `--no-review` skips the loop entirely (status `SKIPPED`) — today's fast path,
 for when you deliberately want no local review round.
@@ -458,6 +468,102 @@ for when you deliberately want no local review round.
 A bad escalation costs a human an afternoon; a good one costs two minutes. On
 any `ESCALATE_*` / `BUDGET_EXHAUSTED` status, produce **one** decision-ready
 issue comment and nothing else — **no PR, no auto-merge exposure**:
+
+**Interactive extension (human present, `BUDGET_EXHAUSTED` /
+`ESCALATE_NO_CONVERGENCE` only, #562-resume).** When the run is
+**interactive** — the same human-present determination §0a's remediation uses —
+and the loop exited `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE`, do **not**
+jump straight to the comment. The person who can grant "two more rounds" or
+supply the missing constraint is right here; offer that in-session first. (Every
+other exit — `ESCALATE_CONFLICT`, `ESCALATE_AMBIGUOUS` — and **every autonomous
+run** skip this branch entirely and go straight to the typed comment below.)
+
+Run this extension loop, tracking a `grants` counter (starts at 0):
+
+1. **Summarize** the exit in the conversation — never make the human read a
+   comment when they are right here:
+
+   ```bash
+   "<skill-base-dir>/scripts/build-escalation.zsh" --status <status.json> --format summary
+   ```
+
+   It prints the typed status, the remaining blockers, and the round history —
+   the same data the comment would carry, so nothing drifts.
+
+2. **Offer the choice** with `AskUserQuestion` (one question), tailored to the
+   exit type. The built-in **"Other"** option is the free-text channel — the
+   human uses it to *ask you a question* ("why is that blocker stuck?", "show me
+   the diff for `b.py`") **or** to *type guidance*.
+   - `BUDGET_EXHAUSTED`: **Grant +2 rounds** · **Grant +2 with guidance** ·
+     **Stop**.
+   - `ESCALATE_NO_CONVERGENCE`: **Give guidance & retry (+2)** — the primary
+     lever, since more rounds alone will not move a stuck blocker — · **Stop**.
+
+3. **If they asked a question** (Other → a question, not guidance): answer it
+   from the changelist / dossier, then **re-present step 2**. A question never
+   consumes a grant.
+
+4. **If they gave guidance** (with or without an explicit grant — guidance
+   always implies a grant; the +2/`grants` bookkeeping happens **once**, in
+   step 5): **post it as an issue comment** so it is durable and
+   survives a dead session, tagged so the audit trail separates human guidance
+   from the automated escalation comment:
+
+   ```bash
+   gh issue comment <N> --body "<!-- review-loop-guidance -->
+   $GUIDANCE"
+   ```
+
+   Then resume (step 5) with a `--fix-cmd` that **re-reads the issue's
+   comments** as fix context (the readiness gate and escalation already read
+   comments — reuse that, do not invent an env side-channel).
+
+5. **If they granted rounds** (with or without guidance): **first apply one fix
+   pass, then resume.** The escalated round broke *before* its own fix pass ran
+   (the loop's round order is review → decide → fix), so the tree still holds
+   the un-fixed blockers — resuming immediately would re-review unchanged code
+   and instantly re-trip non-convergence against the carried prior round,
+   burning the grant on a no-op. So: read the status JSON's
+   `final_changelist.blocking` (plus the guidance comment, when one was posted)
+   and implement the fixes exactly as step 2 implements, re-run the step-3 gate
+   — resume only once it is green; red follows §3's rule (fix it, or abandon and
+   report) — then resume the loop — same `--work-dir`, `--resume`, ceiling
+   raised by 2 — and increment `grants`:
+
+   ```bash
+   "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
+     --work-dir <same-work-dir> --resume --max-rounds <prev_max + 2> \
+     --review-cmd <cmd> --fix-cmd <guidance-aware cmd> --test-cmd <cmd> \
+     --issue <N> --status-file <status.json>
+   ```
+
+   On `CONVERGED` (exit 0) → leave this branch and proceed to step 4 (version
+   bump) / PR as normal. On another `BUDGET_EXHAUSTED` /
+   `ESCALATE_NO_CONVERGENCE` → go back to step 1 with the new status. On
+   `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` → leave this branch and take the
+   typed-comment terminal below (a resumed run can surface a different exit).
+   On an **operational error** (exit 1/2), the loop wrote either **no** new
+   status (the file still holds the *previous* escalation) or a status
+   `ERROR` (a red gate after a fix) — neither is a typed escalation, so never
+   build a comment from the file: report the error in the conversation and
+   stop.
+
+6. **Soft cap.** Before re-offering, if `grants >= 5` **or** the just-finished
+   extension produced **zero net blocker reduction** vs. the prior round
+   (compare `.round_changelists[-1].summary.blocking` to the round before), say
+   so plainly — "this isn't converging; the diff may need rethinking" — and nudge
+   toward **Stop** or splitting the work into a follow-up issue. Never hard-stop
+   on the human; they may still choose to extend.
+
+7. **Stop / decline** (the human picks Stop, or bails via "Other"): fall through
+   to the typed-comment terminal below, exactly as an autonomous run does. The
+   diff-so-far and any guidance are already on the issue; the human can resume
+   later with `/development:resolve-issue <N>`.
+
+If the interactive extension ended in `CONVERGED`, skip the terminal below and
+continue to §4. If it ended in an **operational error**, it was already reported
+in-session (step 5) — stop, with **no** typed comment. Otherwise (a Stop /
+decline, or a `CONFLICT` / `AMBIGUOUS` exit):
 
 1. **Push the branch as the bot** (so the diff-so-far is linkable) but **create
    no PR object** — a draft would trigger CI and defeat the local loop. Use the

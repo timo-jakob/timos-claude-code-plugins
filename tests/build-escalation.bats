@@ -5,6 +5,8 @@
 # escalation type, a summary, the round history, and 2-3 concrete options — so a
 # human interruption costs two minutes, not an afternoon (epic #557).
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/build-escalation.zsh"
@@ -91,4 +93,59 @@ EOF
   echo 'not json' > "$ST"
   run zsh "$S" --status "$ST"
   [ "$status" -eq 1 ]
+}
+
+@test "--format summary: conversational render, no options / marker / branch note" {
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":3,"max_rounds":3,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":3,"blocking":1,"conflicts":0,"non_converging":false}],
+ "final_changelist":{"blocking":[{"priority":"High","dimension":"performance","file":"b.py","line":5,"title":"N+1"}]}}
+EOF
+  # --branch/--compare-url provided: the comment render WOULD emit the no-PR
+  # note, so its absence below actually discriminates summary from comment
+  run zsh "$S" --status "$ST" --issue 603 --format summary \
+    --branch feat/603-x --compare-url 'https://github.com/o/r/tree/feat/603-x'
+  [ "$status" -eq 0 ]
+  # shares the comment's data: the status and the remaining blocker location appear
+  echo "$output" | grep -q 'BUDGET_EXHAUSTED'
+  echo "$output" | grep -q 'b.py:5'
+  echo "$output" | grep -q 'Round 3:'
+  # but it is NOT the comment: no options, no marker, no no-PR note
+  run ! grep -q 'How to proceed' <<< "$output"
+  run ! grep -q '<!-- review-loop-escalation' <<< "$output"
+  run ! grep -q 'no PR opened' <<< "$output"
+}
+
+@test "--format summary omits the Remaining block when no blockers remain" {
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":3,"max_rounds":3,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 603 --format summary
+  [ "$status" -eq 0 ]
+  run ! grep -q 'Remaining' <<< "$output"
+}
+
+@test "--format summary renders CONVERGED as converged, not as an escalation" {
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":2,"max_rounds":3,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":0,"conflicts":0,"non_converging":false}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'converged'
+  run ! grep -q 'without converging' <<< "$output"
+}
+
+@test "--format: unknown value is a usage error (exit 2)" {
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":3,"max_rounds":3,"history":[],"final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format bogus
+  [ "$status" -eq 2 ]
 }

@@ -1150,9 +1150,24 @@ status JSON (`{status, rounds, max_rounds, repo_type, review_skill,
 escalation_reasons, history, final_changelist}`). `--no-review` yields `SKIPPED`
 — the fast path that bypasses the loop.
 
-Only `CONVERGED` proceeds to commit + open-pr; every escalation stops without a
-PR and is surfaced as a `needs-human-decision` issue comment (#564), never a
-draft PR (a draft would trigger CI, defeating the local loop).
+**The loop is resumable (#902).** `--resume` continues a prior run from its
+`--work-dir` (the work-dir *is* the state): it reads the last completed round
+from `history.jsonl`, seeds the prior changelist so non-convergence detection
+spans the extension, honours a raised `--max-rounds`, and appends to the
+accumulators instead of truncating. `--resume` without prior non-empty history —
+or with a ceiling at or below the resumed round — is a usage error (exit 2); the
+exit-code contract gains no new codes. Its sibling,
+`build-escalation.zsh --format summary`, renders the same status data
+conversationally (no options list, no branch note, no marker).
+
+Only `CONVERGED` proceeds to commit + open-pr; no escalation ever opens a PR
+(a draft would trigger CI, defeating the local loop). On an **autonomous** run —
+and on `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` always — the escalation is
+surfaced as a `needs-human-decision` issue comment (#564). On an **interactive**
+run, `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first enter the in-session
+interactive extension (#902): the skill summarizes via `--format summary`,
+offers +2 rounds / guidance, and resumes the loop via `--resume`; only a
+Stop/decline falls back to the typed comment.
 
 ## Review-loop telemetry (#566)
 
