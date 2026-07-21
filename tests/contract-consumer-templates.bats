@@ -141,6 +141,119 @@ render_workflows() {
   grep -qF 'token: ${{ secrets.GITHUB_TOKEN }}' "$W"
 }
 
+# --- consumer deprecation surface (#707) -------------------------------------
+
+@test "contract-consumer #707: the blessed deprecation files are present" {
+  [ -f "$CC/orval-deprecation-transformer.mjs" ]
+  [ -f "$CC/fixtures/deprecated-openapi.yaml" ]
+}
+
+@test "contract-consumer #707: ESLint enables no-deprecated (warn) with typed linting SCOPED to src" {
+  E="$CC/eslint.config.js"
+  # The rule requires type information — the config must enable projectService,
+  # or no-deprecated silently does nothing.
+  grep -q '"@typescript-eslint/no-deprecated": "warn"' "$E"
+  grep -q 'projectService: true' "$E"
+  # warn, not error
+  run ! grep -q '"@typescript-eslint/no-deprecated": "error"' "$E"
+  # Typed linting MUST be scoped to src/** — a repo-wide projectService errors on
+  # the root config files the base tsconfig (include: src/**) doesn't cover.
+  grep -qE 'files: \["src/\*\*/\*\.ts", "src/\*\*/\*\.tsx"\]' "$E"
+}
+
+@test "contract-consumer #707: the transformer SOURCE carries its load-bearing literals (node-free backstop)" {
+  # Runs everywhere (no node): catches a dropped x-sunset in the notice, a
+  # reworded notice, or a removed guard — the regressions the node test would
+  # catch only where node runs.
+  T="$CC/orval-deprecation-transformer.mjs"
+  grep -qF 'Deprecated; scheduled for removal after ${sunset}' "$T"
+  grep -qF '"Deprecated."' "$T"
+  # the guards that stop it corrupting a real spec must exist
+  grep -qF 'op.deprecated !== true' "$T"
+  grep -q 'HTTP_METHODS' "$T"
+}
+
+@test "contract-consumer #707: seeded orval.config.ts wires the transformer to a file that ships" {
+  WORK="$BATS_TEST_TMPDIR/depseed"
+  mkdir -p "$WORK"
+  printf '{ "name": "x", "dependencies": { "@acme/orders-api-spec": "2.4.0" } }\n' > "$WORK/package.json"
+  run zsh "$REPO_ROOT/development/skills/bootstrap/scripts/seed-orval-targets.zsh" "$WORK"
+  [ "$status" -eq 0 ]
+  grep -q 'transformer: "./orval-deprecation-transformer.mjs"' "$WORK/orval.config.ts"
+  grep -q 'useDeprecatedOperations: true' "$WORK/orval.config.ts"
+  # The transformer path the config references MUST resolve to a shipped template
+  # (guards against a rename on one side only — a dangling transformer reference).
+  ref=$(grep -oE 'transformer: "\./[^"]+"' "$WORK/orval.config.ts" | sed -E 's/.*"\.\/([^"]+)"/\1/')
+  [ -n "$ref" ]
+  [ -f "$CC/$ref" ]
+}
+
+@test "contract-consumer #707: the fixture spec has a deprecated op with x-sunset and an ACTIVE op (structural)" {
+  F="$CC/fixtures/deprecated-openapi.yaml"
+  grep -q 'operationId: getOrders' "$F"
+  grep -q 'x-sunset:' "$F"
+  grep -q 'operationId: getHealth' "$F"
+  # Structure-aware: the /health operation must NOT be deprecated. Prefer yq;
+  # fall back to a block-scoped grep (the /health path block up to the next
+  # top-level path) so this is not the fragile positional check it replaces.
+  if command -v yq >/dev/null 2>&1; then
+    [ "$(yq -r '.paths["/health"].get.deprecated' "$F")" = "null" ]
+    [ "$(yq -r '.paths["/orders"].get.deprecated' "$F")" = "true" ]
+  else
+    run ! grep -q 'deprecated: true' <(awk '/^  \/health:/{f=1} f&&/^  \/[a-z]/&&!/\/health:/{f=0} f' "$F")
+  fi
+}
+
+@test "contract-consumer #707: the transformer maps deprecated+x-sunset and guards every edge (node)" {
+  # node is a DECLARED test dependency (tests/Dockerfile + script-tests.yml install
+  # it) — a hard failure, not a silent skip, so a node-less runner is loud, and the
+  # transformer's behavior is verified in the canonical suite.
+  command -v node >/dev/null 2>&1 || { echo "node is required for the #707 transformer test"; false; }
+  T="$CC/orval-deprecation-transformer.mjs"
+  DRIVER="$BATS_TEST_TMPDIR/drive.mjs"
+  cat > "$DRIVER" <<JS
+import transform from "$T";
+const spec = { paths: {
+  // path item with path-item-level non-operation keys (must be untouched)
+  "/orders": { parameters: [{ name: "x" }], summary: "Orders",
+    get: { deprecated: true, "x-sunset": "2026-12-31", description: "Returns all orders." } },
+  "/health": { get: { description: "Liveness probe." } },
+  "/legacy": { get: { deprecated: true, description: "No sunset here." } },
+  "/reffed": { \$ref: "#/paths/x" },
+}};
+const out = transform(spec);
+console.log(JSON.stringify({
+  dep: out.paths["/orders"].get.description,
+  active: out.paths["/health"].get.description,
+  activeDeprecated: out.paths["/health"].get.deprecated ?? null,
+  noSunset: out.paths["/legacy"].get.description,
+  pathParams: out.paths["/orders"].parameters,
+  pathSummary: out.paths["/orders"].summary,
+  reffed: out.paths["/reffed"],
+  idempotent: transform(out).paths["/orders"].get.description,
+  idempotentLegacy: transform(out).paths["/legacy"].get.description,
+}));
+JS
+  run node "$DRIVER"
+  [ "$status" -eq 0 ]
+  # deprecated + x-sunset -> sunset date carried into the description
+  echo "$output" | jq -e '.dep | test("Deprecated; scheduled for removal after 2026-12-31")' >/dev/null
+  echo "$output" | jq -e '.dep | test("Returns all orders")' >/dev/null
+  # AC2: active op fully untouched — description AND no injected deprecated/notice
+  [ "$(jq -r '.active' <<<"$output")" = "Liveness probe." ]
+  echo "$output" | jq -e '.activeDeprecated == null' >/dev/null
+  echo "$output" | jq -e '.active | test("Deprecated") | not' >/dev/null
+  # deprecated WITHOUT x-sunset -> a bare deprecation notice, no date
+  echo "$output" | jq -e '.noSunset | test("^Deprecated\\.")' >/dev/null
+  # path-item-level keys (parameters, summary) and a $ref path item are untouched
+  echo "$output" | jq -e '.pathParams == [{ "name": "x" }]' >/dev/null
+  [ "$(jq -r '.pathSummary' <<<"$output")" = "Orders" ]
+  echo "$output" | jq -e '.reffed == { "$ref": "#/paths/x" }' >/dev/null
+  # idempotent — re-running double-prefixes NEITHER the sunset nor the bare case
+  [ "$(jq -r '.dep' <<<"$output")" = "$(jq -r '.idempotent' <<<"$output")" ]
+  [ "$(jq -r '.noSunset' <<<"$output")" = "$(jq -r '.idempotentLegacy' <<<"$output")" ]
+}
+
 @test "contract-consumer: workflows render with no leftover placeholders and valid DEFAULT_BRANCH" {
   render_workflows
   for w in contracts-drift contracts-regen; do

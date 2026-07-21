@@ -172,7 +172,13 @@ trap 'rm -f "$tmp_config"' EXIT
 		t_input=$(jq -r ".[$((ti - 1))].input" <<<"$targets_json")
 		t_output=$(jq -r ".[$((ti - 1))].output" <<<"$targets_json")
 		print -r -- "  \"${t_name}\": {"
-		print -r -- "    input: \"${t_input}\","
+		print -r -- '    input: {'
+		print -r -- "      target: \"${t_input}\","
+		print -r -- '      override: {'
+		print -r -- '        // Carry deprecated:true + x-sunset to @deprecated JSDoc (#707).'
+		print -r -- '        transformer: "./orval-deprecation-transformer.mjs",'
+		print -r -- '      },'
+		print -r -- '    },'
 		print -r -- '    output: {'
 		print -r -- '      mode: "tags-split",'
 		print -r -- "      target: \"${t_output}\","
@@ -180,6 +186,11 @@ trap 'rm -f "$tmp_config"' EXIT
 		print -r -- '      mock: true,'
 		print -r -- '      clean: true,'
 		print -r -- '      baseUrl: "/api",'
+		print -r -- '      override: {'
+		print -r -- '        // Keep deprecated operations in the client so their'
+		print -r -- '        // @deprecated call sites can be linted (#707).'
+		print -r -- '        useDeprecatedOperations: true,'
+		print -r -- '      },'
 		print -r -- '    },'
 		print -r -- '  },'
 	done
