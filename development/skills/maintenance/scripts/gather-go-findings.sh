@@ -9,7 +9,7 @@
 #   {
 #     "tooling_configured": { "format_lint", "sonarcloud", "code_scanning",
 #                             "semgrep", "govulncheck", "dependabot",
-#                             "snyk_prs", "renovate" },
+#                             "snyk_prs", "renovate", "grpc", "api_contract" },
 #     "findings_by_tool":   { <key per CONFIGURED tool; code_scanning -> code_scanning_alerts> },
 #     "coverage": {                 # MEASURED (per-package) as of Slice E (#874)
 #       "overall":   <float|null>,  #   null + reliable:false when withheld
@@ -27,6 +27,11 @@
 #   - coverage via `go test -coverprofile` (per-package)   — Slice E (#874)
 #   - govulncheck (Go vuln source of truth) + vendor-PR    — Slice G (#876)
 #     sources dependabot + snyk_prs + renovate
+#   - grpc + api_contract advisors (proto-first)           — Slice I (#878)
+#     grpc = buf/protobuf gRPC codegen (.proto present); api_contract =
+#     proto-first REST pipeline (.proto carrying google.api.http). Config-audit
+#     advisors, not scanners — one finding each, coverage-exempt (they edit buf
+#     config / CI, not source under test), like Java's grpc/openapi advisors.
 # govulncheck is authoritative for Go code vulns; Snyk OSS is disabled for
 # gomod (no double-triage) — so there is NO Snyk-OSS vuln key here, and
 # `snyk_prs` is Snyk's version-bump PRs only. Declaring only the tools this
@@ -576,6 +581,74 @@ if [[ "$has_renovate_config" == "true" ]]; then
 	fi
 fi
 
+# --- grpc + api_contract advisors (proto-first) — Slice I (#878) -------------
+# Config-audit advisors, mirroring Java's grpc/openapi: a grep sees the config
+# path but can't reason about the multi-plugin buf wiring, annotation
+# completeness, gateway registration, or the spec-conversion step — so we emit
+# ONE audit finding and let the advisor Read the config and decide.
+#
+#   grpc         — configured when .proto files exist (the authoritative gRPC
+#                  contract). go-grpc-advisor audits the buf generate wiring
+#                  (protoc-gen-go + protoc-gen-go-grpc, pinned).
+#   api_contract — configured when a .proto declares an EXTERNAL REST surface,
+#                  i.e. carries a `google.api.http` annotation. Absent
+#                  annotations means an internal-only gRPC service (the normal
+#                  "gRPC internal, REST external" state) — NOT a gap, so
+#                  api_contract stays false and no REST facade is pushed.
+#                  go-api-contract-advisor audits the four-stage proto-first
+#                  REST pipeline (buf wiring, annotation completeness, gateway
+#                  registration, 2.0->3.0 spec conversion).
+has_grpc_config="false"
+if find . -path '*/.git/*' -prune -o -path '*/third_party/*' -prune -o \
+	-name '*.proto' -print -quit 2>/dev/null | grep -q .; then
+	has_grpc_config="true"
+fi
+
+has_api_contract_config="false"
+# Only meaningful when protos exist; a `google.api.http` reference in ANY .proto
+# marks a declared external REST surface. `grep -rl` exits 1 on no match, which
+# under `set -e` would abort — the `|| true` and the string test absorb it.
+if [[ "$has_grpc_config" == "true" ]]; then
+	if [[ -n "$(grep -rlE 'google\.api\.http' --include='*.proto' . 2>/dev/null || true)" ]]; then
+		has_api_contract_config="true"
+	fi
+fi
+
+# Shared component: the codegen config the advisor Reads. Prefer buf.gen.yaml
+# (where the plugins are pinned), then buf.yaml, else the first .proto so the
+# finding still points somewhere concrete when buf isn't wired yet.
+proto_component=""
+if [[ "$has_grpc_config" == "true" ]]; then
+	if [[ -f "buf.gen.yaml" ]]; then
+		proto_component="buf.gen.yaml"
+	elif [[ -f "buf.yaml" ]]; then
+		proto_component="buf.yaml"
+	else
+		proto_component="$(find . -path '*/.git/*' -prune -o -name '*.proto' -print 2>/dev/null | head -n1)"
+		proto_component="${proto_component#./}"
+	fi
+fi
+
+grpc_json="null"
+if [[ "$has_grpc_config" == "true" ]]; then
+	grpc_json="$(jq -n --arg c "$proto_component" '[{
+		type: "config", severity: "MINOR", rule: "grpc:proto-audit",
+		component: $c, line: 0,
+		message: "Audit the buf protobuf/gRPC code-generation wiring — buf generate with pinned protoc-gen-go + protoc-gen-go-grpc producing the Go message + gRPC stubs from the authoritative .proto contract, with buf lint + buf breaking gating the contract and generated sources (*.pb.go, *_grpc.pb.go) excluded from coverage.",
+		key: ("grpc:proto-audit:" + $c)
+	}]')"
+fi
+
+api_contract_json="null"
+if [[ "$has_api_contract_config" == "true" ]]; then
+	api_contract_json="$(jq -n --arg c "$proto_component" '[{
+		type: "config", severity: "MINOR", rule: "api_contract:contract-audit",
+		component: $c, line: 0,
+		message: "Audit the proto-first REST contract pipeline — google.api.http annotations as the source of truth, grpc-gateway as the generated REST facade, and protoc-gen-openapiv2 output converted 2.0->3.0 into the contracts machinery. Checks buf wiring, annotation completeness on external RPCs, gateway mux registration, and the spec conversion step.",
+		key: ("api_contract:contract-audit:" + $c)
+	}]')"
+fi
+
 # --- notes -> JSON -----------------------------------------------------------
 if [[ ${#notes[@]} -gt 0 ]]; then
 	notes_json=$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s '.')
@@ -593,6 +666,8 @@ jq -n \
 	--argjson dependabot_cfg "$has_dependabot_config" \
 	--argjson snyk_prs_cfg "$has_snyk_prs_config" \
 	--argjson renovate_cfg "$has_renovate_config" \
+	--argjson grpc_cfg "$has_grpc_config" \
+	--argjson api_contract_cfg "$has_api_contract_config" \
 	--argjson format_lint_findings "$format_lint_json" \
 	--argjson sonar_findings "$sonar_json" \
 	--argjson cs_findings "$code_scanning_json" \
@@ -601,6 +676,8 @@ jq -n \
 	--argjson dependabot_findings "$dependabot_json" \
 	--argjson snyk_prs_findings "$snyk_prs_json" \
 	--argjson renovate_findings "$renovate_json" \
+	--argjson grpc_findings "$grpc_json" \
+	--argjson api_contract_findings "$api_contract_json" \
 	--argjson sonar_quality_gate "$sonar_quality_gate" \
 	--argjson coverage_overall "$coverage_overall" \
 	--argjson coverage_by_module "$coverage_by_module" \
@@ -618,18 +695,22 @@ jq -n \
     govulncheck:   $govulncheck_cfg,
     dependabot:    $dependabot_cfg,
     snyk_prs:      $snyk_prs_cfg,
-    renovate:      $renovate_cfg
+    renovate:      $renovate_cfg,
+    grpc:          $grpc_cfg,
+    api_contract:  $api_contract_cfg
   },
   findings_by_tool: (
     {} +
-    (if $format_lint_findings != null then {format_lint:          $format_lint_findings} else {} end) +
-    (if $sonar_findings       != null then {sonarcloud:           $sonar_findings}       else {} end) +
-    (if $cs_findings          != null then {code_scanning_alerts: $cs_findings}          else {} end) +
-    (if $semgrep_findings     != null then {semgrep:              $semgrep_findings}     else {} end) +
-    (if $govulncheck_findings != null then {govulncheck:          $govulncheck_findings} else {} end) +
-    (if $dependabot_findings  != null then {dependabot:           $dependabot_findings}  else {} end) +
-    (if $snyk_prs_findings    != null then {snyk_prs:             $snyk_prs_findings}    else {} end) +
-    (if $renovate_findings    != null then {renovate:             $renovate_findings}    else {} end)
+    (if $format_lint_findings  != null then {format_lint:          $format_lint_findings}  else {} end) +
+    (if $sonar_findings        != null then {sonarcloud:           $sonar_findings}        else {} end) +
+    (if $cs_findings           != null then {code_scanning_alerts: $cs_findings}           else {} end) +
+    (if $semgrep_findings      != null then {semgrep:              $semgrep_findings}      else {} end) +
+    (if $govulncheck_findings  != null then {govulncheck:          $govulncheck_findings}  else {} end) +
+    (if $dependabot_findings   != null then {dependabot:           $dependabot_findings}   else {} end) +
+    (if $snyk_prs_findings     != null then {snyk_prs:             $snyk_prs_findings}     else {} end) +
+    (if $renovate_findings     != null then {renovate:             $renovate_findings}     else {} end) +
+    (if $grpc_findings         != null then {grpc:                 $grpc_findings}         else {} end) +
+    (if $api_contract_findings != null then {api_contract:         $api_contract_findings} else {} end)
   ),
   coverage: {
     overall:   $coverage_overall,

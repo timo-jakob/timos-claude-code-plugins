@@ -14,8 +14,10 @@ description: >
   code_scanning + semgrep (Slice D #873 — all three ship, Go's support in each
   is deep), gated by the per-package coverage pre-flight (Slice E #874), plus
   govulncheck (the Go vuln source of truth) and the vendor-PR sources
-  dependabot + snyk_prs + renovate (Slice G #876). See ARCHITECTURE.md for the
-  schema and dispatch contract.
+  dependabot + snyk_prs + renovate (Slice G #876), plus the proto-first
+  config-audit advisors grpc + api_contract (Slice I #878 — buf/protobuf gRPC
+  codegen and the proto-first REST contract pipeline). See ARCHITECTURE.md for
+  the schema and dispatch contract.
 disable-model-invocation: false
 ---
 
@@ -109,8 +111,9 @@ product (see ARCHITECTURE.md § "Primary / auxiliary model"). So:
   `go-coverage-improver`, no coverage gate. An auxiliary Go isn't the
   product, so its coverage is not maintained.
 - The non-mechanical triagers (`sonarcloud`, `code_scanning`, `semgrep`),
-  the `govulncheck` vuln work, and the vendor-PR sources
-  (`dependabot`/`snyk_prs`/`renovate`) are **skipped** in auxiliary
+  the `govulncheck` vuln work, the vendor-PR sources
+  (`dependabot`/`snyk_prs`/`renovate`), and the config-audit advisors
+  (`grpc`/`api_contract`) are **skipped** in auxiliary
   mode — only its mechanical, behavior-preserving layer is maintained,
   exactly as development-java does. Concretely: pass the planner **only
   the `format_lint` findings** (intersect the supported set with
@@ -127,10 +130,11 @@ pre-flight section runs only in primary mode** — auxiliary skips it entirely
 `improver_result`.
 
 Then proceed with the flow below **in both modes** — `"primary"` (or an
-absent `dispatch_mode`) skips nothing: all eight tools (`format_lint`, the
-`sonarcloud` / `code_scanning` / `semgrep` triple, `govulncheck`, and the
-`dependabot` / `snyk_prs` / `renovate` vendor-PR sources) are planned.
-Auxiliary mode is the only one that narrows the set, to `format_lint`.
+absent `dispatch_mode`) skips nothing: all ten tools (`format_lint`, the
+`sonarcloud` / `code_scanning` / `semgrep` triple, `govulncheck`, the
+`dependabot` / `snyk_prs` / `renovate` vendor-PR sources, and the proto-first
+advisors `grpc` / `api_contract`) are planned. Auxiliary mode is the only one
+that narrows the set, to `format_lint`.
 
 **User input:** $ARGUMENTS
 
@@ -147,7 +151,7 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
   "language": "go",
   "dispatch_mode": "primary",
   "language_meta": { "version": "1.24", "manifests": ["go.mod"] },
-  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true, "govulncheck": true, "dependabot": true, "snyk_prs": false, "renovate": false },
+  "tooling_configured": { "format_lint": true, "sonarcloud": true, "code_scanning": true, "semgrep": true, "govulncheck": true, "dependabot": true, "snyk_prs": false, "renovate": false, "grpc": true, "api_contract": false },
   "findings_by_tool": {
     "format_lint":          [ /* golangci-lint fmt findings: type, severity, rule, component, line, message, key */ ],
     "sonarcloud":           [ /* normalized Sonar Go findings: type, severity, rule, component, line, message, key */ ],
@@ -156,7 +160,9 @@ ARCHITECTURE.md § "JSON schema (v2)" for the full contract.
     "govulncheck":          [ /* Go vuln findings: rule (GO-id), severity (called|imported), component (module), package, current_version, target_version, cve_reference, key */ ],
     "dependabot":           [ /* open Dependabot PR records: number, title, body, headRefName */ ],
     "snyk_prs":             [ /* open Snyk auto-Fix/Upgrade PR records: same shape */ ],
-    "renovate":             [ /* open Renovate PR records: same shape */ ]
+    "renovate":             [ /* open Renovate PR records: same shape */ ],
+    "grpc":                 [ /* one proto-audit finding: type, severity, rule (grpc:proto-audit), component (buf.gen.yaml), line, message, key */ ],
+    "api_contract":         [ /* one contract-audit finding: type, severity, rule (api_contract:contract-audit), component (buf.gen.yaml), line, message, key */ ]
   },
   "coverage": { "overall": null, "by_module": {}, "regions": [], "measurement": { "source": "none", "reliable": false, "reason": "..." } },
   "policy": { "coverage_threshold": 90, "severity_gate": "high", "allow_nosemgrep_with_justification": true },
@@ -195,6 +201,18 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
 > semantic-import-versioning major-upgrade agent, and the (no-Dockerfile)
 > runtime-upgrade agent. `container_scan` remains **out of scope for Go** —
 > the blessed image path is ko, which has no Dockerfile to scan.
+> **Slice I (#878) added the proto-first advisors:** **`grpc`** (a `.proto`
+> contract → `go-grpc-advisor`, which audits the buf `buf generate` wiring —
+> protoc-gen-go + protoc-gen-go-grpc, pinned) and **`api_contract`** (a
+> `.proto` carrying `google.api.http` → `go-api-contract-advisor`, which
+> audits the four-stage proto-first REST pipeline: buf wiring, annotation
+> completeness on external RPCs, grpc-gateway registration, and the
+> 2.0→3.0 spec-conversion feeding the contracts machinery). Both are
+> **config-audit** advisors like Java's `grpc`/`openapi`: they edit buf
+> config / CI, not source under test, so they are **coverage-exempt**. A
+> pure internal-only gRPC service has no `google.api.http`, so
+> `api_contract` stays unconfigured — the "gRPC internal, REST external"
+> policy, not a gap.
 
 ## Validation
 
@@ -222,18 +240,19 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
 4. Confirm `repo.path` exists on disk. If not, error and stop.
 5. **Validate `dispatch_filter`** (when present). This slice's supported
    set is `format_lint`, `sonarcloud`, `code_scanning`, `semgrep`,
-   `govulncheck`, `dependabot`, `snyk_prs`, `renovate`.
+   `govulncheck`, `dependabot`, `snyk_prs`, `renovate`, `grpc`,
+   `api_contract`.
    `only_tools` is a **list**, so classify every name first, then act on
    the partition as a whole — a `--concern` expansion routinely mixes
    categories:
 
    - **Outside the family's tool vocabulary** (not one of `format_lint`,
      `sonarcloud`, `code_scanning`, `semgrep`, `govulncheck`, `dependabot`,
-     `snyk_prs`, `renovate`, `container_scan`) → **halt**, whatever else
-     the list holds: "Unknown tool '`<X>`' in dispatch_filter.only_tools;
-     development-go supports: format_lint, sonarcloud, code_scanning,
-     semgrep, govulncheck, dependabot, snyk_prs, renovate." That really is
-     a malformed payload.
+     `snyk_prs`, `renovate`, `grpc`, `api_contract`, `container_scan`) →
+     **halt**, whatever else the list holds: "Unknown tool '`<X>`' in
+     dispatch_filter.only_tools; development-go supports: format_lint,
+     sonarcloud, code_scanning, semgrep, govulncheck, dependabot, snyk_prs,
+     renovate, grpc, api_contract." That really is a malformed payload.
    - Otherwise, **scope the planner to the intersection** of `only_tools`
      with this slice's supported set — i.e. plan the supported tools that
      appear, even alongside names this slice doesn't have. Dropping real
@@ -257,6 +276,22 @@ Code Scanning key is `code_scanning_alerts`, not `code_scanning`.
    `<X>`: not configured for this project. Set it up first via
    /development:bootstrap, or drop `--tool=<X>`."
 
+   > **Exception — `grpc` / `api_contract` never halt on `false`.** Their
+   > `false` does **not** mean "tooling absent": it means "no `.proto`" /
+   > "no `google.api.http`", and bootstrap **cannot** author protos or
+   > annotations. Worse, halting `--tool=api_contract` on an internal-only
+   > gRPC service and telling the user to "set it up" is the REST-onto-internal
+   > push these advisors exist to avoid. So when a filtered **name** is `grpc`
+   > / `api_contract` with `tooling_configured` **false**, do **not** halt —
+   > treat that name like an out-of-scope tool: **exclude it from the
+   > intersection**, render "`<X>`: no `.proto` / no `google.api.http` —
+   > nothing to audit (the normal state under gRPC-internal / REST-external)",
+   > and plan the **remaining** filtered tools as usual. Only when the
+   > resulting intersection is empty does the run return `plan: []` — a mixed
+   > filter like `--tool=grpc,sonarcloud` on a proto-less repo still plans its
+   > real `sonarcloud` findings. Every *other* supported tool still halts on
+   > `false` as above.
+   >
    > **Known gap (not this slice's to fix).** The orchestrator's own
    > `--tool` vocabulary does not yet include `format_lint`, so
    > `--tool=format_lint` is rejected before dispatch ever happens —
@@ -275,8 +310,10 @@ sources** (`dependabot`, `snyk_prs`, `renovate`) and **`govulncheck`** are
 they act on GitHub PRs (the triager, via `gh`) or drive a dependency
 upgrade whose own agent runs a full `go build ./... && go test ./...` as its
 safety net (the semantic-import-versioning major-upgrade agent, the
-no-Dockerfile runtime-upgrade agent). The **coverage-respecting** tools are
-the ones that edit real in-repo code: `sonarcloud`, `semgrep`, and a
+no-Dockerfile runtime-upgrade agent). The **config-audit advisors** `grpc`
+and `api_contract` are **exempt too** — they edit buf config / CI, not source
+under test (like Java's `grpc`/`openapi`). The **coverage-respecting** tools
+are the ones that edit real in-repo code: `sonarcloud`, `semgrep`, and a
 file-bearing `code_scanning` alert. A run whose findings are all exempt has an
 empty affected set, so the pre-flight is a no-op and it goes straight to
 planning.
@@ -300,7 +337,7 @@ profile).
 
 **Exception — coverage-exempt findings:** do **not** halt when **every** finding
 is coverage-exempt (`format_lint`, `govulncheck`, `dependabot`, `snyk_prs`,
-`renovate`). Return a plan routing them to their agent.
+`renovate`, `grpc`, `api_contract`). Return a plan routing them to their agent.
 
 Only halt when at least one **coverage-respecting** finding is present
 (`sonarcloud`, `semgrep`, or a file-bearing `code_scanning` alert) **and**
@@ -328,9 +365,11 @@ coverage-respecting ones (partial halt).
 
 Build the **affected set**: every coverage-respecting finding that names a file
 (`sonarcloud.component`, a file-bearing `code_scanning_alerts.file`, a `semgrep`
-finding's `path`). `format_lint` and file-less `code_scanning` findings
-(Scorecard repo-policy) contribute nothing. When `dispatch_filter.only_tools`
-is set, restrict to the filtered tools.
+finding's `path`). `format_lint`, file-less `code_scanning` findings
+(Scorecard repo-policy), and the config-audit advisors `grpc` / `api_contract`
+(their `component` is a buf config file, not source under test) contribute
+nothing. When `dispatch_filter.only_tools` is set, restrict to the filtered
+tools.
 
 For each affected finding, resolve its **enclosing region** from
 `coverage.regions` (emitted by the gather): the entry whose `file` matches and
@@ -548,12 +587,20 @@ loaded in context above) consumes it for its Phase 7 / Phase 8 work.
   its agent file's `missing_tool_recommendation` block (`format_lint` →
   `go-format-lint-fixer.md`, `sonarcloud` → `go-sonar-triage.md`,
   `code_scanning` → `go-code-scanning-triage.md`, `semgrep` →
-  `go-semgrep-triage.md`, and the three vendor-PR keys `dependabot` /
+  `go-semgrep-triage.md`, the three vendor-PR keys `dependabot` /
   `snyk_prs` / `renovate` → the shared `missing_tool_recommendation` block
   in `go-dependabot-snyk-triage.md`, whose `configured == false` case
-  covers all three collectively); reuse it verbatim.
+  covers all three collectively, `grpc` → `go-grpc-advisor.md`, and
+  `api_contract` → `go-api-contract-advisor.md`); reuse it verbatim.
 
-  Two Slice-G keys have no dedicated agent file, so emit their copy
+  > **The advisors' `false` is informational, not a push.** `grpc: false`
+  > (no `.proto`) and `api_contract: false` (no `google.api.http`) are the
+  > normal state for most repos — a non-RPC service, or an internal-only
+  > gRPC service under the "gRPC internal, REST external" policy. Their
+  > `missing_tool_recommendation` copy describes what proto-first would
+  > provide; it does **not** claim the repo *should* adopt it.
+
+  One Slice-G key has no dedicated agent file, so emit its copy
   **inline** (the pattern Swift uses for its deferred semgrep):
 
   - **`govulncheck`** is configured whenever the repo is a Go module, so a

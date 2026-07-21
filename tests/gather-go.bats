@@ -159,14 +159,15 @@ stub_zsh() {
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 
-@test "gather-go: tool universe is format_lint + triple + govulncheck + vendor-PR sources (#876)" {
+@test "gather-go: tool universe is format_lint + triple + govulncheck + vendor-PR + proto advisors (#878)" {
   # Slice B: format_lint. Slice D: sonarcloud/code_scanning/semgrep. Slice G
-  # (#876): govulncheck (the Go vuln source of truth) plus the vendor-PR sources
-  # dependabot/snyk_prs/renovate — eight keys, all always present in the map.
+  # (#876): govulncheck plus the vendor-PR sources dependabot/snyk_prs/renovate.
+  # Slice I (#878): the proto-first config-audit advisors grpc + api_contract —
+  # ten keys, all always present in the map.
   no_binary "$WORK"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "8" ]
-  for tool in format_lint sonarcloud code_scanning semgrep govulncheck dependabot snyk_prs renovate; do
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "10" ]
+  for tool in format_lint sonarcloud code_scanning semgrep govulncheck dependabot snyk_prs renovate grpc api_contract; do
     [ "$(jq -r ".tooling_configured | has(\"$tool\")" <<<"$output")" = "true" ]
   done
 }
@@ -404,6 +405,68 @@ stub_zsh() {
   [ "$(jq -r '.findings_by_tool | has("snyk_prs")' <<<"$output")" = "false" ]
 }
 
+@test "gather-go #878: no .proto -> grpc + api_contract not configured, findings keys absent" {
+  # setup() writes only go.mod, no protos — the default state for most repos.
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.grpc' <<<"$output")" = "false" ]
+  [ "$(jq -r '.tooling_configured.api_contract' <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("grpc")' <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("api_contract")' <<<"$output")" = "false" ]
+}
+
+@test "gather-go #878: a .proto present -> grpc configured, ONE proto-audit finding" {
+  mkdir -p "$WORK/proto/job/v1"
+  printf 'syntax = "proto3";\npackage job.v1;\nservice JobService {\n  rpc List(ListReq) returns (ListResp);\n}\n' \
+    > "$WORK/proto/job/v1/job.proto"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.grpc' <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.grpc | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.grpc[0].rule' <<<"$output")" = "grpc:proto-audit" ]
+  # No buf config -> component falls back to the first .proto (repo-relative).
+  [ "$(jq -r '.findings_by_tool.grpc[0].component' <<<"$output")" = "proto/job/v1/job.proto" ]
+  [ "$(jq -r '.findings_by_tool.grpc[0].key' <<<"$output")" = "grpc:proto-audit:proto/job/v1/job.proto" ]
+}
+
+@test "gather-go #878: a .proto WITHOUT google.api.http -> api_contract stays false (internal-only gRPC)" {
+  # The "gRPC internal, REST external" policy: an internal-only service declares
+  # no REST surface, so api_contract must NOT be flagged as a missing pipeline.
+  mkdir -p "$WORK/proto"
+  printf 'syntax = "proto3";\npackage internal.v1;\nservice Ledger {\n  rpc Post(PostReq) returns (PostResp);\n}\n' \
+    > "$WORK/proto/ledger.proto"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.grpc' <<<"$output")" = "true" ]
+  [ "$(jq -r '.tooling_configured.api_contract' <<<"$output")" = "false" ]
+  [ "$(jq -r '.findings_by_tool | has("api_contract")' <<<"$output")" = "false" ]
+}
+
+@test "gather-go #878: a .proto WITH google.api.http -> api_contract configured, ONE contract-audit finding" {
+  mkdir -p "$WORK/proto/job/v1"
+  printf 'syntax = "proto3";\npackage job.v1;\nimport "google/api/annotations.proto";\nservice JobService {\n  rpc CreateJob(CreateJobRequest) returns (Job) {\n    option (google.api.http) = { post: "/v1/jobs" body: "*" };\n  }\n}\n' \
+    > "$WORK/proto/job/v1/job.proto"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.api_contract' <<<"$output")" = "true" ]
+  [ "$(jq -r '.findings_by_tool.api_contract | length' <<<"$output")" = "1" ]
+  [ "$(jq -r '.findings_by_tool.api_contract[0].rule' <<<"$output")" = "api_contract:contract-audit" ]
+  # grpc is configured too (protos exist) — both advisors fire on an external service.
+  [ "$(jq -r '.tooling_configured.grpc' <<<"$output")" = "true" ]
+}
+
+@test "gather-go #878: buf.gen.yaml is preferred as the audit finding's component" {
+  mkdir -p "$WORK/proto"
+  printf 'syntax = "proto3";\npackage a.v1;\nservice A { rpc P(R) returns (S); }\n' \
+    > "$WORK/proto/a.proto"
+  printf 'version: v2\nplugins:\n  - remote: buf.build/protocolbuffers/go:v1.36.6\n    out: gen\n' \
+    > "$WORK/buf.gen.yaml"
+  no_binary "$WORK"
+  [ "$status" -eq 0 ]
+  # The advisor Reads buf.gen.yaml, so the finding points there, not at a .proto.
+  [ "$(jq -r '.findings_by_tool.grpc[0].component' <<<"$output")" = "buf.gen.yaml" ]
+}
+
 @test "gather-go: coverage carries a regions array (empty while withheld)" {
   # The region-scoped gate consumes coverage.regions; the gather always emits
   # the key (empty [] while coverage is unmeasured).
@@ -602,7 +665,7 @@ stub_zsh() {
   [ "$status" -eq 0 ]
   # tooling_configured keys are unique by construction; the guard is that two
   # config spellings don't confuse the boolean or add a spurious key.
-  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "8" ]
+  [ "$(jq -r '.tooling_configured | keys | length' <<<"$output")" = "10" ]
   [ "$(jq -r .tooling_configured.format_lint <<<"$output")" = "true" ]
 }
 
