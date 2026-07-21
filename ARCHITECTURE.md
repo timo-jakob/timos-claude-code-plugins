@@ -911,6 +911,7 @@ approval verdicts to GitHub. Unlike the old CI-driven model, approval is now
 /development-python:approve <PR>    # Python projects
 /development-java:approve <PR>      # Java/Gradle projects
 /development-swift:approve <PR>     # Swift projects
+/development-go:approve <PR>        # Go projects
 ```
 
 **Flow:**
