@@ -1,6 +1,6 @@
 ---
 name: go-maintenance-planner
-description: Pre-dispatch planner. Reads a set of Go maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-go:maintenance.
+description: Pre-dispatch planner. Reads a set of Go maintenance findings, ranks them by impact + file churn + critical-path proximity, and produces one group per agent (a single tool's findings stay together — two exceptions: vendor-PR sources split per ecosystem + bump level, govulncheck splits one group per vulnerable module). Returns an ordered list of groups with rationale; does NOT edit code, spawn agents, or modify state. Used by development-go:maintenance.
 model: opus
 tools: Bash, Read, Grep
 ---
@@ -43,10 +43,17 @@ Your prompt contains:
   - Code Scanning (CodeQL/Scorecard): `critical` → 0.85, `high` → 0.7,
     `medium` → 0.5, `low` → 0.3, `warning` → 0.2, `note`/`null` → 0.1.
   - semgrep: `ERROR` → 0.7, `WARNING` → 0.4, `INFO` → 0.1.
+  - govulncheck: a vulnerability whose vulnerable symbol the code
+    **calls** → 0.85 (a live, reachable vuln); `imported`-but-not-called
+    → 0.4 (present in the dependency graph but not on a call path).
   - Unmapped / missing severity → 0.3 (a sensible mid-low default so a
     finding is never dropped to zero priority for an unknown scale).
 
-  The vendor-PR sources add their own handling in Slice G (#876).
+  **Vendor-PR sources (`dependabot`, `snyk_prs`, `renovate`) are NOT
+  scored here** — they are PRs, not code findings, so they carry no
+  `severity`/`component`/`line`. They are classified and routed in § 5a
+  (ecosystem + bump level → agent), never ranked by the priority formula.
+  Skip them in this step; their groups get a fixed priority in § 5a.
 
 - **Churn component (0–1):** for each finding's `component`, run
 
@@ -88,20 +95,32 @@ when they span different rules, files, or severities.
 Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
-> **Tool universe so far (#868 epic): `format_lint`, `sonarcloud`,
-> `code_scanning`, `semgrep`.** Static-analysis triage landed in Slice D
-> (#873) — all three scanners ship (unlike Swift, whose semgrep was
-> deferred for an empty registry; Go's semgrep support is GA). Coverage
+> **Tool universe (#868 epic): `format_lint`, `sonarcloud`,
+> `code_scanning`, `semgrep`, `govulncheck`, and the vendor-PR sources
+> `dependabot` / `snyk_prs` / `renovate`.** Static-analysis triage landed
+> in Slice D (#873) — all three scanners ship (unlike Swift, whose semgrep
+> was deferred for an empty registry; Go's semgrep support is GA). Coverage
 > landed in Slice E (#874) as the dispatcher-owned pre-flight gate (not a
-> plannable `_tool`); the vendor-PR sources (`dependabot`,
-> `snyk_prs`, `renovate`) in Slice G (#876), where the ecosystem +
-> bump-level split lands. If a finding arrives carrying a
-> `_tool` you don't have a row for in § 5, that is a contract violation.
-> **Never guess an agent for it.** Exclude it from `plan` and from
-> `summary.total_findings`, and record it in the optional
-> `summary.contract_violations` array declared in the Output schema below
-> — that field exists precisely so the violation has somewhere to go
-> instead of being silently dropped.
+> plannable `_tool`). Slice G (#876) added `govulncheck` — the single
+> source of truth for Go code vulns, Snyk OSS being disabled for gomod —
+> and the vendor-PR sources with their ecosystem + bump-level split (§ 5a).
+> If a finding arrives carrying a `_tool` you don't have a row for in § 5,
+> that is a contract violation. **Never guess an agent for it.** Exclude it
+> from `plan` and from `summary.total_findings`, and record it in the
+> optional `summary.contract_violations` array declared in the Output
+> schema below — that field exists precisely so the violation has somewhere
+> to go instead of being silently dropped.
+>
+> **Two exceptions to "one group per tool."** (1) The vendor-PR sources: a
+> single vendor tool's PRs can dispatch to **three** different agents — the
+> triager (`go-dependabot-snyk-triage`) for safe patch/minor, the
+> major-upgrade agent for gomod majors, and the runtime-upgrade agent for
+> Go-toolchain bumps — so `dependabot`/`snyk_prs`/`renovate` findings are
+> split **per § 5a** by ecosystem + bump level, not kept as one group.
+> (2) `govulncheck`: its findings are split **one group per vulnerable
+> module** (see § 5), because `go-major-upgrade` takes a single scalar
+> package — a lumped group would upgrade only one module and drop the rest.
+> Every other tool keeps the one-group-per-tool rule above.
 
 ### 4. Group priority + ordering
 
@@ -120,17 +139,112 @@ Order groups by descending priority. Ties broken by:
 | `sonarcloud` | `go-sonar-triage` | `true` |
 | `code_scanning` | `go-code-scanning-triage` | `true` |
 | `semgrep` | `go-semgrep-triage` | `true` |
+| `govulncheck` | `go-major-upgrade` (one group **per vulnerable module** — see below) | `true` |
+| `dependabot` / `snyk_prs` / `renovate` | split by § 5a | see § 5a |
 
-Every agent in this table edits local files, so each group is
-`isolation: true`. Later slices extend it — notably the vendor-PR
-agents, which act on GitHub PRs via `gh` rather than the working tree
-and therefore carry `isolation: false` (#876).
+Most agents in this table edit local files, so their group is
+`isolation: true`. The **vendor-PR triager** (`go-dependabot-snyk-triage`)
+is the exception: it acts on GitHub PRs via `gh`, not the working tree, so
+its group carries `isolation: false` (§ 5a).
 
 The `findings_by_tool` key for Code Scanning is `code_scanning_alerts`
 (not `code_scanning`); the dispatcher augments each finding with
 `_tool: "code_scanning"` so you route it by the tool name, not the key.
 
-No group in this slice carries a `pre_dispatch_hook`; omit the field.
+**`govulncheck` → `go-major-upgrade`, one group PER vulnerable module.**
+govulncheck findings name a vulnerable module and the version that fixes
+it. The fix IS a dependency upgrade, so route them to `go-major-upgrade`
+(which accepts a `govulncheck` source and applies the bump — a
+`/vN`-crossing fix triggers its semantic-import-versioning rewrite, a
+patch/minor fix skips it). But `go-major-upgrade`'s input is a **single
+scalar `package`**, and a scan routinely reports **several** vulnerable
+modules — so emit **one group per distinct vulnerable module** (mirroring
+the per-PR rule for vendor majors), never one lumped "govulncheck group"
+that would upgrade only the module the scalar names and silently drop the
+rest. Merge multiple advisories on the **same** module into one group
+(target = the highest advised fixed version). Each group carries its own
+scalar `package`, `current_version`, `target_version`, `source:
+"govulncheck"`, and `cve_reference` (the `GO-YYYY-NNNN` / CVE id);
+`pr_number` is absent (no vendor PR triggered it) so its `superseded_prs`
+is `[]`. Each group's priority = the max of that module's findings' § 2
+scores.
+
+### 5a. Vendor-PR classification — split by ecosystem + bump level
+
+Vendor-PR findings (`_tool` ∈ {`dependabot`, `snyk_prs`, `renovate`})
+carry `{number, title, body, headRefName}`. Classify each, then group by
+target agent (a single tool's PRs may land in up to three groups):
+
+- **`source`** — `dependabot` when `_tool == "dependabot"` or
+  `headRefName` starts `dependabot/`; `snyk_prs` when `headRefName` starts
+  `snyk-fix-`/`snyk-upgrade-` (use the **tool-key spelling `snyk_prs`**, not
+  bare `snyk`, so it matches the `source` enum `go-major-upgrade` /
+  `go-dependabot-snyk-triage` expect); `renovate` when `_tool == "renovate"`
+  or `headRefName` starts `renovate/`.
+- **`ecosystem`** — Dependabot: the segment after `dependabot/`
+  (`go_modules` → normalize to `gomod`; `github_actions` → `github-actions`;
+  `docker`). Snyk: defaults `gomod`. Renovate: infer from the title/body
+  (`github-actions` / `docker` / else `gomod`). Unrecognized → `unknown`.
+- **`bump_level`** — parse the `<old> → <new>` version pair (from the
+  title for Dependabot/Snyk, from the Renovate body's update table) and
+  semver-compare: `patch` / `minor` / `major`. A `0.x → 0.y` bump is
+  `major-equiv` (treated as major — pre-v1 minors can break).
+  - **Renovate fallback when the body's update table is missing/unparseable**
+    (config variants, truncated bodies): the title carries only the target,
+    so compare the target against the module's current requirement in
+    `go.mod`/`go.sum`; if that too is unknown, treat as **`minor`**
+    (conservative — routes to the CI- and release-notes-gated triage path,
+    **never** to an autonomous major). Never guess `patch` (it would skip the
+    B2 release-notes scan) or `major` (it would trigger an unwarranted
+    migration).
+  - A grouped multi-package PR → `bump_level: "grouped"`, **treated as the
+    highest level any member implies**: inspect the grouped PR's body/update
+    table, and if any member is a `major`/`major-equiv` (a gomod major, or a
+    github-actions major), classify the group `major` for routing — default
+    to `minor` only when no member implies a major.
+- **A `go`/`toolchain`-directive or `setup-go` version bump is a
+  `runtime` classification, not an ecosystem bump** — detect it from the
+  title/body (raises the Go version, not a module) regardless of whether
+  Dependabot labels it `gomod` or `github-actions`.
+
+**Routing:**
+
+| Classification | Agent | Group `isolation` | Notes |
+| --- | --- | --- | --- |
+| gomod / github-actions **patch \| minor**; grouped with **no** major member | `go-dependabot-snyk-triage` | `false` | one triage group carrying every `auto-merge-if-green` + `human-review` PR; attach `routing` + `routing_reason` per PR |
+| **grouped** PR containing a gomod/github-actions **major** member | `go-dependabot-snyk-triage` (**`routing: human-review`**) | `false` | a grouped major can't be auto-migrated as one unit — `routing_reason` names the major member(s); a human splits or reviews it |
+| gomod **major \| major-equiv** (single-package) | `go-major-upgrade` (one group **per PR**) | `true` | carry `package, current_version, target_version, source, pr_number, release_notes_url` |
+| **runtime** (Go-toolchain bump) | `go-runtime-upgrade` (one group **per PR**) | `true` | carry `from_version, to_version, source, pr_number`; attach the `pre_dispatch_hook` below |
+| docker / `.ko.yaml` **same-tag digest-only** refresh | `go-dependabot-snyk-triage` | `false` | `routing: auto-merge-if-green`, `routing_reason: "digest-refresh — @sha256 only, tag unchanged"` (the triager re-verifies) |
+| docker / `.ko.yaml` **tag/version** bump; github-actions **major**; `unknown` | `go-dependabot-snyk-triage` | `false` | `routing: human-review` with a concrete `routing_reason` |
+
+For the triage group, set each PR's `routing` (`auto-merge-if-green` |
+`human-review`) and, for human-review, a one-line `routing_reason`. gomod
+majors, runtime bumps, and their PRs go to their **own** groups — never
+into the triage group.
+
+**`pre_dispatch_hook` — only on a `go-runtime-upgrade` group.** The
+orchestrator runs it before dispatch to decide whether the target Go
+toolchain is locally available (drives `local_verification_mode`):
+
+```json
+"pre_dispatch_hook": {
+  "type": "runtime_availability",
+  "script": "development-go/scripts/pre-dispatch-runtime-upgrade.zsh",
+  "target": "<to_version, e.g. 1.24>",
+  "prompt_field": "local_verification_mode",
+  "modes": { "available": "auto", "unavailable": "skip" },
+  "label": "Go <to_version> toolchain"
+}
+```
+
+Every non-runtime group omits `pre_dispatch_hook`.
+
+**Fixed group priority for vendor-PR / govulncheck groups.** These aren't
+scored by the § 2 formula. Give the triage group `priority_score: 0.5`,
+each major/runtime group `0.7` (a standalone dependency migration is
+higher-value than routine triage), and a govulncheck group the max of its
+findings' § 2 scores. Order them among the scored groups by these values.
 
 ## Output
 

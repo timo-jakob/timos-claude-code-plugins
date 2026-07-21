@@ -1,0 +1,150 @@
+# ko base-image digest refresh (Go) — epic #868 hard part 6, Slice G (#876).
+#
+# The .ko.yaml `defaultBaseImage` is pinned by @sha256 digest for reproducible,
+# CVE-patchable builds. Neither Dependabot (docker ecosystem = Dockerfiles) nor
+# Dependabot/Renovate out of the box reliably bumps a digest-pinned base in a
+# .ko.yaml, so the digest would silently go stale. This scheduled job owns the
+# refresh explicitly: weekly, it re-resolves the CURRENT digest of the pinned
+# TAG and, if it moved, opens a PR that swaps only the @sha256 — the same
+# same-tag digest-only refresh go-dependabot-snyk-triage recognizes. A human (or
+# the Approver) reviews + merges it; the digest pin itself is never dropped.
+#
+# It compares only the digest for the tag ALREADY pinned — it never changes the
+# image name:tag (a base-image tag bump, e.g. debian12 -> debian13, stays a
+# deliberate human decision, not an automated refresh).
+name: ko-base-digest-refresh
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ko-base-digest-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push the refresh branch
+      pull-requests: write   # open the PR
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Resolve current digest for the pinned base tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ ! -f .ko.yaml ]; then
+            echo "no .ko.yaml — nothing to refresh."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Parse `defaultBaseImage: <ref>`. Strip, in order: the key, an inline
+          # `# comment` (a bare '#' is never part of an image ref), surrounding
+          # quotes, and whitespace — so `defaultBaseImage: "img:tag@sha256:x" #p`
+          # yields exactly `img:tag@sha256:x` and old_digest isn't corrupted.
+          ref="$(grep -E '^[[:space:]]*defaultBaseImage:' .ko.yaml | head -n1 \
+            | sed -E 's/^[[:space:]]*defaultBaseImage:[[:space:]]*//' \
+            | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//' \
+            | sed -E 's/^["'\'']//; s/["'\'']$//' || true)"
+          if [ -z "$ref" ]; then
+            echo "::warning::.ko.yaml has no defaultBaseImage — nothing to refresh."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          name_tag="${ref%@*}"          # drop any @sha256:... suffix
+          # A digest-only refresh needs a TAG to re-resolve. A tagless pin
+          # (`img@sha256:x`) would make name_tag bare `img`, and inspecting it
+          # resolves `:latest` — a covert tag change. Refuse instead.
+          last_seg="${name_tag##*/}"
+          case "$last_seg" in
+            *:*) : ;;   # has a tag
+            *)
+              echo "::warning::defaultBaseImage ($name_tag) is digest-pinned without a tag; cannot refresh safely."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          old_digest=""
+          case "$ref" in
+            *@sha256:*) old_digest="sha256:${ref##*@sha256:}" ;;
+          esac
+          # The multi-arch index digest is what @sha256 on a ko base pins.
+          new_digest="$(docker buildx imagetools inspect "$name_tag" \
+            --format '{{.Manifest.Digest}}')"
+          echo "name_tag=$name_tag"       >> "$GITHUB_OUTPUT"
+          echo "old_digest=$old_digest"   >> "$GITHUB_OUTPUT"
+          echo "new_digest=$new_digest"   >> "$GITHUB_OUTPUT"
+          if [ "$old_digest" = "$new_digest" ]; then
+            echo "digest unchanged ($new_digest) — no refresh needed."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "digest moved: ${old_digest:-<unpinned>} -> $new_digest"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the digest-refresh PR
+        if: steps.resolve.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME_TAG: ${{ steps.resolve.outputs.name_tag }}
+          OLD_DIGEST: ${{ steps.resolve.outputs.old_digest }}
+          NEW_DIGEST: ${{ steps.resolve.outputs.new_digest }}
+        run: |
+          set -euo pipefail
+          branch="chore/ko-base-digest-refresh"
+          # Rewrite only the digest on the defaultBaseImage line, tag untouched.
+          python3 - "$NAME_TAG" "$NEW_DIGEST" <<'PY'
+          import re, sys
+          name_tag, new_digest = sys.argv[1], sys.argv[2]
+          path = ".ko.yaml"
+          text = open(path, encoding="utf-8").read()
+          # Replace the value after `defaultBaseImage:` with name_tag@new_digest,
+          # preserving the exact original indentation of that line.
+          def repl(m):
+              return f"{m.group('indent')}defaultBaseImage: {name_tag}@{new_digest}"
+          text2 = re.sub(
+              r"(?m)^(?P<indent>[ \t]*)defaultBaseImage:[ \t]*\S.*$", repl, text, count=1)
+          open(path, "w", encoding="utf-8").write(text2)
+          PY
+          if git diff --quiet -- .ko.yaml; then
+            echo "no textual change after rewrite — skipping PR."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add .ko.yaml
+          git commit -m "chore(deps): refresh .ko.yaml base image digest
+
+          ${NAME_TAG}: ${OLD_DIGEST:-<unpinned>} -> ${NEW_DIGEST}
+
+          Digest-only refresh of the already-pinned base tag (reproducibility +
+          base CVE patching). The image name:tag is unchanged."
+          # Plain --force (not --force-with-lease): actions/checkout fetched only
+          # the default branch, so there is no remote-tracking ref for $branch to
+          # lease against — --force-with-lease would then require the remote ref
+          # to NOT exist and reject the push on every run while last week's PR is
+          # still open. This branch is exclusively machine-owned and regenerated
+          # in full each run, so a plain force is safe and correct.
+          git push --force origin "$branch"
+          # Reuse an existing open PR for this branch, else open one.
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            # Body built in parts to keep every source line within the 120-col
+            # yamllint limit; digest-only refresh of the already-pinned tag.
+            body="Weekly ko base-image digest refresh (epic hard part 6):"
+            body="$body swaps only the @sha256 on the already-pinned"
+            body="$body \`${NAME_TAG}\` tag, keeping reproducible builds on the"
+            body="$body latest patched base without dropping the pin."
+            body="$body Review + merge; CI's \`image\` check exercises it."
+            gh pr create --base "{{DEFAULT_BRANCH}}" --head "$branch" \
+              --title "chore(deps): refresh .ko.yaml base image digest" \
+              --body "$body"
+          else
+            echo "an open PR for $branch already exists — pushed the updated digest to it."
+          fi

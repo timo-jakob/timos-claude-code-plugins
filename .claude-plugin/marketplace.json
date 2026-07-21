@@ -19,7 +19,7 @@
     {
       "name": "development-go",
       "description": "Go maintenance + review plugin. Review panel: /development-go:review runs 5 specialist agents. Maintenance dispatches findings from /development:maintenance to go-format-lint-fixer (golangci-lint v2), the static-analysis triage agents go-sonar-triage + go-code-scanning-triage + go-semgrep-triage, go-maintenance-planner, and go-ci-fixer, with a per-package coverage pre-flight (go test -coverprofile) that spawns go-coverage-improver in a worktree when affected code sits below Required. Blessed toolchain: Go modules, Taskfile, golangci-lint v2, go test -coverprofile, buf + grpc-gateway, ko. Bootstrap, vendor PRs, the approver, and the platform advisors land in later slices of #868.",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "author": {
         "name": "Timo Jakob"
       },
@@ -29,7 +29,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills.",
-      "version": "1.126.0",
+      "version": "1.127.0",
       "author": {
         "name": "Timo Jakob"
       },
