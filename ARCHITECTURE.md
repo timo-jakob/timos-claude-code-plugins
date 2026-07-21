@@ -708,6 +708,30 @@ self-approves), gomod majors → `go-major-upgrade` (which performs the
 path, so import sites are rewritten across the tree, not just `go.mod`), and
 Go-toolchain bumps → `go-runtime-upgrade` (the no-Dockerfile path above).
 
+**Go proto-first advisors (#878, slice I of #868).** Two **config-audit**
+advisors extend the tool universe, mirroring Java's `grpc` + `openapi` in
+spirit but realized proto-first (epic decision 2026-07-19: proto is the
+single source of truth, grpc-gateway the generated REST facade, the OpenAPI
+document a generated artifact). **`grpc`** is configured whenever `.proto`
+files exist; the gather emits one `grpc:proto-audit` finding and
+`go-grpc-advisor` audits the buf `buf generate` wiring — `protoc-gen-go` +
+`protoc-gen-go-grpc` pinned in `buf.gen.yaml`, `buf lint` + `buf breaking`
+gating the contract, generated sources (`*.pb.go`, `*_grpc.pb.go`) excluded
+from coverage. **`api_contract`** is configured only when a `.proto` declares
+an **external** REST surface (carries a `google.api.http` annotation) — an
+internal-only gRPC service has none, so `api_contract` stays unconfigured
+under the "gRPC internal, REST external" policy rather than being pushed a
+REST facade; the gather emits one `api_contract:contract-audit` finding and
+`go-api-contract-advisor` audits the four-stage pipeline: buf wiring,
+`google.api.http` completeness on external RPCs, grpc-gateway mux
+registration, and the mechanical **2.0→3.0** conversion of
+`protoc-gen-openapiv2` output feeding the contracts machinery (Spectral,
+oasdiff, spec-publish). Both are **coverage-exempt** (they edit buf config /
+CI, not source under test) and route one-group-per-tool through
+`go-maintenance-planner`. `buf` is the pinned proto toolchain
+(`buf lint`/`buf breaking`/`buf generate`), consistent with the
+`development-go ← language: Go (modules; golangci-lint v2, ko, buf)` line.
+
 **`dispatch_filter` is optional** and added by the orchestrator only
 when the user passed `--tool=<name>` (a testing aid). When present,
 the language plugin scopes dispatch to the listed tools only — every

@@ -46,6 +46,8 @@ Your prompt contains:
   - govulncheck: a vulnerability whose vulnerable symbol the code
     **calls** → 0.85 (a live, reachable vuln); `imported`-but-not-called
     → 0.4 (present in the dependency graph but not on a call path).
+  - config-audit advisors (`grpc`, `api_contract`): one `MINOR` audit
+    finding each → 0.35 (a standing config audit, not an urgent defect).
   - Unmapped / missing severity → 0.3 (a sensible mid-low default so a
     finding is never dropped to zero priority for an unknown scale).
 
@@ -96,15 +98,19 @@ Cross-tool findings are never grouped together — different tools mean
 different agents, different review concerns, and different PRs.
 
 > **Tool universe (#868 epic): `format_lint`, `sonarcloud`,
-> `code_scanning`, `semgrep`, `govulncheck`, and the vendor-PR sources
-> `dependabot` / `snyk_prs` / `renovate`.** Static-analysis triage landed
+> `code_scanning`, `semgrep`, `govulncheck`, the vendor-PR sources
+> `dependabot` / `snyk_prs` / `renovate`, and the proto-first advisors
+> `grpc` / `api_contract`.** Static-analysis triage landed
 > in Slice D (#873) — all three scanners ship (unlike Swift, whose semgrep
 > was deferred for an empty registry; Go's semgrep support is GA). Coverage
 > landed in Slice E (#874) as the dispatcher-owned pre-flight gate (not a
 > plannable `_tool`). Slice G (#876) added `govulncheck` — the single
 > source of truth for Go code vulns, Snyk OSS being disabled for gomod —
 > and the vendor-PR sources with their ecosystem + bump-level split (§ 5a).
-> If a finding arrives carrying a `_tool` you don't have a row for in § 5,
+> Slice I (#878) added the config-audit advisors `grpc` (buf/protobuf gRPC
+> codegen → `go-grpc-advisor`) and `api_contract` (the proto-first REST
+> pipeline → `go-api-contract-advisor`); both are ordinary one-group-per-tool
+> rows in § 5. If a finding arrives carrying a `_tool` you don't have a row for in § 5,
 > that is a contract violation. **Never guess an agent for it.** Exclude it
 > from `plan` and from `summary.total_findings`, and record it in the
 > optional `summary.contract_violations` array declared in the Output
@@ -141,6 +147,8 @@ Order groups by descending priority. Ties broken by:
 | `semgrep` | `go-semgrep-triage` | `true` |
 | `govulncheck` | `go-major-upgrade` (one group **per vulnerable module** — see below) | `true` |
 | `dependabot` / `snyk_prs` / `renovate` | split by § 5a | see § 5a |
+| `grpc` | `go-grpc-advisor` | `true` |
+| `api_contract` | `go-api-contract-advisor` | `true` |
 
 Most agents in this table edit local files, so their group is
 `isolation: true`. The **vendor-PR triager** (`go-dependabot-snyk-triage`)

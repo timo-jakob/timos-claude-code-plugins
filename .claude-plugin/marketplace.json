@@ -18,8 +18,8 @@
     },
     {
       "name": "development-go",
-      "description": "Go maintenance + review plugin. Review panel: /development-go:review runs 5 specialist agents. Maintenance dispatches findings from /development:maintenance to go-format-lint-fixer (golangci-lint v2), the static-analysis triage agents go-sonar-triage + go-code-scanning-triage + go-semgrep-triage, go-maintenance-planner, and go-ci-fixer, with a per-package coverage pre-flight (go test -coverprofile) that spawns go-coverage-improver in a worktree when affected code sits below Required. The go-approver synthesis layer posts merge verdicts via /development-go:approve, fed by the 5 review dimensions as risk-register lenses. Blessed toolchain: Go modules, Taskfile, golangci-lint v2, go test -coverprofile, buf + grpc-gateway, ko. Bootstrap and the platform advisors land in later slices of #868.",
-      "version": "0.6.0",
+      "description": "Go maintenance + review plugin. Review panel: /development-go:review runs 5 specialist agents. Maintenance dispatches findings from /development:maintenance to go-format-lint-fixer (golangci-lint v2), the static-analysis triage agents go-sonar-triage + go-code-scanning-triage + go-semgrep-triage, go-maintenance-planner, and go-ci-fixer, with a per-package coverage pre-flight (go test -coverprofile) that spawns go-coverage-improver in a worktree when affected code sits below Required. The go-approver synthesis layer posts merge verdicts via /development-go:approve, fed by the 5 review dimensions as risk-register lenses. The proto-first advisors go-grpc-advisor (buf codegen) and go-api-contract-advisor (grpc-gateway REST facade + 2.0→3.0 OpenAPI pipeline) audit the API-contract wiring. Blessed toolchain: Go modules, Taskfile, golangci-lint v2, go test -coverprofile, buf + grpc-gateway, ko.",
+      "version": "0.7.0",
       "author": {
         "name": "Timo Jakob"
       },

@@ -361,10 +361,15 @@ withheld (`null`, `reliable: false`, with a reason) on any failure rather than
 guessed (#258). Bootstrap templates
 ([#875](https://github.com/timo-jakob/timos-claude-code-plugins/issues/875)),
 vendor PRs + upgrades ([#876](https://github.com/timo-jakob/timos-claude-code-plugins/issues/876)),
-the approver ([#877](https://github.com/timo-jakob/timos-claude-code-plugins/issues/877)),
-and the proto-first platform advisors
-([#878](https://github.com/timo-jakob/timos-claude-code-plugins/issues/878))
-arrive in the remaining slices.
+and the approver ([#877](https://github.com/timo-jakob/timos-claude-code-plugins/issues/877))
+have landed. The proto-first platform advisors
+([#878](https://github.com/timo-jakob/timos-claude-code-plugins/issues/878)) —
+`go-grpc-advisor` (buf/protobuf gRPC codegen) and `go-api-contract-advisor`
+(the four-stage proto-first REST pipeline: buf wiring, `google.api.http`
+completeness on external RPCs, grpc-gateway registration, and the 2.0→3.0
+spec conversion feeding the contracts machinery) — complete the epic's tool
+universe; both are coverage-exempt config-audit advisors that recommend
+adoption when an external surface lacks the wiring.
 
 > **Blessed toolchain (one default each).** Go modules; **Taskfile** as a thin
 > orchestrator; **golangci-lint v2** (pinned) as the *single* binary for both
