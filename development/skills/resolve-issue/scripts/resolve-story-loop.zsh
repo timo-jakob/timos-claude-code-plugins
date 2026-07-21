@@ -58,7 +58,7 @@ local CONSOLIDATE="${self_dir}/consolidate-findings.zsh"
 
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
-local issue="" telemetry_file=""
+local issue="" telemetry_file="" resume=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --repo) repo="$2"; shift 2 ;;
@@ -72,7 +72,8 @@ while [[ $# -gt 0 ]]; do
   --issue) issue="$2"; shift 2 ;;
   --telemetry-file) telemetry_file="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
-  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] [--base REF] [--max-rounds N] [--issue N] [--telemetry-file PATH] [--no-review]"; exit 0 ;;
+  --resume) resume=1; shift ;;
+  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N] [--telemetry-file PATH] [--no-review]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
@@ -132,11 +133,45 @@ fi
 [[ -d "$repo" ]] || { print -u2 -- "resolve-story-loop: --repo not a directory: $repo"; exit 1 }
 [[ -n "$review_cmd" ]] || { print -u2 -- "resolve-story-loop: --review-cmd is required (or use --no-review)"; exit 2 }
 [[ -n "$fix_cmd" ]] || { print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --no-review)"; exit 2 }
+# a non-positive/non-numeric ceiling would skip the loop entirely and fall out
+# with an empty status — refuse it up front as the usage error it is
+[[ "$max_rounds" == <-> ]] && (( max_rounds >= 1 )) || {
+  print -u2 -- "resolve-story-loop: --max-rounds must be a positive integer (got: $max_rounds)"; exit 2 }
 
 [[ -n "$work_dir" ]] || work_dir=$(mktemp -d)
 mkdir -p "$work_dir"
-local history_file="$work_dir/history.jsonl"; : > "$history_file"
-local changelists_file="$work_dir/changelists.jsonl"; : > "$changelists_file"
+local history_file="$work_dir/history.jsonl"
+local changelists_file="$work_dir/changelists.jsonl"
+# On --resume we CONTINUE a prior run: the work-dir IS the state. Read the last
+# completed round from history, and re-use its persisted changelist file as the
+# prior round so non-convergence detection spans the extension. A fresh run
+# (no --resume) truncates both accumulators as before.
+local resume_round=0 resume_prev=""
+if (( resume )); then
+  [[ -s "$history_file" ]] || {
+    print -u2 -- "resolve-story-loop: --resume needs an existing non-empty history in --work-dir"; exit 2 }
+  # the accumulators ARE the resume state — a partial line left by a killed run
+  # would otherwise surface only at the final emit, as an empty status JSON
+  jq -e -sc '.' "$history_file" >/dev/null 2>&1 || {
+    print -u2 -- "resolve-story-loop: --resume found corrupt history in $history_file"; exit 1 }
+  if [[ -s "$changelists_file" ]]; then
+    jq -e -sc '.' "$changelists_file" >/dev/null 2>&1 || {
+      print -u2 -- "resolve-story-loop: --resume found corrupt changelists in $changelists_file"; exit 1 }
+  fi
+  resume_round=$(tail -n 1 "$history_file" | jq -r '.round')
+  [[ "$resume_round" == <-> ]] || {
+    print -u2 -- "resolve-story-loop: --resume could not read a round number from $history_file"; exit 1 }
+  resume_prev="$work_dir/changelist-$resume_round.json"
+  [[ -s "$resume_prev" ]] || {
+    print -u2 -- "resolve-story-loop: --resume cannot find prior changelist $resume_prev"; exit 1 }
+  # a ceiling at or below the resumed round would run zero rounds and fall out
+  # of the loop with an empty status — refuse it as a usage error instead
+  (( resume_round + 1 <= max_rounds )) || {
+    print -u2 -- "resolve-story-loop: --resume would start at round $(( resume_round + 1 )) but --max-rounds is $max_rounds — raise --max-rounds"; exit 2 }
+else
+  : > "$history_file"
+  : > "$changelists_file"
+fi
 
 # --- dispatch: which panel, on what scope (typed escalation on failure) -----
 local plan rc
@@ -162,7 +197,7 @@ print -r -- "$plan" | jq -r '.changed_files[]?' > "$scope_file"
 # All loop-locals are declared ONCE here: re-running a bare `local NAME` on a
 # later iteration makes zsh PRINT the existing parameter to stdout, which would
 # corrupt the status JSON. Inside the loop we plain-assign only.
-local round=1 loop_status="" final_changelist="" prev_changelist=""
+local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
 local rp findings_path scoped changelist blockers
 local blocking conflict nonconv nconf
 while (( round <= max_rounds )); do

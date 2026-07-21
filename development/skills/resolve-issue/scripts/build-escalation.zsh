@@ -24,19 +24,22 @@
 emulate -L zsh
 setopt nounset pipefail
 
-local status_file="" issue="" branch="" compare_url=""
+local status_file="" issue="" branch="" compare_url="" fmt="comment"
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --status) status_file="$2"; shift 2 ;;
   --issue) issue="$2"; shift 2 ;;
   --branch) branch="$2"; shift 2 ;;
   --compare-url) compare_url="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL]"; exit 0 ;;
+  --format) fmt="$2"; shift 2 ;;
+  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
-[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL]"; exit 2 }
+[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary]"; exit 2 }
+[[ "$fmt" == "comment" || "$fmt" == "summary" ]] || {
+  print -u2 -- "build-escalation: --format must be 'comment' or 'summary'"; exit 2 }
 [[ -s "$status_file" ]] || { print -u2 -- "build-escalation: status file missing or empty: $status_file"; exit 1 }
 
 local st rounds max_rounds
@@ -76,6 +79,12 @@ ESCALATE_AMBIGUOUS)
     "**Skip review** — if this repo is out of review scope, re-run with \`--no-review\`."
     "**Add support** — if it is a language we should review, file a follow-up to add its review panel."
   ) ;;
+CONVERGED)
+  summary="The loop converged — zero blockers remain."
+  opts=() ;;
+SKIPPED)
+  summary="The review loop was skipped (\`--no-review\`)."
+  opts=() ;;
 *)
   summary="The review loop exited \`${st}\` without converging."
   opts=(
@@ -108,6 +117,27 @@ ESCALATE_AMBIGUOUS)
     "- \(.error): \(.detail // "")" end' "$status_file") ;;
 *) detail="" ;;
 esac
+
+# --- summary render (interactive, #562 resume): shares the extraction above,
+# omits options / branch note / marker — the skill drives the live options.
+if [[ "$fmt" == "summary" ]]; then
+  {
+    print -r -- "Review loop **\`${st}\`** — ${rounds}/${max_rounds} rounds."
+    print -r --
+    print -r -- "$summary"
+    if [[ -n "$detail" ]]; then
+      print -r --
+      print -r -- "**Remaining**"
+      print -r --
+      print -r -- "$detail"
+    fi
+    print -r --
+    print -r -- "**Round history**"
+    print -r --
+    print -r -- "$history_lines"
+  }
+  exit 0
+fi
 
 # assemble the comment
 {
