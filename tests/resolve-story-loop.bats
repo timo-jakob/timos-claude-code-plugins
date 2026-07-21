@@ -5,6 +5,8 @@
 # as hook commands, so every exit state is driven deterministically. Detection
 # is stubbed via DETECT_STACK_BIN (review-dispatch's seam); git runs for real.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/resolve-story-loop.zsh"
@@ -215,4 +217,12 @@ seed_exhausted_wd() {
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 1 \
     --review-cmd 'true' --fix-cmd 'true'
   [ "$status" -eq 2 ]
+}
+
+@test "an unresolvable --base is an operational error (exit 1), never CONVERGED (#910)" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base refs/heads/does-not-exist --work-dir "$BATS_TEST_TMPDIR/wd-badbase" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  run ! grep -q 'CONVERGED' <<< "$output"
 }
