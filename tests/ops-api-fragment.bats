@@ -72,5 +72,5 @@ setup() {
   local tmpl="$COMMON/.github/workflows/contracts-semver.yml.tmpl"
   # a `git rm -r contracts/ops/` must still be gated (retire-a-live-major),
   # so the ops invocation must not be behind an existence guard.
-  ! grep -q "compgen -G 'contracts/ops" "$tmpl"
+  run ! grep -q "compgen -G 'contracts/ops" "$tmpl"
 }
