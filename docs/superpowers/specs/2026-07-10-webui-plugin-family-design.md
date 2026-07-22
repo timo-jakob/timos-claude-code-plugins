@@ -102,7 +102,15 @@ Bootstrap asks 3–4 questions and recommends one; the user can override.
 | Highly custom design-driven UI; design-system component library; embedding / micro-frontend into existing pages | **React** — composition model and ecosystem fit custom UX work |
 | Tie | Angular for internal business apps; React for consumer-facing custom UX |
 
-**Build order: Angular first, React second.**
+**Build order: React first, Angular second.**
+
+> **Amended 2026-07-22** (epic #682): originally "Angular first, React
+> second". Reversed while designing the target platform architecture — it
+> is micro-frontend-based, which the decision table above itself points at
+> React. Consequences: the recommendation heuristic ships with the *second*
+> framework topic (#685, Angular) since it needs both to exist, and the
+> blessed MFE app shape (Module Federation host/remote repo shapes) is
+> scoped as #954, a #686 follow-up; Vite SPA remains React's default shape.
 
 ## 3. Contract flow — versioned spec artifact, consumer generates
 
@@ -283,8 +291,9 @@ Each epic is independently shippable.
 2. **API lifecycle** — spec publish (npm + APIM), semver triangle gate,
    per-major `contracts/` layout + ACL pattern, deprecation
    headers/gates, Spectral socket. Overlaps/absorbs parts of #174.
-3. **`development-angular`** (first framework topic).
-4. **`development-react`** + the bootstrap recommendation heuristic.
+3. **`development-react`** (first framework topic — see the 2026-07-22
+   amendment in §2; the MFE app shape follow-up is #954).
+4. **`development-angular`** + the bootstrap recommendation heuristic.
 5. **`development-composition`** (composition repo type).
 6. **Standardized ops surface** — the `ops-api` fragment + per-language
    canonical implementations + OTel defaults.

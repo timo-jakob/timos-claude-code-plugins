@@ -110,7 +110,8 @@ Filed as bounded stories when work starts (after #682 lands the prerequisites):
 cannot run until they exist:
 
 - **#683** — `development-javascript` foundation **+ consumer-side client generation**
-- **#685** — `development-angular` bootstrap (stands up the new `-ui` repo)
+- **#686** — `development-react` bootstrap (stands up the new `-ui` repo; React
+  first per the 2026-07-22 reordering on #682 — an Angular frontend needs #685)
 - **#684(a)** — producer-side per-major `contracts/` layout + npm spec publish
 
 GitHub-native `blocked-by` (#583) is authoritative.
