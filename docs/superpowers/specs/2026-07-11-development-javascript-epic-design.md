@@ -98,8 +98,10 @@ flipped from "future" to shipped.
 
 - **Within the epic:** slice 1 gates all; slice 2 depends only on slice 1 and is
   pulled ahead of 3–6.
-- **Downstream:** slice 2 unblocks #685 (Angular binding), #717 (split-frontend UI
-  repo consuming the contract), #719 (composition — real FE images).
+- **Downstream:** slice 2 unblocks #686 (React Query binding — React first per
+  the 2026-07-22 reordering on #682; the Angular binding #685 follows), #717
+  (split-frontend UI repo consuming the contract), #719 (composition — real FE
+  images).
 - **Upstream:** none hard — #683 is the foundation. #684(a)'s npm spec-package
   publication is what slice 2 consumes, so slice 2's *validation* wants a real
   published spec (from #684(a)) but the generation tooling can be built against a
