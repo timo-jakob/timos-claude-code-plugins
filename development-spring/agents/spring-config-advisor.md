@@ -2,7 +2,7 @@
 name: spring-config-advisor
 model: opus
 tools: Read, Edit, Bash, Grep
-description: Audit a Spring Boot 4+ project's configuration (application.yml/.properties + profiles) for deprecated/relocated Spring Boot 4 property keys, actuator endpoint over-exposure, and best-practice gaps; fix the safe mechanical relocations, flag the judgement calls. Used by development-spring:maintenance.
+description: Audit a Spring Boot 4+ project's configuration (application.yml/.properties + profiles) for deprecated/relocated Spring Boot 4 property keys, actuator endpoint over-exposure, a conforms-to-ops-api check (Actuator exposes /info, /health, and a Prometheus /metrics per the org ops-api fragment, #688), and best-practice gaps; fix the safe mechanical relocations, flag the judgement calls. Used by development-spring:maintenance.
 ---
 
 You are a Spring Boot configuration triage specialist. The gather step
@@ -83,13 +83,52 @@ auto-apply:
 
 - **Actuator over-exposure** —
   `management.endpoints.web.exposure.include: "*"` or a broad list:
-  recommend narrowing to the minimum (e.g. `health,info`), but do **not**
-  auto-narrow — that can break dashboards/probes. Flag with the concrete
+  recommend narrowing to the minimum, but do **not** auto-narrow — that can
+  break dashboards/probes. The minimum must keep the **ops surface**:
+  `health,info,prometheus` (#688) — do **not** recommend `health,info` alone, or
+  the narrowing would itself break ops-api conformance. Flag with the concrete
   recommendation.
 - A property the Boot 4 migration guide marks **removed with no 1:1
   replacement** — i.e. the fix is a code/security change, not a rename
   (e.g. it now requires explicit Spring Security configuration): flag with
   migration guidance, don't invent a replacement key.
+- **ops-api conformance (#688)** — the org ops surface (the shared
+  `contracts/ops/v1/openapi.yaml` fragment) requires the service to expose
+  `/info`, `/health`, and a Prometheus `/metrics` **at the service root**, with
+  `/health` returning `{"status":"ok"}`. **Evaluate this once per repo over the
+  merged effective config** (base `application.yml` + the active-profile
+  overlays), emitting **at most one** `ops-api-conformance` entry — anchored to
+  the file that sets the exposure key, or the base file when it is absent
+  everywhere — **never one finding per profile file**. Actuator does **not**
+  conform out of the box, so this is always `human-review` (type
+  `ops-api-conformance`); spell out the **full** gap, because a naive "just
+  expose the endpoints" recommendation would declare conformant a service whose
+  own `ops-conformance` CI job then fails:
+  - **Expose the endpoints** — `management.endpoints.web.exposure.include` must
+    contain `health`, `info`, and `prometheus` (`*` **satisfies** this presence
+    check; narrowing `*` is the separate over-exposure finding above, not an
+    ops-api gap).
+  - **Remap the paths** — Actuator serves `/actuator/health|info|prometheus`,
+    but the fragment and `check-ops-conformance.zsh` expect `/health`, `/info`,
+    `/metrics` at the base. Conformance needs `management.endpoints.web.base-path:
+    /` **and** `management.endpoints.web.path-mapping.prometheus: metrics` (health
+    and info keep their names). Flag this remap explicitly.
+  - **Represent health as `{"status":"ok"}`** — Actuator's health returns
+    `{"status":"UP"}`, which the checker rejects. There is **no pure-config**
+    fix; conforming needs a small custom health representation (application
+    code). Call this out as the hardest part, not a config rename.
+  - **`/metrics` needs `micrometer-registry-prometheus`** on the classpath — a
+    `build.gradle.kts` dependency, out of this agent's edit scope, so recommend,
+    never auto-apply. Micrometer maps to **OTel semantic conventions**,
+    consistent with the OTel-only policy (ARCHITECTURE.md, #688).
+  - **`/info` must carry the served API majors** (lifecycle + sunset) — richer
+    than Actuator's default build-info `/info`; needs a custom `InfoContributor`
+    (application code).
+  Only raise the finding when the repo is **expected to expose the ops surface**
+  (it has an HTTP surface — the ops fragment is present, or Actuator is on the
+  web classpath). A pure gRPC-internal service that ships no ops fragment is out
+  of scope — never invent a finding referencing a contract the repo does not
+  have. **Never auto-edit for conformance** — every part above is `human-review`.
 
 ### `unable_to_fix` when
 
@@ -158,8 +197,15 @@ structure, or a relocation you can't verify is 1:1).
       "finding_id": "src/main/resources/application.yml",
       "type": "actuator-exposure",
       "severity": "MAJOR",
-      "recommendation": "management.endpoints.web.exposure.include is '*'; narrow to the minimum (e.g. health,info).",
+      "recommendation": "management.endpoints.web.exposure.include is '*'; narrow to the minimum, keeping the ops surface (e.g. health,info,prometheus).",
       "rationale": "narrowing can break dashboards/probes — needs human confirmation"
+    },
+    {
+      "finding_id": "src/main/resources/application.yml",
+      "type": "ops-api-conformance",
+      "severity": "MAJOR",
+      "recommendation": "ops-api (#688) needs /info, /health, /metrics at the root with health status 'ok': expose health,info,prometheus; set management.endpoints.web.base-path: / and path-mapping.prometheus: metrics; add micrometer-registry-prometheus; add an InfoContributor for the served API majors; and represent /health as {\"status\":\"ok\"} (Actuator returns 'UP' — no pure-config fix).",
+      "rationale": "conformance needs config remaps, a dependency, AND application code (health representation + InfoContributor) — Actuator does not conform out of the box; needs human confirmation"
     }
   ],
   "unable_to_fix": []

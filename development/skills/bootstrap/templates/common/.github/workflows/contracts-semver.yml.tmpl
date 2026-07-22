@@ -56,9 +56,25 @@ jobs:
 
       - name: Run the contract semver gate
         run: |
+          # The business API (contracts/vN) and the org-standard ops surface
+          # (contracts/ops/vN, #688) are both versioned artifacts and get the
+          # identical triangle + bump gate. Run BOTH unconditionally and OR their
+          # exit codes. Running the ops invocation even when HEAD has no
+          # contracts/ops/ is deliberate: the inner script self-guards an absent
+          # surface (no majors at head or base -> exit 0), and this is what lets
+          # it reject a `git rm -r contracts/ops/` that retires a live ops major
+          # (detected against the base ref) — a guard testing HEAD-only existence
+          # would skip exactly that violation. Both findings files are produced
+          # for the Approver even when one half fails.
+          rc=0
           bash .github/scripts/check-contracts-semver.sh \
             --base-ref "origin/{{DEFAULT_BRANCH}}" \
-            --output contracts-semver-findings.json
+            --output contracts-semver-findings.json || rc=$?
+          bash .github/scripts/check-contracts-semver.sh \
+            --base-ref "origin/{{DEFAULT_BRANCH}}" \
+            --contracts-dir contracts/ops \
+            --output contracts-ops-semver-findings.json || rc=$?
+          exit "$rc"
 
       - name: Upload findings artifact
         # if: always() so the Approver can read the report even when the gate
@@ -67,25 +83,34 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: contracts-semver-${{ github.event.pull_request.number || github.sha }}
-          path: contracts-semver-findings.json
+          # both the business-API and the ops-surface (#688) findings, when present
+          path: |
+            contracts-semver-findings.json
+            contracts-ops-semver-findings.json
+          if-no-files-found: ignore
           retention-days: 30
 
       - name: Job summary
         if: always()
         run: |
           set -euo pipefail
-          if [[ ! -f contracts-semver-findings.json ]]; then exit 0; fi
-          {
-            echo "## Contract Semver Gate"
+          summarize() { # $1 = findings file, $2 = heading
+            [[ -f "$1" ]] || return 0
+            echo "## $2"
             echo
-            majors="$(jq -r '.majors | join(", ")' contracts-semver-findings.json)"
+            majors="$(jq -r '.majors | join(", ")' "$1")"
             echo "- **Live majors:** ${majors:-none}"
-            n="$(jq -r '.violations | length' contracts-semver-findings.json)"
+            n="$(jq -r '.violations | length' "$1")"
             echo "- **Violations:** ${n}"
             if [[ "$n" -gt 0 ]]; then
               echo
               echo "### Violations"
               echo
-              jq -r '.violations[] | "- " + .' contracts-semver-findings.json
+              jq -r '.violations[] | "- " + .' "$1"
             fi
+            echo
+          }
+          {
+            summarize contracts-semver-findings.json "Contract Semver Gate"
+            summarize contracts-ops-semver-findings.json "Ops Contract Semver Gate (#688)"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,151 @@
+# Ops API — the org-standard operations surface, major v1. SHARED FRAGMENT.
+#
+# Unlike contracts/v1/openapi.yaml (the per-project business API), this file is
+# an ORG-WIDE STANDARD: every backend service exposes exactly this surface, so
+# "standardised" is testable rather than aspirational (epic #682, design §5).
+# Bootstrap installs it verbatim at contracts/ops/v1/openapi.yaml; it carries no
+# {{PLACEHOLDERS}} because the ops contract is identical across every repo.
+#
+# It is versioned exactly like the business contract — the same per-major
+# layout (contracts/ops/vN/openapi.yaml), the same version triangle
+# (info.version major == vN directory == servers /vN), and the same CI gates
+# (contracts-lint Spectral + contracts-semver oasdiff) discover it (#688). A
+# breaking change to the ops surface is a new ops major, never an in-place edit.
+#
+# Ops endpoints stay INTERNAL — never published as APIM products. The runtime
+# base URL a service mounts them at is passed to check-ops-conformance.zsh; the
+# /vN server segment here is the artifact's version declaration for the triangle.
+openapi: 3.1.0
+info:
+  title: Ops API
+  version: "1.0.0"
+  description: >
+    The org-standard operations surface every backend service exposes: /info
+    (build + served API majors with lifecycle and sunset), /health (probes),
+    and /metrics (Prometheus/OpenMetrics exposition). Instrumentation is
+    OpenTelemetry-only; /metrics is the mandatory pull-compat surface served by
+    the OTel SDK's Prometheus exporter.
+servers:
+  - url: /v1
+    description: >
+      Ops API major v1. The URL major segment MUST match info.version's major
+      (1). The surface is internal — never fronted by the APIM gateway.
+tags:
+  - name: ops
+    description: The standardized operations surface (/info, /health, /metrics).
+paths:
+  /info:
+    get:
+      operationId: getInfo
+      summary: Build metadata and served API lifecycle.
+      description: >
+        Returns the build version and git SHA plus, for each API major the
+        service serves, its lifecycle state and (once deprecated) its sunset
+        date — making the epic #684 deprecation machinery observable.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: Build metadata and the served-major lifecycle table.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Info"
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness/readiness probe.
+      description: >
+        Returns the service health status, consumed as a probe by the
+        composition repo's deployment manifests.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus/OpenMetrics exposition.
+      description: >
+        Metrics in Prometheus exposition format, served by the OTel SDK's
+        Prometheus exporter. A mandatory compatibility surface — curl-able with
+        no collector, so conformance and smoke checks need no infrastructure.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: Metrics in Prometheus/OpenMetrics exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Prometheus text exposition (version 0.0.4).
+            application/openmetrics-text:
+              schema:
+                type: string
+                description: OpenMetrics text exposition.
+components:
+  schemas:
+    Info:
+      type: object
+      description: Build metadata and the served-major lifecycle table.
+      required: ["build", "api"]
+      properties:
+        build:
+          $ref: "#/components/schemas/Build"
+        api:
+          type: array
+          description: Every API major the service currently serves.
+          items:
+            $ref: "#/components/schemas/ApiMajor"
+    Build:
+      type: object
+      description: Build provenance.
+      required: ["version", "git_sha"]
+      properties:
+        version:
+          type: string
+          description: The service build/release version (e.g. 1.4.2).
+        git_sha:
+          type: string
+          description: The git commit the build was cut from.
+    ApiMajor:
+      type: object
+      description: >
+        One served API major and its lifecycle. A deprecated major MUST carry a
+        sunset date (RFC 8594); an active major MUST NOT need one.
+      required: ["major", "lifecycle"]
+      properties:
+        major:
+          type: integer
+          minimum: 1
+          description: The API major version number.
+        lifecycle:
+          type: string
+          description: The major's lifecycle state.
+          enum: ["active", "deprecated"]
+        sunset:
+          type: string
+          format: date
+          description: >
+            The retirement date (RFC 8594). Required when lifecycle is
+            deprecated; absent while active.
+      # A deprecated major MUST declare a sunset date; an active one carries
+      # none. JSON Schema (OpenAPI 3.1) expresses the conditional requirement.
+      if:
+        properties:
+          lifecycle:
+            const: deprecated
+      then:
+        required: ["sunset"]
+    Health:
+      type: object
+      description: Health status envelope.
+      required: ["status"]
+      properties:
+        status:
+          type: string
+          description: Health indicator.
+          enum: ["ok"]

@@ -34,7 +34,10 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          specs=(contracts/v[0-9]*/openapi.yaml)
+          # The per-major business API (contracts/vN) AND the org-standard ops
+          # surface (contracts/ops/vN, #688) are both versioned contract
+          # artifacts, so both are linted against the same ruleset.
+          specs=(contracts/v[0-9]*/openapi.yaml contracts/ops/v[0-9]*/openapi.yaml)
           if [[ ${#specs[@]} -eq 0 ]]; then
             echo "No contracts/vN/openapi.yaml found — nothing to lint."
             exit 0
