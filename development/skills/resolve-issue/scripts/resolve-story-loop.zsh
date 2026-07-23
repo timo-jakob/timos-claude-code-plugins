@@ -223,6 +223,15 @@ else
   : > "$changelists_file"
 fi
 
+# Step mode gates the PREVIOUS round's in-session fix here (#971): the fix ran
+# between invocations, so the "red after a fix aborts" check runs at resume
+# start — deterministically, before any new round work.
+if (( step_mode && resume )) && [[ -n "$test_cmd" ]]; then
+  ( cd "$repo" && eval "$test_cmd" ) || {
+    print -u2 -- "resolve-story-loop: --test-cmd red on --resume (prior round's fix broke the gate)"
+    emit_and_exit "ERROR" "$resume_round" 1 "" "" "$resume_prev" "$history_file" "$changelists_file" }
+fi
+
 # --- dispatch: which panel, on what scope (typed escalation on failure) -----
 local plan rc
 plan=$("$DISPATCH" plan --repo "$repo" --base "$base" --round 1); rc=$?

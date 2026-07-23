@@ -103,3 +103,46 @@ seed_awaiting() {
   [ "$status" -eq 11 ]
   [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_CONFLICT" ]
 }
+
+@test "resume with clean findings converges at round 2; accumulators span invocations" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  [ "$(echo "$output" | jq '.history | length')" -eq 2 ]
+  [ "$(echo "$output" | jq '.round_changelists | length')" -eq 2 ]
+}
+
+@test "resume with the SAME blocker trips ESCALATE_NO_CONVERGENCE against the carried prior round" {
+  seed_awaiting
+  printf '%s' "$CRIT" > "$F"
+  step --resume
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+}
+
+@test "a fresh step-mode run does NOT execute --test-cmd (step 3's gate already ran)" {
+  printf '%s' "$CRIT" > "$F"
+  step --test-cmd 'false'
+  # if --test-cmd ran, this would be exit 1; the round must proceed to AWAITING_FIX
+  [ "$status" -eq 20 ]
+}
+
+@test "--test-cmd red at the start of a step-mode resume is ERROR (exit 1) — the prior fix broke the gate" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --test-cmd 'false'
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ERROR" ]
+}
+
+@test "--test-cmd green at the start of a step-mode resume lets the round proceed" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --test-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+}
