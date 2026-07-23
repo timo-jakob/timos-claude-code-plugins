@@ -57,6 +57,7 @@ typeset -gra BLOCKING_SEVERITIES=(CRITICAL WARNING)   # == Critical + High
 local self_dir="${0:A:h}"
 local DISPATCH="${self_dir}/review-dispatch.zsh"
 local CONSOLIDATE="${self_dir}/consolidate-findings.zsh"
+local RENDER_PROGRESS="${self_dir}/render-progress-block.zsh"
 
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
@@ -111,6 +112,15 @@ emit_and_exit() {
   print -r -- "$out"
   [[ -n "$status_file" ]] && print -r -- "$out" > "$status_file"
 
+  # progress.md terminal line (#971) — non-fatal; AWAITING_FIX is not terminal.
+  # Same brace-group rationale as append_progress_round above: a redirection
+  # setup failure must not leak to the real stderr.
+  if [[ -n "$work_dir" && -d "$work_dir" && "$st" != "AWAITING_FIX" ]]; then
+    local reasons=""
+    [[ -n "$esc" && "$esc" != "[]" ]] && reasons=" — $(print -r -- "$esc" | jq -r 'join(", ")' 2>/dev/null)"
+    { print -r -- "**Final:** ${st}${reasons} ($(date +%H:%M:%S))" >> "$work_dir/progress.md" ; } 2>/dev/null || true
+  fi
+
   # telemetry (#566): append exactly one JSONL record per run, to the explicit
   # --telemetry-file or the git-ignored default under the repo. Never fatal.
   local tfile="$telemetry_file"
@@ -140,6 +150,20 @@ emit_ambiguous() {
       summary:{critical:0,high:0,low:0,blocking:0,conflicts:0}, blocking:[], suggestions:[],
       conflicts:[], non_converging:false, round:$r}' > "$carrier"
   emit_and_exit "ESCALATE_AMBIGUOUS" "$rounds" 10 "$rtype" "$rskill" "$carrier" "$history_file" "$changelists_file"
+}
+
+# append one per-round block to the tail-able progress file (#971). Rendering
+# is render-progress-block.zsh (a testable pure function); transparency must
+# never abort a run, so every failure here is swallowed.
+append_progress_round() {
+  local cl="$1" r="$2" v="$3"
+  [[ -n "$work_dir" ]] || return 0
+  # the append target's OWN open failure (e.g. a directory sits at the path)
+  # is a shell-level redirection error, reported on the CURRENT stderr before
+  # the trailing `2>/dev/null` would apply to it — brace-group it so the
+  # 2>/dev/null covers the redirection setup too, not just the command (#971).
+  { "$RENDER_PROGRESS" --changelist "$cl" --round "$r" --verdict "$v" \
+    >> "$work_dir/progress.md" ; } 2>/dev/null || true
 }
 
 # --no-review is the fast path — it short-circuits before any other requirement.
@@ -359,6 +383,7 @@ while (( round <= max_rounds )); do
     AWAITING_FIX) verdict="awaiting fix — apply blockers in-session, then --resume" ;;
     *) verdict="fix pass (in-loop), continuing" ;;
   esac
+  append_progress_round "$changelist" "$round" "$verdict"
   if [[ -n "$loop_status" ]]; then break; fi
 
   # 5. fix pass — blockers only (Low suggestions never loop)

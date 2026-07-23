@@ -146,3 +146,49 @@ seed_awaiting() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
 }
+
+@test "progress.md gets a per-round block with the new/carried split (step mode)" {
+  seed_awaiting
+  grep -q '^## Round 1 — blockers remain' "$WD/progress.md"
+  grep -q -- '- blockers: 1 (new: 1, carried: 0), conflicts: 0, suggestions: 0' "$WD/progress.md"
+  grep -q -- '- by dimension: bugs 1' "$WD/progress.md"
+  printf '%s' "$CRIT" > "$F"
+  step --resume
+  [ "$status" -eq 12 ]
+  grep -q '^## Round 2 — blockers remain' "$WD/progress.md"
+  grep -q -- 'new: 0, carried: 1' "$WD/progress.md"
+  grep -q '^\*\*Final:\*\* ESCALATE_NO_CONVERGENCE' "$WD/progress.md"
+}
+
+@test "progress.md ends with a Final line naming the terminal status (converged run)" {
+  printf '[]' > "$F"
+  step
+  [ "$status" -eq 0 ]
+  grep -q '^## Round 1 — no blockers' "$WD/progress.md"
+  grep -q '^\*\*Final:\*\* CONVERGED' "$WD/progress.md"
+}
+
+@test "AWAITING_FIX writes its round block but NO Final line (non-terminal)" {
+  seed_awaiting
+  run ! grep -q '^\*\*Final:' "$WD/progress.md"
+}
+
+@test "hook mode also writes progress.md (both wirings are observable)" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd-hook" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  grep -q '^## Round 1 — blockers remain' "$BATS_TEST_TMPDIR/wd-hook/progress.md"
+  grep -q -- '- fix pass (in-loop), continuing' "$BATS_TEST_TMPDIR/wd-hook/progress.md"
+  grep -q '^## Round 2 — no blockers' "$BATS_TEST_TMPDIR/wd-hook/progress.md"
+  grep -q '^\*\*Final:\*\* CONVERGED' "$BATS_TEST_TMPDIR/wd-hook/progress.md"
+}
+
+@test "an unwritable progress.md never aborts the run (transparency is non-fatal)" {
+  mkdir -p "$WD/progress.md"   # a DIRECTORY at the target path defeats appends
+  printf '[]' > "$F"
+  step
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+}
