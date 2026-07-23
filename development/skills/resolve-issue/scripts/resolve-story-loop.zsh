@@ -58,7 +58,7 @@ local self_dir="${0:A:h}"
 local DISPATCH="${self_dir}/review-dispatch.zsh"
 local CONSOLIDATE="${self_dir}/consolidate-findings.zsh"
 
-local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd=""
+local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0
 while [[ $# -gt 0 ]]; do
@@ -68,6 +68,7 @@ while [[ $# -gt 0 ]]; do
   --review-cmd) review_cmd="$2"; shift 2 ;;
   --fix-cmd) fix_cmd="$2"; shift 2 ;;
   --test-cmd) test_cmd="$2"; shift 2 ;;
+  --findings-file) findings_file="$2"; shift 2 ;;
   --max-rounds) max_rounds="$2"; shift 2 ;;
   --status-file) status_file="$2"; shift 2 ;;
   --work-dir) work_dir="$2"; shift 2 ;;
@@ -75,7 +76,7 @@ while [[ $# -gt 0 ]]; do
   --telemetry-file) telemetry_file="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
   --resume) resume=1; shift ;;
-  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N] [--telemetry-file PATH] [--no-review]"; exit 0 ;;
+  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD) [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N] [--telemetry-file PATH] [--no-review]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
@@ -148,8 +149,18 @@ fi
 
 [[ -n "$repo" ]] || { print -u2 -- "resolve-story-loop: --repo is required"; exit 2 }
 [[ -d "$repo" ]] || { print -u2 -- "resolve-story-loop: --repo not a directory: $repo"; exit 1 }
-[[ -n "$review_cmd" ]] || { print -u2 -- "resolve-story-loop: --review-cmd is required (or use --no-review)"; exit 2 }
-[[ -n "$fix_cmd" ]] || { print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --no-review)"; exit 2 }
+# Step mode (#971): --findings-file replaces BOTH model-driven hooks — the
+# driving session runs the panel and the fix pass in-session, one round per
+# invocation. Mixing the two wirings is a contradiction, not a fallback.
+local step_mode=0
+[[ -n "$findings_file" ]] && step_mode=1
+if (( step_mode )) && [[ -n "$review_cmd" || -n "$fix_cmd" ]]; then
+  print -u2 -- "resolve-story-loop: --findings-file is mutually exclusive with --review-cmd/--fix-cmd"; exit 2
+fi
+if (( ! step_mode )); then
+  [[ -n "$review_cmd" ]] || { print -u2 -- "resolve-story-loop: --review-cmd is required (or use --findings-file / --no-review)"; exit 2 }
+  [[ -n "$fix_cmd" ]] || { print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --findings-file / --no-review)"; exit 2 }
+fi
 # a non-positive/non-numeric ceiling would skip the loop entirely and fall out
 # with an empty status — refuse it up front as the usage error it is
 [[ "$max_rounds" == <-> ]] && (( max_rounds >= 1 )) || {
@@ -245,7 +256,7 @@ fi
 # corrupt the status JSON. Inside the loop we plain-assign only.
 local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
 local rp findings_path scoped changelist blockers
-local blocking conflict nonconv nconf
+local blocking conflict nonconv nconf verdict
 local -a scope_lines
 while (( round <= max_rounds )); do
   # per-round dispatch: the round's well-known findings path AND a fresh scope
@@ -280,11 +291,22 @@ while (( round <= max_rounds )); do
   mkdir -p "${findings_path:h}"
   : > "$findings_path"
 
-  # 1. run the review panel (hook) — it writes findings_path
-  ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
-           REVIEW_SKILL="$review_skill" REVIEW_SCOPE_FILE="$scope_file" \
-           REVIEW_REPO="$repo"; eval "$review_cmd" ) || {
-    print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
+  # 1. obtain this round's findings: step mode consumes --findings-file (the
+  # session already ran the panel in-session, #971); hook mode runs the
+  # injected panel command
+  if (( step_mode )); then
+    if [[ -s "$findings_file" ]]; then
+      jq -e 'type=="array"' "$findings_file" >/dev/null 2>&1 || {
+        print -u2 -- "resolve-story-loop: --findings-file is not a JSON array: $findings_file"; exit 1 }
+      cp "$findings_file" "$findings_path" || {
+        print -u2 -- "resolve-story-loop: could not copy --findings-file"; exit 1 }
+    fi
+  else
+    ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
+             REVIEW_SKILL="$review_skill" REVIEW_SCOPE_FILE="$scope_file" \
+             REVIEW_REPO="$repo"; eval "$review_cmd" ) || {
+      print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
+  fi
   [[ -s "$findings_path" ]] || print -r -- '[]' > "$findings_path"
 
   # 2. scope findings to the story's diff (#560)
@@ -311,11 +333,24 @@ while (( round <= max_rounds )); do
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
      '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1)}' <<< '{}' >> "$history_file"
 
-  # 4. decide the round's fate
-  if (( blocking == 0 )); then loop_status="CONVERGED"; break; fi
-  if (( conflict == 1 )); then loop_status="ESCALATE_CONFLICT"; break; fi
-  if (( nonconv == 1 )); then loop_status="ESCALATE_NO_CONVERGENCE"; break; fi
-  if (( round == max_rounds )); then loop_status="BUDGET_EXHAUSTED"; break; fi
+  # 4. decide the round's fate. In step mode a survivable round (blockers,
+  # budget left) exits AWAITING_FIX (20): the fix pass is the driving session's
+  # job, in-session, before it re-invokes with --resume (#971).
+  if (( blocking == 0 )); then loop_status="CONVERGED"
+  elif (( conflict == 1 )); then loop_status="ESCALATE_CONFLICT"
+  elif (( nonconv == 1 )); then loop_status="ESCALATE_NO_CONVERGENCE"
+  elif (( round == max_rounds )); then loop_status="BUDGET_EXHAUSTED"
+  elif (( step_mode )); then loop_status="AWAITING_FIX"
+  fi
+  case "$loop_status" in
+    CONVERGED) verdict="converged" ;;
+    ESCALATE_CONFLICT) verdict="escalating (unresolved conflict)" ;;
+    ESCALATE_NO_CONVERGENCE) verdict="escalating (non-converging blocker)" ;;
+    BUDGET_EXHAUSTED) verdict="budget exhausted" ;;
+    AWAITING_FIX) verdict="awaiting fix — apply blockers in-session, then --resume" ;;
+    *) verdict="fix pass (in-loop), continuing" ;;
+  esac
+  if [[ -n "$loop_status" ]]; then break; fi
 
   # 5. fix pass — blockers only (Low suggestions never loop)
   blockers="$work_dir/blockers-$round.json"
@@ -338,6 +373,7 @@ done
 local code
 case "$loop_status" in
   CONVERGED) code=0 ;;
+  AWAITING_FIX) code=20 ;;
   ESCALATE_CONFLICT) code=11 ;;
   ESCALATE_NO_CONVERGENCE) code=12 ;;
   BUDGET_EXHAUSTED) code=13 ;;
