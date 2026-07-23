@@ -1,0 +1,217 @@
+# Ops API — the org-standard operations surface, major v1. SHARED FRAGMENT.
+#
+# Unlike contracts/v1/openapi.yaml (the per-project business API), this file is
+# an ORG-WIDE STANDARD: every backend service exposes exactly this surface, so
+# "standardised" is testable rather than aspirational (epic #682, design §5).
+# Bootstrap installs it verbatim at contracts/ops/v1/openapi.yaml; it carries no
+# {{PLACEHOLDERS}} because the ops contract is identical across every repo.
+#
+# It is versioned exactly like the business contract — the same per-major
+# layout (contracts/ops/vN/openapi.yaml), the same version triangle
+# (info.version major == vN directory == servers /vN), and the same CI gates
+# (contracts-lint Spectral + contracts-semver oasdiff) discover it (#688). A
+# breaking change to the ops surface is a new ops major, never an in-place edit.
+#
+# Ops endpoints stay INTERNAL — never published as APIM products. The runtime
+# base URL a service mounts them at is passed to check-ops-conformance.zsh; the
+# /vN server segment here is the artifact's version declaration for the triangle.
+openapi: 3.1.0
+info:
+  title: Ops API
+  version: "1.0.0"
+  description: >
+    The org-standard operations surface every backend service exposes:
+    /info (build + served API majors with lifecycle and sunset),
+    /health (human-facing aggregate), /health/live (K8s liveness — process
+    only, dependency-free), /health/ready (K8s readiness — dependencies), and
+    /metrics (Prometheus/OpenMetrics exposition). Instrumentation is
+    OpenTelemetry-only; /metrics is the mandatory pull-compat surface served by
+    the OTel SDK's Prometheus exporter.
+
+
+    TRUST MODEL — this is an INTERNAL management surface. It MUST be served on a
+    separate management port (never the public app port), so /info's build data
+    is unreachable from outside without any per-endpoint auth. Network
+    enforcement (a NetworkPolicy restricting the management port to the kubelet +
+    the monitoring namespace, and a Service/Ingress that exposes only the app
+    port) is the deployment layer's job (the composition repo, #687/#719/#720),
+    not this contract's. /info is minimal BY CONTRACT — build version, git SHA,
+    and the API-major lifecycle table only; it MUST NOT expose framework, server,
+    OS, or dependency versions.
+servers:
+  - url: /v1
+    description: >
+      Ops API major v1, served on the internal MANAGEMENT PORT (not the public
+      app port). The URL major segment MUST match info.version's major (1). The
+      surface is never fronted by the APIM gateway.
+tags:
+  - name: ops
+    description: The standardized operations surface (/info, /health, /metrics).
+paths:
+  /info:
+    get:
+      operationId: getInfo
+      summary: Build metadata and served API lifecycle.
+      description: >
+        Returns the build version and git SHA plus, for each API major the
+        service serves, its lifecycle state and (once deprecated) its sunset
+        date — making the epic #684 deprecation machinery observable.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: Build metadata and the served-major lifecycle table.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Info"
+  /health:
+    get:
+      operationId: getHealth
+      summary: Aggregate health (human/dashboard-facing).
+      description: >
+        Overall service health for humans and dashboards — 200 when the service
+        is healthy. NOT a Kubernetes probe target: liveness and readiness are
+        distinct (see /health/live and /health/ready), because a single health
+        endpoint cannot drive both without the liveness-checks-dependencies
+        anti-pattern (a transient dependency blip restarting every pod).
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /health/live:
+    get:
+      operationId: getLiveness
+      summary: Kubernetes liveness probe.
+      description: >
+        Is the process wedged and in need of a restart? MUST be cheap and
+        DEPENDENCY-FREE — it reflects only the process itself. A failing
+        liveness makes the kubelet restart the pod, so it must never check a
+        database or downstream service (that would turn a transient outage into
+        a restart storm). Wire it to the container's livenessProbe.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: The process is not alive and should be restarted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /health/ready:
+    get:
+      operationId: getReadiness
+      summary: Kubernetes readiness probe.
+      description: >
+        Can the service accept traffic right now? This is where dependency
+        checks (datastore, downstream services) belong. A failing readiness
+        removes the pod from the Service endpoints (no traffic) WITHOUT
+        restarting it. Wire it to the container's readinessProbe.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The service is ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: The service is not ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus/OpenMetrics exposition.
+      description: >
+        Metrics in Prometheus exposition format, served by the OTel SDK's
+        Prometheus exporter. A mandatory compatibility surface — curl-able with
+        no collector, so conformance and smoke checks need no infrastructure.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: Metrics in Prometheus/OpenMetrics exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Prometheus text exposition (version 0.0.4).
+            application/openmetrics-text:
+              schema:
+                type: string
+                description: OpenMetrics text exposition.
+components:
+  schemas:
+    Info:
+      type: object
+      description: Build metadata and the served-major lifecycle table.
+      required: ["build", "api"]
+      properties:
+        build:
+          $ref: "#/components/schemas/Build"
+        api:
+          type: array
+          description: Every API major the service currently serves.
+          items:
+            $ref: "#/components/schemas/ApiMajor"
+    Build:
+      type: object
+      description: Build provenance.
+      required: ["version", "git_sha"]
+      properties:
+        version:
+          type: string
+          description: The service build/release version (e.g. 1.4.2).
+        git_sha:
+          type: string
+          description: The git commit the build was cut from.
+    ApiMajor:
+      type: object
+      description: >
+        One served API major and its lifecycle. A deprecated major MUST carry a
+        sunset date (RFC 8594); an active major MUST NOT need one.
+      required: ["major", "lifecycle"]
+      properties:
+        major:
+          type: integer
+          minimum: 1
+          description: The API major version number.
+        lifecycle:
+          type: string
+          description: The major's lifecycle state.
+          enum: ["active", "deprecated"]
+        sunset:
+          type: string
+          format: date
+          description: >
+            The retirement date (RFC 8594). Required when lifecycle is
+            deprecated; absent while active.
+      # A deprecated major MUST declare a sunset date; an active one carries
+      # none. JSON Schema (OpenAPI 3.1) expresses the conditional requirement.
+      if:
+        properties:
+          lifecycle:
+            const: deprecated
+      then:
+        required: ["sunset"]
+    Health:
+      type: object
+      description: >
+        Health status envelope, shared by /health, /health/live, and
+        /health/ready. A 200 response carries status "ok"; a 503 carries "down".
+      required: ["status"]
+      properties:
+        status:
+          type: string
+          description: Health indicator — "ok" on a 200, "down" on a 503.
+          enum: ["ok", "down"]

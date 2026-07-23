@@ -312,6 +312,58 @@ model, and the children of #684 that deliver each piece:
   finding fires when a major is served past its sunset, and retirement deletes
   the adapter + spec and the gateway returns 410.
 
+### Standardized operations surface + OpenTelemetry-only instrumentation (#688)
+
+Every backend service that exposes an **HTTP surface** carries one
+**org-standard ops surface** — `/info`, `/health`, `/metrics`, defined as a
+shared, versioned OpenAPI fragment (`contracts/ops/v1/openapi.yaml`) so
+"standardised" is testable, not aspirational. Bootstrap installs it **alongside
+the contracts machinery** (the fragment + checker whenever an API surface is
+detected; the `ops-conformance` CI job additionally gated on a Dockerfile). A
+purely gRPC-internal service with no HTTP surface has no ops fragment to conform
+to, and `spring-config-advisor`'s conforms-to-ops-api check is scoped
+accordingly — it never flags a repo that ships no ops fragment. Design:
+[`docs/superpowers/specs/2026-07-10-webui-plugin-family-design.md`](docs/superpowers/specs/2026-07-10-webui-plugin-family-design.md)
+§5.
+
+- **The fragment is a contract artifact** — `/info` (build + the served API
+  majors with lifecycle state and, once deprecated, a sunset date, making the
+  #684 deprecation machinery observable), `/health` (human-facing aggregate),
+  **`/health/live` (K8s liveness — process only) and `/health/ready` (K8s
+  readiness — dependencies) as distinct probes** (a single endpoint can't drive
+  both without the liveness-checks-dependencies restart-storm anti-pattern), and
+  `/metrics` (Prometheus/OpenMetrics exposition). It rides the same machinery as
+  the business contract: `contracts-lint` (Spectral) and `contracts-semver`
+  (oasdiff) discover `contracts/ops/v[0-9]*/openapi.yaml`, so a breaking change
+  to the ops surface is a new ops major, never an in-place edit.
+- **The surface is internal, on a management port.** It is served on a separate
+  **management port** (not the public app port), and `/info` is minimal by
+  contract (build + API lifecycle only — never framework/server/OS versions), so
+  build data is unreachable externally without per-endpoint auth. Enforcing the
+  boundary — a `NetworkPolicy` restricting the management port to the kubelet +
+  monitoring namespace, a `Service` exposing only the app port, and the probe
+  wiring — is the **deployment layer's** job (the composition repo, #687/#719/
+  #720): the service provides the seam, the platform draws the boundary. Ops
+  endpoints are never published as APIM products.
+- **Conformance is mechanical.** `scripts/check-ops-conformance.zsh` curls a
+  running service's management base URL and validates the endpoints against the
+  fragment's shapes (including the deprecated-major-needs-sunset rule); bootstrap
+  wires it as a standalone `ops-conformance` CI job (independent of epic #704's
+  rest harness).
+- **Instrumentation is OpenTelemetry-only.** The org-wide rule: instrument with
+  the **OTel SDK + OTel semantic conventions, exclusively** — one vocabulary
+  across every language, covering traces and metrics without a second system.
+  **OTLP push to a collector is the primary pipeline**; the `/metrics` pull
+  endpoint is a **mandatory compatibility surface** served by the same SDK's
+  Prometheus exporter (a config flag, not a second metrics system) — it stays
+  curl-able so conformance and smoke checks need no collector, local dev needs
+  no collector, and Kubernetes scraping still works. Per the language-first
+  principle, Spring gets the surface via Actuator/Micrometer (Micrometer maps to
+  OTel semantic conventions) — `spring-config-advisor` gains a conforms-to-ops-api
+  check — and every other language plugin owns its canonical implementation of
+  the same fragment (Python is the blessed non-Spring reference; #935/#936/#937
+  track Java-non-Spring/Node/Swift).
+
 ### Cross-repo Claude: the big-picture problem
 
 A Claude session in one repo cannot see siblings by default, and in a

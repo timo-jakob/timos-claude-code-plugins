@@ -1,0 +1,157 @@
+"""Canonical ops-api implementation for non-Spring Python services (issue #688).
+
+This is the blessed Python realization of the org-standard ops surface defined by
+``contracts/ops/v1/openapi.yaml`` — ``/info``, ``/health``, ``/metrics`` — so a
+Python service conforms to the same fragment Spring gets via Actuator. It passes
+``scripts/check-ops-conformance.zsh`` unchanged.
+
+Instrumentation is **OpenTelemetry only** (ARCHITECTURE.md policy): metrics come
+from the OTel SDK ``MeterProvider``. OTLP push to a collector is the primary
+pipeline; ``/metrics`` is the mandatory pull-compat surface, served here by the
+OTel SDK's Prometheus exporter (``PrometheusMetricReader`` feeds the
+``prometheus_client`` registry — a config wiring, not a second metrics system).
+
+Endpoints: ``/info``, ``/health`` (aggregate), ``/health/live`` (K8s liveness —
+process only, dependency-free), ``/health/ready`` (K8s readiness — plug your
+dependency check via ``OpsConfig.readiness``), and ``/metrics``.
+
+This is an INTERNAL management surface: it binds a separate MANAGEMENT PORT
+(default 9090), never the public app port, so ``/info``'s build data is
+unreachable from outside without any per-endpoint auth. The network boundary
+(NetworkPolicy + a Service that exposes only the app port, and the liveness/
+readiness probe wiring) is the deployment layer's job (the composition repo).
+
+Placement: drop this module into your package (e.g. ``src/<pkg>/ops_api.py``) and
+run ``python -m <pkg>.ops_api`` as a lightweight ops sidecar, or mount
+``OpsHandler`` on your existing server's management port. Declare the API majors
+your service serves via ``served_majors`` — the /info lifecycle table is what
+makes the epic #684 deprecation machinery observable.
+
+Requires: opentelemetry-sdk, opentelemetry-exporter-prometheus, prometheus-client
+(see requirements.txt beside this file).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Callable, Literal
+
+from opentelemetry import metrics
+from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.sdk.metrics import MeterProvider
+from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
+
+Lifecycle = Literal["active", "deprecated"]
+
+
+@dataclass(frozen=True)
+class ApiMajor:
+    """One served API major and its lifecycle (mirrors the fragment's ApiMajor).
+
+    A ``deprecated`` major MUST carry a ``sunset`` date (RFC 8594); an ``active``
+    one MUST NOT need one. ``to_info`` enforces that invariant at serialization.
+    """
+
+    major: int
+    lifecycle: Lifecycle = "active"
+    sunset: str | None = None
+
+    def to_info(self) -> dict[str, object]:
+        if self.lifecycle == "deprecated" and not self.sunset:
+            raise ValueError(
+                f"deprecated major {self.major} needs a sunset date (RFC 8594)"
+            )
+        entry: dict[str, object] = {"major": self.major, "lifecycle": self.lifecycle}
+        if self.sunset:
+            entry["sunset"] = self.sunset
+        return entry
+
+
+@dataclass
+class OpsConfig:
+    """What the service reports on /info, and how readiness is decided.
+
+    ``readiness`` is the dependency check behind /health/ready (and the /health
+    aggregate) — the default is always-ready; plug your datastore/downstream
+    check here. Liveness is deliberately NOT configurable: it reflects only that
+    the process is serving, and must never check a dependency.
+    """
+
+    version: str = field(default_factory=lambda: os.environ.get("BUILD_VERSION", "0.0.0"))
+    git_sha: str = field(default_factory=lambda: os.environ.get("GIT_SHA", "unknown"))
+    served_majors: tuple[ApiMajor, ...] = (ApiMajor(major=1, lifecycle="active"),)
+    readiness: Callable[[], bool] = field(default=lambda: True)
+
+    def info_payload(self) -> dict[str, object]:
+        return {
+            "build": {"version": self.version, "git_sha": self.git_sha},
+            "api": [m.to_info() for m in self.served_majors],
+        }
+
+
+def install_metrics() -> MeterProvider:
+    """Wire the OTel SDK MeterProvider with the Prometheus reader.
+
+    The reader registers a collector with prometheus_client's global REGISTRY, so
+    ``/metrics`` exposes OTel-recorded metrics in Prometheus text format — the
+    OTel SDK is the single instrumentation source, Prometheus is only the
+    pull-compat exposition.
+    """
+    provider = MeterProvider(metric_readers=[PrometheusMetricReader()])
+    metrics.set_meter_provider(provider)
+    return provider
+
+
+class OpsHandler(BaseHTTPRequestHandler):
+    """Serves the three ops endpoints. Mount on any ``http.server`` server."""
+
+    config: OpsConfig = OpsConfig()
+
+    def _send(self, code: int, content_type: str, body: bytes) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, code: int, payload: dict[str, object]) -> None:
+        self._send(code, "application/json", json.dumps(payload).encode("utf-8"))
+
+    def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler contract)
+        route = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if route == "/info":
+            self._json(200, self.config.info_payload())
+        elif route == "/health/live":
+            # Liveness: the process is serving this request, so it is alive.
+            # Deliberately dependency-free — a failing liveness restarts the pod.
+            self._json(200, {"status": "ok"})
+        elif route in ("/health/ready", "/health"):
+            # Readiness (and the human aggregate): can we serve traffic? A failing
+            # readiness sheds traffic without a restart. 503 => not ready.
+            ready = self.config.readiness()
+            self._json(200 if ready else 503, {"status": "ok" if ready else "down"})
+        elif route == "/metrics":
+            self._send(200, CONTENT_TYPE_LATEST, generate_latest(REGISTRY))
+        else:
+            self._json(404, {"error": "not found", "path": route})
+
+    def log_message(self, *_args: object) -> None:  # silence default stderr logging
+        return
+
+
+def serve(host: str = "0.0.0.0", port: int = 9090, config: OpsConfig | None = None) -> None:  # noqa: S104
+    """Run the ops surface on the MANAGEMENT port (default 9090 — never the public
+    app port). Binds all interfaces so the kubelet's probes and the
+    ops-conformance job can reach it; the network boundary is enforced by the
+    deployment (NetworkPolicy + a Service that omits this port)."""
+    install_metrics()
+    if config is not None:
+        OpsHandler.config = config
+    ThreadingHTTPServer((host, port), OpsHandler).serve_forever()
+
+
+if __name__ == "__main__":
+    serve(port=int(os.environ.get("OPS_PORT", "9090")))

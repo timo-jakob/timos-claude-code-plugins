@@ -1,0 +1,7 @@
+# Canonical Python ops-api dependencies (#688). OpenTelemetry-only
+# instrumentation: the OTel SDK is the single metrics source; the Prometheus
+# exporter serves the /metrics pull-compat surface. OTLP push to a collector is
+# the primary pipeline — add opentelemetry-exporter-otlp when wiring it.
+opentelemetry-sdk>=1.27
+opentelemetry-exporter-prometheus>=0.48b0
+prometheus-client>=0.20

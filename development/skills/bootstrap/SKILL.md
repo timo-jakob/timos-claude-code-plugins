@@ -1557,6 +1557,32 @@ The installed set:
   default 6 months). The `.spectral.yaml` ruleset also gains a
   `deprecation-has-sunset` rule (#695) enforcing that a `deprecated: true`
   element carries `x-sunset`. Documentation/policy — never provenance-stamped.
+- `contracts/ops/v1/openapi.yaml` (#688) — the **org-standard ops surface**
+  (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s
+  probes, `/metrics`) as a **shared, versioned contract fragment**, so
+  "standardised" is testable. It rides the SAME machinery as the business
+  contract: `contracts-lint` lints it and `contracts-semver` gates it (both
+  templates' spec discovery covers `contracts/ops/v[0-9]*/openapi.yaml`), so a
+  breaking change to the ops surface is a new ops major, never an in-place edit.
+  Installed verbatim (no placeholders — the ops contract is identical org-wide).
+  The surface is **internal, on a separate management port** (never the public
+  app port); `/info` is minimal by contract; enforcing the network boundary is
+  the composition repo's job (#687/#719/#720). Never published as APIM products.
+- `scripts/check-ops-conformance.zsh` (#688) — the **conformance checker**: curls
+  a running service's `/info`, `/health`, `/metrics` and validates them against
+  the fragment's shapes (incl. the deprecated-major-needs-sunset rule); exit 0 on
+  conformance, non-zero naming the failing path. Installed verbatim.
+- `.github/workflows/ops-conformance.yml` (#688) — a **standalone** job that
+  builds the canonical container, waits for `/health`, and runs the checker
+  against the running service (independent of epic #704's rest harness; #704 may
+  later fold it into the `acceptance (rest)` leg). Also **path-conditional**
+  (`paths: contracts/ops/**` + its own wiring) — never a required context.
+  **Render it only when the repo has a Dockerfile** (`has_dockerfile == true`,
+  detected in Step 1 — the canonical container the job builds). When there is no
+  Dockerfile, **omit this workflow** (still install the fragment + checker) and
+  add a Step 5 checklist TODO — *"wire `ops-conformance.yml` once the service has
+  a canonical container"* — because its first step is `docker build .`, so
+  shipping it into a Dockerfile-less repo is a guaranteed-red check on every PR.
 
 ```bash
 "<skill-base-dir>/scripts/render.zsh" \
@@ -1568,8 +1594,50 @@ The installed set:
   common/.github/scripts/check-contracts-semver.sh \
   common/.github/workflows/contracts-lint.yml.tmpl \
   common/.github/workflows/spec-publish.yml.tmpl \
-  common/.github/workflows/contracts-semver.yml.tmpl
+  common/.github/workflows/contracts-semver.yml.tmpl \
+  common/contracts/ops/v1/openapi.yaml \
+  common/scripts/check-ops-conformance.zsh
 ```
+
+Then render the ops-conformance workflow **only when `has_dockerfile == true`**
+(see the bullet above — omit it, with a Step 5 TODO, on a Dockerfile-less repo):
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --default-branch "<branch>" \
+  common/.github/workflows/ops-conformance.yml.tmpl
+```
+
+The ops surface (`contracts/ops/`, the checker, and its Dockerfile-gated
+workflow) installs **alongside the contracts block** — it is a contract artifact
+gated by the same lint/semver machinery. Spring gets it via Actuator (`spring-config-advisor`'s
+conforms-to-ops-api check); every other language plugin owns its canonical
+implementation of the same fragment.
+
+**Python canonical implementation (#688).** For a Python service repo, also
+install the blessed non-Spring realization — a self-contained OTel-SDK +
+Prometheus-exporter module serving `/info`, `/health`, `/metrics` (it passes
+`check-ops-conformance.zsh` unchanged). Copied verbatim (no placeholders). Unlike
+the `common/…` artifacts (whose relpath maps 1:1 into the repo), these need an
+explicit destination — **detect the package directory** and place them there:
+`ops_api.py` → `src/<package>/ops_api.py` (the package that `python -m
+<package>.ops_api` resolves), the shipped `README.md` alongside it, and **fold
+`requirements.txt`'s three deps into the project's dependency set** (the existing
+Python confirmed-edit model — `pyproject.toml`/`requirements.txt`) rather than
+dropping a second root `requirements.txt`:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/python/ops-api/ops_api.py \
+  languages/python/ops-api/requirements.txt \
+  languages/python/ops-api/README.md
+```
+
+The remaining languages' canonical implementations are tracked follow-ups under
+epic #682: development-java non-Spring (#935), development-javascript/Node
+(#936), development-swift (#937).
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the

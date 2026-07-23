@@ -7,6 +7,7 @@ what you want to achieve.
 - [Write docs in a bootstrapped repo](write-docs-in-a-target-repo.md)
 - [Install and use the plugins](install-and-use-plugins.md)
 - [Adopt the Claude Approver on your repo](adopt-the-approver.md)
+- [Adopt the standardized ops surface on your service](adopt-the-ops-surface.md)
 - [Maintain this repo (quarterly template refresh)](maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](contributing.md)
 - [Add support for a new language plugin](../adding-a-language-plugin.md)
