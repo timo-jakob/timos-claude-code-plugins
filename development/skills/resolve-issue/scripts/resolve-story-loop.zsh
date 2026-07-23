@@ -6,10 +6,15 @@
 # opened until this exits CONVERGED.
 #
 # The agentic steps — running the review panel and applying the implementor's
-# fix pass — are model-driven, so they are injected as HOOK COMMANDS. This keeps
-# the deterministic state machine (rounds, budget, consolidation, exit-state)
-# testable, and lets /development:resolve-issue wire the real panel/fix/test
-# commands (or a headless `claude -p`) behind the same seam.
+# fix pass — are model-driven. The canonical wiring is STEP MODE (#971): the
+# driving session runs the panel in-session (visible review agents), passes the
+# aggregate findings via --findings-file, and this script processes exactly ONE
+# round per invocation — exiting AWAITING_FIX (20) when blockers remain with
+# budget left, so the session applies the fixes in-session (visible edits) and
+# re-invokes with --resume. HOOK MODE (--review-cmd/--fix-cmd) remains as the
+# deterministic seam the bats suite drives the state machine through; wiring a
+# headless `claude -p` behind it is NOT a supported pattern — it hides the
+# whole loop from the user behind one opaque background task.
 #
 # Per-round flow:
 #   re-dispatch (fresh scope; ambiguous => ESCALATE_AMBIGUOUS, #912)
@@ -18,7 +23,17 @@
 #     -> surviving conflict     => ESCALATE_CONFLICT   (early exit)
 #     -> non_converging blocker => ESCALATE_NO_CONVERGENCE (early exit)
 #     -> last round + blockers  => BUDGET_EXHAUSTED
-#     -> else: fix pass (blockers only) -> re-run tests -> next round
+#     -> else: step mode        => AWAITING_FIX (fix in-session, --resume)
+#              hook mode        => fix pass -> re-run tests -> next round
+#
+# Every round also appends a human-readable block to $work_dir/progress.md
+# (#971) — the user tails it to watch a long run; writes are never fatal.
+#
+# Step mode:
+#   --findings-file  this round's aggregate findings JSON (issue #558 schema,
+#                    a flat array). Missing/empty file = "no findings". On
+#                    --resume, --test-cmd (when given) runs FIRST — it gates
+#                    the previous round's in-session fix; red exits ERROR (1).
 #
 # Hooks (run via the shell, with these env vars exported):
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
@@ -28,17 +43,22 @@
 #   --fix-cmd     applies the blockers. Sees $REVIEW_ROUND, $REVIEW_REPO,
 #                 $REVIEW_CHANGELIST (full changelist) and $REVIEW_BLOCKERS
 #                 (blockers-only slice). Expected to leave the tree buildable.
-#   --test-cmd    (optional) the repo gate, re-run after a fix; nonzero aborts
-#                 the loop as an operational error (exit 1), never a verdict.
+#   --test-cmd    the repo gate. Hook mode: re-run after each fix. Step mode:
+#                 run at --resume start (see above). Nonzero aborts the loop as
+#                 an operational error (exit 1), never a verdict.
 #
 # Usage:
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
-#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
-#       [--max-rounds N] [--status-file PATH] [--work-dir DIR]
+#       --findings-file FILE [--test-cmd CMD] [--resume] \
+#       [--max-rounds N] [--status-file PATH] [--work-dir DIR]    # step mode
+#   resolve-story-loop.zsh --repo PATH [--base REF] \
+#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] ...       # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path)
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
+#   20  AWAITING_FIX              (step mode only: blockers remain, budget
+#                                  left — fix in-session, then --resume)
 #   10  ESCALATE_AMBIGUOUS        (dispatch could not pick a panel — #560 —
 #                                  pre-loop or at any round's re-dispatch, #912)
 #   11  ESCALATE_CONFLICT         (a surviving reviewer conflict)

@@ -417,25 +417,52 @@ body.
 Once the gate is green, run the **local review loop** before committing or
 pushing anything, so a PR is only opened on code a reviewer panel has already
 converged on (no CI minutes spent on unconverged work). Drive
-`development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — the state
-machine (constants `MAX_REVIEW_ROUNDS=3`, `BLOCKING_SEVERITIES=(CRITICAL
-WARNING)`). It ties the pieces together and you provide three hooks for the
-model-driven steps:
+`development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — the
+state machine (constants `MAX_REVIEW_ROUNDS=3`, `BLOCKING_SEVERITIES=(CRITICAL
+WARNING)`) — in **step mode** (#971): one invocation per round, with every
+model-driven step done **in-session, where the user can watch it**. Two hard
+rules: **never** shell out to a headless `claude` (`claude -p` / `--print`)
+for any model-driven step, and **never** run the loop as a long-lived
+background task spanning rounds. The user must be able to see rounds happen:
+visible review agents, visible fix edits, a narrated summary per round.
 
-- **`--review-cmd`** — run the diff-scoped review panel for this round: use the
-  dispatch plan from `review-dispatch.zsh` (§#560) and invoke the skill its
-  descriptor names in `review_skill` (a language panel, or
-  `development-claude-plugin:review` for a plugin repo — #809), scoped to
-  `$REVIEW_SCOPE_FILE`, and write the aggregate findings JSON
-  (the #558 schema) to `$REVIEW_FINDINGS`.
-- **`--fix-cmd`** — read `$REVIEW_BLOCKERS` (the consolidated Critical+High
-  items) and implement the fixes, exactly as step 2 implements — Low
-  suggestions never loop.
-- **`--test-cmd`** — re-run the step-3 gate — the **full** suite (unit **and**
-  integration), never a subset — so a fix that breaks tests anywhere aborts the
-  loop instead of shipping. The per-round re-run is the whole suite too; a
-  loop-round fix that passes a unit subset but breaks an integration test must
-  fail here, not at CI (#604).
+**At loop start, tell the user where to watch:** the loop appends one block per
+round to `<work-dir>/progress.md` — say so once, e.g. "follow along with
+`tail -f <work-dir>/progress.md`".
+
+Each round:
+
+1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh
+   plan`, §#560) and spawn the reviewers of the skill it names in
+   `review_skill` via the **Agent tool** (one agent per dimension, visible to
+   the user), scoped to the plan's `changed_files`. Aggregate their findings
+   into one #558-schema JSON array file — the round's findings file.
+2. **One loop invocation.**
+
+   ```bash
+   "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
+     --work-dir <work-dir> --status-file <status.json> --issue <N> \
+     --findings-file <findings-round-R.json> \
+     --test-cmd '<full gate>' [--resume]
+   ```
+
+   `--resume` from round 2 on. On a `--resume` invocation the loop runs
+   `--test-cmd` — the **full** suite (unit **and** integration), never a
+   subset (#604) — FIRST, deterministically gating the previous round's
+   in-session fix: red exits `ERROR` (1), the same "red after a fix aborts"
+   rule as ever.
+3. **On `AWAITING_FIX` (exit 20)** — blockers remain and budget is left:
+   **narrate the round in the conversation** (round number; blockers found,
+   new vs carried; the dimensions they came from; what you fix next — the
+   same block the loop just appended to progress.md), then implement the
+   blockers from the status JSON's `final_changelist.blocking` exactly as
+   step 2 implements — Low suggestions never loop — re-run the full gate, and
+   go to 1 for the next round's panel.
+4. **On a terminal status**, take its branch below (`CONVERGED` → step 4;
+   escalations → *Escalation*).
+
+(Hook mode — `--review-cmd`/`--fix-cmd` — still exists as the bats test seam
+only. Never wire it to a headless `claude`.)
 
 Pass `--issue <N>` too: the loop appends one JSONL telemetry record per run to
 `.claude/telemetry/review-loop.jsonl` (git-ignored, #566) — evidence for
@@ -453,6 +480,9 @@ with a status JSON + code:
   dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
   suggestions, reviewers) lands in the PR body, with a hidden JSON block the
   Approver re-ingests (#563).
+- **`AWAITING_FIX` (20)** → not a verdict — the step-mode "narrate, fix
+  in-session, `--resume`" turn of the round protocol above. Never build an
+  escalation comment from it.
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
   *Escalation* below. Opening a PR here would spend CI on unconverged work.
@@ -514,9 +544,10 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
    $GUIDANCE"
    ```
 
-   Then resume (step 5) with a `--fix-cmd` that **re-reads the issue's
-   comments** as fix context (the readiness gate and escalation already read
-   comments — reuse that, do not invent an env side-channel).
+   Then resume (step 5): re-read the issue's comments during the pre-resume
+   in-session fix pass so the guidance becomes fix context (the readiness gate
+   and escalation already read comments — reuse that, do not invent an env
+   side-channel).
 
 5. **If they granted rounds** (with or without guidance): **first apply one fix
    pass, then resume.** The escalated round broke *before* its own fix pass ran
@@ -527,13 +558,14 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
    `final_changelist.blocking` (plus the guidance comment, when one was posted)
    and implement the fixes exactly as step 2 implements, re-run the step-3 gate
    — resume only once it is green; red follows §3's rule (fix it, or abandon and
-   report) — then resume the loop — same `--work-dir`, `--resume`, ceiling
-   raised by 2 — and increment `grants`:
+   report) — run the next round's panel in-session (round protocol step 1) to
+   produce its findings file, then resume the loop — same `--work-dir`,
+   `--resume`, ceiling raised by 2 — and increment `grants`:
 
    ```bash
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <same-work-dir> --resume --max-rounds <prev_max + 2> \
-     --review-cmd <cmd> --fix-cmd <guidance-aware cmd> --test-cmd <cmd> \
+     --findings-file <findings-round-R.json> --test-cmd '<full gate>' \
      --issue <N> --status-file <status.json>
    ```
 
