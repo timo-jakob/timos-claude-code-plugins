@@ -35,6 +35,10 @@
 #                    --resume, --test-cmd (when given) runs FIRST — it gates
 #                    the previous round's in-session fix; red exits ERROR (1).
 #
+# Telemetry note: an extended run (escalate -> grant -> --resume) appends one
+# record per terminal exit, each spanning from .t0 — so consecutive records of
+# one extended loop overlap and wall_s must not be summed across them.
+#
 # Hooks (run via the shell, with these env vars exported):
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
 #                 schema) to $REVIEW_FINDINGS. Also sees $REVIEW_ROUND,
@@ -97,7 +101,11 @@ while [[ $# -gt 0 ]]; do
   --telemetry-file) telemetry_file="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
   --resume) resume=1; shift ;;
-  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD) [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N] [--telemetry-file PATH] [--no-review]"; exit 0 ;;
+  -h|--help)
+    print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
+    print -r -- "  [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N]"
+    print -r -- "  [--telemetry-file PATH] [--no-review]"
+    exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
@@ -208,8 +216,10 @@ if (( step_mode )) && [[ -n "$review_cmd" || -n "$fix_cmd" ]]; then
   print -u2 -- "resolve-story-loop: --findings-file is mutually exclusive with --review-cmd/--fix-cmd"; exit 2
 fi
 if (( ! step_mode )); then
-  [[ -n "$review_cmd" ]] || { print -u2 -- "resolve-story-loop: --review-cmd is required (or use --findings-file / --no-review)"; exit 2 }
-  [[ -n "$fix_cmd" ]] || { print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --findings-file / --no-review)"; exit 2 }
+  [[ -n "$review_cmd" ]] || {
+    print -u2 -- "resolve-story-loop: --review-cmd is required (or use --findings-file / --no-review)"; exit 2 }
+  [[ -n "$fix_cmd" ]] || {
+    print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --findings-file / --no-review)"; exit 2 }
 fi
 # a non-positive/non-numeric ceiling would skip the loop entirely and fall out
 # with an empty status — refuse it up front as the usage error it is
@@ -318,7 +328,7 @@ fi
 # later iteration makes zsh PRINT the existing parameter to stdout, which would
 # corrupt the status JSON. Inside the loop we plain-assign only.
 local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
-local rp findings_path scoped changelist blockers
+local rp findings_path scoped scoped_filtered changelist blockers
 local blocking conflict nonconv nconf verdict
 local -a scope_lines
 while (( round <= max_rounds )); do
@@ -376,6 +386,15 @@ while (( round <= max_rounds )); do
   scoped="$work_dir/scoped-$round.json"
   "$DISPATCH" scope-findings --repo "$repo" --base "$base" --findings "$findings_path" > "$scoped" || {
     print -u2 -- "resolve-story-loop: scope-findings failed at round $round"; exit 1 }
+  # a repo-internal work-dir's own files are loop state, never story findings —
+  # the #909/#911 exclusion must hold in step mode too (final-review fix, #971)
+  if [[ -n "$wd_rel" ]]; then
+    scoped_filtered="$work_dir/.scoped-filtered-$round.json"
+    jq -c --arg wd "$wd_rel" '[ .[] | select(((.file // "") | sub("^\\./"; "")) | startswith($wd) | not) ]' \
+      "$scoped" > "$scoped_filtered" || {
+      print -u2 -- "resolve-story-loop: work-dir scope filter failed at round $round"; exit 1 }
+    mv "$scoped_filtered" "$scoped"
+  fi
 
   # 3. consolidate (#561), carrying the previous round for non-convergence
   changelist="$work_dir/changelist-$round.json"

@@ -215,3 +215,23 @@ seed_awaiting() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.wall_s >= 100' "$T")" = "true" ]
 }
+
+@test "an empty (zero-byte) findings file is treated as no findings (CONVERGED)" {
+  : > "$F"
+  step
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+}
+
+@test "step mode drops findings on the work-dir's own files (#909/#911 parity)" {
+  WDIN="$R/.loop-wd"
+  printf '%s' "$CRIT" > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F"
+  [ "$status" -eq 20 ]
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":".loop-wd/progress.md","line":1,"title":"phantom","description":"d","reviewer":"r"}]' > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F" --resume
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+}

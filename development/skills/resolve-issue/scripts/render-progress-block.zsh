@@ -26,6 +26,8 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$changelist" && -n "$round" && -n "$verdict" ]] || {
   print -u2 -- "usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT"; exit 2 }
+[[ "$round" == <-> ]] || {
+  print -u2 -- "render-progress-block: --round must be a positive integer (got: $round)"; exit 2 }
 [[ -s "$changelist" ]] || {
   print -u2 -- "render-progress-block: changelist missing or empty: $changelist"; exit 1 }
 

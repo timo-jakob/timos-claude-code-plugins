@@ -435,8 +435,9 @@ Each round:
 1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh
    plan`, §#560) and spawn the reviewers of the skill it names in
    `review_skill` via the **Agent tool** (one agent per dimension, visible to
-   the user), scoped to the plan's `changed_files`. Aggregate their findings
-   into one #558-schema JSON array file — the round's findings file.
+   the user), scoped to the plan's `changed_files` — minus anything under the
+   loop's `--work-dir`, which is loop state, never story code. Aggregate their
+   findings into one #558-schema JSON array file — the round's findings file.
 2. **One loop invocation.**
 
    ```bash
@@ -574,7 +575,10 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
    `ESCALATE_NO_CONVERGENCE` → go back to step 1 with the new status. On
    `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` → leave this branch and take the
    typed-comment terminal below (a resumed run can surface a different exit).
-   On an **operational error** (exit 1/2), the loop wrote either **no** new
+   On `AWAITING_FIX` (20) → continue the §3.5 round protocol (narrate, fix
+   in-session, re-run the gate, run the next panel, `--resume` with the same
+   raised `--max-rounds`) — no grant bookkeeping; the grant was already
+   counted. On an **operational error** (exit 1/2), the loop wrote either **no** new
    status (the file still holds the *previous* escalation) or a status
    `ERROR` (a red gate after a fix) — neither is a typed escalation, so never
    build a comment from the file: report the error in the conversation and

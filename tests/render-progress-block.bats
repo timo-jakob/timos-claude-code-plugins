@@ -82,3 +82,12 @@ EOF
   run zsh "$S" --changelist "$CL" --round 1 --verdict v
   [ "$status" -eq 1 ]
 }
+
+@test "a non-numeric --round is a usage error (exit 2), not a confusing jq failure" {
+  cat > "$CL" <<'EOF'
+{"round":1,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+ "blocking":[],"suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round abc --verdict v
+  [ "$status" -eq 2 ]
+}
