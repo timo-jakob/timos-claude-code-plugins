@@ -6,10 +6,15 @@
 # opened until this exits CONVERGED.
 #
 # The agentic steps — running the review panel and applying the implementor's
-# fix pass — are model-driven, so they are injected as HOOK COMMANDS. This keeps
-# the deterministic state machine (rounds, budget, consolidation, exit-state)
-# testable, and lets /development:resolve-issue wire the real panel/fix/test
-# commands (or a headless `claude -p`) behind the same seam.
+# fix pass — are model-driven. The canonical wiring is STEP MODE (#971): the
+# driving session runs the panel in-session (visible review agents), passes the
+# aggregate findings via --findings-file, and this script processes exactly ONE
+# round per invocation — exiting AWAITING_FIX (20) when blockers remain with
+# budget left, so the session applies the fixes in-session (visible edits) and
+# re-invokes with --resume. HOOK MODE (--review-cmd/--fix-cmd) remains as the
+# deterministic seam the bats suite drives the state machine through; wiring a
+# headless `claude -p` behind it is NOT a supported pattern — it hides the
+# whole loop from the user behind one opaque background task.
 #
 # Per-round flow:
 #   re-dispatch (fresh scope; ambiguous => ESCALATE_AMBIGUOUS, #912)
@@ -18,7 +23,21 @@
 #     -> surviving conflict     => ESCALATE_CONFLICT   (early exit)
 #     -> non_converging blocker => ESCALATE_NO_CONVERGENCE (early exit)
 #     -> last round + blockers  => BUDGET_EXHAUSTED
-#     -> else: fix pass (blockers only) -> re-run tests -> next round
+#     -> else: step mode        => AWAITING_FIX (fix in-session, --resume)
+#              hook mode        => fix pass -> re-run tests -> next round
+#
+# Every round also appends a human-readable block to $work_dir/progress.md
+# (#971) — the user tails it to watch a long run; writes are never fatal.
+#
+# Step mode:
+#   --findings-file  this round's aggregate findings JSON (issue #558 schema,
+#                    a flat array). Missing/empty file = "no findings". On
+#                    --resume, --test-cmd (when given) runs FIRST — it gates
+#                    the previous round's in-session fix; red exits ERROR (1).
+#
+# Telemetry note: an extended run (escalate -> grant -> --resume) appends one
+# record per terminal exit, each spanning from .t0 — so consecutive records of
+# one extended loop overlap and wall_s must not be summed across them.
 #
 # Hooks (run via the shell, with these env vars exported):
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
@@ -28,17 +47,22 @@
 #   --fix-cmd     applies the blockers. Sees $REVIEW_ROUND, $REVIEW_REPO,
 #                 $REVIEW_CHANGELIST (full changelist) and $REVIEW_BLOCKERS
 #                 (blockers-only slice). Expected to leave the tree buildable.
-#   --test-cmd    (optional) the repo gate, re-run after a fix; nonzero aborts
-#                 the loop as an operational error (exit 1), never a verdict.
+#   --test-cmd    the repo gate. Hook mode: re-run after each fix. Step mode:
+#                 run at --resume start (see above). Nonzero aborts the loop as
+#                 an operational error (exit 1), never a verdict.
 #
 # Usage:
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
-#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
-#       [--max-rounds N] [--status-file PATH] [--work-dir DIR]
+#       --findings-file FILE [--test-cmd CMD] [--resume] \
+#       [--max-rounds N] [--status-file PATH] [--work-dir DIR]    # step mode
+#   resolve-story-loop.zsh --repo PATH [--base REF] \
+#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] ...       # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path)
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
+#   20  AWAITING_FIX              (step mode only: blockers remain, budget
+#                                  left — fix in-session, then --resume)
 #   10  ESCALATE_AMBIGUOUS        (dispatch could not pick a panel — #560 —
 #                                  pre-loop or at any round's re-dispatch, #912)
 #   11  ESCALATE_CONFLICT         (a surviving reviewer conflict)
@@ -57,8 +81,9 @@ typeset -gra BLOCKING_SEVERITIES=(CRITICAL WARNING)   # == Critical + High
 local self_dir="${0:A:h}"
 local DISPATCH="${self_dir}/review-dispatch.zsh"
 local CONSOLIDATE="${self_dir}/consolidate-findings.zsh"
+local RENDER_PROGRESS="${self_dir}/render-progress-block.zsh"
 
-local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd=""
+local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0
 while [[ $# -gt 0 ]]; do
@@ -68,6 +93,7 @@ while [[ $# -gt 0 ]]; do
   --review-cmd) review_cmd="$2"; shift 2 ;;
   --fix-cmd) fix_cmd="$2"; shift 2 ;;
   --test-cmd) test_cmd="$2"; shift 2 ;;
+  --findings-file) findings_file="$2"; shift 2 ;;
   --max-rounds) max_rounds="$2"; shift 2 ;;
   --status-file) status_file="$2"; shift 2 ;;
   --work-dir) work_dir="$2"; shift 2 ;;
@@ -75,7 +101,11 @@ while [[ $# -gt 0 ]]; do
   --telemetry-file) telemetry_file="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
   --resume) resume=1; shift ;;
-  -h|--help) print -r -- "usage: resolve-story-loop.zsh --repo PATH --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N] [--telemetry-file PATH] [--no-review]"; exit 0 ;;
+  -h|--help)
+    print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
+    print -r -- "  [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N]"
+    print -r -- "  [--telemetry-file PATH] [--no-review]"
+    exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
@@ -110,17 +140,32 @@ emit_and_exit() {
   print -r -- "$out"
   [[ -n "$status_file" ]] && print -r -- "$out" > "$status_file"
 
-  # telemetry (#566): append exactly one JSONL record per run, to the explicit
+  # progress.md terminal line (#971) — non-fatal; AWAITING_FIX is not terminal.
+  # Same brace-group rationale as append_progress_round above: a redirection
+  # setup failure must not leak to the real stderr.
+  if [[ -n "$work_dir" && -d "$work_dir" && "$st" != "AWAITING_FIX" ]]; then
+    local reasons=""
+    [[ -n "$esc" && "$esc" != "[]" ]] && reasons=" — $(print -r -- "$esc" | jq -r 'join(", ")' 2>/dev/null)"
+    { print -r -- "**Final:** ${st}${reasons} ($(date +%H:%M:%S))" >> "$work_dir/progress.md" ; } 2>/dev/null || true
+  fi
+
+  # telemetry (#566): append exactly one JSONL record per LOOP — terminal
+  # statuses only, never the non-terminal AWAITING_FIX (#971) — to the explicit
   # --telemetry-file or the git-ignored default under the repo. Never fatal.
   local tfile="$telemetry_file"
   [[ -z "$tfile" && -n "$repo" ]] && tfile="${repo%/}/.claude/telemetry/review-loop.jsonl"
-  if [[ -n "$tfile" ]]; then
+  if [[ -n "$tfile" && "$st" != "AWAITING_FIX" ]]; then
+    local t_begin="$t0"
+    if [[ -n "$work_dir" && -s "$work_dir/.t0" ]]; then
+      t_begin=$(<"$work_dir/.t0")
+      [[ "$t_begin" == <-> ]] || t_begin="$t0"
+    fi
     local tmp_status; tmp_status=$(mktemp)
     print -r -- "$out" > "$tmp_status"
     mkdir -p "${tfile:h}"
     local -a issue_arg; [[ -n "$issue" ]] && issue_arg=(--issue "$issue")
     "${self_dir}/build-telemetry-record.zsh" --status "$tmp_status" \
-      "${issue_arg[@]}" --ts "$t0" --wall-s "$(( $(date +%s) - t0 ))" >> "$tfile" || true
+      "${issue_arg[@]}" --ts "$t_begin" --wall-s "$(( $(date +%s) - t_begin ))" >> "$tfile" || true
     rm -f "$tmp_status"
   fi
   exit "$code"
@@ -141,6 +186,20 @@ emit_ambiguous() {
   emit_and_exit "ESCALATE_AMBIGUOUS" "$rounds" 10 "$rtype" "$rskill" "$carrier" "$history_file" "$changelists_file"
 }
 
+# append one per-round block to the tail-able progress file (#971). Rendering
+# is render-progress-block.zsh (a testable pure function); transparency must
+# never abort a run, so every failure here is swallowed.
+append_progress_round() {
+  local cl="$1" r="$2" v="$3"
+  [[ -n "$work_dir" ]] || return 0
+  # the append target's OWN open failure (e.g. a directory sits at the path)
+  # is a shell-level redirection error, reported on the CURRENT stderr before
+  # the trailing `2>/dev/null` would apply to it — brace-group it so the
+  # 2>/dev/null covers the redirection setup too, not just the command (#971).
+  { "$RENDER_PROGRESS" --changelist "$cl" --round "$r" --verdict "$v" \
+    >> "$work_dir/progress.md" ; } 2>/dev/null || true
+}
+
 # --no-review is the fast path — it short-circuits before any other requirement.
 if (( no_review )); then
   emit_and_exit "SKIPPED" 0 0 "" "" "" "" ""
@@ -148,8 +207,20 @@ fi
 
 [[ -n "$repo" ]] || { print -u2 -- "resolve-story-loop: --repo is required"; exit 2 }
 [[ -d "$repo" ]] || { print -u2 -- "resolve-story-loop: --repo not a directory: $repo"; exit 1 }
-[[ -n "$review_cmd" ]] || { print -u2 -- "resolve-story-loop: --review-cmd is required (or use --no-review)"; exit 2 }
-[[ -n "$fix_cmd" ]] || { print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --no-review)"; exit 2 }
+# Step mode (#971): --findings-file replaces BOTH model-driven hooks — the
+# driving session runs the panel and the fix pass in-session, one round per
+# invocation. Mixing the two wirings is a contradiction, not a fallback.
+local step_mode=0
+[[ -n "$findings_file" ]] && step_mode=1
+if (( step_mode )) && [[ -n "$review_cmd" || -n "$fix_cmd" ]]; then
+  print -u2 -- "resolve-story-loop: --findings-file is mutually exclusive with --review-cmd/--fix-cmd"; exit 2
+fi
+if (( ! step_mode )); then
+  [[ -n "$review_cmd" ]] || {
+    print -u2 -- "resolve-story-loop: --review-cmd is required (or use --findings-file / --no-review)"; exit 2 }
+  [[ -n "$fix_cmd" ]] || {
+    print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --findings-file / --no-review)"; exit 2 }
+fi
 # a non-positive/non-numeric ceiling would skip the loop entirely and fall out
 # with an empty status — refuse it up front as the usage error it is
 [[ "$max_rounds" == <-> ]] && (( max_rounds >= 1 )) || {
@@ -210,6 +281,19 @@ if (( resume )); then
 else
   : > "$history_file"
   : > "$changelists_file"
+  # the loop's logical start — a step-mode run spans several invocations, and
+  # the terminal telemetry must report whole-loop wall clock, not the last
+  # round's (#971)
+  print -r -- "$t0" > "$work_dir/.t0"
+fi
+
+# Step mode gates the PREVIOUS round's in-session fix here (#971): the fix ran
+# between invocations, so the "red after a fix aborts" check runs at resume
+# start — deterministically, before any new round work.
+if (( step_mode && resume )) && [[ -n "$test_cmd" ]]; then
+  ( cd "$repo" && eval "$test_cmd" ) || {
+    print -u2 -- "resolve-story-loop: --test-cmd red on --resume (prior round's fix broke the gate)"
+    emit_and_exit "ERROR" "$resume_round" 1 "" "" "$resume_prev" "$history_file" "$changelists_file" }
 fi
 
 # --- dispatch: which panel, on what scope (typed escalation on failure) -----
@@ -244,8 +328,8 @@ fi
 # later iteration makes zsh PRINT the existing parameter to stdout, which would
 # corrupt the status JSON. Inside the loop we plain-assign only.
 local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
-local rp findings_path scoped changelist blockers
-local blocking conflict nonconv nconf
+local rp findings_path scoped scoped_filtered changelist blockers
+local blocking conflict nonconv nconf verdict
 local -a scope_lines
 while (( round <= max_rounds )); do
   # per-round dispatch: the round's well-known findings path AND a fresh scope
@@ -280,17 +364,37 @@ while (( round <= max_rounds )); do
   mkdir -p "${findings_path:h}"
   : > "$findings_path"
 
-  # 1. run the review panel (hook) — it writes findings_path
-  ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
-           REVIEW_SKILL="$review_skill" REVIEW_SCOPE_FILE="$scope_file" \
-           REVIEW_REPO="$repo"; eval "$review_cmd" ) || {
-    print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
+  # 1. obtain this round's findings: step mode consumes --findings-file (the
+  # session already ran the panel in-session, #971); hook mode runs the
+  # injected panel command
+  if (( step_mode )); then
+    if [[ -s "$findings_file" ]]; then
+      jq -e 'type=="array"' "$findings_file" >/dev/null 2>&1 || {
+        print -u2 -- "resolve-story-loop: --findings-file is not a JSON array: $findings_file"; exit 1 }
+      cp "$findings_file" "$findings_path" || {
+        print -u2 -- "resolve-story-loop: could not copy --findings-file"; exit 1 }
+    fi
+  else
+    ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
+             REVIEW_SKILL="$review_skill" REVIEW_SCOPE_FILE="$scope_file" \
+             REVIEW_REPO="$repo"; eval "$review_cmd" ) || {
+      print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
+  fi
   [[ -s "$findings_path" ]] || print -r -- '[]' > "$findings_path"
 
   # 2. scope findings to the story's diff (#560)
   scoped="$work_dir/scoped-$round.json"
   "$DISPATCH" scope-findings --repo "$repo" --base "$base" --findings "$findings_path" > "$scoped" || {
     print -u2 -- "resolve-story-loop: scope-findings failed at round $round"; exit 1 }
+  # a repo-internal work-dir's own files are loop state, never story findings —
+  # the #909/#911 exclusion must hold in step mode too (final-review fix, #971)
+  if [[ -n "$wd_rel" ]]; then
+    scoped_filtered="$work_dir/.scoped-filtered-$round.json"
+    jq -c --arg wd "$wd_rel" '[ .[] | select(((.file // "") | sub("^\\./"; "")) | startswith($wd) | not) ]' \
+      "$scoped" > "$scoped_filtered" || {
+      print -u2 -- "resolve-story-loop: work-dir scope filter failed at round $round"; exit 1 }
+    mv "$scoped_filtered" "$scoped"
+  fi
 
   # 3. consolidate (#561), carrying the previous round for non-convergence
   changelist="$work_dir/changelist-$round.json"
@@ -311,11 +415,25 @@ while (( round <= max_rounds )); do
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
      '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1)}' <<< '{}' >> "$history_file"
 
-  # 4. decide the round's fate
-  if (( blocking == 0 )); then loop_status="CONVERGED"; break; fi
-  if (( conflict == 1 )); then loop_status="ESCALATE_CONFLICT"; break; fi
-  if (( nonconv == 1 )); then loop_status="ESCALATE_NO_CONVERGENCE"; break; fi
-  if (( round == max_rounds )); then loop_status="BUDGET_EXHAUSTED"; break; fi
+  # 4. decide the round's fate. In step mode a survivable round (blockers,
+  # budget left) exits AWAITING_FIX (20): the fix pass is the driving session's
+  # job, in-session, before it re-invokes with --resume (#971).
+  if (( blocking == 0 )); then loop_status="CONVERGED"
+  elif (( conflict == 1 )); then loop_status="ESCALATE_CONFLICT"
+  elif (( nonconv == 1 )); then loop_status="ESCALATE_NO_CONVERGENCE"
+  elif (( round == max_rounds )); then loop_status="BUDGET_EXHAUSTED"
+  elif (( step_mode )); then loop_status="AWAITING_FIX"
+  fi
+  case "$loop_status" in
+    CONVERGED) verdict="converged" ;;
+    ESCALATE_CONFLICT) verdict="escalating (unresolved conflict)" ;;
+    ESCALATE_NO_CONVERGENCE) verdict="escalating (non-converging blocker)" ;;
+    BUDGET_EXHAUSTED) verdict="budget exhausted" ;;
+    AWAITING_FIX) verdict="awaiting fix — apply blockers in-session, then --resume" ;;
+    *) verdict="fix pass (in-loop), continuing" ;;
+  esac
+  append_progress_round "$changelist" "$round" "$verdict"
+  if [[ -n "$loop_status" ]]; then break; fi
 
   # 5. fix pass — blockers only (Low suggestions never loop)
   blockers="$work_dir/blockers-$round.json"
@@ -338,6 +456,7 @@ done
 local code
 case "$loop_status" in
   CONVERGED) code=0 ;;
+  AWAITING_FIX) code=20 ;;
   ESCALATE_CONFLICT) code=11 ;;
   ESCALATE_NO_CONVERGENCE) code=12 ;;
   BUDGET_EXHAUSTED) code=13 ;;

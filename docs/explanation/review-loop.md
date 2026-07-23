@@ -10,7 +10,9 @@ on work that still has open review blockers.
 Each round, scoped to the story's diff:
 
 1. **Review** — a language-appropriate reviewer panel inspects the change and
-   emits findings (bugs, security, performance, code quality, tests).
+   emits findings (bugs, security, performance, code quality, tests). The
+   panel runs as visible in-session agents, never as a hidden background
+   process.
 2. **Consolidate** — findings are de-duplicated and split into **blockers**
    (Critical + High) and **Low suggestions**. Only blockers drive the loop; Low
    suggestions are logged, never looped on.
@@ -20,6 +22,26 @@ Each round, scoped to the story's diff:
 
 The loop repeats until it **converges** — a round with **zero blockers**. Low
 suggestions remaining is still converged.
+
+## Watching it run
+
+The loop is transparent by construction. Earlier versions allowed the
+model-driven steps to run inside headless `claude -p` hooks, which put a whole
+multi-round loop behind a single opaque background task — you saw nothing
+until it exited. The loop now runs in **step mode**: the driving session
+processes one round per loop invocation, so everything model-driven happens in
+the session where you can see it.
+
+- **Review agents are visible** — each round's panel is spawned in-session,
+  one named agent per review dimension, so the terminal shows who is
+  reviewing what.
+- **A narrated summary per round** — after each round the session reports the
+  blockers found (new vs carried), the dimensions they came from, and what it
+  fixes next.
+- **A tail-able progress file** — the loop appends the same summary to a
+  `progress.md` in its work directory (the run tells you the exact path when
+  the loop starts); `tail -f` it from another terminal to follow a long run.
+  The file survives the session.
 
 ## The round budget and how it can end
 
