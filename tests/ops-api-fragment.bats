@@ -28,6 +28,19 @@ setup() {
   grep -qE '^\s+/metrics:' "$FRAG"
 }
 
+@test "fragment splits liveness and readiness as distinct probes (#688)" {
+  grep -qE '^\s+/health/live:' "$FRAG"
+  grep -qE '^\s+/health/ready:' "$FRAG"
+  grep -q 'operationId: getLiveness' "$FRAG"
+  grep -q 'operationId: getReadiness' "$FRAG"
+}
+
+@test "fragment declares the internal management-port trust model (#688)" {
+  grep -qi 'management port' "$FRAG"
+  # /info minimal-by-contract: no framework/server/OS version disclosure
+  grep -qiE 'MUST NOT expose (framework|.*framework)' "$FRAG"
+}
+
 @test "version triangle: info.version 1.x and servers /v1" {
   grep -qE 'version:\s*"1\.' "$FRAG"
   grep -qE 'url:\s*/v1' "$FRAG"

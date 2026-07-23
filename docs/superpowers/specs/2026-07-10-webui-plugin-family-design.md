@@ -223,10 +223,33 @@ Every backend service exposes one org-standard ops surface, defined as a
 - **`/info`** — build version, git SHA, and **which API majors are served
   with their lifecycle state + sunset dates**. Makes the deprecation
   machinery observable; the composition repo's E2E asserts the right
-  versions are live.
-- **`/health`** — liveness/readiness; consumed as probes by the
-  composition repo's manifests.
+  versions are live. **Minimal by contract** — never framework/server/OS/
+  dependency versions (an information-disclosure surface).
+- **`/health`** — human/dashboard-facing **aggregate** health (not a probe
+  target).
+- **`/health/live`** — Kubernetes **liveness** (process only, dependency-
+  free — a failing liveness restarts the pod, so it must never check a
+  dependency or a transient outage becomes a restart storm).
+- **`/health/ready`** — Kubernetes **readiness** (dependency checks live
+  here — a failing readiness sheds traffic without a restart).
 - **`/metrics`** — Prometheus/OpenMetrics format (see below).
+
+> **Amended 2026-07-23** (issue #688 review): the original design lumped
+> `/health` as "liveness/readiness". Split into a human aggregate plus
+> distinct `/health/live` and `/health/ready`, because one endpoint cannot
+> drive both K8s probes without the liveness-checks-dependencies anti-pattern.
+
+**Trust boundary — an internal management surface, not per-endpoint auth.**
+The whole surface is served on a separate **management port**, never the
+public app port, so `/info`'s build data is unreachable externally with no
+per-endpoint auth (auth is a poor fit for probes the kubelet must reach
+cheaply). The service provides the *seam* (the management port + minimal
+`/info` + distinct probes); the **deployment layer** — the composition
+repo, epics #687/#719/#720 — draws the *boundary*: a `NetworkPolicy`
+restricting the management port to the kubelet + monitoring namespace, a
+`Service`/`Ingress` exposing only the app port, and the liveness/readiness
+probe wiring. Reserve
+in-cluster confidentiality (mTLS/mesh) for when the threat model needs it.
 
 **Telemetry decision — OpenTelemetry only, at the instrumentation layer:**
 
@@ -242,10 +265,14 @@ Every backend service exposes one org-standard ops surface, defined as a
   franca. Developers make zero choices.
 
 Per the language-first principle: Spring gets the surface via
-Actuator/Micrometer (config only; Micrometer maps to OTel semantic
-conventions) — `spring-config-advisor` gains a conforms-to-ops-api check.
-Every other language plugin owns its canonical implementation of the same
-fragment. Ops endpoints stay internal — never published as APIM products.
+Actuator/Micrometer (mostly config — a management port, health probes,
+base-path/path remaps, `micrometer-registry-prometheus`, an `InfoContributor`
+— plus a small custom health representation, since Actuator's `/actuator/health`
+returns `{"status":"UP"}` and the fragment requires `{"status":"ok"}`;
+Micrometer maps to OTel semantic conventions) — `spring-config-advisor` gains a
+conforms-to-ops-api check that states these specifics. Every other language
+plugin owns its canonical implementation of the same fragment. Ops endpoints
+stay internal — never published as APIM products.
 
 ## 6. Testing — disjoint by construction
 

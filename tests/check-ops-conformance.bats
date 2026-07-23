@@ -20,7 +20,8 @@ setup() {
   export OPS_STUB_DIR="$STUB_DIR"
 
   # Stub curl: honours the checker's `-o <file>` and `-w '%{http_code}\t%{content_type}'`,
-  # keying the response off the URL's final path segment (info|health|metrics)
+  # keying the response off the URL's final path segment (info | health | live |
+  # ready | metrics — /health/live and /health/ready reduce to live/ready)
   # against files <ep>.code / <ep>.ct / <ep>.body in $OPS_STUB_DIR.
   local stub="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$stub"
@@ -51,6 +52,8 @@ EOS
   serve info 200 'application/json' \
     '{"build":{"version":"1.4.2","git_sha":"9f3c2ab"},"api":[{"major":2,"lifecycle":"active"}]}'
   serve health 200 'application/json' '{"status":"ok"}'
+  serve live 200 'application/json' '{"status":"ok"}'
+  serve ready 200 'application/json' '{"status":"ok"}'
   serve metrics 200 'text/plain; version=0.0.4' \
     'http_server_request_duration_seconds_bucket{le="0.1"} 1'
 }
@@ -64,12 +67,28 @@ serve() {
 
 run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
 
-@test "happy: fully conformant service -> exit 0, all three PASS" {
+@test "happy: fully conformant service -> exit 0, all five PASS" {
   run_check
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q '/info    PASS'
-  echo "$output" | grep -q '/health  PASS'
-  echo "$output" | grep -q '/metrics PASS'
+  echo "$output" | grep -qE '/info +PASS'
+  echo "$output" | grep -qE '/health +PASS'
+  echo "$output" | grep -qE '/health/live +PASS'
+  echo "$output" | grep -qE '/health/ready +PASS'
+  echo "$output" | grep -qE '/metrics +PASS'
+}
+
+@test "error: /health/live 503 -> non-zero, names /health/live" {
+  serve live 503 'application/json' '{"status":"down"}'
+  run_check
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '/health/live'
+}
+
+@test "error: /health/ready 503 -> non-zero, names /health/ready" {
+  serve ready 503 'application/json' '{"status":"down"}'
+  run_check
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q '/health/ready'
 }
 
 @test "corner: two majors, one deprecated with sunset -> exit 0" {

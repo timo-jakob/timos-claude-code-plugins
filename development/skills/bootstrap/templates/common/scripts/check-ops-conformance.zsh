@@ -2,19 +2,23 @@
 # check-ops-conformance.zsh — verify a running service exposes the org-standard
 # ops surface, in one command (epic #682, design §5; issue #688).
 #
-# Curls a live service's /info, /health, and /metrics and validates them against
-# the ops-api/v1 fragment's shapes:
+# The BASE URL is the service's internal MANAGEMENT base (e.g.
+# http://localhost:9090) — the ops surface is served on a separate management
+# port, never the public app port. Curls the ops endpoints and validates them
+# against the ops-api/v1 fragment's shapes:
 #
-#   /info    — 200 + JSON: build.version, build.git_sha, and an api[] table where
-#              every entry has an integer major and a lifecycle of active|deprecated;
-#              a DEPRECATED major MUST carry a sunset date (RFC 8594), an active one
-#              need not.
-#   /health  — 200 + JSON with status "ok".
-#   /metrics — 200 + a Prometheus/OpenMetrics exposition content type
-#              (text/plain or application/openmetrics-text — both accepted).
+#   /info         — 200 + JSON: build.version, build.git_sha, and an api[] table
+#                   where every entry has an integer major and a lifecycle of
+#                   active|deprecated; a DEPRECATED major MUST carry a sunset date
+#                   (RFC 8594), an active one need not.
+#   /health       — 200 + JSON status "ok" (aggregate, human-facing).
+#   /health/live  — 200 + JSON status "ok" (K8s liveness — process only).
+#   /health/ready — 200 + JSON status "ok" (K8s readiness — dependencies).
+#   /metrics      — 200 + a Prometheus/OpenMetrics exposition content type
+#                   (text/plain or application/openmetrics-text — both accepted).
 #
-# Exit 0 when all three conform; non-zero (1) otherwise, with each failure naming
-# the offending path and reason on stderr. Usage/tooling errors exit 2.
+# Exit 0 when all conform; non-zero (1) otherwise, with each failure naming the
+# offending path and reason on stderr. Usage/tooling errors exit 2.
 #
 # The HTTP client is `curl`; tests stub it on PATH (the repo's stub-on-PATH
 # convention), so this script's decision logic is exercised without a live server.
@@ -139,17 +143,20 @@ check_info() {
   done < <(jq -c '.api[]?' "$BODY_FILE" 2>/dev/null)
 }
 
-# ---- /health ---------------------------------------------------------------
-check_health() {
-  local url="$BASE/health"
+# ---- /health, /health/live, /health/ready ----------------------------------
+# check_status_endpoint <ep> — a health-style endpoint: 200 + JSON status "ok".
+# NB: the parameter must NOT be named `path` — in zsh `path` is the special array
+# tied to $PATH, and clobbering it breaks command lookup (env can't find bash).
+check_status_endpoint() {
+  local ep="$1" url="$BASE$1"
   if ! fetch "$url"; then
-    fail "/health: unreachable at $url"; return
+    fail "${ep}: unreachable at $url"; return
   fi
   if [[ "$HTTP_CODE" != "200" ]]; then
-    fail "/health: expected HTTP 200, got $HTTP_CODE"; return
+    fail "${ep}: expected HTTP 200, got $HTTP_CODE"; return
   fi
   jq -e '.status == "ok"' "$BODY_FILE" >/dev/null 2>&1 \
-    || fail "/health: expected JSON status \"ok\""
+    || fail "${ep}: expected JSON status \"ok\""
 }
 
 # ---- /metrics --------------------------------------------------------------
@@ -170,7 +177,9 @@ check_metrics() {
 }
 
 check_info
-check_health
+check_status_endpoint /health
+check_status_endpoint /health/live
+check_status_endpoint /health/ready
 check_metrics
 
 if (( ${#failures} > 0 )); then
@@ -179,7 +188,9 @@ if (( ${#failures} > 0 )); then
 fi
 
 print -- "ops conformance PASSED at $BASE"
-print -- "  /info    PASS"
-print -- "  /health  PASS"
-print -- "  /metrics PASS"
+print -- "  /info         PASS"
+print -- "  /health       PASS"
+print -- "  /health/live  PASS"
+print -- "  /health/ready PASS"
+print -- "  /metrics      PASS"
 exit 0

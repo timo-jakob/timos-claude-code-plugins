@@ -328,17 +328,28 @@ accordingly — it never flags a repo that ships no ops fragment. Design:
 
 - **The fragment is a contract artifact** — `/info` (build + the served API
   majors with lifecycle state and, once deprecated, a sunset date, making the
-  #684 deprecation machinery observable), `/health` (probes the composition repo
-  consumes), and `/metrics` (Prometheus/OpenMetrics exposition). It rides the
-  same machinery as the business contract: `contracts-lint` (Spectral) and
-  `contracts-semver` (oasdiff) discover `contracts/ops/v[0-9]*/openapi.yaml`, so
-  a breaking change to the ops surface is a new ops major, never an in-place
-  edit. Ops endpoints stay **internal** — never published as APIM products.
+  #684 deprecation machinery observable), `/health` (human-facing aggregate),
+  **`/health/live` (K8s liveness — process only) and `/health/ready` (K8s
+  readiness — dependencies) as distinct probes** (a single endpoint can't drive
+  both without the liveness-checks-dependencies restart-storm anti-pattern), and
+  `/metrics` (Prometheus/OpenMetrics exposition). It rides the same machinery as
+  the business contract: `contracts-lint` (Spectral) and `contracts-semver`
+  (oasdiff) discover `contracts/ops/v[0-9]*/openapi.yaml`, so a breaking change
+  to the ops surface is a new ops major, never an in-place edit.
+- **The surface is internal, on a management port.** It is served on a separate
+  **management port** (not the public app port), and `/info` is minimal by
+  contract (build + API lifecycle only — never framework/server/OS versions), so
+  build data is unreachable externally without per-endpoint auth. Enforcing the
+  boundary — a `NetworkPolicy` restricting the management port to the kubelet +
+  monitoring namespace, a `Service` exposing only the app port, and the probe
+  wiring — is the **deployment layer's** job (the composition repo, #687/#719/
+  #720): the service provides the seam, the platform draws the boundary. Ops
+  endpoints are never published as APIM products.
 - **Conformance is mechanical.** `scripts/check-ops-conformance.zsh` curls a
-  running service and validates the three endpoints against the fragment's
-  shapes (including the deprecated-major-needs-sunset rule); bootstrap wires it
-  as a standalone `ops-conformance` CI job (independent of epic #704's rest
-  harness).
+  running service's management base URL and validates the endpoints against the
+  fragment's shapes (including the deprecated-major-needs-sunset rule); bootstrap
+  wires it as a standalone `ops-conformance` CI job (independent of epic #704's
+  rest harness).
 - **Instrumentation is OpenTelemetry-only.** The org-wide rule: instrument with
   the **OTel SDK + OTel semantic conventions, exclusively** — one vocabulary
   across every language, covering traces and metrics without a second system.

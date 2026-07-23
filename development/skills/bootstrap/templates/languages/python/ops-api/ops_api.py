@@ -11,11 +11,21 @@ pipeline; ``/metrics`` is the mandatory pull-compat surface, served here by the
 OTel SDK's Prometheus exporter (``PrometheusMetricReader`` feeds the
 ``prometheus_client`` registry — a config wiring, not a second metrics system).
 
+Endpoints: ``/info``, ``/health`` (aggregate), ``/health/live`` (K8s liveness —
+process only, dependency-free), ``/health/ready`` (K8s readiness — plug your
+dependency check via ``OpsConfig.readiness``), and ``/metrics``.
+
+This is an INTERNAL management surface: it binds a separate MANAGEMENT PORT
+(default 9090), never the public app port, so ``/info``'s build data is
+unreachable from outside without any per-endpoint auth. The network boundary
+(NetworkPolicy + a Service that exposes only the app port, and the liveness/
+readiness probe wiring) is the deployment layer's job (the composition repo).
+
 Placement: drop this module into your package (e.g. ``src/<pkg>/ops_api.py``) and
 run ``python -m <pkg>.ops_api`` as a lightweight ops sidecar, or mount
-``OpsHandler`` on your existing server. Declare the API majors your service
-serves via ``served_majors`` — the /info lifecycle table is what makes the epic
-#684 deprecation machinery observable.
+``OpsHandler`` on your existing server's management port. Declare the API majors
+your service serves via ``served_majors`` — the /info lifecycle table is what
+makes the epic #684 deprecation machinery observable.
 
 Requires: opentelemetry-sdk, opentelemetry-exporter-prometheus, prometheus-client
 (see requirements.txt beside this file).
@@ -27,7 +37,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Literal
+from typing import Callable, Literal
 
 from opentelemetry import metrics
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
@@ -62,11 +72,18 @@ class ApiMajor:
 
 @dataclass
 class OpsConfig:
-    """What the service reports on /info. Build fields default to env stamps."""
+    """What the service reports on /info, and how readiness is decided.
+
+    ``readiness`` is the dependency check behind /health/ready (and the /health
+    aggregate) — the default is always-ready; plug your datastore/downstream
+    check here. Liveness is deliberately NOT configurable: it reflects only that
+    the process is serving, and must never check a dependency.
+    """
 
     version: str = field(default_factory=lambda: os.environ.get("BUILD_VERSION", "0.0.0"))
     git_sha: str = field(default_factory=lambda: os.environ.get("GIT_SHA", "unknown"))
     served_majors: tuple[ApiMajor, ...] = (ApiMajor(major=1, lifecycle="active"),)
+    readiness: Callable[[], bool] = field(default=lambda: True)
 
     def info_payload(self) -> dict[str, object]:
         return {
@@ -104,23 +121,32 @@ class OpsHandler(BaseHTTPRequestHandler):
         self._send(code, "application/json", json.dumps(payload).encode("utf-8"))
 
     def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler contract)
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
-        if path == "/info":
+        route = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if route == "/info":
             self._json(200, self.config.info_payload())
-        elif path == "/health":
+        elif route == "/health/live":
+            # Liveness: the process is serving this request, so it is alive.
+            # Deliberately dependency-free — a failing liveness restarts the pod.
             self._json(200, {"status": "ok"})
-        elif path == "/metrics":
+        elif route in ("/health/ready", "/health"):
+            # Readiness (and the human aggregate): can we serve traffic? A failing
+            # readiness sheds traffic without a restart. 503 => not ready.
+            ready = self.config.readiness()
+            self._json(200 if ready else 503, {"status": "ok" if ready else "down"})
+        elif route == "/metrics":
             self._send(200, CONTENT_TYPE_LATEST, generate_latest(REGISTRY))
         else:
-            self._json(404, {"error": "not found", "path": path})
+            self._json(404, {"error": "not found", "path": route})
 
     def log_message(self, *_args: object) -> None:  # silence default stderr logging
         return
 
 
-def serve(host: str = "0.0.0.0", port: int = 8080, config: OpsConfig | None = None) -> None:  # noqa: S104
-    """Run the ops surface. Binds all interfaces so the container health probe
-    and the ops-conformance job can reach it."""
+def serve(host: str = "0.0.0.0", port: int = 9090, config: OpsConfig | None = None) -> None:  # noqa: S104
+    """Run the ops surface on the MANAGEMENT port (default 9090 — never the public
+    app port). Binds all interfaces so the kubelet's probes and the
+    ops-conformance job can reach it; the network boundary is enforced by the
+    deployment (NetworkPolicy + a Service that omits this port)."""
     install_metrics()
     if config is not None:
         OpsHandler.config = config
@@ -128,4 +154,4 @@ def serve(host: str = "0.0.0.0", port: int = 8080, config: OpsConfig | None = No
 
 
 if __name__ == "__main__":
-    serve(port=int(os.environ.get("OPS_PORT", "8080")))
+    serve(port=int(os.environ.get("OPS_PORT", "9090")))

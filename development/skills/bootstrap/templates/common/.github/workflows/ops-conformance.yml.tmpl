@@ -35,10 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # The base URL the ops surface is served at. The canonical container maps
-      # its ops port to 8080; override here if your service differs.
-      OPS_BASE_URL: "http://localhost:8080"
-      OPS_PORT: "8080"
+      # The ops surface is served on the internal MANAGEMENT port (default 9090),
+      # never the public app port — so /info is unreachable externally. The
+      # container maps its management port to 9090; override if your service
+      # differs.
+      OPS_BASE_URL: "http://localhost:9090"
+      OPS_PORT: "9090"
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -56,16 +58,16 @@ jobs:
           set -euo pipefail
           docker run -d --name ops-svc -p "${OPS_PORT}:${OPS_PORT}" ops-conformance-svc
 
-      - name: Wait for /health
+      - name: Wait for readiness
         run: |
           set -euo pipefail
           for i in $(seq 1 30); do
-            if curl -fsS -m 2 "${OPS_BASE_URL}/health" >/dev/null 2>&1; then
-              echo "service is up after ${i} attempt(s)"; exit 0
+            if curl -fsS -m 2 "${OPS_BASE_URL}/health/ready" >/dev/null 2>&1; then
+              echo "service is ready after ${i} attempt(s)"; exit 0
             fi
             sleep 2
           done
-          echo "::error::service did not become healthy at ${OPS_BASE_URL}/health"
+          echo "::error::service did not become ready at ${OPS_BASE_URL}/health/ready"
           docker logs ops-svc || true
           exit 1
 

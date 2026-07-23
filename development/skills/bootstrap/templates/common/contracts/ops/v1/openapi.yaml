@@ -20,16 +20,30 @@ info:
   title: Ops API
   version: "1.0.0"
   description: >
-    The org-standard operations surface every backend service exposes: /info
-    (build + served API majors with lifecycle and sunset), /health (probes),
-    and /metrics (Prometheus/OpenMetrics exposition). Instrumentation is
+    The org-standard operations surface every backend service exposes:
+    /info (build + served API majors with lifecycle and sunset),
+    /health (human-facing aggregate), /health/live (K8s liveness — process
+    only, dependency-free), /health/ready (K8s readiness — dependencies), and
+    /metrics (Prometheus/OpenMetrics exposition). Instrumentation is
     OpenTelemetry-only; /metrics is the mandatory pull-compat surface served by
     the OTel SDK's Prometheus exporter.
+
+
+    TRUST MODEL — this is an INTERNAL management surface. It MUST be served on a
+    separate management port (never the public app port), so /info's build data
+    is unreachable from outside without any per-endpoint auth. Network
+    enforcement (a NetworkPolicy restricting the management port to the kubelet +
+    the monitoring namespace, and a Service/Ingress that exposes only the app
+    port) is the deployment layer's job (the composition repo, #687/#719/#720),
+    not this contract's. /info is minimal BY CONTRACT — build version, git SHA,
+    and the API-major lifecycle table only; it MUST NOT expose framework, server,
+    OS, or dependency versions.
 servers:
   - url: /v1
     description: >
-      Ops API major v1. The URL major segment MUST match info.version's major
-      (1). The surface is internal — never fronted by the APIM gateway.
+      Ops API major v1, served on the internal MANAGEMENT PORT (not the public
+      app port). The URL major segment MUST match info.version's major (1). The
+      surface is never fronted by the APIM gateway.
 tags:
   - name: ops
     description: The standardized operations surface (/info, /health, /metrics).
@@ -53,14 +67,64 @@ paths:
   /health:
     get:
       operationId: getHealth
-      summary: Liveness/readiness probe.
+      summary: Aggregate health (human/dashboard-facing).
       description: >
-        Returns the service health status, consumed as a probe by the
-        composition repo's deployment manifests.
+        Overall service health for humans and dashboards — 200 when the service
+        is healthy. NOT a Kubernetes probe target: liveness and readiness are
+        distinct (see /health/live and /health/ready), because a single health
+        endpoint cannot drive both without the liveness-checks-dependencies
+        anti-pattern (a transient dependency blip restarting every pod).
       tags: ["ops"]
       responses:
         "200":
           description: The service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /health/live:
+    get:
+      operationId: getLiveness
+      summary: Kubernetes liveness probe.
+      description: >
+        Is the process wedged and in need of a restart? MUST be cheap and
+        DEPENDENCY-FREE — it reflects only the process itself. A failing
+        liveness makes the kubelet restart the pod, so it must never check a
+        database or downstream service (that would turn a transient outage into
+        a restart storm). Wire it to the container's livenessProbe.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: The process is not alive and should be restarted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /health/ready:
+    get:
+      operationId: getReadiness
+      summary: Kubernetes readiness probe.
+      description: >
+        Can the service accept traffic right now? This is where dependency
+        checks (datastore, downstream services) belong. A failing readiness
+        removes the pod from the Service endpoints (no traffic) WITHOUT
+        restarting it. Wire it to the container's readinessProbe.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The service is ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: The service is not ready to accept traffic.
           content:
             application/json:
               schema:
@@ -142,10 +206,12 @@ components:
         required: ["sunset"]
     Health:
       type: object
-      description: Health status envelope.
+      description: >
+        Health status envelope, shared by /health, /health/live, and
+        /health/ready. A 200 response carries status "ok"; a 503 carries "down".
       required: ["status"]
       properties:
         status:
           type: string
-          description: Health indicator.
-          enum: ["ok"]
+          description: Health indicator — "ok" on a 200, "down" on a 503.
+          enum: ["ok", "down"]

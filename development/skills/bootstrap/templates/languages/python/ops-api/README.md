@@ -1,31 +1,40 @@
 # Canonical ops-api implementation (Python, non-Spring) — #688
 
 The blessed Python realization of the org-standard ops surface defined by
-`contracts/ops/v1/openapi.yaml`: `/info`, `/health`, `/metrics`. It conforms to
-the same fragment Spring services get via Actuator, and passes
-`scripts/check-ops-conformance.zsh` unchanged.
+`contracts/ops/v1/openapi.yaml`: `/info`, `/health`, `/health/live`,
+`/health/ready`, `/metrics`. It conforms to the same fragment Spring services get
+via Actuator, and passes `scripts/check-ops-conformance.zsh` unchanged.
+
+It binds a separate **management port** (default `9090`), never the public app
+port — so `/info`'s build data is unreachable from outside. Enforcing that
+boundary (NetworkPolicy + a Service that omits the management port + the probe
+wiring) is the deployment layer's job (the composition repo).
 
 ## Placement
 
 Drop `ops_api.py` into your package (e.g. `src/<pkg>/ops_api.py`) and add the
 dependencies from `requirements.txt` to your project. Run it as a lightweight
-ops surface:
+ops surface on the management port:
 
 ```bash
 BUILD_VERSION="$(git describe --tags --always)" GIT_SHA="$(git rev-parse HEAD)" \
-  python -m <pkg>.ops_api          # serves on :8080 (override with OPS_PORT)
+  python -m <pkg>.ops_api          # serves on :9090 (override with OPS_PORT)
 ```
 
-Declare the API majors your service serves so `/info` reports the lifecycle
-table the deprecation machinery (#684) reads:
+Declare the API majors your service serves so `/info` reports the lifecycle table
+the deprecation machinery (#684) reads, and plug your readiness check (liveness
+stays dependency-free):
 
 ```python
 from <pkg>.ops_api import ApiMajor, OpsConfig, serve
 
-serve(config=OpsConfig(served_majors=(
-    ApiMajor(major=1, lifecycle="deprecated", sunset="2027-01-31"),
-    ApiMajor(major=2, lifecycle="active"),
-)))
+serve(config=OpsConfig(
+    served_majors=(
+        ApiMajor(major=1, lifecycle="deprecated", sunset="2027-01-31"),
+        ApiMajor(major=2, lifecycle="active"),
+    ),
+    readiness=lambda: db_pool.healthy(),  # /health/ready + /health; liveness never checks deps
+))
 ```
 
 ## Instrumentation is OpenTelemetry-only
@@ -50,8 +59,8 @@ service's actual lifecycle table. Start the entrypoint that passes your real
 # in one shell — your service's real ops entrypoint (passes your OpsConfig),
 # NOT `python -m <pkg>.ops_api` (that only exercises the template default)
 python -m <pkg>
-# in another
-zsh scripts/check-ops-conformance.zsh http://localhost:8080
+# in another — point the checker at the management port
+zsh scripts/check-ops-conformance.zsh http://localhost:9090
 ```
 
 The `ops-conformance` CI job (installed by bootstrap) does exactly this against

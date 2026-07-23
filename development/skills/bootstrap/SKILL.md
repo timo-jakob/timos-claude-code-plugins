@@ -1558,13 +1558,16 @@ The installed set:
   `deprecation-has-sunset` rule (#695) enforcing that a `deprecated: true`
   element carries `x-sunset`. Documentation/policy — never provenance-stamped.
 - `contracts/ops/v1/openapi.yaml` (#688) — the **org-standard ops surface**
-  (`/info`, `/health`, `/metrics`) as a **shared, versioned contract fragment**,
-  so "standardised" is testable. It rides the SAME machinery as the business
+  (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s
+  probes, `/metrics`) as a **shared, versioned contract fragment**, so
+  "standardised" is testable. It rides the SAME machinery as the business
   contract: `contracts-lint` lints it and `contracts-semver` gates it (both
   templates' spec discovery covers `contracts/ops/v[0-9]*/openapi.yaml`), so a
   breaking change to the ops surface is a new ops major, never an in-place edit.
-  Installed verbatim (no placeholders — the ops contract is identical org-wide);
-  ops endpoints stay **internal**, never published as APIM products.
+  Installed verbatim (no placeholders — the ops contract is identical org-wide).
+  The surface is **internal, on a separate management port** (never the public
+  app port); `/info` is minimal by contract; enforcing the network boundary is
+  the composition repo's job (#687/#719/#720). Never published as APIM products.
 - `scripts/check-ops-conformance.zsh` (#688) — the **conformance checker**: curls
   a running service's `/info`, `/health`, `/metrics` and validates them against
   the fragment's shapes (incl. the deprecated-major-needs-sunset rule); exit 0 on
