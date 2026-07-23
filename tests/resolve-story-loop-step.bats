@@ -192,3 +192,26 @@ seed_awaiting() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
 }
+
+@test "no telemetry record on AWAITING_FIX; exactly one on the terminal invocation" {
+  T="$BATS_TEST_TMPDIR/telemetry.jsonl"
+  printf '%s' "$CRIT" > "$F"
+  step --telemetry-file "$T"
+  [ "$status" -eq 20 ]
+  [ ! -s "$T" ]
+  printf '[]' > "$F"
+  step --resume --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$T")" -eq 1 ]
+}
+
+@test "terminal telemetry reports whole-loop wall clock from .t0, not the last round's" {
+  T="$BATS_TEST_TMPDIR/telemetry-wall.jsonl"
+  seed_awaiting
+  # back-date the loop's logical start by 100s; the terminal record must span it
+  echo "$(( $(date +%s) - 100 ))" > "$WD/.t0"
+  printf '[]' > "$F"
+  step --resume --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.wall_s >= 100' "$T")" = "true" ]
+}

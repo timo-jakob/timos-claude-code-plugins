@@ -121,17 +121,23 @@ emit_and_exit() {
     { print -r -- "**Final:** ${st}${reasons} ($(date +%H:%M:%S))" >> "$work_dir/progress.md" ; } 2>/dev/null || true
   fi
 
-  # telemetry (#566): append exactly one JSONL record per run, to the explicit
+  # telemetry (#566): append exactly one JSONL record per LOOP — terminal
+  # statuses only, never the non-terminal AWAITING_FIX (#971) — to the explicit
   # --telemetry-file or the git-ignored default under the repo. Never fatal.
   local tfile="$telemetry_file"
   [[ -z "$tfile" && -n "$repo" ]] && tfile="${repo%/}/.claude/telemetry/review-loop.jsonl"
-  if [[ -n "$tfile" ]]; then
+  if [[ -n "$tfile" && "$st" != "AWAITING_FIX" ]]; then
+    local t_begin="$t0"
+    if [[ -n "$work_dir" && -s "$work_dir/.t0" ]]; then
+      t_begin=$(<"$work_dir/.t0")
+      [[ "$t_begin" == <-> ]] || t_begin="$t0"
+    fi
     local tmp_status; tmp_status=$(mktemp)
     print -r -- "$out" > "$tmp_status"
     mkdir -p "${tfile:h}"
     local -a issue_arg; [[ -n "$issue" ]] && issue_arg=(--issue "$issue")
     "${self_dir}/build-telemetry-record.zsh" --status "$tmp_status" \
-      "${issue_arg[@]}" --ts "$t0" --wall-s "$(( $(date +%s) - t0 ))" >> "$tfile" || true
+      "${issue_arg[@]}" --ts "$t_begin" --wall-s "$(( $(date +%s) - t_begin ))" >> "$tfile" || true
     rm -f "$tmp_status"
   fi
   exit "$code"
@@ -245,6 +251,10 @@ if (( resume )); then
 else
   : > "$history_file"
   : > "$changelists_file"
+  # the loop's logical start — a step-mode run spans several invocations, and
+  # the terminal telemetry must report whole-loop wall clock, not the last
+  # round's (#971)
+  print -r -- "$t0" > "$work_dir/.t0"
 fi
 
 # Step mode gates the PREVIOUS round's in-session fix here (#971): the fix ran
