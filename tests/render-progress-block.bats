@@ -63,8 +63,8 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '^## Round 3 — no blockers'
   echo "$output" | grep -q -- '- blockers: 0, conflicts: 0, suggestions: 2'
-  ! grep -q 'by dimension' <<< "$output"
   echo "$output" | grep -q -- '- converged'
+  run ! grep -q 'by dimension' <<< "$output"
 }
 
 @test "missing required args is a usage error (exit 2)" {
