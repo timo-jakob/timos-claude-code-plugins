@@ -87,8 +87,14 @@ pull-compat surface served by the SDK's Prometheus exporter.
   installs under your package (`ops_api.py` + `requirements.txt`); it serves the
   full surface on the management port and passes the conformance checker
   unchanged. See its `README.md`.
+- **Java (non-Spring)** — use the blessed reference implementation bootstrap
+  installs (`OpsApi.java` + a `build.gradle.kts` dependency fragment): place it
+  under a package in your service's source set, set its `package` line to match,
+  fold in the OTel dependencies, and call `OpsApi.serve(...)` from your startup
+  with your `OpsConfig`. It serves the full surface on the management port and
+  passes the conformance checker unchanged. See its `README.md`.
 - **Other languages** — canonical implementations are tracked per language
-  (Java non-Spring, Node, Swift).
+  (Node, Swift).
 
 ## Who enforces the boundary — you, or the platform?
 

@@ -1635,9 +1635,74 @@ dropping a second root `requirements.txt`:
   languages/python/ops-api/README.md
 ```
 
+**Java canonical implementation (#935).** For a **non-Spring** Java service repo,
+install the blessed realization — a self-contained OTel-SDK + Prometheus-exporter
+class serving `/info`, `/health`, `/metrics` (it passes `check-ops-conformance.zsh`
+unchanged).
+
+*Applicability — gate before you install.* Evaluate these conditions **in order,
+first match wins** — a *skip* always beats an *install*, so the Spring and Maven
+checks are tested **before** the build-DSL branch (a Groovy-DSL Spring Boot repo
+must skip, not install):
+
+1. **Spring → skip this block** (covered by `spring-config-advisor`'s
+   conforms-to-ops-api check). *Spring* means the `org.springframework.boot`
+   Gradle plugin is applied **or** any `org.springframework.boot` dependency
+   appears in a build file (check the build files from Step-1 detection). Plain
+   Spring *Framework* without Boot/Actuator is the ambiguous middle — treat it as
+   non-Spring (fall through) and note the Actuator-absence assumption in the
+   Step-5 checklist.
+2. **Maven repo → skip this block entirely** — the Step-3 Java gate already
+   rejected Java-specific generation (no `OpsApi.java`, no Gradle fragment; an
+   orphan `build.gradle.kts` snippet in a Maven repo is worse than nothing).
+3. **Groovy-DSL Gradle (Kotlin conversion declined in Step 4c)** → there is no
+   `build.gradle.kts` to fold into, so pick **one** of:
+   - **fold-and-install** — fold the dependencies into the existing
+     `build.gradle` (Groovy syntax) **and** place `OpsApi.java` + `README.md`; or
+   - **defer the ENTIRE payload** — no `OpsApi.java`, no `README.md`, no dep
+     folding — behind a single Step-5 checklist TODO until the Kotlin conversion
+     lands.
+
+   **Never place `OpsApi.java` without its dependencies** (its
+   `io.opentelemetry.*` imports won't resolve and the repo stops compiling), and
+   never create a `build.gradle.kts` beside a `build.gradle` (a broken dual-DSL
+   build).
+4. **Kotlin-DSL Gradle, non-Spring** → the standard path: install per the render
+   command below.
+
+The **render command below applies only to cases 3 (fold-and-install) and 4** —
+in the skip/defer cases (1, 2, and 3-defer) do **not** run it.
+
+Like the Python payload these need an explicit destination, plus a Java-specific
+`package` fix-up (Java couples a file's package to its directory):
+
+- **Placement + package** — place `OpsApi.java` at
+  `src/main/java/<base-pkg-path>/ops/OpsApi.java`, where `<base-pkg-path>` is
+  **derived from the service's existing base package** (the common-ancestor
+  package of its main source set) with `.ops` appended. In a **multi-module**
+  build, target the module that produces the **runnable service artifact** — the
+  one applying the `application` (or shadow) plugin, or referenced by the
+  Dockerfile entrypoint — not the root aggregator (which has no compiled source
+  set); if zero or several modules qualify, surface the choice in the Step-2 plan
+  for the user to confirm rather than guessing. Then **set the `package` line to
+  match** — the shipped `package com.example.ops;` is a flagged placeholder,
+  never keep it.
+- **Deps** — **fold `build.gradle.kts`'s dependency block into the module's own
+  build script** — `build.gradle.kts` in case 4, or the existing Groovy
+  `build.gradle` in case 3-fold-and-install (the shipped file is a fragment, not
+  a standalone build file) — rather than dropping a second build script.
+- Put the shipped `README.md` alongside `OpsApi.java`.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/java/ops-api/OpsApi.java \
+  languages/java/ops-api/build.gradle.kts \
+  languages/java/ops-api/README.md
+```
+
 The remaining languages' canonical implementations are tracked follow-ups under
-epic #682: development-java non-Spring (#935), development-javascript/Node
-(#936), development-swift (#937).
+epic #682: development-javascript/Node (#936) and development-swift (#937).
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the
