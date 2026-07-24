@@ -29,3 +29,6 @@ site/
 # resolve-issue review loop dispatch sink (local, per-run state; telemetry
 # under .claude/ is already covered above)
 .review/
+
+# toggle-fable.zsh saved manifest (local dev tooling state, #990)
+scripts/.fable-agents
