@@ -102,10 +102,21 @@ calls() { wc -l < "$CALLS" | tr -d ' '; }
   [ "$status" -eq 2 ]
 }
 
-@test "missing bats binary exits 127" {
-  run env GATE_BATS_BIN="$BATS_TEST_TMPDIR/no-such-bats" \
+@test "missing bats binary exits 127 — fail-fast, with the install hint and no summary" {
+  # `run -127` (not a bare `run` + status check): 127 is the EXPECTED exit here,
+  # and declaring it inline is what tells bats the "command not found" is
+  # deliberate rather than a typo'd command — otherwise every full-suite run
+  # ends in a BW01 advisory block, training the reader to skim past warnings.
+  run -127 --separate-stderr env GATE_BATS_BIN="$BATS_TEST_TMPDIR/no-such-bats" \
     zsh "$S" --tests-dir "$TESTS_DIR"
-  [ "$status" -eq 127 ]
+  # Status alone would NOT pin the contract: 127 is what the shell itself
+  # returns for a not-found command, so deleting the `command -v` guard and
+  # falling through to invoking $bats_bin would still exit 127 and keep this
+  # test green. Assert what the guard is FOR — the actionable message, and a
+  # fail-fast that emits no summary for a suite that never ran.
+  [[ "$stderr" == *"bats binary not found"* ]]
+  [[ "$stderr" == *"brew install bats-core"* ]]
+  [ -z "$output" ]
 }
 
 @test "--help exits 0 and prints the usage header, not code" {
