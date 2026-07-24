@@ -31,9 +31,31 @@
 #
 # Step mode:
 #   --findings-file  this round's aggregate findings JSON (issue #558 schema,
-#                    a flat array). Missing/empty file = "no findings". On
-#                    --resume, --test-cmd (when given) runs FIRST — it gates
-#                    the previous round's in-session fix; red exits ERROR (1).
+#                    a flat array). On a FRESH run's round 1 a missing/empty
+#                    file = "no findings". On --resume, --test-cmd (when given)
+#                    runs FIRST — it gates the previous round's in-session fix;
+#                    red exits ERROR (1).
+#
+#                    Shapes of one caller mistake are refused as STALE_FINDINGS
+#                    (exit 2, #974) — the panel is the driving session's job
+#                    BETWEEN invocations, so each means it never ran for this
+#                    round:
+#                      * missing/empty on --resume — a panel that found nothing
+#                        must still write `[]`, so silence is not evidence;
+#                      * content byte-identical to the round just consumed — a
+#                        stale path re-passed, or the new round's file never
+#                        written;
+#                      * --findings-file IS the round's own dispatch
+#                        findings_path — the caller aimed at the internal sink,
+#                        which this script truncates; refused up front so the
+#                        panel output is never destroyed.
+#                    Left unguarded, the first converges the loop on an
+#                    unreviewed round (a false CONVERGED that green-lights the
+#                    PR) and the second reads as a blocker surviving two rounds
+#                    — the non-convergence fingerprint (#606) — tripping a
+#                    phantom ESCALATE_NO_CONVERGENCE that blames the fix pass
+#                    for a mistake made by the caller. Both are recoverable:
+#                    produce this round's findings and re-invoke.
 #
 # Telemetry note: an extended run (escalate -> grant -> --resume) appends one
 # record per terminal exit, each spanning from .t0 — so consecutive records of
@@ -68,7 +90,12 @@
 #   11  ESCALATE_CONFLICT         (a surviving reviewer conflict)
 #   12  ESCALATE_NO_CONVERGENCE   (a blocker survived two consecutive rounds)
 #   13  BUDGET_EXHAUSTED          (round budget spent with blockers remaining)
-#   2   usage error
+#   2   usage error. Mid-run, step mode's STALE_FINDINGS refusal (#974) uses
+#       this code and DOES write the status JSON (stdout + --status-file), so a
+#       consumer never reads the previous round's verdict as if it were this
+#       invocation's. It is a non-terminal refusal: no telemetry record and no
+#       progress.md `**Final:**` line, because the loop resumes once the caller
+#       supplies the round's real findings.
 #   1   internal/operational error (sub-script failed, hook failed, tests red)
 
 emulate -L zsh
@@ -104,7 +131,7 @@ while [[ $# -gt 0 ]]; do
   -h|--help)
     print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
     print -r -- "  [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N]"
-    print -r -- "  [--telemetry-file PATH] [--no-review]"
+    print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--no-review]"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -140,21 +167,24 @@ emit_and_exit() {
   print -r -- "$out"
   [[ -n "$status_file" ]] && print -r -- "$out" > "$status_file"
 
-  # progress.md terminal line (#971) — non-fatal; AWAITING_FIX is not terminal.
+  # progress.md terminal line (#971) — non-fatal; neither AWAITING_FIX nor the
+  # STALE_FINDINGS refusal (#974) is terminal, so neither closes the file.
   # Same brace-group rationale as append_progress_round above: a redirection
   # setup failure must not leak to the real stderr.
-  if [[ -n "$work_dir" && -d "$work_dir" && "$st" != "AWAITING_FIX" ]]; then
+  if [[ -n "$work_dir" && -d "$work_dir" && "$st" != "AWAITING_FIX" && "$st" != "STALE_FINDINGS" ]]; then
     local reasons=""
     [[ -n "$esc" && "$esc" != "[]" ]] && reasons=" — $(print -r -- "$esc" | jq -r 'join(", ")' 2>/dev/null)"
     { print -r -- "**Final:** ${st}${reasons} ($(date +%H:%M:%S))" >> "$work_dir/progress.md" ; } 2>/dev/null || true
   fi
 
   # telemetry (#566): append exactly one JSONL record per LOOP — terminal
-  # statuses only, never the non-terminal AWAITING_FIX (#971) — to the explicit
-  # --telemetry-file or the git-ignored default under the repo. Never fatal.
+  # statuses only, never the non-terminal AWAITING_FIX (#971) or the
+  # STALE_FINDINGS refusal (#974), which would double-count the loop that
+  # resumes right after it — to the explicit --telemetry-file or the
+  # git-ignored default under the repo. Never fatal.
   local tfile="$telemetry_file"
   [[ -z "$tfile" && -n "$repo" ]] && tfile="${repo%/}/.claude/telemetry/review-loop.jsonl"
-  if [[ -n "$tfile" && "$st" != "AWAITING_FIX" ]]; then
+  if [[ -n "$tfile" && "$st" != "AWAITING_FIX" && "$st" != "STALE_FINDINGS" ]]; then
     local t_begin="$t0"
     if [[ -n "$work_dir" && -s "$work_dir/.t0" ]]; then
       t_begin=$(<"$work_dir/.t0")
@@ -198,6 +228,55 @@ append_progress_round() {
   # 2>/dev/null covers the redirection setup too, not just the command (#971).
   { "$RENDER_PROGRESS" --changelist "$cl" --round "$r" --verdict "$v" \
     >> "$work_dir/progress.md" ; } 2>/dev/null || true
+}
+
+# refuse this round's findings as never-produced (#974) and exit 2. Typed, so
+# --status-file can never keep the PREVIOUS invocation's AWAITING_FIX and read
+# as this one's verdict (the #912 lesson) — but NOT terminal: emit_and_exit
+# skips telemetry and the progress `**Final:**` line for this status, because
+# the caller fixes the invocation and resumes the same work-dir. `rounds` is
+# the completed-round count, so it agrees with history as everywhere else.
+refuse_stale_findings() {
+  local detail="$1"
+  print -u2 -- "resolve-story-loop: $detail"
+  # a refusal is still worth a progress line — the user tailing progress.md
+  # must see WHY a round they expected did not happen (same non-fatal rules)
+  if [[ -n "$work_dir" && -d "$work_dir" ]]; then
+    { print -r -- "**Refused (round ${round}):** stale findings — $detail" \
+      >> "$work_dir/progress.md" ; } 2>/dev/null || true
+  fi
+  emit_and_exit "STALE_FINDINGS" "$(( round - 1 ))" 2 "$repo_type" "$review_skill" \
+    "$prev_changelist" "$history_file" "$changelists_file"
+}
+
+# content digest of a findings file, for the stale-findings guard (#974).
+# Prints the hex digest, or NOTHING when no digest tool is available — the
+# guard is a caller-mistake detector, so a toolless environment loses the
+# detection rather than the run.
+#
+# The tool is chosen by existence, so on any host that ships `shasum` (both CI
+# lanes do) the `sha256sum` arm is otherwise unreachable and untestable.
+# RESOLVE_LOOP_DIGEST_TOOL pins the implementation to exercise each arm — the
+# DETECT_STACK_BIN convention; unset in production.
+findings_digest() {
+  local tool="${RESOLVE_LOOP_DIGEST_TOOL:-}"
+  if [[ -n "$tool" ]]; then
+    # an explicit pin that names an unknown tool, or one absent on this host,
+    # would otherwise fall through to the silent no-digest arm and read as
+    # "toolless" — say why the guard went dark, so a mis-pinned test run is
+    # diagnosable rather than a mysterious non-refusal
+    if [[ "$tool" != shasum && "$tool" != sha256sum ]] || (( ! $+commands[$tool] )); then
+      print -u2 -- "resolve-story-loop: RESOLVE_LOOP_DIGEST_TOOL=$tool not usable — byte-identical guard disabled"
+      return 0
+    fi
+  else
+    (( $+commands[shasum] )) && tool=shasum || { (( $+commands[sha256sum] )) && tool=sha256sum }
+  fi
+  case "$tool" in
+    shasum)    shasum -a 256 -- "$1" 2>/dev/null | awk '{print $1}' ;;
+    sha256sum) sha256sum -- "$1" 2>/dev/null | awk '{print $1}' ;;
+    *)         return 0 ;;
+  esac
 }
 
 # --no-review is the fast path — it short-circuits before any other requirement.
@@ -281,6 +360,10 @@ if (( resume )); then
 else
   : > "$history_file"
   : > "$changelists_file"
+  # the consumed-findings digests are per-run state too (#974): a re-used
+  # work-dir must not let a previous run's round-N digest veto this run's
+  # round N+1
+  rm -f -- "$work_dir"/.findings-digest-*(N)
   # the loop's logical start — a step-mode run spans several invocations, and
   # the terminal telemetry must report whole-loop wall clock, not the last
   # round's (#971)
@@ -329,6 +412,7 @@ fi
 # corrupt the status JSON. Inside the loop we plain-assign only.
 local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
 local rp findings_path scoped scoped_filtered changelist blockers
+local digest prev_digest_file
 local blocking conflict nonconv nconf verdict
 local -a scope_lines
 while (( round <= max_rounds )); do
@@ -362,17 +446,60 @@ while (( round <= max_rounds )); do
     fi
   fi
   mkdir -p "${findings_path:h}"
+  # (#974) refuse the alias BEFORE truncating: findings_path is the round's
+  # internal sink, and the very next line zero-bytes it. A session that passed
+  # the dispatch plan's findings_path as --findings-file (instead of its own
+  # findings-round-R.json, per SKILL.md) would have its real panel output
+  # destroyed here, then be told "the panel never ran" — a confidently wrong
+  # verdict, and the cp below would fail on identical files anyway. Name the
+  # mistake instead, while the bytes are still intact. Compare canonical paths
+  # (catches symlinks and ./-prefixed spellings) AND device+inode via -ef
+  # (catches a hardlink to the same file, which canonicalizes differently).
+  if (( step_mode )) && [[ -n "$findings_file" ]] && \
+     { [[ "${findings_file:A}" == "${findings_path:A}" ]] || [[ "$findings_file" -ef "$findings_path" ]] }; then
+    refuse_stale_findings "--findings-file must not be the round's own findings_path ($findings_path) — pass this round's aggregated findings (e.g. findings-round-${round}.json), not the dispatch sink."
+  fi
   : > "$findings_path"
 
   # 1. obtain this round's findings: step mode consumes --findings-file (the
   # session already ran the panel in-session, #971); hook mode runs the
   # injected panel command
   if (( step_mode )); then
+    # (#974) silence is not evidence on a resumed round: the panel runs between
+    # invocations, and one that found nothing still writes `[]`. Consuming a
+    # missing/empty file as "no findings" here would converge the loop on a
+    # round nobody reviewed — the false CONVERGED that per-round file names
+    # make the LIKELIER shape of this mistake. A fresh run's round 1 keeps the
+    # documented missing == no-findings behaviour.
+    if (( resume )) && [[ ! -s "$findings_file" ]]; then
+      refuse_stale_findings "--findings-file is missing or empty on --resume ($findings_file) — did this round's review panel run? A panel that found nothing must still write []."
+    fi
     if [[ -s "$findings_file" ]]; then
       jq -e 'type=="array"' "$findings_file" >/dev/null 2>&1 || {
         print -u2 -- "resolve-story-loop: --findings-file is not a JSON array: $findings_file"; exit 1 }
+      # stale-findings guard (#974): the panel is the session's job, run between
+      # invocations — so findings byte-identical to the round just consumed mean
+      # it did NOT run (a stale path re-passed, or the new round's file never
+      # written). Refuse as the usage error it is, naming the actual mistake,
+      # rather than consuming it and reporting the phantom non-convergence
+      # (#606) that identical blockers across two rounds would otherwise look
+      # like. Content-based, not path-based: a fresh per-round path holding the
+      # previous round's bytes is the same mistake. Only the IMMEDIATELY
+      # preceding round is compared — a blocker legitimately re-found by a real
+      # panel run varies in its evidence text, and identity for non-convergence
+      # is [file, dimension, line] anyway, so a genuine re-find still escalates.
+      digest=$(findings_digest "$findings_file")
+      prev_digest_file="$work_dir/.findings-digest-$(( round - 1 ))"
+      if [[ -n "$digest" && -s "$prev_digest_file" && "$digest" == "$(<"$prev_digest_file")" ]]; then
+        refuse_stale_findings "--findings-file is byte-identical to round $(( round - 1 ))'s consumed findings ($findings_file) — did this round's review panel run? Write each round's aggregate findings to its own path (findings-round-N.json) before --resume."
+      fi
       cp "$findings_file" "$findings_path" || {
         print -u2 -- "resolve-story-loop: could not copy --findings-file"; exit 1 }
+      # record only AFTER a successful consume, so a failed round leaves no
+      # digest to veto its retry
+      if [[ -n "$digest" ]]; then
+        print -r -- "$digest" > "$work_dir/.findings-digest-$round"
+      fi
     fi
   else
     ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \

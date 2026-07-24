@@ -14,7 +14,7 @@ description: >
   to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
   non-converging review-loop exit becomes an interactive extension (offer more
   rounds, give guidance, ask questions) — see [The local review
-  loop](../explanation/review-loop.md).
+  loop](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/review-loop/).
 disable-model-invocation: false
 ---
 
@@ -452,6 +452,57 @@ Each round:
    subset (#604) — FIRST, deterministically gating the previous round's
    in-session fix: red exits `ERROR` (1), the same "red after a fix aborts"
    rule as ever.
+
+   **Write each round's findings to its own path** (`findings-round-R.json` —
+   hence the `R`), and pass that round's path. On a `--resume` round the loop
+   refuses two shapes of "this round's panel never ran" as
+   **`STALE_FINDINGS` (exit 2, #974)** — a *recoverable* usage error, not a
+   verdict:
+
+   - the file is **missing or empty** — a panel that found nothing still writes
+     `[]`, so silence is never read as a clean round (that would converge the
+     loop on an unreviewed round and green-light the PR);
+   - its content is **byte-identical to the round just consumed** — a stale
+     path re-passed, or the new round's file never written. Consumed, it would
+     read as a blocker surviving two rounds and trip a phantom
+     `ESCALATE_NO_CONVERGENCE`.
+
+   **Recover by cause, then re-invoke** — the round is not lost:
+
+   - if round R's panel **did** run and its aggregate exists at its own path,
+     just re-invoke with the correct `--findings-file` (don't re-run the panel);
+   - if it **never** ran (or you can't tell), run round R's panel (step 1),
+     write its aggregate — `[]` when it found nothing — and re-invoke.
+
+   Never re-pass the previous round's file, and **never hand-edit findings to
+   make the bytes differ** — that fakes a round. The refusal can only fire
+   *again* if you feed it byte-identical findings *again*; two genuinely
+   independent panel runs never serialise to identical bytes (evidence text,
+   ordering, and reviewer set all vary), so a repeat means the file still
+   wasn't this round's real panel output — recover it (above), don't work
+   around it. A blocker the reviewers keep re-finding is a real problem to
+   **fix in-session**, not a reason to defeat the guard.
+
+   Exit 2 **writes** its own status JSON (`status: "STALE_FINDINGS"`) to
+   stdout and `--status-file`, so the previous round's verdict is never left
+   there to be misread; it is not terminal, so it appends no telemetry record
+   and no `**Final:**` line — but it *does* append a `**Refused (round N):**`
+   line to `<work-dir>/progress.md`, so a user tailing it sees why the round
+   they expected did not happen. `STALE_FINDINGS` is never an escalation: don't
+   run `build-escalation.zsh` on it, don't post a comment from it, don't enter
+   the interactive extension on it — only recover-and-re-invoke.
+
+   The byte-identical half of the guard needs a sha256 tool (`shasum` /
+   `sha256sum`); without one that detection degrades silently, so a re-passed
+   stale file trips a **phantom** `ESCALATE_NO_CONVERGENCE` instead of this
+   refusal. Guard against that at the point it would mislead: on any
+   `ESCALATE_NO_CONVERGENCE`, before trusting it, confirm the `--findings-file`
+   you passed was round R's own freshly-aggregated path. If it was **stale**,
+   the escalation is phantom — ignore it (don't post or extend on it) and
+   recover as the `STALE_FINDINGS` case (re-invoke `--resume` with round R's
+   real findings, running the panel first if it never ran). The missing/empty
+   half of the guard (and the alias guard — `--findings-file` must never be the
+   dispatch `findings_path`) needs no digest tool and always applies.
 3. **On `AWAITING_FIX` (exit 20)** — blockers remain and budget is left:
    **narrate the round in the conversation** (round number; blockers found,
    new vs carried; the dimensions they came from; what you fix next — the
@@ -484,6 +535,11 @@ with a status JSON + code:
 - **`AWAITING_FIX` (20)** → not a verdict — the step-mode "narrate, fix
   in-session, `--resume`" turn of the round protocol above. Never build an
   escalation comment from it.
+- **`STALE_FINDINGS` (exit 2)** → neither a verdict nor an escalation — the
+  round's findings were never produced (missing/empty on `--resume`,
+  byte-identical to the last round, or `--findings-file` aliased the dispatch
+  `findings_path`). Recover by cause per §3.5 step 2 and re-invoke; **never**
+  build an escalation comment or a dossier from it.
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
   *Escalation* below. Opening a PR here would spend CI on unconverged work.
@@ -494,11 +550,16 @@ with a status JSON + code:
 `--no-review` skips the loop entirely (status `SKIPPED`) — today's fast path,
 for when you deliberately want no local review round.
 
-#### Escalation (any non-`CONVERGED` loop exit) — typed, no PR (#564)
+#### Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
 A bad escalation costs a human an afternoon; a good one costs two minutes. On
 any `ESCALATE_*` / `BUDGET_EXHAUSTED` status, produce **one** decision-ready
 issue comment and nothing else — **no PR, no auto-merge exposure**:
+
+**Only those statuses escalate.** Exit 1/2 are operational, never escalations:
+`STALE_FINDINGS` (exit 2) follows §3.5 step 2's recover-and-re-invoke, and any
+other exit 1/2 is reported in the conversation. Never build an escalation comment
+from a status file the failed invocation did not write.
 
 **Interactive extension (human present, `BUDGET_EXHAUSTED` /
 `ESCALATE_NO_CONVERGENCE` only, #562-resume).** When the run is
@@ -578,10 +639,16 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
    On `AWAITING_FIX` (20) → continue the §3.5 round protocol (narrate, fix
    in-session, re-run the gate, run the next panel, `--resume` with the same
    raised `--max-rounds`) — no grant bookkeeping; the grant was already
-   counted. On an **operational error** (exit 1/2), the loop wrote either **no** new
-   status (the file still holds the *previous* escalation) or a status
-   `ERROR` (a red gate after a fix) — neither is a typed escalation, so never
-   build a comment from the file: report the error in the conversation and
+   counted. On `STALE_FINDINGS` (exit 2, #974) → **not terminal**: recover by
+   cause per §3.5 step 2 (re-invoke with round R's real findings path, or run
+   its panel first) and resume with the same raised `--max-rounds`. The grant
+   was already counted at the resume that produced this exit — the recovery
+   re-invocation neither increments nor decrements `grants`, and never re-runs
+   step 1's `build-escalation.zsh` summary on the `STALE_FINDINGS` status. On
+   any **other operational error** (exit 1/2), the loop wrote
+   either **no** new status (the file still holds the *previous* escalation) or
+   a status `ERROR` (a red gate after a fix) — neither is a typed escalation, so
+   never build a comment from the file: report the error in the conversation and
    stop.
 
 6. **Soft cap.** Before re-offering, if `grants >= 5` **or** the just-finished
@@ -597,9 +664,10 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
    later with `/development:resolve-issue <N>`.
 
 If the interactive extension ended in `CONVERGED`, skip the terminal below and
-continue to §4. If it ended in an **operational error**, it was already reported
-in-session (step 5) — stop, with **no** typed comment. Otherwise (a Stop /
-decline, or a `CONFLICT` / `AMBIGUOUS` exit):
+continue to §4. A `STALE_FINDINGS` exit never ends it — recover and resume as
+step 5 says. If it ended in another **operational error**, it was already
+reported in-session (step 5) — stop, with **no** typed comment. Otherwise (a
+Stop / decline, or a `CONFLICT` / `AMBIGUOUS` exit):
 
 1. **Push the branch as the bot** (so the diff-so-far is linkable) but **create
    no PR object** — a draft would trigger CI and defeat the local loop. Use the
