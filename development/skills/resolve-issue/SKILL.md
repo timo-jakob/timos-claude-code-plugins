@@ -341,9 +341,26 @@ Run the repo's own test + lint gate and **only proceed when green**. Detect what
 applies and run it:
 
 - pre-commit hooks (`pre-commit run --all-files`, or the staged subset),
-- tests for the stack — the **whole suite**, never a subset: `bats tests/`
-  (plugin repos), `pytest` (Python — the whole suite, **not** `pytest
-  tests/unit`), `./gradlew test` / `build` (Java/Gradle), etc.,
+- tests for the stack — the **whole suite**, never a subset. For **plugin
+  repos**, run the blessed single-run parallel gate rather than bare `bats`:
+  `<skill-base-dir>/scripts/run-gate.zsh --tests-dir tests` (#980) — it runs the
+  whole `bats tests` suite **exactly once**, parallelised via `--jobs` = CPU
+  count on a multi-core host with GNU `parallel`, and run sequentially otherwise
+  — loudly (a degraded warning) only on a multi-core host missing GNU `parallel`,
+  quietly on a single-core host where there is nothing to parallelise — prints
+  the ok/not-ok counts plus bats' **real** exit code (a JSON
+  summary on stdout), and exits with that code, so it drops in as the gate
+  command. A run that reports **zero** tests is forced to a non-zero (red) exit
+  — never a false green. Never hand-roll a `bats … | grep -c` that runs the
+  suite twice to count. For other stacks: `pytest` (Python — the whole suite,
+  **not** `pytest tests/unit`), `./gradlew test` / `build` (Java/Gradle), etc.,
+- **relay a DEGRADED gate to the user, up front (#980).** `run-gate.zsh`'s
+  stdout summary carries a `"mode"` field. When it is `"sequential-degraded"`
+  (GNU `parallel` is not installed), the gate still ran the **whole** suite at
+  full rigor — but sequentially, so every review round's gate takes multiple
+  times longer. Tell the user **clearly and immediately**: that parallelization
+  is unavailable, that each round's gate will be several times slower, and that
+  the fix is `brew install parallel`. Never quietly absorb the slowdown.
 - any repo-specific check named in `CLAUDE.md`,
 - **the same-PR C4 currency check (#746 child (c), #792)**: if the change
   altered the system's **structure**, `docs/architecture/c4-container.md` must be
@@ -446,6 +463,11 @@ Each round:
      --findings-file <findings-round-R.json> \
      --test-cmd '<full gate>' [--resume]
    ```
+
+   `<full gate>` is the same whole-suite command as Step 3. On a **plugin repo**
+   that is the blessed single-run parallel gate — `--test-cmd 'zsh
+   <skill-base-dir>/scripts/run-gate.zsh --tests-dir tests'` (#980) — never a
+   bare `bats` invocation that a later step would re-run to count.
 
    `--resume` from round 2 on. On a `--resume` invocation the loop runs
    `--test-cmd` — the **full** suite (unit **and** integration), never a
@@ -1020,7 +1042,10 @@ children's **combined** effect. Once the whole epic is on `main`, run a
 - **Java / Python app** (most critical) — the full build + test suite, plus a
   real end-to-end exercise of the affected behaviour (run the relevant pipeline
   / the app itself), so integration regressions surface here.
-- **Claude-plugin** — the full `bats` suite **and** `/development-claude-plugin:test`
+- **Claude-plugin** — the full `bats` suite via the blessed single-run gate
+  `<skill-base-dir>/scripts/run-gate.zsh --tests-dir tests` (#980 — same
+  parallel, single-run, real-exit command as Step 3; never a bare `bats … |
+  grep -c` that runs the suite twice) **and** `/development-claude-plugin:test`
   driving the affected skills/agents end-to-end (the same pattern used to verify
   slices by hand).
 

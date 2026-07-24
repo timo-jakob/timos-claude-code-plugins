@@ -2698,7 +2698,8 @@ The script will:
 2. Refuse to run without Homebrew.
 3. List missing tools (`gh`, `jq`, `pre-commit`, `gitleaks`, `semgrep`,
    `sonar-scanner`, plus path-specific: `snyk` for public, `trivy` + Docker for
-   private, plus language-specific linters).
+   private, plus language-specific linters, plus `parallel` on claude-plugin
+   repos — the bats review-loop gate parallelises via it, #980).
 4. Offer to `brew install` all missing pieces in one batch.
 5. Verify `gh auth status`; offer to run `gh auth login` if not authenticated.
 6. For private path: verify Docker daemon is running; offer to launch

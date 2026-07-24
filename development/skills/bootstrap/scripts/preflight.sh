@@ -96,6 +96,17 @@ for lang in $LANGUAGES; do
 	esac
 done
 
+# Claude-plugin repos run the bats review-loop gate (run-gate.zsh, #980), which
+# parallelises the suite via bats' GNU-parallel `--jobs` backend. Offer `parallel`
+# so the gate isn't stuck in loud DEGRADED (sequential) mode. There is no
+# "claude-plugin" language token, so key off the .claude-plugin marker in the
+# repo being bootstrapped — the same signal detect-stack.sh's is_claude_plugin
+# uses (cwd is the target repo root).
+if [[ -e ".claude-plugin/marketplace.json" ]] ||
+	[[ -n "$(find . -path '*/.claude-plugin/plugin.json' -not -path '*/.git/*' 2>/dev/null | head -n1)" ]]; then
+	required_brews+=("parallel")
+fi
+
 # Casks: Docker is handled separately via check_docker (three-way detection
 # between Docker Desktop, CLI-only setups like Colima, and absent), so we
 # don't list it here.
@@ -108,6 +119,25 @@ required_casks=()
 info "Checking required tools…"
 missing_brews=()
 for pkg in "${required_brews[@]}"; do
+	# parallel needs GNU-ness specifically: bats' `--jobs` backend requires GNU
+	# parallel, and a non-GNU `parallel` (Homebrew moreutils, which conflicts
+	# with the GNU formula) would satisfy a bare `command -v` yet break the gate.
+	# Verify the GNU variant; the brew-formula check alone (formula name
+	# `parallel` IS GNU) also confirms it.
+	if [[ "$pkg" == "parallel" ]]; then
+		# Verify the PATH `parallel` is GNU — that is exactly what run-gate.zsh
+		# probes at runtime, so a brew-list fallback would wrongly pass when the
+		# GNU formula is installed-but-unlinked and a non-GNU `parallel`
+		# (moreutils) shadows it on PATH.
+		if command -v parallel >/dev/null 2>&1 &&
+			parallel --version </dev/null 2>/dev/null | grep -i 'GNU parallel' >/dev/null; then
+			ok "parallel (GNU)"
+		else
+			warn "parallel — missing (GNU parallel required; a non-GNU 'parallel' such as moreutils does not satisfy bats --jobs; if you have moreutils, 'brew unlink moreutils' before installing, or install parallel in its own step)"
+			missing_brews+=("parallel")
+		fi
+		continue
+	fi
 	# The brew formula name occasionally differs from the binary name. The map
 	# below covers the special cases; everything else uses the formula name as
 	# the binary name.
