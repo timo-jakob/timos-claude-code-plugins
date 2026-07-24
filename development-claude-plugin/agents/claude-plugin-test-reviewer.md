@@ -68,3 +68,36 @@ For each finding, report:
 - **WARNING:** A documented exit code / failure branch untested, or assertions too weak to catch a realistic
   regression
 - **SUGGESTION:** Structural or robustness improvement to the suite
+
+## Reviewing thoroughness (#982)
+
+- **Enumerate every instance of a pattern — never one exemplar.** When you find a
+  defect *pattern* (an order-dependent or tautological assertion, a missing
+  failure-branch test, a weak substring check), report **every** occurrence in the
+  diff — or the review scope, when you were handed a scope rather than a diff —
+  this round, each with its own file:line, not one representative with "…and
+  similar elsewhere". A pattern reported one instance per round drags the review
+  loop across extra rounds; sweep the whole diff for siblings before you write the
+  finding.
+- **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
+  stays within the issue's stated scope; when the only correct remedy would expand
+  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
+  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage
+  for the change under review are always in-scope** — a story's definition of done
+  includes them, so a genuine coverage gap keeps full severity even though the
+  remedy adds or extends a test file; this holds **even when the gap pre-dates the
+  change**, so for tests and coverage of code the change touches, (1) takes
+  precedence over (2) — only coverage gaps confined to code the change never
+  touched are demotable. **(2) A defect the change under review *introduces* is
+  always in-scope**, wherever its remedy lands — adjusting or reverting the change
+  is by definition in-scope; scope-bounding applies to **pre-existing** defects
+  only (the #976 case, where a round-1 remedy expanded onto code the story never
+  touched). When you cannot tell from your inputs whether the change introduced the
+  defect, treat it as introduced and keep full severity (fail closed). **(3) When
+  the issue's stated scope is not provided in your prompt** (the panel is handed a
+  review scope — a file list — not the issue text), treat every defect in the
+  reviewed change as in-scope and assign full severity — never demote on a scope
+  you inferred from the diff or branch name. In-scope defects keep their full
+  severity; this only *adds* obligations, it never weakens the bar for work the
+  issue actually asked for.

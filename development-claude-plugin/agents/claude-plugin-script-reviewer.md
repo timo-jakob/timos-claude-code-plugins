@@ -65,3 +65,33 @@ For each finding, report:
 - **CRITICAL:** Wrong exit status, data loss, or a corrupting/destructive action on a reachable path
 - **WARNING:** Incorrect behaviour under realistic inputs or failure of a documented contract
 - **SUGGESTION:** Defensive hardening with no current misbehaviour
+
+## Reviewing thoroughness (#982)
+
+- **Enumerate every instance of a pattern — never one exemplar.** When you find a
+  defect *pattern* (an unquoted expansion, a `|| true` that swallows an error the
+  caller needed, a trailing-test exit-code leak, a `$?` read after the wrong
+  command),
+  report **every** occurrence in the diff — or the review scope, when you were
+  handed a scope rather than a diff — this round, each with its own file:line, not
+  one representative with "…and similar elsewhere". A pattern reported one instance
+  per round drags the review loop across extra rounds; sweep the whole diff for
+  siblings before you write the finding.
+- **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
+  stays within the issue's stated scope; when the only correct remedy would expand
+  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
+  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  Two carve-outs keep this from muzzling real blockers. **(1) A defect the change
+  under review *introduces* is always in-scope**, wherever its remedy lands —
+  adjusting or reverting the change is by definition in-scope; scope-bounding
+  applies to **pre-existing** defects only (the #976 case, where a round-1 remedy
+  expanded onto code the story never touched). When you cannot tell from your
+  inputs whether the change introduced the defect, treat it as introduced and keep
+  full severity (fail closed). **(2) When the issue's stated scope is not provided
+  in your prompt** (the panel is handed a review scope — a file list — not the
+  issue text), treat every defect in the reviewed change as in-scope and assign
+  full severity — never demote on a scope you inferred from the diff or branch
+  name. In-scope defects keep their full severity; this only *adds* obligations, it
+  never weakens the bar for work the issue actually asked for.
+  (There is no tests-coverage carve-out here: coverage findings belong to the
+  `tests` dimension's reviewer, not this logic dimension.)

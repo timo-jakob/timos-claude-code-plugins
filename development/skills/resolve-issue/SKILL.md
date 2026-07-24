@@ -335,6 +335,15 @@ read the repo, not a fixed recipe. If, on reading, the issue is genuinely
 **under-specified** or far larger than its description implies, **stop and say
 so** rather than guessing.
 
+**Sibling-sweep when you fix (#982).** When a change — or a review finding you're
+resolving — targets one instance of a repeating *pattern*, sweep the diff for
+**every sibling instance of the same pattern and fix them all in the same
+round**. Never fix one exemplar and leave its siblings for a later round: that
+one-instance-per-round dribble is exactly what dragged the #976 loop across
+extra rounds (the same defect pattern reported and fixed one variant at a time).
+The test- and script-reviewer prompts now enumerate all instances of a pattern
+per round; your fix pass must clear all of them per round to match.
+
 ### 3. Validate — the per-issue gate (do NOT skip)
 
 Run the repo's own test + lint gate and **only proceed when green**. Detect what
@@ -598,7 +607,10 @@ Each round:
    `ESCALATE_NO_CONVERGENCE`, never `AWAITING_FIX`); narrate it there, per
    the escalation branch below. Then implement the
    blockers from the status JSON's `final_changelist.blocking` exactly as
-   step 2 implements — Low suggestions never loop — re-run the full gate (on a
+   step 2 implements — **sibling-sweeping each blocker's pattern across the whole
+   diff and fixing every instance this round** (#982), so a repeating defect is
+   cleared in one round, not dribbled across several — Low suggestions never
+   loop — re-run the full gate (on a
    plugin repo, keep its green `tree` for the next `--resume`'s `--gate-attest`,
    #981; other stacks have none), and go to 1 for the next round's panel.
 4. **On a terminal status**, take its branch below (`CONVERGED` → step 4;
