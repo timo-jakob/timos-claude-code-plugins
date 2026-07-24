@@ -1070,6 +1070,60 @@ are its extension, while `tests` **reuses** the core dimension and its
 `*-test-reviewer` convention (`claude-plugin-test-reviewer`) — five claude-plugin
 dimensions in total.
 
+### Scope-bounded severity (#982)
+
+Reviewers that carry the rule (below) assign severity **relative to the story's
+stated scope**, not in the abstract. A finding is `CRITICAL`/`WARNING` (blocking)
+only when its remedy stays within what the issue asked to change. When the only
+correct fix would **expand the change beyond that scope** (a subsystem to
+refactor, or a guard the issue never mentioned that lives in code the story never
+touched), the reviewer files it as a **`SUGGESTION`** with an explicit "spin off a
+follow-up issue" recommendation — never as a blocking `WARNING`/`CRITICAL`.
+Nothing is lost (the observation still rides into the dossier as a suggestion):
+a scope-expanding remedy is meant to no longer force a round of work the story
+never authorized — the #976 round-1 overreach that round 2 then reverted. **This
+demotion only activates when the reviewer is actually given the issue's stated
+scope.** Under today's panel wiring the reviewer receives only a review scope (a
+file list), not the issue text, so carve-out (3) below fires and full severity is
+kept (fail-safe); passing the issue scope into the panel — the step that makes the
+bound bite in the resolve-issue loop — is tracked follow-up (#988).
+
+**Three carve-outs keep this from muzzling real blockers.** (1) **Tests and
+coverage for the change under review are always in-scope** — they are part of the
+story's definition of done, so a genuine coverage gap keeps full severity even
+though its remedy adds a test file (a test reviewer whose only remedy is "add a
+test" is not scope-expanding). This holds **even when the gap pre-dates the
+change**: for tests and coverage of code the change touches, (1) takes precedence
+over (2), and only coverage gaps confined to code the change never touched are
+demotable. (2) A **defect the change under review *introduces*** is always
+in-scope wherever its remedy lands (adjusting or reverting the change is by
+definition in-scope) — scope-bounding applies to **pre-existing** defects only,
+which is the #976 case; when a reviewer cannot tell from its inputs whether the
+change introduced the defect, it treats it as introduced and keeps full severity
+(fail closed). (3) When the reviewer is **not given the issue's stated scope** (the
+panel launch prompt passes a review scope — a file list — not the issue text), it
+treats every defect in the reviewed change as in-scope and assigns full severity
+rather than demoting on an inferred scope. The five test reviewers state all three
+carve-outs; `claude-plugin-script-reviewer`, a logic dimension rather than a tests
+dimension, states carve-outs (2) and (3) only (numbered (1) and (2) locally in
+that file) — the coverage carve-out (1) is tests-dimension-specific.
+
+This **adds** obligations to the severity taxonomy; it never weakens the bar for
+in-scope defects, which keep their full severity. The rule currently lives in the
+per-file *Reviewing thoroughness (#982)* section of each panel's test reviewer
+(`go-`/`java-`/`python-`/`claude-plugin-test-reviewer` and swift's `test-reviewer`)
+and `claude-plugin-script-reviewer`; extending it to the remaining review-panel
+dimensions (bugs, security, performance, code-quality, and the claude-plugin
+prose-logic/contract/manifest reviewers) is tracked follow-up (#987), not yet
+done — no shared convention file or prompt-injection carries it. It is honoured mechanically
+downstream: `SUGGESTION → Low`, and Low never blocks a round (see the consolidator
+below).
+
+Reviewers also **enumerate every instance of a repeating pattern in one round**
+rather than one exemplar per round; the fix pass sibling-sweeps to match (both in
+the reviewer prompts and resolve-issue's fix-round step). This is a per-round
+thoroughness *increase*, orthogonal to the schema fields here.
+
 ### Aggregation (per round)
 
 Each review skill's synthesis step concatenates every agent's JSON array into a
@@ -1155,7 +1209,9 @@ reliable but the merging needs semantics:
 - **`consolidate-findings.zsh`** is the deterministic engine (jq), fully
   bats-tested. It applies the **severity map** `CRITICAL→Critical`,
   `WARNING→High`, `SUGGESTION→Low`; **blocking = Critical + High** (Low is logged
-  in `suggestions` and never triggers a round); **dedup** by `file`+`line`+
+  in `suggestions` and never triggers a round — so a scope-bounded finding a
+  reviewer downgraded to `SUGGESTION` per *Scope-bounded severity* above rides
+  into the dossier without ever forcing a round); **dedup** by `file`+`line`+
   `dimension` (most-detailed description kept, reviewers unioned, `agreement`
   counted, highest severity carried); a **conflict** item for co-located
   `performance`-vs-`code_quality` recommendations; and **non-convergence** —

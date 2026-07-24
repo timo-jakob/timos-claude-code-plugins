@@ -1,10 +1,17 @@
 {
   "name": "development-swift",
   "description": "Swift development plugin with code review, formatting/linting, and Swift-specific tooling.",
-  "version": "1.5.10",
+  "version": "1.6.0",
   "author": {
     "name": "Timo Jakob"
   },
   "license": "MIT",
-  "keywords": ["swift", "code-review", "swiftlint", "swiftformat", "concurrency", "security"]
+  "keywords": [
+    "swift",
+    "code-review",
+    "swiftlint",
+    "swiftformat",
+    "concurrency",
+    "security"
+  ]
 }
