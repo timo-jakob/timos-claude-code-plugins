@@ -1246,6 +1246,25 @@ line to `progress.md`), because the caller re-invokes with the round's real
 findings. `--no-review` yields `SKIPPED` — the fast path that bypasses the
 loop.
 
+**Gate attestation — one full-gate run per round (#981).** On `--resume` the
+loop re-runs `--test-cmd` first to gate the previous round's in-session fix
+(above) — but the driving session has *just* run that identical full suite green
+in SKILL.md Step 3. `--gate-attest <tree-id>` removes the byte-identical
+duplicate that dominated the #976 session (~24 min): the session passes the
+working-tree identity it gated (the `tree` field `run-gate.zsh` now emits on a
+**green** run only — a red/zero-tests run blanks it, so a failed gate is
+unattestable), and the loop **skips** its own `--test-cmd` run **iff** a freshly
+computed current identity exactly matches. The identity is `git-tree-id.zsh`:
+`git write-tree` over a throwaway temp index holding `git add -A` — tracked *and*
+untracked (`.gitignore`-honored) content, computed without touching the caller's
+real index or working tree (chosen over `git stash create`, which ignores
+untracked files and would false-match a round that only adds one). It is
+strictly **fail-closed**: a mismatch, an empty/absent attestation, or an
+uncomputable identity all run the gate exactly as before — the gate never
+weakens, only the provably-redundant re-run is elided. It applies only where
+`--test-cmd` *is* the attested `run-gate.zsh` (plugin repos); other stacks emit
+no `tree`, pass no `--gate-attest`, and are unchanged.
+
 **The loop is resumable (#902).** `--resume` continues a prior run from its
 `--work-dir` (the work-dir *is* the state): it reads the last completed round
 from `history.jsonl`, seeds the prior changelist so non-convergence detection

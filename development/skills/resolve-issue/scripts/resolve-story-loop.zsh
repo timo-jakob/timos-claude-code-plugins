@@ -72,6 +72,17 @@
 #   --test-cmd    the repo gate. Hook mode: re-run after each fix. Step mode:
 #                 run at --resume start (see above). Nonzero aborts the loop as
 #                 an operational error (exit 1), never a verdict.
+#   --gate-attest gate attestation (#981), step mode + --resume only. The tree
+#                 identity (git-tree-id.zsh, e.g. run-gate.zsh's `tree` field)
+#                 the driving session ALREADY gated green for the round it is
+#                 resuming. At --resume start the loop compares it to the current
+#                 working tree and SKIPS its own --test-cmd run ONLY on an exact
+#                 match — the session and the loop would otherwise run the SAME
+#                 full suite on the SAME tree twice (~24 min in the #976 session).
+#                 Fail-closed: a mismatch, an empty/absent value, or an
+#                 uncomputable current identity runs --test-cmd as before. The
+#                 gate itself never weakens — this removes only a byte-identical
+#                 duplicate. Ignored without --test-cmd or without --resume.
 #
 # Usage:
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
@@ -109,10 +120,11 @@ local self_dir="${0:A:h}"
 local DISPATCH="${self_dir}/review-dispatch.zsh"
 local CONSOLIDATE="${self_dir}/consolidate-findings.zsh"
 local RENDER_PROGRESS="${self_dir}/render-progress-block.zsh"
+local TREE_ID="${self_dir}/git-tree-id.zsh"
 
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
-local issue="" telemetry_file="" resume=0
+local issue="" telemetry_file="" resume=0 gate_attest=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --repo) repo="$2"; shift 2 ;;
@@ -120,6 +132,7 @@ while [[ $# -gt 0 ]]; do
   --review-cmd) review_cmd="$2"; shift 2 ;;
   --fix-cmd) fix_cmd="$2"; shift 2 ;;
   --test-cmd) test_cmd="$2"; shift 2 ;;
+  --gate-attest) gate_attest="$2"; shift 2 ;;
   --findings-file) findings_file="$2"; shift 2 ;;
   --max-rounds) max_rounds="$2"; shift 2 ;;
   --status-file) status_file="$2"; shift 2 ;;
@@ -130,7 +143,7 @@ while [[ $# -gt 0 ]]; do
   --resume) resume=1; shift ;;
   -h|--help)
     print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
-    print -r -- "  [--test-cmd CMD] [--base REF] [--max-rounds N] [--resume] [--issue N]"
+    print -r -- "  [--test-cmd CMD] [--gate-attest TREE_ID] [--base REF] [--max-rounds N] [--resume] [--issue N]"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--no-review]"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
@@ -379,10 +392,36 @@ fi
 # Step mode gates the PREVIOUS round's in-session fix here (#971): the fix ran
 # between invocations, so the "red after a fix aborts" check runs at resume
 # start — deterministically, before any new round work.
+#
+# Gate attestation (#981): the driving session already ran this identical full
+# suite green in SKILL.md Step 3 right after applying the fix. When it passes the
+# tree identity it gated (--gate-attest) and that identity EXACTLY matches the
+# current working tree, the --test-cmd run here is a byte-identical duplicate — so
+# skip it. Fail-closed: skip ONLY on a successfully-computed exact match; a
+# mismatch (tree changed since the attestation), an empty/absent value, or an
+# uncomputable current identity all fall through to running --test-cmd as before.
+# The gate never weakens — this removes only the duplicate, never the check.
 if (( step_mode && resume )) && [[ -n "$test_cmd" ]]; then
-  ( cd "$repo" && eval "$test_cmd" ) || {
-    print -u2 -- "resolve-story-loop: --test-cmd red on --resume (prior round's fix broke the gate)"
-    emit_and_exit "ERROR" "$resume_round" 1 "" "" "$resume_prev" "$history_file" "$changelists_file" }
+  local gate_skipped=0
+  if [[ -n "$gate_attest" ]]; then
+    local cur_tree=""
+    [[ -x "$TREE_ID" ]] && cur_tree="$("$TREE_ID" "$repo" 2>/dev/null)"
+    if [[ -n "$cur_tree" && "$cur_tree" == "$gate_attest" ]]; then
+      gate_skipped=1
+      print -u2 -- "resolve-story-loop: --gate-attest matches the working tree ($cur_tree) — skipping the duplicate --test-cmd run (#981)"
+      if [[ -n "$work_dir" && -d "$work_dir" ]]; then
+        { print -r -- "**Gate (round $(( resume_round + 1 ))):** attested green — skipped the duplicate full-suite run (#981)" \
+          >> "$work_dir/progress.md" ; } 2>/dev/null || true
+      fi
+    else
+      print -u2 -- "resolve-story-loop: --gate-attest does not match the working tree (attested '${gate_attest}', current '${cur_tree:-<uncomputable>}') — running --test-cmd (fail-closed, #981)"
+    fi
+  fi
+  if (( ! gate_skipped )); then
+    ( cd "$repo" && eval "$test_cmd" ) || {
+      print -u2 -- "resolve-story-loop: --test-cmd red on --resume (prior round's fix broke the gate)"
+      emit_and_exit "ERROR" "$resume_round" 1 "" "" "$resume_prev" "$history_file" "$changelists_file" }
+  fi
 fi
 
 # --- dispatch: which panel, on what scope (typed escalation on failure) -----
