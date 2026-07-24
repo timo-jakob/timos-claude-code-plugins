@@ -98,7 +98,13 @@ jq -c \
         fixed_from_prev: (if ($i > 0) and ($carried_priors != null)
                           then (((($rounds[$i-1].blocking // []) | length) - $carried_priors)
                                 | if . < 0 then 0 else . end)
-                          else null end)
+                          else null end),
+        # verified false trips (#983): proximity matches identity cleared as
+        # genuinely different — auto-continued, never escalated. Recorded per
+        # round so convergence analytics can separate a false-trip continuation
+        # from a genuine carry. null (not 0) on a pre-#983 changelist that could
+        # not compute the count — the honest-gap convention the sibling fields use.
+        false_trips: (if (($r.summary // {}) | has("false_trips")) then $r.summary.false_trips else null end)
       } ],
       # per-loop convergence assessment (#969): the machine-readable form of
       # the read the grant prompt shows the human

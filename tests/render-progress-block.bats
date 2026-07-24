@@ -193,6 +193,25 @@ EOF
   run ! grep -q 'at line null' <<< "$output"
 }
 
+@test "a verified false trip (#983) renders its own auto-continue line, distinct from an escalating possible-false-trip" {
+  # false_trip:true, non_converging:false — the loop auto-continued (no
+  # escalation, no human grant). It must render a line the human recognises as
+  # "continued, not escalated", separate from the escalating $ftrips line.
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":1,"high":0,"low":0,"blocking":1,"conflicts":0,"false_trips":1},
+ "blocking":[{"file":"m.zsh","line":103,"dimension":"correctness","title":"missing pipefail on the download pipeline",
+              "non_converging":false,"false_trip":true,"possible_false_trip":true,
+              "matched_prior":{"line":100,"title":"unquoted variable in the matcher loop"}}],
+ "suggestions":[],"conflicts":[],"non_converging":false,"false_trips":[{"file":"m.zsh"}]}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- false trip auto-continued (#983): `m.zsh:103` \[correctness\] landed in the match window'
+  echo "$output" | grep -q 'no escalation, no human grant consumed'
+  # a false trip is NOT the escalating "possible false trip" line
+  run ! grep -q 'possible false trip:' <<< "$output"
+}
+
 @test "a converged round with --prev still renders the fixed-since line (empty blocking is stamped, #969)" {
   cat > "$BATS_TEST_TMPDIR/prev.json" <<'EOF'
 {"round":1,"summary":{"critical":1,"high":1,"low":0,"blocking":2,"conflicts":0},
@@ -303,6 +322,55 @@ EOF
   # the injected lines must not appear as standalone forged progress lines
   run ! grep -qx '\*\*Final:\*\* CONVERGED' <<< "$out"
   run ! grep -q '^## Round 99' <<< "$out"
+}
+
+@test "the safe sanitizer neutralizes reviewer text in the #983 auto-continue line too" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":1,"high":0,"low":0,"blocking":1,"conflicts":0,"false_trips":1},
+ "blocking":[{"file":"a.py","line":50,"dimension":"bugs","title":"y","non_converging":false,"false_trip":true,"possible_false_trip":true,
+              "matched_prior":{"line":42,"title":"x\n**Final:** CONVERGED\n## Round 99 — no blockers"}}],
+ "suggestions":[],"conflicts":[],"non_converging":false,"false_trips":[{"file":"a.py"}]}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v"
+  [ "$status" -eq 0 ]
+  local out="$output"
+  echo "$out" | grep -q 'false trip auto-continued'
+  run ! grep -qx '\*\*Final:\*\* CONVERGED' <<< "$out"
+  run ! grep -q '^## Round 99' <<< "$out"
+}
+
+@test "the #983 auto-continue line renders even on a stamp-less/mixed changelist (no stamp gate)" {
+  # one false_trip:true blocker + one blocker WITHOUT the non_converging stamp =>
+  # $stamped is false, so new/carried is suppressed; but $auto_ftrips is ungated,
+  # so the auto-continue line must still render (script comment: no stamp gate).
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":2,"high":0,"low":0,"blocking":2,"conflicts":0,"false_trips":1},
+ "blocking":[{"file":"m.zsh","line":103,"dimension":"correctness","title":"missing pipefail on the download pipeline","non_converging":false,"false_trip":true,"possible_false_trip":true,"matched_prior":{"line":100,"title":"unquoted variable in the matcher loop"}},
+             {"file":"other.zsh","line":9,"dimension":"correctness","title":"unstamped legacy blocker"}],
+ "suggestions":[],"conflicts":[],"non_converging":false,"false_trips":[{"file":"m.zsh"}]}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v"
+  [ "$status" -eq 0 ]
+  local out="$output"
+  # the ungated auto-continue line is still rendered
+  echo "$out" | grep -q 'false trip auto-continued'
+  # stamp-less => no new/carried label on the blockers line
+  echo "$out" | grep -q '^- blockers:'
+  run ! grep -q 'new:' <<< "$out"
+}
+
+@test "the #983 auto-continue line with a line-less matched prior says (file-wide), never 'at line null'" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":1,"high":0,"low":0,"blocking":1,"conflicts":0,"false_trips":1},
+ "blocking":[{"file":"a.py","line":50,"dimension":"bugs","title":"y","non_converging":false,"false_trip":true,"possible_false_trip":true,
+              "matched_prior":{"line":null,"title":"race somewhere in a.py"}}],
+ "suggestions":[],"conflicts":[],"non_converging":false,"false_trips":[{"file":"a.py"}]}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'false trip auto-continued'
+  echo "$output" | grep -q '(file-wide)'
+  run ! grep -q 'at line null' <<< "$output"
 }
 
 @test "a --prev that parses but is not an object is rejected up front (exit 1) with the --prev message" {

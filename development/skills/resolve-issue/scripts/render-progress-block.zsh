@@ -6,16 +6,20 @@
 # Per #969 every round's block carries judgment-grade counts: the severity
 # split (critical/warning on the blockers line — "suggestions" is already the
 # Suggestion count), found-vs-fixed against the previous round (--prev), the
-# cumulative blocking trend (--history), and a per-blocker possible-false-trip
-# line whenever the consolidator flagged a carried blocker whose matched prior
-# has a different title (#913/#969).
+# cumulative blocking trend (--history), a per-blocker possible-false-trip line
+# whenever the consolidator flagged an ESCALATING carried blocker whose matched
+# prior has a different title (#913/#969), and a distinct "false trip
+# auto-continued" line for each identity-cleared false trip (#983).
 #
-# The new/carried split (and everything derived from it: fixed-since,
-# false-trip lines) is rendered ONLY when every blocker carries the #913
-# per-item non_converging stamp; a stamp-less (pre-#913) or mixed producer gets
-# totals only — no label rather than a confident wrong one. An EMPTY blocking
-# array counts as stamped (carried is determinately 0 with no per-item stamps
-# to consult), so the converged round still reports what its fix pass cleared.
+# The new/carried split (and everything derived from it: fixed-since, the
+# escalating possible-false-trip lines) is rendered ONLY when every blocker
+# carries the #913 per-item non_converging stamp; a stamp-less (pre-#913) or
+# mixed producer gets totals only — no label rather than a confident wrong one.
+# An EMPTY blocking array counts as stamped (carried is determinately 0 with no
+# per-item stamps to consult), so the converged round still reports what its fix
+# pass cleared. The #983 auto-continued false-trip line renders off the direct
+# per-item false_trip flag with NO stamp gate — an absent flag (a pre-#983
+# changelist) simply yields no line.
 #
 # Usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT
 #          [--prev FILE] [--history FILE]
@@ -102,6 +106,11 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
      then (($prev_blocking - $carried_priors) | if . < 0 then 0 else . end)
      else null end) as $fixed
   | (if $stamped then [ $blk[] | select((.non_converging == true) and (.possible_false_trip == true)) ] else [] end) as $ftrips
+  # verified false trips (#983): a proximity match identity cleared as a
+  # genuinely different finding — the loop AUTO-CONTINUES on these (no escalation,
+  # no human grant), so they render distinctly from the escalating $ftrips above.
+  # A direct flag, no $stamped gate: a pre-#983 changelist simply lacks it.
+  | ([ $blk[] | select(.false_trip == true) ]) as $auto_ftrips
   | "## Round \($r) — \(if (.summary.blocking // 0) == 0 then "no blockers" else "blockers remain" end) (\($ts))",
     ("- blockers: \(.summary.blocking // 0)"
      + (if (.summary.blocking // 0) > 0 then " (critical: \(.summary.critical // 0), warning: \(.summary.high // 0))" else "" end)
@@ -121,6 +130,9 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
        + (if ((.matched_prior.line | type) == "number") and ((.line | type) == "number")
           then " at line \(.matched_prior.line)" else " file-wide" end)
        + " (\"\(.matched_prior.title // "" | safe)\") but the titles differ — may be a NEW finding inside the match window, not a stuck one"),
+    ($auto_ftrips[] | "- false trip auto-continued (#983): `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] landed in the match window of prior-round blocker"
+       + (if ((.matched_prior.line | type) == "number") then " at line \(.matched_prior.line)" else " (file-wide)" end)
+       + " (\"\(.matched_prior.title // "" | safe)\") but shares no title terms — treated as a NEW blocker, not a stuck one; no escalation, no human grant consumed"),
     "- \($v)",
     ""
 ' "$changelist" || { print -u2 -- "render-progress-block: invalid changelist JSON"; exit 1 }

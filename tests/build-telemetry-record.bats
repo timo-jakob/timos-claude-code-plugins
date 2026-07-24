@@ -40,6 +40,32 @@ EOF
   [ "$(echo "$output" | jq '.findings_by_round[0].by_dimension.bugs')" -eq 1 ]
 }
 
+@test "per-round false_trips is recorded from summary.false_trips, null on a pre-#983 round (#983)" {
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":3,"max_rounds":3,"repo_type":"python","escalation_reasons":[],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":1,"high":0,"low":0,"blocking":1,"conflicts":0,"false_trips":0},
+   "blocking":[{"priority":"Critical","dimension":"bugs","file":"a.py","line":1,"title":"b1"}],"suggestions":[]},
+  {"round":2,"summary":{"critical":1,"high":0,"low":0,"blocking":1,"conflicts":0,"false_trips":1},
+   "blocking":[{"priority":"Critical","dimension":"bugs","file":"a.py","line":3,"title":"new","non_converging":false,"false_trip":true,"matched_prior":{"line":1,"title":"b1"}}],"suggestions":[]},
+  {"round":3,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 983 --ts 1720000000
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.findings_by_round[0].false_trips')" -eq 0 ]
+  [ "$(echo "$output" | jq '.findings_by_round[1].false_trips')" -eq 1 ]
+  # round 3 has a summary that OMITS false_trips (a pre-#983 changelist) ->
+  # honest null, not a confident 0
+  [ "$(echo "$output" | jq -r '.findings_by_round[2].false_trips')" = "null" ]
+  # #983 x #969: the false-trip blocker is stamped non_converging:false, so it
+  # counts as NEW (not carried) and does NOT suppress the prior round's fixed
+  # count — a false trip is a fresh finding, not a stuck one
+  [ "$(echo "$output" | jq '.findings_by_round[1].new')" -eq 1 ]
+  [ "$(echo "$output" | jq '.findings_by_round[1].carried')" -eq 0 ]
+  [ "$(echo "$output" | jq '.findings_by_round[1].fixed_from_prev')" -eq 1 ]
+}
+
 @test "per-round new/carried/fixed_from_prev + convergence_assessment are recorded (#969)" {
   cat > "$ST" <<'EOF'
 {"status":"ESCALATE_NO_CONVERGENCE","rounds":2,"max_rounds":3,"repo_type":"python",

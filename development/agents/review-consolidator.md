@@ -34,13 +34,18 @@ changelist with:
 - **dedup** — findings sharing `file`+`line`+`dimension` merged, most-detailed
   description kept, reviewers unioned (`agreement` count);
 - **conflicts** — co-located `performance` vs `code_quality` recommendations;
-- **non-convergence** — a blocker whose fingerprint also blocked last round is
-  flagged `non_converging: true`, with `matched_prior: {line, title}` naming
-  the nearest title-identical prior when one exists, else the nearest
-  matching prior by line distance (#913/#969) — **preserve `matched_prior`
-  and `possible_false_trip` verbatim on any item that carries them**; the
-  escalation renders them so a human can spot a false trip of the proximity
-  match.
+- **non-convergence (#983)** — candidates for "this blocked last round too" are
+  gathered by fingerprint (file+dimension+line-proximity), but the verdict is
+  title-identity: an **exact** normalized-title match => a genuine survivor
+  (`non_converging: true`, escalates); a non-exact match that shares a
+  significant token — or has a tokenless side — => **ambiguous**
+  (`non_converging: true`, still escalates); a non-exact match whose titles are
+  **fully disjoint** => a **false trip** (`false_trip: true`,
+  `non_converging: false`) that the loop AUTO-CONTINUES on (never an escalation).
+  Each carries `matched_prior: {line, title}`. **Preserve `matched_prior`,
+  `possible_false_trip`, AND `false_trip` verbatim on any item that carries
+  them** — never re-derive the verdict, and never re-flag a disjoint-title match
+  as `non_converging` (that reintroduces the #976 false escalation).
 
 Take the engine's output as the source of truth for all of the above.
 
@@ -56,11 +61,11 @@ flagging, never inventing or dropping a real finding**:
    union their reviewers, keep the clearest description, keep the highest
    severity. A merged item keeps `non_converging: true` if any constituent
    carried it, and the `matched_prior` of the earliest-listed carrying
-   constituent — along with that same constituent's `possible_false_trip`
-   and `file`/`line`, so the flag and the
+   constituent — along with that same constituent's `possible_false_trip`,
+   `false_trip`, and `file`/`line`, so the flag and the
    escalation's at-line/file-wide rendering stay paired with the match they
-   describe (#913/#969) — never OR the flag across constituents and never
-   drop it. Read the cited code (`Read`/`Grep`) when you need to
+   describe (#913/#969/#983) — never OR the flags across constituents and never
+   drop them. Read the cited code (`Read`/`Grep`) when you need to
    confirm they are truly the same issue before merging.
 2. **Conflict confirmation.** The engine flags only co-located
    performance-vs-code_quality pairs. Promote a genuine opposing pair the
@@ -78,15 +83,20 @@ your judgment edits applied on top:
 ```json
 {
   "round": 2,
-  "summary": { "critical": 1, "high": 2, "low": 3, "blocking": 3, "conflicts": 1 },
+  "summary": { "critical": 1, "high": 2, "low": 3, "blocking": 3, "conflicts": 1,
+               "false_trips": 0 },
   "blocking": [
     { "priority": "Critical", "severity": "CRITICAL", "dimension": "bugs",
       "file": "src/app/checkout.py", "line": 42, "title": "…", "description": "…",
       "suggested_fix": "…", "reviewers": ["python-bug-hunter","python-security-reviewer"],
-      "agreement": 2, "blocking": true, "non_converging": false }
-    /* a non-converging item additionally carries, verbatim from the engine:
-       "non_converging": true, "matched_prior": { "line": 40, "title": "…" },
-       "possible_false_trip": false */
+      "agreement": 2, "blocking": true, "non_converging": false, "false_trip": false }
+    /* a VERIFIED survivor additionally carries, verbatim from the engine:
+       "non_converging": true, "false_trip": false, "matched_prior": { "line": 40,
+       "title": "…" }, "possible_false_trip": false. An AMBIGUOUS survivor is
+       identical but "possible_false_trip": true (no exact-title match). A false
+       trip (#983) carries: "non_converging": false, "false_trip": true,
+       "matched_prior": {…}, "possible_false_trip": true — it stays in blocking[]
+       (still needs fixing) but never escalates. */
   ],
   "suggestions": [ /* Low items, logged, never loop */ ],
   "conflicts": [
@@ -94,6 +104,7 @@ your judgment edits applied on top:
       "items": [ /* … */ ], "detail": "…" }
   ],
   "non_converging": false,
+  "false_trips": [ /* the false_trip:true subset of blocking[], #983 */ ],
   "escalation_reasons": []
 }
 ```
