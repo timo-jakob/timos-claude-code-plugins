@@ -18,6 +18,10 @@ on:
       # **-prefixed, so a per-skill line is needed for the suite to gate the
       # script it covers (e.g. resolve-issue's resolve-story-loop.zsh, #974).
       - 'development/skills/**/scripts/**'
+      # plugin-level shared scripts (development/scripts/<area>/, e.g. the
+      # telemetry emitter + validator, #740) — 'scripts/**' below matches only a
+      # top-level scripts/ dir, so this line is what gates them
+      - 'development/scripts/**'
       - 'scripts/**'
       - 'development-claude-plugin/**'
       - '.github/workflows/script-tests.yml'

@@ -1349,13 +1349,140 @@ interactive extension (#902): the skill summarizes via `--format summary`,
 offers +2 rounds / guidance, and resumes the loop via `--resume`; only a
 Stop/decline falls back to the typed comment.
 
+## The telemetry/v1 contract (#740)
+
+Two telemetry streams predate this contract — review-loop (#566) and
+refine-issue (#579/#735) — and both were built by **copy-adaptation**: the same
+sink convention, near-identical envelope fields, duplicated zsh/jq scaffolding,
+and no shared definition. Every further stream would have copied again and
+drifted further, while the declared consumers are all three of a human glancing
+at one repo, a separate cross-repo reporting repo running Grafana, and the
+plugin self-improvement loop. `telemetry/v1` is the versioned contract that
+stops the drift. Design spec:
+`docs/superpowers/specs/2026-07-13-pipeline-telemetry-trilogy-design.md`.
+
+**One JSON object per line (JSONL), two kinds, one closed envelope:**
+
+```jsonc
+{
+  "schema": "telemetry/v1",
+  "kind": "run",                           // "run" | "enrichment"
+  "run_id": "review-loop-1752403000-8f3a",  // <pipeline>-<epoch>-<4 hex rand>; the join key
+  "parent_run_id": null,                   // e.g. a review-loop run inside a resolve-issue run
+  "ts": 1752403000,                        // unix seconds
+  "repo": "owner/name",                    // remote-derived; basename fallback
+  "repo_type": "python",                   // nullable
+  "pipeline": "review-loop",               // OPEN identifier [A-Za-z0-9._-]+ — NOT a closed
+                                           // enum. Conventional: review-loop | refine-issue |
+                                           // resolve-issue | maintenance | approve |
+                                           // bootstrap | acceptance | …
+  "issue": 123,                            // nullable linkage
+  "pr": 456,                               // nullable linkage
+  "outcome": "success",                    // success | parked | escalated | failed
+  "wall_s": 312,                           // REQUIRED on kind:"run"
+  "tokens": null,                          // best-effort; null until reliably measurable
+  "payload": { }                           // pipeline-specific detail, OPEN
+}
+```
+
+**The envelope is closed; `payload` is open.** Exactly those 14 top-level keys —
+an unknown key at the top level is a contract violation, while any keys inside
+`payload` are accepted. Everything bespoke (`rounds`, `findings_by_round`,
+`objections_*`, `park_type`, `risk_classification`, …) lives in `payload`; the
+4-value `outcome` enum stays small precisely so cross-pipeline dashboards can
+group on it. Pipeline-specific nuance (e.g. *which* park type) is payload detail,
+never a new enum value.
+
+Rules that carry the contract's weight:
+
+- **`wall_s` is a run measure.** It is **required** on `kind: "run"` records; on
+  enrichments the key is still present but its value must be **`null`** (the
+  envelope is closed — no key is ever omitted). Both sides enforce this: the
+  emitter rejects `--wall-s` under `--kind enrichment`, and the validator rejects
+  a non-null enrichment `wall_s`. Without that, any consumer summing `wall_s`
+  without filtering `kind` would double-count every enriched run.
+  **`tokens` is never estimated** — it stays `null` until the harness exposes a
+  real number, because a withheld figure beats a confidently wrong one.
+- **`run_id` is the join key.** A minted id is
+  `<pipeline>-<epoch>-<4 hex rand>`, with the random suffix drawn from
+  `/dev/urandom` rather than derived from the timestamp, so two runs stamped the
+  same second still get distinct ids. `parent_run_id` links nested runs (a
+  review-loop run inside a resolve-issue run).
+- **A `kind: "enrichment"` record MUST carry the `run_id` of the run it
+  enriches.** Enrichment (epic 3) is event-sourced — never rewrite a line, append
+  a record joined on `run_id` — so an enrichment that minted a *fresh* id would
+  validate cleanly and still be permanently orphaned. `emit-telemetry.zsh`
+  therefore **requires** `--run-id` for `--kind enrichment`; the minted-id default
+  applies to `kind: "run"` only.
+- **On an enrichment, `outcome` describes the enrichment event itself** — whether
+  the downstream facts could be settled — and is **never** a restatement of the
+  enriched run's outcome. A consumer computing run outcomes must therefore filter
+  `kind: "run"`: counting both kinds would double-count every enriched run *and*
+  blend two different meanings into the one field dashboards group on. The same
+  rule holds for the other run-shaped fields on an enrichment — `ts` is the
+  enrichment's own timestamp, and `wall_s` is `null`. Conventionally `success`
+  means the facts were settled and `failed` that the query errored; a run whose
+  facts are **not yet settled** gets no enrichment record at all, rather than one
+  full of nulls. Because the enrichment pass finds work by looking for runs that
+  lack a **`success`** enrichment (among those carrying a `pr`), a `failed` one
+  is retryable rather than a
+  tombstone — otherwise one transient `gh` error would orphan that run's facts
+  permanently.
+- **`pipeline` is an open identifier**, not a closed enum: any
+  `[A-Za-z0-9._-]+`. Adding a pipeline needs no schema change and no version
+  bump. The values listed above are conventional — the emitter enforces only the
+  charset (because `pipeline` seeds the `run_id` format) and the validator only
+  that it is a non-empty string.
+- **Emission is shared code, not convention.** `development/scripts/telemetry/`
+  is the plugin-level shared home: `emit-telemetry.zsh` owns the envelope and the
+  sink, `validate-telemetry.zsh` enforces the contract, and both are bats-tested.
+  A pipeline supplies only its `payload` — no skill hand-rolls an envelope.
+  Skills reference it with the family's established `<skill-base-dir>`
+  placeholder — from a skill under `development/skills/<skill>/`, that is
+  `<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh` (the same
+  relative idiom `<skill-base-dir>/../bootstrap/scripts/…` already uses).
+- **What the validator actually enforces:** the envelope — the `schema` literal
+  (so a future `telemetry/v2` record fails a v1 validator outright rather than
+  passing on the fields they share), the exact key set, types, the `kind` and
+  `outcome` enums, non-negative-integer numerics, and `wall_s` (required on
+  runs, `null` on enrichments). It does **not** check the `run_id` *format* (only
+  that it is a non-empty string), so the format above is the emitter's promise
+  for minted ids rather than a validated invariant.
+- **Nothing lands on a rejected record.** Every validation failure in the emitter
+  exits non-zero *before* the append, so a malformed record never reaches a sink.
+  The record is also written to stdout *before* the append, so a downstream pipe
+  closing early can't leave a record in the sink behind a non-zero exit.
+- **A record-less stream is vacuously valid** — "every line is valid" over zero
+  records. That is the right answer for *is this data conformant?* and the wrong
+  one for *did my pipeline emit anything?*, so a caller asserting that emission
+  happened passes `--require-records`, which turns it into a failure. Blank and
+  whitespace-only lines are not records, so a file of blanks fails it too.
+- **Sink precedence:** `--telemetry-file` > the local default
+  `<repo-dir>/.claude/telemetry/telemetry.jsonl` (git-ignored). One stream per
+  repo; the `pipeline` and `kind` fields discriminate. Child (d) inserts a
+  `--telemetry-dir DIR` shared mode (`DIR/<owner>-<name>.jsonl`) between the two.
+- **Legacy records** (the pre-contract per-pipeline files, which carry no
+  `schema` key) **will be** handled by a v0→v1 adapter in child (e)'s rollup —
+  **no file migration is performed**, so the old files stay readable where they
+  lie.
+- **Versioning:** a breaking envelope change bumps to `telemetry/v2`; `payload`
+  evolution is per-pipeline and non-breaking by definition.
+
+The two sections below describe the two streams **as they emit today — in the
+pre-contract (v0) shape**, with bespoke keys at the top level and their own
+per-pipeline sink files. Retrofitting them onto `telemetry/v1` — envelope and
+sink from `emit-telemetry.zsh`, the bespoke fields moved into `payload`, and
+review-loop's `status` plus refine-issue's pre-contract `outcome` values
+(`refined-ready` / `parked`) mapped onto the 4-value `outcome` enum — is
+children (b) and (c) of #740, not this contract.
+
 ## Review-loop telemetry (#566)
 
 Raising autonomy safely needs evidence, so the loop appends **one JSONL record
 per terminal status — never per round; an extended loop (escalate → grant →
 `--resume`) therefore emits one record per escalation plus its final
 status** to `.claude/telemetry/review-loop.jsonl`
-(git-ignored — the bootstrap gitignore fragments for python/java/swift carry
+(git-ignored — the bootstrap gitignore fragments for every language carry
 `.claude/telemetry/`). It is never appended on the non-terminal `AWAITING_FIX`
 (#971) or the `STALE_FINDINGS` refusal (#974) — both resume the same loop, so a
 record there would double-count it. A step-mode loop spans several invocations,
@@ -2440,6 +2567,19 @@ Instead, the orchestrator pre-runs every helper it needs and passes
 the results as part of the JSON payload. Language plugins receive
 "here is the parsed detect-stack output" rather than "here is the path
 to detect-stack.sh; go run it." Pure functions, no path coupling.
+
+**Cross-skill shared scripts live at `development/scripts/<area>/`.** That is a
+different axis from the cross-*plugin* hazard above: a script used by several
+skills *within* `development` has no natural owner under
+`development/skills/<skill>/scripts/`, and parking it inside one skill's
+directory makes every other caller reach across a sibling. `telemetry/` (#740)
+is the first such area — `emit-telemetry.zsh` and `validate-telemetry.zsh`, the
+shared `telemetry/v1` emitter and contract validator. Skills reference these
+with the usual `<skill-base-dir>` placeholder
+(`<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh`), the same
+relative idiom already used for `<skill-base-dir>/../bootstrap/scripts/…`. This
+stays *inside* one plugin, so it does not reintroduce the cross-plugin coupling
+this section warns about.
 
 ## Line-length policy
 
