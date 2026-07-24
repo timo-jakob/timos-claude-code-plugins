@@ -71,20 +71,26 @@ EOF
   [ "$(echo "$output" | jq '.non_converging')" = "false" ]
 
   # round 2: same defect, a different reviewer, punctuation reword + shifted
-  # line — still blocks (identity is file+dimension+line-proximity, not title).
+  # line — still blocks. Candidates are gathered by file+dimension+proximity, and
+  # the reword shares every significant title token, so identity (#983) reads it
+  # as an ambiguous survivor (not a disjoint-title false trip) — non_converging.
   cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
 [{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":31,"title":"Race on shared counter!","description":"still here","reviewer":"python-security-reviewer"}]
 EOF
   run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]   # ambiguous, not a clear false trip
   echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
 }
 
 @test "non-convergence: a SEMANTICALLY reworded blocker (same file/dimension) still fires (#606)" {
-  # The #606 regression: round-to-round the reviewer re-words the SAME finding.
-  # A title-based fingerprint misses it and wastes a third round; identity must
-  # be [file, dimension] + line proximity, not the free-text title.
+  # The #606 regression: round-to-round the reviewer re-words the SAME finding
+  # and the line drifts. #983 keeps this firing: the reword shares significant
+  # title tokens with the prior, so once proximity gathers it as a candidate,
+  # identity classes it AMBIGUOUS — non_converging (fail-toward-the-human) — not
+  # a disjoint-title false trip. A pure exact-title fingerprint would still miss
+  # it; a pure proximity fingerprint would over-fire on a genuinely new neighbour.
   cat > "$F" <<'EOF'
 [{"severity":"CRITICAL","dimension":"security","file":"client.py","line":40,"title":"Disabling TLS verification exposes API key and document PII to MITM","description":"verify=False","reviewer":"python-security-reviewer"}]
 EOF
@@ -94,20 +100,24 @@ EOF
   [ "$(echo "$output" | jq '.non_converging')" = "false" ]
 
   # round 2: same defect (verify=False still present), title reworded with an
-  # extra clause and the line drifted by 2 — the old title fingerprint would NOT
-  # have matched, so it must still fire on file+dimension+proximity.
+  # extra clause and the line drifted by 2 — proximity gathers it and the shared
+  # significant tokens (disabling/verification/exposes/…) make the #983 verdict
+  # AMBIGUOUS, so it must still fire (a pure proximity fingerprint would over-fire
+  # on a genuinely new neighbour; a pure exact-title one would miss the reword).
   cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
 [{"severity":"CRITICAL","dimension":"security","file":"client.py","line":42,"title":"Disabling TLS verification exposes API key and document PII to MITM (now wired and reachable)","description":"verify=False still present","reviewer":"python-security-reviewer"}]
 EOF
   run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]   # ambiguous (shared tokens), not a clear false trip
   echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
 }
 
 @test "non-convergence: the match records WHICH prior blocker it hit (matched_prior, #913)" {
-  # the escalation needs "matched prior blocker at old line L" so a human can
-  # spot a false trip of the proximity window after a fix pass shifted lines
+  # the escalation needs "matched prior blocker at old line L" so a human can vet
+  # an AMBIGUOUS match (here a shared-token retitle, "counter") after a fix pass
+  # shifted lines
   cat > "$F" <<'EOF'
 [{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":30,"title":"Race on shared counter","description":"d","reviewer":"python-bug-hunter"}]
 EOF
@@ -148,7 +158,7 @@ EOF
   [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" -eq 35 ]
   [ "$(echo "$output" | jq -r '.blocking[0].matched_prior.title')" = "Unlocked read of counter" ]
 
-  # equidistant priors (|30-32|=|34-32|... use 25/35 around 30): stable sort
+  # equidistant priors (|30-32| == |34-32| == 2): stable sort
   # keeps the first in prior blocking-array order — deterministic
   cat > "$BATS_TEST_TMPDIR/r2b.json" <<'EOF'
 [{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":32,"title":"Counter still racy somehow","description":"d","reviewer":"python-bug-hunter"}]
@@ -168,7 +178,11 @@ EOF
 @test "non-convergence: a line-less prior blocker matches as a wildcard and matched_prior.line is null (#913)" {
   # the producer side of the render-side wildcard test: line_near treats a
   # missing line as a wildcard, and matched_prior must carry line:null (not 0,
-  # not an omitted key) so the escalation renders the file-wide caveat
+  # not an omitted key) so the escalation renders the file-wide caveat. The
+  # round-2 title SHARES a significant token ("race") with the prior, so identity
+  # (#983) reads it as an ambiguous survivor — still non_converging — rather than
+  # a disjoint-title false trip; the wildcard-line matched_prior is what is under
+  # test here.
   cat > "$F" <<'EOF'
 [{"severity":"CRITICAL","dimension":"bugs","file":"e.py","title":"Race somewhere in e.py","description":"d","reviewer":"python-bug-hunter"}]
 EOF
@@ -177,11 +191,12 @@ EOF
   echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
 
   cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
-[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":500,"title":"Counter still racy","description":"d","reviewer":"python-bug-hunter"}]
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":500,"title":"Race still unsynchronized here","description":"d","reviewer":"python-bug-hunter"}]
 EOF
   run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]   # shared "race" token => ambiguous, not clear
   [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" = "null" ]
   [ "$(echo "$output" | jq -r '.blocking[0].matched_prior.title')" = "Race somewhere in e.py" ]
 }
@@ -197,9 +212,9 @@ EOF
   # round 1 has no prior — nothing may carry the flag
   [ "$(echo "$output" | jq '[.blocking[] | has("possible_false_trip")] | any')" = "false" ]
 
-  # round 2: e.py match has a genuinely different title (a different finding
-  # inside the window) -> flagged; t.py match differs only in case/whitespace
-  # (a pure reword of the same finding) -> NOT flagged
+  # round 2: e.py match is retitled but shares a significant token ("counter") —
+  # AMBIGUOUS under #983 (still escalates) with possible_false_trip flagged; t.py
+  # differs only in case/whitespace (exact after normalization) -> NOT flagged
   cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
 [{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":33,"title":"Off-by-one in retry counter","description":"d","reviewer":"python-bug-hunter"},
  {"severity":"CRITICAL","dimension":"tests","file":"t.py","line":11,"title":"missing   FAILURE-branch test ","description":"d","reviewer":"python-test-reviewer"}]
@@ -300,8 +315,12 @@ EOF
 }
 
 @test "matched_prior: a proximate NUMBERED prior outranks a co-windowed line-less one (#969)" {
+  # both priors share the significant token "counter" with the round-2 blocker,
+  # so under #983 both survive the identity verdict into the candidate pool (an
+  # AMBIGUOUS carried blocker) and nearest-rank is what actually decides between
+  # them — not the token filter.
   cat > "$F" <<'EOF'
-[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","title":"Race somewhere in e.py","description":"d","reviewer":"r"},
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","title":"Counter race somewhere in e.py","description":"d","reviewer":"r"},
  {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":30,"title":"Race on shared counter","description":"d","reviewer":"r"}]
 EOF
   run zsh "$S" --findings "$F" --round 1
@@ -313,54 +332,64 @@ EOF
 EOF
   run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
   [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]
   # both priors match (wildcard + within window), but the numbered one is
   # nearer than the wildcard rank — matched_prior must not be the line-less one
   [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" -eq 30 ]
 }
 
 @test "matched_prior attribution is one-to-one: two carried blockers never claim the same prior (#969)" {
-  # P1@11 and P2@20 re-found (reworded) as C1@11 and C2@12 — C2 is nearer to
-  # P1 than to P2, but P1 is already claimed by C1, so C2 must claim P2 and
-  # the distinct-priors fixed count downstream reads 0 of 2, not 1 of 2
+  # All four titles share the tokens "shared"+"counter", so under #983 both
+  # round-2 blockers are AMBIGUOUS with BOTH priors in their candidate pool —
+  # only the one-to-one claiming (not the token filter) forces C2 off the prior
+  # C1 already took. P1@11 and P2@20 re-found as C1@11 and C2@12 — C2 is nearer
+  # to P1 than to P2, but P1 is already claimed by C1, so C2 must claim P2 and
+  # the distinct-priors fixed count downstream reads 0 of 2, not 1 of 2.
   cat > "$F" <<'EOF'
-[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":11,"title":"Race on counter A","description":"d","reviewer":"r"},
- {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":20,"title":"Unlocked read of B","description":"d","reviewer":"r"}]
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":11,"title":"Shared counter race in A","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":20,"title":"Shared counter unlocked read B","description":"d","reviewer":"r"}]
 EOF
   run zsh "$S" --findings "$F" --round 1
   [ "$status" -eq 0 ]
   echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
 
   cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
-[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":11,"title":"Counter A trouble remains","description":"d","reviewer":"r"},
- {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":12,"title":"B read trouble remains","description":"d","reviewer":"r"}]
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":11,"title":"Shared counter A still trouble","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":12,"title":"Shared counter B read trouble","description":"d","reviewer":"r"}]
 EOF
   run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
   [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '[.blocking[] | .false_trip] | all(. == false)')" = "true" ]
   [ "$(echo "$output" | jq '[.blocking[] | select(.line==11)][0].matched_prior.line')" -eq 11 ]
   [ "$(echo "$output" | jq '[.blocking[] | select(.line==12)][0].matched_prior.line')" -eq 20 ]
   [ "$(echo "$output" | jq '[.blocking[] | .matched_prior] | unique | length')" -eq 2 ]
 }
 
 @test "one-to-one claiming: with more carried blockers than priors, the overflow blocker still gets a REAL matched_prior (#969)" {
-  # two priors, three co-windowed carried blockers: the first two claim
-  # distinct priors, the third finds every candidate claimed and must fall
-  # back to a real prior — never a null matched_prior that would add a
-  # spurious distinct entry to the fixed-since counts
+  # all five titles share "shared"+"counter", so under #983 all three round-2
+  # blockers are AMBIGUOUS with both priors in their pool — exercising the
+  # claimed/free fallback, not the clear-false-trip path. Two priors, three
+  # co-windowed carried blockers: the first two claim distinct priors, the third
+  # finds every candidate claimed and must fall back to a real prior — never a
+  # null matched_prior that would add a spurious distinct entry to fixed-since.
   cat > "$F" <<'EOF'
-[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":10,"title":"Race on counter A","description":"d","reviewer":"r"},
- {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":15,"title":"Unlocked read of B","description":"d","reviewer":"r"}]
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":10,"title":"Shared counter race in A","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":15,"title":"Shared counter unlocked read B","description":"d","reviewer":"r"}]
 EOF
   run zsh "$S" --findings "$F" --round 1
   [ "$status" -eq 0 ]
   echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
 
   cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
-[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":10,"title":"A trouble remains","description":"d","reviewer":"r"},
- {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":12,"title":"more A trouble","description":"d","reviewer":"r"},
- {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":14,"title":"B trouble remains","description":"d","reviewer":"r"}]
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":10,"title":"Shared counter A trouble","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":12,"title":"Shared counter more trouble","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":14,"title":"Shared counter B trouble","description":"d","reviewer":"r"}]
 EOF
   run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
   [ "$status" -eq 0 ]
+  # ambiguous carried blockers (claiming path), not clear false trips
+  [ "$(echo "$output" | jq '[.blocking[] | .false_trip] | all(. == false)')" = "true" ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
   # every carried blocker records a real prior line — no null matched_prior
   [ "$(echo "$output" | jq '[.blocking[] | .matched_prior.line] | map(select(. != null)) | length')" -eq 3 ]
   # and only the two real priors appear as distinct claims
@@ -447,6 +476,194 @@ EOF
   [ "$(echo "$output" | jq '.non_converging')" = "false" ]
 }
 
+@test "identity (#983): a DISJOINT-title match in the proximity window is a false trip, not non-convergence" {
+  # the #976 21-minute false escalation: a round-1 blocker is FIXED and a
+  # genuinely different finding lands a couple of lines away. Proximity gathers
+  # it, but the titles share no significant token, so identity clears it: the
+  # blocker is a false_trip (auto-continue), NOT non_converging (no escalation).
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":100,"title":"unquoted variable in the matcher loop","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":103,"title":"missing pipefail on the download pipeline","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "false" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "true" ]
+  # the clear branch still stamps possible_false_trip (the render/escalation
+  # surfaces gate it with non_converging, so the false trip never double-reports)
+  [ "$(echo "$output" | jq '.blocking[0].possible_false_trip')" = "true" ]
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 1 ]
+  [ "$(echo "$output" | jq '.false_trips | length')" -eq 1 ]
+  # the blocker still needs fixing (it is a real new finding) but must NOT
+  # produce a non-convergence escalation reason
+  echo "$output" | jq -e '(.escalation_reasons | index("non_converging_blocker")) | not' >/dev/null
+  # matched_prior still recorded so a human/telemetry can see what the window hit
+  [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" -eq 100 ]
+}
+
+@test "identity (#983): an EXACT-title match at a shifted line still fires non-convergence (verified survivor)" {
+  # titles of genuinely-surviving blockers do not shift; the line does. An exact
+  # normalized-title match anywhere in the window is a verified survivor.
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":100,"title":"unquoted variable in the matcher loop","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":107,"title":"unquoted variable in the matcher loop","description":"still here","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]
+  [ "$(echo "$output" | jq '.blocking[0].possible_false_trip')" = "false" ]
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 0 ]
+  echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
+}
+
+@test "identity (#983): a retitled-but-arguably-same finding (shared token) is AMBIGUOUS and still escalates" {
+  # fail-toward-the-human: a reword that keeps a significant token could be the
+  # same finding, so it stays non_converging (escalates) — NOT a false trip.
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":100,"title":"unquoted variable in the matcher loop","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":103,"title":"unquoted matcher variable still unsafe","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]
+  # it is not an exact-title match, so the possible-false-trip flag is still set
+  [ "$(echo "$output" | jq '.blocking[0].possible_false_trip')" = "true" ]
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 0 ]
+  echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
+}
+
+@test "identity (#983): an untitled carried blocker is AMBIGUOUS (cannot verify identity), not a false trip" {
+  # no title evidence either way => fail-toward-the-human: still escalates.
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":30,"description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":33,"description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]
+  [ "$(echo "$output" | jq '.blocking[0].possible_false_trip')" = "true" ]
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 0 ]
+  echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
+}
+
+@test "identity (#983): a titled current blocker vs a TOKENLESS prior candidate is AMBIGUOUS, not clear" {
+  # the asymmetric tokenless-side branch: the current title yields tokens but the
+  # prior candidate does not, so identity cannot be verified => ambiguous
+  # (escalates), never a disjoint-title false trip.
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":30,"title":"a b c","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":33,"title":"unquoted matcher variable reference","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 0 ]
+}
+
+@test "identity (#983): an ambiguous blocker claims the token-sharing prior, not a nearer disjoint one" {
+  # regression lock on the ambiguous $cands restriction: with a nearer
+  # disjoint-titled prior and a farther token-sharing prior in the window, the
+  # ambiguous blocker must attribute to the token-sharing (evidence) prior.
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":90,"title":"race on the shared counter","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":101,"title":"unclosed file descriptor leak","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"e.py","line":100,"title":"counter race still unsynchronized","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  [ "$(echo "$output" | jq '.blocking[0].false_trip')" = "false" ]
+  # nearer prior is @101 (dist 1, disjoint title); evidence prior is @90 (dist 10,
+  # shares "counter"/"race") — the claim must land on the evidence prior
+  [ "$(echo "$output" | jq '.blocking[0].matched_prior.line')" -eq 90 ]
+}
+
+@test "identity (#983): TWO disjoint-title false trips in one round are both counted and neither escalates" {
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"m.zsh","line":100,"title":"unquoted variable in the matcher loop","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"m.zsh","line":200,"title":"race between check and use of the lockfile","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  # both fixed; two genuinely different findings land in-window near each prior
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"m.zsh","line":103,"title":"missing pipefail on the download pipeline","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"m.zsh","line":203,"title":"stale symlink target left after rename","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "false" ]
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 2 ]
+  [ "$(echo "$output" | jq '.false_trips | length')" -eq 2 ]
+  [ "$(echo "$output" | jq '[.blocking[] | select(.false_trip == true)] | length')" -eq 2 ]
+  echo "$output" | jq -e '(.escalation_reasons | index("non_converging_blocker")) | not' >/dev/null
+}
+
+@test "identity (#983): a verified survivor and a clear false trip in ONE round — escalate, count the trip, don't steal the prior" {
+  # the one-to-one claiming interaction: the survivor must still claim its prior
+  # (non_converging + escalation), and the co-located false trip must claim
+  # NOTHING (so the distinct-prior fixed count is not collapsed).
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":100,"title":"unquoted variable in the matcher loop","description":"d","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/round1.json"
+  cat > "$BATS_TEST_TMPDIR/r2.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":103,"title":"unquoted variable in the matcher loop","description":"still here","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"correctness","file":"m.zsh","line":105,"title":"missing pipefail on the download pipeline","description":"new","reviewer":"r"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2.json" --round 2 --prev "$BATS_TEST_TMPDIR/round1.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+  echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 1 ]
+  # the verified survivor claims the prior (line 100), false_trip:false
+  [ "$(echo "$output" | jq '[.blocking[] | select(.title | test("unquoted"))][0].false_trip')" = "false" ]
+  [ "$(echo "$output" | jq '[.blocking[] | select(.title | test("unquoted"))][0].matched_prior.line')" -eq 100 ]
+  # the neighbour is the false trip, non_converging:false
+  [ "$(echo "$output" | jq '[.blocking[] | select(.title | test("pipefail"))][0].false_trip')" = "true" ]
+  [ "$(echo "$output" | jq '[.blocking[] | select(.title | test("pipefail"))][0].non_converging')" = "false" ]
+}
+
 @test "empty findings: a clean empty changelist, nothing blocking" {
   echo '[]' > "$F"
   con
@@ -454,6 +671,7 @@ EOF
   [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
   [ "$(echo "$output" | jq '.blocking | length')" -eq 0 ]
   [ "$(echo "$output" | jq '.non_converging')" = "false" ]
+  [ "$(echo "$output" | jq '.summary.false_trips')" -eq 0 ]
 }
 
 @test "usage: --findings is required (exit 2)" {

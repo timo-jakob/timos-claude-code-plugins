@@ -65,6 +65,40 @@ loop() {
   echo "$output" | jq -e '.escalation_reasons | index("non_converging_blocker")' >/dev/null
 }
 
+@test "identity false trip (#983): a disjoint-title neighbour of a fixed blocker auto-continues, never escalates" {
+  # round 1: a blocker; round 2: it is FIXED and a genuinely different finding
+  # lands 3 lines away (disjoint title) — a proximity false trip that must NOT
+  # ESCALATE_NO_CONVERGENCE; round 3 is clean, so the loop CONVERGES. The old
+  # proximity-only matcher would have escalated at round 2 (the #976 bug).
+  loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":5,\"title\":\"unquoted variable in matcher\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":8,\"title\":\"missing pipefail on the download pipeline\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  # round 2 recorded the false trip and did NOT flag non-convergence
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.false_trips')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].non_converging')" = "false" ]
+  [ "$(echo "$output" | jq '.round_changelists[1].blocking[0].false_trip')" = "true" ]
+  # the loop history carries the per-round false-trip count (#983)
+  [ "$(echo "$output" | jq '.history[1].false_trips')" -eq 1 ]
+  # never escalated on non-convergence
+  echo "$output" | jq -e '(.escalation_reasons | index("non_converging_blocker")) | not' >/dev/null
+}
+
+@test "identity false trip (#983) on the final budget round: BUDGET_EXHAUSTED, not ESCALATE_NO_CONVERGENCE" {
+  # the fate ladder puts round==max_rounds AFTER the non-converging check, so a
+  # false trip on the last round must fall through to BUDGET_EXHAUSTED (still
+  # recording summary.false_trips), never flip the terminal verdict.
+  loop --max-rounds 2 \
+       --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":5,\"title\":\"unquoted variable in matcher\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"; else printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":8,\"title\":\"missing pipefail on the download pipeline\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.false_trips')" -eq 1 ]
+  [ "$(echo "$output" | jq '.history[1].false_trips')" -eq 1 ]
+  echo "$output" | jq -e '(.escalation_reasons | index("non_converging_blocker")) | not' >/dev/null
+}
+
 @test "round budget exhaustion exits BUDGET_EXHAUSTED with status JSON" {
   # A GENUINELY different blocker each round -> never non_converging -> runs out
   # the budget. Non-convergence is fingerprinted on [file, dimension] + line

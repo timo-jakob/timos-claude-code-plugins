@@ -1215,41 +1215,49 @@ reliable but the merging needs semantics:
   `dimension` (most-detailed description kept, reviewers unioned, `agreement`
   counted, highest severity carried); a **conflict** item for co-located
   `performance`-vs-`code_quality` recommendations; and **non-convergence** —
-  a blocker whose fingerprint (`file`+`dimension` with line proximity, ±10
-  lines; a missing line is a wildcard — deliberately NOT the free-text title,
-  #606) also blocked the previous round (`--prev`) is marked
-  `non_converging: true` and carries `matched_prior: {line, title}` — the
+  candidates for "this blocked the previous round too" (`--prev`) are
+  **gathered** by fingerprint (`file`+`dimension` with line proximity, ±10
+  lines; a missing line is a wildcard, #606), but the **verdict** on a
+  gathered candidate is **title-identity** (#983): an **exact** normalized-title
+  match => a **verified survivor** (`non_converging: true`, escalates); a
+  non-exact match that shares any significant title token — or has an untitled
+  side — => **ambiguous** (`non_converging: true`, still escalates:
+  fail-toward-the-human, a reword must not defeat the match, #606); a non-exact
+  match with **fully disjoint** significant tokens => a **false trip**
+  (`false_trip: true`, `non_converging: false`) — a genuinely different finding
+  that merely landed in the window after a fix shifted lines, so the loop
+  **auto-continues** instead of escalating (the #976 21-minute false escalation).
+  Every gathered blocker carries `matched_prior: {line, title}` — the
   **nearest** title-identical prior when one exists, else the **nearest**
-  matching prior by line distance (#913). Attribution is **one-to-one**
-  (#969): each carried blocker, in changelist order, first narrows its
-  candidates to the title-identical matches when any exist (else all
-  matches), then claims the nearest still-*unclaimed* of those — falling
-  back to the nearest claimed one, within the same narrowed set, only when
-  every candidate is taken — which is what makes two co-windowed priors
-  attribute to their own
-  successors and keeps the distinct-priors fixed-since counts honest —
-  which the escalation
-  renders so a false trip of the proximity match is spottable — plus
-  `possible_false_trip: bool` (#969): true when **no** matching prior shares
-  a **non-empty** *normalized* title with the current blocker (two title-less
-  findings carry no title evidence either way, so the flag fires), i.e. the match may be a
-  genuinely different finding that landed inside the proximity window after a
-  fix pass shifted lines (an identical title anywhere in the match set is the
-  strongest evidence of a genuine repeat and wins). The flag is computed
-  **here, once**, and read by
-  every surface (progress block, escalation summary/comment, telemetry) so the
-  heuristic can never drift between them. A
-  surviving conflict and a non-converging blocker are both `escalation_reasons`.
+  matching prior by line distance (#913). Attribution among the escalating
+  (verified/ambiguous) set is **one-to-one** (#969): each such blocker, in
+  changelist order, narrows its candidates to its verdict evidence
+  (title-identical for verified; token-sharing/untitled for ambiguous), then
+  claims the nearest still-*unclaimed* of those — falling back to the nearest
+  claimed one only when every candidate is taken — which keeps the
+  distinct-priors fixed-since counts honest. A false trip is a **new** blocker,
+  not a carried one, so it claims nothing. `possible_false_trip: bool` (#969) is
+  "no exact title match" on **every** matched blocker (true on both the ambiguous
+  and false-trip branches), so a surface wanting only the escalating set reads it
+  **together with** `non_converging`. The verdict and both flags are computed
+  **here, once**, and read by every surface (progress block, escalation
+  summary/comment, telemetry) so the heuristic can never drift between them. A
+  surviving conflict and a non-converging (verified/ambiguous) blocker are both
+  `escalation_reasons`; the count of auto-continued false trips rides in
+  `summary.false_trips` + a top-level `false_trips[]`, never an escalation reason.
 - **`review-consolidator`** (agent, opus) runs the engine, then adds the
   judgment the exact-key heuristics can't: merging findings that describe the
   same defect in different words / across dimensions, and confirming or demoting
   conflicts by reading the cited code. It never re-grades a reviewer's severity
   and never invents or drops a finding.
 
-Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts},
-blocking[], suggestions[], conflicts[], non_converging, escalation_reasons[] }`.
-The `blocking` array (Critical first, then High) is what the loop must clear;
-`suggestions` ride into the dossier (#563) but never loop.
+Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts,
+false_trips}, blocking[], suggestions[], conflicts[], non_converging,
+false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
+carries `false_trip: bool` (#983). The `blocking` array (Critical first, then
+High) is what the loop must clear; `suggestions` ride into the dossier (#563) but
+never loop; `false_trips[]` are the auto-continued clear false trips (a subset of
+`blocking`, `non_converging: false`).
 
 ## Review-loop state machine (#562)
 
@@ -1364,8 +1372,10 @@ found and cleared) vs `waived` (Low suggestions logged), `wall_s`, and a reserve
 (#969) carries `by_severity` in the **user-facing vocabulary** —
 `Critical` / `Warning` / `Suggestion`, the same words the human reads in
 `progress.md` and the escalation (internally `Warning` = priority High,
-`Suggestion` = the Low bucket) — plus `by_dimension` and the per-round
-`new` / `carried` / `fixed_from_prev` counts, recorded for **every** round
+`Suggestion` = the Low bucket) — plus `by_dimension`, the per-round
+`new` / `carried` / `fixed_from_prev` counts, and `false_trips` (#983 — the
+count of identity-cleared auto-continued false trips that round, `null` on a
+pre-#983 changelist that could not compute it), recorded for **every** round
 including the `AWAITING_FIX` ones (`new`/`carried` are `null` only on
 stamp-less rounds — the #913 per-item stamp is absent — while
 `fixed_from_prev` is additionally `null` on round 1, which has no prior

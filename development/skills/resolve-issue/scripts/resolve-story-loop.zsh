@@ -21,7 +21,11 @@
 #     -> run review panel (diff-scoped) -> scope to diff -> consolidate
 #     -> no blockers            => CONVERGED
 #     -> surviving conflict     => ESCALATE_CONFLICT   (early exit)
-#     -> non_converging blocker => ESCALATE_NO_CONVERGENCE (early exit)
+#     -> non_converging blocker => ESCALATE_NO_CONVERGENCE (early exit). Identity-
+#          based (#983): a cross-round proximity match whose title identity
+#          CLEARS it as a genuinely different finding is a false_trip, NOT
+#          non_converging — the loop auto-continues (records it, no escalation,
+#          no human grant), so only verified/ambiguous survivors escalate here.
 #     -> last round + blockers  => BUDGET_EXHAUSTED
 #     -> else: step mode        => AWAITING_FIX (fix in-session, --resume)
 #              hook mode        => fix pass -> re-run tests -> next round
@@ -224,8 +228,8 @@ emit_ambiguous() {
   local carrier="$work_dir/dispatch-error.json"
   jq -nc --argjson e "$err_json" --argjson r "$rounds" \
     '{escalation_reasons:["ambiguous_dispatch"], dispatch_error:$e,
-      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0}, blocking:[], suggestions:[],
-      conflicts:[], non_converging:false, round:$r}' > "$carrier"
+      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0,false_trips:0}, blocking:[], suggestions:[],
+      conflicts:[], non_converging:false, false_trips:[], round:$r}' > "$carrier"
   emit_and_exit "ESCALATE_AMBIGUOUS" "$rounds" 10 "$rtype" "$rskill" "$carrier" "$history_file" "$changelists_file"
 }
 
@@ -458,7 +462,7 @@ fi
 local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
 local rp findings_path scoped scoped_filtered changelist blockers
 local digest prev_digest_file
-local blocking conflict nonconv nconf verdict
+local blocking conflict nonconv nconf verdict ftrips
 local -a scope_lines
 while (( round <= max_rounds )); do
   # per-round dispatch: the round's well-known findings path AND a fresh scope
@@ -531,8 +535,10 @@ while (( round <= max_rounds )); do
       # like. Content-based, not path-based: a fresh per-round path holding the
       # previous round's bytes is the same mistake. Only the IMMEDIATELY
       # preceding round is compared — a blocker legitimately re-found by a real
-      # panel run varies in its evidence text, and identity for non-convergence
-      # is [file, dimension, line] anyway, so a genuine re-find still escalates.
+      # panel run varies in its evidence text, and non-convergence is gathered on
+      # [file, dimension, line-proximity] with a title-identity verdict (#983), so
+      # an exact or token-sharing re-find still escalates (only a fully disjoint
+      # retitle auto-continues as a false trip, which this guard is unrelated to).
       digest=$(findings_digest "$findings_file")
       prev_digest_file="$work_dir/.findings-digest-$(( round - 1 ))"
       if [[ -n "$digest" && -s "$prev_digest_file" && "$digest" == "$(<"$prev_digest_file")" ]]; then
@@ -584,8 +590,14 @@ while (( round <= max_rounds )); do
   conflict=$(jq 'if ((.escalation_reasons // []) | index("unresolved_conflict")) then 1 else 0 end' "$changelist")
   nonconv=$(jq 'if .non_converging then 1 else 0 end' "$changelist")
   nconf=$(jq '.summary.conflicts' "$changelist")
+  # false_trips (#983): proximity matches identity cleared as genuinely different —
+  # recorded per round so telemetry/history show the auto-continue, but they NEVER
+  # drive an escalation (that is $nonconv, which the consolidator already excludes
+  # them from).
+  ftrips=$(jq '.summary.false_trips // 0' "$changelist")
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
-     '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1)}' <<< '{}' >> "$history_file"
+     --argjson ft "$ftrips" \
+     '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft}' <<< '{}' >> "$history_file"
 
   # 4. decide the round's fate. In step mode a survivable round (blockers,
   # budget left) exits AWAITING_FIX (20): the fix pass is the driving session's

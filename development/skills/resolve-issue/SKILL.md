@@ -600,12 +600,17 @@ Each round:
    Critical/Warning/Suggestion counts; blockers found, new vs carried;
    fixed-since-prior and the cumulative blocking trend from round 2 on; the
    dimensions they came from; what you fix next — the same block the loop
-   just appended to progress.md, which carries these where applicable). A
-   **possible false trip** — a carried match with no shared (non-empty)
-   prior title (#913/#969), meaning the blocker may be new rather than stuck — can only
-   appear on an *escalating* round (a `non_converging` blocker exits
-   `ESCALATE_NO_CONVERGENCE`, never `AWAITING_FIX`); narrate it there, per
-   the escalation branch below. Then implement the
+   just appended to progress.md, which carries these where applicable). Two
+   false-trip shapes to narrate: an **escalating possible false trip** — a
+   carried match with no shared (non-empty) prior title that is still
+   ambiguous (#913/#969) — can only appear on an *escalating* round (an
+   `ESCALATE_NO_CONVERGENCE`, never `AWAITING_FIX`); narrate it there, per the
+   escalation branch below. A **verified false trip auto-continue** (#983),
+   though, *does* appear on an `AWAITING_FIX` round: a carried match whose title
+   is fully disjoint from its prior is identity-cleared as a genuinely different
+   finding, so the loop kept going (no escalation, no human grant) — progress.md
+   renders it as a `false trip auto-continued` line; narrate it here (the blocker
+   is fresh, not stuck) and fix it as a normal new blocker. Then implement the
    blockers from the status JSON's `final_changelist.blocking` exactly as
    step 2 implements — **sibling-sweeping each blocker's pattern across the whole
    diff and fixing every instance this round** (#982), so a repeating defect is

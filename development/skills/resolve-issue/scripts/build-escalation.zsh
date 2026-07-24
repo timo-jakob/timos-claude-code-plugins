@@ -143,7 +143,8 @@ BUDGET_EXHAUSTED)
     def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;
     def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
     (.final_changelist.blocking // []) | if length==0 then "" else
-    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)] \(.title | safe)") end' "$status_file") ;;
+    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)] \(.title | safe)"
+      + (if .false_trip == true then " — identity-cleared false trip (#983): landed in a prior-round blocker match window but shares no title terms, so it is a FRESH blocker, not a stuck one" else "" end)) end' "$status_file") ;;
 ESCALATE_AMBIGUOUS)
   detail=$(jq -r '(.final_changelist.dispatch_error // {}) | if . == {} then "" else
     "- \(.error): \(.detail // "")" end' "$status_file") ;;
