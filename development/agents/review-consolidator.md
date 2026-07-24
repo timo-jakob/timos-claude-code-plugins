@@ -36,9 +36,11 @@ changelist with:
 - **conflicts** — co-located `performance` vs `code_quality` recommendations;
 - **non-convergence** — a blocker whose fingerprint also blocked last round is
   flagged `non_converging: true`, with `matched_prior: {line, title}` naming
-  the first prior-round blocker the fingerprint matched (#913) — **preserve
-  `matched_prior` verbatim on any item that carries it**; the escalation
-  renders it so a human can spot a false trip of the proximity match.
+  the nearest title-identical prior when one exists, else the nearest
+  matching prior by line distance (#913/#969) — **preserve `matched_prior`
+  and `possible_false_trip` verbatim on any item that carries them**; the
+  escalation renders them so a human can spot a false trip of the proximity
+  match.
 
 Take the engine's output as the source of truth for all of the above.
 
@@ -54,9 +56,11 @@ flagging, never inventing or dropping a real finding**:
    union their reviewers, keep the clearest description, keep the highest
    severity. A merged item keeps `non_converging: true` if any constituent
    carried it, and the `matched_prior` of the earliest-listed carrying
-   constituent — along with that same constituent's `file`/`line`, so the
-   escalation's at-line/file-wide rendering stays paired with the match it
-   describes (#913). Read the cited code (`Read`/`Grep`) when you need to
+   constituent — along with that same constituent's `possible_false_trip`
+   and `file`/`line`, so the flag and the
+   escalation's at-line/file-wide rendering stay paired with the match they
+   describe (#913/#969) — never OR the flag across constituents and never
+   drop it. Read the cited code (`Read`/`Grep`) when you need to
    confirm they are truly the same issue before merging.
 2. **Conflict confirmation.** The engine flags only co-located
    performance-vs-code_quality pairs. Promote a genuine opposing pair the
@@ -81,7 +85,8 @@ your judgment edits applied on top:
       "suggested_fix": "…", "reviewers": ["python-bug-hunter","python-security-reviewer"],
       "agreement": 2, "blocking": true, "non_converging": false }
     /* a non-converging item additionally carries, verbatim from the engine:
-       "non_converging": true, "matched_prior": { "line": 40, "title": "…" } */
+       "non_converging": true, "matched_prior": { "line": 40, "title": "…" },
+       "possible_false_trip": false */
   ],
   "suggestions": [ /* Low items, logged, never loop */ ],
   "conflicts": [

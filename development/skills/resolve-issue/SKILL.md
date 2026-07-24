@@ -504,9 +504,16 @@ Each round:
    half of the guard (and the alias guard — `--findings-file` must never be the
    dispatch `findings_path`) needs no digest tool and always applies.
 3. **On `AWAITING_FIX` (exit 20)** — blockers remain and budget is left:
-   **narrate the round in the conversation** (round number; blockers found,
-   new vs carried; the dimensions they came from; what you fix next — the
-   same block the loop just appended to progress.md), then implement the
+   **narrate the round in the conversation** (round number; the
+   Critical/Warning/Suggestion counts; blockers found, new vs carried;
+   fixed-since-prior and the cumulative blocking trend from round 2 on; the
+   dimensions they came from; what you fix next — the same block the loop
+   just appended to progress.md, which carries these where applicable). A
+   **possible false trip** — a carried match with no shared (non-empty)
+   prior title (#913/#969), meaning the blocker may be new rather than stuck — can only
+   appear on an *escalating* round (a `non_converging` blocker exits
+   `ESCALATE_NO_CONVERGENCE`, never `AWAITING_FIX`); narrate it there, per
+   the escalation branch below. Then implement the
    blockers from the status JSON's `final_changelist.blocking` exactly as
    step 2 implements — Low suggestions never loop — re-run the full gate, and
    go to 1 for the next round's panel.
@@ -516,7 +523,9 @@ Each round:
 (Hook mode — `--review-cmd`/`--fix-cmd` — still exists as the bats test seam
 only. Never wire it to a headless `claude`.)
 
-Pass `--issue <N>` too: the loop appends one JSONL telemetry record per run to
+Pass `--issue <N>` too: the loop appends one JSONL telemetry record per
+**terminal status** (none on `AWAITING_FIX` / `STALE_FINDINGS`; an extended
+loop emits one per escalation plus its final status) to
 `.claude/telemetry/review-loop.jsonl` (git-ignored, #566) — evidence for
 convergence rate, rounds-to-converge, and escalation breakdown. **Always pass an
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
@@ -570,17 +579,29 @@ supply the missing constraint is right here; offer that in-session first. (Every
 other exit — `ESCALATE_CONFLICT`, `ESCALATE_AMBIGUOUS` — and **every autonomous
 run** skip this branch entirely and go straight to the typed comment below.)
 
-Run this extension loop, tracking a `grants` counter (starts at 0):
+Run this extension loop, tracking a `grants` counter (starts at 0 the
+**first** time the extension is entered for this story; re-entering after an
+`AWAITING_FIX` detour or a later escalation **resumes the existing count —
+never reset it**, or the `--grants` figure shown to the human understates
+what was consumed and the step-6 soft cap can never fire across detours):
 
 1. **Summarize** the exit in the conversation — never make the human read a
    comment when they are right here:
 
    ```bash
-   "<skill-base-dir>/scripts/build-escalation.zsh" --status <status.json> --format summary
+   "<skill-base-dir>/scripts/build-escalation.zsh" --status <status.json> \
+     --format summary --grants <grants>
    ```
 
-   It prints the typed status, the remaining blockers, and the round history —
-   the same data the comment would carry, so nothing drifts.
+   It prints the typed status, the remaining blockers (severity + dimension,
+   with any **possible false trip** flagged), the round history, the
+   **per-round progress table** (Critical/Warning/Suggestion, new/carried,
+   fixed-since-prior), the **convergence assessment** — an explicit, honest
+   read of whether another round is likely to help — and the grants consumed
+   against the soft cap (#969). Show all of it *before* the `AskUserQuestion`
+   in step 2, so the human can decide **and** supply direction from the
+   summary alone. It is the same data the comment would carry, so nothing
+   drifts — never compose an ad-hoc summary instead.
 
 2. **Offer the choice** with `AskUserQuestion` (one question), tailored to the
    exit type. The built-in **"Other"** option is the free-text channel — the
@@ -590,6 +611,10 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
      **Stop**.
    - `ESCALATE_NO_CONVERGENCE`: **Give guidance & retry (+2)** — the primary
      lever, since more rounds alone will not move a stuck blocker — · **Stop**.
+     When the step-1 assessment reports **every** carried match as a possible
+     false trip (the blockers may be fresh, not stuck), also offer a plain
+     **Grant +2 rounds** option — the guidance-only framing would contradict
+     the assessment shown moments earlier.
 
 3. **If they asked a question** (Other → a question, not guidance): answer it
    from the changelist / dossier, then **re-present step 2**. A question never
@@ -602,8 +627,14 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
    from the automated escalation comment:
 
    ```bash
-   gh issue comment <N> --body "<!-- review-loop-guidance -->
-   $GUIDANCE"
+   # via a QUOTED heredoc + --body-file, never --body "$GUIDANCE": guidance
+   # about code routinely contains backticks/$(...) that a double-quoted
+   # --body would hand to the shell as command substitution
+   cat > /tmp/review-loop-guidance.md <<'GUIDANCE_EOF'
+   <!-- review-loop-guidance -->
+   <the guidance text>
+   GUIDANCE_EOF
+   gh issue comment <N> --body-file /tmp/review-loop-guidance.md
    ```
 
    Then resume (step 5): re-read the issue's comments during the pre-resume
@@ -651,9 +682,14 @@ Run this extension loop, tracking a `grants` counter (starts at 0):
    never build a comment from the file: report the error in the conversation and
    stop.
 
-6. **Soft cap.** Before re-offering, if `grants >= 5` **or** the just-finished
-   extension produced **zero net blocker reduction** vs. the prior round
-   (compare `.round_changelists[-1].summary.blocking` to the round before), say
+6. **Soft cap.** Before re-offering, if `grants >= 5` **or** the **last round
+   removed no blockers** — measured by the progress table's *Fixed since
+   prior* column (prior blockers cleared: the prior round's blocking count
+   minus distinct matched priors) being 0, **not** by the net
+   blocking count, which a churn round (fixed 3, found 3 new) would wrongly
+   trip; fall back to comparing `.round_changelists[-1].summary.blocking` to
+   the round before only when the Fixed cell degrades to `–` (stamp-less
+   round) — say
    so plainly — "this isn't converging; the diff may need rethinking" — and nudge
    toward **Stop** or splitting the work into a follow-up issue. Never hard-stop
    on the human; they may still choose to extend.

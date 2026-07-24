@@ -18,13 +18,16 @@
 #     --issue        issue number (for the header, optional)
 #     --branch       pushed branch holding the diff-so-far (optional, linked)
 #     --compare-url  a compare/tree URL for the branch (optional, linked)
+#     --grants       interactive-extension grants already consumed (optional;
+#                    rendered against the soft cap so the human sees the
+#                    context at the grant prompt, #969)
 #
 # Exit codes: 0 ok · 2 usage · 1 internal (unreadable / invalid status JSON)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local status_file="" issue="" branch="" compare_url="" fmt="comment"
+local status_file="" issue="" branch="" compare_url="" fmt="comment" grants=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --status) status_file="$2"; shift 2 ;;
@@ -32,14 +35,19 @@ while [[ $# -gt 0 ]]; do
   --branch) branch="$2"; shift 2 ;;
   --compare-url) compare_url="$2"; shift 2 ;;
   --format) fmt="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary]"; exit 0 ;;
+  --grants) grants="$2"; shift 2 ;;
+  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary] [--grants N]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
-[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary]"; exit 2 }
+[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary] [--grants N]"; exit 2 }
 [[ "$fmt" == "comment" || "$fmt" == "summary" ]] || {
   print -u2 -- "build-escalation: --format must be 'comment' or 'summary'"; exit 2 }
+[[ -z "$grants" || "$grants" == <-> ]] || {
+  print -u2 -- "build-escalation: --grants must be a non-negative integer (got: $grants)"; exit 2 }
+[[ -z "$issue" || "$issue" == <-> ]] || {
+  print -u2 -- "build-escalation: --issue must be an issue number (got: $issue)"; exit 2 }
 [[ -s "$status_file" ]] || { print -u2 -- "build-escalation: status file missing or empty: $status_file"; exit 1 }
 
 local st rounds max_rounds
@@ -104,31 +112,105 @@ history_lines=$(jq -r '
 local detail
 case "$st" in
 ESCALATE_CONFLICT)
-  detail=$(jq -r '(.final_changelist.conflicts // []) | if length==0 then "" else
-    (.[] | "- `\(.file):\(.line)` — \(.between | join(" vs "))") end' "$status_file") ;;
+  detail=$(jq -r '
+    def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
+    (.final_changelist.conflicts // []) | if length==0 then "" else
+    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` — \(.between | join(" vs "))") end' "$status_file") ;;
 ESCALATE_NO_CONVERGENCE)
   # matched_prior (#913): name the prior-round blocker the fingerprint matched
   # (line proximity, or file-wide when a side has no line), so a false trip — a
   # DIFFERENT finding that merely landed inside the match window after a fix
-  # pass shifted lines — is spottable. Deliberately option-agnostic: a false
+  # pass shifted lines — is spottable. The consolidator now stamps
+  # possible_false_trip (#969) when the titles differ; render the flag so the
+  # human never has to open the JSON. Deliberately option-agnostic: a false
   # trip means the blocker is FRESH, not stuck — how to act on it (fix, grant
   # rounds, or waive on its own merits) belongs to the surrounding options,
   # which differ between the comment and the interactive summary.
-  detail=$(jq -r '((.final_changelist.blocking // []) | map(select(.non_converging))) | if length==0 then "" else
-    (.[] | "- `\(.file):\(.line)` [\(.dimension)] \(.title)"
+  detail=$(jq -r '
+    def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;
+    def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
+    ((.final_changelist.blocking // []) | map(select(.non_converging))) | if length==0 then "" else
+    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)] \(.title | safe)"
       + (if .matched_prior then
           "\n  - matched prior-round blocker "
           + (if ((.matched_prior.line | type) != "number" or (.line | type) != "number") then "(no line recorded on one side — matched file-wide)" else "at line \(.matched_prior.line)" end)
-          + " (\"\(.matched_prior.title)\") — if this is a DIFFERENT finding that only landed inside the match window, the non-convergence flag is a false trip: treat this as a fresh blocker on its own merits, not a stuck one"
+          + " (\"\(.matched_prior.title // "" | safe)\")"
+          + (if .possible_false_trip == true then " — **flagged possible false trip**: the titles differ, so this may be a NEW finding that only landed inside the match window; treat it as a fresh blocker on its own merits, not a stuck one"
+             else " — if this is a DIFFERENT finding that only landed inside the match window, the non-convergence flag is a false trip: treat this as a fresh blocker on its own merits, not a stuck one" end)
         else "" end)) end' "$status_file") ;;
 BUDGET_EXHAUSTED)
-  detail=$(jq -r '(.final_changelist.blocking // []) | if length==0 then "" else
-    (.[] | "- `\(.file):\(.line)` [\(.dimension)/\(.priority)] \(.title)") end' "$status_file") ;;
+  detail=$(jq -r '
+    def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;
+    def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
+    (.final_changelist.blocking // []) | if length==0 then "" else
+    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)] \(.title | safe)") end' "$status_file") ;;
 ESCALATE_AMBIGUOUS)
   detail=$(jq -r '(.final_changelist.dispatch_error // {}) | if . == {} then "" else
     "- \(.error): \(.detail // "")" end' "$status_file") ;;
 *) detail="" ;;
 esac
+
+# --- per-round progress table + convergence assessment (#969) ----------------
+# Both are derived from .round_changelists (the full per-round changelists the
+# loop already retains for the dossier, #563), so the in-session summary, the
+# grant prompt, the escalation comment, AND progress.md all read the SAME
+# computed numbers — the stamped/carried/new/fixed derivation below is one of
+# THREE copies kept in lockstep with render-progress-block.zsh and
+# build-telemetry-record.zsh; change all three together.
+# The new/carried/fixed columns need the #913 per-item non_converging stamp;
+# a stamp-less round degrades those cells to "–" rather than a confident wrong
+# number. Fixed counts DISTINCT matched priors (two current blockers matching
+# the same prior must not hide a genuinely fixed second one). An empty
+# .round_changelists (older status JSONs, ambiguous-dispatch carriers) renders
+# neither block — the round history above still carries the bare trend.
+local round_table assessment
+round_table=$(jq -r '
+  (.round_changelists // []) as $rs
+  | if ($rs | length) == 0 then "" else
+    ( [ "| Round | Critical | Warning | Suggestion | New | Carried | Fixed since prior |",
+        "|---|---|---|---|---|---|---|" ]
+      + [ range(0; $rs | length) as $i | $rs[$i] as $r
+          | ($r.blocking // []) as $blk
+          | ((($blk | length) == 0) or ([ $blk[] | has("non_converging") ] | all)) as $stamped
+          | (if $stamped then ([ $blk[] | select(.non_converging == true) ] | length) else null end) as $carried
+          | (if $stamped then ($blk | map(select(.non_converging == true)
+                | {file, dimension, mp: (.matched_prior // {line, title})})
+              | unique_by([.file, .dimension, .mp.line, .mp.title]) | length)
+             else null end) as $carried_priors
+          | (if $carried != null then (($blk | length) - $carried) else null end) as $new
+          | (if ($i > 0) and ($carried_priors != null)
+             then (((($rs[$i-1].blocking // []) | length) - $carried_priors) | if . < 0 then 0 else . end)
+             else null end) as $fixed
+          | "| \($r.round // ($i + 1)) | \($r.summary.critical // 0) | \($r.summary.high // 0) | \($r.summary.low // 0) | \($new // "–") | \($carried // "–") | \($fixed // "–") |"
+        ]
+      | join("\n") ) end' "$status_file")
+assessment=$(jq -r '
+  (.round_changelists // []) as $rs
+  | if ($rs | length) == 0 then "" else
+    ( [ $rs[] | ((.blocking // []) | length) ] ) as $series
+    | ($rs[-1].blocking // []) as $lastblk
+    | ((($lastblk | length) == 0) or ([ $lastblk[] | has("non_converging") ] | all)) as $stamped
+    | (if $stamped then ([ $lastblk[] | select(.non_converging == true) ] | length) else null end) as $carried
+    | (if $stamped then ([ $lastblk[] | select((.non_converging == true) and (.possible_false_trip == true)) ] | length) else 0 end) as $ftrips
+    | (if ($series | length) < 2 then null
+       elif $series[-1] < $series[-2] then "improving"
+       elif $series[-1] == $series[-2] then "flat"
+       else "regressing" end) as $trend
+    | "Blocking findings by round: " + ($series | map(tostring) | join(" → ")) + "."
+      + (if $ftrips > 0 then
+           " \($ftrips) of the \($carried) non-convergence match(es) look like line-proximity false trips (the matched prior blocker has a different title) — those blockers may be new, not stuck."
+         else "" end)
+      + (if ($series[-1] == 0) then " The final round has zero blockers — converged; no further rounds needed."
+         elif ($trend == null) or ($carried == null) then ""
+         elif ($trend == "improving") and (($carried - $ftrips) == 0)
+         then " Blockers are falling and the remaining \($series[-1]) are new rather than carried — another round is likely to help."
+         elif ($trend != "improving") and (($carried - $ftrips) > 0)
+         then " \($carried - $ftrips) blocker(s) carried across rounds unmoved by the fix pass — extending alone is unlikely to help; give direction, waive, or split."
+         elif ($trend == "improving")
+         then " Blockers are falling, but \($carried - $ftrips) genuinely carried one(s) remain — extending can help if paired with direction on the carried blocker(s)."
+         else " Blockers are not falling, but the remaining ones are new rather than carried — one more round may still help; judge from the table."
+         end)
+    end' "$status_file")
 
 # --- summary render (interactive, #562 resume): shares the extraction above,
 # omits options / branch note / marker — the skill drives the live options.
@@ -147,6 +229,22 @@ if [[ "$fmt" == "summary" ]]; then
     print -r -- "**Round history**"
     print -r --
     print -r -- "$history_lines"
+    if [[ -n "$round_table" ]]; then
+      print -r --
+      print -r -- "**Per-round progress**"
+      print -r --
+      print -r -- "$round_table"
+    fi
+    if [[ -n "$assessment" ]]; then
+      print -r --
+      print -r -- "**Convergence assessment**"
+      print -r --
+      print -r -- "$assessment"
+    fi
+    if [[ -n "$grants" ]]; then
+      print -r --
+      print -r -- "Grants consumed: ${grants} (soft cap 5)."
+    fi
   }
   exit 0
 fi
@@ -167,6 +265,18 @@ fi
   print -r --
   print -r -- "$history_lines"
   print -r --
+  if [[ -n "$round_table" ]]; then
+    print -r -- "**Per-round progress**"
+    print -r --
+    print -r -- "$round_table"
+    print -r --
+  fi
+  if [[ -n "$assessment" ]]; then
+    print -r -- "**Convergence assessment**"
+    print -r --
+    print -r -- "$assessment"
+    print -r --
+  fi
   print -r -- "**How to proceed** — reply in this thread, then re-run \`/development:resolve-issue ${issue:-<N>}\` (the run re-reads this issue, including your comment, so your decision becomes implementation context):"
   print -r --
   local i=1 opt

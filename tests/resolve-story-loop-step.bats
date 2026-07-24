@@ -377,16 +377,22 @@ _digest_arm_refuses() {
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
 }
 
-@test "progress.md gets a per-round block with the new/carried split (step mode)" {
+@test "progress.md gets a per-round block with severity split, new/carried, fixed-since and trend (step mode, #969)" {
   seed_awaiting
   grep -q '^## Round 1 — blockers remain' "$WD/progress.md"
-  grep -q -- '- blockers: 1 (new: 1, carried: 0), conflicts: 0, suggestions: 0' "$WD/progress.md"
+  grep -q -- '- blockers: 1 (critical: 1, warning: 0) (new: 1, carried: 0), conflicts: 0, suggestions: 0' "$WD/progress.md"
   grep -q -- '- by dimension: bugs 1' "$WD/progress.md"
   printf '%s' "$CRIT2" > "$F"
   step --resume
   [ "$status" -eq 12 ]
   grep -q '^## Round 2 — blockers remain' "$WD/progress.md"
   grep -q -- 'new: 0, carried: 1' "$WD/progress.md"
+  # the round-2 block carries the found/fixed count and the cumulative trend
+  grep -q -- '- fixed since round 1: 0 of 1' "$WD/progress.md"
+  grep -q -- '- trend: blocking 1 → 1' "$WD/progress.md"
+  # CRIT2 rewords the title ("T" -> "T (still)"), so the carried match is
+  # flagged as a possible line-proximity false trip, legibly, in the block
+  grep -q -- 'possible false trip' "$WD/progress.md"
   grep -q '^\*\*Final:\*\* ESCALATE_NO_CONVERGENCE' "$WD/progress.md"
 }
 
