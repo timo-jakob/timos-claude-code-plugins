@@ -36,6 +36,10 @@ done
 [[ -s "$status_file" ]] || { print -u2 -- "build-telemetry-record: status file missing or empty: $status_file"; exit 1 }
 
 [[ -n "$ts" ]] || ts=$(date +%s)
+# --ts feeds --argjson: a non-numeric value would surface as a misleading
+# "invalid status JSON" from jq — name the actual mistake instead
+[[ "$ts" == <-> ]] || {
+  print -u2 -- "build-telemetry-record: --ts must be unix seconds (got: $ts)"; exit 2 }
 
 # issue / wall as JSON scalars (number or null)
 local issue_json='null' wall_json='null'
@@ -61,16 +65,67 @@ jq -c \
                    then $s.status else null end),
       rounds: ($s.rounds // 0),
       max_rounds: ($s.max_rounds // 0),
-      findings_by_round: [ $rounds[] | {
-        round: .round,
-        by_priority: {
-          Critical: ([ (.blocking // [])[] | select(.priority=="Critical") ] | length),
-          High:     ([ (.blocking // [])[] | select(.priority=="High") ] | length),
-          Low:      ((.suggestions // []) | length)
+      # per-round severity counts use the USER-FACING vocabulary (#969):
+      # Critical / Warning / Suggestion — the same words the human reads in
+      # progress.md and the escalation — so on-screen and on-disk agree
+      # (internally Warning == priority High, Suggestion == the Low bucket).
+      # The stamped/carried/new/fixed derivation is one of THREE copies kept
+      # in lockstep with render-progress-block.zsh and build-escalation.zsh;
+      # change all three together.
+      findings_by_round: [ range(0; ($rounds | length)) as $i | $rounds[$i] as $r
+        | ($r.blocking // []) as $blk
+        | ((($blk | length) == 0) or ([ $blk[] | has("non_converging") ] | all)) as $stamped
+        | (if $stamped then ([ $blk[] | select(.non_converging == true) ] | length) else null end) as $carried
+        | (if $stamped then ($blk | map(select(.non_converging == true)
+              | {file, dimension, mp: (.matched_prior // {line, title})})
+            | unique_by([.file, .dimension, .mp.line, .mp.title]) | length)
+           else null end) as $carried_priors
+        | {
+        round: $r.round,
+        by_severity: {
+          Critical:   ([ $blk[] | select(.priority=="Critical") ] | length),
+          Warning:    ([ $blk[] | select(.priority=="High") ] | length),
+          Suggestion: (($r.suggestions // []) | length)
         },
-        by_dimension: ( reduce ((.blocking // []) + (.suggestions // []))[] as $f
-                          ({}; .[$f.dimension] = ((.[$f.dimension] // 0) + 1)) )
+        by_dimension: ( reduce ($blk + ($r.suggestions // []))[] as $f
+                          ({}; .[($f.dimension // "")] = ((.[($f.dimension // "")] // 0) + 1)) ),
+        # new/carried need the #913 per-item stamp; fixed_from_prev is derived
+        # against the previous round from DISTINCT matched priors (null on
+        # round 1 / stamp-less rounds — an honest gap, never a confident
+        # wrong number)
+        new:     (if $carried != null then (($blk | length) - $carried) else null end),
+        carried: $carried,
+        fixed_from_prev: (if ($i > 0) and ($carried_priors != null)
+                          then (((($rounds[$i-1].blocking // []) | length) - $carried_priors)
+                                | if . < 0 then 0 else . end)
+                          else null end)
       } ],
+      # per-loop convergence assessment (#969): the machine-readable form of
+      # the read the grant prompt shows the human
+      convergence_assessment: (
+        if ($rounds | length) == 0 then null else
+          ( [ $rounds[] | ((.blocking // []) | length) ] ) as $series
+          | ($rounds[-1].blocking // []) as $lastblk
+          | ((($lastblk | length) == 0) or ([ $lastblk[] | has("non_converging") ] | all)) as $stamped
+          | (if $stamped then ([ $lastblk[] | select(.non_converging == true) ] | length) else null end) as $carried
+          | (if $stamped then ($lastblk | map(select(.non_converging == true)
+                | {file, dimension, mp: (.matched_prior // {line, title})})
+            | unique_by([.file, .dimension, .mp.line, .mp.title]) | length)
+             else null end) as $carried_priors
+          | {
+              blocking_by_round: $series,
+              trend: (if ($series | length) < 2 then null
+                      elif $series[-1] < $series[-2] then "improving"
+                      elif $series[-1] == $series[-2] then "flat"
+                      else "regressing" end),
+              blockers_moving: (if (($series | length) < 2) or ($carried_priors == null) then null
+                                else (((($rounds[-2].blocking // []) | length) - $carried_priors) > 0) end),
+              carried_final: $carried,
+              possible_false_trips: (if $stamped
+                then ([ $lastblk[] | select((.non_converging == true) and (.possible_false_trip == true)) ] | length)
+                else null end)
+            }
+        end),
       fixed:  ( [ $seen[]
                   | select(.priority=="Critical" or .priority=="High")
                   | ("\(.file)|\(.line)|\(.dimension)|\(.title)") as $k

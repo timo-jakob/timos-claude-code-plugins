@@ -69,7 +69,12 @@ local -r PROG='
 def sevrank(s): if s=="CRITICAL" then 3 elif s=="WARNING" then 2 elif s=="SUGGESTION" then 1 else 0 end;
 def prio(s): if s=="CRITICAL" then "Critical" elif s=="WARNING" then "High" else "Low" end;
 def blocks(s): (s=="CRITICAL" or s=="WARNING");
-def normfile: ((. // "") | sub("^\\./";""));
+def normfile: ((. // "") | tostring | sub("^\\./";""));
+# title normalization for the possible_false_trip flag (#969): lenient enough
+# that pure case/whitespace re-wording is not read as a different finding;
+# tostring keeps a malformed non-string title from aborting the whole round
+def normtitle: ((. // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
+  | sub("^ +"; "") | sub(" +$"; ""));
 # Cross-round identity: same file + dimension, with the line close enough that a
 # small edit-drift between rounds still matches (a null line on either side is a
 # wildcard). The title is NOT part of it — a reviewer re-wording the same finding
@@ -81,22 +86,36 @@ def line_near($a;$b):
   if (($a | type) == "number") and (($b | type) == "number")
   then ((($a) - ($b)) | (if . < 0 then -. else . end) <= LINEWIN)
   else true end;
+# nearest candidate by line distance to $c — stable sort, so wildcard or
+# line-less candidates rank last (LINEWIN + 1) and ties keep prior
+# blocking-array order; used by BOTH matched_prior branches so co-windowed
+# priors always attribute to their own successors (#969)
+def nearest($c): sort_by(
+  if ((.line | type) == "number") and (($c.line | type) == "number")
+  then (((.line) - ($c.line)) | if . < 0 then -. else . end)
+  else LINEWIN + 1 end) | .[0];
 
 # previous round blockers projected to [file, dimension, line] (empty on round
 # 1); title rides along only to label a match for the human (#913), it is never
 # part of the identity (#606)
 ( ($prev // {}) | (.blocking // [])
-  | map({ file: (.file | normfile), dimension: (.dimension // ""), line: .line,
-          title: (.title // "") }) ) as $prevblk
+  | map({ file: (.file | normfile), dimension: ((.dimension // "") | tostring),
+          line: .line, title: (.title // "") }) ) as $prevblk
 
 # normalize this round
 | [ .[] | {
     severity: (.severity // "SUGGESTION"),
-    dimension: (.dimension // ""),
-    file: ((.file // "") | sub("^\\./";"")),
-    line: (.line),
+    dimension: ((.dimension // "") | tostring),
+    file: (.file | normfile),
+    # number-or-null only: a digit-only string line is recovered losslessly
+    # (a plausible model-output malformation), anything else becomes null —
+    # already a wildcard for line_near — so no downstream renderer can ever
+    # interpolate a reviewer-crafted string line into markdown (#969)
+    line: (if (.line | type) == "number" then .line
+           elif ((.line | type) == "string") and (.line | test("^[0-9]+$")) then (.line | tonumber)
+           else null end),
     title: (.title // ""),
-    description: (.description // ""),
+    description: ((.description // "") | tostring),
     suggested_fix: (.suggested_fix // ""),
     reviewer: (.reviewer // "")
   } ]
@@ -129,18 +148,43 @@ def line_near($a;$b):
 
 # mark non-converging blockers (a matching blocker blocked last round too).
 # Match on [file, dimension] + line proximity — NOT the title (#606). A match
-# also records the FIRST matching prior blocker (matched_prior: its line +
-# title, in prior blocking-array order), so the escalation can show the human
-# what the match window hit and a false trip — a genuinely different finding
-# that merely landed inside the window after a fix pass shifted lines — is
-# spottable (#913). NB: keep this jq program free of apostrophes; it lives in a
-# zsh single-quoted string.
-| ( $items | map( . as $cur
-    | [ $prevblk[] | select(
-          .file == $cur.file and .dimension == $cur.dimension and line_near(.line; $cur.line)) ] as $m
-    | . + (if (.blocking and ($m | length) > 0)
-           then { non_converging: true, matched_prior: ($m[0] | {line, title}) }
-           else { non_converging: false } end) ) ) as $items
+# also records the matching prior blocker (matched_prior: its line + title) so
+# the escalation can show the human what the match window hit and a false trip
+# — a genuinely different finding that merely landed inside the window after a
+# fix pass shifted lines — is spottable (#913). possible_false_trip (#969) is
+# the derived flag every surface (progress block, escalation summary/comment,
+# telemetry) reads, so the heuristic lives in ONE place: an identical
+# NON-EMPTY (normalized) title anywhere in the match set is the strongest
+# evidence of a genuine repeat and wins (two title-LESS findings carry no
+# title evidence either way, so they fall through and the flag fires).
+# Attribution is ONE-TO-ONE: each carried item, in changelist order, claims
+# the NEAREST still-unclaimed candidate (title-identical candidates when any
+# exist, else all matches), falling back to the nearest claimed one only when
+# every candidate is already taken. Independent per-item nearest would let
+# two carried blockers claim the same prior, and the distinct-priors count
+# every fixed-since surface derives would collapse them and overstate what
+# was fixed. The flag fires only when NO match shares the title, i.e. the
+# window may have hit a fresh finding. NB: keep this jq program free of
+# apostrophes; it lives in a zsh single-quoted string.
+| ( $items | reduce .[] as $cur ({out: [], claimed: []};
+    ( [ $prevblk[] | select(
+          .file == $cur.file and .dimension == $cur.dimension and line_near(.line; $cur.line)) ] ) as $m
+    | if ($cur.blocking and ($m | length) > 0)
+      then ([ $m[] | select(((.title | normtitle) != "")
+               and ((.title | normtitle) == ($cur.title | normtitle))) ]) as $exact
+         | (if ($exact | length) > 0 then $exact else $m end) as $cands
+         | (.claimed) as $cl
+         | ([ $cands[] | [.file, .dimension, .line, .title] as $k
+              | select((any($cl[]; . == $k)) | not) ]) as $free
+         | ((if ($free | length) > 0 then $free else $cands end) | nearest($cur)) as $mp
+         | { out: (.out + [ $cur + {
+                 non_converging: true,
+                 matched_prior: ($mp | {line, title}),
+                 possible_false_trip: (($exact | length) == 0) } ]),
+             claimed: (.claimed + [[ $mp.file, $mp.dimension, $mp.line, $mp.title ]]) }
+      else { out: (.out + [ $cur + { non_converging: false } ]), claimed: .claimed }
+      end)
+    | .out ) as $items
 
 | ( [ $items[] | select(.priority=="Critical") ] ) as $crit
 | ( [ $items[] | select(.priority=="High") ] ) as $high

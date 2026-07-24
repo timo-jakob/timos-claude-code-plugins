@@ -14,14 +14,14 @@ Each round, scoped to the story's diff:
    panel runs as visible in-session agents, never as a hidden background
    process.
 2. **Consolidate** — findings are de-duplicated and split into **blockers**
-   (Critical + High) and **Low suggestions**. Only blockers drive the loop; Low
+   (Critical + Warning) and **Suggestions**. Only blockers drive the loop;
    suggestions are logged, never looped on.
 3. **Fix** — if there are blockers, an implementor pass fixes them.
 4. **Re-test** — the full test suite runs again; a fix that breaks anything
    aborts the loop rather than shipping.
 
-The loop repeats until it **converges** — a round with **zero blockers**. Low
-suggestions remaining is still converged.
+The loop repeats until it **converges** — a round with **zero blockers**.
+Suggestions remaining is still converged.
 
 ## Watching it run
 
@@ -36,8 +36,12 @@ the session where you can see it.
   one named agent per review dimension, so the terminal shows who is
   reviewing what.
 - **A narrated summary per round** — after each round the session reports the
-  blockers found (new vs carried), the dimensions they came from, and what it
-  fixes next.
+  blockers found by severity (critical / warning / suggestion), the new-vs-carried
+  split, how many of the previous round's blockers the fix pass actually cleared,
+  the cumulative blocking trend, and what it fixes next. When a "carried" blocker
+  looks like a false alarm — the cross-round match hit a *different* finding that
+  merely landed near the old one after edits shifted lines — the summary says so
+  explicitly, so you never have to dig into JSON to spot it.
 - **A tail-able progress file** — the loop appends the same summary to a
   `progress.md` in its work directory (the run tells you the exact path when
   the loop starts); `tail -f` it from another terminal to follow a long run.
@@ -61,11 +65,18 @@ If **you** launched `/development:resolve-issue` and are present, the two
 "still making progress but not done" endings — **budget exhausted** and **not
 converging** — do not dead-end. Instead the run pauses and talks to you:
 
-1. It **summarizes** what is left: the remaining blockers and a per-round
-   history.
+1. It **summarizes** what is left, with enough in front of you to actually
+   decide: the remaining blockers (with severity and dimension, and any
+   suspected false-alarm "carried" match flagged), a per-round progress table
+   (critical / warning / suggestion counts, new vs carried, fixed since the
+   prior round), an honest **convergence assessment** — whether another round
+   is likely to help, or whether direction or a split is needed — and how many
+   extension grants you have already spent.
 2. It **offers you a choice**:
-   - **Grant two more rounds** (budget exhausted only) — the remaining blockers
-     get one fix pass first, then the loop continues.
+   - **Grant two more rounds** (on budget exhausted — or on a not-converging
+     exit where every carried blocker is flagged as a suspected false alarm,
+     meaning the blockers may be fresh rather than stuck) — the remaining
+     blockers get one fix pass first, then the loop continues.
    - **Give guidance, then retry** — tell it something it is missing ("that auth
      check is intentional, don't flag it"; "try a documented fast-path helper for
      the retry logic"). Your note is posted to the issue and folded into the next

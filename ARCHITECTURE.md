@@ -1162,9 +1162,27 @@ reliable but the merging needs semantics:
   a blocker whose fingerprint (`file`+`dimension` with line proximity, ±10
   lines; a missing line is a wildcard — deliberately NOT the free-text title,
   #606) also blocked the previous round (`--prev`) is marked
-  `non_converging: true` and carries `matched_prior: {line, title}` — the first
-  prior-round blocker the fingerprint matched (#913), which the escalation
-  renders so a false trip of the proximity match is spottable. A
+  `non_converging: true` and carries `matched_prior: {line, title}` — the
+  **nearest** title-identical prior when one exists, else the **nearest**
+  matching prior by line distance (#913). Attribution is **one-to-one**
+  (#969): each carried blocker, in changelist order, first narrows its
+  candidates to the title-identical matches when any exist (else all
+  matches), then claims the nearest still-*unclaimed* of those — falling
+  back to the nearest claimed one, within the same narrowed set, only when
+  every candidate is taken — which is what makes two co-windowed priors
+  attribute to their own
+  successors and keeps the distinct-priors fixed-since counts honest —
+  which the escalation
+  renders so a false trip of the proximity match is spottable — plus
+  `possible_false_trip: bool` (#969): true when **no** matching prior shares
+  a **non-empty** *normalized* title with the current blocker (two title-less
+  findings carry no title evidence either way, so the flag fires), i.e. the match may be a
+  genuinely different finding that landed inside the proximity window after a
+  fix pass shifted lines (an identical title anywhere in the match set is the
+  strongest evidence of a genuine repeat and wins). The flag is computed
+  **here, once**, and read by
+  every surface (progress block, escalation summary/comment, telemetry) so the
+  heuristic can never drift between them. A
   surviving conflict and a non-converging blocker are both `escalation_reasons`.
 - **`review-consolidator`** (agent, opus) runs the engine, then adds the
   judgment the exact-key heuristics can't: merging findings that describe the
@@ -1196,6 +1214,13 @@ exiting `AWAITING_FIX` (20) when blockers remain with budget left, resuming with
 bats seam that keeps the state machine — rounds, budget, consolidation,
 exit-state — a pure, testable function; wiring a headless `claude -p` behind
 them is **not** a supported pattern, because it hides every round from the user.
+Every round appends a block to `<work-dir>/progress.md`
+(`render-progress-block.zsh`), which per #969 carries judgment-grade counts:
+the severity split (critical/warning; the suggestions total is the Suggestion
+count), new vs carried, fixed-since-prior, the cumulative blocking trend, and
+a per-blocker *possible false trip* line whenever the consolidator flagged a
+carried match with no shared non-empty prior title (#913/#969) — so the human can read "are we
+actually clearing things?" straight off the tail.
 
 Per round: run panel (diff-scoped) → `scope-findings` → `consolidate-findings`.
 No blockers ⇒ `CONVERGED`. Otherwise the early-exit escalations fire *before* the
@@ -1244,7 +1269,9 @@ Stop/decline falls back to the typed comment.
 ## Review-loop telemetry (#566)
 
 Raising autonomy safely needs evidence, so the loop appends **one JSONL record
-per LOOP, on terminal statuses only** to `.claude/telemetry/review-loop.jsonl`
+per terminal status — never per round; an extended loop (escalate → grant →
+`--resume`) therefore emits one record per escalation plus its final
+status** to `.claude/telemetry/review-loop.jsonl`
 (git-ignored — the bootstrap gitignore fragments for python/java/swift carry
 `.claude/telemetry/`). It is never appended on the non-terminal `AWAITING_FIX`
 (#971) or the `STALE_FINDINGS` refusal (#974) — both resume the same loop, so a
@@ -1256,9 +1283,25 @@ timing from the last record only. The record
 is built deterministically from the loop's status JSON by
 `build-telemetry-record.zsh`: `ts`, `issue`, `repo_type`, `status`, `escalation`
 (the type, or `null` when converged/skipped), `rounds`, `max_rounds`,
-`findings_by_round` (per round, by priority and by dimension), `fixed` (blockers
+`findings_by_round`, `fixed` (blockers
 found and cleared) vs `waived` (Low suggestions logged), `wall_s`, and a reserved
-`tokens` field (not observable from zsh in v1). The append is never fatal — a
+`tokens` field (not observable from zsh in v1). Each `findings_by_round` entry
+(#969) carries `by_severity` in the **user-facing vocabulary** —
+`Critical` / `Warning` / `Suggestion`, the same words the human reads in
+`progress.md` and the escalation (internally `Warning` = priority High,
+`Suggestion` = the Low bucket) — plus `by_dimension` and the per-round
+`new` / `carried` / `fixed_from_prev` counts, recorded for **every** round
+including the `AWAITING_FIX` ones (`new`/`carried` are `null` only on
+stamp-less rounds — the #913 per-item stamp is absent — while
+`fixed_from_prev` is additionally `null` on round 1, which has no prior
+round; an honest gap, never a confident wrong number). The record also
+carries a per-loop `convergence_assessment` (#969) —
+the machine-readable form of the read the grant prompt shows the human:
+`blocking_by_round` (the series), `trend`
+(`improving` / `flat` / `regressing`, `null` on a single round),
+`blockers_moving`, `carried_final`, and `possible_false_trips` (carried
+blockers whose #913 match is flagged as a probable line-proximity artifact).
+The append is never fatal — a
 telemetry failure can't break the loop's exit.
 
 The three headline metrics come straight off the file with `jq`:
@@ -1266,8 +1309,9 @@ The three headline metrics come straight off the file with `jq`:
 ```bash
 # first-pass convergence rate
 jq -s '([.[] | select(.status == "CONVERGED")] | length) / length' .claude/telemetry/review-loop.jsonl
-# mean rounds to converge
-jq -s '([.[].rounds] | add) / length' .claude/telemetry/review-loop.jsonl
+# mean rounds to converge (CONVERGED records only — like wall_s, the rounds of
+# consecutive records of one extended loop overlap, so never average over all)
+jq -s '[.[] | select(.status == "CONVERGED")] | (map(.rounds) | add) / length' .claude/telemetry/review-loop.jsonl
 # escalation breakdown
 jq -s 'group_by(.escalation) | map({(.[0].escalation | tostring): length}) | add' .claude/telemetry/review-loop.jsonl
 ```
@@ -1317,15 +1361,30 @@ nothing, so the body and the Approver's behavior are unchanged.
 ## Typed escalation path (#564)
 
 Escalation quality decides whether a human interruption costs two minutes or an
-afternoon, so every non-`CONVERGED` loop exit produces exactly **one**
-decision-ready artifact and nothing else. `build-escalation.zsh` turns the loop's
+afternoon, so every **terminal escalation** exit (`ESCALATE_*` /
+`BUDGET_EXHAUSTED`) produces exactly **one**
+decision-ready artifact and nothing else — the non-terminal `AWAITING_FIX` /
+`STALE_FINDINGS` exits and the operational `ERROR` exit never produce a
+comment (they resume the loop or are reported in-session; see the state
+machine above). `build-escalation.zsh` turns the loop's
 status JSON into an issue-comment body: a typed header (the escalation type), a
 one-line summary, a type-specific detail block (the conflicting dimensions / the
-non-converging blocker / the remaining blockers / the dispatch error), the round
-history one line each, and **2–3 concrete options** tailored to the type (pick a
+non-converging blocker / the remaining blockers, severity rendered in the
+user-facing `Critical`/`Warning`/`Suggestion` vocabulary, with any
+`possible_false_trip` match flagged / the dispatch error), the round
+history one line each, a **per-round progress table** (#969) — Critical /
+Warning / Suggestion, new / carried, fixed-since-prior, derived from
+`.round_changelists`; stamp-less cells degrade to `–` — a **convergence
+assessment** (the blocking series, whether the trend and the carried/false-trip
+split make another round likely to help), and **2–3 concrete options**
+tailored to the type (pick a
 winner, reconcile, split; unblock, waive, split; extend, triage, split; name the
 language, skip review, add support). A trailing `<!-- review-loop-escalation:
-<STATUS> -->` marker makes the comment machine-findable.
+<STATUS> -->` marker makes the comment machine-findable. `--format summary`
+renders the same computed data conversationally for the interactive extension
+(no options list, no branch note, no marker), plus `--grants N` — the
+extension's consumed-grants count against the soft cap — so the human decides
+at the grant prompt from one source of truth.
 
 The skill then: pushes the branch as the bot so the diff-so-far is linkable but
 **creates no PR object** (a draft would trigger CI and defeat the local loop);

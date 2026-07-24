@@ -220,13 +220,19 @@ emit_ambiguous() {
 # is render-progress-block.zsh (a testable pure function); transparency must
 # never abort a run, so every failure here is swallowed.
 append_progress_round() {
-  local cl="$1" r="$2" v="$3"
+  local cl="$1" r="$2" v="$3" prev_cl="${4:-}"
   [[ -n "$work_dir" ]] || return 0
+  # judgment-grade per-round counts (#969): the previous round changelist
+  # enables fixed-since, the history (which already holds this round — it is
+  # appended before this call) enables the cumulative trend line
+  local -a extra
+  [[ -n "$prev_cl" && -s "$prev_cl" ]] && extra+=(--prev "$prev_cl")
+  [[ -s "$history_file" ]] && extra+=(--history "$history_file")
   # the append target's OWN open failure (e.g. a directory sits at the path)
   # is a shell-level redirection error, reported on the CURRENT stderr before
   # the trailing `2>/dev/null` would apply to it — brace-group it so the
   # 2>/dev/null covers the redirection setup too, not just the command (#971).
-  { "$RENDER_PROGRESS" --changelist "$cl" --round "$r" --verdict "$v" \
+  { "$RENDER_PROGRESS" --changelist "$cl" --round "$r" --verdict "$v" "${extra[@]}" \
     >> "$work_dir/progress.md" ; } 2>/dev/null || true
 }
 
@@ -559,7 +565,7 @@ while (( round <= max_rounds )); do
     AWAITING_FIX) verdict="awaiting fix — apply blockers in-session, then --resume" ;;
     *) verdict="fix pass (in-loop), continuing" ;;
   esac
-  append_progress_round "$changelist" "$round" "$verdict"
+  append_progress_round "$changelist" "$round" "$verdict" "$prev_changelist"
   if [[ -n "$loop_status" ]]; then break; fi
 
   # 5. fix pass — blockers only (Low suggestions never loop)
