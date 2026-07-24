@@ -361,8 +361,8 @@ accordingly — it never flags a repo that ships no ops fragment. Design:
   principle, Spring gets the surface via Actuator/Micrometer (Micrometer maps to
   OTel semantic conventions) — `spring-config-advisor` gains a conforms-to-ops-api
   check — and every other language plugin owns its canonical implementation of
-  the same fragment (Python is the blessed non-Spring reference; #935/#936/#937
-  track Java-non-Spring/Node/Swift).
+  the same fragment (Python and Java-non-Spring are the blessed non-Spring
+  references; #936/#937 track Node/Swift).
 
 ### Cross-repo Claude: the big-picture problem
 
