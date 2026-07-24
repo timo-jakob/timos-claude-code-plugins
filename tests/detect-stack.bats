@@ -1199,3 +1199,174 @@ setup() {
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(jq -r '.languages | index("javascript")' <<<"$out")" = "null" ]
 }
+
+# --- #976: template-payload markers are NOT project language markers ---------
+# A generator repo (this plugin repo above all) ships template files that ARE
+# marker files under a `templates/` payload tree. Counting them detected the
+# plugin repo itself as python+javascript, so the §3.5 review loop dispatched
+# the python panel instead of development-claude-plugin:review. detect_lang now
+# prunes any `templates/` directory.
+
+@test "detect-stack #976: markers under templates/ are NOT counted as languages" {
+  mkdir -p templates/languages/python/ops-api templates/languages/javascript
+  printf 'flask\n' > templates/languages/python/ops-api/requirements.txt
+  printf '{ "compilerOptions": {} }\n' > templates/languages/javascript/tsconfig.json
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("python")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" = "null" ]
+  [ "$(jq -c '.languages' <<<"$out")" = '[]' ]
+}
+
+@test "detect-stack #976: a genuine root marker still detects despite a templates/ payload" {
+  # Root-level pyproject is real project source; the templates/ payload must not
+  # add a spurious javascript token.
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  mkdir -p templates/languages/javascript
+  printf '{ "compilerOptions": {} }\n' > templates/languages/javascript/tsconfig.json
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("python")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack #976: nested templates/ (e.g. skills/bootstrap/templates) is pruned" {
+  # Mirror this repo's real layout: the payload lives deep under the tree, not at
+  # the repo root, so the prune must match a templates/ dir at any depth.
+  mkdir -p development/skills/bootstrap/templates/languages/python/ops-api
+  printf 'flask\n' > development/skills/bootstrap/templates/languages/python/ops-api/requirements.txt
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("python")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack #976: the real repo shape (.claude-plugin marker + templates payload) -> languages [] AND is_claude_plugin true" {
+  # Mirror this plugin repo: a .claude-plugin marker co-present with template
+  # payloads. This is the combined state the §3.5 review dispatch keys on.
+  mkdir -p .claude-plugin templates/languages/python/ops-api templates/languages/javascript
+  printf '{ "name": "fam" }\n' > .claude-plugin/marketplace.json
+  printf 'flask\n' > templates/languages/python/ops-api/requirements.txt
+  printf '{ "compilerOptions": {} }\n' > templates/languages/javascript/tsconfig.json
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -c '.languages' <<<"$out")" = '[]' ]
+  [ "$(jq -r '.is_claude_plugin' <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #976: a similarly-named directory (report-templates) is NOT pruned" {
+  # The exact-component match '*/templates' must not prune a dir whose name only
+  # CONTAINS 'templates'; a regression loosening the glob to '*templates*' would
+  # over-prune and drop a real marker.
+  mkdir -p tools/report-templates
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > tools/report-templates/pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("python")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack #976: a genuine root JS marker still detects despite a templates/ JS payload" {
+  # Symmetric to the python survival test — a root package.json survives while a
+  # templates/ JS payload is ignored, and javascript appears exactly once.
+  printf '{ "name": "x", "version": "0.1.0" }\n' > package.json
+  mkdir -p templates/languages/javascript
+  printf '{ "compilerOptions": {} }\n' > templates/languages/javascript/tsconfig.json
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '[.languages[] | select(. == "javascript")] | length' <<<"$out")" = "1" ]
+}
+
+@test "detect-stack #976: java version is NOT read from a templates/ payload (order-independent)" {
+  # The templates prune must extend to the build-metadata scan (#258 reliability).
+  # Make the assertion independent of find's enumeration order: the REAL root
+  # build carries NO version pin (so the default 21 / source=default applies),
+  # while the templates payload holds the ONLY parseable pin, of(8). With the
+  # prune working, version=21 / source=default. If the prune regresses, the
+  # template's 8 becomes the only parseable version (source=parsed) regardless of
+  # which file find lists first — so this fails unambiguously on a regression.
+  printf 'plugins {\n  java\n}\n' > build.gradle.kts
+  printf "rootProject.name = 'x'\n" > settings.gradle.kts
+  mkdir -p templates/languages/java
+  printf 'java {\n  toolchain {\n    languageVersion = JavaLanguageVersion.of(8)\n  }\n}\n' > templates/languages/java/build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("java")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+  [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "default" ]
+}
+
+@test "detect-stack #976: swift version is NOT read from a templates/ payload (order-independent)" {
+  # Swift twin of the Java metadata-prune test — the Swift build-metadata scan
+  # carries the same #258 reliability contract. Unlike Java (which greps an
+  # aggregated -print list), the Swift version source is package_swift = a single
+  # `-print -quit` file, so a competing root Package.swift would make the mutant
+  # kill filesystem-order-dependent. Make the templates Package.swift the ONLY
+  # Package.swift and detect the root as Swift via a root .xcodeproj: with the
+  # prune working, package_swift is empty and the (SWIFT_VERSION-free) root pbxproj
+  # yields the default 6.0 / source=default; with the prune removed, package_swift
+  # DETERMINISTICALLY resolves to the templates file -> 5.5 / source=parsed,
+  # failing this test on every filesystem.
+  mkdir -p App.xcodeproj templates/languages/swift
+  : > App.xcodeproj/project.pbxproj
+  printf '// swift-tools-version:5.5\nimport PackageDescription\nlet package = Package(name: "tmpl")\n' > templates/languages/swift/Package.swift
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("swift")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.swift.version <<<"$out")" = "6.0" ]
+  [ "$(jq -r .language_meta.swift.version_source <<<"$out")" = "default" ]
+}
+
+@test "detect-stack #976: java version is NOT read from a templates/ pom payload (order-independent)" {
+  # Cover the pom_files templates prune too: a gradle-first repo whose root build
+  # declares no version falls through to Maven compiler properties (version step
+  # 4). The REAL root gradle build carries no pin (default 21 / source=default);
+  # the templates payload pom.xml holds the ONLY parseable version (release 8).
+  # With the pom_files prune working the template pom is ignored -> 21 / default;
+  # a prune regression makes 8 the only parseable version (source=parsed).
+  printf 'plugins {\n  java\n}\n' > build.gradle.kts
+  printf "rootProject.name = 'x'\n" > settings.gradle.kts
+  mkdir -p templates/languages/java
+  printf '<project><properties><maven.compiler.release>8</maven.compiler.release></properties></project>\n' > templates/languages/java/pom.xml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("java")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+  [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "default" ]
+}
+
+@test "detect-stack #976: a repo dir literally named 'templates' still detects its root language (-mindepth 1 guard)" {
+  # -path '*/templates' -prune would match the search root itself; -mindepth 1
+  # skips depth 0 so a repo checked out as 'templates/' is still descended into.
+  tdir="$BATS_TEST_TMPDIR/templates"
+  mkdir -p "$tdir"
+  cd "$tdir"
+  git init -q
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("python")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack #976: in a 'templates'-named repo the METADATA finds still read the real root build (-mindepth 1 guard)" {
+  # The -mindepth 1 guard must hold on the language-metadata finds too, not only
+  # detect_lang. In a repo whose dir basename is literally 'templates', a metadata
+  # find missing -mindepth 1 would match '*/templates' at depth 0 and prune the
+  # whole tree, silently degrading version_source to "default" (a #258 regression)
+  # even though the language is still detected. Assert the metadata is PARSED from
+  # the real pinned root build for both Java and Swift.
+  tdir="$BATS_TEST_TMPDIR/templates"
+  mkdir -p "$tdir"
+  cd "$tdir"
+  git init -q
+  printf 'plugins {\n  java\n}\njava {\n  toolchain {\n    languageVersion = JavaLanguageVersion.of(21)\n  }\n}\n' > build.gradle.kts
+  printf "rootProject.name = 'x'\n" > settings.gradle.kts
+  printf '// swift-tools-version:6.0\nimport PackageDescription\nlet package = Package(name: "x")\n' > Package.swift
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("java")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.java.version <<<"$out")" = "21" ]
+  [ "$(jq -r .language_meta.java.version_source <<<"$out")" = "parsed" ]
+  [ "$(jq -r .language_meta.java.build_system <<<"$out")" = "gradle" ]
+  [ "$(jq -r '.languages | index("swift")' <<<"$out")" != "null" ]
+  [ "$(jq -r .language_meta.swift.version <<<"$out")" = "6.0" ]
+  [ "$(jq -r .language_meta.swift.version_source <<<"$out")" = "parsed" ]
+}

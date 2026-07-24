@@ -279,6 +279,22 @@ if [[ "$git_initialized" == "true" ]]; then
 fi
 
 # --- languages ---------------------------------------------------------------
+# A `templates/` payload is NOT a project language marker (#976). A generator
+# repo — this plugin repo above all — ships template files that ARE marker files
+# (bootstrap's `templates/languages/python/ops-api/requirements.txt`,
+# `templates/languages/javascript/tsconfig.json`); counting them detected the
+# plugin repo itself as python+javascript, so the §3.5 review loop dispatched the
+# python panel instead of `development-claude-plugin:review`. Pruning any
+# `templates/` directory keeps such payloads out of detection while leaving a
+# real target's root-level markers — and a runtime `templates/` dir of `.html`
+# views, which carries no manifest markers — untouched.
+#
+# `-mindepth 1` guards the start directory: `find` applies the prune expression
+# to `$cwd` itself, so without it a repo checked out into a directory literally
+# named `templates` (or any other pruned name) would match `*/templates` at depth
+# 0, prune the whole tree, and silently detect zero languages. Skipping depth 0
+# means the root is always descended into regardless of its name, while every
+# deeper prune still fires.
 detect_lang() {
 	local lang="$1"
 	shift
@@ -286,12 +302,13 @@ detect_lang() {
 		while IFS= read -r -d '' _; do
 			printf '%s\n' "$lang"
 			return
-		done < <(find "$cwd" \
+		done < <(find "$cwd" -mindepth 1 \
 			-path '*/node_modules' -prune -o \
 			-path '*/.git' -prune -o \
 			-path '*/vendor' -prune -o \
 			-path '*/.build' -prune -o \
 			-path '*/dist' -prune -o \
+			-path '*/templates' -prune -o \
 			-name "$marker" -print0 2>/dev/null)
 	done
 }
@@ -429,19 +446,28 @@ if [[ "$java_in_langs" == "true" ]]; then
 	# Candidate build files (prune build-output + VCS dirs). Newline-separated;
 	# passed unquoted to grep below, which is safe for the conventional
 	# space-free Gradle/Maven filenames these globs match.
-	gradle_files="$(find "$cwd" \
+	# `-path '*/templates' -prune` keeps a generator repo's template payloads out
+	# of the build-metadata scan too (#976): a repo with a genuine root
+	# build.gradle.kts that ALSO ships gradle templates must parse its version /
+	# DSL / JaCoCo from the REAL build, never a template file (which would be
+	# reported as version_source="parsed" and break the #258 reliability
+	# contract). `-mindepth 1` guards a repo dir literally named `templates`.
+	gradle_files="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/.gradle' -prune -o \
 		-path '*/build' -prune -o \
+		-path '*/templates' -prune -o \
 		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null)"
-	pom_files="$(find "$cwd" \
+	pom_files="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/target' -prune -o \
+		-path '*/templates' -prune -o \
 		-name 'pom.xml' -print 2>/dev/null)"
 
 	# Build system: Gradle wins when both are present.
-	gradle_settings="$(find "$cwd" \
+	gradle_settings="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
+		-path '*/templates' -prune -o \
 		\( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit 2>/dev/null)"
 	if [[ -n "$gradle_files" || -n "$gradle_settings" ]]; then
 		java_build_system="gradle"
@@ -526,14 +552,19 @@ for l in ${langs[@]+"${langs[@]}"}; do
 done
 
 if [[ "$swift_in_langs" == "true" ]]; then
-	# Build system: Xcode wins when a project/workspace is present.
-	xcode_proj="$(find "$cwd" \
+	# Build system: Xcode wins when a project/workspace is present. The
+	# `templates` prune (+ `-mindepth 1`) keeps a generator repo's Swift template
+	# payloads out of the build-system/version scan too (#976), the same
+	# #258-reliability guard the Java scan uses.
+	xcode_proj="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/.build' -prune -o \
+		-path '*/templates' -prune -o \
 		\( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -print -quit 2>/dev/null)"
-	package_swift="$(find "$cwd" \
+	package_swift="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/.build' -prune -o \
+		-path '*/templates' -prune -o \
 		-name 'Package.swift' -print -quit 2>/dev/null)"
 	if [[ -n "$xcode_proj" ]]; then
 		swift_build_system="xcode"
@@ -553,8 +584,9 @@ if [[ "$swift_in_langs" == "true" ]]; then
 	fi
 	# 3) Xcode SWIFT_VERSION build setting (language mode) from the pbxproj
 	if [[ -z "$swift_version" ]]; then
-		pbxproj="$(find "$cwd" \
+		pbxproj="$(find "$cwd" -mindepth 1 \
 			-path '*/.git' -prune -o \
+			-path '*/templates' -prune -o \
 			-name 'project.pbxproj' -print -quit 2>/dev/null)"
 		if [[ -n "$pbxproj" ]]; then
 			swift_version="$(grep -oE 'SWIFT_VERSION = [0-9]+(\.[0-9]+)?' "$pbxproj" 2>/dev/null |
@@ -578,9 +610,10 @@ if [[ "$swift_in_langs" == "true" ]]; then
 		has_swift_cov="true"
 	elif [[ -d "$cwd/Tests" ]]; then
 		has_swift_cov="true"
-	elif find "$cwd" \
+	elif find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/.build' -prune -o \
+		-path '*/templates' -prune -o \
 		\( -name '*Tests.swift' -o -name '*Test.swift' \) -print -quit 2>/dev/null | grep -q .; then
 		has_swift_cov="true"
 	fi
