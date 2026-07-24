@@ -29,6 +29,21 @@ setup() {
   WD="$BATS_TEST_TMPDIR/wd"
   F="$BATS_TEST_TMPDIR/findings.json"
   CRIT='[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"T","description":"d","reviewer":"r"}]'
+  # the SAME blocker as a real second panel run would report it: same identity
+  # ([file, dimension, line] — #606), different evidence text, so it is not
+  # byte-identical and clears the stale-findings guard (#974)
+  CRIT2='[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"T (still)","description":"d2","reviewer":"r2"}]'
+  # same fixture as a file, so hook commands can cp it instead of interpolating
+  # JSON into a shell string (word splitting / globbing hazard)
+  CRIT_FILE="$BATS_TEST_TMPDIR/crit.json"
+  printf '%s' "$CRIT" > "$CRIT_FILE"
+}
+
+# a test that chmods a dir read-only (the failed-consume case) must not leave it
+# un-removable if an assertion aborts the test mid-way — bats' rm -rf of the
+# tmpdir would then fail and bury the real failure. Restore write perms always.
+teardown() {
+  chmod -R u+rwX "$BATS_TEST_TMPDIR" 2>/dev/null || true
 }
 
 # one step-mode invocation against the python repo
@@ -115,13 +130,228 @@ seed_awaiting() {
   [ "$(echo "$output" | jq '.round_changelists | length')" -eq 2 ]
 }
 
-@test "resume with the SAME blocker trips ESCALATE_NO_CONVERGENCE against the carried prior round" {
+@test "resume with the same blocker re-worded (same file/dimension/line) trips ESCALATE_NO_CONVERGENCE" {
   seed_awaiting
-  printf '%s' "$CRIT" > "$F"
+  printf '%s' "$CRIT2" > "$F"   # re-found by a real panel run: same identity, fresh evidence
   step --resume
   [ "$status" -eq 12 ]
   [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
   [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  # the cross-round match was made on [file, dimension, line] (#606), not on text
+  [ "$(echo "$output" | jq -r '.final_changelist.blocking[0].matched_prior.title')" = "T" ]
+}
+
+# --- stale-findings guard (#974) --------------------------------------------
+
+@test "re-invoking with the same UNCHANGED findings path is a usage error (2), not a phantom ESCALATE_NO_CONVERGENCE" {
+  seed_awaiting
+  # the session forgot to run the panel / rewrite the file — $F is untouched
+  step --resume
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"byte-identical to round 1"* ]]
+  [[ "$output" == *"did this round's review panel run?"* ]]
+}
+
+@test "the guard is content-based: a fresh per-round path holding the previous round's bytes also exits 2" {
+  seed_awaiting
+  F2="$BATS_TEST_TMPDIR/findings-round-2.json"
+  cp "$F" "$F2"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F2" --resume
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$F2"* ]]
+}
+
+@test "the refusal is typed: it overwrites the prior AWAITING_FIX verdict with STALE_FINDINGS" {
+  ST="$BATS_TEST_TMPDIR/status.json"
+  T="$BATS_TEST_TMPDIR/refusal-telemetry.jsonl"
+  printf '%s' "$CRIT" > "$F"
+  step --status-file "$ST" --telemetry-file "$T"
+  [ "$status" -eq 20 ]
+  # separate-stderr so the stdout-is-one-JSON-line contract is actually observed,
+  # not blurred by bats merging stderr into $output
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume \
+    --status-file "$ST" --telemetry-file "$T"
+  [ "$status" -eq 2 ]
+  # with --separate-stderr, $output is stdout and $stderr is stderr:
+  # stdout is exactly the one-line status JSON; the human complaint is on stderr
+  [ "$(printf '%s' "$output" | grep -c '')" -eq 1 ]
+  [ "$(jq -r '.status' <<<"$output")" = "STALE_FINDINGS" ]
+  [[ "$stderr" == *"did this round's review panel run?"* ]]
+  # no stale verdict survives: the status file names THIS invocation's refusal
+  [ "$(jq -r '.status' "$ST")" = "STALE_FINDINGS" ]
+  [ "$(jq -r '.rounds' "$ST")" -eq 1 ]
+  # the carried accumulators are real prior state, not empty stubs
+  [ "$(jq '.history | length' "$ST")" -eq 1 ]
+  [ "$(jq '.round_changelists | length' "$ST")" -eq 1 ]
+  [ "$(jq '.final_changelist.round' "$ST")" -eq 1 ]
+  # ...but it is NOT terminal: no telemetry record, no round block, no Final line
+  [ ! -e "$T" ]
+  run ! grep -q '^## Round 2' "$WD/progress.md"
+  run ! grep -q '^\*\*Final:' "$WD/progress.md"
+  grep -q '^\*\*Refused (round 2):\*\* stale findings' "$WD/progress.md"
+}
+
+@test "passing the round's own dispatch findings_path as --findings-file is refused up front, panel output intact" {
+  # round 1's real panel output lives at the dispatch sink; a caller that aims
+  # --findings-file there must be refused BEFORE the loop truncates it
+  SINK="$R/.review/findings-round-1.json"
+  mkdir -p "$R/.review"
+  printf '%s' "$CRIT" > "$SINK"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$SINK"
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' <<<"$output")" = "STALE_FINDINGS" ]
+  [[ "$stderr" == *"must not be the round's own findings_path"* ]]
+  # the refusal did not destroy the file it pointed at
+  [ -s "$SINK" ]
+  [ "$(cat "$SINK")" = "$CRIT" ]
+}
+
+@test "a missing findings file on --resume is refused (2) — silence is not a clean round" {
+  seed_awaiting
+  rm -f "$F"
+  step --resume
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  [[ "$output" == *"missing or empty on --resume"* ]]
+  [[ "$output" == *"must still write []"* ]]
+}
+
+@test "a zero-byte findings file on --resume is refused (2) too" {
+  seed_awaiting
+  : > "$F"
+  step --resume
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing or empty on --resume"* ]]
+}
+
+@test "the guard compares only the immediately preceding round — and the window moves with it" {
+  echo "print(2)" > "$R/lib.py"   # a second in-scope file, so round 2 differs in identity
+  seed_awaiting                   # round 1 consumed $CRIT (app.py:1)
+  LIB='[{"severity":"CRITICAL","dimension":"bugs","file":"lib.py","line":1,"title":"L","description":"d","reviewer":"r"}]'
+  printf '%s' "$LIB" > "$F"
+  step --resume --max-rounds 4    # round 2: a different blocker — no non-convergence
+  [ "$status" -eq 20 ]
+  # round 3 re-passing ROUND 2's bytes is refused: the comparison window moved
+  step --resume --max-rounds 4
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"byte-identical to round 2"* ]]
+  printf '%s' "$CRIT" > "$F"      # round 3: byte-identical to ROUND 1, not to round 2
+  step --resume --max-rounds 4
+  [ "$status" -eq 20 ]            # allowed through: only the adjacent round is compared
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+}
+
+@test "a fresh (non-resume) run wipes a previous run's digests from a reused work-dir" {
+  echo "print(2)" > "$R/lib.py"
+  seed_awaiting                   # round 1
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":"lib.py","line":1,"title":"L","description":"d","reviewer":"r"}]' > "$F"
+  step --resume --max-rounds 4    # round 2
+  [ "$status" -eq 20 ]
+  [ -s "$WD/.findings-digest-2" ]
+  printf '%s' "$CRIT" > "$F"      # a NEW loop from round 1 in the same work-dir
+  step
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 1 ]
+  [ ! -e "$WD/.findings-digest-2" ]   # the stale round-2 digest is gone...
+  [ -s "$WD/.findings-digest-1" ]     # ...and this run's round 1 recorded its own
+}
+
+@test "a failed consume records no digest, so the retry with the same bytes is accepted" {
+  seed_awaiting
+  mkdir -p "$R/.review"
+  chmod 555 "$R/.review"          # read-only dir: the round's cp cannot land
+  printf '%s' "$CRIT2" > "$F"
+  step --resume
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not copy"* ]]
+  [ ! -e "$WD/.findings-digest-2" ]
+  chmod 755 "$R/.review"
+  step --resume                   # same bytes, now consumable
+  [ "$status" -eq 12 ]            # a verdict, never a phantom refusal
+}
+
+@test "without a sha256 tool the byte-identical detection degrades, it does not fail the run" {
+  BIN="$BATS_TEST_TMPDIR/nodigest"
+  mkdir -p "$BIN"
+  for t in shasum sha256sum; do
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/$t"
+    chmod +x "$BIN/$t"
+  done
+  printf '%s' "$CRIT" > "$F"
+  run env PATH="$BIN:$PATH" DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F"
+  [ "$status" -eq 20 ]
+  [ ! -e "$WD/.findings-digest-1" ]   # nothing recorded: the guard is simply off
+  run env PATH="$BIN:$PATH" DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  [ "$status" -eq 12 ]   # degraded to the pre-#974 behaviour, not an abort
+}
+
+# both digest implementations must actually work — the arm is chosen by tool
+# existence, so on a host with shasum the sha256sum arm is otherwise unreachable.
+# RESOLVE_LOOP_DIGEST_TOOL pins it; skip the arm whose tool this host lacks.
+_digest_arm_refuses() {
+  local tool="$1"
+  command -v "$tool" >/dev/null 2>&1 || skip "$tool not installed on this host"
+  printf '%s' "$CRIT" > "$F"
+  run env RESOLVE_LOOP_DIGEST_TOOL="$tool" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F"
+  [ "$status" -eq 20 ]
+  [ -s "$WD/.findings-digest-1" ]   # this arm produced a digest
+  run env RESOLVE_LOOP_DIGEST_TOOL="$tool" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  [ "$status" -eq 2 ]   # byte-identical → refused by this arm
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+}
+
+@test "the shasum digest arm powers the byte-identical guard" {
+  _digest_arm_refuses shasum
+}
+
+@test "the sha256sum digest arm powers the byte-identical guard" {
+  _digest_arm_refuses sha256sum
+}
+
+@test "an unknown RESOLVE_LOOP_DIGEST_TOOL pin disables the guard loudly, not silently" {
+  printf '%s' "$CRIT" > "$F"
+  run env RESOLVE_LOOP_DIGEST_TOOL=sha256 DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F"
+  [ "$status" -eq 20 ]                        # the run itself is unaffected
+  [[ "$output" == *"RESOLVE_LOOP_DIGEST_TOOL=sha256 not usable"* ]]
+  [ ! -e "$WD/.findings-digest-1" ]           # guard is off: no digest recorded
+  # ...and with the guard off, byte-identical findings are consumed, not refused
+  run env RESOLVE_LOOP_DIGEST_TOOL=sha256 DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  [ "$status" -eq 12 ]
+}
+
+@test "a hardlinked --findings-file to the dispatch sink is caught, panel output intact" {
+  # canonical-path compare misses a hardlink (different name, same inode); -ef catches it
+  SINK="$R/.review/findings-round-1.json"
+  mkdir -p "$R/.review"
+  printf '%s' "$CRIT" > "$SINK"
+  LINK="$BATS_TEST_TMPDIR/hardlink.json"
+  ln "$SINK" "$LINK" || skip "hardlink not supported here"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$LINK"
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' <<<"$output")" = "STALE_FINDINGS" ]
+  [ -s "$SINK" ]                              # not truncated through the link
+}
+
+@test "hook mode is unaffected: identical findings two rounds running still escalate (12), never exit 2" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd-hook-nc" \
+    --review-cmd "cp '$CRIT_FILE' \"\$REVIEW_FINDINGS\"" --fix-cmd 'true'
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
 }
 
 @test "a fresh step-mode run does NOT execute --test-cmd (step 3's gate already ran)" {
@@ -152,7 +382,7 @@ seed_awaiting() {
   grep -q '^## Round 1 — blockers remain' "$WD/progress.md"
   grep -q -- '- blockers: 1 (new: 1, carried: 0), conflicts: 0, suggestions: 0' "$WD/progress.md"
   grep -q -- '- by dimension: bugs 1' "$WD/progress.md"
-  printf '%s' "$CRIT" > "$F"
+  printf '%s' "$CRIT2" > "$F"
   step --resume
   [ "$status" -eq 12 ]
   grep -q '^## Round 2 — blockers remain' "$WD/progress.md"

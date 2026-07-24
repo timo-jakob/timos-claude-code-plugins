@@ -25,3 +25,7 @@ site/
 /manual.pdf
 /manual.epub
 /chapters.txt
+
+# resolve-issue review loop dispatch sink (local, per-run state; telemetry
+# under .claude/ is already covered above)
+.review/

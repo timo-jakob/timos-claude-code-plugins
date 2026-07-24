@@ -14,8 +14,10 @@ on:
   pull_request:
     paths:
       - 'tests/**'
-      - 'development/skills/maintenance/scripts/**'
-      - 'development/skills/bootstrap/scripts/**'
+      # any plugin skill's scripts — GitHub path filters are not implicitly
+      # **-prefixed, so a per-skill line is needed for the suite to gate the
+      # script it covers (e.g. resolve-issue's resolve-story-loop.zsh, #974).
+      - 'development/skills/**/scripts/**'
       - 'scripts/**'
       - 'development-claude-plugin/**'
       - '.github/workflows/script-tests.yml'

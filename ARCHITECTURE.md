@@ -1187,11 +1187,15 @@ exits `CONVERGED`. It sits in `/development:resolve-issue` between validate
 converged on. Constants live at the top: `MAX_REVIEW_ROUNDS=3`,
 `BLOCKING_SEVERITIES=(CRITICAL WARNING)` (= Critical + High).
 
-**The agentic steps are hooks.** Running the panel and applying the fix pass are
-model-driven, so they are injected as `--review-cmd` / `--fix-cmd` (and an
-optional `--test-cmd` gate). This keeps the deterministic state machine — rounds,
-budget, consolidation, exit-state — a pure, bats-testable function, and lets the
-skill wire the real panel/fix behind the seam (inline, or a headless `claude -p`).
+**The agentic steps run in-session — step mode is canonical (#971).** Running
+the panel and applying the fix pass are model-driven, so the driving session
+does both *between* invocations: it passes the round's aggregate findings via
+`--findings-file` and the script processes exactly ONE round per invocation,
+exiting `AWAITING_FIX` (20) when blockers remain with budget left, resuming with
+`--resume`. `--review-cmd` / `--fix-cmd` remain only as the deterministic
+bats seam that keeps the state machine — rounds, budget, consolidation,
+exit-state — a pure, testable function; wiring a headless `claude -p` behind
+them is **not** a supported pattern, because it hides every round from the user.
 
 Per round: run panel (diff-scoped) → `scope-findings` → `consolidate-findings`.
 No blockers ⇒ `CONVERGED`. Otherwise the early-exit escalations fire *before* the
@@ -1200,20 +1204,32 @@ blocker (same fingerprint two rounds running) ⇒ `ESCALATE_NO_CONVERGENCE` — 
 feed the blockers-only slice to the fix hook, re-run the gate, and loop. Reaching
 the last round with blockers still open ⇒ `BUDGET_EXHAUSTED`; an unpickable repo
 type from dispatch ⇒ `ESCALATE_AMBIGUOUS`. Each state is a distinct exit code
-(0 `CONVERGED`/`SKIPPED`; 10 ambiguous; 11 conflict; 12 no-convergence; 13 budget;
-2 usage; 1 operational — e.g. a red gate after a fix) alongside a machine-readable
+(0 `CONVERGED`/`SKIPPED`; 20 `AWAITING_FIX` — step mode's non-terminal
+"blockers remain, budget left, fix in-session then `--resume`"; 10 ambiguous;
+11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
+gate after a fix, which emits status `ERROR`) alongside a machine-readable
 status JSON (`{status, rounds, max_rounds, repo_type, review_skill,
-escalation_reasons, history, final_changelist}`). `--no-review` yields `SKIPPED`
-— the fast path that bypasses the loop.
+escalation_reasons, history, round_changelists, final_changelist}`).
+Step mode adds one further exit-2 semantic, `STALE_FINDINGS` (#974): a
+`--findings-file` that is missing/empty on `--resume`, byte-identical to the
+round just consumed, or aliased to the round's own dispatch `findings_path`
+(the internal sink the loop truncates) means the session's panel never ran for
+this round, so the loop refuses it — typed (it writes its own status JSON,
+never leaving the prior verdict to be misread) but non-terminal (no telemetry
+record, no progress `**Final:**` line; it does append a `**Refused (round N):**`
+line to `progress.md`), because the caller re-invokes with the round's real
+findings. `--no-review` yields `SKIPPED` — the fast path that bypasses the
+loop.
 
 **The loop is resumable (#902).** `--resume` continues a prior run from its
 `--work-dir` (the work-dir *is* the state): it reads the last completed round
 from `history.jsonl`, seeds the prior changelist so non-convergence detection
 spans the extension, honours a raised `--max-rounds`, and appends to the
 accumulators instead of truncating. `--resume` without prior non-empty history —
-or with a ceiling at or below the resumed round — is a usage error (exit 2); the
-exit-code contract gains no new codes. Its sibling,
-`build-escalation.zsh --format summary`, renders the same status data
+or with a ceiling at or below the resumed round — is a usage error (exit 2), as
+is a resumed round whose findings were never produced (`STALE_FINDINGS`, above).
+The interactive extension is driven by `build-escalation.zsh --format summary`,
+which renders the same status data the escalation comment carries, but
 conversationally (no options list, no branch note, no marker).
 
 Only `CONVERGED` proceeds to commit + open-pr; no escalation ever opens a PR
@@ -1228,8 +1244,15 @@ Stop/decline falls back to the typed comment.
 ## Review-loop telemetry (#566)
 
 Raising autonomy safely needs evidence, so the loop appends **one JSONL record
-per run** to `.claude/telemetry/review-loop.jsonl` (git-ignored — the bootstrap
-gitignore fragments for python/java/swift carry `.claude/telemetry/`). The record
+per LOOP, on terminal statuses only** to `.claude/telemetry/review-loop.jsonl`
+(git-ignored — the bootstrap gitignore fragments for python/java/swift carry
+`.claude/telemetry/`). It is never appended on the non-terminal `AWAITING_FIX`
+(#971) or the `STALE_FINDINGS` refusal (#974) — both resume the same loop, so a
+record there would double-count it. A step-mode loop spans several invocations,
+and each terminal record spans from the loop's logical start (`.t0`), so
+consecutive records of one extended loop (escalate → grant → `--resume`) overlap
+and their `wall_s` must not be summed — count records, but derive per-loop
+timing from the last record only. The record
 is built deterministically from the loop's status JSON by
 `build-telemetry-record.zsh`: `ts`, `issue`, `repo_type`, `status`, `escalation`
 (the type, or `null` when converged/skipped), `rounds`, `max_rounds`,
