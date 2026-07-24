@@ -46,10 +46,12 @@ jobs:
           sudo apt-get update
           # nodejs: the #707 contract-consumer transformer test executes a pure-JS
           # .mjs with node — a declared test dependency, not incidental.
-          sudo apt-get install -y --no-install-recommends bats jq shellcheck zsh python3 nodejs
+          # parallel: GNU parallel is bats' `--jobs` backend, which run-gate.zsh
+          # uses to parallelise the suite (#980).
+          sudo apt-get install -y --no-install-recommends bats jq shellcheck zsh python3 nodejs parallel
       - name: Install test dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install bats-core jq shellcheck node
+        run: brew install bats-core jq shellcheck node parallel
       - name: Run shell-script behavioral tests
         run: |
           # On macOS, force the bash scripts onto Apple's stock /bin/bash 3.2 —
@@ -59,4 +61,10 @@ jobs:
           # `zsh` resolves to the system /bin/zsh.
           if [ "$RUNNER_OS" = "macOS" ]; then export PATH="/bin:$PATH"; fi
           echo "bash for scripts under test: $(bash --version | head -1)"
-          bats tests
+          # Silence GNU parallel's citation notice so it never leaks into the TAP
+          # stream (#980).
+          mkdir -p ~/.parallel && touch ~/.parallel/will-cite
+          # Run the suite through the blessed gate helper: it parallelises via
+          # `bats --jobs $(nproc)`, runs the suite ONCE, and exits with bats' real
+          # code — the same single-run parallel path skills use, dogfooded here.
+          zsh development/skills/resolve-issue/scripts/run-gate.zsh --tests-dir tests
