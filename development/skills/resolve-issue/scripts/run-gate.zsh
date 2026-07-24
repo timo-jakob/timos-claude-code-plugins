@@ -33,8 +33,14 @@
 # Output:
 #   stdout — ONE JSON summary object (machine-readable), e.g.
 #     {"mode":"parallel","jobs":10,"ok":1220,"not_ok":0,"total":1220,
-#      "exit":0,"tap":"/tmp/run-gate.XXXX.tap"}
+#      "exit":0,"tap":"/tmp/run-gate.XXXX.tap","tree":"<40-hex or empty>"}
 #     mode is one of: "parallel" | "sequential" | "sequential-degraded".
+#     `tree` is the working-tree identity (git-tree-id.zsh) captured at the run —
+#     empty outside a git repo. On a GREEN run the caller passes it to the review
+#     loop's --gate-attest so the loop skips its own byte-identical re-run of this
+#     same tree (#981 gate attestation). It is a plain field; NEVER read it as
+#     the pass/fail signal — `exit` is the gate verdict, `tree` only says which
+#     tree was gated.
 #   stderr — the live TAP stream, a human count line, and (degraded) the warning.
 #
 # Exit codes:
@@ -64,6 +70,8 @@
 
 emulate -L zsh
 setopt nounset pipefail
+
+local self_dir="${0:A:h}"
 
 die_usage() { print -u2 -- "run-gate: $1"; exit 2 }
 
@@ -119,6 +127,21 @@ else
   print -u2 -- "############################################################"
 fi
 
+# --- working-tree identity for gate attestation (#981) -----------------------
+# Captured BEFORE the run — the tree being gated. The suite is read-only, so the
+# identity is stable across the run; empty outside a git repo / when git-tree-id
+# can't compute one (the caller then simply gets no attestation to pass, so the
+# loop falls back to running its own gate — fail-closed). Never fatal to the gate.
+# Degradation is allowed, silence is not: if the helper is missing/non-exec the
+# optimization is permanently dead, so say so once (on stderr) rather than
+# emitting a silent empty tree forever.
+local tree=""
+if [[ -x "${self_dir}/git-tree-id.zsh" ]]; then
+  tree="$("${self_dir}/git-tree-id.zsh" . 2>/dev/null)" || tree=""
+else
+  print -u2 -- "run-gate: git-tree-id.zsh not found/executable next to run-gate — gate attestation unavailable (#981)"
+fi
+
 # --- run the suite EXACTLY ONCE, tee TAP, keep bats' REAL exit ----------------
 if [[ -z "$tap_out" ]]; then
   # NB: the X's MUST be trailing — BSD/macOS mktemp rejects a mid-string
@@ -169,7 +192,18 @@ local tap_json="${tap_out//\\/\\\\}"
 tap_json="${tap_json//\"/\\\"}"
 tap_json="${tap_json//$'\n'/\\n}"
 tap_json="${tap_json//$'\t'/\\t}"
-printf '{"mode":"%s","jobs":%d,"ok":%d,"not_ok":%d,"total":%d,"exit":%d,"tap":"%s"}\n' \
-  "$mode" "$jobs" "$ok" "$not_ok" "$total" "$rc" "$tap_json"
+# The attestation is a GREEN-run identity: a RED run (incl. the zero-tests guard
+# above forcing rc=1) must be UNATTESTABLE, so no caller — however careless —
+# can pass a red run's tree and skip the suite on a tree that was never proven
+# green (the #974 "silence is not evidence" rule, enforced at the source rather
+# than trusting SKILL.md prose). And a shape guard keeps a stray non-hex value
+# (a stub / future edit) from corrupting the machine-readable summary — `tree`
+# is either 40 hex chars or the empty string.
+[[ "$rc" -eq 0 ]] || tree=""
+# 40 hex (SHA-1) or 64 hex (SHA-256 repos) — else blank it, so a stray value
+# never corrupts the JSON summary. Exact-match by the loop is length-agnostic.
+[[ "$tree" =~ '^([0-9a-f]{40}|[0-9a-f]{64})$' ]] || tree=""
+printf '{"mode":"%s","jobs":%d,"ok":%d,"not_ok":%d,"total":%d,"exit":%d,"tap":"%s","tree":"%s"}\n' \
+  "$mode" "$jobs" "$ok" "$not_ok" "$total" "$rc" "$tap_json" "$tree"
 
 exit $rc

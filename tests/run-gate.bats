@@ -270,3 +270,106 @@ EOF
   echo "$output" | jq -e --arg t "$tap" '.tap==$t'
   grep -q '^ok 1 first' "$tap"
 }
+
+# ---- gate attestation: the `tree` field (#981) ------------------------------
+# run-gate captures the working-tree identity so a GREEN caller can hand it to
+# the review loop's --gate-attest and skip the byte-identical duplicate re-run.
+
+# a git repo fixture with a tests/ dir; $proj set for the caller to `cd` into.
+mk_gitproj() {
+  proj="$BATS_TEST_TMPDIR/gitproj"
+  mkdir -p "$proj/tests"
+  git -C "$proj" init -q
+  git -C "$proj" config user.email t@example.com
+  git -C "$proj" config user.name tester
+  echo base > "$proj/f.txt"
+  git -C "$proj" add -A && git -C "$proj" commit -qm base
+}
+
+@test "tree is EXACTLY git-tree-id's identity for the working tree (not just 40-hex-shaped)" {
+  mk_gitproj
+  local TID="$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh"
+  local want; want="$(zsh "$TID" "$proj")"
+  [ -n "$want" ]
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$S" --tests-dir tests
+  [ "$status" -eq 0 ]
+  # the attestation must be the ACTUAL identity the loop will re-compute, else
+  # exact-match never fires (or false-fires): assert equality, not just shape
+  [ "$(echo "$output" | jq -r '.tree')" = "$want" ]
+}
+
+@test "tree tracks the working tree: an untracked change makes run-gate report a different tree" {
+  mk_gitproj
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$S" --tests-dir tests
+  local before; before="$(echo "$output" | jq -r '.tree')"
+  echo dirty > "$proj/new-untracked.txt"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$S" --tests-dir tests
+  local after; after="$(echo "$output" | jq -r '.tree')"
+  [ -n "$before" ]
+  [ "$before" != "$after" ]
+}
+
+@test "a RED run is UNATTESTABLE: tree is blanked even in a git repo" {
+  mk_gitproj
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    STUB_EXIT=1 \
+    zsh "$S" --tests-dir tests
+  [ "$status" -eq 1 ]
+  # a failed gate must not yield a matchable attestation, regardless of caller care
+  [ "$(echo "$output" | jq -r '.tree')" = "" ]
+}
+
+@test "the zero-tests forced-red also blanks tree (no attestation on a 1..0 run)" {
+  mk_gitproj
+  cat > "$TAPFIX" <<'EOF'
+1..0
+EOF
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$S" --tests-dir tests
+  [ "$status" -ne 0 ]
+  [ "$(echo "$output" | jq -r '.tree')" = "" ]
+}
+
+@test "tree is the empty string outside a git repo (attestation simply unavailable, never fatal)" {
+  local proj="$BATS_TEST_TMPDIR/nonrepo"
+  mkdir -p "$proj/tests"
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$S" --tests-dir tests
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.tree')" = "" ]
+}
+
+@test "git-tree-id.zsh missing next to run-gate: tree empty, LOUD stderr note, gate still runs (non-fatal)" {
+  # copy run-gate.zsh into an isolated dir WITHOUT git-tree-id.zsh beside it, so
+  # self_dir/git-tree-id.zsh is absent — the degradation branch (#981).
+  local isolated="$BATS_TEST_TMPDIR/isolated"
+  mkdir -p "$isolated/tests"
+  cp "$S" "$isolated/run-gate.zsh"
+  # a real git repo, so tree WOULD be computable were the helper present —
+  # proving the empty tree is the missing helper, not a missing repo
+  git -C "$isolated" init -q
+  git -C "$isolated" config user.email t@example.com
+  git -C "$isolated" config user.name tester
+  echo x > "$isolated/f.txt"; git -C "$isolated" add -A && git -C "$isolated" commit -qm base
+  cd "$isolated"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$isolated/run-gate.zsh" --tests-dir tests
+  [ "$status" -eq 0 ]                                    # non-fatal: the gate verdict is untouched
+  [ "$(echo "$output" | jq -r '.tree')" = "" ]          # no attestation
+  [[ "$stderr" == *"gate attestation unavailable"* ]]   # degradation is LOUD, not silent
+}

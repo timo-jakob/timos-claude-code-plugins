@@ -354,6 +354,13 @@ applies and run it:
   — never a false green. Never hand-roll a `bats … | grep -c` that runs the
   suite twice to count. For other stacks: `pytest` (Python — the whole suite,
   **not** `pytest tests/unit`), `./gradlew test` / `build` (Java/Gradle), etc.,
+  - **Capture the gate attestation (#981).** On a **green** `run-gate.zsh`,
+    keep its stdout `"tree"` field — the working-tree identity it just gated. On
+    the **next** review round's `--resume` you pass it as `--gate-attest` (§3.5)
+    so the loop skips a byte-identical re-run of the exact same tree it already
+    proved green — the single biggest per-round duplicate the #976 session paid.
+    It is a plain identity, not a verdict; `exit`/`ok` counts remain the pass
+    signal, and the loop re-runs the gate on any mismatch (fail-closed).
 - **relay a DEGRADED gate to the user, up front (#980).** `run-gate.zsh`'s
   stdout summary carries a `"mode"` field. When it is `"sequential-degraded"`
   (GNU `parallel` is not installed), the gate still ran the **whole** suite at
@@ -461,7 +468,7 @@ Each round:
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <work-dir> --status-file <status.json> --issue <N> \
      --findings-file <findings-round-R.json> \
-     --test-cmd '<full gate>' [--resume]
+     --test-cmd '<full gate>' [--resume] [--gate-attest <tree>]
    ```
 
    `<full gate>` is the same whole-suite command as Step 3. On a **plugin repo**
@@ -473,7 +480,54 @@ Each round:
    `--test-cmd` — the **full** suite (unit **and** integration), never a
    subset (#604) — FIRST, deterministically gating the previous round's
    in-session fix: red exits `ERROR` (1), the same "red after a fix aborts"
-   rule as ever.
+   rule as ever — **unless** a matching `--gate-attest` (below) proves that run
+   redundant, in which case the loop skips it (and only it).
+
+   **`--gate-attest` — one full-gate run per round, not two (#981).** On a
+   `--resume` the session has *just* run the full gate green in Step 3 (right
+   after applying the previous round's fix). Passing the `tree` identity from
+   that green `run-gate.zsh` (Step 3, above) as `--gate-attest <tree>` lets the
+   loop **skip** its own `--test-cmd` run **when — and only when — that identity
+   still exactly matches the working tree**, killing the byte-identical
+   duplicate that dominated the #976 session (~24 min). It is strictly
+   **fail-closed**: a mismatch (the tree changed since the attestation), an
+   empty/absent value, or an uncomputable current identity all run `--test-cmd`
+   exactly as before — the gate itself never weakens, this removes only a
+   provably-redundant re-run.
+
+   Four rules keep it honest — break any and the loop either re-runs the gate
+   (safe) or, worse, skips a gate it should not (a false green):
+
+   - **Only when `--test-cmd` *is* the attested `run-gate.zsh`.** The `tree`
+     field exists only on **plugin repos** (it is `run-gate.zsh` stdout). On a
+     `pytest` / `gradle` / other stack there is **no** attestation to pass —
+     **omit `--gate-attest` entirely** and let the loop run the gate. Never
+     synthesize an identity yourself (e.g. calling `git-tree-id.zsh` right
+     before `--resume`): a resume-time identity trivially matches the loop's
+     resume-time computation, turning the check into a vacuous self-attestation
+     that skips a gate that never ran. The attestation must come from the actual
+     green gate, or not at all. Likewise pass it only when `--test-cmd` runs the
+     **same** `run-gate.zsh` you gated with — a broader/compound `--test-cmd`
+     would be skipped whole on a tree match, including parts the attested run
+     never executed.
+   - **Capture the attestation from the *green* gate, and don't edit after.**
+     The panel is read-only, so a tree that only the review agents have touched
+     (i.e. read) is unchanged and still matches — but **you** must not touch the
+     tree between the green Step-3 gate and the `--resume`. If you did edit anything (or you
+     can't be sure), re-run the gate to get a fresh `tree` **or** omit
+     `--gate-attest` — never pass the stale one. (Passing it is not *unsafe* —
+     the loop just re-runs on the mismatch — but it wastes the round's point.)
+   - **Keep `--work-dir` and every `findings-round-R.json` OUTSIDE the repo**
+     (or on a git-ignored path). The identity hashes tracked **and** untracked,
+     non-ignored files, so a findings file or work-dir written *inside* the repo
+     changes the tree every round and defeats every match. Put them under a
+     scratch dir outside the worktree, exactly as the C4 step (§3) writes
+     `detect.json` outside the repo.
+   - **The one blind spot: git-ignored files.** The identity honors
+     `.gitignore`, so a change confined to an *ignored* test-relevant file is
+     the single edit class a match cannot catch. In these repos ignored paths
+     are build artifacts the suite never reads, so this is theoretical — but if
+     you knowingly change an ignored file the tests read, re-run the gate.
 
    **Write each round's findings to its own path** (`findings-round-R.json` —
    hence the `R`), and pass that round's path. On a `--resume` round the loop
@@ -495,6 +549,13 @@ Each round:
      just re-invoke with the correct `--findings-file` (don't re-run the panel);
    - if it **never** ran (or you can't tell), run round R's panel (step 1),
      write its aggregate — `[]` when it found nothing — and re-invoke.
+
+   **Re-pass the same `--gate-attest` on the recovery re-invoke** (plugin repos).
+   The refusal happens *after* the resume-start gate has already run (or validly
+   attest-skipped) on this exact tree, and neither the refusal nor the read-only
+   panel touches the tree — so the held attestation still matches. Omit it and
+   the recovery needlessly re-runs the full suite, the very duplicate #981
+   removes; drop it only if you edited the tree since the green gate.
 
    Never re-pass the previous round's file, and **never hand-edit findings to
    make the bytes differ** — that fakes a round. The refusal can only fire
@@ -537,8 +598,9 @@ Each round:
    `ESCALATE_NO_CONVERGENCE`, never `AWAITING_FIX`); narrate it there, per
    the escalation branch below. Then implement the
    blockers from the status JSON's `final_changelist.blocking` exactly as
-   step 2 implements — Low suggestions never loop — re-run the full gate, and
-   go to 1 for the next round's panel.
+   step 2 implements — Low suggestions never loop — re-run the full gate (on a
+   plugin repo, keep its green `tree` for the next `--resume`'s `--gate-attest`,
+   #981; other stacks have none), and go to 1 for the next round's panel.
 4. **On a terminal status**, take its branch below (`CONVERGED` → step 4;
    escalations → *Escalation*).
 
@@ -675,13 +737,16 @@ what was consumed and the step-6 soft cap can never fire across detours):
    — resume only once it is green; red follows §3's rule (fix it, or abandon and
    report) — run the next round's panel in-session (round protocol step 1) to
    produce its findings file, then resume the loop — same `--work-dir`,
-   `--resume`, ceiling raised by 2 — and increment `grants`:
+   `--resume`, ceiling raised by 2 — and increment `grants`. On a plugin repo
+   pass the green gate's `tree` as `--gate-attest` here too (#981, under the four
+   rules above), so the resume skips the byte-identical re-run just as a normal
+   round does; omit it on any other stack:
 
    ```bash
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <same-work-dir> --resume --max-rounds <prev_max + 2> \
      --findings-file <findings-round-R.json> --test-cmd '<full gate>' \
-     --issue <N> --status-file <status.json>
+     [--gate-attest <tree>] --issue <N> --status-file <status.json>
    ```
 
    On `CONVERGED` (exit 0) → leave this branch and proceed to step 4 (version
@@ -694,7 +759,8 @@ what was consumed and the step-6 soft cap can never fire across detours):
    raised `--max-rounds`) — no grant bookkeeping; the grant was already
    counted. On `STALE_FINDINGS` (exit 2, #974) → **not terminal**: recover by
    cause per §3.5 step 2 (re-invoke with round R's real findings path, or run
-   its panel first) and resume with the same raised `--max-rounds`. The grant
+   its panel first, re-passing the same `--gate-attest` per §3.5's recovery
+   rule) and resume with the same raised `--max-rounds`. The grant
    was already counted at the resume that produced this exit — the recovery
    re-invocation neither increments nor decrements `grants`, and never re-runs
    step 1's `build-escalation.zsh` summary on the `STALE_FINDINGS` status. On

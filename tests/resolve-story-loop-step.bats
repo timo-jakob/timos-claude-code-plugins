@@ -377,6 +377,114 @@ _digest_arm_refuses() {
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
 }
 
+# --- gate attestation: one full-gate run per round (#981) --------------------
+# The session already ran the full suite green in Step 3; on --resume the loop
+# skips its byte-identical duplicate run ONLY on an exact tree match, and runs
+# the gate on any mismatch/absence (fail-closed — the gate never weakens).
+
+TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh" "$R"; }
+
+@test "gate-attest: a matching attestation skips the duplicate resume gate (#981)" {
+  seed_awaiting
+  local attest; attest="$(TID)"
+  [ -n "$attest" ]
+  printf '[]' > "$F"
+  # --test-cmd 'false' would ERROR (1) if it RAN; the exact-match skip lets
+  # round 2 converge instead — proving the duplicate run was suppressed.
+  step --resume --test-cmd 'false' --gate-attest "$attest"
+  [ "$status" -eq 0 ]
+  # the skip emits a diagnostic to stderr, so pull the JSON line off the combined output
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+  # pin that the SKIP (not a generic converge) is what fired
+  [[ "$output" == *"skipping the duplicate --test-cmd run"* ]]
+  grep -q 'attested green' "$WD/progress.md"
+}
+
+@test "gate-attest: an uncomputable current identity runs the gate (fail-closed, #981)" {
+  seed_awaiting
+  local attest; attest="$(TID)"   # the identity that WOULD match if computable
+  printf '[]' > "$F"
+  # force git-tree-id dark (its git unavailable) while a would-match attest is passed:
+  # the ONLY reason the identities don't match is the uncomputable current tree.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_TREE_ID_BIN="$BATS_TEST_TMPDIR/no-such-git" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" \
+    --resume --test-cmd 'false' --gate-attest "$attest"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ERROR" ]
+}
+
+@test "gate-attest: inert in HOOK mode — a matching identity never suppresses the post-fix gate (#981)" {
+  # the gate-attest skip is guarded by (step_mode && resume); hook mode is
+  # step_mode=0, so --gate-attest must be a no-op. Round 1 hook: review finds a
+  # CRIT, fix is a no-op, then --test-cmd 'false' runs after the fix -> ERROR.
+  # A matching attestation must NOT stop that gate from running.
+  local attest; attest="$(TID)"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd-hook-attest" \
+    --review-cmd "cp '$CRIT_FILE' \"\$REVIEW_FINDINGS\"" --fix-cmd 'true' \
+    --test-cmd 'false' --gate-attest "$attest"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ERROR" ]
+}
+
+@test "gate-attest: on a FRESH (non-resume) run --gate-attest is inert — no skip, round proceeds (#981)" {
+  # the resume-start gate block is --resume-only, so --gate-attest must do nothing
+  # on a fresh round (Step 3's gate has not run in-loop yet). --test-cmd 'false'
+  # is also not run on a fresh run, so the CRIT blocker reaches AWAITING_FIX.
+  printf '%s' "$CRIT" > "$F"
+  local attest; attest="$(TID)"
+  step --test-cmd 'false' --gate-attest "$attest"
+  [ "$status" -eq 20 ]
+  [ ! -f "$WD/progress.md" ] || ! grep -q 'attested green' "$WD/progress.md"
+}
+
+@test "gate-attest: a NON-matching attestation still runs the gate (fail-closed, #981)" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --test-cmd 'false' \
+    --gate-attest "0000000000000000000000000000000000000000"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ERROR" ]
+}
+
+@test "gate-attest: a tree changed since the attestation runs the gate (fail-closed, #981)" {
+  seed_awaiting
+  local attest; attest="$(TID)"
+  echo "print(2)  # changed after the attested gate" >> "$R/app.py"
+  printf '[]' > "$F"
+  step --resume --test-cmd 'false' --gate-attest "$attest"
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ERROR" ]
+}
+
+@test "gate-attest: an empty --gate-attest value runs the gate (fail-closed, #981)" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --test-cmd 'false' --gate-attest ''
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ERROR" ]
+}
+
+@test "gate-attest: no --gate-attest is unchanged — the resume gate still runs (#981)" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --test-cmd 'false'
+  [ "$status" -eq 1 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "ERROR" ]
+}
+
+@test "gate-attest: a matching attestation still aborts if a red gate would have — it just isn't run; the round proceeds (#981)" {
+  seed_awaiting
+  local attest; attest="$(TID)"
+  printf '[]' > "$F"
+  # matching attestation + a GREEN gate: converges either way, proving the skip
+  # path leaves the happy case intact.
+  step --resume --test-cmd 'true' --gate-attest "$attest"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+}
+
 @test "progress.md gets a per-round block with severity split, new/carried, fixed-since and trend (step mode, #969)" {
   seed_awaiting
   grep -q '^## Round 1 — blockers remain' "$WD/progress.md"
