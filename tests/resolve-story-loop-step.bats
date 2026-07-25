@@ -52,6 +52,46 @@ step() {
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" "$@"
 }
 
+# a blocker that is GENUINELY different per round, on BOTH axes the matcher
+# uses: the line jumps far beyond the proximity window (#606) AND the titles
+# share no significant (>= 4-char) token, so the identity check clears them as
+# distinct findings rather than routing to the ambiguous branch (#983). A
+# multi-round run therefore spends its budget instead of tripping
+# non-convergence, and consecutive rounds are never byte-identical (the #974
+# stale-findings guard).
+distinct_blocker() {
+  local -a titles=(
+    "unquoted variable in matcher"
+    "missing pipefail on download"
+    "stale cache never invalidated"
+    "off-by-one window bound"
+    "swallowed exit from consolidator"
+    "wrong severity mapping"
+    "unreachable resume branch"
+    "leaked temp file"
+  )
+  printf '[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":%d,"title":"%s","description":"d%d","reviewer":"r"}]' \
+    "$(( $1 * 1000 ))" "${titles[$(( $1 - 1 ))]}" "$1"
+}
+
+# burn the whole DEFAULT budget: rounds 1..MAX-1 keep asking for a fix, the last
+# one spends it. Shared by the two #993 step-mode budget tests so the ramp
+# cannot drift between them.
+spend_default_budget() {
+  local r
+  for r in 1 2 3 4; do
+    distinct_blocker "$r" > "$F"
+    if [ "$r" -eq 1 ]; then step; else step --resume; fi
+    # every assertion carries the round, so a regression at round 3 does not
+    # report the same failure message as one at round 1
+    [ "round $r: $status" = "round $r: 20" ]
+    [ "round $r: $(echo "$output" | jq -r '.status')" = "round $r: AWAITING_FIX" ]
+    [ "round $r: $(echo "$output" | jq '.rounds')" = "round $r: $r" ]
+  done
+  distinct_blocker 5 > "$F"
+  step --resume
+}
+
 # seed a work-dir one AWAITING_FIX round deep (round 1, one CRITICAL blocker)
 seed_awaiting() {
   printf '%s' "$CRIT" > "$F"
@@ -110,6 +150,46 @@ seed_awaiting() {
   step --max-rounds 1
   [ "$status" -eq 13 ]
   [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+}
+
+@test "step mode's default cap is 5: rounds 1-4 AWAITING_FIX, round 5 BUDGET_EXHAUSTED (#993)" {
+  # Step mode is the CANONICAL production wiring, so the raised default must
+  # move its AWAITING_FIX -> BUDGET_EXHAUSTED boundary too — and no --max-rounds
+  # is passed anywhere here, so the boundary IS MAX_REVIEW_ROUNDS.
+  spend_default_budget
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq '.history | length')" -eq 5 ]
+}
+
+@test "step mode: a granted extension resumes past the default cap with --max-rounds 8 (#993)" {
+  # The executable half of the +2 -> +3 increment: SKILL.md's interactive
+  # extension re-invokes the loop with `--resume --max-rounds <prev_max + 3>`,
+  # i.e. 8 once the default 5 is spent — a resume whose ceiling is ABOVE
+  # MAX_REVIEW_ROUNDS, in the canonical step-mode wiring. A regression that
+  # re-derived the resume ceiling from the compiled constant (or refused
+  # resume_round + 1 > MAX_REVIEW_ROUNDS) would kill every granted extension at
+  # round 5 while the rest of the suite stayed green.
+  spend_default_budget
+  [ "$status" -eq 13 ]   # budget spent at the default cap — the human is asked
+
+  # ... the human grants +3: the ceiling becomes 8 and the loop continues
+  distinct_blocker 6 > "$F"
+  step --resume --max-rounds 8
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 6 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 8 ]
+
+  # and it converges inside the granted rounds
+  printf '[]' > "$F"
+  step --resume --max-rounds 8
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 7 ]
+  [ "$(echo "$output" | jq '.history | length')" -eq 7 ]
 }
 
 @test "a surviving conflict exits ESCALATE_CONFLICT (11) in step mode too" {

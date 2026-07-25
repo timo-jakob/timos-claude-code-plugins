@@ -50,7 +50,7 @@ them would act wrongly — not where the wording could be nicer.
 
 ## The behavioural bar (severity rule — this bounds you)
 
-The review loop blocks on `CRITICAL`+`WARNING` and escalates after 3 rounds, so a chatty prose reviewer would
+The review loop blocks on `CRITICAL`+`WARNING` and escalates after 5 rounds, so a chatty prose reviewer would
 turn every plugin PR into an escalation. Your severities are therefore bounded by a falsifiable rule:
 
 | Severity | Bar |

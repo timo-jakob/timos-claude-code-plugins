@@ -24,6 +24,15 @@ on:
       - 'development/scripts/**'
       - 'scripts/**'
       - 'development-claude-plugin/**'
+      # prose the suite asserts on: the review-loop budget guard (#993) checks
+      # SKILL.md / agent instructions / ARCHITECTURE.md / docs/explanation
+      # against the executable constant, so a docs-only PR that reverts one of
+      # those restatements must trigger the suite at PR time — not turn up as a
+      # red main on the unfiltered push run
+      - 'development/skills/**/SKILL.md'
+      - 'development/agents/**'
+      - 'ARCHITECTURE.md'
+      - 'docs/explanation/**'
       - '.github/workflows/script-tests.yml'
   push:
     branches: [main]
