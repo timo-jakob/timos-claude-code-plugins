@@ -58,13 +58,15 @@ One JSON object per line (JSONL), two kinds, one versioned envelope:
 {
   "schema": "telemetry/v1",
   "kind": "run",                        // "run" | "enrichment"
-  "run_id": "review-loop-1752403000-8f3a", // <pipeline>-<ts>-<rand>; the join key
+  "run_id": "review-loop-1752403000-8f3a", // <pipeline>-<epoch>-<4 hex rand>; the join key
   "parent_run_id": null,                // e.g. a review-loop run inside a resolve-issue run
   "ts": 1752403000,                     // unix seconds
   "repo": "owner/name",                 // remote-derived; basename fallback (from #593)
   "repo_type": "python",                // nullable (claude-plugin repos, etc.)
-  "pipeline": "review-loop",            // review-loop | refine-issue | resolve-issue |
-                                        // maintenance | approve | bootstrap | acceptance
+  "pipeline": "review-loop",            // OPEN identifier [A-Za-z0-9._-]+, not a closed
+                                        // enum. Conventional: review-loop | refine-issue |
+                                        // resolve-issue | maintenance | approve |
+                                        // bootstrap | acceptance | …
   "issue": 123,                         // nullable linkage
   "pr": 456,                            // nullable linkage
   "outcome": "success",                 // success | parked | escalated | failed
@@ -81,13 +83,16 @@ Rules:
   `park_type`, `risk_classification`, …) moves into `payload`. The top-level
   `outcome` enum stays at 4 values so cross-pipeline dashboards can group on
   it; pipeline-specific detail (e.g. *which* park type) lives in `payload`.
-- **`wall_s` is required** on `kind: "run"` records. `tokens` remains nullable
-  and is never estimated (reliability rule).
+- **`wall_s` is required** on `kind: "run"` records and **`null` on
+  enrichments** — it is a run measure, and both the emitter and the validator
+  enforce that. `tokens` remains nullable and is never estimated (reliability
+  rule).
 - **`run_id`** is `<pipeline>-<epoch>-<4 hex rand>`; `parent_run_id` links
   nested runs (review-loop inside resolve-issue).
 - **Emission is shared code, not convention.** One emit script + one contract
   validator at `development/scripts/telemetry/` (new plugin-level shared home,
-  referenced by skills via `${CLAUDE_PLUGIN_ROOT}`), bats-tested. The two
+  referenced by skills via the family's `<skill-base-dir>` placeholder —
+  `<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh`), bats-tested. The two
   existing builders (`build-telemetry-record.zsh`,
   `build-refine-telemetry-record.zsh`) are replaced by thin per-pipeline
   payload builders feeding the shared emitter.
@@ -98,9 +103,10 @@ Rules:
 
 ### Sink layout
 
-- **Local default:** `<repo>/.claude/telemetry/telemetry.jsonl` (git-ignored).
+- **Local default:** `<repo-dir>/.claude/telemetry/telemetry.jsonl` (git-ignored).
   One stream; `pipeline`/`kind` fields discriminate. The old per-pipeline
-  files remain readable as legacy but are no longer written.
+  files remain readable as legacy, and stop being written once children (b)/(c)
+  retrofit the two streams.
 - **Shared mode:** `--telemetry-dir DIR` → append to `DIR/<owner>-<name>.jsonl`
   (one file per repo, no cross-repo clobbering; the reporting repo globs
   `*.jsonl`). Precedence: `--telemetry-file` > `--telemetry-dir` > local
@@ -158,10 +164,25 @@ Run records are written before their PR's fate is known. Enrichment is
 joined by `run_id`.
 
 - **Mechanism:** an enrichment pass (skill or script; `/loop`-able, on-demand)
-  scans run records with `pr != null` that lack an enrichment record, queries
-  `gh` for settled facts, appends one enrichment record per run:
-  `merged` (bool), `merge_ts`, `ci_rounds_to_green`, `approver_verdict`,
-  `reverted`.
+  scans run records with `pr != null` that lack a **`success`** enrichment
+  record, queries `gh` for settled facts, and appends one enrichment record per
+  run whose **`payload`** carries `merged` (bool), `merge_ts`,
+  `ci_rounds_to_green`, `approver_verdict`, `reverted`. Those are payload keys,
+  not envelope keys — the envelope is closed at 14, so a top-level reading would
+  be rejected by the shared validator.
+  Keying the scan on a *successful* enrichment is what makes a `failed` one
+  retryable: a transient `gh` error must not permanently mark the run enriched.
+- **Not-yet-settled runs are SKIPPED, not enriched.** A run whose PR is still
+  open gets **no** enrichment record. Because enrichment is append-only and the
+  scan predicate is "lacks a `success` enrichment record", writing a `success`
+  record early would mark the run enriched forever and permanently lose the
+  merge and CI facts it was waiting for. **An open PR is the only skip
+  condition**: once the PR is merged or closed the run counts as settled and is
+  enriched on the next scan. `reverted` is captured *as of enrichment time* — a
+  revert landing later is out of scope for this mechanism (a future revert sweep
+  would append a further enrichment record, never rewrite one), so waiting on one
+  is not a reason to defer. Nulls are for facts `gh` cannot settle at enrichment
+  time, not a licence to postpone enrichment indefinitely.
 - **Reliability rule applied:** `reverted` is `true` only on an explicit
   revert-commit match referencing the squashed PR; otherwise `null` — never
   inferred. Same for any field `gh` can't settle: null, not guessed.
