@@ -1,7 +1,7 @@
 ---
 name: swift-major-upgrade
 description: Apply a major-version SwiftPM dependency upgrade autonomously — read official release notes, identify breaking changes, migrate the call sites via LSP, run `swift test`, iterate on failures. Handles bumps originating from either Snyk Open Source findings OR Dependabot/Renovate major-version PRs. Escalates only when 3 remediation passes still fail. Used by development-swift:maintenance.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, LSP, WebFetch
 ---
 

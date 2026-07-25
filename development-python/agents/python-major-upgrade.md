@@ -1,7 +1,7 @@
 ---
 name: python-major-upgrade
 description: Apply a major-version dependency upgrade autonomously — read official release notes, identify breaking changes, migrate the call sites via LSP, run tests, iterate on failures. Handles bumps originating from either Snyk Open Source findings OR Dependabot major-version PRs. Escalates only when 3 remediation passes still fail. Used by development-python:maintenance.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, LSP, WebFetch
 ---
 

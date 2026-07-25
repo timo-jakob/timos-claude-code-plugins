@@ -1,7 +1,7 @@
 ---
 name: python-runtime-upgrade
 description: Apply a Python interpreter upgrade triggered by a Dependabot Docker base-image bump (`python:X.Y → python:Z.W`). Reads the upstream release notes, swaps the Dockerfile FROM line and pyproject.toml's `requires-python`, attempts local verification against the new interpreter, **cascade-upgrades dependencies** that lack `<to_version>`-compatible versions (up to 3 passes), then if tests still fail applies **mechanical code adaptations** documented in the whatsnew doc (up to 2 passes — Python-2 except syntax, removed stdlib modules, deprecated-now-error APIs). Records every change in a structured commit body so the PR description enumerates Runtime + Cascade + Code Adaptations for clean atomic revert. Escalates only when a required dep has no `<to_version>` version on PyPI OR when remaining test failures aren't covered by documented whatsnew migrations (the agent does not speculate). Used by development-python:maintenance for the special case where a Dependabot docker bump is the Python runtime itself.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, WebFetch
 ---
 

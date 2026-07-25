@@ -1,7 +1,7 @@
 ---
 name: go-major-upgrade
 description: Apply a major-version Go module upgrade autonomously — handle semantic import versioning (a /vN major changes the import path, so rewrite import sites across the tree, not just go.mod), read official release notes, migrate call sites, run go build + go test, iterate on failures. Handles bumps originating from either a govulncheck finding (the Go vuln source of truth; a patch/minor fix skips the rewrite) OR Dependabot/Renovate major-version PRs. Escalates only when 3 remediation passes still fail. Used by development-go:maintenance.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, LSP, WebFetch
 ---
 

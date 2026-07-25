@@ -1,6 +1,6 @@
 ---
 name: spring-boot-upgrade
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, LSP, WebFetch
 description: Apply a Spring Boot version upgrade end-to-end — bump the Boot version, read the release notes + migration guide + configuration-properties changelog, relocate renamed/removed config properties, apply documented removed/changed-API code fixes, and verify with the Gradle build. Spring Boot 4+ only. Triggered by a Dependabot/Snyk org.springframework.boot bump that development-java defers here. Used by development-spring:maintenance.
 ---

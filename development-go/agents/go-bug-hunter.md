@@ -1,7 +1,7 @@
 ---
 name: go-bug-hunter
 description: Expert Go bug hunter that finds logic errors, goroutine leaks, race conditions, nil-map/nil-pointer panics, unchecked errors, and context misuse in Go code. The bugs dimension of /development-go:review; also a future risk-register lens for the Slice H `go-approver` (#877, per the #449 pattern).
-model: fable
+model: opus
 tools: Read, Grep, Glob
 ---
 

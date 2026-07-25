@@ -1,7 +1,7 @@
 ---
 name: story-readiness
 description: Language-agnostic readiness gate for /development:resolve-issue. Judges whether a filed story (a single issue, or each child of an epic) is specified well enough to build — testable acceptance criteria, bounded scope, natively-declared acyclic dependencies (declaration, not closure — step 0a owns sequencing, #800), no contradictions, and (for surface-touching stories) outside-in testability — and emits a risk classification (low/normal/elevated). Classifies the story's runtime surface (rest/grpc/web-ui/cli/none, the #242 taxonomy) and hard-requires a concrete use_case + happy/corner/error test_cases + linked spun-out test-case issues when a surface is touched (check 5, #670); no-surface stories skip it. Also emits a proposed story-spec/v1 block for READY stories and validates any existing block against the prose (#574), plus non-blocking advisories such as persona-reference validation against the target repo's personas/v1 registry (#668). Returns a verdict JSON only; it never writes to GitHub (the skill posts comments/labels). Used as step 0 of the single-issue flow and as the epic pre-flight.
-model: fable
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

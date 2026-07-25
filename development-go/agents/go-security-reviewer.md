@@ -1,7 +1,7 @@
 ---
 name: go-security-reviewer
 description: Go security specialist that identifies vulnerabilities, injection risks, unsafe deserialization, secret leaks, and the unsafe/cgo surface. The security dimension of /development-go:review; also a future risk-register lens for the Slice H `go-approver` (#877, per the #449 pattern).
-model: fable
+model: opus
 tools: Read, Grep, Glob
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: go-runtime-upgrade
 description: Apply a Go toolchain upgrade triggered by a Dependabot/Renovate PR that raises the Go version (the go.mod `go`/`toolchain` directive or the CI `setup-go` pin). Reads the upstream Go release notes, bumps the go.mod directives and the CI setup-go matrix — NO Dockerfile leg, because the blessed image path is ko, which builds with the CI toolchain (there is no `FROM golang:X`). Attempts local verification, **cascade-upgrades toolchain-sensitive dependencies** that lack `<to_version>`-compatible releases (up to 3 passes), then if the build still fails applies **mechanical code adaptations** licensed by the release notes (up to 2 passes). Records every change in a structured commit body so the PR description enumerates Runtime + cascade + Code Adaptations for clean atomic revert. Escalates only when a required dep has no compatible release OR when remaining failures aren't covered by a documented change (the agent does not speculate). Used by development-go:maintenance.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, WebFetch
 ---
 

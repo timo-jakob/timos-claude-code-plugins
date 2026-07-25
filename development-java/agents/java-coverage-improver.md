@@ -1,7 +1,7 @@
 ---
 name: java-coverage-improver
 description: Bring JaCoCo coverage up to a target by adding meaningful JUnit tests — either a region-scoped method (a coverage-respecting refactor finding, target Required, #462) or a whole class (a major dependency upgrade, Floor/Required, #429). Conservative — never modifies production code under test. Used by development-java:maintenance's coverage pre-flight. Fable because writing tests that actually verify behavior (not just touch lines) is high-judgment work.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, LSP
 ---
 

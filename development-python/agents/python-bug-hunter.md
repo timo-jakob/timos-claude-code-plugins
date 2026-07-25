@@ -1,7 +1,7 @@
 ---
 name: python-bug-hunter
 description: Expert Python bug hunter that finds logic errors, None-handling crashes, race conditions, and stability issues in Python code. The bugs dimension of /development-python:review; also a risk-register lens for python-approver (#449).
-model: fable
+model: opus
 tools: Read, Grep, Glob
 ---
 

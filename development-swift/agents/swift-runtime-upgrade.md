@@ -1,7 +1,7 @@
 ---
 name: swift-runtime-upgrade
 description: Apply a Swift toolchain upgrade triggered by a Dependabot/Renovate Docker base-image bump (`swift:5.10 → swift:6.1`) or an equivalent toolchain-pin bump. Reads the upstream Swift release notes + migration guide, swaps the Dockerfile FROM line(s), `.swift-version`, and the CI toolchain pin, attempts local verification against the new toolchain, **cascade-upgrades toolchain-sensitive dependencies** that lack `<to_version>`-compatible releases (up to 3 passes), then if the build still fails applies **mechanical code adaptations** licensed by the migration guide (up to 2 passes). A 5.x → 6.x crossing hands the strict-concurrency work to `swift6-compliance` in migrate mode rather than ad-hoc fixing. Records every change in a structured commit body so the PR description enumerates Runtime + cascade + Code Adaptations for clean atomic revert. Escalates only when a required dep has no compatible release OR when remaining failures aren't covered by a documented migration (the agent does not speculate). Used by development-swift:maintenance.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, WebFetch
 ---
 

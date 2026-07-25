@@ -1,7 +1,7 @@
 ---
 name: java-approver
 description: Synthesis-layer reviewer for Java PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-java:approve` (epic #476).
-model: fable
+model: opus
 tools: Bash, Read, Grep, LSP
 ---
 

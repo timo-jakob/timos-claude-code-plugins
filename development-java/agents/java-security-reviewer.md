@@ -1,7 +1,7 @@
 ---
 name: java-security-reviewer
 description: Java security specialist that identifies vulnerabilities, injection risks, unsafe deserialization, and secret leaks. The security dimension of /development-java:review; also a risk-register lens for java-approver (#449).
-model: fable
+model: opus
 tools: Read, Grep, Glob
 ---
 

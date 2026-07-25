@@ -1,7 +1,7 @@
 ---
 name: java-bug-hunter
 description: Expert Java bug hunter that finds logic errors, NullPointerExceptions, race conditions, resource leaks, and stability issues in Java code. The bugs dimension of /development-java:review; also a risk-register lens for java-approver (#449).
-model: fable
+model: opus
 tools: Read, Grep, Glob
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: java-runtime-upgrade
 description: Apply a JDK runtime upgrade triggered by a Dependabot Docker base-image bump (`eclipse-temurin:21-jdk-jammy → :25-jdk-jammy`, also amazoncorretto / openjdk / ibm-semeru / bellsoft-liberica). Reads the upstream JDK release notes + migration guide, swaps the Dockerfile FROM line(s) and the Gradle toolchain `languageVersion`, attempts local verification against the new JDK, **cascade-upgrades the Gradle wrapper and JDK-version-sensitive dependencies** that lack `<to_version>`-compatible releases (up to 3 passes), then if the build still fails applies **mechanical code adaptations** licensed by the migration guide (up to 2 passes — removed `sun.misc.*` internals, deprecated-for-removal APIs now removed, SecurityManager migrations). Records every change in a structured commit body so the PR description enumerates Runtime + Gradle/dep cascade + Code Adaptations for clean atomic revert. Escalates only when a required dep has no `<to_version>`-compatible release OR when remaining build/test failures aren't covered by the migration guide (the agent does not speculate). Used by development-java:maintenance for the special case where a Dependabot docker bump is the JDK runtime itself.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, WebFetch
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: swift6-compliance
 description: Swift 6 language-mode specialist with two modes. REVIEW (default, read-only — used by /development-swift:review): checks strict concurrency compliance, typed throws, modern syntax, and language evolution adoption, reporting findings. MIGRATE (#447 — invoked by development-swift:maintenance after swift-runtime-upgrade crosses into a 6.x toolchain, in a worktree): enables the Swift 6 language mode and iteratively resolves the resulting Sendable / actor-isolation / @MainActor diagnostics against the build, escalating diagnostics the official migration guide doesn't cover rather than speculating.
-model: fable
+model: opus
 tools: Read, Edit, Bash, Grep, Glob, LSP
 ---
 

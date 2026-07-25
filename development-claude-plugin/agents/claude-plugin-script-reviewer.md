@@ -1,7 +1,7 @@
 ---
 name: claude-plugin-script-reviewer
 description: Expert zsh logic reviewer for a plugin repo's shell scripts — exit-code correctness, quoting, error paths, and unhandled failure modes. Logic review, not a shellcheck re-run (mechanical lint is the maintenance pipeline's job). The script_quality dimension of /development-claude-plugin:review.
-model: fable
+model: opus
 tools: Read, Grep, Glob
 ---
 
