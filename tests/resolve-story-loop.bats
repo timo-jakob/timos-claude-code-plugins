@@ -99,18 +99,59 @@ loop() {
   echo "$output" | jq -e '(.escalation_reasons | index("non_converging_blocker")) | not' >/dev/null
 }
 
-@test "round budget exhaustion exits BUDGET_EXHAUSTED with status JSON" {
+@test "round budget exhaustion exits BUDGET_EXHAUSTED at the default cap of 5 (#993)" {
   # A GENUINELY different blocker each round -> never non_converging -> runs out
   # the budget. Non-convergence is fingerprinted on [file, dimension] + line
   # proximity (#606), NOT the title — so a distinct blocker must differ in
-  # location: the line jumps 1000/2000/3000 (well beyond the proximity window),
-  # so no round matches the prior one and the loop exhausts all 3 rounds.
+  # location: the 1000-line jumps are the ONLY safeguard here — the b1..bN
+  # titles carry no significant (>= 4-char) token, so they would route to the
+  # ambiguous branch rather than clear as an identity false trip (#983). The
+  # terminal verdict is therefore the budget, not non-convergence, on the line
+  # spacing alone; widen the proximity window and this test flips to
+  # ESCALATE_NO_CONVERGENCE.
+  # This also pins MAX_REVIEW_ROUNDS: no --max-rounds is passed, so the run
+  # length IS the default (5 since #993, previously 3).
   loop --review-cmd 'printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":$((REVIEW_ROUND*1000)),\"title\":\"b$REVIEW_ROUND\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"' \
        --fix-cmd 'true'
   [ "$status" -eq 13 ]
   [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
-  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
-  [ "$(echo "$output" | jq '.max_rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 5 ]
+  # five rounds genuinely executed and the budget was spent for the intended
+  # reason — not an escalation that happened to echo max_rounds
+  [ "$(echo "$output" | jq '.history | length')" -eq 5 ]
+  [ "$(echo "$output" | jq '.round_changelists | length')" -eq 5 ]
+  [ "$(echo "$output" | jq '.escalation_reasons | length')" -eq 0 ]
+}
+
+@test "an explicit --max-rounds BELOW the default still overrides it (#993)" {
+  # same never-repeating blocker stream, but the caller asks for 2 rounds: the
+  # flag wins over MAX_REVIEW_ROUNDS, so the budget is spent at round 2.
+  loop --max-rounds 2 \
+       --review-cmd 'printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":$((REVIEW_ROUND*1000)),\"title\":\"b$REVIEW_ROUND\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"' \
+       --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 2 ]
+}
+
+@test "an explicit --max-rounds ABOVE the default is never clamped to it (#993)" {
+  # The production path the interactive extension drives: a granted extension
+  # resumes with `--max-rounds <prev_max + 3>` — 8 once the new default of 5 is
+  # spent, a ceiling ABOVE MAX_REVIEW_ROUNDS. That exact value is used here so
+  # the fixture IS the first-grant ceiling. A regression that clamped the flag
+  # to the compiled constant (or re-derived the ceiling from it after parsing)
+  # would stop at 5 while every below-default test stayed green.
+  loop --max-rounds 8 \
+       --review-cmd 'printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":$((REVIEW_ROUND*1000)),\"title\":\"b$REVIEW_ROUND\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"' \
+       --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 8 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 8 ]
+  # all eight rounds genuinely ran — the budget was spent, not short-circuited
+  [ "$(echo "$output" | jq '.history | length')" -eq 8 ]
 }
 
 @test "surviving conflict exits ESCALATE_CONFLICT" {
@@ -246,7 +287,7 @@ seed_exhausted_wd() {
 @test "--resume with a ceiling at or below the resumed round is a usage error (exit 2)" {
   WD="$BATS_TEST_TMPDIR/wd-low-ceiling"
   seed_exhausted_wd "$WD"
-  # default --max-rounds (3) is fine, but an explicit ceiling <= last round must refuse
+  # default --max-rounds (5) is fine, but an explicit ceiling <= last round must refuse
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 1 \
     --review-cmd 'true' --fix-cmd 'true'

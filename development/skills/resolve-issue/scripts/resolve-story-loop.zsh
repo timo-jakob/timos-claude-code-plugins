@@ -116,8 +116,13 @@
 emulate -L zsh
 setopt nounset pipefail
 
-# --- Constants (issue #557 / #562) ------------------------------------------
-typeset -gr MAX_REVIEW_ROUNDS=3
+# --- Constants (issue #557 / #562 / #993) -----------------------------------
+# 5, not 3 (#993): the cap is an UPPER bound — the loop stops the moment blocking
+# findings reach 0 — so a larger default costs the easy majority nothing and only
+# affects the hard tail, where it buys fewer human approval round-trips. Telemetry
+# also showed convergence is non-monotonic (blocking counts rise again as fixes
+# surface new problems), so a longer leash avoids escalating runs that self-resolve.
+typeset -gr MAX_REVIEW_ROUNDS=5
 typeset -gra BLOCKING_SEVERITIES=(CRITICAL WARNING)   # == Critical + High
 
 local self_dir="${0:A:h}"
