@@ -435,6 +435,28 @@ per-language policy templates.
   pre-push hook), security thresholds, `.snyk` ignore conventions.
 - The **dispatch JSON schema** (see below) — the contract every
   language plugin and topic plugin reads and writes.
+- **Plugin-level hooks** registered via `development/hooks/hooks.json`. These
+  load for every installer of the `development` plugin, and they differ in how
+  they are gated — state each one's actual trigger rather than assuming
+  opt-in:
+  - `PostToolUse`/`Bash` → `skills/cleanup/scripts/cleanup-hook.sh`. **Not**
+    opt-in: it runs on every Bash call and `exec`s `cleanup.sh` (switch to main,
+    pull, prune stale remote-tracking refs, delete merged local branches, and
+    **force-delete** squash-merged ones whose upstream is gone) whenever the
+    command string *contains*
+    `gh pr merge` — an unanchored match, so a compound command or even a grep
+    counts — and the tool response reports `exit_code: 0`. An absent `exit_code`
+    fails closed.
+  - `PreToolUse`/`Agent` → `hooks/switch-fable-to-opus.zsh`, the
+    `switch_fable_to_opus` model redirect (see "Agent model selection"). Inert
+    unless that variable is truthy.
+
+  **New hooks must default to inert**, since they load for every installer;
+  the cleanup hook predates that rule. Hook scripts also deliberately omit
+  `err_exit` (see "Scripting conventions"): a non-zero exit from a `PreToolUse`
+  hook is user-visible and exit 2 outright *blocks* the tool call, so a
+  **`PreToolUse`** hook must never die on the way to a decision. A `PostToolUse`
+  hook is less exposed and may still exit non-zero.
 - This `ARCHITECTURE.md`.
 
 ### `development-<lang>` owns
@@ -2214,6 +2236,35 @@ try most often. A wrong haiku output costs more than the haiku tokens
 saved — agents that frequently come back with "I need more context"
 should move up the ladder.
 
+### Runtime override: `switch_fable_to_opus` (#1017)
+
+Frontmatter is the *declared* model, but it is no longer the sole determinant of
+what a dispatch actually runs on. Two things can override it:
+
+1. the Agent tool's per-call `model` parameter, which takes precedence over
+   frontmatter; and
+2. the environment variable **`switch_fable_to_opus`**, which — when truthy —
+   redirects a dispatch whose *effective* model would be `fable` to `opus`. The
+   frontmatter lookup behind that is confined to this marketplace's installed
+   plugins, so an unrelated marketplace's fable agent is left alone; an explicit
+   per-call `model: "fable"` needs no lookup and is redirected whoever owns the
+   agent.
+
+Fable is metered as its own weekly bucket, so when it drains, all 32
+fable-declaring agents fail at once; the variable is the runtime remedy that
+needs no file edits (contrast `scripts/toggle-fable.zsh`, which rewrites
+frontmatter in a checkout and so cannot affect the installed cache a session
+dispatches from). Truthiness is `1` / `true` / `yes` in any case; **unset, `""`,
+`0`, `false` and any unrecognised value are off**, so both an emptied variable
+and a typo fail safe.
+
+It is implemented as a `PreToolUse` hook on the `Agent` tool —
+`development/hooks/switch-fable-to-opus.zsh`, registered in
+`development/hooks/hooks.json` — and every error path exits 0 emitting nothing,
+so a broken hook degrades to "no switching", never to "wrong model everywhere".
+User-facing docs: [how-to: switch fable agents to
+opus](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/how-to/switch-fable-agents-to-opus.md).
+
 ## Worktree pattern for parallel work
 
 The Agent tool natively supports `isolation: "worktree"`. The runtime
@@ -2703,6 +2754,17 @@ is no Linux support claim in `marketplace.json` and none is planned.
 #!/usr/bin/env zsh
 setopt err_exit nounset pipefail
 ```
+
+**Exception — hook scripts** (those registered in a plugin's `hooks.json`, e.g.
+`development/hooks/`): omit `err_exit`, keeping `nounset pipefail`. A hook that
+exits non-zero is user-visible, and a `PreToolUse` hook exiting 2 outright
+*blocks* the tool call — so a **`PreToolUse`** hook must reach its decision and
+exit 0 on every path, including the failure paths `err_exit` would abort on.
+`PostToolUse` hooks are less exposed (nothing is blocked by then), which is why
+the pre-existing `cleanup-hook.sh` may still `exit 1` when it cannot enter the
+working directory. Documented here
+rather than only in the scripts, so the exemption is visible from the convention
+it deviates from; see the `development/hooks/` bullet under "`development` owns".
 
 Why zsh:
 
