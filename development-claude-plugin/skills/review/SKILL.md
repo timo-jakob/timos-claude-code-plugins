@@ -129,5 +129,5 @@ harness:
 **PASS** iff `claude-plugin-prose-logic` reports a `prose_logic` finding at
 `>= WARNING` naming the absent failure branch. **FAIL** on silence or on
 `SUGGESTION`-only. (Recall on one known defect; precision is tuned against the
-review-loop telemetry, `.claude/telemetry/review-loop.jsonl` — see the epic #810
-design spec.)
+review-loop telemetry — the `pipeline: "review-loop"` records in
+`.claude/telemetry/telemetry.jsonl` (#1004) — see the epic #810 design spec.)

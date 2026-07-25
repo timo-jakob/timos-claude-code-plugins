@@ -363,8 +363,12 @@ or `resolve-issue` — relies on.
 Every refine-issue run — whether it reached `refined-ready` (Steps 3–6) **or**
 took a typed parked exit (Step 2) — appends **one** JSONL record so the plugin
 self-improvement handoff can learn where refinement helps and where it stalls.
-Mirror the review-loop telemetry (#566): same sink convention, and **never let a
-telemetry failure break the run** (`|| true`).
+Mirror the review-loop telemetry's **pre-contract (v0)** convention — the shape
+it used before #1004 moved it onto `telemetry/v1` — i.e. this stream keeps its
+own per-pipeline sink and its whole-record builder below. Do **not** hand-roll a
+`telemetry/v1` envelope here: retrofitting this stream onto the shared emitter
+is epic #740's child (c), issue #1005. What still carries over unchanged is the
+rule that a **telemetry failure must never break the run** (`|| true`).
 
 Build the record from the run's summary and append it to the git-ignored sink:
 

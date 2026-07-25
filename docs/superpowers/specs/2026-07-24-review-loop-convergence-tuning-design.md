@@ -20,8 +20,8 @@ Two findings from the recorded review-loop telemetry:
    reduces *premature* escalations of runs that would have self-resolved.
 
 2. **Suggestions are logged but never acted on.** In telemetry, `waived` is mechanically
-   *"every distinct Low/Suggestion finding"* (`build-telemetry-record.zsh:134`;
-   `consolidate-findings.zsh:18-19` — "Low is logged in `suggestions`, never blocks"). A
+   *"every distinct Low/Suggestion finding"* (`build-telemetry-record.zsh`, the `waived` field;
+   `consolidate-findings.zsh` (the severity-bucket comment) — "Low is logged in `suggestions`, never blocks"). A
    Suggestion is "waived" the instant it is surfaced because Suggestions are non-blocking by
    definition. There is no mechanism for a human to say "actually, do this one." The
    suggestion volume is dead data.
@@ -39,12 +39,15 @@ Two findings from the recorded review-loop telemetry:
 
 ### Child 1 — round-budget + increment tuning (do first)
 
-- `MAX_REVIEW_ROUNDS` `3 → 5` (`resolve-story-loop.zsh:116`).
-- Human-approved extension increment `+2 → +3` (prose: `SKILL.md:759`, `:706-708`;
+- `MAX_REVIEW_ROUNDS` `3 → 5` (`resolve-story-loop.zsh` (the `MAX_REVIEW_ROUNDS` constant)).
+- Human-approved extension increment `+2 → +3` (prose: `SKILL.md` — the
+  `--resume`, ceiling raised by 2 line AND every `+2` in the AskUserQuestion
+  grant options;
   `docs/explanation/review-loop.md:76`).
 - `--max-rounds` flag still overrides. Soft-cap of 5 grants stays as a *nudge* (not a hard
   stop); note the raised theoretical ceiling (5 + 5×3 = 20 rounds) but do not tighten it here.
-- Keep all restatements consistent: `ARCHITECTURE.md:454`, `:1261`;
+- Keep all restatements consistent: `ARCHITECTURE.md` (the review-loop
+  "Constants live at the top" line, and the loop-flow restatement below it);
   `docs/explanation/review-loop.md:52`.
 
 ### Child 2 — human-curated suggestion promotion (after Child 1)
@@ -75,16 +78,20 @@ orchestrated in `SKILL.md`, mirroring the existing interactive-extension precede
 
 ### Child 3 — promotion telemetry (after Child 2)
 
-Add to the terminal record (`build-telemetry-record.zsh`, around `:129-135`):
+Add to the terminal record's **`payload`** (`build-telemetry-record.zsh`, the
+`fixed` / `waived` block near the end). Since #1004 that script builds only the
+payload — the `telemetry/v1` envelope is closed and owned by
+`development/scripts/telemetry/emit-telemetry.zsh`, so these fields go in the
+payload, never the envelope:
 
 - `suggestions_waived` — distinct Low findings at first convergence.
 - `suggestions_promoted` — count the human selected.
 - `suggestion_rounds` — rounds the promotion sub-loop ran.
 - `suggestion_phase_status` — terminal status of the sub-loop (`null` when no promotion).
 
-Respect the three-copy severity-derivation lockstep
-(`build-telemetry-record.zsh:72-74` — change `render-progress-block.zsh` and
-`build-escalation.zsh` together). Update `ARCHITECTURE.md` telemetry section and
+Respect the three-copy severity-derivation lockstep — see the comment above
+`findings_by_round` in `build-telemetry-record.zsh`, and change
+`render-progress-block.zsh` and `build-escalation.zsh` together. Update `ARCHITECTURE.md` telemetry section and
 `tests/build-telemetry-record.bats`. This finally yields data on **whether humans act on
 suggestions** — the question that motivated the feature.
 

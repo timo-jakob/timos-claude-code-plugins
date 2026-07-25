@@ -29,7 +29,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills, including the shared telemetry/v1 emit + validate contract.",
-      "version": "1.139.0",
+      "version": "1.140.0",
       "author": {
         "name": "Timo Jakob"
       },
@@ -69,7 +69,7 @@
     {
       "name": "development-claude-plugin",
       "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test), a review panel (/development-claude-plugin:review — prose logic, contract integrity, script quality, tests, manifests), and a maintenance dispatcher that validates plugin conventions and composes alongside the language plugin. Validators: version sync, SKILL.md/agent frontmatter, orphaned skill/agent references, directory layout, and shell-script quality (shellcheck / zsh -n).",
-      "version": "1.9.1",
+      "version": "1.9.2",
       "author": {
         "name": "Timo Jakob"
       },
