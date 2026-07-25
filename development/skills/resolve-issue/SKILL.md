@@ -624,10 +624,14 @@ Each round:
 (Hook mode — `--review-cmd`/`--fix-cmd` — still exists as the bats test seam
 only. Never wire it to a headless `claude`.)
 
-Pass `--issue <N>` too: the loop appends one JSONL telemetry record per
-**terminal status** (none on `AWAITING_FIX` / `STALE_FINDINGS`; an extended
-loop emits one per escalation plus its final status) to
-`.claude/telemetry/review-loop.jsonl` (git-ignored, #566) — evidence for
+Pass `--issue <N>` too: the loop appends one `telemetry/v1` record per
+**terminal exit** (none on `AWAITING_FIX` / `STALE_FINDINGS`; an extended
+loop emits one per escalation, plus a final one only if it later reaches a
+different terminal status — a run whose human declines the grant ends ON its
+last escalation, so that record is its final one, not an extra) to the shared sink
+`.claude/telemetry/telemetry.jsonl` (git-ignored, #566/#1004) — via the family's
+shared emitter, with the loop's own detail under `payload` and its status
+narrowed onto the cross-pipeline `outcome` enum. Evidence for
 convergence rate, rounds-to-converge, and escalation breakdown. **Always pass an
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
 is the loop's resumable state and the status file its verdict — the interactive

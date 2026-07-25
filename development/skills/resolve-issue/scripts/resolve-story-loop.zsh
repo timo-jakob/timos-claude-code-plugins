@@ -33,6 +33,19 @@
 # Every round also appends a human-readable block to $work_dir/progress.md
 # (#971) — the user tails it to watch a long run; writes are never fatal.
 #
+# Seams (for tests):
+#   RESOLVE_LOOP_DIGEST_TOOL  selects WHICH of the two supported tool NAMES
+#                             (`shasum` | `sha256sum`) backs the byte-identical
+#                             stale-findings guard (#974), so a test can drive
+#                             each arm. It is a name, NOT a path: any other
+#                             value — including an absolute path to a real
+#                             shasum — is rejected and the guard degrades off.
+#   RESOLVE_LOOP_PAYLOAD_BIN  pins the telemetry payload builder (a PATH), so a
+#                             test can drive the "failed payload build emits
+#                             nothing" branch (#1004). This one follows
+#                             review-dispatch.zsh's DETECT_STACK_BIN convention.
+#   Both are unset in production.
+#
 # Step mode:
 #   --findings-file  this round's aggregate findings JSON (issue #558 schema,
 #                    a flat array). On a FRESH run's round 1 a missing/empty
@@ -91,7 +104,8 @@
 # Usage:
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --findings-file FILE [--test-cmd CMD] [--resume] \
-#       [--max-rounds N] [--status-file PATH] [--work-dir DIR]    # step mode
+#       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
+#       [--issue N] [--telemetry-file PATH] [--gate-attest TREE_ID]  # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] ...       # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path)
@@ -129,20 +143,62 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest=""
+
+# A value flag with no value, or one whose value is the NEXT FLAG, is a caller
+# mistake — and both are silent disasters here. Under `nounset` a dangling
+# `--issue` aborts on the bare `$2` with zsh's raw "2: parameter not set" and
+# exit 1, which this script's taxonomy reserves for *internal* errors. And the
+# unquoted `--telemetry-file $VAR` idiom with VAR unset collapses so the next
+# flag becomes the value: `--telemetry-file --resume` would swallow `--resume`,
+# silently running FRESH (truncating the prior rounds' accumulators) and then
+# losing the telemetry record when the emitter rejects the flag-shaped path.
+# Both sibling scripts guard exactly this way; a half-applied rule is the
+# inconsistency the next caller trips on, so it covers EVERY value flag.
+_need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
+  [[ $2 -ge 2 ]] || {
+    print -u2 -- "resolve-story-loop: $1 requires a value"; exit 2 }
+  [[ "$3" != --* ]] || {
+    print -u2 -- "resolve-story-loop: $1 requires a value (got the flag $3)"; exit 2 }
+  # An EXPLICIT empty value is the same mistake wearing a third hat — the
+  # realistic `--flag "$VAR"` with VAR unset — and left alone it reads
+  # downstream as "flag omitted", exit 0. The damage varies by flag and the
+  # worst is silent: `--test-cmd ""` makes BOTH gate call sites fall to their
+  # `[[ -n "$test_cmd" ]]` branches, so the loop can converge having never run
+  # the suite. `--issue ""` drops the envelope's issue linkage; `--status-file
+  # ""` writes no verdict file. Both sibling scripts refuse it, so refuse it
+  # here too — for every value flag EXCEPT the one whose contract already
+  # assigns empty a meaning (see _need_val_optional below).
+  [[ -n "$3" ]] || {
+    print -u2 -- "resolve-story-loop: $1 requires a non-empty value"; exit 2 }
+}
+
+# --gate-attest is the deliberate exception: #981 defines an empty value as
+# FAIL-CLOSED ("a mismatch, an empty/absent value, or an uncomputable current
+# identity runs --test-cmd as before"), so `--gate-attest ""` must degrade to
+# "no attestation" and run the gate, NOT abort as a usage error. Refusing it
+# would turn a documented safe default into a hard failure. The arg-count and
+# flag-shape checks still apply — those are caller mistakes under any contract.
+_need_val_optional() {  # $1 = flag, $2 = remaining arg count, $3 = candidate
+  [[ $2 -ge 2 ]] || {
+    print -u2 -- "resolve-story-loop: $1 requires a value"; exit 2 }
+  [[ "$3" != --* ]] || {
+    print -u2 -- "resolve-story-loop: $1 requires a value (got the flag $3)"; exit 2 }
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --repo) repo="$2"; shift 2 ;;
-  --base) base="$2"; shift 2 ;;
-  --review-cmd) review_cmd="$2"; shift 2 ;;
-  --fix-cmd) fix_cmd="$2"; shift 2 ;;
-  --test-cmd) test_cmd="$2"; shift 2 ;;
-  --gate-attest) gate_attest="$2"; shift 2 ;;
-  --findings-file) findings_file="$2"; shift 2 ;;
-  --max-rounds) max_rounds="$2"; shift 2 ;;
-  --status-file) status_file="$2"; shift 2 ;;
-  --work-dir) work_dir="$2"; shift 2 ;;
-  --issue) issue="$2"; shift 2 ;;
-  --telemetry-file) telemetry_file="$2"; shift 2 ;;
+  --repo) _need_val "$1" $# "${2:-}"; repo="$2"; shift 2 ;;
+  --base) _need_val "$1" $# "${2:-}"; base="$2"; shift 2 ;;
+  --review-cmd) _need_val "$1" $# "${2:-}"; review_cmd="$2"; shift 2 ;;
+  --fix-cmd) _need_val "$1" $# "${2:-}"; fix_cmd="$2"; shift 2 ;;
+  --test-cmd) _need_val "$1" $# "${2:-}"; test_cmd="$2"; shift 2 ;;
+  --gate-attest) _need_val_optional "$1" $# "${2:-}"; gate_attest="$2"; shift 2 ;;
+  --findings-file) _need_val "$1" $# "${2:-}"; findings_file="$2"; shift 2 ;;
+  --max-rounds) _need_val "$1" $# "${2:-}"; max_rounds="$2"; shift 2 ;;
+  --status-file) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
+  --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
+  --issue) _need_val "$1" $# "${2:-}"; issue="$2"; shift 2 ;;
+  --telemetry-file) _need_val "$1" $# "${2:-}"; telemetry_file="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
   --resume) resume=1; shift ;;
   -h|--help)
@@ -155,6 +211,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 local t0=$(date +%s)   # for the telemetry wall-clock (#566)
+
+# --issue rides straight into the telemetry envelope, whose contract is a
+# non-negative integer. Before #1004 a junk value (`--issue '#123'` from a
+# caller's glue) was coerced to null and the record still landed; now the
+# emitter rejects it and `|| true` swallows the rejection, costing the ENTIRE
+# terminal record at the very end of a run. Fail at parse time instead, where
+# the caller can still see it.
+[[ -z "$issue" || "$issue" == <-> ]] || {
+  print -u2 -- "resolve-story-loop: --issue must be a non-negative integer (got: $issue)"; exit 2 }
+# ...and the emitter's WIDTH cap too. Porting only the digits-only half would
+# leave the same hole this guard exists to close: a 19+ digit value is
+# digit-only, so it would sail past here, be rejected by the emitter at
+# terminal-exit time, and lose the whole record behind `|| true`.
+[[ -z "$issue" || ${#issue} -le 18 ]] || {
+  print -u2 -- "resolve-story-loop: --issue is out of range (max 18 digits, got: $issue)"; exit 2 }
 
 # emit the status JSON (stdout + optional --status-file) and exit with `code`.
 emit_and_exit() {
@@ -194,26 +265,67 @@ emit_and_exit() {
     { print -r -- "**Final:** ${st}${reasons} ($(date +%H:%M:%S))" >> "$work_dir/progress.md" ; } 2>/dev/null || true
   fi
 
-  # telemetry (#566): append exactly one JSONL record per LOOP — terminal
-  # statuses only, never the non-terminal AWAITING_FIX (#971) or the
-  # STALE_FINDINGS refusal (#974), which would double-count the loop that
-  # resumes right after it — to the explicit --telemetry-file or the
-  # git-ignored default under the repo. Never fatal.
-  local tfile="$telemetry_file"
-  [[ -z "$tfile" && -n "$repo" ]] && tfile="${repo%/}/.claude/telemetry/review-loop.jsonl"
-  if [[ -n "$tfile" && "$st" != "AWAITING_FIX" && "$st" != "STALE_FINDINGS" ]]; then
+  # telemetry (#566, on the shared `telemetry/v1` contract since #1004): append
+  # exactly one JSONL record per TERMINAL EXIT — terminal statuses only, never the
+  # non-terminal AWAITING_FIX (#971) or the STALE_FINDINGS refusal (#974), which
+  # would double-count the loop that resumes right after it. The envelope AND
+  # the sink belong to the shared emitter (#740 child (a)); this loop supplies
+  # only its own `payload` and the envelope's linkage fields. Never fatal — a
+  # telemetry failure can't change the loop's exit.
+  #
+  # `repo` must be an existing directory: the emitter derives the repo identity
+  # and the default sink from it. It always is by the time a loop runs, but the
+  # --no-review fast path short-circuits BEFORE the --repo checks, so guard here
+  # rather than hand the emitter a path it would reject.
+  if [[ "$st" != "AWAITING_FIX" && "$st" != "STALE_FINDINGS" && -d "$repo" ]]; then
     local t_begin="$t0"
     if [[ -n "$work_dir" && -s "$work_dir/.t0" ]]; then
       t_begin=$(<"$work_dir/.t0")
-      [[ "$t_begin" == <-> ]] || t_begin="$t0"
+      # digits AND width: `--ts` carries the emitter's 18-digit cap, so an
+      # over-wide .t0 would be rejected there and cost the whole record
+      [[ "$t_begin" == <-> && ${#t_begin} -le 18 ]] || t_begin="$t0"
     fi
-    local tmp_status; tmp_status=$(mktemp)
-    print -r -- "$out" > "$tmp_status"
-    mkdir -p "${tfile:h}"
-    local -a issue_arg; [[ -n "$issue" ]] && issue_arg=(--issue "$issue")
-    "${self_dir}/build-telemetry-record.zsh" --status "$tmp_status" \
-      "${issue_arg[@]}" --ts "$t_begin" --wall-s "$(( $(date +%s) - t_begin ))" >> "$tfile" || true
-    rm -f "$tmp_status"
+    # The loop's own status narrows onto the 4-value cross-pipeline `outcome`
+    # enum dashboards group on; nothing is lost, because the full status stays
+    # in the payload. The catch-all is `failed` (ERROR today) rather than a
+    # guess, so a status added later is never silently counted as a success.
+    local outcome
+    case "$st" in
+      CONVERGED|SKIPPED)           outcome="success" ;;
+      ESCALATE_*|BUDGET_EXHAUSTED) outcome="escalated" ;;
+      *)                           outcome="failed" ;;
+    esac
+    # wall_s is REQUIRED and must be non-negative; the emitter rejects a
+    # negative outright (exit 2), which `|| true` would swallow — costing the
+    # whole record. A backwards clock step (NTP) or a work-dir whose `.t0` is
+    # stamped ahead of now both produce one, so clamp rather than lose the run.
+    local wall_s=$(( $(date +%s) - t_begin ))
+    (( wall_s >= 0 )) || wall_s=0
+    local tmp_status="" tmp_payload=""
+    tmp_status=$(mktemp) && tmp_payload=$(mktemp) && {
+      print -r -- "$out" > "$tmp_status"
+      # a failed payload build emits NOTHING: an envelope wrapped around an
+      # empty/partial payload would validate (payload is OPEN) and still be
+      # useless — it would silently poison the convergence metrics.
+      # RESOLVE_LOOP_PAYLOAD_BIN pins the builder so a test can exercise that
+      # branch — the DETECT_STACK_BIN / RESOLVE_LOOP_DIGEST_TOOL convention;
+      # unset in production.
+      local payload_bin="${RESOLVE_LOOP_PAYLOAD_BIN:-${self_dir}/build-telemetry-record.zsh}"
+      if "$payload_bin" --status "$tmp_status" > "$tmp_payload"; then
+        local -a emit_args
+        emit_args=(--pipeline review-loop --kind run --outcome "$outcome"
+                   --repo-dir "$repo" --ts "$t_begin"
+                   --wall-s "$wall_s"
+                   --payload "$tmp_payload")
+        [[ -n "$issue" ]] && emit_args+=(--issue "$issue")
+        [[ -n "$repo_type" && "$repo_type" != "null" ]] && emit_args+=(--repo-type "$repo_type")
+        [[ -n "$telemetry_file" ]] && emit_args+=(--telemetry-file "$telemetry_file")
+        # the emitter echoes the record to stdout; the loop's stdout is the
+        # status JSON contract, so drop it (stderr stays visible for diagnosis)
+        "${self_dir}/../../../scripts/telemetry/emit-telemetry.zsh" "${emit_args[@]}" >/dev/null || true
+      fi
+    }
+    rm -f "$tmp_status" "$tmp_payload" 2>/dev/null || true
   fi
   exit "$code"
 }
@@ -303,6 +415,18 @@ findings_digest() {
 }
 
 # --no-review is the fast path — it short-circuits before any other requirement.
+# --max-rounds reaches `--argjson max` in emit_and_exit on EVERY exit — the
+# --no-review fast path below included — so it must be validated BEFORE that
+# path, not after it. A non-positive/non-numeric ceiling would otherwise make
+# jq fail, blanking the status JSON while still exiting 0.
+[[ "$max_rounds" == <-> ]] && [[ ${#max_rounds} -le 18 ]] && (( 10#$max_rounds >= 1 )) || {
+  print -u2 -- "resolve-story-loop: --max-rounds must be a positive integer of at most 18 digits (got: $max_rounds)"; exit 2 }
+# `<->` accepts leading zeros but JSON forbids them, so a `03` would reach
+# --argjson and fail there — emptying `out`, printing a BLANK line as the
+# status JSON, and losing the telemetry record while the exit code still
+# claimed a verdict. Normalize, exactly as the shared emitter does.
+max_rounds=$(( 10#$max_rounds ))
+
 if (( no_review )); then
   emit_and_exit "SKIPPED" 0 0 "" "" "" "" ""
 fi
@@ -323,10 +447,6 @@ if (( ! step_mode )); then
   [[ -n "$fix_cmd" ]] || {
     print -u2 -- "resolve-story-loop: --fix-cmd is required (or use --findings-file / --no-review)"; exit 2 }
 fi
-# a non-positive/non-numeric ceiling would skip the loop entirely and fall out
-# with an empty status — refuse it up front as the usage error it is
-[[ "$max_rounds" == <-> ]] && (( max_rounds >= 1 )) || {
-  print -u2 -- "resolve-story-loop: --max-rounds must be a positive integer (got: $max_rounds)"; exit 2 }
 
 [[ -n "$work_dir" ]] || work_dir=$(mktemp -d)
 mkdir -p "$work_dir"

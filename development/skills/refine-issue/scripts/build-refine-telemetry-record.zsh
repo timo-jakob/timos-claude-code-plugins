@@ -1,10 +1,19 @@
 #!/usr/bin/env zsh
 # build-refine-telemetry-record.zsh — turn a refine-issue run summary into ONE
-# JSONL telemetry record (#579, epic #573). Mirrors the review-loop telemetry
-# builder (build-telemetry-record.zsh, #566): the refine-issue skill appends one
-# record per run to `.claude/telemetry/refine-issue.jsonl` (git-ignored, same
-# sink convention as #566) so the plugin self-improvement handoff can learn where
-# refinement helps and where it stalls.
+# JSONL telemetry record (#579, epic #573). It mirrors the review-loop
+# telemetry builder **as that was before #1004** — the pre-contract (v0) shape:
+# a WHOLE record with bespoke keys at the top level, written by the refine-issue
+# skill to its own `.claude/telemetry/refine-issue.jsonl` (git-ignored), so the
+# plugin self-improvement handoff can learn where refinement helps and where it
+# stalls.
+#
+# The review loop has since moved onto the shared `telemetry/v1` contract, so
+# the two builders deliberately DIFFER now: `build-telemetry-record.zsh` is a
+# PAYLOAD builder over `development/scripts/telemetry/emit-telemetry.zsh` (it
+# carries no envelope key and rejects --issue/--ts/--wall-s), and its sink is
+# the shared `.claude/telemetry/telemetry.jsonl`. Retrofitting this script the
+# same way is epic #740's child (c), issue #1005; no file migration is
+# performed either way.
 #
 # The record is deterministic given the state JSON (+ ts/wall), so it is built
 # and tested separately from the skill that appends it.

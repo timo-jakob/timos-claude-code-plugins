@@ -1,53 +1,89 @@
 #!/usr/bin/env zsh
-# build-telemetry-record.zsh — turn a review-loop status JSON (from
-# resolve-story-loop.zsh, #562) into ONE JSONL telemetry record (epic #557,
-# issue #566). The loop appends one record per run to
-# `.claude/telemetry/review-loop.jsonl` (git-ignored); this is the raw material
-# for the DORA-style dashboard and for deciding future budgets and risk-based
-# review depth.
+# build-telemetry-record.zsh — build the review-loop `payload` for ONE
+# `telemetry/v1` record from the loop's status JSON (from resolve-story-loop.zsh,
+# #562; epic #557, issue #566 — retrofitted onto the shared contract by epic
+# #740's child (b), issue #1004).
 #
-# The record is deterministic given the status JSON (+ ts/wall), so it is built
-# and tested separately from the loop that appends it.
+# It is a PAYLOAD builder, not a record builder. The envelope — `schema`, `kind`,
+# `run_id`, `parent_run_id`, `ts`, `repo`, `repo_type`, `pipeline`, `issue`,
+# `pr`, `outcome`, `wall_s`, `tokens` — belongs to
+# `development/scripts/telemetry/emit-telemetry.zsh`, which owns it for EVERY
+# pipeline so no skill hand-rolls one. This script contributes only the
+# review-loop's own detail, which the emitter embeds unmodified as `payload`;
+# `resolve-story-loop.zsh` pipes the two together and owns the sink.
+#
+# The payload is deterministic given the status JSON, so it is built and tested
+# separately from the loop that emits it. The `wall_s`/`ts`/`issue` this script
+# used to carry are envelope fields now, supplied by the loop to the emitter —
+# hence no `--ts`/`--issue`/`--wall-s` flags here.
 #
 # Usage:
-#   build-telemetry-record.zsh --status FILE [--issue N] [--ts EPOCH] [--wall-s N]
-#     --ts     unix seconds to stamp (default: now). Pinning it keeps tests
-#              deterministic; the loop passes its own start time.
-#     --wall-s total wall-clock seconds for the run (default: null/reserved).
+#   build-telemetry-record.zsh --status FILE
 #
-# Exit codes: 0 ok · 2 usage · 1 internal (invalid status JSON)
+# Exit codes: 0 ok · 2 usage (bad/absent/unreadable --status operand) ·
+#             1 internal — the status JSON could not be turned into a payload.
+#             Stated as a CLASS, not a closed list: it covers an empty status
+#             file, a missing jq, input that is not exactly one JSON object,
+#             and a structurally-wrong-but-valid object the jq program itself
+#             cannot evaluate (e.g. a numeric `.status`).
 
 emulate -L zsh
 setopt nounset pipefail
 
-local status_file="" issue="" ts="" wall=""
+local usage="usage: build-telemetry-record.zsh --status FILE"
+
+# A value flag with no value is a caller mistake, not an omission: under
+# `nounset` a bare `$2` would abort with a raw zsh parameter error and exit 1,
+# reading downstream as "invalid status JSON" — name the actual mistake.
+_need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
+  [[ $2 -ge 2 ]] || { print -u2 -- "build-telemetry-record: $1 requires a value"; exit 2 }
+  [[ -n "$3" && "$3" != --* ]] || {
+    print -u2 -- "build-telemetry-record: $1 requires a non-empty value"; exit 2 }
+}
+
+local status_file=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --status) status_file="$2"; shift 2 ;;
-  --issue) issue="$2"; shift 2 ;;
-  --ts) ts="$2"; shift 2 ;;
-  --wall-s) wall="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: build-telemetry-record.zsh --status FILE [--issue N] [--ts EPOCH] [--wall-s N]"; exit 0 ;;
+  --status) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
+  -h|--help) print -r -- "$usage"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
-[[ -n "$status_file" ]] || { print -u2 -- "usage: build-telemetry-record.zsh --status FILE [--issue N] [--ts EPOCH] [--wall-s N]"; exit 2 }
-[[ -s "$status_file" ]] || { print -u2 -- "build-telemetry-record: status file missing or empty: $status_file"; exit 1 }
+[[ -n "$status_file" ]] || { print -u2 -- "$usage"; exit 2 }
+# A directory has non-zero size, so it would sail past the -s check below and
+# surface as jq's "Is a directory" relabelled "invalid status JSON". Name it for
+# what it is — the same operand policy the sibling emitter applies to --payload.
+[[ ! -d "$status_file" ]] || {
+  print -u2 -- "build-telemetry-record: --status is a directory: $status_file"; exit 2 }
+# A path that does not exist (or cannot be read) is a CALLER mistake — exit 2,
+# the same class the sibling emitter gives a bad --payload operand. Only a file
+# that exists and is empty is the internal case (exit 1: the loop produced
+# nothing), so a path typo stays distinguishable from a broken status JSON.
+[[ -e "$status_file" ]] || {
+  print -u2 -- "build-telemetry-record: --status file does not exist: $status_file"; exit 2 }
+[[ -r "$status_file" ]] || {
+  print -u2 -- "build-telemetry-record: --status file not readable: $status_file"; exit 2 }
+[[ -s "$status_file" ]] || { print -u2 -- "build-telemetry-record: status file is empty: $status_file"; exit 1 }
 
-[[ -n "$ts" ]] || ts=$(date +%s)
-# --ts feeds --argjson: a non-numeric value would surface as a misleading
-# "invalid status JSON" from jq — name the actual mistake instead
-[[ "$ts" == <-> ]] || {
-  print -u2 -- "build-telemetry-record: --ts must be unix seconds (got: $ts)"; exit 2 }
+# Without this, an absent jq makes the `||` branch below report "invalid status
+# JSON" — a wrong diagnosis of an environment problem. The sibling emitter
+# guards the same way (it exits 3; this script's documented taxonomy has no 3,
+# so the internal class here is 1).
+command -v jq >/dev/null 2>&1 || {
+  print -u2 -- "build-telemetry-record: jq not found on PATH"; exit 1 }
 
-# issue / wall as JSON scalars (number or null)
-local issue_json='null' wall_json='null'
-[[ "$issue" == <-> ]] && issue_json="$issue"
-[[ "$wall" == <-> ]] && wall_json="$wall"
+# `-s` only proves the file is non-empty, which two malformed inputs satisfy
+# while still producing a bogus exit 0: a WHITESPACE-ONLY file (jq -c emits
+# nothing and exits 0, so an EMPTY payload would be handed to the emitter) and a
+# CONCATENATED multi-document file (jq runs the program per document, emitting
+# several payload lines where the contract allows exactly one). The first is
+# reachable from the loop itself — if its own `jq -nc` ever failed, the status
+# tmpfile would hold a lone newline. Require exactly one JSON object up front.
+jq -e -s 'length == 1 and (.[0] | type == "object")' "$status_file" >/dev/null 2>&1 || {
+  print -u2 -- "build-telemetry-record: invalid status JSON (expected exactly one JSON object): $status_file"; exit 1 }
 
-jq -c \
-  --argjson ts "$ts" --argjson issue "$issue_json" --argjson wall "$wall_json" '
+jq -c '
   . as $s
   | [ $s.round_changelists[]? ] as $rounds
   # distinct findings across all rounds, keyed by identity
@@ -57,9 +93,11 @@ jq -c \
   | ( [ ($s.final_changelist.blocking // [])[]
         | "\(.file)|\(.line)|\(.dimension)|\(.title)" ] | unique ) as $final_keys
   | {
-      ts: $ts,
-      issue: $issue,
-      repo_type: $s.repo_type,
+      # PAYLOAD ONLY — no envelope keys. `ts`, `issue`, `wall_s` and `tokens`
+      # belong to the emitter, and `repo_type` is an envelope field the loop
+      # hands it as --repo-type; duplicating any of them here would give a
+      # consumer two places to read one fact.
+      # (No apostrophes in this block: the jq program is single-quoted.)
       status: $s.status,
       escalation: (if ($s.status | test("^ESCALATE_")) or $s.status=="BUDGET_EXHAUSTED"
                    then $s.status else null end),
@@ -137,7 +175,5 @@ jq -c \
                   | ("\(.file)|\(.line)|\(.dimension)|\(.title)") as $k
                   | select( ($final_keys | index($k)) == null ) ]
                 | length ),
-      waived: ($seen | map(select(.priority=="Low")) | length),
-      wall_s: $wall,
-      tokens: null
+      waived: ($seen | map(select(.priority=="Low")) | length)
     }' "$status_file" || { print -u2 -- "build-telemetry-record: invalid status JSON"; exit 1 }

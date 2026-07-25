@@ -188,6 +188,8 @@ seed_awaiting() {
   [ "$(jq '.final_changelist.round' "$ST")" -eq 1 ]
   # ...but it is NOT terminal: no telemetry record, no round block, no Final line
   [ ! -e "$T" ]
+  # AC3's negative is about the WHOLE stream, not just the named sink
+  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
   run ! grep -q '^## Round 2' "$WD/progress.md"
   run ! grep -q '^\*\*Final:' "$WD/progress.md"
   grep -q '^\*\*Refused (round 2):\*\* stale findings' "$WD/progress.md"
@@ -542,7 +544,11 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
   printf '%s' "$CRIT" > "$F"
   step --telemetry-file "$T"
   [ "$status" -eq 20 ]
-  [ ! -s "$T" ]
+  # `! -e`, not `! -s`: the contract is that AWAITING_FIX writes NOTHING, so a
+  # regression that merely touches the sink before the terminal guard must fail
+  [ ! -e "$T" ]
+  # ...and nothing landed in the default sink either (AC3 is about the stream)
+  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
   printf '[]' > "$F"
   step --resume --telemetry-file "$T"
   [ "$status" -eq 0 ]
@@ -578,4 +584,84 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
     zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F" --resume
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+}
+
+@test "a .t0 stamped in the FUTURE clamps wall_s to 0 instead of losing the record (#1004)" {
+  # .t0 survives only across a --resume (a fresh run rewrites it), which is
+  # exactly where a copied work-dir or an NTP step back bites. The emitter
+  # rejects a negative --wall-s (exit 2) and the loop swallows that with
+  # `|| true`, so without the clamp the whole terminal record vanishes.
+  T="$BATS_TEST_TMPDIR/future-wall.jsonl"
+  seed_awaiting
+  echo "$(( $(date +%s) + 600 ))" > "$WD/.t0"
+  printf '[]' > "$F"
+  step --resume --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$T")" -eq 1 ]
+  [ "$(jq '.wall_s' "$T")" -eq 0 ]
+}
+
+@test "an over-wide .t0 falls back to the run's own start rather than losing the record (#1004)" {
+  # digits alone are not enough: --ts carries the emitter's 18-digit cap, so a
+  # 20-digit .t0 would be rejected there and cost the record
+  T="$BATS_TEST_TMPDIR/wide-t0.jsonl"
+  seed_awaiting
+  echo "99999999999999999999" > "$WD/.t0"
+  printf '[]' > "$F"
+  local NOW; NOW="$(date +%s)"
+  step --resume --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$T")" -eq 1 ]
+  local TS
+  TS="$(jq -r '.ts' "$T")"
+  [ "${#TS}" -le 11 ]        # a real epoch, not the unusable stamp
+  # ...and specifically THIS invocation's start, not some other epoch: `$now`
+  # is captured just before the resume, so a fallback to .t0 (or anything
+  # older) fails here rather than passing on a vacuous `>= 0`
+  [ "$TS" -ge "$NOW" ]
+}
+
+@test "the step-mode RESUME ERROR path emits a telemetry record too (#1004)" {
+  # a second emission call site: the red-gate-after-a-fix abort. It passes
+  # repo_type="" and the resumed round, unlike every path covered elsewhere.
+  T="$BATS_TEST_TMPDIR/resume-error.jsonl"
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --test-cmd 'false' --telemetry-file "$T"
+  [ "$status" -eq 1 ]
+  [ "$(grep -c '' "$T")" -eq 1 ]
+  [ "$(jq -r '.schema' "$T")" = "telemetry/v1" ]
+  [ "$(jq -r '.pipeline' "$T")" = "review-loop" ]
+  [ "$(jq -r '.outcome' "$T")" = "failed" ]
+  [ "$(jq -r '.payload.status' "$T")" = "ERROR" ]
+  [ "$(jq -r '.repo_type' "$T")" = "null" ]
+  [ "$(jq -r '.wall_s | type' "$T")" = "number" ]
+  run zsh "$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh" "$T" --require-records
+  [ "$status" -eq 0 ]
+}
+
+@test "a NON-NUMERIC .t0 falls back to this run's start — the record survives and the exit is untouched (#1004)" {
+  # The guard is two-part (`<->` AND width); the width half is covered above,
+  # this is the digits half. A corrupt .t0 — a truncated write, a hand-edited
+  # or copied work-dir, the same corruption class this suite already tests for
+  # history.jsonl and changelists.jsonl — would otherwise reach `--ts`, which
+  # the emitter rejects as non-numeric behind `|| true` (losing the whole
+  # record), and would make `$(( ... - t_begin ))` evaluate a bare identifier
+  # under `setopt nounset`, aborting the loop with exit 1 instead of its verdict.
+  T="$BATS_TEST_TMPDIR/corrupt-t0.jsonl"
+  seed_awaiting
+  printf 'not-a-number\n' > "$WD/.t0"
+  printf '[]' > "$F"
+  local NOW; NOW="$(date +%s)"
+  step --resume --telemetry-file "$T"
+  # the verdict is the loop's own, NOT an operational abort
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+  # ...and the record still landed, stamped from this invocation's start
+  [ "$(grep -c '' "$T")" -eq 1 ]
+  [ "$(jq -r '.ts | type' "$T")" = "number" ]
+  [ "$(jq '.ts' "$T")" -ge "$NOW" ]
+  [ "$(jq -r '.wall_s | type' "$T")" = "number" ]
+  run zsh "$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh" "$T" --require-records
+  [ "$status" -eq 0 ]
 }

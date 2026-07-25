@@ -219,7 +219,7 @@ EOF
   # simulate a prior run's artifacts (untracked) alongside a real story file
   mkdir -p "$R/.review" "$R/.claude/telemetry"
   echo '[]' > "$R/.review/findings-round-1.json"
-  echo '{}' > "$R/.claude/telemetry/review-loop.jsonl"
+  echo '{}' > "$R/.claude/telemetry/telemetry.jsonl"
   echo "print(1)" > "$R/app.py"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" plan --repo "$R" --base main

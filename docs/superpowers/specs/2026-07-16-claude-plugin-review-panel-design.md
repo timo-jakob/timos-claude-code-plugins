@@ -219,8 +219,10 @@ The fixture proves **recall** on one known defect. It cannot prove
 control (a clean diff the panel must not flag) was considered and deliberately
 deferred as speculative fixture work.
 
-The real precision signal is the loop's own telemetry, which already exists:
-`.claude/telemetry/review-loop.jsonl` (#566) records rounds-to-converge and
+The real precision signal is the loop's own telemetry, which already exists: the
+`pipeline: "review-loop"` records in `.claude/telemetry/telemetry.jsonl` (#566,
+moved onto the `telemetry/v1` contract by #1004 — pre-retrofit runs are still in
+the frozen `review-loop.jsonl`) record rounds-to-converge and
 escalation breakdown per run. If plugin PRs begin escalating on `prose_logic`,
 the behavioural bar is miscalibrated — a tuning question against real data,
 rather than one to guess at now.

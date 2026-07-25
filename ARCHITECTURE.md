@@ -1468,35 +1468,70 @@ Rules that carry the contract's weight:
 - **Versioning:** a breaking envelope change bumps to `telemetry/v2`; `payload`
   evolution is per-pipeline and non-breaking by definition.
 
-The two sections below describe the two streams **as they emit today — in the
-pre-contract (v0) shape**, with bespoke keys at the top level and their own
-per-pipeline sink files. Retrofitting them onto `telemetry/v1` — envelope and
-sink from `emit-telemetry.zsh`, the bespoke fields moved into `payload`, and
-review-loop's `status` plus refine-issue's pre-contract `outcome` values
-(`refined-ready` / `parked`) mapped onto the 4-value `outcome` enum — is
-children (b) and (c) of #740, not this contract.
+Of the two pre-existing streams, **review-loop is retrofitted** — child (b),
+issue #1004: it emits `telemetry/v1` through `emit-telemetry.zsh` into the
+shared sink, with its bespoke fields inside `payload` — see the section below.
+**Refine-issue is not yet** — it still emits the pre-contract (v0) shape,
+bespoke keys at the top level, into its own `.claude/telemetry/refine-issue.jsonl`.
+Retrofitting it (envelope and sink from `emit-telemetry.zsh`, bespoke fields into
+`payload`, its `refined-ready` / `parked` outcomes mapped onto the 4-value enum)
+is child (c) of #740. **No file migration is performed** either way: records
+written before a stream's retrofit stay where and as they are, and child (e)'s
+rollup reads them through a v0→v1 adapter.
 
 ## Review-loop telemetry (#566)
 
-Raising autonomy safely needs evidence, so the loop appends **one JSONL record
-per terminal status — never per round; an extended loop (escalate → grant →
-`--resume`) therefore emits one record per escalation plus its final
-status** to `.claude/telemetry/review-loop.jsonl`
+Raising autonomy safely needs evidence, so the loop appends **one `telemetry/v1`
+record per terminal exit — never per round; an extended loop (escalate → grant
+→ `--resume`) therefore emits one record per escalation, plus a final one only
+if it later reaches a different terminal status (a run whose human declines the
+grant ends ON its last escalation, so that escalation is its final record, not
+an extra one)** to the shared sink `.claude/telemetry/telemetry.jsonl`
 (git-ignored — the bootstrap gitignore fragments for every language carry
-`.claude/telemetry/`). It is never appended on the non-terminal `AWAITING_FIX`
+`.claude/telemetry/`), or to an explicit `--telemetry-file`. Emission is
+**best-effort**: it is skipped when `--repo` is not an existing directory (only
+reachable via the `--no-review` fast path, which short-circuits before the
+`--repo` checks) and when the payload build fails, and any emitter error is
+swallowed — a telemetry failure drops the record, never the run. It is never appended
+on the non-terminal `AWAITING_FIX`
 (#971) or the `STALE_FINDINGS` refusal (#974) — both resume the same loop, so a
 record there would double-count it. A step-mode loop spans several invocations,
 and each terminal record spans from the loop's logical start (`.t0`), so
 consecutive records of one extended loop (escalate → grant → `--resume`) overlap
 and their `wall_s` must not be summed — count records, but derive per-loop
-timing from the last record only. The record
-is built deterministically from the loop's status JSON by
-`build-telemetry-record.zsh`: `ts`, `issue`, `repo_type`, `status`, `escalation`
-(the type, or `null` when converged/skipped), `rounds`, `max_rounds`,
-`findings_by_round`, `fixed` (blockers
-found and cleared) vs `waived` (Low suggestions logged), `wall_s`, and a reserved
-`tokens` field (not observable from zsh in v1). Each `findings_by_round` entry
-(#969) carries `by_severity` in the **user-facing vocabulary** —
+timing from the last record only. **The v1 envelope carries no ordering key for
+that "last"**: both records share the same `ts` (the loop passes `.t0`), the
+minted `run_id`'s suffix is random rather than monotonic, and `parent_run_id` is
+`null`. So the tiebreaker within a `(repo, issue, ts)` group is the **largest
+`wall_s`** — each record spans from the same logical start, so the longest span
+is the latest. Do not rely on physical file order: the sink is shared with every
+other pipeline now, which makes it a much weaker implicit key than the old
+per-pipeline file.
+
+**The envelope is the shared emitter's, the payload is the loop's** (#1004). The
+loop calls `emit-telemetry.zsh` with `--pipeline review-loop`, the `--issue`,
+the status JSON's `repo_type`, `--ts` (the loop's logical start) and `--wall-s`
+— which is **required and always a number** here, never the old nullable field —
+and lets the emitter derive `repo`, mint the `run_id`, and resolve the sink. The
+loop's own `status` narrows onto the contract's 4-value `outcome` enum:
+`CONVERGED` and `SKIPPED` → `success`, every `ESCALATE_*` and
+`BUDGET_EXHAUSTED` → `escalated`, `ERROR` → `failed`. Nothing is lost, because
+the exact status stays in the payload; the catch-all is `failed` rather than a
+guess, so a status added later is never silently counted a success.
+
+`build-telemetry-record.zsh` builds that **payload** deterministically from the
+loop's status JSON — it is a payload builder, not a record builder, and carries
+**no** envelope key (a `--issue` / `--ts` / `--wall-s` flag is a usage error
+there now). The payload holds `status`, `escalation`
+(the escalation type on `ESCALATE_*` / `BUDGET_EXHAUSTED`, and `null` on
+**every other** status — `CONVERGED`, `SKIPPED`, `ERROR`, and anything added
+later; so a `null` here means "not an escalation", **not** "succeeded", and the
+`escalation` breakdown's null bucket silently contains failed `ERROR` runs —
+read `outcome` when you want success/failure), `rounds`, `max_rounds`,
+`findings_by_round`, `convergence_assessment`, and `fixed` (blockers
+found and cleared) vs `waived` (Low suggestions logged). Each `findings_by_round` entry
+(#969) carries the `round` number it describes (the key every per-round join
+uses), plus `by_severity` in the **user-facing vocabulary** —
 `Critical` / `Warning` / `Suggestion`, the same words the human reads in
 `progress.md` and the escalation (internally `Warning` = priority High,
 `Suggestion` = the Low bucket) — plus `by_dimension`, the per-round
@@ -1516,24 +1551,70 @@ blockers whose #913 match is flagged as a probable line-proximity artifact).
 The append is never fatal — a
 telemetry failure can't break the loop's exit.
 
-The three headline metrics come straight off the file with `jq`:
+The three headline metrics come straight off the file with `jq`. The sink is
+**shared** now, so every query first narrows to `kind == "run"` **and** the
+pipeline — the `kind` half is not optional: an enrichment's `outcome` describes
+the enrichment event, not the run, so counting both blends two meanings into the
+one field and double-counts every enriched run. The loop's own detail then sits
+one level down under `.payload`. Each metric guards its own divisor, so a
+record-less stream yields `null` rather than a division error:
 
 ```bash
-# first-pass convergence rate
-jq -s '([.[] | select(.status == "CONVERGED")] | length) / length' .claude/telemetry/review-loop.jsonl
+S=.claude/telemetry/telemetry.jsonl
+RL='[.[] | select(.kind == "run" and .pipeline == "review-loop")]'
+# terminal-record convergence rate — the share of NON-SKIPPED review-loop
+# records that converged (failed ERROR runs stay in the denominator). NOT a first-pass rate: an extended loop (escalate → grant →
+# --resume) emits a record per terminal exit, so its post-grant CONVERGED
+# counts here too. SKIPPED (--no-review) records reviewed nothing, so the
+# expression drops them from the denominator. Read the figure as per-record,
+# not per-loop.
+jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
+  | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$S"
 # mean rounds to converge (CONVERGED records only — like wall_s, the rounds of
 # consecutive records of one extended loop overlap, so never average over all)
-jq -s '[.[] | select(.status == "CONVERGED")] | (map(.rounds) | add) / length' .claude/telemetry/review-loop.jsonl
-# escalation breakdown
-jq -s 'group_by(.escalation) | map({(.[0].escalation | tostring): length}) | add' .claude/telemetry/review-loop.jsonl
+jq -s "$RL"' | [.[] | select(.payload.status == "CONVERGED")]
+  | if length == 0 then null else (map(.payload.rounds) | add) / length end' "$S"
+# escalation breakdown (the null bucket is every non-escalation status —
+# CONVERGED, SKIPPED and ERROR alike; see the payload note above)
+jq -s "$RL"' | group_by(.payload.escalation) | map({(.[0].payload.escalation | tostring): length}) | add' "$S"
 ```
+
+A true **first-pass** rate needs per-loop grouping, which the v1 envelope does
+not key directly — group by `(repo, issue, ts)` (which groups one loop
+**whenever the work-dir's `.t0` survives** — a deleted or malformed `.t0` makes
+a resumed invocation fall back to its own start, splitting the loop into two
+groups), then take each group's
+**smallest `wall_s`**: every record of one loop spans from the same `.t0`, so
+the smallest span is the loop's **first** terminal exit, and the loop converged
+first-pass exactly when that record is `CONVERGED`. Note this is the **opposite
+end** of the group from the ordering rule above: largest `wall_s` is the
+*final* outcome (and the per-loop timing), smallest is the *first-pass* one.
+Taking the largest here would count every escalate → grant → converge loop as a
+first-pass success — precisely what the metric must exclude.
+
+```bash
+jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
+  | group_by([.repo, .issue, .ts]) | map(min_by(.wall_s))
+  | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$S"
+```
+
+The cross-pipeline cut needs no payload at all — that is what the 4-value
+`outcome` enum buys — but it still needs the `kind` filter:
+`jq -s '[.[] | select(.kind == "run")] | group_by(.outcome) | map({(.[0].outcome): length}) | add' "$S"`.
+
+Records written **before** this retrofit are still `review-loop.jsonl` in the
+pre-contract shape (top-level `status` / `rounds`, no `pipeline`); they are not
+migrated, and child (e)'s rollup is what reads both.
 
 This is the raw material for the DORA-style dashboard and for deciding future
 budgets (tokens, wall-clock) and risk-based review depth.
 
 ### Refine-issue telemetry (#579)
 
-`/development:refine-issue` mirrors this for the refinement phase: every run
+`/development:refine-issue` mirrors the **pre-contract (v0) shape** of the above
+for the refinement phase — it has not been retrofitted yet (child (c), #1005), so
+unlike the review loop it still writes bespoke top-level keys, not a
+`telemetry/v1` envelope. Every run
 appends **one JSONL record** to `.claude/telemetry/refine-issue.jsonl` (same
 git-ignored sink convention), built deterministically by
 `build-refine-telemetry-record.zsh` from the run summary. Fields: `ts`, `issue`,
