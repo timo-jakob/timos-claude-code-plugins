@@ -26,6 +26,7 @@ separate.
 - [Adopt the Claude Approver on your repo](how-to/adopt-the-approver.md)
 - [Adopt C4 architecture docs on an existing repo](how-to/adopt-c4-architecture-docs.md)
 - [Amend a C4 diagram by hand](how-to/amend-a-c4-diagram.md)
+- [Switch fable agents to opus when the fable budget runs out](how-to/switch-fable-agents-to-opus.md)
 - [Maintain this repo (quarterly template refresh)](how-to/maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](how-to/contributing.md)
 - [Add support for a new language plugin](adding-a-language-plugin.md)

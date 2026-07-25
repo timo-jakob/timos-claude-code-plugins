@@ -22,6 +22,9 @@ on:
       # telemetry emitter + validator, #740) — 'scripts/**' below matches only a
       # top-level scripts/ dir, so this line is what gates them
       - 'development/scripts/**'
+      # plugin-level hook scripts (development/hooks/, e.g. the fable->opus
+      # PreToolUse hook, #1017) — same non-**-prefixed hazard as the lines above
+      - 'development/hooks/**'
       - 'scripts/**'
       - 'development-claude-plugin/**'
       # prose the suite asserts on: the review-loop budget guard (#993) checks

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # cleanup-hook.sh — PostToolUse hook that runs cleanup.sh after a successful gh pr merge.
-# Install by adding a PostToolUse hook pointing to this script in ~/.claude/settings.json.
+# Registered by the plugin itself via development/hooks/hooks.json (PostToolUse/Bash), so
+# it needs no manual ~/.claude/settings.json entry. Note it is NOT opt-in: it loads for
+# every installer of the `development` plugin and fires whenever a `gh pr merge` exits 0.
 
 input=$(cat)
 

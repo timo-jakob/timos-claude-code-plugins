@@ -20,6 +20,14 @@ pieces compose. For the *why* behind splitting these per language, see
 
 Language-agnostic workflow tooling for git operations, committing, and branch management.
 
+**Hooks** (registered in `development/hooks/hooks.json`, so they load for every installer
+of this plugin):
+
+| Event / matcher | Script | Fires |
+| --- | --- | --- |
+| `PostToolUse` / `Bash` | `skills/cleanup/scripts/cleanup-hook.sh` | After any Bash command containing `gh pr merge` that exits 0 — switches to main, pulls, prunes, deletes merged branches |
+| `PreToolUse` / `Agent` | `hooks/switch-fable-to-opus.zsh` | Only when `switch_fable_to_opus` is truthy — redirects dispatches whose effective model is fable to opus ([how-to](https://timo-jakob.github.io/timos-claude-code-plugins/how-to/switch-fable-agents-to-opus/)) |
+
 **Skills:**
 
 | Skill | Command | Description |
@@ -39,15 +47,15 @@ Language-agnostic workflow tooling for git operations, committing, and branch ma
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
-| Commit Message | opus | Generates clear commit messages from diffs, ignoring formatting/linting noise |
+| Commit Message | sonnet | Generates clear commit messages from diffs, ignoring formatting/linting noise |
 | Bootstrap Security Reviewer | fable | Reviews planned workflows for GH Actions permissions, secret refs, self-hosted runner safety, scan-before-push gates |
 | Bootstrap Config Consistency | opus | Cross-references Sonar keys, workflow job IDs ↔ branch-protection contexts, language fragments ↔ detected languages |
 | Bootstrap Idempotency Reviewer | opus | For each existing file conflicting with a template, recommends skip/overwrite/merge |
 | Bootstrap Validator | haiku | Fast post-write check — YAML/JSON parses, no unresolved placeholders, cross-references resolve |
-| Story Readiness | opus | Readiness gate for `/development:resolve-issue` — judges whether a story is specified well enough to build (testable acceptance, bounded scope, resolved dependencies) and emits a low/normal/elevated risk classification. Classifies the runtime `surface` and, for surface-touching stories, hard-requires outside-in `use_case` + `test_cases` (interface-aware check 5, #670). Also emits a proposed `story-spec/v1` block for READY stories and non-blocking advisories (e.g. persona-reference validation against the repo's `personas/v1` registry); verdict JSON only |
+| Story Readiness | fable | Readiness gate for `/development:resolve-issue` — judges whether a story is specified well enough to build (testable acceptance, bounded scope, resolved dependencies) and emits a low/normal/elevated risk classification. Classifies the runtime `surface` and, for surface-touching stories, hard-requires outside-in `use_case` + `test_cases` (interface-aware check 5, #670). Also emits a proposed `story-spec/v1` block for READY stories and non-blocking advisories (e.g. persona-reference validation against the repo's `personas/v1` registry); verdict JSON only |
 | Review Consolidator | opus | Consolidates one review round's findings into a single prioritised changelist for the `resolve-issue` local review loop (dedup, blocking classification, conflict + non-convergence detection); changelist JSON only |
-| Issue Refiner | opus | Per-turn refinement engine for `/development:refine-issue` — turns the gate's objections + a human reply into a why-not-ready explanation, questions, recommendations, a prose rewrite, and a proposed `story-spec/v1` block (mining the repo for outside-in test cases, drawing realistic payloads from persona `data_traits`); pure function, no writes |
-| Persona Definer | opus | Per-turn elicitation engine for `/development:define-personas` — proposes repo-grounded candidate personas, asks Socratic questions to extract tacit knowledge, and returns a draft `personas/v1` registry update; challenges gaps (missing kinds, uncovered surfaces) rather than only confirming; pure function, no writes |
+| Issue Refiner | fable | Per-turn refinement engine for `/development:refine-issue` — turns the gate's objections + a human reply into a why-not-ready explanation, questions, recommendations, a prose rewrite, and a proposed `story-spec/v1` block (mining the repo for outside-in test cases, drawing realistic payloads from persona `data_traits`); pure function, no writes |
+| Persona Definer | fable | Per-turn elicitation engine for `/development:define-personas` — proposes repo-grounded candidate personas, asks Socratic questions to extract tacit knowledge, and returns a draft `personas/v1` registry update; challenges gaps (missing kinds, uncovered surfaces) rather than only confirming; pure function, no writes |
 
 ## development-swift
 
