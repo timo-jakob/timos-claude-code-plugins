@@ -63,7 +63,7 @@ What is shipped and aligned with the motivation:
   ([#558](https://github.com/timo-jakob/timos-claude-code-plugins/issues/558)),
   and a **consolidator** turns them into one prioritised changelist
   ([#561](https://github.com/timo-jakob/timos-claude-code-plugins/issues/561)).
-  The loop fixes blockers and re-reviews up to three rounds, so a PR is only
+  The loop fixes blockers and re-reviews up to five rounds, so a PR is only
   opened — and CI minutes only spent — on code the panel has already converged
   on. Convergence attaches a **review dossier** the Approver re-ingests
   ([#563](https://github.com/timo-jakob/timos-claude-code-plugins/issues/563));

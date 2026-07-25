@@ -193,7 +193,7 @@ issue number. It returns a verdict JSON — a pure judgment, **no** GitHub write
   ```
 
 Never guess past a `NEEDS_REFINEMENT` — escalating the ambiguity here is the
-whole point, and it is far cheaper than after three review rounds converge on
+whole point, and it is far cheaper than after five review rounds converge on
 the wrong thing.
 
 **Division of labour — the gate judges specification, 0a enforces sequencing**
@@ -451,7 +451,7 @@ Once the gate is green, run the **local review loop** before committing or
 pushing anything, so a PR is only opened on code a reviewer panel has already
 converged on (no CI minutes spent on unconverged work). Drive
 `development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — the
-state machine (constants `MAX_REVIEW_ROUNDS=3`, `BLOCKING_SEVERITIES=(CRITICAL
+state machine (constants `MAX_REVIEW_ROUNDS=5`, `BLOCKING_SEVERITIES=(CRITICAL
 WARNING)`) — in **step mode** (#971): one invocation per round, with every
 model-driven step done **in-session, where the user can watch it**. Two hard
 rules: **never** shell out to a headless `claude` (`claude -p` / `--print`)
@@ -679,7 +679,7 @@ from a status file the failed invocation did not write.
 `ESCALATE_NO_CONVERGENCE` only, #562-resume).** When the run is
 **interactive** — the same human-present determination §0a's remediation uses —
 and the loop exited `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE`, do **not**
-jump straight to the comment. The person who can grant "two more rounds" or
+jump straight to the comment. The person who can grant "three more rounds" or
 supply the missing constraint is right here; offer that in-session first. (Every
 other exit — `ESCALATE_CONFLICT`, `ESCALATE_AMBIGUOUS` — and **every autonomous
 run** skip this branch entirely and go straight to the typed comment below.)
@@ -712,13 +712,13 @@ what was consumed and the step-6 soft cap can never fire across detours):
    exit type. The built-in **"Other"** option is the free-text channel — the
    human uses it to *ask you a question* ("why is that blocker stuck?", "show me
    the diff for `b.py`") **or** to *type guidance*.
-   - `BUDGET_EXHAUSTED`: **Grant +2 rounds** · **Grant +2 with guidance** ·
+   - `BUDGET_EXHAUSTED`: **Grant +3 rounds** · **Grant +3 with guidance** ·
      **Stop**.
-   - `ESCALATE_NO_CONVERGENCE`: **Give guidance & retry (+2)** — the primary
+   - `ESCALATE_NO_CONVERGENCE`: **Give guidance & retry (+3)** — the primary
      lever, since more rounds alone will not move a stuck blocker — · **Stop**.
      When the step-1 assessment reports **every** carried match as a possible
      false trip (the blockers may be fresh, not stuck), also offer a plain
-     **Grant +2 rounds** option — the guidance-only framing would contradict
+     **Grant +3 rounds** option — the guidance-only framing would contradict
      the assessment shown moments earlier.
 
 3. **If they asked a question** (Other → a question, not guidance): answer it
@@ -726,7 +726,7 @@ what was consumed and the step-6 soft cap can never fire across detours):
    consumes a grant.
 
 4. **If they gave guidance** (with or without an explicit grant — guidance
-   always implies a grant; the +2/`grants` bookkeeping happens **once**, in
+   always implies a grant; the +3/`grants` bookkeeping happens **once**, in
    step 5): **post it as an issue comment** so it is durable and
    survives a dead session, tagged so the audit trail separates human guidance
    from the automated escalation comment:
@@ -758,14 +758,25 @@ what was consumed and the step-6 soft cap can never fire across detours):
    — resume only once it is green; red follows §3's rule (fix it, or abandon and
    report) — run the next round's panel in-session (round protocol step 1) to
    produce its findings file, then resume the loop — same `--work-dir`,
-   `--resume`, ceiling raised by 2 — and increment `grants`. On a plugin repo
+   `--resume`, ceiling raised by 3 — and increment `grants`.
+   **The grant raises the *ceiling* by 3, not the remaining rounds**:
+   after a `BUDGET_EXHAUSTED` (round == `max_rounds`) that is
+   exactly three more rounds (ceiling 8 after the default budget, rounds 6-8),
+   but an `ESCALATE_NO_CONVERGENCE` can fire as early as round 2, where the same
+   `prev_max + 3` leaves more than three
+   (ceiling 8 after a round-2 exit = 6 rounds left). Compute the remainder
+   (`new ceiling − rounds already run`) and say what the resume actually buys,
+   rather than promising a flat three. The soft cap counts **grants** and the
+   20-round figure is a `max_rounds` value, so the varying remainder changes
+   neither.
+   On a plugin repo
    pass the green gate's `tree` as `--gate-attest` here too (#981, under the four
    rules above), so the resume skips the byte-identical re-run just as a normal
    round does; omit it on any other stack:
 
    ```bash
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
-     --work-dir <same-work-dir> --resume --max-rounds <prev_max + 2> \
+     --work-dir <same-work-dir> --resume --max-rounds <prev_max + 3> \
      --findings-file <findings-round-R.json> --test-cmd '<full gate>' \
      [--gate-attest <tree>] --issue <N> --status-file <status.json>
    ```
@@ -801,7 +812,10 @@ what was consumed and the step-6 soft cap can never fire across detours):
    round) — say
    so plainly — "this isn't converging; the diff may need rethinking" — and nudge
    toward **Stop** or splitting the work into a follow-up issue. Never hard-stop
-   on the human; they may still choose to extend.
+   on the human; they may still choose to extend. The cap is a **nudge** by
+   design, not a hard stop (#993): by the fifth grant the ceiling already stands
+   at 5 + 5×3 = 20 rounds, and the human — not the counter — decides whether to
+   go past it.
 
 7. **Stop / decline** (the human picks Stop, or bails via "Other"): fall through
    to the typed-comment terminal below, exactly as an autonomous run does. The

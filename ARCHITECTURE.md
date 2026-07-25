@@ -1266,8 +1266,12 @@ the consolidator (#561) into an autonomous implement→review→fix loop that ru
 **entirely in the worktree** — nothing is pushed and no PR is opened until it
 exits `CONVERGED`. It sits in `/development:resolve-issue` between validate
 (step 3) and open-pr, so CI minutes are only spent on code a panel has already
-converged on. Constants live at the top: `MAX_REVIEW_ROUNDS=3`,
-`BLOCKING_SEVERITIES=(CRITICAL WARNING)` (= Critical + High).
+converged on. Constants live at the top: `MAX_REVIEW_ROUNDS=5`,
+`BLOCKING_SEVERITIES=(CRITICAL WARNING)` (= Critical + High). The round cap is an
+**upper** bound — the loop exits the moment blocking findings reach 0 — so the
+5-round default (#993, raised from 3 on telemetry evidence) costs a story that
+converges in one round nothing, and only gives the hard tail a longer leash
+before escalating. `--max-rounds N` still overrides it.
 
 **The agentic steps run in-session — step mode is canonical (#971).** Running
 the panel and applying the fix pass are model-driven, so the driving session
@@ -1346,8 +1350,13 @@ and on `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` always — the escalation is
 surfaced as a `needs-human-decision` issue comment (#564). On an **interactive**
 run, `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first enter the in-session
 interactive extension (#902): the skill summarizes via `--format summary`,
-offers +2 rounds / guidance, and resumes the loop via `--resume`; only a
-Stop/decline falls back to the typed comment.
+offers +3 to the round ceiling / guidance, and resumes the loop via `--resume`;
+only a Stop/decline falls back to the typed comment.
+A grant raises `--max-rounds` by 3 — exactly three more rounds after a
+`BUDGET_EXHAUSTED`, more after an early `ESCALATE_NO_CONVERGENCE`.
+The 5-grant soft cap stays a
+**nudge**, not a hard stop: by the fifth grant the ceiling already stands at
+5 + 5×3 = 20 rounds.
 
 ## The telemetry/v1 contract (#740)
 
