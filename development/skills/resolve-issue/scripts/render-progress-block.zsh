@@ -8,8 +8,12 @@
 # Suggestion count), found-vs-fixed against the previous round (--prev), the
 # cumulative blocking trend (--history), a per-blocker possible-false-trip line
 # whenever the consolidator flagged an ESCALATING carried blocker whose matched
-# prior has a different title (#913/#969), and a distinct "false trip
-# auto-continued" line for each identity-cleared false trip (#983).
+# prior has a different title (#913/#969), a distinct "false trip
+# auto-continued" line for each identity-cleared false trip (#983), and — when
+# the human promoted a suggestion (#995) — a `promoted: N` term inside the
+# blockers line's severity parens plus one "- promoted suggestion:" line per
+# promoted blocker, so the human's own picks read differently from
+# reviewer-raised Warnings.
 #
 # The new/carried split (and everything derived from it: fixed-since, the
 # escalating possible-false-trip lines) is rendered ONLY when every blocker
@@ -19,7 +23,10 @@
 # per-item stamps to consult), so the converged round still reports what its fix
 # pass cleared. The #983 auto-continued false-trip line renders off the direct
 # per-item false_trip flag with NO stamp gate — an absent flag (a pre-#983
-# changelist) simply yields no line.
+# changelist) simply yields no line. The #995 promoted term and lines are the
+# same shape: a direct per-item `promoted` flag, NO stamp gate, and rendered
+# only when the count is non-zero — which is what keeps a run without
+# --promote byte-identical to before the label existed.
 #
 # Usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT
 #          [--prev FILE] [--history FILE]
@@ -111,9 +118,21 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
   # no human grant), so they render distinctly from the escalating $ftrips above.
   # A direct flag, no $stamped gate: a pre-#983 changelist simply lacks it.
   | ([ $blk[] | select(.false_trip == true) ]) as $auto_ftrips
+  # human-promoted blockers (#995): the overlay raised them from Suggestion, so
+  # without a label they read as ordinary reviewer-raised Warnings. The rendered
+  # term is a SUBSET of the `warning:` count it sits beside, never added to it —
+  # stated here too because this is the surface where an additive misreading is
+  # most likely (the term sits inside the same severity parentheses). NB: no
+  # apostrophes in this block — the jq program is single-quoted. Same
+  # per-item expression as the two sibling copies, and — like $auto_ftrips — a
+  # direct flag with NO $stamped gate: an unstamped changelist simply counts 0
+  # and renders neither the term nor a line, keeping a no-promote run
+  # byte-identical.
+  | ([ $blk[] | select(.promoted == true) ]) as $promoted
   | "## Round \($r) — \(if (.summary.blocking // 0) == 0 then "no blockers" else "blockers remain" end) (\($ts))",
     ("- blockers: \(.summary.blocking // 0)"
-     + (if (.summary.blocking // 0) > 0 then " (critical: \(.summary.critical // 0), warning: \(.summary.high // 0))" else "" end)
+     + (if (.summary.blocking // 0) > 0 then " (critical: \(.summary.critical // 0), warning: \(.summary.high // 0)"
+        + (if ($promoted | length) > 0 then ", promoted: \($promoted | length)" else "" end) + ")" else "" end)
      + (if ($carried != null) and ((.summary.blocking // 0) > 0)
         then " (new: \(($blk | length) - $carried), carried: \($carried))" else "" end)
      + ", conflicts: \(.summary.conflicts // 0), suggestions: \(.summary.low // 0)"),
@@ -126,6 +145,8 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
     (if ($blk | length) > 0 then
        "- by dimension: " + ($blk | group_by(.dimension // "") | map("\(.[0].dimension | dimlabel) \(length)") | join(", "))
      else empty end),
+    ($promoted[] | "- promoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
+       + " — raised from Suggestion by the human at convergence; blocking until cleared"),
     ($ftrips[] | "- possible false trip: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] matched prior-round blocker"
        + (if ((.matched_prior.line | type) == "number") and ((.line | type) == "number")
           then " at line \(.matched_prior.line)" else " file-wide" end)

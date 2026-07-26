@@ -123,7 +123,9 @@ polishing a suggestion is caught exactly like any other blocker.
 A few properties worth knowing:
 
 - **Nothing is ever auto-promoted.** The list is a menu, not a plan. Selecting
-  none converges immediately, exactly as before.
+  none converges immediately — the only trace is a telemetry line recording that
+  you were asked and chose nothing (when the run's own telemetry line exists;
+  see *What gets recorded about it*).
 - **Unattended runs are untouched.** An autonomous or headless run is never
   prompted, passes no promoted set, and converges with its suggestions waived —
   behaviour identical to before this existed.
@@ -148,11 +150,50 @@ A few properties worth knowing:
   five-round budget the blocking phase had, governed by that same single
   constant rather than a second one, with the same extension offer if it runs
   out. It is not the blocking phase's leftovers.
+- **A promoted item reads as promoted, everywhere.** Once raised it is a
+  blocker like any other — but it is labelled, so nobody has to guess whether a
+  reviewer flagged it or you did. The progress file counts it in the round's
+  blockers line (`critical: 0, warning: 3, promoted: 2`) and gives it its own
+  line naming the file, dimension and title; if the pass ends up escalating, the
+  per-round table gains a **Promoted** column and the item is listed as
+  `Warning (promoted)`. Both the count and the column appear **only when
+  something was actually promoted**, so an ordinary run's output is unchanged.
+  The count is always a *subset* of the warnings, never an extra category added
+  on top.
 - **A promoted item that has already vanished is reported, not silently
   skipped.** If the code moved on and a promoted suggestion no longer exists,
   you are told — a converged pass never implies work that was not done. And when
   the run cannot confirm either way, it says exactly that ("could not verify")
   rather than claiming the item is gone.
+
+### What gets recorded about it
+
+The point of offering the choice at all is to find out whether suggestions are
+worth acting on — so the run records the two numbers that answer it: **how many
+suggestions you were shown**, and **how many you promoted**. They are appended
+to the repo's local telemetry file as one extra line linked to the run that
+produced them, at the moment you answer.
+
+Four details worth knowing, because they decide what the numbers mean:
+
+- **Picking none is recorded too** (as "0 promoted"). It is a real answer to
+  "are these worth doing?", not a non-event.
+- **An unattended run records nothing here.** No prompt was shown, so there is
+  no offered-vs-promoted pair to record, and its telemetry is exactly what it
+  was before this feature existed.
+- **The promotion pass does not count against the loop's convergence rate.** It
+  is polish on an already-converged change, so the headline "did it converge?"
+  figures deliberately exclude it — otherwise choosing to promote a suggestion
+  would make the loop look worse at converging. Its rounds still show up where
+  the question is *what the loop did*: the rounds-to-converge average and the
+  escalation breakdown both keep them.
+- **If the run's own telemetry line was never written, nothing is recorded here
+  either.** The pair is linked to that line, and an unlinkable record would be
+  worse than none — so it is skipped rather than invented.
+
+The telemetry file records only counts, never the findings themselves — what
+each suggestion *was* lives in the PR's review dossier. What this adds is just
+the two numbers: what you were shown, and what you chose.
 
 If the promotion pass cannot clear what you picked, it escalates through the
 normal taxonomy rather than silently re-waiving it — you asked for those items,

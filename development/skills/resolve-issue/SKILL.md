@@ -597,7 +597,9 @@ Each round:
    dispatch `findings_path`) needs no digest tool and always applies.
 3. **On `AWAITING_FIX` (exit 20)** — blockers remain and budget is left:
    **narrate the round in the conversation** (round number; the
-   Critical/Warning/Suggestion counts; blockers found, new vs carried;
+   Critical/Warning/Suggestion counts — plus, on a promotion sub-loop round, the
+   `promoted` count and each `- promoted suggestion:` line; blockers found, new
+   vs carried;
    fixed-since-prior and the cumulative blocking trend from round 2 on; the
    dimensions they came from; what you fix next — the same block the loop
    just appended to progress.md, which carries these where applicable). Two
@@ -635,7 +637,16 @@ narrowed onto the cross-pipeline `outcome` enum. Evidence for
 convergence rate, rounds-to-converge, and escalation breakdown. **A promotion
 sub-loop (#994) is a second, terminal invocation with the same `--issue`, so a
 story that promotes anything appends its own record too** — read the pair
-together rather than as two independent stories. **Always pass an
+together rather than as two independent stories — with one caveat: a phase
+whose keys **all** fall out unmatched/unverified never invokes the sub-loop
+(step 4's *If NONE matched* terminal), so it legitimately leaves the enrichment
+with no second run record to pair with. That second record carries
+`payload.promotion_phase: true` (#995), which is how the two documented
+convergence-**rate** recipes exclude it. The mean-rounds and escalation-breakdown
+cuts deliberately **keep** it — a promotion pass genuinely did those rounds
+(ARCHITECTURE.md, *Review-loop telemetry*). Every terminal exit that emits a
+record also drops that record's `run_id` in `<work-dir>/.telemetry-run-id` — the
+join key the promotion enrichment below needs. **Always pass an
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
 is the loop's resumable state and the status file its verdict — the interactive
 extension below re-invokes the loop with `--resume` on the *same* work-dir, and
@@ -668,7 +679,9 @@ with a status JSON + code:
   enter the **interactive extension** (offer more rounds / guidance) before any
   comment; the others, and all autonomous runs, go straight to the typed comment.
 
-`--no-review` skips the loop entirely (status `SKIPPED`) — today's fast path,
+`--no-review` skips the loop entirely (status `SKIPPED`) — and is **refused
+together with `--promote`** (exit 2), since nothing is consolidated for an
+overlay to reach. Today's fast path,
 for when you deliberately want no local review round.
 
 #### Suggestion promotion on convergence — human-curated, opt-in (#994)
@@ -684,8 +697,45 @@ is ever auto-promoted.**
 run is **interactive** (the same human-present determination §0a's remediation
 uses) **and** the waived set is non-empty. An **autonomous / headless run never
 prompts and never passes `--promote`**: it converges with its suggestions
-waived, byte-identically to before this feature existed. Selecting *none* is
-the same terminal — converge immediately, unchanged.
+waived, byte-identically to before this feature existed. Selecting *none* skips
+the sub-loop and converges unchanged — but it is still a **presented prompt**, so
+step 3's enrichment record (`suggestions_promoted: 0`) is emitted *first*
+(subject to step 3's no-id rule — an absent or empty sidecar means no record at
+all). Only
+an autonomous / headless run, which never prompts, is byte-identical to before
+this feature existed.
+
+**First, locate the run's telemetry id (#995).** The blocking phase's terminal
+exit wrote the `run_id` of the record it just emitted to
+`<blocking-phase-work-dir>/.telemetry-run-id`. Step 3 reads it **directly from
+there**, inline, at the moment it emits:
+
+```bash
+cat <blocking-phase-work-dir>/.telemetry-run-id     # the join key, read at emit time
+```
+
+Two things not to do with it, each of which silently breaks the join:
+
+- **Do not hold it in a shell variable.** Step 3's emit runs after one or more
+  `AskUserQuestion` turns, and each `bash` invocation is its own shell — a
+  `RUN_ID=…` set here is unset there, the emitter refuses the empty `--run-id`
+  with exit 2, and the "never fatal" rule below swallows it, so the enrichment
+  silently never lands, on every run.
+- **Do not copy it to a fixed scratch path first.** A scratch dir is reused
+  within a session (a human resolving several issues back to back; a re-run
+  after an escalation), and a copy that fails — the source is absent whenever
+  telemetry was skipped, and it fails *silently* — leaves an **earlier story's**
+  id at that path to be read as this run's. The work-dir path has no such
+  hazard: it is per-run, and the loop clears it on a fresh start and rewrites it
+  on every terminal exit.
+
+**Absent or empty is not an error.** Most often it means no record was emitted —
+telemetry is best-effort — and there is then nothing to join to: skip the
+enrichment entirely and run the phase as normal. Before concluding that, confirm
+the path you are reading is the **blocking phase's** `--work-dir` (the one you
+passed at §3.5), not a defaulted temp dir or the sub-loop's. Never mint or invent
+a `run_id` to fill the gap; a fresh id would validate cleanly and be permanently
+orphaned.
 
 1. **Derive the waived set.** It is the **cross-round union of distinct Low
    findings**, keyed `[file, line, dimension, title]`, over the status JSON's
@@ -735,8 +785,86 @@ the same terminal — converge immediately, unchanged.
      *that chunk*, not the phase). **Ask every chunk before acting**, and
      re-state the running selection before the last one so the human can see
      what they have picked so far.
-   - Converge unchanged only when the **accumulated** selection over all chunks
-     is empty; otherwise proceed to step 4 of this phase with the accumulated set.
+   - **The decline option selected TOGETHER with one or more suggestions** is an
+     ambiguous answer, not a resolvable one — `multiSelect` puts both in the
+     same question, so the human can tick both. Re-present that chunk rather
+     than deciding which half to honour; emit no enrichment until the answer is
+     unambiguous.
+   - **A free-text question** (the built-in **"Other"** channel used to ask
+     rather than answer — "which file is #3 in?") is **not an answer**: answer
+     it and **re-present the same chunk**. A question never ends the phase, the
+     same rule the interactive extension applies to its own "Other".
+   - **Any other free text** is the human's **final** answer: stop chunking
+     (never re-prompt a chunk they have ended), then:
+     - free text that **names items** ("also do #2 and #7, that's all") **adds
+       exactly those** — matched by their rendered number or title, including
+       items from a chunk not yet asked — to the accumulated selection, and then
+       ends the phase. If any name is ambiguous, treat the answer as a
+       **question** (answer it, re-present that chunk) rather than guessing
+       which item was meant;
+     - free text that **names no items** declines **only the remaining chunks**,
+       never the earlier picks.
+     Either way the phase converges unchanged only when the accumulated
+     selection over **every chunk actually asked** is empty — and the prompt
+     *was* presented, so step 3's enrichment is still owed.
+   - **Record the answer first, then branch** (below). Converge unchanged only
+     when the **accumulated** selection over **every chunk actually asked** is
+     empty; otherwise proceed to step 4 of this phase with the accumulated set.
+
+   **Record the offered-vs-promoted pair (#995) — once the answer is known,
+   before either branch above.** This is the one fact the sink cannot
+   reconstruct: `waived` counts what the loop *logged*, never what a human was
+   *shown* or *chose*. Append **one** `telemetry/v1` enrichment joined to the
+   phase-1 run, via the shared emitter (no skill hand-rolls an envelope):
+
+   ```bash
+   # the guard IS the documented "no id -> no record, silently": unguarded, an
+   # absent file makes `cat` complain and the emitter exit 2 on the empty
+   # --run-id, handing you a failure you are separately told never to act on
+   if [[ -s <blocking-phase-work-dir>/.telemetry-run-id ]]; then
+     jq -nc --argjson offered <N-offered> --argjson promoted <N-picked> \
+       '{event:"suggestion_promotion", suggestions_offered:$offered, suggestions_promoted:$promoted}' \
+       > <scratch>/promotion-enrichment.json   # <scratch>: the same
+       # outside-the-repo dir as the work-dir and findings files (§3.5), never a
+       # path inside the worktree — one more file §5 could otherwise commit
+     "<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh" \
+       --pipeline review-loop --kind enrichment --outcome success \
+       --run-id "$(cat <blocking-phase-work-dir>/.telemetry-run-id)" \
+       --repo-dir <repo> --issue <issue-number> [--repo-type T] \
+       [--telemetry-file <the same file the loop was given>] \
+       --payload <scratch>/promotion-enrichment.json >/dev/null
+   fi
+   ```
+
+   - **`suggestions_offered`** is the size of the set step 1 derived and step 2
+     rendered (it equals the phase-1 record's `waived` by construction — same
+     union, same identity — and is repeated here only so the enrichment stands
+     alone without a join). **`suggestions_promoted`** is the **accumulated**
+     selection across every chunk — *how many the human picked*, recorded here
+     at answer time and therefore **before** step 4's matching runs. It is not a
+     count of items that reached the sub-loop: a run whose keys all fall out
+     unmatched/unverified legitimately carries a non-zero value with no sub-loop
+     at all (step 4's "**If NONE matched**" terminal), so never divide the
+     sub-loop's `fixed` by it.
+   - **No `--wall-s`** — the emitter rejects it on an enrichment, and `wall_s`
+     lands `null`; **`--outcome success`** describes *the enrichment event*
+     (the promotion facts were settled), never the run's outcome.
+   - **`--repo-dir` must be the same `--repo` the loop was given, and
+     `--telemetry-file` the same `--telemetry-file`** — they are the two sink
+     determinants (with no `--telemetry-file`, the emitter resolves
+     `<repo-dir>/.claude/telemetry/telemetry.jsonl`), so either one differing
+     lands the record in a *different* sink where it can never be joined, and
+     the emitter still exits 0.
+   - **Emit exactly when the prompt was presented** — that is this step. A
+     headless run, or one with nothing to offer, never reaches here and gets
+     **no record at all**. Promoting **none** is a *settled* fact and **does**
+     get a record (`suggestions_promoted: 0`) — it is the single most
+     informative datum for "do humans act on suggestions?", so emit it and
+     *then* converge unchanged.
+   - **No id (absent/empty `<blocking-phase-work-dir>/.telemetry-run-id`) → no
+     record.** The `-s` guard above *is* that rule: skip silently and carry on.
+     A failed emit is likewise never fatal — telemetry never changes what the
+     run does.
 
 4. **Write the promote file and run the sub-loop.** The selected identity keys
    go to a JSON array file **outside the repo** (the scratch dir the work-dir
@@ -752,9 +880,16 @@ the same terminal — converge immediately, unchanged.
    **seeded** file built by the ordered procedure that follows, and a
    NONE-matched classification means the sub-loop is never invoked at all. Read
    the procedure first, then come back to this invocation.
-   **`rm -f <promotion-status.json>` immediately before every invocation**
-   (round 1, each `--resume`, each recovery re-invoke) so step 7's exit taxonomy
-   can tell a status this invocation wrote from one the last one left behind:
+   **`rm -f <promotion-status.json> || { echo "could not delete the promotion
+   status file — its existence is no longer a signal; do NOT invoke the
+   sub-loop"; }` immediately before
+   every invocation** (round 1, each `--resume`, each recovery re-invoke) so
+   step 7's exit taxonomy can tell a status this invocation wrote from one the
+   last one left behind — and so a *failed* delete is visible rather than
+   silently turning the next exit's taxonomy into a guess. **On a failed delete,
+   do not invoke the sub-loop at all**: step 7 could not then tell this
+   invocation's verdict from the previous one's. Report it in the conversation
+   and stop, or point `--status-file` at a fresh, deletable path and continue:
 
    ```bash
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
@@ -832,9 +967,18 @@ the same terminal — converge immediately, unchanged.
    the fields from the **changelist item** you find by looking the promoted key
    up in `<status.json>`'s `round_changelists[]` on
    `[file, line, dimension, title]` (the key itself carries only those four, so
-   `description` and `suggested_fix` can come from nowhere else):
+   `description` and `suggested_fix` can come from nowhere else). **Project the
+   seed BEFORE re-anchoring the key**, and look it up on its **original**
+   (as-derived) `line`: `<status.json>` only ever holds the stale line, so a key
+   already re-anchored to the found line — or to `null` — matches nothing there,
+   and the fields it says can come from nowhere else would have to be
+   fabricated. If you have already re-anchored, look the item up on
+   `[file, dimension, title]` alone:
    `{severity: "SUGGESTION", round: 1, dimension, file, line, title, description,
-   suggested_fix, reviewer}` (the #558 schema declares `round`), with `reviewer`
+   suggested_fix, reviewer}` — where `line` is **the line you FOUND it at**, the
+   same one you re-anchor the key to, never the changelist item's stale one (a
+   seed outside the key's ±10 gather window is never raised, and step 7 would
+   then report a still-present item as promoted-but-not-reproducible) (the #558 schema declares `round`), with `reviewer`
    from that item's `reviewers[0]`, or `"promoted-by-human"` when it has none.
 
    **Keep the matched set** — every key classed matched in step 2, seeded or not
@@ -890,8 +1034,10 @@ the same terminal — converge immediately, unchanged.
 
    **A round-1 `CONVERGED` with
    a non-empty matched set is not a verdict yet** — first check that round 1's
-   `--findings-file` was the **seeded** file from step 3 and that `--promote` was
-   passed. The two answers lead opposite ways:
+   `--findings-file` was the file built by **step 4's ordered procedure, item 3**
+   (the pre-seed aggregate plus any still-present-but-unraised keys — identical
+   to the pre-seed aggregate when nothing needed seeding) and that `--promote`
+   was passed. The two answers lead opposite ways:
 
    - **Either was wrong** → this `CONVERGED` is an artifact of the slip, not a
      result. **Discard it**, fix the invocation, and re-invoke as a **fresh
@@ -919,8 +1065,17 @@ the same terminal — converge immediately, unchanged.
    - **exit 2, no status JSON written** → a genuine usage error in the
      invocation. **Stderr names the offending argument**: a missing, empty,
      non-file or wrong-shaped `--promote` path, a persisted promote path that
-     has since vanished or been rewritten badly, or a `--max-rounds` at or below
-     the resumed round. Fix the command and re-invoke.
+     has since vanished or been rewritten badly, a `--max-rounds` at or below
+     the resumed round, or `--promote` passed together with `--no-review`. Fix the command and re-invoke.
+   - **On an exit 1 or 2**, a status JSON that is neither `STALE_FINDINGS` nor
+     `ERROR` is a **LEFTOVER** — the previous invocation's, because the delete
+     above failed or was skipped. It is never this invocation's verdict: treat
+     it exactly as "no status JSON written", report in the conversation, and
+     stop. Reading a leftover round-1 `CONVERGED` as this exit's result would
+     converge the promotion phase on a run that actually failed.
+     **Exits 20 and 10-13 are not covered by this rule**: each always writes its
+     own status, so that status *is* this invocation's verdict — take the round
+     protocol (`AWAITING_FIX`) or the escalation branch, never this one.
    - **exit 1** → an operational failure, and **not necessarily the promote
      file**. A freshly written `status: "ERROR"` is a **red gate after the
      previous round's fix** — follow §3's rule (fix the gate, or abandon and
@@ -945,9 +1100,10 @@ the same terminal — converge immediately, unchanged.
    human promoted and the sub-loop fixed is still listed under **Waived
    suggestions**. Teaching `build-dossier.zsh` to merge both phases is tracked
    separately in **#1064** — it is a #563 change, not this story's. Until it lands, **say in
-   the PR body's Summary** how many suggestions were promoted and that the
-   dossier reflects the blocking phase only, so a reviewer is never misled by
-   the waived list.
+   the PR body's Summary** — per §6, which owns the count contract: **both**
+   counts plus step 4's unmatched / unverified split, and the dossier caveat
+   only when the sub-loop actually ran — so a reviewer is never misled by the
+   waived list.
 
 #### Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
@@ -990,7 +1146,8 @@ alongside the summary so the human still sees the story's full cost:
 
    It prints the typed status, the remaining blockers (severity + dimension,
    with any **possible false trip** flagged), the round history, the
-   **per-round progress table** (Critical/Warning/Suggestion, new/carried,
+   **per-round progress table** (Critical/Warning/Suggestion, a **Promoted**
+   column when any round has a promoted blocker (#995), new/carried,
    fixed-since-prior), the **convergence assessment** — an explicit, honest
    read of whether another round is likely to help — and the grants consumed
    against the soft cap (#969). Show all of it *before* the `AskUserQuestion`
@@ -1192,8 +1349,16 @@ status, once, even when the suggestion-promotion phase also ran. Running it a
 second time for the promotion phase would put two hidden blocks in one body and
 the Approver would read only the first; merging the two is a separate #563
 change (#1064, promotion step 8). When the promotion phase ran, **name in the Summary**
-how many suggestions were promoted and that the dossier covers the blocking
-phase only.
+both counts — **how many suggestions the human picked and how many the sub-loop
+actually cleared** (the size of step 4's kept **matched set** on a sub-loop
+`CONVERGED`, and `0` on the *If NONE matched* and not-reproducible terminals;
+**never** the sub-loop's total `fixed`, which counts regressions it cleared
+along the way) — plus step 4's unmatched / unverified split. They are not
+the same number: step 4's *If NONE matched* terminal converges with a non-zero
+pick count and a sub-loop that never ran, so reporting the picks alone would
+claim work that never happened. A select-none answer is `0` and `0`. Add the
+"dossier covers the blocking phase only" caveat **only when the sub-loop
+actually ran** — with no second pass there is nothing for it to be missing.
 
 **Joint closure of the story + its test-case issues (#696).** When the same-PR
 test-case lifecycle ran (Step 2's planner exited 0), the PR body carries **one

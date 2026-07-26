@@ -57,15 +57,24 @@ New interactive branch on the **`CONVERGED`** exit of the initial blocking phase
 
 1. Render the waived suggestions as a numbered list (title · `file:line` · dimension).
 2. **Multi-select** which to promote (0..N) — `AskUserQuestion` `multiSelect` for ≤4,
-   chunked / numbered-reply fallback for larger sets.
+   chunked / numbered-reply fallback for larger sets. *(Superseded during implementation —
+   the shipped rule is at most **3** suggestions per question so the fourth option carries a
+   labelled decline; see SKILL.md step 3.)*
 3. Selected suggestions are promoted to blocking via a **promotion overlay in the
-   consolidator** (mechanism A): any finding whose identity key `[file,line,dimension,title]`
-   is in the promoted set is severity-bumped to `WARNING` during consolidation for the
+   consolidator** (mechanism A). *(Superseded during implementation — the spec said "any
+   finding whose identity key `[file,line,dimension,title]` is in the promoted set"; the
+   shipped rule deliberately is NOT exact key equality: candidates are gathered on
+   `file`+`dimension`+line proximity and the verdict is title identity, so a promoted item
+   survives its own fix shifting the line. See ARCHITECTURE.md's promotion-overlay bullet.)*
+   The matched finding is severity-bumped to `WARNING` during consolidation for the
    sub-loop. The existing fix→review→converge loop then runs **unchanged**, so regressions
    from fixing a suggestion are caught exactly like any other blocker. (This reuses the
    identity-matching from epic #979 / child #983.)
-4. The promotion phase gets its **own fresh 3-round budget** (`--max-rounds 3`), with the same
-   `+3`-per-human-approval extension machinery as the blocking phase.
+4. The promotion phase passes **no `--max-rounds` override**: it inherits the loop's own
+   `MAX_REVIEW_ROUNDS` (5 since Child 1) and the same `+3`-per-human-approval extension
+   machinery as the blocking phase. *(Superseded during implementation — the spec proposed a
+   second 3-round budget constant; the shipped rule is deliberately one number for both
+   phases. See ARCHITECTURE.md "Review-loop state machine" and `SKILL.md` step 5.)*
 5. **One-shot:** new suggestions surfacing during the sub-loop are waived, not re-prompted.
    New *blockers* (regressions) are gated normally.
 6. Sub-loop converges → final `CONVERGED`. If it cannot clear the promoted items, it escalates
@@ -74,20 +83,50 @@ New interactive branch on the **`CONVERGED`** exit of the initial blocking phase
 Headless/autonomous: the branch is skipped entirely; the run converges with all suggestions
 waived, exactly as today. The loop script stays non-interactive — all interaction is
 orchestrated in `SKILL.md`, mirroring the existing interactive-extension precedent
-(`SKILL.md:669-800`) and the dependency-precheck `AskUserQuestion` precedent (`SKILL.md:120`).
+(`SKILL.md`, *Interactive extension*) and the dependency-precheck `AskUserQuestion` precedent (`SKILL.md:120`).
 
 ### Child 3 — promotion telemetry (after Child 2)
 
-Add to the terminal record's **`payload`** (`build-telemetry-record.zsh`, the
-`fixed` / `waived` block near the end). Since #1004 that script builds only the
-payload — the `telemetry/v1` envelope is closed and owned by
-`development/scripts/telemetry/emit-telemetry.zsh`, so these fields go in the
-payload, never the envelope:
+> **Superseded during implementation (#995).** This section proposed four new
+> payload fields — `suggestions_waived`, `suggestions_promoted`,
+> `suggestion_rounds`, `suggestion_phase_status`. None shipped: the phase-1 run
+> record is already on disk before the prompt is shown, so it *cannot* carry
+> facts the human has not yet supplied. **ARCHITECTURE.md's "The
+> suggestion-promotion enrichment (#995)" section is authoritative**; what
+> follows records the shipped shape.
 
-- `suggestions_waived` — distinct Low findings at first convergence.
-- `suggestions_promoted` — count the human selected.
-- `suggestion_rounds` — rounds the promotion sub-loop ran.
-- `suggestion_phase_status` — terminal status of the sub-loop (`null` when no promotion).
+The offered-vs-promoted pair is an **append-only `kind: "enrichment"` record**
+joined to the phase-1 run by `run_id`, emitted by `SKILL.md` once the human's
+multi-select answer is known, with payload
+`{event: "suggestion_promotion", suggestions_offered, suggestions_promoted}`.
+`kind: "enrichment"` already exists in the contract, so nothing changes in the
+envelope, the validator, or the `kind` enum. The schema doc (ARCHITECTURE.md's
+telemetry/v1 section) gains exactly one rule — every enrichment must carry a
+non-empty `payload.event` — which a *second* enrichment kind makes load-bearing. The join key reaches `SKILL.md`
+through a `<work-dir>/.telemetry-run-id` sidecar the loop writes on every
+terminal exit that emits a record; an absent or empty sidecar means **no
+enrichment**, never a minted id.
+
+Two markers go into the **run** payload instead:
+
+- `promotion_phase` — an always-present boolean, `true` exactly when the
+  invocation carried **or adopted** a promoted set (an adopting `--resume`
+  counts) — i.e. when it is the promotion sub-loop. The promotion sub-loop is a fresh invocation
+  with its own `.t0`, so without this it forms its own `(repo, issue, ts)` group
+  and inflates both published rates; the two documented **rate** recipes
+  therefore carry `select(.payload.promotion_phase != true)`. The mean-rounds
+  and escalation-breakdown cuts deliberately keep it.
+- `findings_by_round[].promoted` — the round's human-promoted blockers, a
+  **subset** of `by_severity.Warning`, derived from the per-item `promoted: true`
+  stamp the overlay now applies.
+
+`suggestions_waived` is not added: the existing `waived` already owns "distinct
+Low findings this loop logged", and `suggestions_offered` equals it by
+construction against the loop's **final** terminal record (`>=` against an
+earlier record of an extended loop — the union grows monotonically; see
+ARCHITECTURE.md). `suggestion_rounds` and `suggestion_phase_status` are not added
+either — the sub-loop emits its own run record carrying both, keyed by
+`promotion_phase`.
 
 Respect the three-copy severity-derivation lockstep — see the comment above
 `findings_by_round` in `build-telemetry-record.zsh`, and change

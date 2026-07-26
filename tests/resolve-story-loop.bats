@@ -430,6 +430,283 @@ assert_envelope() {
   assert_envelope "$T" success SKIPPED
 }
 
+# --- the telemetry run_id sidecar (#995, test cases #1028 / #1034) ----------
+#
+# An enrichment MUST carry the run_id of the run it enriches, and the emitter
+# only ever printed it — so before this the id was unrecoverable and any
+# promotion enrichment would have minted an orphan. The sidecar is what makes
+# the join possible; it deliberately does NOT go into the status JSON, which is
+# written before telemetry runs so a slow or broken emitter cannot delay or
+# damage the loop's primary output.
+
+@test "#1028 a terminal exit writes the EMITTED record's run_id to <work-dir>/.telemetry-run-id" {
+  T="$BATS_TEST_TMPDIR/sidecar.jsonl"
+  WD="$BATS_TEST_TMPDIR/wd"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --issue 995 --telemetry-file "$T" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  # the loop's stdout contract is untouched: EXACTLY one JSON object, the status
+  echo "$output" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # ...and the record is NOT on stdout, which capturing it could easily leak
+  run ! grep -q 'telemetry/v1' <<<"$output"
+
+  [ -s "$WD/.telemetry-run-id" ]
+  # the id must be THE emitted record's, not a fresh or fabricated one — that
+  # is the whole point, and a plausible-looking wrong id joins to nothing
+  [ "$(cat "$WD/.telemetry-run-id")" = "$(jq -r '.run_id' "$T")" ]
+  # one line, no trailing junk a `$(cat …)` consumer would carry into --run-id
+  [ "$(grep -c '' "$WD/.telemetry-run-id")" -eq 1 ]
+}
+
+@test "#1028 an emitter failure leaves the exit and status untouched, and writes NO sidecar" {
+  [ "$(id -u)" -ne 0 ] || skip "runs as root: chmod a-w cannot make the sink unwritable"
+  local BAD="$BATS_TEST_TMPDIR/nosink"
+  mkdir -p "$BAD"
+  chmod a-w "$BAD"
+  WD="$BATS_TEST_TMPDIR/wd-failed-emit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true' \
+    --telemetry-file "$BAD/sub/telemetry.jsonl"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # nothing landed in a sink, so there is nothing to join to — an id here would
+  # point at a record that does not exist
+  [ ! -e "$WD/.telemetry-run-id" ]
+}
+
+@test "#1028 a failed payload build writes no sidecar either (no record, no id)" {
+  T="$BATS_TEST_TMPDIR/nopayload-sidecar.jsonl"
+  WD="$BATS_TEST_TMPDIR/wd-nopayload"
+  local STUB_BUILDER="$BATS_TEST_TMPDIR/bad-builder2.sh"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB_BUILDER"
+  chmod +x "$STUB_BUILDER"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    RESOLVE_LOOP_PAYLOAD_BIN="$STUB_BUILDER" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true' --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ ! -e "$T" ]
+  [ ! -e "$WD/.telemetry-run-id" ]
+}
+
+@test "#1028 a fresh (non---resume) run clears a stale sidecar rather than inheriting it" {
+  # A re-used work-dir must never hand the caller the PREVIOUS run's id: the
+  # enrichment would join onto a foreign record and quietly attribute one
+  # story's promotion to another.
+  [ "$(id -u)" -ne 0 ] || skip "runs as root: chmod a-w cannot make the sink unwritable"
+  WD="$BATS_TEST_TMPDIR/wd-stale"
+  mkdir -p "$WD"
+  printf 'review-loop-1-stale\n' > "$WD/.telemetry-run-id"
+  local BAD="$BATS_TEST_TMPDIR/nosink-stale"
+  mkdir -p "$BAD"
+  chmod a-w "$BAD"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true' \
+    --telemetry-file "$BAD/sub/telemetry.jsonl"
+  [ "$status" -eq 0 ]
+  # the emit failed, so nothing rewrote it — and the stale id is gone, not kept
+  [ ! -e "$WD/.telemetry-run-id" ]
+}
+
+@test "#1028 a --resume does not clear the sidecar at START — only a fresh run does" {
+  # The start-of-run clear is guarded by `(( ! resume ))` on purpose: a resume
+  # continues the same loop. The observable case is a resume that exits
+  # NON-TERMINALLY — AWAITING_FIX emits no telemetry, so nothing rewrites the
+  # sidecar and only the guard can explain a surviving id. (Every TERMINAL exit
+  # now clears immediately before its own emission attempt, so this is the one
+  # path where the start-of-run guard is visible at all.)
+  WD="$BATS_TEST_TMPDIR/wd-resume-keeps"
+  T="$BATS_TEST_TMPDIR/resume-keeps.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 \
+    --telemetry-file "$T" --issue 995 \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  local first_id
+  first_id=$(cat "$WD/.telemetry-run-id")
+  [ -n "$first_id" ]
+
+  # step mode, blockers remain, budget left -> AWAITING_FIX (exit 20): a
+  # non-terminal exit, so no telemetry is emitted on it. The finding must be
+  # DISTINCT from round 1's, or the cross-round match trips non-convergence and
+  # the run exits terminally instead.
+  local FIND="$BATS_TEST_TMPDIR/resume-keeps-findings.json"
+  printf '%s' '[{"severity":"CRITICAL","dimension":"tests","file":"app.py","line":500,"title":"a different blocker","description":"d","reviewer":"r"}]' > "$FIND"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 5 \
+    --telemetry-file "$T" --issue 995 --findings-file "$FIND"
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  # the id is STILL there, unchanged: the resume did not clear it at start
+  [ -s "$WD/.telemetry-run-id" ]
+  [ "$(cat "$WD/.telemetry-run-id")" = "$first_id" ]
+}
+
+@test "#1028 a failed sidecar WRITE stays swallowed: exit, status and stderr are untouched" {
+  # The branch the brace-group + 2>/dev/null exist for — the emitter SUCCEEDED
+  # and the record landed, but the sidecar path cannot be opened. Every other
+  # negative test makes the EMIT fail instead, so a regression dropping the
+  # redirection (leaking an open-failure onto the loop's real stderr, which
+  # callers parse alongside the status JSON) or the `|| true` would slip past.
+  WD="$BATS_TEST_TMPDIR/wd-write-fail"
+  T="$BATS_TEST_TMPDIR/write-fail.jsonl"
+  mkdir -p "$WD"
+  # a DIRECTORY at the sidecar path: `print > dir` cannot open it. Planted
+  # before a --resume so the fresh-start `rm -f` (which also refuses a
+  # directory) is not what is under test here.
+  mkdir -p "$WD/.telemetry-run-id"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 \
+    --telemetry-file "$T" --issue 995 \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  # this FRESH run also exercises the clear's failure branch (rm -f refuses the
+  # directory) — and the clear is deliberately NOT silent, because a silent
+  # failure leaves a foreign story's id in place with nothing to notice it
+  contains "$stderr" "could not clear the stale telemetry run-id sidecar"
+  [ -d "$WD/.telemetry-run-id" ]
+
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --telemetry-file "$T" --issue 995 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  # the loop is unaffected: its exit, its status JSON...
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # ...and the record still landed (the emit succeeded; only the sidecar failed)
+  [ "$(grep -c '' "$T")" -eq 2 ]
+  # ...and nothing about the sidecar leaked to stderr
+  lacks "$stderr" ".telemetry-run-id"
+}
+
+@test "#1034 a FAILED emission on a later terminal exit leaves NO id, never the earlier one" {
+  # The sidecar is cleared at fresh-run start AND immediately before each
+  # emission attempt, so it holds this exit's id or nothing. Without the second
+  # clear, an extended run whose later emission fails keeps the EARLIER exit's
+  # id — a reader then finds a non-empty sidecar, the "no id, no enrichment"
+  # valve never fires, and the enrichment joins a superseded record.
+  [ "$(id -u)" -ne 0 ] || skip "runs as root: chmod a-w cannot make the sink unwritable"
+  WD="$BATS_TEST_TMPDIR/wd-stale-after-fail"
+  T="$BATS_TEST_TMPDIR/stale-after-fail.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 \
+    --telemetry-file "$T" --issue 995 \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  [ -s "$WD/.telemetry-run-id" ]                      # first exit wrote an id
+
+  # resume into a CONVERGED exit whose emission cannot land
+  local BAD="$BATS_TEST_TMPDIR/nosink-after-fail"
+  mkdir -p "$BAD"
+  chmod a-w "$BAD"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --telemetry-file "$BAD/sub/telemetry.jsonl" --issue 995 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # the earlier id must be GONE — not left to be joined to the wrong record
+  [ ! -e "$WD/.telemetry-run-id" ]
+}
+
+@test "#1034 an extended loop leaves the LAST terminal exit's run_id in the sidecar" {
+  # escalate -> grant -> --resume -> converge. SKILL.md reads the sidecar on the
+  # CONVERGED exit, so that is the id it must find; the earlier escalation's id
+  # must have been overwritten, not kept.
+  WD="$BATS_TEST_TMPDIR/wd-extended-sidecar"
+  XT="$BATS_TEST_TMPDIR/extended-sidecar.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 \
+    --telemetry-file "$XT" --issue 995 \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  local first_id
+  first_id=$(cat "$WD/.telemetry-run-id")
+  [ "$first_id" = "$(jq -r 'select(.payload.status == "BUDGET_EXHAUSTED") | .run_id' "$XT")" ]
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --telemetry-file "$XT" --issue 995 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+
+  local final_id
+  final_id=$(cat "$WD/.telemetry-run-id")
+  [ "$final_id" != "$first_id" ]
+  [ "$final_id" = "$(jq -r 'select(.payload.status == "CONVERGED") | .run_id' "$XT")" ]
+  # and it really is joinable: the record it names is in the sink
+  [ "$(jq -s --arg id "$final_id" '[.[] | select(.run_id == $id)] | length' "$XT")" -eq 1 ]
+}
+
+# --- promotion_phase in the status JSON (#995, test case #1033) -------------
+
+@test "#995 --no-review with a VALID --promote is refused before anything is emitted" {
+  # The three existing --no-review --promote tests all pass an absent/empty/
+  # flag-shaped value, so _need_val answers them during argv parsing and none
+  # ever reaches the guard. Only a VALID file exercises it — and the stake is
+  # telemetry: the fast path reaches emit_and_exit ABOVE _validate_promote, so
+  # without the guard this invocation emits a SKIPPED record stamped
+  # promotion_phase:true from a promote file nothing ever checked.
+  P="$BATS_TEST_TMPDIR/valid-promote.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  T="$BATS_TEST_TMPDIR/no-review-promote.jsonl"
+  WD="$BATS_TEST_TMPDIR/wd-no-review-promote"
+  run zsh "$S" --repo "$R" --no-review --promote "$P" \
+    --telemetry-file "$T" --work-dir "$WD"
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote is meaningless with --no-review"
+  # nothing was emitted, and no join key was left behind — a guard moved below
+  # the SKIPPED emit would fail exactly here
+  [ ! -e "$T" ]
+  [ ! -e "$WD/.telemetry-run-id" ]
+}
+
+@test "#1033 the status JSON carries promotion_phase — true under --promote, false without" {
+  P="$BATS_TEST_TMPDIR/phase-promote.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  # without the flag: a phase-1 run, explicitly false rather than absent
+  suggestion_loop
+  [ "$status" -eq 0 ]
+  # STRICT equality, not `jq -r … = "false"`: jq -r prints the boolean false and
+  # the STRING "false" identically, while the documented metric predicate
+  # (select(.payload.promotion_phase != true)) is a strict JSON comparison — so a
+  # --argjson -> --arg slip would keep every promotion record in both published
+  # rates with a type-blind suite still green
+  echo "$output" | jq -e '.promotion_phase == false' >/dev/null
+  [ "$(echo "$output" | jq 'has("promotion_phase")')" = "true" ]
+
+  # with it: the promotion sub-loop, which the documented metrics exclude
+  suggestion_loop --promote "$P"
+  [ "$status" -eq 12 ]
+  echo "$output" | jq -e '.promotion_phase == true' >/dev/null
+}
+
+@test "#1033 promotion_phase reaches the telemetry payload, not just the status JSON" {
+  # the status JSON is only the carrier; the metric reads .payload.promotion_phase
+  P="$BATS_TEST_TMPDIR/phase-payload.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  T="$BATS_TEST_TMPDIR/phase.jsonl"
+  suggestion_loop --promote "$P" --telemetry-file "$T" --issue 995
+  [ "$status" -eq 12 ]
+  jq -e '.payload.promotion_phase == true' "$T" >/dev/null
+
+  T2="$BATS_TEST_TMPDIR/phase1.jsonl"
+  suggestion_loop --telemetry-file "$T2" --issue 995
+  [ "$status" -eq 0 ]
+  jq -e '.payload.promotion_phase == false' "$T2" >/dev/null
+}
+
 @test "a non-numeric --issue is a usage error, not a silently dropped record (#1004)" {
   # it rides into the envelope, whose contract is a non-negative integer; the
   # emitter would reject it behind `|| true`, costing the whole record
@@ -891,6 +1168,34 @@ EOF
   [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
   [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
   [ "$(echo "$output" | jq -r '.round_changelists[0].blocking[0].priority')" = "High" ]
+  # #995: the per-item stamp must survive INTO the loop's status JSON — that is
+  # the single link between the consolidator that writes it and the three
+  # surfaces that read it (all of whose tests otherwise run on hand-written
+  # fixtures). A loop that reshaped or key-filtered the changelist would leave
+  # every fixture-based test green while production rendered no label at all.
+  echo "$output" | jq -e '.round_changelists[0].blocking[0].promoted == true' >/dev/null
+  echo "$output" | jq -e '.final_changelist.blocking[0].promoted == true' >/dev/null
+}
+
+@test "#1029 a reviewer-raised blocker in the same round is NOT stamped promoted" {
+  # the stamp must mark the human's pick alone; stamping everything would make
+  # the label meaningless in all three surfaces
+  P="$BATS_TEST_TMPDIR/promote-mixed.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  loop --promote "$P" --max-rounds 1 \
+    --review-cmd 'printf "%s" '"'"'[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d","reviewer":"q"},{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":80,"title":"unchecked exit","description":"d","reviewer":"b"}]'"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq '[.round_changelists[0].blocking[] | select(.promoted == true)] | length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '[.round_changelists[0].blocking[] | select(.promoted == true)][0].title')" = "extract the magic number" ]
+  # assert over the COMPLEMENT, and bound the round: `[…] | any` over an empty
+  # array is false, so a select that matches nothing (a dropped blocker, an
+  # edited fixture title) would silently stop asserting anything
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 2 ]
+  [ "$(echo "$output" | jq '[.round_changelists[0].blocking[] | select(.promoted != true) | has("promoted")] | any')" = "false" ]
+  [ "$(echo "$output" | jq '[.round_changelists[0].blocking[] | select(.title == "unchecked exit")] | length')" -eq 1 ]
 }
 
 @test "#1021 promote: the overlay is forwarded on round 2+, not applied once" {
@@ -1029,4 +1334,41 @@ EOF
   [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
   [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 1 ]
   [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 0 ]
+  # #995: promotion_phase is derived from $promote, so on THIS path it depends
+  # on the adoption having run first — the resume carried no --promote. Its
+  # record is the one that would otherwise be counted as a phase-1 story.
+  echo "$output" | jq -e '.promotion_phase == true' >/dev/null
+}
+
+@test "#1033 an adopting --resume that CONVERGES still records promotion_phase true" {
+  # the sub-loop's SUCCESS record is the dangerous one: counted as phase-1 it
+  # would credit the story with a convergence it already had, in both published
+  # rates. Round 1 promotes and exhausts; the resume's panel finds nothing.
+  P="$BATS_TEST_TMPDIR/promote-adopt-converge.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  T="$BATS_TEST_TMPDIR/adopt-converge.jsonl"
+  WD="$BATS_TEST_TMPDIR/wd-adopt-converge"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --promote "$P" --max-rounds 1 \
+    --telemetry-file "$T" --issue 995 \
+    --review-cmd 'printf "%s" '"'"'[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d","reviewer":"q"}]'"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+
+  # the resume drops --promote on purpose: the adoption branch is the realistic
+  # path, and it is what promotion_phase must survive. --separate-stderr because
+  # the adoption prints a notice there, which bats would otherwise merge into
+  # $output ahead of the status JSON.
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --telemetry-file "$T" --issue 995 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  contains "$stderr" "adopting the run's promoted set"
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  echo "$output" | jq -e '.promotion_phase == true' >/dev/null
+  # ...and it reaches the payload, which is what the metric predicate reads
+  jq -es 'all(.[]; .payload.promotion_phase == true)' "$T" >/dev/null
 }

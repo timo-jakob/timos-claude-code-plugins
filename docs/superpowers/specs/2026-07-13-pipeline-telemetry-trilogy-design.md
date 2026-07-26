@@ -89,6 +89,12 @@ Rules:
   rule).
 - **`run_id`** is `<pipeline>-<epoch>-<4 hex rand>`; `parent_run_id` links
   nested runs (review-loop inside resolve-issue).
+- **Every `kind: "enrichment"` record carries a non-empty `payload.event`**
+  naming which enrichment it is — conventionally `pr_outcome` (epic 3 below) or
+  `suggestion_promotion` (#995). `kind` says *that* a record is an enrichment;
+  `event` says *which* one, and each pass's work-finding scan joins on its own
+  event. The validator does **not** enforce it (`payload` is open by design), so
+  it is a rule each emitting pass keeps.
 - **Emission is shared code, not convention.** One emit script + one contract
   validator at `development/scripts/telemetry/` (new plugin-level shared home,
   referenced by skills via the family's `<skill-base-dir>` placeholder —
@@ -165,17 +171,24 @@ joined by `run_id`.
 
 - **Mechanism:** an enrichment pass (skill or script; `/loop`-able, on-demand)
   scans run records with `pr != null` that lack a **`success`** enrichment
-  record, queries `gh` for settled facts, and appends one enrichment record per
-  run whose **`payload`** carries `merged` (bool), `merge_ts`,
+  record **of its own `payload.event`**, queries `gh` for settled facts, and appends one enrichment record per
+  run whose **`payload`** carries `event: "pr_outcome"` (the required enrichment
+  qualifier — see below), `merged` (bool), `merge_ts`,
   `ci_rounds_to_green`, `approver_verdict`, `reverted`. Those are payload keys,
   not envelope keys — the envelope is closed at 14, so a top-level reading would
   be rejected by the shared validator.
   Keying the scan on a *successful* enrichment is what makes a `failed` one
   retryable: a transient `gh` error must not permanently mark the run enriched.
+  The `payload.event` qualifier became load-bearing with #995: the review-loop
+  sink now also carries a `suggestion_promotion` enrichment (same `kind`, same
+  `pipeline`, `outcome: "success"`), so an unqualified predicate would read it
+  as *this run's PR facts are settled* and orphan them permanently. Name this
+  pass's own event and filter on it.
 - **Not-yet-settled runs are SKIPPED, not enriched.** A run whose PR is still
   open gets **no** enrichment record. Because enrichment is append-only and the
-  scan predicate is "lacks a `success` enrichment record", writing a `success`
-  record early would mark the run enriched forever and permanently lose the
+  scan predicate is "lacks a `success` enrichment record **of its own
+  `payload.event`**", writing a `success` record early would mark the run
+  enriched forever and permanently lose the
   merge and CI facts it was waiting for. **An open PR is the only skip
   condition**: once the PR is merged or closed the run counts as settled and is
   enriched on the next scan. `reverted` is captured *as of enrichment time* — a

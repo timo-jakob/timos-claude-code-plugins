@@ -56,9 +56,21 @@ changelist with:
   **fully disjoint** => a **false trip** (`false_trip: true`,
   `non_converging: false`) that the loop AUTO-CONTINUES on (never an escalation).
   Each carries `matched_prior: {line, title}`. **Preserve `matched_prior`,
-  `possible_false_trip`, AND `false_trip` verbatim on any item that carries
-  them** — never re-derive the verdict, and never re-flag a disjoint-title match
-  as `non_converging` (that reintroduces the #976 false escalation).
+  `possible_false_trip`, `false_trip`, AND `promoted` verbatim on any item that
+  carries them** — never re-derive the verdict, and never re-flag a
+  disjoint-title match as `non_converging` (that reintroduces the #976 false
+  escalation).
+- **promotion (#994/#995)** — an item the human promoted from a waived
+  suggestion carries `promoted: true` (the overlay raises it to
+  `WARNING`/`High` before any classification runs). Dropping the stamp makes it
+  indistinguishable from a reviewer-raised Warning, and all three surfaces that
+  read it — the telemetry payload's per-round `promoted` count, `progress.md`'s
+  `promoted:` term and `- promoted suggestion:` lines, and the escalation's
+  `Promoted` column and `[<dimension>/Warning (promoted)]` bullets — then
+  silently report 0. Never add the stamp to an item **no constituent carried**
+  either — only the engine's overlay decides what was promoted. (A merged item
+  counts as carrying it when **any** constituent did — see the merge rule below;
+  that is the scope of this rule, not an exception to it.)
 
 Take the engine's output as the source of truth for all of the above.
 
@@ -78,8 +90,21 @@ flagging, never inventing or dropping a real finding**:
    `false_trip`, and `file`/`line`, so the flag and the
    escalation's at-line/file-wide rendering stay paired with the match they
    describe (#913/#969/#983) — never OR the flags across constituents and never
-   drop them. Read the cited code (`Read`/`Grep`) when you need to
-   confirm they are truly the same issue before merging.
+   drop them. `promoted` is the one flag that DOES carry across: a merged item
+   keeps `promoted: true` if **any** constituent carried it (#995), because the
+   human asked for that defect and merging it into a co-described one must not
+   un-ask it. **Never produce a merged item that is both `Critical` and
+   `promoted: true`** — in either merge direction, since merging is symmetric:
+   the
+   promoted count is contracted everywhere as a **subset of the round's
+   Warnings** (the telemetry payload, `progress.md`, the escalation's Promoted
+   column all count `promoted == true` across the whole blocking array), so a
+   Critical carrying the stamp makes `Warning − Promoted` go negative for every
+   downstream reader. The engine can never produce that — it stamps only Lows it
+   raises to `WARNING` — so this merge is the only way it could happen. Leave
+   the two as separate blocking items (both get fixed either way) and note the
+   relationship in their descriptions. Read the cited code (`Read`/`Grep`) when
+   you need to confirm they are truly the same issue before merging.
 2. **Conflict confirmation.** The engine flags only co-located
    performance-vs-code_quality pairs. Promote a genuine opposing pair the
    heuristic missed (e.g. recommendations a few lines apart that cannot both be
@@ -109,7 +134,9 @@ your judgment edits applied on top:
        identical but "possible_false_trip": true (no exact-title match). A false
        trip (#983) carries: "non_converging": false, "false_trip": true,
        "matched_prior": {…}, "possible_false_trip": true — it stays in blocking[]
-       (still needs fixing) but never escalates. */
+       (still needs fixing) but never escalates. A HUMAN-PROMOTED item (#995)
+       additionally carries "promoted": true, verbatim from the engine — it is
+       otherwise an ordinary High blocker. */
   ],
   "suggestions": [ /* Low items, logged, never loop */ ],
   "conflicts": [

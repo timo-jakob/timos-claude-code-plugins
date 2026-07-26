@@ -52,6 +52,18 @@
 #                 a withheld number beats a confidently wrong one.
 #     --payload   FILE (or `-` for stdin) holding a JSON OBJECT, embedded
 #                 unmodified as `payload`. Omitted → {}.
+#                 On --kind enrichment the payload MUST carry a non-empty
+#                 `event` naming WHICH enrichment this is (conventionally
+#                 `suggestion_promotion` (#995) or `pr_outcome`). `kind` says
+#                 THAT a record is an enrichment; `event` says which one, and
+#                 consuming passes find their work by looking for runs that lack
+#                 a success enrichment OF THEIR OWN event — so an eventless
+#                 enrichment is unfindable by its own pass and reads to every
+#                 other pass as "already enriched". This script does NOT enforce
+#                 it and neither does the validator (`payload` is open by
+#                 design, and closing it for one key would make every pipeline's
+#                 payload the contract's business); it is a rule each emitting
+#                 pass keeps. See ARCHITECTURE.md, "The telemetry/v1 contract".
 #
 # Sink precedence: --telemetry-file > <repo-dir>/.claude/telemetry/telemetry.jsonl
 # (child (d) inserts --telemetry-dir between the two.) The record is printed to

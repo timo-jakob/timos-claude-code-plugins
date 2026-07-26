@@ -1282,8 +1282,24 @@ reliable but the merging needs semantics:
   title identity — an exact normalized title, a shared significant token, or a
   tokenless side promotes; **fully disjoint** titles do not. Exact-line equality
   would un-promote an item the moment its own fix shifted the line, so the
-  sub-loop could "converge" without doing the work the human asked for. The
-  overlay is **one-to-one**: each promote key raises **at most one** item — its
+  sub-loop could "converge" without doing the work the human asked for.
+  A raised item is **stamped `promoted: true`** (#995) — a direct per-item flag
+  with **no** stamp gate (the `false_trip` precedent), so an absent flag simply
+  counts 0 and a run without `--promote` stays byte-identical. The stamp is what
+  makes a promoted item *readable* as such everywhere downstream, where it would
+  otherwise be indistinguishable from a reviewer-raised Warning: the per-round
+  `promoted` count in the telemetry payload, the `promoted:` term and the
+  per-item `- promoted suggestion:` line in `progress.md`, and the `Promoted`
+  column plus `[<dimension>/Warning (promoted)]` bullets in the escalation. Both
+  the `promoted:` term and the `Promoted` column are rendered **only when there
+  is one** (the column table-wide, since a column present in one row and absent
+  in another is not a table) — which is what keeps a run without `--promote`
+  byte-identical to before the label existed. All
+  three read the stamp with the **identical** expression
+  (`[ $blk[] | select(.promoted == true) ] | length`) — the same three-copy
+  lockstep the stamped/carried/new/fixed derivation carries; change them
+  together. The count is a **subset of the Warning count**, never added to it.
+  The overlay is **one-to-one**: each promote key raises **at most one** item — its
   nearest eligible candidate — and claims it, so neither can two keys take the
   same item nor can one key fan out across several neighbouring Lows. That bound
   matters because the verdict is deliberately lenient (a shared token, or a
@@ -1291,7 +1307,9 @@ reliable but the merging needs semantics:
   title-compatible Low in the window as blocking work the human never picked.
   The overlay only ever **raises a finding the round already reported** — it never
   *injects* one, which is why a promotion sub-loop's first round is seeded with
-  **only those promoted keys the fresh panel did not itself raise** (a key the
+  **only those promoted keys the fresh panel did not itself raise and that were
+  then confirmed still present in the cited file** — a key that is confirmably
+  gone (`unmatched`) or unconfirmable (`unverified`) is never seeded (a key the
   panel already raised needs no seed — the overlay raises the panel's own item,
   at its current line; seeding a duplicate from the blocking phase's stale line
   would survive dedup and raise the same defect twice). Each key is classified
@@ -1316,12 +1334,20 @@ reliable but the merging needs semantics:
   judgment the exact-key heuristics can't: merging findings that describe the
   same defect in different words / across dimensions, and confirming or demoting
   conflicts by reading the cited code. It never re-grades a reviewer's severity
-  and never invents or drops a finding.
+  and never invents or drops a finding. Two promotion rules bound the merge
+  (#995): a merged item **keeps `promoted: true` if any constituent carried it**
+  (the human asked for that defect; merging it into a co-described one must not
+  un-ask it), and it must **never end up both `Critical` and `promoted`** — in
+  either direction — because the `promoted` count is contracted above as a
+  subset of the round's Warnings, so such an item would make
+  `Warning − Promoted` negative for every reader. The two stay separate blocking
+  items instead; both get fixed either way.
 
 Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts,
 false_trips}, blocking[], suggestions[], conflicts[], non_converging,
 false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
-carries `false_trip: bool` (#983). The `blocking` array (Critical first, then
+carries `false_trip: bool` (#983) and, when the overlay raised it,
+`promoted: true` (#995). The `blocking` array (Critical first, then
 High) is what the loop must clear; `suggestions` ride into the dossier (#563) and
 never loop **unless a human promotes them** via `--promote` (#994), which moves
 the matched ones into `blocking` before any classification runs; `false_trips[]`
@@ -1354,7 +1380,9 @@ them is **not** a supported pattern, because it hides every round from the user.
 Every round appends a block to `<work-dir>/progress.md`
 (`render-progress-block.zsh`), which per #969 carries judgment-grade counts:
 the severity split (critical/warning; the suggestions total is the Suggestion
-count), new vs carried, fixed-since-prior, the cumulative blocking trend, and
+count), a `promoted: N` term inside that split plus one `- promoted suggestion:`
+line per human-promoted blocker — both rendered only when there is one (#995),
+new vs carried, fixed-since-prior, the cumulative blocking trend, and
 a per-blocker *possible false trip* line whenever the consolidator flagged a
 carried match with no shared non-empty prior title (#913/#969) — so the human can read "are we
 actually clearing things?" straight off the tail.
@@ -1370,8 +1398,14 @@ type from dispatch ⇒ `ESCALATE_AMBIGUOUS`. Each state is a distinct exit code
 "blockers remain, budget left, fix in-session then `--resume`"; 10 ambiguous;
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
-status JSON (`{status, rounds, max_rounds, repo_type, review_skill,
-escalation_reasons, history, round_changelists, final_changelist}`).
+status JSON (`{status, rounds, max_rounds, promotion_phase, repo_type,
+review_skill, escalation_reasons, history, round_changelists,
+final_changelist}`), where `promotion_phase` (#995) is an **always-present**
+boolean — `true` exactly when the invocation **carried or adopted** a promoted
+set, i.e. when it is the promotion sub-loop (a `--resume` that omits `--promote`
+and re-adopts the work-dir's `.promote` records `true` too) — that
+`build-telemetry-record.zsh` copies into the payload so the documented
+convergence metrics can exclude a promotion pass.
 Step mode adds one further exit-2 semantic, `STALE_FINDINGS` (#974): a
 `--findings-file` that is missing/empty on `--resume`, byte-identical to the
 round just consumed, or aliased to the round's own dispatch `findings_path`
@@ -1381,7 +1415,10 @@ never leaving the prior verdict to be misread) but non-terminal (no telemetry
 record, no progress `**Final:**` line; it does append a `**Refused (round N):**`
 line to `progress.md`), because the caller re-invokes with the round's real
 findings. `--no-review` yields `SKIPPED` — the fast path that bypasses the
-loop.
+loop; combining it with `--promote` is refused as a usage error (**exit 2**),
+because nothing is consolidated for an overlay to reach and the fast path would
+otherwise stamp `promotion_phase: true` on a `SKIPPED` record from a promote
+file it never validated.
 
 **Suggestion promotion (#994).** `--promote FILE` is **pass-through in substance**: the
 loop never *interprets* the promoted set — it validates the file's shape up
@@ -1538,10 +1575,32 @@ Rules that carry the contract's weight:
   means the facts were settled and `failed` that the query errored; a run whose
   facts are **not yet settled** gets no enrichment record at all, rather than one
   full of nulls. Because the enrichment pass finds work by looking for runs that
-  lack a **`success`** enrichment (among those carrying a `pr`), a `failed` one
+  lack a **`success`** enrichment **of its own `payload.event`**, a `failed` one
   is retryable rather than a
   tombstone — otherwise one transient `gh` error would orphan that run's facts
-  permanently.
+  permanently. The `payload.event` qualifier is load-bearing once **any stream
+  carries more than one enrichment kind**: the review-loop's
+  `suggestion_promotion` enrichment (#995) is also `kind: "enrichment"` on
+  `pipeline: "review-loop"` with `outcome: "success"`, so an unqualified "has a
+  success enrichment" test would read it as *this run's facts are already
+  settled* and orphan them for good. (The PR-facts pass additionally scopes
+  itself to runs carrying a `pr`, which no pipeline sets today — so read the
+  collision as the general rule it is, not as a claim about that scoping.)
+  `kind` says **that** a record is an enrichment; `payload.event` says **which**
+  one — one marker per level, never two copies of the same fact (and never a
+  top-level `phase` key: the envelope is closed, so that is a contract
+  violation the validator rejects).
+- **Every `kind: "enrichment"` record MUST carry a non-empty `payload.event`**
+  naming its kind. It is the qualifier the work-finding query above joins on, so
+  an enrichment without one is both unfindable by its own pass and invisible to
+  every other pass's "already enriched?" test — the orphaning failure the
+  qualifier exists to prevent, reached from the emitting side instead of the
+  querying one. Conventional values: `suggestion_promotion` (#995) and
+  `pr_outcome` (epic 3's PR-facts pass). The **validator does not enforce it**:
+  `payload` is open by design, and closing it for one key would make every
+  pipeline's payload the contract's business. So it is a rule each emitting pass
+  keeps, and each consuming query names its own event rather than matching
+  `kind` alone.
 - **`pipeline` is an open identifier**, not a closed enum: any
   `[A-Za-z0-9._-]+`. Adding a pipeline needs no schema change and no version
   bump. The values listed above are conventional — the emitter enforces only the
@@ -1641,14 +1700,21 @@ there now). The payload holds `status`, `escalation`
 later; so a `null` here means "not an escalation", **not** "succeeded", and the
 `escalation` breakdown's null bucket silently contains failed `ERROR` runs —
 read `outcome` when you want success/failure), `rounds`, `max_rounds`,
-`findings_by_round`, `convergence_assessment`, and `fixed` (blockers
-found and cleared) vs `waived` (Low suggestions logged). Each `findings_by_round` entry
+`promotion_phase`, `findings_by_round`, `convergence_assessment`, and `fixed`
+(blockers found and cleared) vs `waived` (Low suggestions logged).
+`promotion_phase` (#995) is an always-present boolean copied from the status
+JSON — `true` exactly when the invocation carried **or adopted** a promoted set,
+i.e. when it is the promotion sub-loop (an adopting `--resume` counts) — and it is what the two documented rate metrics below
+exclude. Each `findings_by_round` entry
 (#969) carries the `round` number it describes (the key every per-round join
 uses), plus `by_severity` in the **user-facing vocabulary** —
 `Critical` / `Warning` / `Suggestion`, the same words the human reads in
 `progress.md` and the escalation (internally `Warning` = priority High,
-`Suggestion` = the Low bucket) — plus `by_dimension`, the per-round
-`new` / `carried` / `fixed_from_prev` counts, and `false_trips` (#983 — the
+`Suggestion` = the Low bucket) — plus `promoted` (#995 — the round's
+human-promoted blockers, a **subset of `by_severity.Warning`** and never added
+to it, derived from the per-item `promoted: true` stamp with **no** stamp gate,
+so a changelist that predates the stamp simply counts 0), `by_dimension`, the
+per-round `new` / `carried` / `fixed_from_prev` counts, and `false_trips` (#983 — the
 count of identity-cleared auto-continued false trips that round, `null` on a
 pre-#983 changelist that could not compute it), recorded for **every** round
 including the `AWAITING_FIX` ones (`new`/`carried` are `null` only on
@@ -1679,9 +1745,11 @@ RL='[.[] | select(.kind == "run" and .pipeline == "review-loop")]'
 # records that converged (failed ERROR runs stay in the denominator). NOT a first-pass rate: an extended loop (escalate → grant →
 # --resume) emits a record per terminal exit, so its post-grant CONVERGED
 # counts here too. SKIPPED (--no-review) records reviewed nothing, so the
-# expression drops them from the denominator. Read the figure as per-record,
-# not per-loop.
+# expression drops them from the denominator, and so is a PROMOTION sub-loop
+# (#995): a second pass over ONE story, not a story of its own. Read the figure
+# as per-record, not per-loop.
 jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
+  | map(select(.payload.promotion_phase != true))
   | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$S"
 # mean rounds to converge (CONVERGED records only — like wall_s, the rounds of
 # consecutive records of one extended loop overlap, so never average over all)
@@ -1695,7 +1763,14 @@ jq -s "$RL"' | group_by(.payload.escalation) | map({(.[0].payload.escalation | t
 A **promotion sub-loop** (#994) is a second full invocation with its own `.t0`
 and the same `--issue`, so an interactive story that promotes anything
 contributes an additional terminal record — a second multiplicity source, on top
-of the extended-loop case, that these recipes read as another group.
+of the extended-loop case. Its own `.t0` is exactly why it cannot be absorbed by
+the `(repo, issue, ts)` grouping the extended-loop case relies on: a **new `ts`**
+makes it its own group, inflating the per-record rate *and* adding a second
+group for one story to the first-pass rate. Hence the one predicate both rate
+recipes carry, `select(.payload.promotion_phase != true)` (#995) — the sub-loop's
+rounds are polish on an already-converged story, not a story's convergence. The
+mean-rounds and escalation-breakdown cuts keep it: those describe *what the loop
+did*, and a promotion pass genuinely did those rounds.
 
 A true **first-pass** rate needs per-loop grouping, which the v1 envelope does
 not key directly — group by `(repo, issue, ts)` (which groups one loop
@@ -1712,6 +1787,7 @@ first-pass success — precisely what the metric must exclude.
 
 ```bash
 jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
+  | map(select(.payload.promotion_phase != true))
   | group_by([.repo, .issue, .ts]) | map(min_by(.wall_s))
   | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$S"
 ```
@@ -1719,6 +1795,69 @@ jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
 The cross-pipeline cut needs no payload at all — that is what the 4-value
 `outcome` enum buys — but it still needs the `kind` filter:
 `jq -s '[.[] | select(.kind == "run")] | group_by(.outcome) | map({(.[0].outcome): length}) | add' "$S"`.
+
+### The suggestion-promotion enrichment (#995)
+
+`waived` answers *how many Low findings did the loop log?* — it can never answer
+*did a human act on them?*, because the phase-1 run record is on disk before the
+prompt is ever shown. That fact is recorded as an **append-only enrichment**
+joined to the run, emitted by `resolve-issue`'s `SKILL.md` once the human's
+multi-select answer is known:
+
+```json
+{"schema":"telemetry/v1","kind":"enrichment","run_id":"review-loop-1753400000-8f3a",
+ "parent_run_id":null,"ts":1753400420,"repo":"owner/name","repo_type":"shell",
+ "pipeline":"review-loop","issue":995,"pr":null,"outcome":"success",
+ "wall_s":null,"tokens":null,
+ "payload":{"event":"suggestion_promotion","suggestions_offered":4,"suggestions_promoted":2}}
+```
+
+It uses `kind: "enrichment"` exactly as the contract already defines it — **no
+envelope key, no validator change and no new `kind`**; the contract above gains
+only the `payload.event` rule that a *second* enrichment kind makes load-bearing — with `--run-id` (the join key, hence
+required), **no** `--wall-s`, and an `outcome` describing *the enrichment event*.
+The `run_id` comes from the loop's `<work-dir>/.telemetry-run-id` sidecar, which
+every terminal exit clears and then rewrites from the record it emitted — so it
+holds the id of that exit's record, or **nothing** when the emission failed (a
+stale id would otherwise be joined to a superseded record, and the caller's
+"no id, no enrichment" guard would never fire); **an absent or empty
+sidecar means no enrichment at all**, never a minted id — that would validate
+cleanly and be permanently orphaned.
+
+**Emission gate: exactly when the promotion prompt was presented** (interactive,
+and at least one waived suggestion). A headless run, or one with nothing to
+offer, gets **no record**, keeping its sink identical to before the feature.
+Selecting *none* is a **settled** fact and does get one, with
+`suggestions_promoted: 0` — the single most informative datum for the question
+the enrichment exists to answer.
+
+**One owner per fact — never sum these three.** `waived` in a phase-1 run
+payload means **distinct Low findings this loop logged**, not *never acted on*. A
+promoted item therefore legitimately appears as `waived` in the phase-1 run
+record, again as `suggestions_promoted` in the promotion enrichment, and — once
+its fix lands — as `fixed` in the promotion sub-loop's own run record. These are
+three different facts about the same item and **must never be summed**. `waived`
+is the single owner of "distinct Low findings logged"; `suggestions_offered` owns
+"how many the human was shown", equals `waived` by construction (same cross-round
+union, same `[file, line, dimension, title]` identity) and is repeated on the
+enrichment only so the enrichment stands alone without a join.
+ If they ever
+disagree, the phase-1 `waived` is authoritative and the difference is a bug
+signal — the sidecar names the exit's own record or nothing, so there is no
+join-to-a-superseded-record case to excuse it.
+
+`suggestions_promoted` owns **how many the human picked** — recorded at answer
+time, and therefore *before* the skill's step-4 matching classifies each key
+against the sub-loop's first panel. It is deliberately **not** a count of items
+that entered the sub-loop: every key can fall out `unmatched`/`unverified` and
+the run converges with nothing promoted, so a non-zero `suggestions_promoted`
+with no promotion-phase run record at all is a correct, expected pairing. Read it
+as *the human's answer*, never as work done — and never divide the promotion
+sub-loop's `fixed` by it.
+
+The metrics above need **no** filter for this record — `select(.kind == "run")`
+already excludes it — which is precisely why the one predicate they did gain
+(`promotion_phase`) is about the sub-loop's *run* record, not the enrichment.
 
 Records written **before** this retrofit are still `review-loop.jsonl` in the
 pre-contract shape (top-level `status` / `rounds`, no `pipeline`); they are not
@@ -1819,8 +1958,9 @@ non-converging blocker / the remaining blockers, severity rendered in the
 user-facing `Critical`/`Warning`/`Suggestion` vocabulary, with any
 `possible_false_trip` match flagged / the dispatch error), the round
 history one line each, a **per-round progress table** (#969) — Critical /
-Warning / Suggestion, new / carried, fixed-since-prior, derived from
-`.round_changelists`; stamp-less cells degrade to `–` — a **convergence
+Warning / Suggestion, a table-wide `Promoted` column rendered only when some
+round has a promoted blocker (#995), new / carried, fixed-since-prior, derived
+from `.round_changelists`; stamp-less cells degrade to `–` — a **convergence
 assessment** (the blocking series, whether the trend and the carried/false-trip
 split make another round likely to help), and **2–3 concrete options**
 tailored to the type (pick a
