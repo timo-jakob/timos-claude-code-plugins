@@ -13,7 +13,10 @@
 # makes an assertion's meaning depend on which machine ran it — inert on the
 # maintainer's Mac and on the `bats (macos-latest)` CI leg, enforced on
 # `bats (ubuntu-latest)`. A repo-wide ban is the only way to make the suite say
-# one thing everywhere.
+# one thing everywhere. This is the same bash-3.2-vs-bash-5 divergence the
+# two-lane script-tests matrix exists to catch (#292/#293) — that lane is what
+# surfaced it here, by reddening the premise tests when they pinned the macOS
+# outcome as universal.
 #
 # Verified empirically: bats 1.10.0/1.11.0/1.12.0/1.13.0/1.14.0 ALL report `ok`
 # under bash 3.2.57 and `not ok` under bash 4.4/5.2 — the bats version is not the

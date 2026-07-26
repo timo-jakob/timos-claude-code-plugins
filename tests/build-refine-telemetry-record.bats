@@ -85,8 +85,10 @@ sys.exit(rc if rc >= 0 else 128 - rc)' "$@"
 }
 build_split_to() { run --separate-stderr _bounded zsh "$S" "$@"; }
 
-# `[[ ... ]]` is a shell KEYWORD: a failing one mid-test is silently ignored by
-# bats. These helpers are ordinary commands, so they fail wherever they appear.
+# bash 3.2 (macOS `/bin/bash`) does not apply errexit to a failing `[[ ... ]]`,
+# so one mid-test is silently ignored there — while bash >= 4 catches it, making
+# the same assertion mean different things on the two CI legs. These helpers are
+# ordinary commands, so they fail wherever they appear, on every bash.
 assert_eq() {  # $1 = actual, $2 = expected, $3 = label
   [ "$1" = "$2" ] || { printf 'expected %s = %s, got %s\n' "$3" "$2" "$1" >&2; return 1; }
 }
