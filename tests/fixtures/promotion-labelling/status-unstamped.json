@@ -1,0 +1,287 @@
+{
+  "status": "BUDGET_EXHAUSTED",
+  "rounds": 2,
+  "max_rounds": 2,
+  "repo_type": "shell",
+  "review_skill": "development-claude-plugin:review",
+  "escalation_reasons": [
+    "budget_exhausted"
+  ],
+  "history": [
+    {
+      "round": 1,
+      "blocking": 3,
+      "conflicts": 0,
+      "non_converging": false
+    },
+    {
+      "round": 2,
+      "blocking": 3,
+      "conflicts": 0,
+      "non_converging": false
+    }
+  ],
+  "round_changelists": [
+    {
+      "round": 1,
+      "summary": {
+        "critical": 0,
+        "high": 3,
+        "low": 1,
+        "blocking": 3,
+        "conflicts": 0,
+        "false_trips": 0
+      },
+      "blocking": [
+        {
+          "severity": "WARNING",
+          "priority": "High",
+          "blocking": true,
+          "dimension": "code_quality",
+          "file": "development/skills/resolve-issue/scripts/consolidate-findings.zsh",
+          "line": 113,
+          "title": "LINEWIN is a magic number",
+          "description": "extract a named constant",
+          "suggested_fix": "name the window",
+          "reviewers": [
+            "script-reviewer"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        },
+        {
+          "severity": "WARNING",
+          "priority": "High",
+          "blocking": true,
+          "dimension": "tests",
+          "file": "tests/consolidate-findings.bats",
+          "line": 40,
+          "title": "Assertion could be stronger",
+          "description": "assert the whole object",
+          "suggested_fix": "assert the document",
+          "reviewers": [
+            "test-reviewer"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        },
+        {
+          "severity": "WARNING",
+          "priority": "High",
+          "blocking": true,
+          "dimension": "bugs",
+          "file": "development/skills/resolve-issue/scripts/resolve-story-loop.zsh",
+          "line": 342,
+          "title": "emitter stdout is discarded",
+          "description": "the run_id is unrecoverable",
+          "suggested_fix": "capture it",
+          "reviewers": [
+            "bug-hunter"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        }
+      ],
+      "suggestions": [
+        {
+          "severity": "SUGGESTION",
+          "priority": "Low",
+          "blocking": false,
+          "dimension": "code_quality",
+          "file": "docs/explanation/review-loop.md",
+          "line": 12,
+          "title": "tighten the wording",
+          "description": "shorter",
+          "suggested_fix": "trim",
+          "reviewers": [
+            "script-reviewer"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        }
+      ],
+      "conflicts": [],
+      "non_converging": false,
+      "false_trips": [],
+      "escalation_reasons": []
+    },
+    {
+      "round": 2,
+      "summary": {
+        "critical": 0,
+        "high": 3,
+        "low": 1,
+        "blocking": 3,
+        "conflicts": 0,
+        "false_trips": 0
+      },
+      "blocking": [
+        {
+          "severity": "WARNING",
+          "priority": "High",
+          "blocking": true,
+          "dimension": "code_quality",
+          "file": "development/skills/resolve-issue/scripts/consolidate-findings.zsh",
+          "line": 113,
+          "title": "LINEWIN is a magic number",
+          "description": "extract a named constant",
+          "suggested_fix": "name the window",
+          "reviewers": [
+            "script-reviewer"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        },
+        {
+          "severity": "WARNING",
+          "priority": "High",
+          "blocking": true,
+          "dimension": "tests",
+          "file": "tests/consolidate-findings.bats",
+          "line": 40,
+          "title": "Assertion could be stronger",
+          "description": "assert the whole object",
+          "suggested_fix": "assert the document",
+          "reviewers": [
+            "test-reviewer"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        },
+        {
+          "severity": "WARNING",
+          "priority": "High",
+          "blocking": true,
+          "dimension": "bugs",
+          "file": "development/skills/resolve-issue/scripts/resolve-story-loop.zsh",
+          "line": 342,
+          "title": "emitter stdout is discarded",
+          "description": "the run_id is unrecoverable",
+          "suggested_fix": "capture it",
+          "reviewers": [
+            "bug-hunter"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        }
+      ],
+      "suggestions": [
+        {
+          "severity": "SUGGESTION",
+          "priority": "Low",
+          "blocking": false,
+          "dimension": "code_quality",
+          "file": "docs/explanation/review-loop.md",
+          "line": 12,
+          "title": "tighten the wording",
+          "description": "shorter",
+          "suggested_fix": "trim",
+          "reviewers": [
+            "script-reviewer"
+          ],
+          "agreement": 1,
+          "non_converging": false,
+          "false_trip": false
+        }
+      ],
+      "conflicts": [],
+      "non_converging": false,
+      "false_trips": [],
+      "escalation_reasons": []
+    }
+  ],
+  "final_changelist": {
+    "round": 2,
+    "summary": {
+      "critical": 0,
+      "high": 3,
+      "low": 1,
+      "blocking": 3,
+      "conflicts": 0,
+      "false_trips": 0
+    },
+    "blocking": [
+      {
+        "severity": "WARNING",
+        "priority": "High",
+        "blocking": true,
+        "dimension": "code_quality",
+        "file": "development/skills/resolve-issue/scripts/consolidate-findings.zsh",
+        "line": 113,
+        "title": "LINEWIN is a magic number",
+        "description": "extract a named constant",
+        "suggested_fix": "name the window",
+        "reviewers": [
+          "script-reviewer"
+        ],
+        "agreement": 1,
+        "non_converging": false,
+        "false_trip": false
+      },
+      {
+        "severity": "WARNING",
+        "priority": "High",
+        "blocking": true,
+        "dimension": "tests",
+        "file": "tests/consolidate-findings.bats",
+        "line": 40,
+        "title": "Assertion could be stronger",
+        "description": "assert the whole object",
+        "suggested_fix": "assert the document",
+        "reviewers": [
+          "test-reviewer"
+        ],
+        "agreement": 1,
+        "non_converging": false,
+        "false_trip": false
+      },
+      {
+        "severity": "WARNING",
+        "priority": "High",
+        "blocking": true,
+        "dimension": "bugs",
+        "file": "development/skills/resolve-issue/scripts/resolve-story-loop.zsh",
+        "line": 342,
+        "title": "emitter stdout is discarded",
+        "description": "the run_id is unrecoverable",
+        "suggested_fix": "capture it",
+        "reviewers": [
+          "bug-hunter"
+        ],
+        "agreement": 1,
+        "non_converging": false,
+        "false_trip": false
+      }
+    ],
+    "suggestions": [
+      {
+        "severity": "SUGGESTION",
+        "priority": "Low",
+        "blocking": false,
+        "dimension": "code_quality",
+        "file": "docs/explanation/review-loop.md",
+        "line": 12,
+        "title": "tighten the wording",
+        "description": "shorter",
+        "suggested_fix": "trim",
+        "reviewers": [
+          "script-reviewer"
+        ],
+        "agreement": 1,
+        "non_converging": false,
+        "false_trip": false
+      }
+    ],
+    "conflicts": [],
+    "non_converging": false,
+    "false_trips": [],
+    "escalation_reasons": []
+  }
+}

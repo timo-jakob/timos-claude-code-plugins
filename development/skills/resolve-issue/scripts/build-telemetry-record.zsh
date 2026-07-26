@@ -103,6 +103,13 @@ jq -c '
                    then $s.status else null end),
       rounds: ($s.rounds // 0),
       max_rounds: ($s.max_rounds // 0),
+      # promotion sub-loop marker (#995). A promotion pass is a SECOND full
+      # invocation for one story, so counting its record alongside the phase-1
+      # one inflates the per-record convergence rate and adds a second
+      # (repo, issue, ts) group to the first-pass rate. The documented metrics
+      # exclude it with select(.payload.promotion_phase != true); an older
+      # status JSON with no such key reads false, i.e. a phase-1 record.
+      promotion_phase: ($s.promotion_phase // false),
       # per-round severity counts use the USER-FACING vocabulary (#969):
       # Critical / Warning / Suggestion — the same words the human reads in
       # progress.md and the escalation — so on-screen and on-disk agree
@@ -125,6 +132,11 @@ jq -c '
           Warning:    ([ $blk[] | select(.priority=="High") ] | length),
           Suggestion: (($r.suggestions // []) | length)
         },
+        # human-promoted blockers this round (#995): a SUBSET of
+        # by_severity.Warning (the overlay raises a Low to WARNING), never a
+        # fourth severity to add to it. Same per-item expression as the two
+        # sibling copies; no stamp gate, so an unstamped changelist counts 0.
+        promoted: ([ $blk[] | select(.promoted == true) ] | length),
         by_dimension: ( reduce ($blk + ($r.suggestions // []))[] as $f
                           ({}; .[($f.dimension // "")] = ((.[($f.dimension // "")] // 0) + 1)) ),
         # new/carried need the #913 per-item stamp; fixed_from_prev is derived

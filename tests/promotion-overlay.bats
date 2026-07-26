@@ -72,6 +72,38 @@ EOF
   [ "$(jq '.suggestions | length' <<<"$output")" -eq 0 ]
 }
 
+@test "#1029 promote: the raised item is STAMPED promoted:true, and only it (#995)" {
+  # Without the stamp a promoted item is indistinguishable from a
+  # reviewer-raised Warning in every surface that reads the changelist, so the
+  # three lockstep copies have nothing to count. It is a direct per-item flag —
+  # no stamp gate — so an absent one simply counts 0 downstream.
+  cat > "$F" <<EOF
+[{"severity":"SUGGESTION","dimension":"code_quality","file":"$TARGET_FILE","line":113,
+  "title":"$TARGET_TITLE","description":"extract a named constant","reviewer":"script-reviewer"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"$TARGET_FILE","line":200,
+  "title":"unchecked exit","description":"the pipe status is dropped","reviewer":"bug-hunter"}]
+EOF
+  promote_target
+  con --round 1 --promote "$P"
+  [ "$status" -eq 0 ]
+  [ "$(jq '.summary.blocking' <<<"$output")" -eq 2 ]
+  [ "$(jq '[.blocking[] | select(.promoted == true)] | length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '[.blocking[] | select(.promoted == true)][0].title' <<<"$output")" = "$TARGET_TITLE" ]
+  # the reviewer-raised blocker is NOT stamped — a stamp on everything would
+  # make the label meaningless
+  # over the COMPLEMENT so the set cannot be empty by construction — `any` over
+  # an empty array is false, i.e. the assertion would stop asserting exactly
+  # when the fixture or the document shape changed
+  [ "$(jq '[.blocking[] | select(.promoted != true) | has("promoted")] | any' <<<"$output")" = "false" ]
+  [ "$(jq '[.blocking[] | select(.title == "unchecked exit")] | length' <<<"$output")" -eq 1 ]
+  # pin the promoted item's SHAPE, not just the flag — this suite already pins
+  # key sets on the no-flag path so an extra key cannot ship green, and the item
+  # the overlay MUTATES deserves the same: exactly the ordinary item keys plus
+  # `promoted`, so a second stamp (or a dropped field) is a failing assertion
+  [ "$(jq -Sc '[.blocking[] | select(.promoted == true)][0] | keys' <<<"$output")" = \
+    '["agreement","blocking","description","dimension","false_trip","file","line","non_converging","priority","promoted","reviewers","severity","suggested_fix","title"]' ]
+}
+
 @test "#1019 promote: an unselected Low finding is untouched alongside a promoted one" {
   cat > "$F" <<EOF
 [{"severity":"SUGGESTION","dimension":"code_quality","file":"$TARGET_FILE","line":113,
@@ -270,6 +302,11 @@ EOF
   [ "$(jq -r '.blocking[0].priority' <<<"$output")" = "Critical" ]
   [ "$(jq '.summary.critical' <<<"$output")" -eq 1 ]
   [ "$(jq '.summary.high' <<<"$output")" -eq 0 ]
+  # "left alone" now also means UNSTAMPED (#995): this is the only case where a
+  # promote key actually MATCHES an already-blocking finding, so a regression
+  # moving the stamp outside the still-Low filter would label reviewer-raised
+  # blockers as human-promoted in all three surfaces and pass everywhere else
+  [ "$(jq '[.blocking[] | has("promoted")] | any' <<<"$output")" = "false" ]
 }
 
 # --- #1025 error: invalid / unreadable promote JSON --------------------------

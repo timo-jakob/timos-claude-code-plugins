@@ -77,6 +77,19 @@
 # Telemetry note: an extended run (escalate -> grant -> --resume) appends one
 # record per terminal exit, each spanning from .t0 — so consecutive records of
 # one extended loop overlap and wall_s must not be summed across them.
+# Each terminal exit that emits a record also writes that record's `run_id` to
+# `<work-dir>/.telemetry-run-id` (#995), so a later enrichment can JOIN the run
+# it enriches instead of minting an orphan id. It is best-effort like the
+# emission itself, and cleared both on a fresh (non---resume) start and again
+# immediately before each emission attempt — so it holds the id of THIS
+# terminal exit's record, or NOTHING. A failed emission therefore leaves no id
+# rather than the previous exit's, which a reader would otherwise join to a
+# superseded record. Each loop's sidecar lives in its OWN --work-dir, so a
+# second loop against the same story (the promotion sub-loop, which takes a
+# fresh work-dir) never touches this one. The status JSON also carries `promotion_phase` (true exactly when this
+# invocation carried OR ADOPTED a promoted set — an adopting --resume counts),
+# which the payload builder copies through so the documented convergence-rate
+# metrics can exclude a promotion pass.
 #
 # Hooks (run via the shell, with these env vars exported):
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
@@ -110,7 +123,8 @@
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
 #       [--promote FILE] ...                                      # hook mode
-#   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path)
+#   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path;
+#                                        # refused together with --promote)
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
@@ -221,13 +235,55 @@ while [[ $# -gt 0 ]]; do
     print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
     print -r -- "  [--test-cmd CMD] [--gate-attest TREE_ID] [--base REF] [--max-rounds N] [--resume] [--issue N]"
     print -r -- "  [--promote FILE]"
-    print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--no-review]"
+    print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH]"
+    print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
 local t0=$(date +%s)   # for the telemetry wall-clock (#566)
+
+# Clear a stale telemetry run-id sidecar (#995) as EARLY as the run is known to
+# be fresh — here, right after argument parsing, where `work_dir` and `resume`
+# are final. The invariant is "a fresh run never hands back the PREVIOUS run's
+# id", and everything that can exit before the fresh-run setup would otherwise
+# break it: the --issue guards just below, the --no-review fast path (which
+# returns SKIPPED before any work-dir setup, and skips telemetry entirely when
+# --repo is not a directory), and every usage exit
+# down to _validate_promote's — which the promotion sub-loop's own invocation
+# hits. A caller then reads a foreign story's id and joins its enrichment onto
+# that run's record. The in-parse exits above (_need_val, unknown flag)
+# necessarily precede this and are not covered; they need a two-pass parse,
+# which is not worth it for a caller-visible failure the caller re-invokes past.
+# `rm -f` on a path whose directory does not exist yet is a no-op, and a
+# --resume deliberately KEEPS the sidecar: it continues the same loop, whose
+# next terminal exit overwrites it.
+if (( ! resume )) && [[ -n "$work_dir" ]]; then
+  # create it here rather than letting the telemetry block below do it as a side
+  # effect: the --no-review fast path exits above the loop's own `mkdir -p`, so
+  # without this the sidecar write would be the sole creator of the tree. `--`
+  # because a --work-dir value may legitimately begin with a single dash.
+  mkdir -p -- "$work_dir" 2>/dev/null || true
+  # non-fatal, but never silent: rm -f still fails on an unwritable work-dir or
+  # a directory at that path, and a silent failure leaves the stale id in place
+  # — the exact state this clear exists to prevent, with nothing to notice it.
+  # keep rm's OWN message: it is the only thing that separates the three
+  # reachable failures (unwritable/unsearchable work-dir, a directory planted at
+  # the sidecar path, --work-dir naming a regular file), and the diagnostic
+  # below names none of them
+  # `local rm_err=""`, never a bare `local rm_err`: at TOP LEVEL there is no new
+  # scope, so a bare typeset whose name already exists in the environment PRINTS
+  # `rm_err=value` — on stdout, ahead of the status JSON. Same hazard this file
+  # documents for the loop-local declarations further down.
+  local rm_err=""
+  # -r: rm_err holds an EXTERNAL command's output, and print without -r
+  # escape-processes it — mangling the very path that distinguishes the three
+  # reachable failures
+  rm_err=$(rm -f -- "$work_dir/.telemetry-run-id" 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the stale telemetry run-id sidecar at $work_dir/.telemetry-run-id (${rm_err}) — a later read may return a PREVIOUS run's id (#995)"
+fi
+
 
 # --issue rides straight into the telemetry envelope, whose contract is a
 # non-negative integer. Before #1004 a junk value (`--issue '#123'` from a
@@ -259,12 +315,24 @@ emit_and_exit() {
   local esc='[]'
   [[ "$final" != "null" ]] && esc=$(print -r -- "$final" | jq -c '.escalation_reasons // []')
   local out
+  # promotion_phase (#995) is ALWAYS present — a plain boolean, true exactly
+  # when this invocation carried OR ADOPTED a promoted set, i.e. when it is the
+  # promotion sub-loop. It is derived AFTER the --resume adoption branch on
+  # purpose: a resume that drops --promote and re-adopts the work-dir's .promote
+  # is still the promotion sub-loop, and its (often CONVERGED) record must not
+  # be counted as a phase-1 story. build-telemetry-record.zsh copies it into the payload so the
+  # documented convergence metrics can exclude the second pass; always-present
+  # means a consumer never has to distinguish "false" from "an older status
+  # file that predates the key".
+  local promotion_phase='false'
+  [[ -n "$promote" ]] && promotion_phase='true'
   out=$(jq -nc \
     --arg status "$st" --argjson rounds "$rounds" --argjson max "$max_rounds" \
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
-    --argjson clists "$clists" \
+    --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
+      promotion_phase:$promotion_phase,
       repo_type:(if $repo_type=="" then null else $repo_type end),
       review_skill:(if $review_skill=="" then null else $review_skill end),
       escalation_reasons:$esc, history:$history, round_changelists:$clists,
@@ -337,12 +405,57 @@ emit_and_exit() {
         [[ -n "$issue" ]] && emit_args+=(--issue "$issue")
         [[ -n "$repo_type" && "$repo_type" != "null" ]] && emit_args+=(--repo-type "$repo_type")
         [[ -n "$telemetry_file" ]] && emit_args+=(--telemetry-file "$telemetry_file")
-        # the emitter echoes the record to stdout; the loop's stdout is the
-        # status JSON contract, so drop it (stderr stays visible for diagnosis)
-        "${self_dir}/../../../scripts/telemetry/emit-telemetry.zsh" "${emit_args[@]}" >/dev/null || true
+        # The emitter echoes the record to stdout. The loop's stdout is the
+        # status JSON contract, so it is CAPTURED, never printed (stderr stays
+        # visible for diagnosis) — and the capture is what makes the minted
+        # `run_id` recoverable (#995): a promotion enrichment must carry the
+        # enriched run's id, and a fresh one would validate cleanly while being
+        # permanently orphaned. It goes to a `<work-dir>/.telemetry-run-id`
+        # sidecar rather than into the status JSON, because the status JSON is
+        # written BEFORE telemetry runs — deliberately, so a slow or broken
+        # emitter can neither delay nor damage the loop's primary output. The
+        # sidecar mirrors the existing `.t0` idiom, is rewritten on every
+        # terminal exit, and every failure here stays swallowed.
+        # Clear before attempting: the sidecar is otherwise cleared only at
+        # fresh-run start, so on an extended run (escalate -> grant -> resume)
+        # a FAILED emission on the later terminal exit would leave the EARLIER
+        # exit's id in place. A reader then finds a non-empty sidecar — the
+        # "no id, no enrichment" valve never fires — and joins the enrichment to
+        # a superseded record. Clearing here makes the invariant exact: the
+        # sidecar holds the id of THIS terminal exit's record, or nothing.
+        [[ -d "$work_dir" ]] && { rm -f -- "$work_dir/.telemetry-run-id" 2>/dev/null || true }
+        local rec=""
+        if rec=$("${self_dir}/../../../scripts/telemetry/emit-telemetry.zsh" "${emit_args[@]}"); then
+          # `-d`, not `-n`: the work-dir is created up front (next to the
+          # stale-sidecar clear, and again in the fresh-run setup), so this
+          # branch never has to create it — directory creation must not be an
+          # emergent side effect of a best-effort telemetry path. A work-dir
+          # that still does not exist here is one the write would fail on
+          # anyway. The one gap this leaves is `--no-review --resume` with a
+          # nonexistent work-dir: the up-front mkdir is resume-gated and the
+          # fast path exits above the fresh-run setup, so that exit emits its
+          # record and writes no sidecar.
+          if [[ -n "$work_dir" && -d "$work_dir" && -n "$rec" ]]; then
+            local rid=""
+            rid=$(print -r -- "$rec" | jq -r '.run_id // empty' 2>/dev/null) || rid=""
+            # only a non-empty id is worth persisting: an empty file would read
+            # as "there is an id" to a naive consumer, and the SKILL.md guard
+            # treats absent and empty identically for exactly that reason.
+            # brace-group the redirection so a failure to OPEN the sidecar path
+            # (a read-only work-dir, a directory at that path) is swallowed too
+            # — zsh installs redirections left to right, so `print … > f
+            # 2>/dev/null` would report the open failure on the real stderr
+            # before the discard is in place. Same idiom as the progress.md and
+            # history writes above.
+            # a MULTI-LINE rid is unusable as a join key but would pass a bare
+            # -n guard, and the emitter only requires --run-id to be non-empty —
+            # so it would land as a cleanly-validating orphan
+            [[ -n "$rid" && "$rid" != *$'\n'* ]] && { { print -r -- "$rid" > "$work_dir/.telemetry-run-id" ; } 2>/dev/null || true }
+          fi
+        fi
       fi
     }
-    rm -f "$tmp_status" "$tmp_payload" 2>/dev/null || true
+    rm -f -- "$tmp_status" "$tmp_payload" 2>/dev/null || true
   fi
   exit "$code"
 }
@@ -444,6 +557,16 @@ findings_digest() {
 # claimed a verdict. Normalize, exactly as the shared emitter does.
 max_rounds=$(( 10#$max_rounds ))
 
+# --promote with --no-review is a contradiction, not a fallback: nothing is
+# consolidated, so there is no overlay to apply — and the fast path reaches
+# emit_and_exit ABOVE _validate_promote, so the combination would stamp
+# promotion_phase:true on a SKIPPED record from a promote file that was never
+# even checked to exist. Refuse it where the sibling contradiction
+# (--findings-file with --review-cmd) is refused.
+if (( no_review )) && [[ -n "$promote" ]]; then
+  print -u2 -- "resolve-story-loop: --promote is meaningless with --no-review (nothing is consolidated)"; exit 2
+fi
+
 if (( no_review )); then
   emit_and_exit "SKIPPED" 0 0 "" "" "" "" ""
 fi
@@ -466,7 +589,7 @@ if (( ! step_mode )); then
 fi
 
 [[ -n "$work_dir" ]] || work_dir=$(mktemp -d)
-mkdir -p "$work_dir"
+mkdir -p -- "$work_dir"
 local history_file="$work_dir/history.jsonl"
 # --promote is an INPUT PATH, and the only one the loop used to forward blind.
 # Left unchecked, a typo survives parse and the run does a full round's setup —
@@ -612,6 +735,9 @@ else
   # invocations, and clear a previous run's so a re-used work-dir cannot
   # resurrect an overlay this run did not ask for
   rm -f -- "$promote_state"
+  # (the telemetry run-id sidecar is cleared far earlier — see the #995 note
+  # above the --no-review fast path, which must run before every exit that can
+  # precede this setup)
   # the loop's logical start — a step-mode run spans several invocations, and
   # the terminal telemetry must report whole-loop wall clock, not the last
   # round's (#971)
@@ -733,7 +859,7 @@ while (( round <= max_rounds )); do
       : > "$scope_file"
     fi
   fi
-  mkdir -p "${findings_path:h}"
+  mkdir -p -- "${findings_path:h}"
   # (#974) refuse the alias BEFORE truncating: findings_path is the round's
   # internal sink, and the very next line zero-bytes it. A session that passed
   # the dispatch plan's findings_path as --findings-file (instead of its own
@@ -783,7 +909,7 @@ while (( round <= max_rounds )); do
       if [[ -n "$digest" && -s "$prev_digest_file" && "$digest" == "$(<"$prev_digest_file")" ]]; then
         refuse_stale_findings "--findings-file is byte-identical to round $(( round - 1 ))'s consumed findings ($findings_file) — did this round's review panel run? Write each round's aggregate findings to its own path (findings-round-N.json) before --resume."
       fi
-      cp "$findings_file" "$findings_path" || {
+      cp -- "$findings_file" "$findings_path" || {
         print -u2 -- "resolve-story-loop: could not copy --findings-file"; exit 1 }
       # record only AFTER a successful consume, so a failed round leaves no
       # digest to veto its retry

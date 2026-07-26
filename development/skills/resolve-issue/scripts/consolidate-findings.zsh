@@ -13,7 +13,8 @@
 # of finding objects). Output on stdout: one changelist JSON:
 #   { round, summary{critical,high,low,blocking,conflicts,false_trips},
 #     blocking[], suggestions[], conflicts[], non_converging, false_trips[],
-#     escalation_reasons[] }  (each blocking[] item also carries false_trip:bool)
+#     escalation_reasons[] }  (each blocking[] item also carries false_trip:bool,
+#     and promoted:true when the overlay raised it — #995)
 #
 # Rules (per #561):
 #   - Severity map: CRITICAL->Critical, WARNING->High, SUGGESTION->Low.
@@ -35,8 +36,11 @@
 #     shared significant token, or a tokenless side promotes; FULLY DISJOINT
 #     titles do not. Exact-line equality would silently un-promote an item the
 #     moment its own fix shifted the line, which is the one thing a promoted
-#     item must survive. Without --promote (or with an empty array) the output
-#     is byte-identical to a run without the flag.
+#     item must survive. A raised item is STAMPED promoted:true (#995) so every
+#     surface downstream can tell the human's pick from a reviewer-raised
+#     Warning; only Low items are eligible, so a reviewer-raised blocker a key
+#     matches is never stamped. Without --promote (or with an empty array) the
+#     output is byte-identical to a run without the flag — nothing is stamped.
 #   - Non-convergence (#606 + #983): candidates for "this blocked last round too"
 #     are GATHERED on [file, dimension] + line proximity (within LINEWIN lines; a
 #     missing line on either side is a wildcard). The VERDICT on a candidate is
@@ -339,7 +343,13 @@ def nearest($c): sort_by(
                    then (((.value.line) - ($k.line | normline)) | if . < 0 then -. else . end)
                    else LINEWIN + 1 end) | .[0] ) as $best
             | { its: ($cur | .[$best.key] |= (. + { severity: "WARNING",
-                        priority: prio("WARNING"), blocking: blocks("WARNING") })),
+                        priority: prio("WARNING"), blocking: blocks("WARNING"),
+                        # the LABEL (#995): a promoted item is otherwise
+                        # indistinguishable from a reviewer-raised Warning
+                        # everywhere it is read afterwards. A direct per-item
+                        # flag with NO stamp gate (the #983 false_trip
+                        # precedent), so an absent flag simply counts 0.
+                        promoted: true })),
                 claimed: ($cl + [$best.key]) }
           end)
     | .its ) as $items

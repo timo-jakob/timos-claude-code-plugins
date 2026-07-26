@@ -29,7 +29,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills, including the shared telemetry/v1 emit + validate contract; ships a PreToolUse(Agent) hook, inert unless switch_fable_to_opus is truthy, that then redirects dispatches whose effective model is fable to opus.",
-      "version": "1.143.0",
+      "version": "1.144.0",
       "author": {
         "name": "Timo Jakob"
       },

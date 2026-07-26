@@ -93,3 +93,8 @@ repos:
     rev: v0.44.0
     hooks:
       - id: markdownlint
+        # tests/fixtures/**/*.md are byte-exact GOLDENS of generated output
+        # (escalation comments, progress.md blocks) — the whole point is that
+        # they match a script's bytes exactly, so reformatting them to satisfy
+        # a prose linter would destroy what they pin (#995).
+        exclude: ^tests/fixtures/.*\.md$

@@ -130,7 +130,7 @@ ESCALATE_NO_CONVERGENCE)
     def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;
     def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
     ((.final_changelist.blocking // []) | map(select(.non_converging))) | if length==0 then "" else
-    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)] \(.title | safe)"
+    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)\(if .promoted == true then " (promoted)" else "" end)] \(.title | safe)"
       + (if .matched_prior then
           "\n  - matched prior-round blocker "
           + (if ((.matched_prior.line | type) != "number" or (.line | type) != "number") then "(no line recorded on one side — matched file-wide)" else "at line \(.matched_prior.line)" end)
@@ -143,7 +143,7 @@ BUDGET_EXHAUSTED)
     def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;
     def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
     (.final_changelist.blocking // []) | if length==0 then "" else
-    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)] \(.title | safe)"
+    (.[] | "- `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | safe)/\((.priority // "High") | sevword)\(if .promoted == true then " (promoted)" else "" end)] \(.title | safe)"
       + (if .false_trip == true then " — identity-cleared false trip (#983): landed in a prior-round blocker match window but shares no title terms, so it is a FRESH blocker, not a stuck one" else "" end)) end' "$status_file") ;;
 ESCALATE_AMBIGUOUS)
   detail=$(jq -r '(.final_changelist.dispatch_error // {}) | if . == {} then "" else
@@ -163,13 +163,23 @@ esac
 # number. Fixed counts DISTINCT matched priors (two current blockers matching
 # the same prior must not hide a genuinely fixed second one). An empty
 # .round_changelists (older status JSONs, ambiguous-dispatch carriers) renders
-# neither block — the round history above still carries the bare trend.
+# neither block — the round history above still carries the bare trend. The
+# Promoted column (#995) is a SUBSET of Warning, never added to it, and is the
+# third of those lockstep copies' per-item `promoted` derivation.
 local round_table assessment
 round_table=$(jq -r '
   (.round_changelists // []) as $rs
   | if ($rs | length) == 0 then "" else
-    ( [ "| Round | Critical | Warning | Suggestion | New | Carried | Fixed since prior |",
-        "|---|---|---|---|---|---|---|" ]
+    # The Promoted column renders only when SOME round actually has a promoted
+    # blocker — the same "only when non-zero" rule progress.md applies to its
+    # `promoted:` term, and what keeps a run without --promote byte-identical to
+    # before the column existed. Table-wide, never per-row: a column present in
+    # one row and absent in another is not a markdown table.
+    ( [ $rs[] | (.blocking // [])[] | select(.promoted == true) ] | length > 0) as $anyprom
+    | ( [ (if $anyprom
+           then "| Round | Critical | Warning | Suggestion | Promoted | New | Carried | Fixed since prior |"
+           else "| Round | Critical | Warning | Suggestion | New | Carried | Fixed since prior |" end),
+          (if $anyprom then "|---|---|---|---|---|---|---|---|" else "|---|---|---|---|---|---|---|" end) ]
       + [ range(0; $rs | length) as $i | $rs[$i] as $r
           | ($r.blocking // []) as $blk
           | ((($blk | length) == 0) or ([ $blk[] | has("non_converging") ] | all)) as $stamped
@@ -182,7 +192,13 @@ round_table=$(jq -r '
           | (if ($i > 0) and ($carried_priors != null)
              then (((($rs[$i-1].blocking // []) | length) - $carried_priors) | if . < 0 then 0 else . end)
              else null end) as $fixed
-          | "| \($r.round // ($i + 1)) | \($r.summary.critical // 0) | \($r.summary.high // 0) | \($r.summary.low // 0) | \($new // "–") | \($carried // "–") | \($fixed // "–") |"
+          # human-promoted blockers (#995) — a SUBSET of the Warning column, not
+          # an addition to it. Same per-item expression as the two sibling
+          # copies, and no stamp gate: an unstamped round counts 0, never "–".
+          | ([ $blk[] | select(.promoted == true) ] | length) as $promoted
+          | "| \($r.round // ($i + 1)) | \($r.summary.critical // 0) | \($r.summary.high // 0) | \($r.summary.low // 0) |"
+            + (if $anyprom then " \($promoted) |" else "" end)
+            + " \($new // "–") | \($carried // "–") | \($fixed // "–") |"
         ]
       | join("\n") ) end' "$status_file")
 assessment=$(jq -r '
