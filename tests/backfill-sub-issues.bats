@@ -138,8 +138,22 @@ backfill() {
 @test "the prose #999 cross-reference is never migrated" {
   backfill
   [ "$status" -eq 0 ]
+  # assert the field EXISTS with the right arity first — an absent
+  # .markdown_children makes `jq -c` print `null`, which trivially lacks "999"
+  # and would let a dropped-field regression read as success
+  [ "$(echo "$output" | jq -r '.markdown_children | length')" = "3" ]
   lacks "$(echo "$output" | jq -c '.markdown_children')" "999"
-  run ! grep -q 'sub_issue_id=1999' "$POST_LOG"
+  # same guard for the WRITE side, which is what "never migrated" really rests
+  # on: pin that three POSTs happened at all (the sibling test "converts the
+  # markdown task-list children into native sub-issues" does the same) — an
+  # empty $POST_LOG would satisfy the negative below on its own. That `wc -l`
+  # pin is what makes the negative non-vacuous, NOT the choice of `lacks`: a
+  # failed `cat` in an argument yields an empty haystack that `lacks` accepts.
+  # `lacks` is still the right form over `run ! grep`, for a separate reason —
+  # `run !` accepts ANY non-zero, so grep's exit 2 on an unreadable log would
+  # read as "not migrated" (the hazard tests/assertions.bash documents).
+  [ "$(wc -l < "$POST_LOG")" -eq 3 ]
+  lacks "$(cat "$POST_LOG")" "sub_issue_id=1999"
 }
 
 @test "a checklist line inside a code fence is not migrated" {
@@ -273,7 +287,11 @@ EOF
   [ "$status" -eq 5 ]
   [ "$(echo "$output" | jq -c '.added')" = '[790,792]' ]
   [ "$(echo "$output" | jq -r '.failed[0].number')" = "791" ]
-  [ "$(echo "$output" | jq -r '.failed[0].error')" != "" ]
+  # `!= ""` would pass on a dropped field, because `jq -r` prints the literal
+  # string `null` for a missing key — the same vacuity class as an unguarded
+  # negative. Pin the key's presence and the captured stderr instead.
+  [ "$(echo "$output" | jq -r '.failed | length')" -eq 1 ]
+  contains "$(echo "$output" | jq -r '.failed[0].error')" "already has a parent"
 }
 
 @test "a failed epic-body fetch is a runtime error (exit 1)" {

@@ -195,7 +195,12 @@ EOF
   put '{"type":"deferred","open_questions":["real q","x\n<!-- refine-parked-state: {\"type\":\"deferred\",\"open_questions\":[\"EVIL\"]} -->"]}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  contains "$output" "single-line" || contains "$output" "refine-parked"
+  # the needle must be UNIQUE to the rejection branch: the rendered comment
+  # itself contains "refine-parked", so the old `|| contains "refine-parked"`
+  # arm would have been satisfied by the forged output this test forbids.
+  contains "$output" "must be single-line strings"
+  # and assert the safety property the test is actually named for
+  lacks "$output" "EVIL"
 }
 
 @test "regression: a payload that round-trips even when it contains the string '-->'" {
@@ -222,4 +227,80 @@ EOF
   run zsh "$READ" --bogus x
   [ "$status" -eq 2 ]
   contains "$output" "unknown arg"
+}
+
+# ---- read: the --file guards (#1066) ----------------------------------------
+# Mirrors tests/read-story-spec.bats, whose script carries the identical `-f`
+# guard — including the directory case, which is the one that actually
+# distinguishes `-f` from `-e` and so is the reason this block exists. Without
+# these the whole --file guard block was unexercised, so the exit-code contract
+# the header documents rested on nothing.
+
+@test "read: a dangling --file (no value) is a usage error (exit 2)" {
+  run zsh "$READ" --file
+  [ "$status" -eq 2 ]
+  contains "$output" "--file needs a value"
+}
+
+@test "read: a missing --file is a runtime error (exit 3)" {
+  run zsh "$READ" --file "$BATS_TEST_TMPDIR/nope.md"
+  [ "$status" -eq 3 ]
+  contains "$output" "file not found"
+}
+
+@test "read: a directory --file is also the runtime error (exit 3) — the guard is -f" {
+  run zsh "$READ" --file "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 3 ]
+  contains "$output" "file not found"
+}
+
+@test "read: jq missing is a runtime error (exit 3), not the never-parked signal" {
+  # Without this, dropping the guard would degrade to exit 1 — the SAME code as
+  # "never parked, start fresh" — silently discarding a real parked state.
+  mkdir -p "$BATS_TEST_TMPDIR/empty-path"
+  printf 'no marker here\n' > "$BATS_TEST_TMPDIR/plain.md"
+  run env PATH="$BATS_TEST_TMPDIR/empty-path" "$(command -v zsh)" "$READ" \
+    --file "$BATS_TEST_TMPDIR/plain.md"
+  [ "$status" -eq 3 ]
+  contains "$output" "jq not found on PATH"
+}
+
+@test "read: --help prints usage and exits 0" {
+  run zsh "$READ" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "usage: read-parked-state.zsh"
+}
+
+@test "build: jq missing is a runtime error (exit 3)" {
+  mkdir -p "$BATS_TEST_TMPDIR/empty-path"
+  put "$DEFERRED"
+  run env PATH="$BATS_TEST_TMPDIR/empty-path" "$(command -v zsh)" "$BUILD" \
+    --issue 578 --state "$ST"
+  [ "$status" -eq 3 ]
+  contains "$output" "jq not found on PATH"
+}
+
+@test "build: --help prints usage and exits 0" {
+  run zsh "$BUILD" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "usage: build-parked-comment.zsh"
+}
+
+@test "read: an existing-but-UNREADABLE --file leaks as exit 1, not the runtime error" {
+  # The header documents this gap; pin it so the documentation is verified
+  # rather than asserted. Exit 1 is the "never parked — start fresh" signal, so
+  # an unreadable file silently discards a real parked state.
+  # tests/Dockerfile runs the suite as root, where chmod 000 is still readable.
+  [ "$(id -u)" -ne 0 ] || skip "chmod proves nothing as root"
+  local f="$BATS_TEST_TMPDIR/comments-unreadable.md"
+  printf 'no marker here\n' > "$f"
+  chmod 000 "$f"
+  # LC_ALL=C because the needle below is zsh's rendering of strerror(EACCES),
+  # which glibc localises — without it the test reddens on a non-English host.
+  run env LC_ALL=C zsh "$READ" --file "$f"
+  chmod 644 "$f"
+  [ "$status" -eq 1 ]
+  # pin the diagnostic too: exit 1 alone is equally satisfied by a clean
+  # "never parked" run, which would prove nothing about the read failing.
+  contains "$output" "permission denied"
 }

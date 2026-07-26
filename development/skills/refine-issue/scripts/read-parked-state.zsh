@@ -15,11 +15,18 @@
 #
 # Exit codes:
 #   0 — a parked-state marker was found and printed (valid JSON on stdout)
-#   1 — NO parked marker present — the issue was never parked (not an error;
-#       the caller just starts a fresh session).
+#   1 — the INPUT contained no parked marker (not an error; the caller starts a
+#       fresh session). This only means "never parked" when the caller knows the
+#       input was produced successfully: an empty input is indistinguishable
+#       here, so a failed upstream `gh` — or the unreadable-file leak noted
+#       under exit 3 — also lands on 1, and treating that as a fresh session
+#       would overwrite a real park. Callers piping `gh` should fail the pipe
+#       themselves before reading this status.
 #   2 — usage error
-#   3 — runtime error (unreadable file, jq missing, marker present but its
-#       payload is not valid JSON)
+#   3 — runtime error (the named --file is not a regular file, jq missing,
+#       marker present but its payload is not valid JSON). NOT every I/O
+#       failure: the guard below is `-f`, so an existing-but-unreadable file
+#       passes it and the later read aborts under errexit as 1.
 #
 # Usage:
 #   read-parked-state.zsh --file <comments.md>

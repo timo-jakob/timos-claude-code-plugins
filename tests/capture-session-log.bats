@@ -85,7 +85,12 @@ run_cap() { run zsh "$CAP" --projects-dir "$P" "$@"; }
 
 @test "missing projects dir is an error" {
   run zsh "$CAP" --projects-dir "$BATS_TEST_TMPDIR/nope" --list
-  [ "$status" -ne 0 ]
+  # pin the typed code and the diagnostic: a bare `-ne 0` is equally satisfied
+  # by exit 2 (an arg-parsing regression), by an errexit abort before the guard
+  # is reached, and by 127 if the script moved — the failure modes it is least
+  # able to notice.
+  [ "$status" -eq 1 ]
+  contains "$output" "projects dir not found"
 }
 
 # --- related-session discovery (#414) ----------------------------------------
@@ -143,11 +148,19 @@ related_fixture() {
   touch -t "$(date -v-10H '+%Y%m%d%H%M' 2>/dev/null || date -d '10 hours ago' '+%Y%m%d%H%M')" \
     "$D/-Users-x-repositories-acme--claude-worktrees-foo/wt1.jsonl"
   run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run
+  [ "$status" -eq 0 ]
+  # pin that discovery RAN and still found the in-window sibling first — an
+  # aborted script prints no "[worktree]" either, so the negative below would
+  # pass vacuously without this
+  contains "$output" "related sessions (1)"
+  contains "$output" "plugin-test-XXXXXX-rnd-acme/h1  [headless]"
   lacks "$output" "[worktree]"
   # widening the window brings it back
   run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run --window-hours 24
+  [ "$status" -eq 0 ]
   contains "$output" "[worktree]"
   # --related forces a dir in regardless of signal/window
   run zsh "$CAP" --projects-dir "$D" --project /Users/x/repositories/acme --dry-run --related unrelated
+  [ "$status" -eq 0 ]
   contains "$output" "unrelated/u1  [manual]"
 }
