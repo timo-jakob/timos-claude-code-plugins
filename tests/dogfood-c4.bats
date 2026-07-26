@@ -44,11 +44,11 @@ setup() {
   # a non-empty JSON array with the FULL c4/v1 per-entry shape (incl. description)
   echo "$output" | jq -e 'type == "array" and length > 0' >/dev/null
   echo "$output" | jq -e 'all(.[]; has("alias") and has("label") and has("technology") and has("description"))' >/dev/null
-  # the declared set is the real one — the seven plugins plus the detected tests
+  # the declared set is the real one — the ten plugins plus the detected tests
   # image — so a mass-deletion of Container entries fails rather than passing on a
   # single survivor
   echo "$output" | jq -e 'map(.alias) as $a | ($a | index("development")) and ($a | index("development-docs")) and ($a | index("tests"))' >/dev/null
-  echo "$output" | jq -e 'length >= 8' >/dev/null
+  echo "$output" | jq -e 'length >= 11' >/dev/null
 }
 
 @test "the Container diagram declares the one container the detector finds — no detected_not_declared drift (#795)" {

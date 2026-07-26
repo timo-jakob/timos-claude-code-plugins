@@ -62,6 +62,12 @@ For the narrative overview of what each plugin is for, see the
 | `/development-python:maintenance` | Python project maintenance dispatcher. Receives findings from /development:maintenance (or equivalent JSON input), validates the payload, runs a coverage pre-flight (may spawn `python-coverage-improver` in a worktree when affected modules sit below Required — topping up toward Required, or bootstrapping a below-floor (0%) module toward the Floor, #429), and otherwise invokes `python-maintenance-planner` and returns its plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection. See ARCHITECTURE.md for the schema and dispatch contract. |
 | `/development-python:review` | Perform a comprehensive Python code review using 5 specialized parallel agents |
 
+## development-react
+
+| Command | Description |
+| --- | --- |
+| `/development-react:maintenance` | React-topic maintenance dispatcher. Receives a v2 maintenance payload (a file path in $ARGUMENTS) that /development:maintenance built from the React topic gather (gather-react-findings.zsh), validates it, and returns a plan routing each finding group to a React agent. A TOPIC plugin: it composes alongside development-javascript, not instead of it, triggered by the React marker (`react` in the runtime dependencies of any package.json) and only when javascript is also detected. The v0.1 tool universe is deliberately EMPTY, so a valid payload yields a zero-group plan; tools arrive with #957-#960. CI remediation reuses development-javascript's js-ci-fixer. A single invocation returns the plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection or gather — it validates the payload envelope only. See ARCHITECTURE.md for the schema and dispatch contract. |
+
 ## development-spring
 
 | Command | Description |

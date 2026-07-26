@@ -29,7 +29,7 @@
     {
       "name": "development",
       "description": "General development plugin with agents and skills, including the shared telemetry/v1 emit + validate contract; ships a PreToolUse(Agent) hook, inert unless switch_fable_to_opus is truthy, that then redirects dispatches whose effective model is fable to opus.",
-      "version": "1.143.1",
+      "version": "1.144.0",
       "author": {
         "name": "Timo Jakob"
       },
@@ -94,6 +94,16 @@
         "name": "Timo Jakob"
       },
       "source": "./development-javascript",
+      "category": "development"
+    },
+    {
+      "name": "development-react",
+      "description": "React framework topic plugin (foundation slice, #956). Composes ALONGSIDE development-javascript via /development:maintenance (a TOPIC plugin, like development-spring composes with development-java), triggered by the React marker — `react` in the runtime dependencies of any package.json — and only when javascript is also detected. This slice ships the composition wiring only: a real but tool-less gather that places `react` in supported_topics, and a dispatcher stub returning a zero-group plan, reusing js-ci-fixer for CI remediation.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Timo Jakob"
+      },
+      "source": "./development-react",
       "category": "development"
     }
   ]
