@@ -10,8 +10,9 @@ reader can follow it to run the workflow; it is also the validation artifact for
 [#581](https://github.com/timo-jakob/timos-claude-code-plugins/issues/581).
 
 Every primitive named below is a real, tested script under
-`development/skills/{refine-issue,resolve-issue}/scripts/` — the walkthrough uses
-them exactly as the skills do.
+`development/skills/{refine-issue,resolve-issue}/scripts/` — plus the shared
+`development/scripts/telemetry/`, the cross-skill home the `telemetry/v1` emitter
+lives in — and the walkthrough uses them exactly as the skills do.
 
 ---
 
@@ -98,17 +99,24 @@ issue with a comment.
 `refine-issue` re-runs `story-readiness` on the edited issue. Now check 5 passes
 (concrete `use_case`, happy+error test cases in `curl`, both spun-out issues
 exist and are linked), so the verdict is `READY` and the `needs-refinement` label
-is cleared. One JSONL telemetry record is appended (#579):
+is cleared. One `telemetry/v1` record is appended to the shared, git-ignored sink
+`.claude/telemetry/telemetry.jsonl` (#579, retrofitted onto the contract
+by #1005) — the envelope comes from the shared `emit-telemetry.zsh`, the five
+bespoke fields from `build-refine-telemetry-record.zsh` as the `payload`, and the
+run's `refined-ready` ending narrows onto the envelope's `success`. (The stream
+is deliberately **lossy** — Step 7 skips the record rather than fabricate an
+unmeasured `wall_s`, count, outcome or park type.)
 
 ```json
-{"ts":1720000000,"issue":900,"rounds":2,"objections_raised":3,"objections_resolved":3,"outcome":"refined-ready","park_type":null,"risk_classification":"normal","wall_s":180,"tokens":null}
+{"schema":"telemetry/v1","kind":"run","run_id":"refine-issue-1720000000-8f3a","parent_run_id":null,"ts":1720000000,"repo":"owner/app","repo_type":null,"pipeline":"refine-issue","issue":900,"pr":null,"outcome":"success","wall_s":180,"tokens":null,"payload":{"rounds":2,"objections_raised":2,"objections_resolved":2,"park_type":null,"risk_classification":"normal"}}
 ```
 
 > **Can't converge in one sitting?** `refine-issue` takes a **typed parked exit**
 > (#578) — `needs-decision` / `split-recommended` / `deferred` — that records the
 > open questions + conversation in a machine-findable comment (`build-parked-comment.zsh`)
 > and keeps the label; a later run resumes from it (`read-parked-state.zsh`),
-> and telemetry records `outcome: "parked"`.
+> and telemetry records the envelope's `outcome: "parked"` with the specific
+> `park_type` in the `payload`.
 >
 > **A halted epic with several parked children?** `refine-issue` pointed at the
 > epic walks each `needs-refinement` child through this same flow
@@ -160,7 +168,7 @@ feature-only PR.
 | Refine | `refine-issue` + `issue-refiner` (#575/#576) | human-approved prose + proposed `story-spec/v1` |
 | Spin out | `test-case-spinout.zsh` (#671) | linked `test-case` issues #901/#902 |
 | Re-gate | `story-readiness` (#574 validation) | `READY`, label cleared |
-| Telemetry | `build-refine-telemetry-record.zsh` (#579) | one JSONL record |
+| Telemetry | `build-refine-telemetry-record.zsh` → `emit-telemetry.zsh` (#579, #1005) | one `telemetry/v1` record |
 | Consume | `read-story-spec.zsh` (#577) | the block as structured input |
 | Same-PR tests | `plan-acceptance-tests.zsh` (#696) | acceptance tests + joint `Closes #N` |
 

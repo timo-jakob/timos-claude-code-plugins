@@ -84,12 +84,17 @@ this is the guided pass that clears them.
 
 2. **Walk each child in turn** through the **single-issue flow** (Steps 0–7) —
    reuse it as written, one child fully before the next. A child either reaches
-   `READY` (its label cleared, Step 5) or takes a **typed parked exit** (Step 2);
+   `READY` (its label cleared, Step 5) or takes a **typed parked exit** (Step 2's,
+   or Step 5's `deferred` stop);
    a parked child does not halt the walk — record it and continue to the next.
 
 3. **Post an epic-level summary** on the epic issue: for each child, whether it is
    now **ready** (label cleared) or **still parked** (with the park type), plus
-   any that had no work to do. **A ready child's line also notes its expected
+   any that had no work to do — and, separately, any that ended in a **failure**
+   state: *skipped (human declined)*, *label-removal failed*, *parked (comment
+   build failed)*, or *parked (resume state not saved)* when the comment built
+   but did not post. Never fold a failure into "no work to do": a failed child
+   reading as a benign zero is how it gets forgotten. **A ready child's line also notes its expected
    docs pages (#768)** — the refiner's `expected_docs_pages` from that child's
    final turn (e.g. `· docs: docs/how-to/use-the-rest-api.md`), omitted when the
    field is `[]` (a no-surface child has no docs duty) — so the epic's docs
@@ -109,6 +114,38 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
 ```
 
 - If `state` is not `OPEN`, stop — nothing to refine.
+- **Stamp the run's start and the repo path, for Step 7:**
+
+  ```bash
+  T0=$(date +%s)                              # this run's start, for wall_s + ts
+  REPO_ROOT="$(git rev-parse --show-toplevel)" \
+    || { echo "not in a git work tree — Step 7 will skip the record"; REPO_ROOT=""; }
+  # Step 7's run variables. Initialize them HERE so a later child in an epic
+  # walk can never inherit the previous child's values, and assign the real
+  # ones as you go: STATE_OUTCOME at Step 2's park, Step 5's guarded label write,
+  # or Step 5's `deferred` stop — never at Step 1, whose shortcut delegates it to
+  # Step 5; PARK_TYPE at Step 2's park or Step 5's `deferred` stop, cleared at
+  # Step 1's shortcut and Step 5's READY branch; RISK from Step 1's verdict; the
+  # three counts from the Step 2 loop, or explicitly on a run that made no
+  # refiner call.
+  STATE_OUTCOME=""; PARK_TYPE=""; RISK=""; ROUNDS=""; RAISED=""; RESOLVED=""
+  # Print the two stamps: Step 7 needs their LITERAL values many tool calls
+  # later, and a shell variable does not survive that gap.
+  echo "carry into Step 7: T0=$T0 REPO_ROOT=$REPO_ROOT"
+  # A stale parked-state from a PREVIOUS epic-walk child would otherwise be read
+  # as this child's, giving its record the wrong park_type.
+  rm -f /tmp/parked-state.json /tmp/parked-comment.md /tmp/parked.json
+  ```
+
+  `T0` is **per-run, not per-session**: `wall_s` and `ts` are measures of *one*
+  single-issue flow, so the **epic walk re-stamps both for every child** (it
+  re-enters Step 0 per child). Carrying a prior child's `T0` forward would make
+  each subsequent child's `wall_s` include all the preceding ones. The contract
+  requires a **measured** number and you have no other clock — without the
+  stamp, Step 7 can only guess, and a guessed figure in the evidence stream is
+  worse than none, so Step 7 skips the record rather than fabricate one.
+  `REPO_ROOT` must be the repo **directory** — `$REPO` is an `owner/name`
+  identity, not a path, and the emitter keeps the two on separate flags.
 - **Precondition — the `needs-refinement` label.** This skill is for stories the
   gate sent back. If the label is **absent**, **warn and confirm** before
   proceeding ("this issue isn't marked `needs-refinement`; refine it anyway?") —
@@ -142,8 +179,37 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
 Spawn **`story-readiness`** (Task tool, `subagent_type: story-readiness`) on the
 repo + issue to get a **current** verdict — the thread's comment may be stale
 against the latest body. Take its `refinement_questions` as the authoritative
-**objections** for this session. If it already returns `READY`, tell the human
-the story now passes and offer to just clear the label (Step 5) — no loop needed.
+**objections** for this session, and **record the verdict's `risk`** into Step 7's
+`RISK` **verbatim** — one of `low`, `normal`, `elevated` (e.g. `RISK=elevated`),
+never a placeholder and never a default, since it rides into
+`risk_classification` unvalidated and a plausible-but-wrong level is worse than
+none. If the spawn fails or the verdict carries no `risk`, leave `RISK=""`: the
+contract makes `risk_classification` nullable for exactly this case, and an
+empty value null-ifies rather than fabricating. A verdict carrying some *other*
+level is still recorded verbatim — unlike `park_type`, this field is pipeline
+detail that neither the guard nor the builder polices; only a **missing** risk
+becomes `RISK=""`. This
+**diagnosis** verdict is its only source: it is the risk of the story *as the
+gate sent it back*, which is what the metric measures, so Step 4's re-gate
+`risk` is never substituted for it.
+
+If it already returns `READY`, tell the human the story now passes and offer to
+just clear the label (Step 5) — no loop needed. **If they accept**, that
+shortcut is still a run: set `PARK_TYPE=""; ROUNDS=0; RAISED=0; RESOLVED=0` —
+measured zeros, assigned deliberately, so a no-op never reads as a hard-won
+convergence — then run **Step 5's `READY` branch**, which assigns
+`STATE_OUTCOME` only if the label removal actually succeeded, and emit Step 7's
+record. Never set `STATE_OUTCOME="refined-ready"` here: it would claim `success`
+for a story whose label the removal may have failed to clear. Then **skip Step
+6** — nothing changed, so there is no before/after trail to post — and stop
+after Step 7, which emits **at most** one record (none if Step 5's label
+removal failed and the label is still set). **If
+they decline**, ask whether they want to refine anyway: if **yes**, continue to
+Step 2 and this **is** a run (Step 5 decides its outcome); if they decline **and
+stop**, nothing happened — no label change, no refinement — so emit **no**
+record; it was not a run. (In an epic walk that ends **this child**, not the
+walk: note it in the epic summary as *skipped — human declined* and continue to
+the next child.)
 
 ## Step 2 — the refinement loop (human present)
 
@@ -176,6 +242,49 @@ present the **final `proposed_prose` + `proposed_story_spec`** and get the
 human's **explicit approval of the exact rewrite**. Nothing is written until they
 approve. If they want changes, feed their reply back for another round.
 
+**Record Step 7's counters as you go — on every path through this loop, not just
+a park.** They have no other source, and Step 7 refuses to guess, so leaving them
+unset makes it skip the record entirely rather than report a fabricated zero:
+
+A shell variable does **not** survive between Bash tool calls, and this loop
+spans many of them across human turns. Step 7's fence reads **eight** variables
+— Step 0's `T0` and `REPO_ROOT` plus the six run variables — and its guard reads
+them *before* the `jq` does, so substituting literals into the `--arg` lines
+alone still leaves the guard seeing unset values and skipping the record. So:
+carry all eight in your own notes as you go (Step 0 prints its two), and
+**re-assign every one of them on the lines immediately above the guard, in the
+same invocation as the fence**. The guard reads **seven** of the eight — all but
+`RISK`, which only the `jq` reads — so an omitted `RISK` is not skipped, it is
+silently recorded as `null`. Never assume an assignment from an earlier turn is
+still live:
+
+- `ROUNDS` — after each round, re-assign it to the cumulative count of
+  `issue-refiner` calls made in this flow, as a bare integer (e.g. `ROUNDS=4`).
+  Never spell it `ROUNDS=$((ROUNDS+1))`: the previous value is gone by the next
+  tool call, so every round would record `1`.
+- `RAISED` — after each round, re-assign it to the count of **distinct
+  objections seen so far in this flow**, as a bare integer (e.g. `RAISED=4`);
+  never paste a placeholder, which is a shell syntax error and leaves the count
+  empty. In an epic walk this is *this child's* objections only, never a running
+  total across children. On a run that never entered the loop it is Step 1's
+  `refinement_questions` count (`0` only when the verdict raised none).
+- `RESOLVED` — after each round, re-assign it to the **cumulative** count of
+  objections ever reported `resolved: true`, as a bare integer (e.g.
+  `RESOLVED=4`). Cumulative matters: an objection stays counted after it drops
+  out of a later round's `objections` input (which carries only the still-open
+  ones), so on convergence `RESOLVED == RAISED` by definition — a per-turn
+  reading would record a 4-objection convergence as `objections_resolved: 1`.
+
+**A run that made no `issue-refiner` call at all** — Step 1's already-`READY`
+shortcut, or a park taken straight off a resumed session — still assigns all
+three **explicitly**, per the definitions above: `ROUNDS=0`, `RESOLVED=0`, and
+`RAISED` = the objections Step 1 actually raised (`0` on the shortcut, where the
+verdict was `READY`; N on a resumed session that re-parked, where N objections
+were seen and none resolved — that is the stall signal the stream exists to
+capture, and zeroing it would hide it). Those are measured zeros. Never
+*default* an unrecorded count to 0: an unset count must reach Step 7 unset so it
+skips the record rather than fabricating a no-op.
+
 ### Step 2 — the typed parked exit (#578)
 
 Not every session reaches `READY` in one sitting. When the human decides it
@@ -188,27 +297,88 @@ typed escalation (#564), for the human-present refinement loop. Three types:
   testable spec. The state names the `decision` and its `owner`.
 - **`split-recommended`** — the story is really an epic; it can't be one bounded
   spec. The state lists the `candidate_children`.
-- **`deferred`** — the human pauses without converging. The `conversation`
-  so far is preserved.
+- **`deferred`** — the human pauses without converging: either from this loop
+  (the `conversation` so far is preserved) or from Step 5, after a re-gate the
+  story still fails (the block is written, so there is no resume state to keep).
+
+**Check first: did Step 3 already run for THIS issue's flow (Steps 0–7)?** In an
+epic walk each child is its own flow, so a *previous child's* Step 3 does not
+count. `build-parked-comment.zsh`
+states in its comment that "no `story-spec` block was written (the prose isn't
+finalized)". That is true of a park taken from **this loop before Step 3** — the
+normal case — and **false** after a write-back (you looped back here from Step
+5). If Step 3 has already run, do **not** build the comment: take **Step 5's
+route** instead (keep the label, post Step 6's trail, emit `parked` /
+`deferred`). Otherwise continue here.
 
 Build the parked comment with the script (never hand-roll the marker) and post
 it as the human, exactly like every other refine-issue side effect. The state
 object carries the type, the still-**`open_questions`**, the `conversation`, and
-the type-specific fields:
+the type-specific fields. Set Step 7's run variables as you go —
+`STATE_OUTCOME="parked"` and `PARK_TYPE` to the type you chose:
 
 ```bash
 # /tmp/parked-state.json — the structured state (type + open_questions +
 # conversation + type-specific decision/owner or candidate_children)
+STATE_OUTCOME="parked"
+# Write /tmp/parked-state.json FIRST; this only reads it. Deriving the park type
+# from the file that already holds it keeps the payload and the posted comment's
+# marker from disagreeing — and guard the read, because an unguarded one yields
+# a bogus or empty type, which Step 7's enum guard then rejects: the record is
+# skipped and a real park goes uncounted.
+PARK_TYPE="$(jq -re '.type' /tmp/parked-state.json)" || PARK_TYPE=""
+case "$PARK_TYPE" in
+  needs-decision|split-recommended|deferred) ;;
+  # Re-assign it YOURSELF to the type you chose and told the human — as one of
+  # the three literals, e.g. PARK_TYPE=needs-decision. Never paste a
+  # placeholder: it is outside the enum, so Step 7's guard skips the record and
+  # the run goes uncounted (the builder would pass it through verbatim; the
+  # guard is the only thing standing between it and the shared sink).
+  # If you genuinely have no type, leave it EMPTY: Step 7 then SKIPS the record,
+  # which is the right answer — a `parked` with `park_type: null` is the shape
+  # the contract reserves for `refined-ready`, and no consumer could tell them
+  # apart. Lossy beats wrong.
+  *) echo "park type missing/unknown in /tmp/parked-state.json — set PARK_TYPE to the type you chose (needs-decision|split-recommended|deferred), or leave it empty and the record is skipped"
+     PARK_TYPE="" ;;
+esac
 # Guard the post on the build succeeding — a non-zero build (validation failure)
 # must NOT post a blank/markerless comment, which would silently lose the resume.
 if "<skill-base-dir>/scripts/build-parked-comment.zsh" \
      --issue <N> --state /tmp/parked-state.json > /tmp/parked-comment.md; then
-  gh issue comment <N> --body-file /tmp/parked-comment.md
+  # Guard the POST too, not just the build. The run is still RECORDED either
+  # way — a failed post and a failed build leave the issue in the same state
+  # (no resume comment, label kept), and `outcome: "parked"` makes no
+  # resumability promise, so suppressing one and not the other would split the
+  # stream on an accident. What matters is that the human is told.
+  gh issue comment <N> --body-file /tmp/parked-comment.md \
+    || echo "the parked comment did not post — the resume state was NOT saved; retry before ending the session (the run is still recorded as parked)"
 else
   echo "parked-comment build failed (see stderr) — not posting; fix the state and retry"
-  exit 1
 fi
 ```
+
+**On a build failure, follow this order exactly:**
+
+1. **Set `PARK_TYPE` first, then run Step 7.** The commonest cause of a build
+   failure is the very state file the type is read from, so `PARK_TYPE` is
+   likely empty — and Step 7 skips a parked record without it. Assign the type
+   you chose and told the human (one of the three literals), then emit. A failed
+   park still ends a run that spent rounds and objections, and it is the ending
+   an author most wants counted. Emit the record **once**. Do not `exit` out of
+   the shell first: that
+   would discard Step 0's `T0`/`REPO_ROOT` stamps, and Step 7's guard would then
+   correctly refuse to fabricate a `wall_s` — losing the very record this rule
+   exists to keep.
+2. **You may fix the state and re-run the build in-session.** If it then
+   succeeds, post the comment. If step 1 actually **emitted** a record, emit no
+   second one — "exactly one record per run" still holds. If step 1 **skipped**
+   it (its advisory names which value was missing), re-state **every** required
+   value and run Step 7 once more; if it skips again the run is genuinely
+   unmeasured — say so and move on. Either way the run ends with at most one
+   record.
+3. **Then end this issue's flow**, whether or not the retry succeeded. In an
+   epic walk that ends the **child**, not the walk: record it as
+   `parked (comment build failed)` and continue to the next child.
 
 A parked exit is deliberately **distinct from the Step 3 write-back and the
 Step 5/6 path**:
@@ -340,15 +510,72 @@ they can add or fix it and, optionally, re-run refine-issue to reference it.
 
 ## Step 5 — resolve the label, honestly
 
-- **`READY`** → remove the label; the story is buildable:
+- **`READY`** → remove the label; the story is buildable. Step 7 defines
+  `refined-ready` as "the run ends with `needs-refinement` **removed**", so set
+  the outcome **only if the removal actually succeeded** — otherwise the record
+  would claim `success` for a story still carrying the label. Clearing
+  `PARK_TYPE` matters too, when an earlier loop began a park that was then
+  abandoned, or the record would claim `success` with a park type attached:
 
   ```bash
-  gh issue edit <N> --remove-label needs-refinement
+  # The retry is INSIDE the condition: a second attempt that succeeds is an
+  # ordinary READY ending and must still set the outcome, or Step 7 would skip
+  # the record for a run that genuinely reached refined-ready.
+  #
+  # The final arm checks STATE rather than the command's status, which settles
+  # two cases the status alone cannot: a story that never carried the label
+  # (Step 0 allows refining an ungated one), and a first attempt that succeeded
+  # server-side but lost its response. In both the label is already absent, so
+  # the run really did reach refined-ready.
+  if gh issue edit <N> --remove-label needs-refinement \
+     || { sleep 2; gh issue edit <N> --remove-label needs-refinement; }; then
+    STATE_OUTCOME="refined-ready"; PARK_TYPE=""
+  elif LABELS_NOW="$(gh issue view <N> --json labels -q '.labels[].name')" \
+       && ! printf '%s\n' "$LABELS_NOW" | grep -qx needs-refinement; then
+    # Both edits failed, but the label is VERIFIABLY absent — the story was
+    # never gated, or the first edit landed and only its response was lost.
+    # The assignment is separate from the grep on purpose: `! gh … | grep`
+    # would negate grep's status alone, so a FAILED read (the same outage that
+    # just failed both edits) would print nothing, grep would exit 1, and the
+    # run would record `success` for a story that still carries the label.
+    # An unreadable label state is never evidence of absence.
+    STATE_OUTCOME="refined-ready"; PARK_TYPE=""
+  else
+    # Never carry a value from an abandoned earlier loop into this ending.
+    STATE_OUTCOME=""; PARK_TYPE=""
+    echo "label removal failed, and its state is still set or unverifiable — see below"
+  fi
   ```
+
+  **If both attempts fail and the label is still there:** tell the human it could
+  not be removed, do
+  **not** post Step 6's trail as though it had been, and end this issue's flow.
+  `STATE_OUTCOME` stays empty, so Step 7 skips the record — the run reached no
+  decided ending, and a `success` here would be a lie. (In an epic walk that
+  ends **this child**: note it in the epic summary as *label-removal failed* and
+  continue to the next child.)
 
 - **`NEEDS_REFINEMENT`** → **keep the label** and report the remaining reasons to
   the human. Do not remove it on a story the gate still rejects — the label is
   the honest signal. Offer another loop (back to Step 2) or to stop here.
+
+  **If they stop here, it is a recorded ending, but NOT Step 2's parked exit.**
+  Do **not** run `build-parked-comment.zsh` here: its comment states outright
+  that "no `story-spec` block was written (the prose isn't finalized)", which is
+  **false** on this path — Step 3 already wrote the approved prose and stamped
+  the block. Posting it would contradict the issue's own edit history and seed
+  the next run with a wrong resume state. Instead:
+
+  - keep the `needs-refinement` label (that *is* the resume signal — the next
+    run's Step 0 reads it, and Step 1 re-diagnoses from the current body);
+  - **still post Step 6's before/after trail** — Steps 3–4 really ran, so the
+    issue must record what changed, what the re-gate said, and that the label
+    stays. (Step 2's "do not run Steps 3–6" applies to a parked exit taken
+    **from the Step 2 loop**, where Step 3 never ran at all.)
+  - then set `STATE_OUTCOME="parked"; PARK_TYPE="deferred"`, emit Step 7, and
+    stop.
+
+  Never emit `refined-ready` for a story the gate still rejects.
 
 ## Step 6 — the before/after comment trail
 
@@ -358,37 +585,167 @@ the prose (or a note that the full diff is in the edit history), the re-gate
 verdict, and the resulting label state. This is the audit trail a later reader —
 or `resolve-issue` — relies on.
 
-## Step 7 — emit telemetry (both endings, #579)
+## Step 7 — emit telemetry (every decided ending, #579)
 
-Every refine-issue run — whether it reached `refined-ready` (Steps 3–6) **or**
-took a typed parked exit (Step 2) — appends **one** JSONL record so the plugin
-self-improvement handoff can learn where refinement helps and where it stalls.
-Mirror the review-loop telemetry's **pre-contract (v0)** convention — the shape
-it used before #1004 moved it onto `telemetry/v1` — i.e. this stream keeps its
-own per-pipeline sink and its whole-record builder below. Do **not** hand-roll a
-`telemetry/v1` envelope here: retrofitting this stream onto the shared emitter
-is epic #740's child (c), issue #1005. What still carries over unchanged is the
-rule that a **telemetry failure must never break the run** (`|| true`).
+Every refine-issue run — whether it reached `refined-ready` (Steps 3–6, or Step
+1's already-`READY` shortcut) **or** took a typed parked exit (Step 2's, or Step
+5's `deferred` park) — appends **one** `telemetry/v1` record so the
+plugin self-improvement handoff can learn where refinement helps and where it
+stalls. The **envelope and the sink belong to the shared emitter**
+(`development/scripts/telemetry/emit-telemetry.zsh`, #740 child (a)) — never
+hand-roll one here; this stream supplies only its own `payload` plus the
+envelope's linkage fields, exactly as the review loop does since #1004. What
+carries over unchanged from the pre-contract shape is the rule that a
+**telemetry failure must never break the run** — here spelled
+`{ … } || echo <advisory>`, so the loss is said once in-session and the run is
+unaffected.
 
-Build the record from the run's summary and append it to the git-ignored sink:
+Build the payload from the run's summary and hand it to the emitter, which
+derives `repo`, mints the `run_id`, and appends to the shared git-ignored sink
+`.claude/telemetry/telemetry.jsonl`:
+
+**Build the state with `jq`, never a hand-quoted heredoc**, and pass every field
+as a **plain string** (`--arg`) so `jq` owns the encoding. A hand-quoted state is
+not a small error: one unquoted value makes it invalid JSON, the builder exits 1,
+and the `||` branch reduces the whole lost record to a single advisory line.
+
+**The six run variables come from the steps that decided them** — Step 0
+initializes them all to empty, and Step 1/2/5 assign the real values as they go
+(each names its own). Never let Step 7 invent one: an unset count would record a
+4-round convergence as `rounds: 0`, indistinguishable from Step 1's shortcut,
+which is the same fabrication the `T0` guard exists to refuse.
+
+So the guard below covers the four run variables that **must be present** —
+`STATE_OUTCOME` and the three counts — on top of Step 0's `T0`/`REPO_ROOT`
+stamps, which it checks first, and skips the record rather than emit a guess. It
+deliberately does **not** cover `RISK`, and covers `PARK_TYPE` only
+**conditionally**: both are nullable by contract (`park_type` is `null` on every
+`refined-ready` run, and `risk_classification` is `null` when Step 1 produced no
+verdict), and the `jq` below null-ifies an empty one — so guarding them
+unconditionally would suppress the record on every successful refinement. The
+one exception is a `parked` run whose `PARK_TYPE` is **empty or outside the
+three-value enum**, which the guard *does* reject: an empty one is the
+`refined-ready` shape wearing a `parked` label, which no consumer could tell
+from a well-formed park whose type was lost, and an out-of-enum one is a
+fabricated value the payload builder deliberately does not police.
+
+**Re-assign all eight before running this block.** `T0`, `REPO_ROOT`,
+`STATE_OUTCOME`, `PARK_TYPE`, `RISK`, `ROUNDS`, `RAISED`, `RESOLVED` must all be
+re-stated as literals **in the same Bash invocation as the fence**, on the lines
+above the guard (Step 2's rule). Values assigned in an earlier tool call are
+gone, and the guard would then skip the record for a run that was measured
+perfectly well. This holds on **every** path here — including Step 1's
+already-`READY` shortcut, which never enters Step 2 and so never reads that rule.
 
 ```bash
-# /tmp/refine-state.json — this run's summary:
-#   {rounds, objections_raised, objections_resolved,
-#    outcome: "refined-ready"|"parked", park_type|null, risk_classification}
-mkdir -p "$REPO_ROOT/.claude/telemetry"
-"<skill-base-dir>/scripts/build-refine-telemetry-record.zsh" \
-  --state /tmp/refine-state.json --issue <N> --wall-s <seconds> \
-  >> "$REPO_ROOT/.claude/telemetry/refine-issue.jsonl" || true
+# Step 0 stamped T0/REPO_ROOT and Steps 1/2/5 DECIDED the run variables —
+# re-state every one of their literals above this guard (see the note above).
+# T0, REPO_ROOT, STATE_OUTCOME and the three counts are REQUIRED — wall_s and the
+# counts must be MEASURED, so a missing one means skip the record. (An unset T0
+# would read as 0 in arithmetic and turn into a ~56-year run; a count DEFAULTED
+# to 0 because it was never measured would validate and read as Step 1's no-op
+# shortcut.) RISK is nullable by contract and is NEVER
+# guarded; PARK_TYPE is guarded ONLY in the `parked` pairing below — see the
+# paragraph above.
+# Hoist both patterns: an UNQUOTED `(a|b)` / `{n,m}` on a `=~` right-hand side is
+# a bash-only spelling — zsh treats those characters as shell-special on a
+# different path — and this fence runs under whichever shell the session uses. A
+# pattern that silently never matches would negate to true and skip EVERY parked
+# run's record. A variable is the one form both shells agree on.
+T0_RE='^[0-9]{1,18}$'
+PARK_RE='^(needs-decision|split-recommended|deferred)$'
+if [[ ! "${T0:-}" =~ $T0_RE || -z "${REPO_ROOT:-}" || ! -d "${REPO_ROOT:-/nonexistent}" \
+   || -z "${STATE_OUTCOME:-}" || ! "${ROUNDS:-}" =~ ^[0-9]+$ \
+   || ! "${RAISED:-}" =~ ^[0-9]+$ || ! "${RESOLVED:-}" =~ ^[0-9]+$ \
+   || ( "${STATE_OUTCOME:-}" == "parked" && ! "${PARK_TYPE:-}" =~ $PARK_RE ) ]]; then
+  echo "telemetry not recorded for this run (a Step 0 stamp, the run outcome, a run count, or a park's type is missing) — the run itself is unaffected"
+else
+  # 10# so a leading-zero stamp can't be read as a bad octal literal, matching
+  # the emitter's own normalization.
+  WALL_S=$(( $(date +%s) - 10#$T0 ))
+  (( WALL_S >= 0 )) || WALL_S=0     # a backwards clock (NTP) would be rejected
+
+  # Allocate independently, so a partial success is still cleaned up.
+  STATE=$(mktemp) || STATE=""
+  PAYLOAD=$(mktemp) || PAYLOAD=""
+  if [[ -z "$STATE" || -z "$PAYLOAD" ]]; then
+    rm -f "$STATE" "$PAYLOAD" 2>/dev/null
+    echo "telemetry not recorded for this run (no temp file) — the run itself is unaffected"
+  else
+    BUILDER="<skill-base-dir>/scripts/build-refine-telemetry-record.zsh"
+    {
+      # PARK_TYPE / RISK are PLAIN strings ("deferred", "normal") — empty means
+      # absent. jq encodes and null-ifies them, so there is no JSON literal for
+      # a caller to mis-quote.
+      jq -n --arg rounds "$ROUNDS" --arg raised "$RAISED" --arg resolved "$RESOLVED" \
+            --arg outcome "$STATE_OUTCOME" \
+            --arg park_type "${PARK_TYPE:-}" --arg risk "${RISK:-}" \
+        '{rounds: ($rounds|tonumber),
+          objections_raised: ($raised|tonumber),
+          objections_resolved: ($resolved|tonumber),
+          outcome: $outcome,
+          park_type: (if $park_type == "" then null else $park_type end),
+          risk_classification: (if $risk == "" then null else $risk end)}' > "$STATE" \
+        && OUTCOME="$("$BUILDER" --state "$STATE" --print-outcome)" \
+        && "$BUILDER" --state "$STATE" > "$PAYLOAD" \
+        && "<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh" \
+             --pipeline refine-issue --kind run --outcome "$OUTCOME" \
+             --repo-dir "$REPO_ROOT" --ts "$T0" --issue <N> --wall-s "$WALL_S" \
+             --payload "$PAYLOAD" >/dev/null
+    } || echo "telemetry not recorded for this run (see stderr) — the run itself is unaffected"
+    rm -f "$STATE" "$PAYLOAD"
+  fi
+fi
 ```
 
-- `outcome` is `refined-ready` when Step 5 re-gated `READY` and the label was
-  cleared; `parked` when Step 2 took a typed parked exit (carry the `park_type`).
-- `objections_raised` / `objections_resolved` come from the Step 2 loop's
-  `resolved_objections` tally; `rounds` is the loop's round count.
-- Emit **exactly one** record per run, at whichever ending the run reached. On a
-  parked exit, emit it as part of stopping (after Step 2 posts the parked
-  comment).
+- `REPO_ROOT` and `T0` are **Step 0's** stamps. `--repo-dir` needs the repo
+  **directory** — never pass `$REPO`, which is the `owner/name` identity the
+  emitter takes on its separate `--repo` flag; the emitter rejects a
+  non-directory, and the `|| echo` advisory would reduce that to one line.
+- **The state's `outcome` has exactly two values, and every ending maps to one:**
+  - `refined-ready` — the run ends with `needs-refinement` **removed**, whether
+    via Step 4's re-gate + Step 5's clear or Step 1's already-`READY` shortcut;
+  - `parked` — a typed parked exit was taken: Step 2's, or Step 5's `deferred`
+    stop on a still-rejected story.
+
+  **Anything else emits no record at all.** Two shapes: (a) it was **not a
+  run** — a non-`OPEN` issue, a declined `needs-refinement` precondition, or a
+  declined shortcut clear **that ends the session at Step 1** (a decline that
+  continues into Step 2 *is* a run); (b) it was a run that reached **no decided
+  outcome** — Step 5's twice-failed label removal, or a run whose stamps, counts
+  or park type were never measured. Both are a **skipped** record, not a third
+  `outcome` value: never coerce them to `parked`.
+
+  The two have different reasons, and conflating them is how the guard gets
+  weakened: **(a)** ends before any refinement happens, so there is nothing to
+  measure and recording it would inflate the denominator; **(b)** may have
+  refined a great deal, and the record is skipped anyway — a fabricated outcome,
+  count or park type is worse than a missing one. Lossy beats wrong. The builder
+  hard-rejects any third value rather than guessing, so never invent one.
+
+  `--print-outcome` narrows the state value onto the contract's 4-value envelope
+  enum (`refined-ready` → `success`, `parked` → `parked`) — never map it by
+  hand. Nothing is lost: `park_type` rides in the `payload`.
+- `objections_resolved` comes from the Step 2 loop's `resolved_objections`
+  tally; `objections_raised` from the distinct objections seen across the flow
+  (Step 2's rule — not the size of any one round's array); `rounds` is the loop's round count (`0` on the
+  Step 1 already-`READY` shortcut); `risk_classification` is the **Step 1
+  diagnosis verdict's `risk`** — `low` | `normal` | `elevated`, or `null` only
+  when Step 1 produced no verdict. Step 4's re-gate `risk` is never substituted:
+  the metric asks how risky the story was *when the gate sent it back*. All five
+  bespoke fields live in the `payload`.
+- `repo_type` is deliberately **`null`** on this stream: refine-issue never
+  detects a stack, and a guessed one would be worse than an absent one.
+- Emit **exactly one record per run**, where a "run" is **one single-issue
+  flow** (Steps 0–7). In the **epic walk** that means one record per child,
+  each with its own `--issue <child>` and its own Step 0 stamps — not one per
+  invocation. The walk emits **no** parent record and children carry
+  `parent_run_id: null`; the epic's own summary comment is what groups them.
+- **If the emission fails, say so once in-session** and move on. It must never
+  fail the run, and never retry it.
+- Records written **before** this retrofit stay in
+  `.claude/telemetry/refine-issue.jsonl` in the pre-contract (v0) shape — they
+  are **not** migrated; child (e)'s rollup reads both.
 
 ## Guardrails
 
@@ -410,11 +767,15 @@ mkdir -p "$REPO_ROOT/.claude/telemetry"
   into the block before write-back. Never open or close a `test-case` issue with
   a raw `gh` call — the script keeps the reconcile idempotent and orphan-closing
   consistent. Keep each case's `id` stable so re-runs reuse rather than duplicate.
-- **A parked exit skips write-back and keeps the label (#578).** When a session
-  can't converge, take the typed parked exit (Step 2): build the comment with
-  `scripts/build-parked-comment.zsh` (never hand-roll the `refine-parked` marker),
-  post it, **keep** `needs-refinement`, stamp **no** `story-spec` block, and stop.
-  A later run's Step 0 resumes from it via `scripts/read-parked-state.zsh`.
+- **A parked exit taken BEFORE Step 3 skips write-back and keeps the label
+  (#578).** When a session can't converge in the loop, take the typed parked exit
+  (Step 2): build the comment with `scripts/build-parked-comment.zsh` (never
+  hand-roll the `refine-parked` marker), post it, **keep** `needs-refinement`,
+  stamp **no** `story-spec` block, and stop. A later run's Step 0 resumes from it
+  via `scripts/read-parked-state.zsh`. A park taken **after** Step 3 — Step 5's
+  `deferred` stop, or a loop-back that re-parks — is different: the block **is**
+  written, so it never runs `build-parked-comment.zsh` (whose comment would claim
+  otherwise); it keeps the label, posts Step 6's trail, and emits Step 7.
 - **Epic → walk the children (#580)** — pointed at an epic, enumerate its
   `needs-refinement` children with `scripts/list-refinement-children.zsh` and run
   each through the single-issue flow, then post an epic-level summary. Never
