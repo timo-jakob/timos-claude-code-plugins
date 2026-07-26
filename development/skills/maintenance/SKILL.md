@@ -251,11 +251,13 @@ manifest. Known topics:
 | `claude-plugin` | a `.claude-plugin/` dir holding `plugin.json` (an individual plugin) **or** `marketplace.json` (a marketplace of plugins, like this repo) | `gather-claude-plugin-findings.zsh` |
 | `spring` | an `org.springframework.boot` Gradle plugin **or** a `spring-boot-starter-*` dependency in `build.gradle.kts` (composes alongside `java` — only meaningful when Java is also detected) | `gather-spring-findings.zsh` |
 | `docs` | a `docs/architecture/` **directory** (the C4 architecture docs home — language-agnostic, so it composes with any language, or none) | `gather-docs-findings.zsh` |
+| `react` | `react` in the **`dependencies`** (runtime, **not** `devDependencies`) of **any** `package.json`, monorepo-aware, under `detect_lang`'s prune set (`node_modules`, `.git`, `vendor`, `.build`, `dist`, `templates`). Requires `jq`; **requires language `javascript`** | `gather-react-findings.zsh` |
 
 **Detecting a marker — use these exact recipes, don't improvise.** A
 *file-presence* marker (the `claude-plugin` dir) is robust to test with
-`test -e`. The **content** marker (the `spring` one) must grep *inside*
-the build script. Kotlin DSL only (#343) — the family maintains
+`test -e`. The **content** markers (`spring`, `react`) must look *inside*
+files — `spring` greps `build.gradle.kts`, `react` reads `package.json`
+with `jq`. Kotlin DSL only (#343) — the family maintains
 `build.gradle.kts`, so the marker greps only that; a Groovy/Maven repo is
 detected as `java` (so the dispatcher halts it) but does **not** compose
 Spring. Grep recursively with an `--include` filter over `.` — never pass a
@@ -273,7 +275,48 @@ grep -REl --include='build.gradle.kts' \
 
 # docs marker (directory presence — robust):
 test -d docs/architecture
+
+# react marker: `react` in the DEPENDENCIES of ANY package.json (monorepo-aware).
+# THREE-WAY verdict — 0 = React, 1 = not React, 2 = COULD NOT EVALUATE. The third
+# outcome is why the jq check is part of the recipe rather than advice beside it:
+# with jq missing the pipeline would emit nothing and read as a confident "no".
+# `( exit 2 )` yields status 2 without terminating a caller that sourced/eval'd this.
+#
+# The prune list mirrors detect-stack.sh's `detect_lang` exactly, so the marker and
+# the `javascript` language detector agree about which tree they search. `-prune`
+# (not `-not -path`) so pruned dirs are never DESCENDED into. `! -type d` so a
+# DIRECTORY named package.json is never handed to jq, while a symlinked manifest —
+# which `detect_lang` matches by name — still counts.
+# Per-file `-exec … \;` — never `+`: one batched jq call ABORTS at the first
+# unparseable package.json and skips every remaining file in that batch, so a
+# single malformed manifest could mask a real match.
+# The verdict is CAPTURED, not piped: `find … | grep -q .` inverts under
+# `set -o pipefail`, because grep short-circuits on the first hit, the next jq child
+# dies on SIGPIPE, and find then reports non-zero — turning a genuine match into
+# "no React". Capturing the output and testing it is pipefail-safe.
+# react-marker:begin
+if ! command -v jq >/dev/null 2>&1; then
+  printf 'react-marker: UNEVALUATED (jq not on PATH)\n' >&2
+  ( exit 2 )
+else
+  react_hits="$(find . -mindepth 1 \
+    -path '*/node_modules' -prune -o \
+    -path '*/.git' -prune -o \
+    -path '*/vendor' -prune -o \
+    -path '*/.build' -prune -o \
+    -path '*/dist' -prune -o \
+    -path '*/templates' -prune -o \
+    -name package.json ! -type d \
+    -exec jq -er '.dependencies.react // empty' {} \; 2>/dev/null)" || true
+  [ -n "$react_hits" ]
+fi
+# react-marker:end
 ```
+
+**The `react-marker:begin`/`:end` sentinels are load-bearing**, not decoration:
+`tests/react-topic-marker.bats` extracts exactly the text between them and executes
+it, so the suite tests this recipe rather than a copy of it. Keep the whole recipe
+between them, and keep them a single unique pair.
 
 The `spring` topic is **only meaningful when `java` is also detected** —
 require both before composing `development-spring`. The `docs` topic has no such
@@ -282,18 +325,81 @@ can have one), so it composes with any detected language — or on its own. Its
 marker is the **directory**, not `docs/architecture/c4-container.md`: tying the
 whole topic to one tool's artifact would fail to dispatch a repo that has docs
 concerns but no container diagram yet, and any second docs tool would have to
-widen the marker retroactively. The narrow "is there a container diagram to
-compare?" check belongs one level down, in `c4_drift`'s own per-tool `configured`
-gate (#793) — `tooling_configured` answers "does this tool have something to look
-at?" while the marker answers "does this topic apply to this repo at all?".
+widen the marker retroactively. `tooling_configured.c4_drift` is deliberately the
+**same** predicate — the presence of `docs/architecture/` — rather than a narrower
+"is there a diagram?" gate: when the directory exists but `c4-container.md` is absent
+or unparseable, the gather degrades to an empty finding list **plus a note**, never
+to `configured: false` (#793).
 
-**`gather-docs-findings.zsh` ships in #793, not yet.** Until it lands, the
-partition below places `docs` in **`unsupported_topics`** on every run (marker
-present, no gather script) — the expected intermediate state: #801 stood up the
-`development-docs` dispatcher and this marker so #793 adds only the gather + the
-`c4_drift` tool, not a whole plugin. A repo whose only maintainable surface is
-`docs/architecture/` therefore has nothing to dispatch yet and halts with the
-usual "detected but not built yet" note, exactly as any other unsupported topic.
+The `react` topic (#956) is **only meaningful when `javascript` is also
+detected** — require both before composing `development-react`, exactly as `spring`
+requires `java` (#296 decision #1). That gate is **enforced in the partition step
+below, not merely stated here** — see *Required language*, which also explains why it
+must not rely on the marker's prune set staying in sync. Three deliberate narrowings
+in its recipe:
+
+- **Runtime dependencies only.** `react` in `devDependencies` alone means React
+  *tooling* (a linter plugin, a component-test harness in a repo that ships no React
+  app), not a React application — dispatching the framework topic there would review
+  a codebase that has no components. So the recipe reads `.dependencies.react`, and
+  **never** `.devDependencies.react` or `.peerDependencies.react` (the latter is the
+  shape of every published React *component library*, which is a dependency of React
+  apps rather than one itself).
+- **Monorepo-aware.** A JS monorepo is as ordinary as a Gradle multi-project build,
+  so the recipe searches **every** `package.json` rather than only the root one — a
+  repo whose React app lives in `packages/web/` must match.
+- **Pruned to `detect_lang`'s exact tree.** The recipe prunes `node_modules`, `.git`,
+  `vendor`, `.build`, `dist` and `templates`, with `-mindepth 1`, because that is
+  precisely what `detect-stack.sh`'s `detect_lang` prunes. Two independent reasons.
+  First, `node_modules` must go: React is a transitive dependency of countless
+  packages, so matching there would dispatch the topic for virtually any installed JS
+  repo — the false positive most likely to make users distrust topic detection.
+  Second, and less obvious, **any divergence from `detect_lang`'s set breaks the
+  language gate**: a `package.json` under `templates/` or `dist/` would fire the
+  marker while `javascript` was *not* detected, so the topic could compose onto a repo
+  detection calls non-JS. That is not hypothetical here — #957 ships React bootstrap
+  templates under a `templates/` tree, which would otherwise make this very plugin
+  repo match the React marker. **If `detect_lang`'s prune list ever changes, change
+  this recipe in the same PR.** `-mindepth 1` is copied verbatim so the two
+  expressions stay diff-identical — but note it is a **no-op here**: `detect_lang`
+  needs it because it searches an *absolute* `$cwd`, whose own basename can match
+  `*/templates`, whereas this recipe starts at the literal `.`, which matches no
+  prune pattern at any depth. Keep it for parity (and in case the recipe ever gains
+  a start-path argument); do not cite it as protection this form actually needs.
+
+**`jq` is a prerequisite of this marker, and its absence is not a verdict.** `react`
+is the only topic marker that shells out to a tool which may be missing
+(`claude-plugin`/`docs` use `test`, `spring` uses `grep`). Because the recipe's
+verdict is "did anything reach stdout", a missing `jq` produces no output and would
+otherwise read as a confident **"this is not a React repo"** — silently skipping a
+whole topic with nothing in the summary to say so. So: run the `command -v jq`
+preflight **first**. If it fails, do **not** run the recipe and do **not** record a
+negative — place `react` in **`unsupported_topics`** with the note
+`jq not on PATH: the React marker could not be evaluated`,
+so the Phase 9 summary reports a topic that
+was never evaluated rather than one that was evaluated as absent. A **malformed**
+`package.json` is a different case and *is* a deliberate non-match: `jq` fails on it,
+the recipe emits nothing for that file, and the traversal continues to the others.
+
+Use `-exec … \;` (**per file**) rather than `-exec … +` (one batched call). The
+reason is *not* jq's exit status — nothing reads it; the **captured** stdout
+(`[ -n "$react_hits" ]`) is the verdict, which is also why `-e` is belt-and-braces
+rather than load-bearing. The real
+reason is failure isolation: **a batched `jq` aborts at the first unparseable
+`package.json` and skips every remaining file in that batch**, so one malformed
+manifest sorted before the real one would turn a genuine React repo into a non-match.
+Per-file execution contains that failure to the file that caused it.
+
+Finally, `find` runs with its default `-P` (symlinks not followed), so a monorepo
+whose app directory is a *symlink* is not traversed. This is a deliberate trade, not
+an oversight: `-L` would follow the pnpm/yarn `node_modules` symlink farms the prune
+list exists to avoid, and can loop.
+
+**`gather-docs-findings.zsh` landed in #793**, so `docs` is a **supported** topic
+whenever its marker fires: #801 stood up the `development-docs` dispatcher and this
+marker, and #793 added the gather plus the `c4_drift` tool. Never hard-code a topic's
+supported/unsupported status from prose like this paragraph — the `test -x` partition
+below is the single authority, and it is what decides on every run.
 
 For each known topic whose marker is present, check for its gather script:
 
@@ -301,9 +407,46 @@ For each known topic whose marker is present, check for its gather script:
 test -x "<skill-base-dir>/scripts/gather-<topic>-findings.zsh"
 ```
 
-Partition into **`supported_topics`** (marker present AND gather script exists)
-and **`unsupported_topics`** (marker present, no gather script yet). Note topic
-gather scripts are zsh (`.zsh`); the language ones are bash (`.sh`).
+Partition into **`supported_topics`** (marker present AND gather script exists AND
+any **required language** is in `supported`) and **`unsupported_topics`** (marker
+present, but one of those failed). Note topic gather scripts are zsh (`.zsh`); the
+language ones are bash (`.sh`).
+
+**Required language — the gate, enforced here.** A topic may require a language;
+this is the single place that requirement is applied, so it can't be stated in the
+marker prose and then quietly skipped:
+
+| Topic | Required language |
+| --- | --- |
+| `claude-plugin` | none |
+| `docs` | none |
+| `spring` | `java` |
+| `react` | `javascript` |
+
+**Each `unsupported_topics` entry is `{topic, note}`** — the note says *which*
+condition failed, because Phase 9 renders it verbatim and "we couldn't tell" must
+never be reported as "nothing to do". The same shape applies to an `unsupported`
+**language** entry. Three conditions are decided here in the partition; two more
+producers write into the same bucket later (Phase 3 and Phase 6), so treat this table
+as open, not closed:
+
+| Condition that failed | Note |
+| --- | --- |
+| no gather script | `no gather-<topic>-findings.zsh yet` |
+| required language absent | `marker present but required language <lang> is not in the supported set (not detected, or no gather script)` |
+| marker not evaluable | the marker's own reason, e.g. `jq not on PATH: the React marker could not be evaluated` |
+| gather failed (Phase 3) | `gather failed: <error>` |
+| dispatch failed (Phase 6) | `dispatch failed: <error>` |
+
+A topic in this bucket is never silently dropped and never dispatched. Note the
+middle condition is `<lang>` **not in `supported`** — which is stricter than "not
+detected", since `supported` also requires that language's gather script.
+
+**Why the gate is enforced here rather than trusted to the marker.** With the recipe
+pruning exactly `detect_lang`'s tree, a marker hit without its language is not
+reachable *through that route* today. The gate exists because `supported` is stricter
+than *detected*, and because any future drift between the two prune sets would make
+it reachable — the gate must not depend on the two staying in sync.
 
 ### Proceed / halt
 
@@ -640,6 +783,15 @@ internal error — surface it to the user (with the script path + stderr)
 and skip that language. Don't try to construct a payload from a broken
 gather output.
 
+**Skipping means removing it from `supported`, not just not-gathering it.**
+`supported` is what Phase 4 iterates to build payloads, what Phase 6 iterates to
+dispatch, and what Phase 9 prints verbatim as `Languages processed:`. Leave a
+failed-gather language in that set and the run builds a payload from the broken
+output, dispatches it, and reports the language as **processed** when it was never
+gathered. So: drop it from `supported` and record it with the other unsupported
+languages, noted `gather failed: <error>` (the same bookkeeping the failed-*dispatch*
+branch in Phase 6 already does).
+
 Pool all `notes` across all gather scripts; they describe why certain
 tools couldn't produce live findings (e.g., snyk auth missing,
 pytest-cov not installed). Surface them in the final summary.
@@ -656,7 +808,10 @@ state pre-flight and no coverage**. For each `topic` in `supported_topics`:
 Same output contract as the language gathers — `tooling_configured`,
 `findings_by_tool`, `notes` — except `coverage` is always `null`. Collect them,
 pool their `notes` with the rest, and treat a non-zero exit or malformed JSON
-the same way (surface it, skip that topic).
+the same way (surface it, skip that topic) — including the bookkeeping: **remove the
+topic from `supported_topics`** and record it in `unsupported_topics` noted
+`gather failed: <error>`, for exactly the reason given above on the language path.
+A topic that was never gathered must never appear under `Topics gathered:`.
 
 ### Project-level findings — template drift
 
@@ -789,8 +944,47 @@ differences:
 - `dispatch_mode`: `"primary"` if this topic == the declared `primary` (or no
   declaration); else `"auxiliary"` — same rule as language payloads (Phase 1).
 - `language_meta`: `{ "version": null, "manifests": ["<the topic marker>"] }` —
-  the marker path, whether a file (`claude-plugin`, `spring`) or a directory
-  (`docs` → `"docs/architecture"`).
+  the marker path, whether a file (`claude-plugin`) or a directory
+  (`docs` → `"docs/architecture"`). For a **content** marker — one that matches
+  *inside* files rather than by path (`spring`, `react`) — `manifests` is the list of
+  **every matching file path**, repo-relative, in `find` order: e.g.
+  `["packages/web/package.json", "apps/admin/package.json"]`. Never invent a
+  conventional root path for a content marker: a monorepo whose React app lives in
+  `packages/web/` has no root `package.json` with `react` in it, so `["package.json"]`
+  would name a file that does not carry the marker.
+
+  **Get those paths from the marker's path-listing variant, not from the marker
+  itself.** The `react` verdict recipe prints React *version strings* (and `spring`'s
+  prints nothing but a status), so neither one's stdout is a path list. Run:
+
+  ```bash
+  # react → the matching package.json paths, repo-relative
+  # react-manifests:begin
+  find . -mindepth 1 \
+    -path '*/node_modules' -prune -o \
+    -path '*/.git' -prune -o \
+    -path '*/vendor' -prune -o \
+    -path '*/.build' -prune -o \
+    -path '*/dist' -prune -o \
+    -path '*/templates' -prune -o \
+    -name package.json ! -type d \
+    -exec sh -c '[ -n "$(jq -r ".dependencies.react // empty" "$1" 2>/dev/null)" ] && printf "%s\n" "${1#./}"' _ {} \; \
+    2>/dev/null || true
+  # react-manifests:end
+
+  # spring → grep -REl already prints paths (sed strips find/grep's leading ./ so
+  # both content markers emit the same repo-relative form the example above shows)
+  grep -REl --include='build.gradle.kts' 'org\.springframework\.boot|spring-boot-starter-' . 2>/dev/null | sed 's|^\./||'
+  ```
+
+  **The `react-manifests:begin`/`:end` sentinels are load-bearing too**, exactly as
+  the verdict recipe's are: `tests/react-topic-marker.bats` extracts this block by
+  them, executes it, and holds its prune set to the *same* derived oracle as the
+  verdict recipe and `detect_lang` — all three must stay identical. Keep them a
+  single unique pair, keep the whole recipe between them, and keep the block at its
+  current two-space indent inside this list item (the extractor de-indents by
+  exactly that much).
+
 - `coverage`: `null` (the topic gather already emits `null`).
 - `tooling_configured` / `findings_by_tool`: straight from `findings-<topic>.json`.
 - `policy`, `worktree`: same as language payloads.
@@ -961,14 +1155,27 @@ Topic dispatchers share the response contract, with two simplifications:
   response is always a `plan` (possibly empty) + `missing_tooling`, or
   `human_action_required`. There is no Stage-0 improver dance for topics.
 - **`ci_fixer_agent` may be `null`.** A topic plugin can decline to provide a
-  CI-fixer in v1. Capture it as for languages, but if it is `null` and a topic
+  CI-fixer in v1. Capture it as for languages, but if it is `null` — **or names an
+  agent that cannot be spawned** (a topic may name a *language* plugin's fixer, e.g.
+  `react` reuses `js-ci-fixer`, and that plugin may not be installed) — and a topic
   PR's CI fails in Phase 8, **escalate to the user** (carry it into the Phase 9
   summary as a `human_action_required`-style note) instead of spawning a fixer —
   never substitute a hardcoded one.
 
+**A failed topic dispatch is not an empty plan.** If a topic's `Skill(...)`
+invocation fails, or its response is not a JSON object carrying `plan`, move the
+topic to `unsupported_topics` with the note `dispatch failed: <error>` and continue
+with the remaining topics — never record it as an empty plan. The distinction
+matters most for a topic whose *correct* result is an empty plan (a topic with no
+tools registered yet): without this rule, a dispatch that never happened and a
+dispatch that found nothing are reported identically.
+
 A topic's `plan` groups join the **same Phase 8 queue** as language groups and
-are processed by the same sequential per-stage PR cycle. An empty topic `plan`
-just means "this topic is clean — nothing to do"; record it and move on.
+are processed by the same sequential per-stage PR cycle. **How to read an empty
+topic `plan` depends on `tooling_configured`:** non-empty means "this topic is clean
+— its tools ran and found nothing"; **empty** means "no tools are registered for this
+topic yet — nothing was inspected". Render the second case as such and cite the
+topic's `notes`, so a no-op is never reported as a clean bill of health.
 
 ## Phase 7 — handle `human_action_required` early-outs
 
@@ -1613,10 +1820,15 @@ After pushing and opening the PR:
      summary so the user knows they're still red.
    - **At least one same-tool failure** OR **at least one new
      non-same-tool failure** → if `response.ci_fixer_agent` is `null`
-     (a topic group whose plugin declined a CI-fixer in v1), **escalate
-     this PR to the user** instead of fixing: leave it open, record it
-     in the Phase 9 summary as needing manual attention, and move to the
-     next stage without merging. Otherwise spawn `<response.ci_fixer_agent>`
+     (a topic group whose plugin declined a CI-fixer in v1) **or the named
+     agent cannot be spawned** (it isn't installed in this plugin family —
+     a topic may name a *language* plugin's fixer, e.g. `react` reuses
+     `js-ci-fixer`), **escalate this PR to the user** instead of fixing:
+     leave it open, record it in the Phase 9 summary as needing manual
+     attention, and move to the next stage without merging. **Never
+     substitute a different fixer** — an installed fixer for another
+     language would edit this PR with the wrong toolchain's idioms.
+     Otherwise spawn `<response.ci_fixer_agent>`
      for that combined set. Pass two things in its prompt:
 
      - `failing_checks: <list>` — the names from the combined bucket
@@ -2024,7 +2236,8 @@ its own block so it's clear which plugin produced what.
 Project:       <repo path>
 Branch:        <user's current branch>
 Languages processed: <comma-separated list from supported>
-Topics processed:    <comma-separated list from supported_topics, or "none">
+Topics gathered:     <comma-separated list from supported_topics, or "none">
+                     <per-topic dispatch/processing status is in the blocks below>
 Approver mode:       <ci | local | none — from the Phase 2.5 detection (#642);
                       in local mode the approval gate drove the approve skill
                       directly, posting no /approve comment>
@@ -2050,12 +2263,18 @@ Approver mode:       <ci | local | none — from the Phase 2.5 detection (#642);
 
 <If unsupported is non-empty:>
 ⚠ Languages detected but not yet supported:
-  - <lang>: no development-<lang> plugin built yet — see README's
-    Plugins section for current per-language status.
+  - <lang>: <the note recorded when it entered this bucket>
+    (e.g. "no development-<lang> plugin built yet — see README's Plugins
+     section for current per-language status", "gather failed: <error>",
+     "dispatch failed: <error>")
 
 <If unsupported_topics is non-empty:>
-⚠ Topics detected but not yet supported:
-  - <topic>: marker present but no gather-<topic>-findings.zsh yet.
+⚠ Topics detected but not processed:
+  - <topic>: <the note recorded when it entered this bucket>
+    (e.g. "no gather-<topic>-findings.zsh yet", "marker present but required
+     language <lang> is not in the supported set", "jq not on PATH: the React
+     marker could not be evaluated", "gather failed: <error>",
+     "dispatch failed: <error>")
 
 <If topic dispatch was skipped because --tool/--concern scoped the run:>
 ℹ Topic checks skipped under --tool / --concern (those flags scope the
@@ -2077,6 +2296,52 @@ pushed fixes for — detected, never dispatched:>
   ...
   <If apps.json present but no PRs were Approver-flagged:>
   No Approver-flagged PRs — nothing a live run would push.
+
+<For each topic in supported_topics, a block. Topics are NOT languages — the
+ per-language block below never renders them, so without this block a topic's
+ verdict, its missing_tooling and its escalations would have nowhere to go:>
+--- <topic> ---
+<Verdict — worded from the topic payload's `tooling_configured`, per Phase 6.
+ The cases are ordered and EXHAUSTIVE; never infer "clean" from an absent plan:>
+  <If the topic was never DISPATCHED — no plan exists (topic dispatch skipped
+   under --tool/--concern, or --dry-run):>
+  Gathered but not dispatched — no verdict for this run.
+  <Else if tooling_configured is EMPTY (no tools registered for this topic yet):>
+  No tools registered for this topic yet — nothing was inspected.
+    <cite the topic's gather `notes` here>
+  <Else if the plan was empty AND missing_tooling is empty:>
+  Clean — the topic's tools ran and found nothing.
+  <Else if groups were planned:>
+  <N> group(s) planned, <M> processed.
+  <Otherwise: state the observed state plainly.>
+
+  <`--no-merge` is a SUFFIX on the verdict above, never a replacement for it —
+   the topic WAS dispatched, so its verdict is known and must still be stated.
+   BOTH lines below are inside this condition; omit the whole section whenever
+   Phase 8 ran, since processed and escalated groups are reported by the 🚀 and
+   ! sections instead — rendering both would claim the same groups were merged
+   AND not processed:>
+  <If Phase 8 was skipped (--no-merge) and groups were planned:>
+    — Phase 8 skipped (--no-merge); no PRs were opened for this topic.
+  📋 Planned groups (not processed) — every group in the plan:
+    - <group_id>: <description> → <agent>
+
+<If the topic response carried missing_tooling:>
+? Missing tooling (<N>):
+  - <tool>: <summary> — <how_to_add>
+
+<If any topic group opened a PR:>
+🚀 PRs opened & merged:
+  - PR #<pr>: <title> — <merged|open>
+
+<If any topic stage ended escalated (a null or unspawnable ci_fixer_agent, or
+ 3 failed CI-fix attempts) OR is awaiting approval — these are distinct terminal
+ states in the phase8-stages enum, not one:>
+! Needs your attention:
+  - PR #<pr>: <reason>
+    <If the stage failed CI:> Last failing checks: <names>
+    Suggested action: <what the user should do>
+--- end <topic> ---
 
 <For each language in supported, a block:>
 --- <lang> ---
@@ -2217,6 +2482,13 @@ Worktree branches available for manual review (no PRs opened):
 
 Keep the tone factual. If everything was clean, say so: "No issues
 found by the configured tools; project is in good shape."
+
+**"Clean" is a claim about tools that RAN.** Exclude from it any topic whose
+`tooling_configured` was empty — nothing inspected it, so it cannot be reported as
+clean (Phase 6). When every supported target is in that state, say so plainly
+instead: "No tools are registered for the detected topic(s) yet — nothing was
+inspected." Reporting a no-op as a clean bill of health is the one summary error
+that actively misleads.
 
 ## Phase 10 — track changes and findings as GitHub issues
 

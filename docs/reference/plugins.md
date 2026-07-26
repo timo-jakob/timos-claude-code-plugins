@@ -33,7 +33,7 @@ of this plugin):
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see [Requirements](requirements.md)). |
-| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`) and any topic plugins (`development-spring`, `development-claude-plugin`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
+| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`, `development-javascript`) and any topic plugins (`development-spring`, `development-claude-plugin`, `development-docs`, `development-react`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
 | Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Spins out linked `test-case` issues for a surface-touching story's outside-in cases; takes a typed parked exit when a session can't converge; pointed at an **epic**, walks each `needs-refinement` child and posts an epic summary. |
@@ -313,19 +313,50 @@ language plugin when a repo matches.
 **What's built (v1):** the plugin skeleton and its maintenance **dispatch
 path** — nothing more. The dispatch table is deliberately empty: this plugin was
 stood up ([#801](https://github.com/timo-jakob/timos-claude-code-plugins/issues/801))
-so the `c4_drift` finding source (declared C4 containers vs detected reality) can
+so the `c4_drift` finding source (declared C4 containers vs detected reality) could
 land as *one tool* rather than a whole plugin. Its gather
-(`gather-docs-findings.zsh`) and first tool arrive in
-[#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793); until
-then the `docs` topic reports as an unsupported topic (marker present, no gather
-yet) and the dispatcher is not on the dispatch path. Future docs-site and
-docs-freshness tooling will live under this one topic.
+(`gather-docs-findings.zsh`) and that first tool landed in
+[#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793), so
+`docs` is now a **supported** topic and the dispatcher is on the dispatch path.
+Future docs-site and docs-freshness tooling will live under this one topic.
 
 **Skills:**
 
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
-| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for documentation findings. Validates the v2 payload and returns a plan routing each finding group to a docs agent. Empty dispatch table in v1 — always an empty plan until [#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793) registers `c4_drift`. |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for documentation findings. Validates the v2 payload and returns a plan routing each finding group to a docs agent. Routes `c4_drift` to `docs-c4-drift-advisor` ([#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793)). |
+
+## development-react
+
+Topic plugin for the **React framework** (marker: `react` in the **runtime**
+dependencies of any `package.json`, monorepo-aware). It composes *alongside*
+`development-javascript` exactly as `development-spring` composes with
+`development-java` — React idioms only; everything JS/TS-generic stays in the
+language plugin. The topic **requires** `javascript` to be detected too, so it can
+never compose onto a non-JS repo.
+
+**What's built (v0.1):** the composition wiring and nothing else
+([#956](https://github.com/timo-jakob/timos-claude-code-plugins/issues/956)). The
+tool universe is deliberately **empty** — the gather (`gather-react-findings.zsh`)
+is real but reports no tools, which is precisely what moves `react` into
+`supported_topics` and proves the dispatch path end-to-end. A marker without a
+gather would be detected but never dispatched, leaving the foundation unverified.
+Tools arrive with the rest of epic
+[#686](https://github.com/timo-jakob/timos-claude-code-plugins/issues/686): bootstrap
+templates ([#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)),
+the React Query + MSW API binding
+([#958](https://github.com/timo-jakob/timos-claude-code-plugins/issues/958)), the
+review panel
+([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)), and
+a11y / Playwright / Lighthouse budgets
+([#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960)). CI
+remediation reuses `development-javascript`'s `js-ci-fixer`.
+
+**Skills:**
+
+| Skill | Command | Description |
+| ------- | --------- | ------------- |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan. Empty tool universe in v0.1 — always an empty plan until [#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)–[#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960) register tools. |
 
 ## development-go
 

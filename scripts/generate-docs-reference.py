@@ -41,6 +41,7 @@ PLUGINS = [
     "development-go",
     "development-java",
     "development-python",
+    "development-react",
     "development-spring",
     "development-swift",
 ]

@@ -19,7 +19,7 @@ fire; a topic plugin composes alongside the language plugin for that run.
 > services, and build images. Run here it finds exactly **one** container —
 > `tests` (`tests/Dockerfile`, the bats-in-Docker test runner, #263) — which
 > this diagram **declares**, so there is no `detected_not_declared` drift. The
-> seven **plugins**, by contrast, are the product's real deployable units but
+> ten **plugins**, by contrast, are the product's real deployable units but
 > are not Docker/compose-detectable, so they read as `declared_not_detected` —
 > a direction the pipeline **escalates for human judgement, never auto-removes**
 > (removing a declared container is an architectural statement). That asymmetry
@@ -42,12 +42,14 @@ C4Container
             Container(development-java, "development-java", "Claude Code plugin", "Java / Gradle pipeline")
             Container(development-swift, "development-swift", "Claude Code plugin", "Swift pipeline")
             Container(development-go, "development-go", "Claude Code plugin", "Go pipeline (core loop)")
+            Container(development-javascript, "development-javascript", "Claude Code plugin", "JavaScript / TypeScript pipeline")
         }
 
         Container_Boundary(topics, "Topic plugins (dispatched by marker)") {
             Container(development-spring, "development-spring", "Claude Code plugin", "Spring Boot overlay")
             Container(development-claude-plugin, "development-claude-plugin", "Claude Code plugin", "Plugin-repo overlay")
             Container(development-docs, "development-docs", "Claude Code plugin", "C4 docs topic — owns c4_drift")
+            Container(development-react, "development-react", "Claude Code plugin", "React framework overlay")
         }
     }
 
@@ -61,10 +63,13 @@ C4Container
     Rel(development, development-java, "dispatches")
     Rel(development, development-swift, "dispatches")
     Rel(development, development-go, "dispatches")
+    Rel(development, development-javascript, "dispatches")
     Rel(development, development-spring, "dispatches")
     Rel(development, development-claude-plugin, "dispatches")
     Rel(development, development-docs, "dispatches")
+    Rel(development, development-react, "dispatches")
     Rel(development-spring, development-java, "composes onto")
+    Rel(development-react, development-javascript, "composes onto")
     Rel(development, maint_app, "mints token via")
     Rel(maint_app, github, "authors PRs on")
     Rel(github, tests, "builds + runs")
@@ -72,8 +77,8 @@ C4Container
     UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
 ```
 
-The **declared container set** is the eight `Container(...)` entries above — the
-seven installed plugins plus the `tests` runner image — recoverable by the
+The **declared container set** is the eleven `Container(...)` entries above — the
+ten installed plugins plus the `tests` runner image — recoverable by the
 `c4/v1` parser (`extract-declared-containers.zsh`) without a Mermaid engine.
 `github` and `maint_app` are `System_Ext` — outside the marketplace's container
 boundary, so outside the system this diagram decomposes and therefore outside

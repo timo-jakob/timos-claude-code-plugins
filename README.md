@@ -28,6 +28,7 @@ Read more: [Motivation & current gaps](docs/explanation/motivation.md) ·
 | **development-spring** | Topic plugin for Spring Boot 4+ (composes alongside development-java) |
 | **development-claude-plugin** | Topic plugin for repos that *are* Claude Code plugins — validators + test harness |
 | **development-docs** | Topic plugin for documentation (C4 architecture docs; marker `docs/architecture/`) — dispatch path only in v1 |
+| **development-react** | Topic plugin for React (composes alongside development-javascript; marker `react` in a `package.json`'s runtime deps) — composition wiring only in v0.1 |
 
 Full command + agent inventory: **[docs/reference/plugins.md](docs/reference/plugins.md)**.
 
@@ -55,7 +56,7 @@ Full documentation lives under **[`docs/`](docs/index.md)** and follows the
 - 🔧 **[How-to guides](docs/how-to/index.md)** — task-oriented
 - 📖 **[Reference](docs/reference/index.md)** — lookup
 - 💡 **[Explanation](docs/explanation/index.md)** — concepts & rationale
-- 🏗 **[Architecture](docs/architecture/index.md)** — C4 (placeholder)
+- 🏗 **[Architecture](docs/architecture/index.md)** — C4 System Context + Container diagrams
 
 Contributor-facing contracts stay at the repo root:
 [`ARCHITECTURE.md`](ARCHITECTURE.md) (architecture & schema) and
