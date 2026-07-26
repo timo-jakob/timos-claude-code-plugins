@@ -200,6 +200,30 @@ issue per slice, and resolve them one at a time. Validate each slice on a **real
   toolchain invocation behind a cheap precondition so CI (no toolchain) hits the
   withheld/not-configured paths. See `tests/gather-java.bats` /
   `tests/gather-swift.bats`.
+- **Assert through the shared helpers.** Start each `.bats` file with
+  `load assertions` and use the helpers rostered in
+  [`tests/README.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/tests/README.md)
+  (the contributor-facing source of truth for that list); plain `[ ... ]` stays
+  correct and is never flagged. A bare `[[ ... ]]` in an `@test` body or a bats
+  `setup`/`teardown` hook (including the `_file` variants) is **inert** under
+  the bash 3.2 macOS ships — errexit is not applied to it at all, so a false one
+  on a non-final line is silently ignored and the test passes while proving
+  nothing — while bash >= 4 catches it, so the same test means different things
+  on the two CI legs. Inside a test body or hook, position is no exemption and
+  neither is an `|| return` tail: a final-line one is rejected too, since it goes
+  inert the moment a line is appended below it, and an `|| return` one — though
+  genuinely not inert — is rejected there anyway, so the fix stays uniform.
+  `tests/no-inert-bracket-assertions.bats` rejects the shapes it can detect
+  (#1011), so what you follow is the convention, not the guard. Two carve-outs.
+  The first is about code outside those blocks: a `[[ ]]` inside a **named
+  helper function** is fine when it is the statement whose status the helper
+  returns — typically its last command, or one with an explicit `|| return` —
+  because the assertion's status is then the helper's own and the call site is a
+  simple command errexit catches; one whose status the helper discards is just
+  as inert. The second holds anywhere, inside a test body or hook included: a
+  `[[ ]]` used as an **`if`/`elif`/`while`/`until` condition** is control flow,
+  not an assertion — don't convert it, since rewriting it as a helper call in a
+  file without `load assertions` yields 127 and a silently false branch.
 - **End-to-end:** `/development-claude-plugin:test` drives a headless session with
   the local plugins against an isolated clone of a real repo — use it to verify a
   slice actually does what you intend.

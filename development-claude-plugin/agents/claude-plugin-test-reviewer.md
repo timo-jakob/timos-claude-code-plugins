@@ -28,7 +28,28 @@ gaps, weak assertions, and test-quality issues that let script regressions ship.
 ### Assertion quality
 
 - `[ "$status" -eq 0 ]` alone where the output's content is the actual contract
-- Substring assertions (`[[ "$output" == *ok* ]]`) so loose they pass on the error message too
+- Substring assertions whose needle is generic enough to match the failure output too — `contains "$output" "ok"`
+  also passes on `not ok`; the helper is right and the needle is not, so ask for a needle unique to the asserted
+  branch, not for a different idiom
+- Inert assertions that prove nothing: a bare `[[ ... ]]` in an `@test` body or a bats `setup`/`teardown` hook
+  (including the `_file` variants), and a bare `!` negation (#829, guarded by
+  `tests/no-inert-negative-assertions.bats`), which is exempt from errexit on every bash. For the `[[ ]]` case,
+  bash 3.2 — the `/bin/bash` macOS ships — does not apply errexit to it at all, so a false one on a non-final
+  line is silently ignored, while bash >= 4 fails it and the same test then means different things on the two
+  CI legs. Inside those blocks position is no exemption and neither is an `|| return` tail: a final-line one is
+  correct only by accident and goes inert the moment a line is appended below it, and an `|| return` one —
+  though genuinely not inert — is rejected there anyway so the fix stays uniform; flag both.
+  `tests/no-inert-bracket-assertions.bats` guards this (#1011) for the shapes it can detect, which is why
+  reading for it still pays. The fix is a helper rostered in `tests/README.md` — `lacks` for a negative
+  substring check — or plain `[ ... ]` for file and numeric tests, which errexit catches on every bash and is
+  never a finding. Two carve-outs. The first is about code outside those blocks and is qualified — outside the
+  qualification the assertion is still a finding: a `[[ ]]` inside a **named helper function** is fine when it
+  is the statement whose status the helper returns, typically its last command or one carrying an explicit
+  `|| return`; one whose status the helper discards is as inert as one in a test body, and no suite lint scans
+  helper bodies, so that one IS a finding. The second holds anywhere, inside a test body or hook included: a
+  `[[ ]]` used as an **`if`/`elif`/`while`/`until` condition** is control flow, not an assertion — never flag
+  it and never ask for it to be converted, since rewriting it as a helper call in a file without
+  `load assertions` yields 127 and a silently false branch
 - JSON output checked by grep instead of `jq` field assertions — brittle to formatting, blind to structure
 - Tautological assertions that pass regardless of the script's behaviour
 - Missing assertions on side effects the script's contract promises (files written, labels applied, branches

@@ -2887,6 +2887,42 @@ working directory. Documented here
 rather than only in the scripts, so the exemption is visible from the convention
 it deviates from; see the `development/hooks/` bullet under "`development` owns".
 
+**Exception — the bats suite** (`tests/`): `tests/*.bats` and the shared
+assertion helper library `tests/assertions.bash` are **bash**, not zsh, because
+bats is a bash harness — a `.bats` file is preprocessed into bash, so the tests
+and anything they `load` have no choice in the matter. `tests/assertions.bash`
+is a standalone `.bash` file that bats sources (`load assertions`), indented
+like the `.bats` files that source it rather than in shfmt's tab style — which
+is why pre-commit runs **shellcheck on `.sh` and `.bash`** but **shfmt on `.sh`
+only**. Having no shebang of its own (bats sources it, never executes it), it
+carries a `# shellcheck shell=bash` directive instead, so the
+extension-matches-shebang rule still needs no per-file exception.
+
+Inside that suite, **assert through the shared helpers**: `load assertions` at
+the top of the file, then the helpers whose roster lives in `tests/README.md`
+— the contributor-facing source of truth for that list, deliberately not
+restated here. Plain `[ ... ]` stays correct on every bash and is never
+flagged. Never assert with a bare `[[ ... ]]` in an `@test` body or a bats
+`setup`/`teardown` hook (including the `_file` variants): bash 3.2 (the
+`/bin/bash` macOS ships) does not apply errexit to it, so a false one on a
+non-final line is silently ignored and the test passes while proving nothing,
+whereas bash >= 4 catches it — the same test would mean different things on the
+two CI legs. Position is no exemption: a final-line one is correct only by
+accident and goes inert the moment a line is appended below it, so it is
+rejected too — as is one carrying an `|| return` tail, which is genuinely not
+inert but is rejected inside these blocks anyway, so the fix stays uniform.
+`tests/no-inert-bracket-assertions.bats` fails the suite on the shapes it can
+detect, so what you follow is the convention, not the guard. Two carve-outs.
+The first is about code outside those blocks: a `[[ ]]` inside a **named helper
+function** is fine when it is the statement whose status the function returns —
+typically its last command, or one carrying an explicit `|| return` — because
+the assertion's status is then the function's own and the call site is a simple
+command errexit catches, whereas a `[[ ]]` whose status the function discards is
+as inert as one in a test body. The second holds anywhere, inside a test body or
+hook included: a `[[ ]]` used as an **`if`/`elif`/`while`/`until` condition** is
+control flow, not an assertion, so leave it alone — rewriting it as a helper
+call in a file without `load assertions` yields 127 and a silently false branch.
+
 Why zsh:
 
 - macOS ships bash 3.2 (from 2007) as `/bin/bash`; Apple won't update
