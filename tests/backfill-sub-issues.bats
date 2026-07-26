@@ -13,6 +13,7 @@
 # assertions rely on.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -116,7 +117,7 @@ backfill() {
 @test "usage: a dangling value flag exits 2, not a nounset abort" {
   run zsh "$S" --repo o/r --epic
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--epic needs a value"* ]]
+  contains "$output" "--epic needs a value"
 }
 
 # ---- the conversion ---------------------------------------------------------
@@ -137,7 +138,7 @@ backfill() {
 @test "the prose #999 cross-reference is never migrated" {
   backfill
   [ "$status" -eq 0 ]
-  [[ "$(echo "$output" | jq -c '.markdown_children')" != *999* ]]
+  lacks "$(echo "$output" | jq -c '.markdown_children')" "999"
   run ! grep -q 'sub_issue_id=1999' "$POST_LOG"
 }
 
@@ -278,7 +279,7 @@ EOF
 @test "a failed epic-body fetch is a runtime error (exit 1)" {
   run env GH_BIN=/bin/false zsh "$S" --repo o/r --epic 746
   [ "$status" -eq 1 ]
-  [[ "$output" == *"failed to fetch epic"* ]]
+  contains "$output" "failed to fetch epic"
 }
 
 @test "a failed sub-issue-list fetch is a runtime error (exit 1) and nothing is POSTed" {
@@ -288,7 +289,7 @@ EOF
   touch "$FIXTURE_DIR/fail-sub-issues"
   backfill
   [ "$status" -eq 1 ]
-  [[ "$output" == *"failed to list sub-issues"* ]]
+  contains "$output" "failed to list sub-issues"
   [ ! -s "$POST_LOG" ]
 }
 

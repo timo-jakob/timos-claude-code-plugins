@@ -7,6 +7,8 @@
 # worktrees, and it survives session death — which is the whole point
 # (/tmp artifacts and session scratchpads don't).
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   CK="$REPO_ROOT/development/skills/maintenance/scripts/checkpoint.zsh"
@@ -20,7 +22,7 @@ ck() { run zsh "$CK" "$@"; }
 @test "usage: no subcommand -> exit 2" {
   ck
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage"* ]]
+  contains "$output" "usage"
 }
 
 @test "usage: unknown subcommand -> exit 2" {
@@ -37,7 +39,7 @@ ck() { run zsh "$CK" "$@"; }
   mkdir -p "$BATS_TEST_TMPDIR/plain"
   ck status --repo "$BATS_TEST_TMPDIR/plain"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"not a git repository"* ]]
+  contains "$output" "not a git repository"
 }
 
 @test "save + load round-trips one phase's data" {
@@ -92,7 +94,7 @@ ck() { run zsh "$CK" "$@"; }
 @test "status with no checkpoint -> exit 3, says so" {
   ck status --repo "$R"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"no checkpoint"* ]]
+  contains "$output" "no checkpoint"
 }
 
 @test "status after a save -> exit 0, names the last phase and age" {
@@ -100,8 +102,8 @@ ck() { run zsh "$CK" "$@"; }
   zsh "$CK" save --repo "$R" --phase phase1-detect --data "$BATS_TEST_TMPDIR/a.json"
   ck status --repo "$R"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"last=phase1-detect"* ]]
-  [[ "$output" == *"age="* ]]
+  contains "$output" "last=phase1-detect"
+  contains "$output" "age="
 }
 
 @test "clear is idempotent and removes the store" {
@@ -116,7 +118,7 @@ ck() { run zsh "$CK" "$@"; }
   ck dir --repo "$R"
   [ "$status" -eq 0 ]
   [ -d "$output" ]
-  [[ "$output" == *"/.git/claude-maintenance" ]]
+  ends_with "$output" "/.git/claude-maintenance"
 }
 
 @test "invalid JSON data is rejected (exit 1) and writes nothing" {

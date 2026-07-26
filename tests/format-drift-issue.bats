@@ -2,6 +2,8 @@
 # format-drift-issue.bats — #402: the watcher's issue-body formatter renders
 # named fixes, flags blocking required-check changes, and handles every severity.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   FMT="$REPO_ROOT/development/skills/maintenance/scripts/format-drift-issue.zsh"
@@ -17,11 +19,11 @@ setup() {
 JSON
   run zsh "$FMT" --from-file "$J"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"v1.49.1 → v1.50.0"* ]]
-  [[ "$output" == *"#386 — image scan path-conditional"* ]]
-  [[ "$output" == *"BLOCKING required-check change"* ]]
-  [[ "$output" == *"REQUIRED CI check"* ]]
-  [[ "$output" == *"/development:bootstrap"* ]]
+  contains "$output" "v1.49.1 → v1.50.0"
+  contains "$output" "#386 — image scan path-conditional"
+  contains "$output" "BLOCKING required-check change"
+  contains "$output" "REQUIRED CI check"
+  contains "$output" "/development:bootstrap"
 }
 
 @test "non-blocking drift: names the fix but no BLOCKING callout" {
@@ -33,9 +35,9 @@ JSON
 JSON
   run zsh "$FMT" --from-file "$J"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"#387 — gate excludes advisory snyk"* ]]
-  [[ "$output" != *"BLOCKING"* ]]
-  [[ "$output" != *"REQUIRED CI check"* ]]
+  contains "$output" "#387 — gate excludes advisory snyk"
+  lacks "$output" "BLOCKING"
+  lacks "$output" "REQUIRED CI check"
 }
 
 @test "drift with no changelog entry falls back to the generic line" {
@@ -46,7 +48,7 @@ JSON
 JSON
   run zsh "$FMT" --from-file "$J"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"pick up the latest fixes"* ]]
+  contains "$output" "pick up the latest fixes"
 }
 
 @test "unknown_provenance is reported with a re-bootstrap hint" {
@@ -55,8 +57,8 @@ JSON
 JSON
   run zsh "$FMT" --from-file "$J"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no provenance marker"* ]]
-  [[ "$output" == *"add a marker"* ]]
+  contains "$output" "no provenance marker"
+  contains "$output" "add a marker"
 }
 
 @test "bad --from-file is a usage error (exit 2)" {

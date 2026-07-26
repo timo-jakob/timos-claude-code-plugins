@@ -12,6 +12,8 @@
 # argument and serves a canned raw GraphQL response per issue number, so the
 # graph shape under test is fully deterministic and needs no network.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/read-dependencies.zsh"
@@ -84,13 +86,13 @@ deps() {  # $1 = issue number ; rest = extra flags
 @test "usage: non-numeric --max-depth exits 2 before any traversal" {
   run zsh "$S" --repo owner/repo --issue 5 --max-depth abc
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--max-depth must be a number"* ]]
+  contains "$output" "--max-depth must be a number"
 }
 
 @test "usage: a dangling value flag exits 2, not a nounset abort" {
   run zsh "$S" --repo owner/repo --issue
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--issue needs a value"* ]]
+  contains "$output" "--issue needs a value"
 }
 
 # ---- the trivial and error base cases --------------------------------------

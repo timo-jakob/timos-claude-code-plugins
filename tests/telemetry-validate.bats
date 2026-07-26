@@ -16,6 +16,8 @@
 
 bats_require_minimum_version 1.5.0
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh"
@@ -24,14 +26,6 @@ setup() {
   F="$BATS_TEST_TMPDIR/stream.jsonl"
 }
 
-# `[[ ... ]]` is a shell KEYWORD and does not trip bats' failure detection when
-# it is not the final statement of a test — a failing `[[ ]]` in the middle of a
-# test body is silently ignored. These helpers are ordinary commands, so a
-# failure fails the test wherever it appears. Never assert with a bare `[[ ]]`
-# here.
-contains()    { [ "${1#*"$2"}" != "$1" ]; }
-lacks()       { [ "${1#*"$2"}" = "$1" ]; }
-starts_with() { case "$1" in "$2"*) return 0 ;; *) return 1 ;; esac; }
 
 # Mutate the valid record with a jq expression, then validate it.
 #

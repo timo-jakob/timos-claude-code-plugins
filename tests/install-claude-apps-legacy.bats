@@ -13,6 +13,7 @@
 # drive the function against a PATH-shimmed fake `gh`.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -52,7 +53,7 @@ cleanup_run() {
 @test "legacy: clean repo reports nothing to do and deletes nothing" {
   cleanup_run ""
   [ "$status" -eq 0 ]
-  [[ "$output" == *"No legacy CI-era secrets/variables"* ]]
+  contains "$output" "No legacy CI-era secrets/variables"
   [ ! -s "$CALLS" ]
 }
 
@@ -61,9 +62,9 @@ cleanup_run() {
   echo "CLAUDE_APPROVER_APP_ID"      > "$VARS"
   cleanup_run ""
   [ "$status" -eq 0 ]
-  [[ "$output" == *"CLAUDE_APPROVER_PRIVATE_KEY present"* ]]
-  [[ "$output" == *"CLAUDE_APPROVER_APP_ID present"* ]]
-  [[ "$output" == *"--verify --fix"* ]]
+  contains "$output" "CLAUDE_APPROVER_PRIVATE_KEY present"
+  contains "$output" "CLAUDE_APPROVER_APP_ID present"
+  contains "$output" "--verify --fix"
   [ ! -s "$CALLS" ]
 }
 
@@ -87,8 +88,8 @@ cleanup_run() {
     > "$WORK/.github/workflows/legacy-approver.yml"
   cleanup_run 1
   [ "$status" -eq 0 ]
-  [[ "$output" == *"still referenced by"* ]]
-  [[ "$output" == *"legacy-approver.yml"* ]]
+  contains "$output" "still referenced by"
+  contains "$output" "legacy-approver.yml"
   [ ! -s "$CALLS" ]
 }
 
@@ -96,7 +97,7 @@ cleanup_run() {
   echo "ANTHROPIC_API_KEY" > "$ACTIONS"
   cleanup_run 1
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Not auto-deleted"* ]]
-  [[ "$output" == *"gh secret delete ANTHROPIC_API_KEY"* ]]
+  contains "$output" "Not auto-deleted"
+  contains "$output" "gh secret delete ANTHROPIC_API_KEY"
   run ! grep -q "ANTHROPIC_API_KEY" "$CALLS"
 }

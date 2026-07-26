@@ -2,6 +2,8 @@
 # container-scan.bats — gather-container-scan.zsh normalization, exercised
 # through the `--from-file` seam (no gh / network / unzip).
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   GATHER="$REPO_ROOT/development/skills/maintenance/scripts/gather-container-scan.zsh"
@@ -53,27 +55,27 @@ emit() { "$GATHER" --from-file "$FIX/$1" 2>/dev/null; }
 @test "reliability note: count 0 is framed as 'not a live scan', not clean" {
   run "$GATHER" --reliability-note 0 "2020-01-01T00:00:00Z" main
   [ "$status" -eq 0 ]
-  [[ "$output" == *"NOT a live scan"* ]]
-  [[ "$output" == *"not a clean image"* ]]
-  [[ "$output" == *"#388"* ]]
+  contains "$output" "NOT a live scan"
+  contains "$output" "not a clean image"
+  contains "$output" "#388"
 }
 
 @test "reliability note: a stale (>7d) scan escalates with a refresh hint" {
   run "$GATHER" --reliability-note 0 "2020-01-01T00:00:00Z" main
-  [[ "$output" == *"push to main to refresh"* ]]
+  contains "$output" "push to main to refresh"
 }
 
 @test "reliability note: count >0 reports the count + point-in-time caveat" {
   run "$GATHER" --reliability-note 3 "2020-01-01T00:00:00Z" main
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ingested 3 unique CVE(s)"* ]]
-  [[ "$output" == *"Point-in-time"* ]]
+  contains "$output" "ingested 3 unique CVE(s)"
+  contains "$output" "Point-in-time"
 }
 
 @test "reliability note: a fresh scan carries the caveat but no refresh hint" {
   fresh="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"))')"
   run "$GATHER" --reliability-note 2 "$fresh" main
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Point-in-time"* ]]
-  [[ "$output" != *"refresh before relying"* ]]
+  contains "$output" "Point-in-time"
+  lacks "$output" "refresh before relying"
 }

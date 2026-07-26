@@ -11,6 +11,7 @@
 # confident wrong one).
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -381,7 +382,7 @@ EOF
   printf '[]' > "$BATS_TEST_TMPDIR/arr.json"
   run --separate-stderr zsh "$S" --changelist "$CL" --round 2 --verdict v --prev "$BATS_TEST_TMPDIR/arr.json"
   [ "$status" -eq 1 ]
-  [[ "$stderr" == *"invalid --prev JSON"* ]]
+  contains "$stderr" "invalid --prev JSON"
 }
 
 @test "missing required args is a usage error (exit 2)" {
@@ -435,7 +436,7 @@ EOF
 EOF
   run --separate-stderr zsh "$S" --changelist "$CL" --round 1 --verdict v --prev "$BATS_TEST_TMPDIR/prev-ok.json"
   [ "$status" -eq 2 ]
-  [[ "$stderr" == *"--prev requires --round >= 2"* ]]
+  contains "$stderr" "--prev requires --round >= 2"
 }
 
 @test "--round 0 and leading-zero rounds are usage errors (exit 2) with the accurate message" {

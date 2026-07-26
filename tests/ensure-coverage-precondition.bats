@@ -9,6 +9,8 @@
 #   • covered-language files + report on disk → exit 0 (floor applies, ready)
 #   • covered-language files + report missing → exit 1 (caller must build it)
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/bootstrap/scripts/ensure-coverage-precondition.zsh"
@@ -37,8 +39,8 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang python
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no covered-language files"* ]]
-  [[ "$output" == *"no test run needed"* ]]
+  contains "$output" "no covered-language files"
+  contains "$output" "no test run needed"
 }
 
 @test "python: .py diff with coverage.xml present → exit 0" {
@@ -49,7 +51,7 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang python
   [ "$status" -eq 0 ]
-  [[ "$output" == *"coverage.xml found"* ]]
+  contains "$output" "coverage.xml found"
 }
 
 @test "python: .py diff with coverage.xml MISSING → exit 1 + remedy" {
@@ -59,8 +61,8 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang python
   [ "$status" -eq 1 ]
-  [[ "$output" == *"coverage.xml is missing"* ]]
-  [[ "$output" == *"pytest --cov"* ]]
+  contains "$output" "coverage.xml is missing"
+  contains "$output" "pytest --cov"
 }
 
 @test "python: nested .py file is detected (pathspec spans subdirs)" {
@@ -71,7 +73,7 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang python          # no coverage.xml → must demand it
   [ "$status" -eq 1 ]
-  [[ "$output" == *"missing"* ]]
+  contains "$output" "missing"
 }
 
 @test "java: only build.gradle.kts changed → exit 0 (.kts is not coverable source)" {
@@ -83,7 +85,7 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang java
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no covered-language files"* ]]
+  contains "$output" "no covered-language files"
 }
 
 @test "java: a .kt source change → exit 1 (floor applies, report missing)" {
@@ -93,8 +95,8 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang java
   [ "$status" -eq 1 ]
-  [[ "$output" == *"jacoco"* ]]
-  [[ "$output" == *"gradlew"* ]]
+  contains "$output" "jacoco"
+  contains "$output" "gradlew"
 }
 
 @test "swift: a .swift change with coverage.lcov present → exit 0" {
@@ -105,7 +107,7 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang swift
   [ "$status" -eq 0 ]
-  [[ "$output" == *"coverage.lcov found"* ]]
+  contains "$output" "coverage.lcov found"
 }
 
 @test "--report override is honoured for the presence check" {
@@ -117,13 +119,13 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang python --report out/cov.xml
   [ "$status" -eq 0 ]
-  [[ "$output" == *"out/cov.xml found"* ]]
+  contains "$output" "out/cov.xml found"
 }
 
 @test "missing --lang is a usage error (exit 2)" {
   guard
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage:"* ]]
+  contains "$output" "usage:"
 }
 
 @test "unknown --lang is a usage error (exit 2)" {
@@ -142,7 +144,7 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
     wait $p; exit $?
   ' _ "$S"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"missing value for --report"* ]]
+  contains "$output" "missing value for --report"
 }
 
 @test "an unresolvable compare ref fails loudly (exit 2), not a false pass" {
@@ -152,7 +154,7 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   run zsh "$S" --lang python --compare-branch origin/nonexistent
   [ "$status" -eq 2 ]
-  [[ "$output" == *"does not resolve"* ]]
+  contains "$output" "does not resolve"
 }
 
 @test "python: a pure .py DELETION needs no report (exit 0)" {
@@ -162,5 +164,5 @@ guard() { run zsh "$S" --compare-branch main "$@"; }
 
   guard --lang python          # no coverage.xml on disk
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no covered-language files"* ]]
+  contains "$output" "no covered-language files"
 }

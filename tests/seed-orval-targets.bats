@@ -8,6 +8,7 @@
 # consumer, 2 = usage/precondition error. jq-driven, so fully hermetic.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -28,21 +29,21 @@ pkg() { printf '%s' "$1" > "$WORK/package.json"; }
 @test "seed-orval: no argument -> usage error, exit 2" {
   run zsh "$SEED"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: seed-orval-targets.zsh"* ]]
+  contains "$output" "usage: seed-orval-targets.zsh"
 }
 
 @test "seed-orval: jq not on PATH -> precondition error, exit 2" {
   pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
   run env PATH="$ISO" zsh "$SEED" "$WORK"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"jq is required"* ]]
+  contains "$output" "jq is required"
 }
 
 @test "seed-orval: malformed package.json -> precondition error exit 2 (NOT silently 'not a consumer')" {
   pkg '{ not json'
   run zsh "$SEED" "$WORK"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"not a valid JSON object"* ]]
+  contains "$output" "not a valid JSON object"
   [ ! -f "$WORK/orval.config.ts" ]
 }
 
@@ -61,7 +62,7 @@ pkg() { printf '%s' "$1" > "$WORK/package.json"; }
   pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
   run zsh "$SEED" "$WORK" --plan
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: seed-orval-targets.zsh"* ]]
+  contains "$output" "usage: seed-orval-targets.zsh"
   [ ! -f "$WORK/orval.config.ts" ]
 }
 
@@ -69,7 +70,7 @@ pkg() { printf '%s' "$1" > "$WORK/package.json"; }
   pkg '[] {}'
   run zsh "$SEED" "$WORK"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"not a valid JSON object"* ]]
+  contains "$output" "not a valid JSON object"
 }
 
 @test "seed-orval: --plan detects but writes NOTHING (safe during Step 2 planning)" {
@@ -212,7 +213,7 @@ pkg() { printf '%s' "$1" > "$WORK/package.json"; }
   run zsh "$SEED" "$WORK"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.seeded == false' >/dev/null
-  [[ "$output" == *"left untouched"* ]]
+  contains "$output" "left untouched"
   # still the user's file, and it still lists the target it detected
   [ "$(cat "$WORK/orval.config.ts")" = "// hand-edited config" ]
   [ "$(jq -r '.targets | length' <<<"$output")" = "1" ]

@@ -5,6 +5,7 @@
 # --api-major) and prove the per-major substitution produces a coherent Java stub.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -54,5 +55,5 @@ setup() {
   run zsh "$RENDER" --templates "$TEMPLATES" --out "$OUT" \
     --project-name "Demo Project" --api-major V1 "$TMPL"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--api-major must be vN"* ]]
+  contains "$output" "--api-major must be vN"
 }

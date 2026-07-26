@@ -16,6 +16,8 @@
 
 bats_require_minimum_version 1.5.0
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh"
@@ -37,7 +39,7 @@ id_of() { zsh "$S" "$R"; }
   a="$(id_of)"; b="$(id_of)"
   [ -n "$a" ]
   [ "$a" = "$b" ]
-  [[ "$a" =~ ^[0-9a-f]{40}$ ]] || [[ "$a" =~ ^[0-9a-f]{64}$ ]]
+  matches "$a" '^([0-9a-f]{40}|[0-9a-f]{64})$'
 }
 
 @test "COMPLETE: a modified TRACKED file changes the id" {
@@ -118,7 +120,7 @@ id_of() { zsh "$S" "$R"; }
   echo x > "$fresh/a.txt"
   run zsh "$S" "$fresh"
   [ "$status" -eq 0 ]
-  [[ "$output" =~ ^[0-9a-f]{40}$ ]] || [[ "$output" =~ ^[0-9a-f]{64}$ ]]
+  matches "$output" '^([0-9a-f]{40}|[0-9a-f]{64})$'
 }
 
 @test "NO MUTATION: the caller's index and working tree are untouched" {

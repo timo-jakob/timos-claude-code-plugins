@@ -9,6 +9,8 @@
 #   - no block at all (empty input) -> exit 1 (prose-only fallback);
 #   - an unknown surface value is a hard error naming the value.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/plan-user-docs.zsh"
@@ -76,21 +78,21 @@ put() { printf '%s' "$1" > "$SPEC"; }
   put '{"interface_surfaces":["cli","carrier-pigeon"]}'
   run zsh "$S" --file "$SPEC"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"carrier-pigeon"* ]]
+  contains "$output" "carrier-pigeon"
 }
 
 @test "a non-string surface value is a hard error, not a crash" {
   put '{"interface_surfaces":[42]}'
   run zsh "$S" --file "$SPEC"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"unknown surface"* ]]
+  contains "$output" "unknown surface"
 }
 
 @test "invalid JSON -> runtime error (exit 3)" {
   put '{not json'
   run zsh "$S" --file "$SPEC"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"not valid JSON"* ]]
+  contains "$output" "not valid JSON"
 }
 
 @test "missing --file target -> exit 3 naming it; unknown flag -> usage (exit 2)" {

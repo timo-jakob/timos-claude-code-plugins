@@ -11,6 +11,7 @@
 # reconcile is exercised deterministically without network.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -71,34 +72,34 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   write spec.json "$NEW_TWO"
   spinout --story 671 --spec "$BATS_TEST_TMPDIR/spec.json"
   [ "$status" -eq 2 ]
-  [[ "$(cat "$ERR")" == *"--repo is required"* ]]
+  contains "$(cat "$ERR")" "--repo is required"
 }
 
 @test "missing --story is a usage error (exit 2)" {
   write spec.json "$NEW_TWO"
   spinout --repo o/r --spec "$BATS_TEST_TMPDIR/spec.json"
   [ "$status" -eq 2 ]
-  [[ "$(cat "$ERR")" == *"--story is required"* ]]
+  contains "$(cat "$ERR")" "--story is required"
 }
 
 @test "non-numeric --story is a usage error (exit 2)" {
   write spec.json "$NEW_TWO"
   spinout --repo o/r --story abc --spec "$BATS_TEST_TMPDIR/spec.json"
   [ "$status" -eq 2 ]
-  [[ "$(cat "$ERR")" == *"must be a number"* ]]
+  contains "$(cat "$ERR")" "must be a number"
 }
 
 @test "missing spec file is a runtime error (exit 1)" {
   spinout --repo o/r --story 671 --spec "$BATS_TEST_TMPDIR/nope.json"
   [ "$status" -eq 1 ]
-  [[ "$(cat "$ERR")" == *"spec file not found"* ]]
+  contains "$(cat "$ERR")" "spec file not found"
 }
 
 @test "unknown arg is a usage error (exit 2)" {
   write spec.json "$NEW_TWO"
   spinout --repo o/r --story 671 --spec "$BATS_TEST_TMPDIR/spec.json" --bogus x
   [ "$status" -eq 2 ]
-  [[ "$(cat "$ERR")" == *"unknown arg"* ]]
+  contains "$(cat "$ERR")" "unknown arg"
 }
 
 @test "a dangling final option (no value) is a clean usage error, not a shift abort" {
@@ -106,15 +107,15 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   # not a cryptic `shift count must be <= $#` abort under set -e.
   spinout --repo o/r --story 671 --spec
   [ "$status" -eq 2 ]
-  [[ "$(cat "$ERR")" == *"--spec is required"* ]]
-  [[ "$(cat "$ERR")" != *"shift"* ]]
+  contains "$(cat "$ERR")" "--spec is required"
+  lacks "$(cat "$ERR")" "shift"
 }
 
 @test "invalid JSON spec is a runtime error (exit 1)" {
   write spec.json '{not json'
   spinout --repo o/r --story 671 --spec "$BATS_TEST_TMPDIR/spec.json"
   [ "$status" -eq 1 ]
-  [[ "$(cat "$ERR")" == *"not valid JSON"* ]]
+  contains "$(cat "$ERR")" "not valid JSON"
 }
 
 # ---- create path (AC1 + AC2) -------------------------------------------------

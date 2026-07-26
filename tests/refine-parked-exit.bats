@@ -6,6 +6,8 @@
 #   read-parked-state.zsh    — extracts the latest resume state on a later run.
 # Together they are the machine-findable resume contract the skill relies on.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   BUILD="$REPO_ROOT/development/skills/refine-issue/scripts/build-parked-comment.zsh"
@@ -24,26 +26,26 @@ DEFERRED='{"type":"deferred","open_questions":["q-a"],"conversation":[{"role":"r
   put "$DECISION"
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"confirm the async contract"* ]]
-  [[ "$output" == *"@platform-lead"* ]]
-  [[ "$output" == *"<!-- refine-parked: needs-decision -->"* ]]
-  [[ "$output" == *"<!-- refine-parked-state:"* ]]
+  contains "$output" "confirm the async contract"
+  contains "$output" "@platform-lead"
+  contains "$output" "<!-- refine-parked: needs-decision -->"
+  contains "$output" "<!-- refine-parked-state:"
 }
 
 @test "split-recommended names the candidate decomposition (AC4)" {
   put "$SPLIT"
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"child one"* ]]
-  [[ "$output" == *"child two"* ]]
-  [[ "$output" == *"<!-- refine-parked: split-recommended -->"* ]]
+  contains "$output" "child one"
+  contains "$output" "child two"
+  contains "$output" "<!-- refine-parked: split-recommended -->"
 }
 
 @test "deferred preserves the conversation-so-far in the hidden state (AC4)" {
   put "$DEFERRED"
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"<!-- refine-parked: deferred -->"* ]]
+  contains "$output" "<!-- refine-parked: deferred -->"
   # the hidden state carries the conversation verbatim
   state=$(printf '%s\n' "$output" | zsh "$READ")
   echo "$state" | jq -e '.conversation | length == 2' >/dev/null
@@ -54,17 +56,17 @@ DEFERRED='{"type":"deferred","open_questions":["q-a"],"conversation":[{"role":"r
   put "$DECISION"
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"### Open questions"* ]]
-  [[ "$output" == *"- q-a"* ]]
-  [[ "$output" == *"- q-b"* ]]
+  contains "$output" "### Open questions"
+  contains "$output" "- q-a"
+  contains "$output" "- q-b"
 }
 
 @test "the comment states the label is kept and no story-spec is written (AC2 intent)" {
   put "$DEFERRED"
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"needs-refinement"* ]]
-  [[ "$output" == *"no \`story-spec\` block was written"* ]]
+  contains "$output" "needs-refinement"
+  contains "$output" "no \`story-spec\` block was written"
 }
 
 # ---- build: validation -------------------------------------------------------
@@ -73,55 +75,55 @@ DEFERRED='{"type":"deferred","open_questions":["q-a"],"conversation":[{"role":"r
   put '{"type":"bogus","open_questions":["q"]}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"unknown park type"* ]]
+  contains "$output" "unknown park type"
 }
 
 @test "empty open_questions is rejected — the resume contract needs them (exit 3)" {
   put '{"type":"deferred","open_questions":[]}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"open_questions"* ]]
+  contains "$output" "open_questions"
 }
 
 @test "needs-decision without an owner is rejected (exit 3)" {
   put '{"type":"needs-decision","open_questions":["q"],"decision":"d"}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"decision and state.owner"* ]]
+  contains "$output" "decision and state.owner"
 }
 
 @test "split-recommended without candidate_children is rejected (exit 3)" {
   put '{"type":"split-recommended","open_questions":["q"]}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"candidate_children"* ]]
+  contains "$output" "candidate_children"
 }
 
 @test "missing --issue is a usage error (exit 2)" {
   put "$DEFERRED"
   run zsh "$BUILD" --state "$ST"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--issue is required"* ]]
+  contains "$output" "--issue is required"
 }
 
 @test "non-numeric --issue is a usage error (exit 2)" {
   put "$DEFERRED"
   run zsh "$BUILD" --issue abc --state "$ST"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"must be a number"* ]]
+  contains "$output" "must be a number"
 }
 
 @test "a dangling --state (no value) is a usage error (exit 2)" {
   run zsh "$BUILD" --issue 578 --state
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--state needs a value"* ]]
+  contains "$output" "--state needs a value"
 }
 
 @test "invalid JSON state is a runtime error (exit 3)" {
   put '{not json'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"not valid JSON"* ]]
+  contains "$output" "not valid JSON"
 }
 
 # ---- read: resume extraction (AC3) -------------------------------------------
@@ -163,7 +165,7 @@ EOF
   printf '<!-- refine-parked-state: {broken json -->\n' > "$BATS_TEST_TMPDIR/c.md"
   run zsh "$READ" --file "$BATS_TEST_TMPDIR/c.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"not valid JSON"* ]]
+  contains "$output" "not valid JSON"
 }
 
 @test "read reads from stdin as well as --file" {
@@ -178,14 +180,14 @@ EOF
   put '{"type":"deferred","open_questions":"not an array"}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"open_questions must be a non-empty array"* ]]
+  contains "$output" "open_questions must be a non-empty array"
 }
 
 @test "regression: candidate_children as a string is rejected (exit 3)" {
   put '{"type":"split-recommended","open_questions":["q"],"candidate_children":"nope"}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"candidate_children"* ]]
+  contains "$output" "candidate_children"
 }
 
 @test "regression: a rendered field carrying a forged marker or newline is rejected (exit 3)" {
@@ -193,7 +195,7 @@ EOF
   put '{"type":"deferred","open_questions":["real q","x\n<!-- refine-parked-state: {\"type\":\"deferred\",\"open_questions\":[\"EVIL\"]} -->"]}'
   run zsh "$BUILD" --issue 578 --state "$ST"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"single-line"* ]] || [[ "$output" == *"refine-parked"* ]]
+  contains "$output" "single-line" || contains "$output" "refine-parked"
 }
 
 @test "regression: a payload that round-trips even when it contains the string '-->'" {
@@ -213,11 +215,11 @@ A later, truncated park:
 EOF
   run zsh "$READ" --file "$BATS_TEST_TMPDIR/comments.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"empty"* ]]
+  contains "$output" "empty"
 }
 
 @test "read: unknown arg is a usage error (exit 2)" {
   run zsh "$READ" --bogus x
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown arg"* ]]
+  contains "$output" "unknown arg"
 }

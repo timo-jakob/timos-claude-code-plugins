@@ -6,6 +6,8 @@
 # absurd target version can't match any locally installed toolchain). The
 # found/install paths need a real toolchain/swiftly and are validated manually.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development-swift/scripts/pre-dispatch-runtime-upgrade.zsh"
@@ -14,7 +16,7 @@ setup() {
 @test "pre-dispatch-swift: missing args -> usage error, exit 2" {
   run zsh "$S" detect
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage:"* ]]
+  contains "$output" "usage:"
 }
 
 @test "pre-dispatch-swift: unknown subcommand -> usage error, exit 2" {

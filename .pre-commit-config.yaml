@@ -7,9 +7,12 @@
 # CI mirror: .github/workflows/lint.yml runs `pre-commit run --all-files`
 # (skipping gitleaks, which has its own workflow) and is a required check.
 #
-# shellcheck/shfmt run on .sh (all bash); .zsh scripts are syntax-checked with
-# `zsh -n` (shellcheck can't parse zsh). Extension matches the shebang for every
-# script, so no per-file exceptions are needed.
+# shellcheck runs on .sh and .bash; shfmt on .sh only (a .bash bats helper
+# library is indented like the .bats files that source it — see the shfmt hook's
+# note below). .zsh scripts are syntax-checked with `zsh -n` (shellcheck can't
+# parse zsh). Extension matches the shebang for every script, so no per-file
+# exceptions are needed — the one shebang-less file, tests/assertions.bash
+# (bats sources it), carries a `# shellcheck shell=bash` directive instead.
 
 repos:
   # --- universal hooks -------------------------------------------------------
@@ -60,15 +63,17 @@ repos:
     hooks:
       - id: shellcheck
         args: ["--severity=warning"]
-        # Bash only (.sh): .zsh is checked with `zsh -n` below (shellcheck
-        # SC1071s on it) and .bats is exercised by the test suite.
-        files: \.sh$
+        # Bash only (.sh, .bash): .zsh is checked with `zsh -n` below
+        # (shellcheck SC1071s on it) and .bats is exercised by the test suite.
+        files: \.(sh|bash)$
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.10.0-1
     hooks:
       - id: shfmt
         args: ["-d"]
-        # Bash only (see shellcheck note): skip .zsh and .bats.
+        # Bash only (see shellcheck note): skip .zsh, .bats — and .bash,
+        # which is a bats helper library indented like the .bats files that
+        # source it (2 spaces), not in shfmt's tab style.
         files: \.sh$
   - repo: local
     hooks:

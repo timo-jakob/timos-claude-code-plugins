@@ -13,6 +13,7 @@
 # "moved, not re-derived" evidence.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -354,10 +355,10 @@ EOF
   # nothing — only the message discriminates
   run zsh "$S" --status ""
   [ "$status" -eq 2 ]
-  [[ "$output" == *"requires a non-empty value"* ]]
+  contains "$output" "requires a non-empty value"
   run zsh "$S" --status --help
   [ "$status" -eq 2 ]
-  [[ "$output" == *"requires a non-empty value"* ]]
+  contains "$output" "requires a non-empty value"
 }
 
 @test "usage: --status pointing at a directory is exit 2, not a bogus 'invalid status JSON'" {

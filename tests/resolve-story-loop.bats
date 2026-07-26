@@ -6,6 +6,7 @@
 # is stubbed via DETECT_STACK_BIN (review-dispatch's seam); git runs for real.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -371,7 +372,7 @@ assert_envelope() {
   [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
   # and it said so, naming THIS failure — "emit-telemetry" alone would also
   # match an unknown-flag regression, keeping the test green on the wrong cause
-  [[ "$stderr" == *"cannot create sink directory"* ]]
+  contains "$stderr" "cannot create sink directory"
 }
 
 @test "a failed payload build emits NO record at all, and never changes the exit (#1004)" {
@@ -436,7 +437,7 @@ assert_envelope() {
   [ "$status" -eq 2 ]
   # ...and for the RIGHT reason: the parser catch-all ("unknown flag: --issue")
   # also exits 2, so a dropped --issue case would otherwise pass here
-  [[ "$output" == *"must be a non-negative integer"* ]]
+  contains "$output" "must be a non-negative integer"
 }
 
 @test "a red gate after a fix aborts as an operational error (exit 1), not a verdict" {
@@ -766,13 +767,13 @@ seed_exhausted_wd() {
   [ "$status" -eq 2 ]
   # the WIDTH rule specifically — "--issue" alone would also match the
   # digits-only message and the parser's unknown-flag catch-all
-  [[ "$output" == *"out of range (max 18 digits"* ]]
+  contains "$output" "out of range (max 18 digits"
 }
 
 @test "an explicitly empty --telemetry-file is a usage error, not a silent default-sink write (#1004)" {
   run zsh "$S" --repo "$R" --base main --no-review --telemetry-file ""
   [ "$status" -eq 2 ]
-  [[ "$output" == *"requires a non-empty value"* ]]
+  contains "$output" "requires a non-empty value"
   [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
 }
 
@@ -785,7 +786,7 @@ seed_exhausted_wd() {
            --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file; do
     run zsh "$S" "$f"
     [ "$status" -eq 2 ] || { echo "$f dangling: want exit 2, got $status"; return 1; }
-    [[ "$output" == *"$f requires a value"* ]] || {
+    contains "$output" "$f requires a value" || {
       echo "$f dangling: message did not name the flag: $output"; return 1; }
   done
 }
@@ -797,7 +798,7 @@ seed_exhausted_wd() {
   # lose the telemetry record when the emitter rejects the flag-shaped path
   run zsh "$S" --repo "$R" --telemetry-file --resume --no-review
   [ "$status" -eq 2 ]
-  [[ "$output" == *"requires a value (got the flag --resume)"* ]]
+  contains "$output" "requires a value (got the flag --resume)"
 }
 
 @test "_need_val: an explicitly empty value is refused for every value flag (#1004)" {
@@ -810,7 +811,7 @@ seed_exhausted_wd() {
            --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file; do
     run zsh "$S" "$f" "" --no-review
     [ "$status" -eq 2 ] || { echo "$f empty: want exit 2, got $status"; return 1; }
-    [[ "$output" == *"$f requires a non-empty value"* ]] || {
+    contains "$output" "$f requires a non-empty value" || {
       echo "$f empty: message did not name the flag: $output"; return 1; }
   done
 }
@@ -826,10 +827,10 @@ seed_exhausted_wd() {
   [ "$status" -eq 2 ]
   # ...naming the rule, like its two siblings: with the arg-count check gone
   # the following `shift 2` would also fail, so exit 2 alone discriminates little
-  [[ "$output" == *"--gate-attest requires a value"* ]]
+  contains "$output" "--gate-attest requires a value"
   run zsh "$S" --repo "$R" --gate-attest --resume --no-review
   [ "$status" -eq 2 ]
-  [[ "$output" == *"got the flag --resume"* ]]
+  contains "$output" "got the flag --resume"
 }
 
 @test "a leading-zero --max-rounds is normalised, never a blank status JSON (#1004)" {
@@ -850,5 +851,5 @@ seed_exhausted_wd() {
   # landing positive and silently accepting an effectively unbounded ceiling
   run zsh "$S" --repo "$R" --no-review --max-rounds 12345678901234567890
   [ "$status" -eq 2 ]
-  [[ "$output" == *"at most 18 digits"* ]]
+  contains "$output" "at most 18 digits"
 }
