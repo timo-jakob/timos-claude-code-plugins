@@ -42,8 +42,10 @@ exactly one behaviour.
 **Assert through the shared helpers.** Start the file with `load assertions` and
 use `contains` / `lacks` / `starts_with` / `ends_with` / `matches` from
 `assertions.bash`; plain `[ ... ]` is fine too. Never assert with a bare
-`[[ ... ]]`: it is a shell keyword, so a false one on a non-final line is
-silently ignored and the test passes while proving nothing.
+`[[ ... ]]`: bash 3.2 (macOS `/bin/bash`) does not apply errexit to it, so a
+false one on a non-final line is silently ignored and the test passes while
+proving nothing — while bash >= 4 catches it, making the same test mean
+different things on the macOS and Ubuntu CI legs.
 `no-inert-bracket-assertions.bats` fails the suite if one appears (#1011), just
 as `no-inert-negative-assertions.bats` does for a bare `!` negation (#829).
 

@@ -18,8 +18,8 @@
 # SCOPE (corrected in #1011): this guard covers the bare-`!` form ONLY. It does
 # NOT clear `[[ ! -f … ]]` — an earlier version of this comment cited that form
 # as a benign non-match, which read as a safety claim it was never entitled to
-# make. A `[[ ]]` assertion is inert for its own reason (it is a shell keyword,
-# not a simple command) and is guarded separately by
+# make. A `[[ ]]` assertion is inert for its own reason (bash 3.2 does not apply
+# errexit to it) and is guarded separately by
 # tests/no-inert-bracket-assertions.bats.
 
 bats_require_minimum_version 1.5.0

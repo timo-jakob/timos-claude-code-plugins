@@ -10,8 +10,11 @@
 # confidence #1011 set out to remove, one level down. So each helper is pinned
 # in BOTH directions: it must succeed on a match AND fail on a non-match.
 #
-# The last test pins the premise the entire sweep rests on: a FALSE helper call
-# on a non-final line really does fail a bats test, where `[[ ]]` does not.
+# The last tests pin the premise the entire sweep rests on: a FALSE helper call
+# on a non-final line really does fail a bats test on every platform, where
+# `[[ ]]` only does so on bash >= 4 — inert on the bash 3.2 macOS ships. That
+# platform split IS the argument for the ban, so the premise tests assert the
+# causal link (bats tracks this shell's errexit) rather than either outcome.
 
 bats_require_minimum_version 1.5.0
 
@@ -20,6 +23,23 @@ load assertions
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   LIB="$REPO_ROOT/tests/assertions.bash"
+}
+
+# Echoes `inert` when THIS platform's bash exempts a failing `[[ ]]` from
+# errexit (bash 3.2, macOS `/bin/bash`), `caught` when errexit fires (bash >= 4).
+#
+# The probe uses `env bash`, which is exactly what bats' own shebang resolves to,
+# so the probe and the fixture runs below are judging the same shell. Asserting
+# against this rather than against a hardcoded outcome is the point: it pins the
+# CAUSAL claim — bats' handling of a mid-body `[[ ]]` is nothing but this shell's
+# errexit behaviour — instead of a claim that is only true on one platform.
+#
+# A named function is not scanned by the #1011 lint (calling it is a simple
+# command errexit catches), and `[ ... ]` is never flagged in any case.
+bracket_errexit_here() {
+  local out
+  out="$(env bash -c 'set -e; [[ "a" == "b" ]]; printf REACHED' 2>/dev/null || true)"
+  if [ "$out" = "REACHED" ]; then printf 'inert'; else printf 'caught'; fi
 }
 
 # --- contains / lacks -------------------------------------------------------
@@ -166,29 +186,59 @@ abc" '^abc$'
   contains "$output" "not ok 1"
 }
 
-@test "the premise itself: a FALSE [[ ]] mid-body reports ok, [ ] does not (#1011)" {
+@test "the premise itself: a mid-body [[ ]] tracks this bash's errexit (#1011)" {
   # The empirical claim that licenses this whole change — converting 285
-  # assertions and banning a legal idiom repo-wide — is asserted in three file
-  # headers and was verified by hand on bats 1.14.0. Pin it, so that if a future
-  # bats starts catching mid-body `[[ ]]`, we find out here rather than keeping
-  # a ban on an idiom that is no longer broken.
+  # assertions and banning a legal idiom repo-wide — is asserted in four file
+  # headers, and it is PLATFORM-SPECIFIC: bash 3.2 (macOS) exempts a failing
+  # `[[ ]]` from errexit, bash >= 4 does not. bats does not enter into it; 1.10.0
+  # through 1.14.0 behave identically on a given bash.
+  #
+  # So pin the causal link rather than either outcome. Hardcoding `ok` was a
+  # macOS-only claim that reds the `bats (ubuntu-latest)` leg; hardcoding
+  # `not ok` would red macOS. This form is true on both AND still fires the
+  # alarm if bats ever stops tracking plain errexit here.
   local fixture="$BATS_TEST_TMPDIR/premise-bracket.bats"
 
   printf '@test "false [[ ]] mid-body" {\n  [[ "abc" == "zzz" ]]\n  true\n}\n' >"$fixture"
   run bats "$fixture"
-  [ "$status" -eq 0 ]          # INERT: the false assertion is ignored
-  contains "$output" "ok 1"
-  lacks "$output" "not ok"
+  if [ "$(bracket_errexit_here)" = "inert" ]; then
+    [ "$status" -eq 0 ]        # bash 3.2: the false assertion is ignored
+    contains "$output" "ok 1"
+    lacks "$output" "not ok"
+  else
+    [ "$status" -ne 0 ]        # bash >= 4: errexit fires, as it does for `[ ]`
+    contains "$output" "not ok 1"
+  fi
 
+  # The two claims below hold on EVERY bash, so they are asserted unconditionally
+  # — and together they are what makes the ban survive the platform split:
+  # `[ ]` is always enforced (so it needs no ban), and a trailing `[[ ]]` is safe
+  # only by accident of position (so a positional exemption would be a trap).
   printf '@test "false [ ] mid-body" {\n  [ "abc" = "zzz" ]\n  true\n}\n' >"$fixture"
   run bats "$fixture"
-  [ "$status" -ne 0 ]          # the contrast: `[ ]` fails correctly
+  [ "$status" -ne 0 ]
   contains "$output" "not ok 1"
 
   printf '@test "false [[ ]] as the LAST line" {\n  run true\n  [[ "abc" == "zzz" ]]\n}\n' >"$fixture"
   run bats "$fixture"
-  [ "$status" -ne 0 ]          # safe only by accident of position
+  [ "$status" -ne 0 ]
   contains "$output" "not ok 1"
+}
+
+@test "the probe agrees with a direct reading of this shell's bash (#1011)" {
+  # Guards the guard: if `bracket_errexit_here` ever returned a constant, the
+  # branch above would silently stop testing anything on one platform. Cross-check
+  # it against the bash MAJOR VERSION, which is the documented discriminator
+  # (3.2 exempts `[[ ]]` from errexit; 4.0 onward does not).
+  local probe major
+  probe="$(bracket_errexit_here)"
+  major="$(env bash -c 'printf %s "${BASH_VERSINFO[0]}"')"
+
+  if [ "$major" -lt 4 ]; then
+    [ "$probe" = "inert" ]
+  else
+    [ "$probe" = "caught" ]
+  fi
 }
 
 @test "an && tail neutralises a HELPER call too — the documented hazard is real (#1011)" {
@@ -207,13 +257,24 @@ abc" '^abc$'
 
 @test "the premise holds in setup() and behind an && tail too (#1011)" {
   # Two further claims the detector header makes about WHERE the inertness
-  # reaches; both drive scoping decisions in the lint.
+  # reaches; both drive scoping decisions in the lint. They differ in kind, and
+  # the split is why the lint scopes the way it does:
+  #   * setup() is the SAME errexit question as a test body, so it follows the
+  #     platform — scanned for exactly the reason a test body is.
+  #   * the `&&` tail is the POSIX AND-list exemption, which holds on EVERY bash
+  #     (verified on 3.2.57 and 5.2) — so no positional or platform reasoning
+  #     rescues it, and the lint flags it regardless.
   local fixture="$BATS_TEST_TMPDIR/premise-scope.bats"
 
   printf 'setup() {\n  [[ "abc" == "zzz" ]]\n  true\n}\n@test "x" {\n  true\n}\n' >"$fixture"
   run bats "$fixture"
-  [ "$status" -eq 0 ]
-  contains "$output" "ok 1"
+  if [ "$(bracket_errexit_here)" = "inert" ]; then
+    [ "$status" -eq 0 ]
+    contains "$output" "ok 1"
+  else
+    [ "$status" -ne 0 ]
+    contains "$output" "not ok 1"
+  fi
 
   printf '@test "and-list tail" {\n  [[ "abc" == "zzz" ]] && true\n  true\n}\n' >"$fixture"
   run bats "$fixture"

@@ -3,12 +3,17 @@
 # Suite-lint detector (#1011): find `[[ ... ]]` assertions that are SILENTLY
 # INERT because of where they sit.
 #
-# `[[ ]]` is a shell *keyword*, not a simple command, so bats' failure detection
-# does not trip on a false one the way it does for `[ ... ]` — its exit status
-# only matters when it happens to be the block's last statement. Verified on
-# bats 1.14.0: a false `[[ ! -f <existing> ]]` on a non-final line of an `@test`
-# reports `ok`, while the same assertion written `[ ! -f <existing> ]` fails
-# correctly. The inertness survives an `&&` tail (the AND-list errexit
+# bash 3.2 — macOS `/bin/bash`, and what `#!/usr/bin/env bash` resolves to on
+# this repo's primary platform — does not apply errexit to a failing `[[ ]]`, so
+# its exit status only matters when it happens to be the block's last statement.
+# Verified on bash 3.2.57: a false `[[ ! -f <existing> ]]` on a non-final line of
+# an `@test` reports `ok`, while the same assertion written `[ ! -f <existing> ]`
+# fails correctly. bash >= 4 (4.4 and 5.2 checked) catches BOTH — which is the
+# real argument for the ban: the idiom's meaning depends on the platform, so the
+# `bats (macos-latest)` and `bats (ubuntu-latest)` legs disagree about what a
+# given test proves. The bats version is not a factor (1.10.0 through 1.14.0 all
+# behave identically on a given bash). The inertness survives an `&&` tail (the
+# AND-list errexit
 # exemption, which applies to `[ ... ]` and to a function call identically) and
 # `=~`. A `|| return 1` tail is NOT inert — the command after the final `||` is
 # exactly what errexit catches — but it is flagged anyway so the fix stays
@@ -33,7 +38,7 @@
 #
 # WHERE it is inert — the scoping rule this detector implements:
 #   * `@test` bodies, and `setup` / `teardown` / `setup_file` / `teardown_file`
-#     (`setup` verified inert on bats 1.14.0; the other three hooks are scanned
+#     (`setup` verified inert on bash 3.2.57; the other three hooks are scanned
 #     on the same reasoning) are SCANNED — when the opener is written on one
 #     line ending in `{`, and closed by a `}` at column 0. A self-contained
 #     one-line block (`teardown() { rm -rf "$W"; }`) is neither scanned nor

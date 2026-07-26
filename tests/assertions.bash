@@ -2,11 +2,23 @@
 #
 # Shared bats assertion helpers (#1011).
 #
-# WHY THESE EXIST: `[[ ... ]]` is a shell KEYWORD, not a simple command, so bats'
-# failure detection does not trip on a false one unless it happens to be the
-# block's last statement. A false `[[ "$output" == *"x"* ]]` in the middle of a
-# test body is SILENTLY IGNORED — the test reports `ok` while proving nothing.
-# Verified on bats 1.14.0; `[ ... ]` in the same position fails correctly.
+# WHY THESE EXIST: on bash 3.2 — the `/bin/bash` macOS still ships, and what
+# `#!/usr/bin/env bash` resolves to on this repo's primary platform — errexit
+# does NOT fire on a failing `[[ ... ]]`. So a false `[[ "$output" == *"x"* ]]`
+# in the middle of a test body is SILENTLY IGNORED: the test reports `ok` while
+# proving nothing, unless the assertion happens to be the block's last statement
+# (where its status becomes the block's own).
+#
+# On bash >= 4 the same assertion fails correctly. That is WORSE, not better: it
+# makes an assertion's meaning depend on which machine ran it — inert on the
+# maintainer's Mac and on the `bats (macos-latest)` CI leg, enforced on
+# `bats (ubuntu-latest)`. A repo-wide ban is the only way to make the suite say
+# one thing everywhere.
+#
+# Verified empirically: bats 1.10.0/1.11.0/1.12.0/1.13.0/1.14.0 ALL report `ok`
+# under bash 3.2.57 and `not ok` under bash 4.4/5.2 — the bats version is not the
+# variable, the bash version is. `[ ... ]` in the same position fails correctly
+# on every bash, which is why it is never flagged.
 #
 # Each helper below is an ordinary function, so calling it is a simple command
 # that errexit catches wherever it appears AS A COMMAND OF ITS OWN — position

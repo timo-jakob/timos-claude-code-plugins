@@ -2,8 +2,11 @@
 #
 # Suite lint (#1011): a `[[ ... ]]` assertion inside an `@test` body — or inside
 # setup/teardown — is SILENTLY INERT unless it happens to be the block's last
-# statement. `[[ ]]` is a shell keyword, not a simple command, so bats' failure
-# detection does not trip on a false one the way it does for `[ ... ]`.
+# statement, because bash 3.2 (macOS `/bin/bash`) exempts a failing `[[ ]]` from
+# errexit where it catches `[ ... ]` correctly. bash >= 4 catches both — which
+# makes the idiom worse, not safer: the assertion means one thing on the
+# `bats (macos-latest)` CI leg and another on `bats (ubuntu-latest)`. The ban is
+# what makes the suite say the same thing on every platform.
 #
 # This is the same defect class as the bare-`!` negation guarded by #829 in
 # tests/no-inert-negative-assertions.bats — that guard's own comment used to
