@@ -69,7 +69,7 @@
     {
       "name": "development-claude-plugin",
       "description": "Plugin family for projects that ARE Claude Code plugins. Ships a test harness (/development-claude-plugin:test), a review panel (/development-claude-plugin:review — prose logic, contract integrity, script quality, tests, manifests), and a maintenance dispatcher that validates plugin conventions and composes alongside the language plugin. Validators: version sync, SKILL.md/agent frontmatter, orphaned skill/agent references, directory layout, and shell-script quality (shellcheck / zsh -n).",
-      "version": "1.9.2",
+      "version": "1.9.3",
       "author": {
         "name": "Timo Jakob"
       },
