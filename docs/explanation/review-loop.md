@@ -15,13 +15,15 @@ Each round, scoped to the story's diff:
    process.
 2. **Consolidate** — findings are de-duplicated and split into **blockers**
    (Critical + Warning) and **Suggestions**. Only blockers drive the loop;
-   suggestions are logged, never looped on.
+   suggestions are logged and not looped on — unless a human explicitly
+   promotes one afterwards (see [Promoting a suggestion](#promoting-a-suggestion)).
 3. **Fix** — if there are blockers, an implementor pass fixes them.
 4. **Re-test** — the full test suite runs again; a fix that breaks anything
    aborts the loop rather than shipping.
 
 The loop repeats until it **converges** — a round with **zero blockers**.
-Suggestions remaining is still converged.
+Suggestions remaining is still converged; on an interactive run you are then
+offered the chance to promote some of them (below).
 
 ## Watching it run
 
@@ -102,6 +104,62 @@ converging** — do not dead-end. Instead the run pauses and talks to you:
    That five-grant point is a *nudge*, not a hard stop: by then the ceiling
    already stands at 5 + 5×3 = 20 rounds, and a run that needs anywhere near
    that many should be split, which is exactly what the warning tells you.
+
+## Promoting a suggestion
+
+Suggestions never block, so by the time a run converges every one the panel
+raised has been **waived** — logged, and never acted on. That default is
+deliberate: a Low finding should not hold up a PR. But it left no way to say
+*"actually, do that one"* at the one moment you have the whole picture and the
+change is otherwise ready.
+
+So when an **interactive** run converges with at least one waived suggestion,
+you are shown them — title, `file:line`, dimension — and can **multi-select any
+subset** (including none). What you pick is promoted to blocking and resolved
+through a second pass of the very same loop: review → fix → re-test, the full
+suite every round. Nothing about the bar changes; a regression introduced while
+polishing a suggestion is caught exactly like any other blocker.
+
+A few properties worth knowing:
+
+- **Nothing is ever auto-promoted.** The list is a menu, not a plan. Selecting
+  none converges immediately, exactly as before.
+- **Unattended runs are untouched.** An autonomous or headless run is never
+  prompted, passes no promoted set, and converges with its suggestions waived —
+  behaviour identical to before this existed.
+- **The list is every suggestion the run logged**, not just the last round's.
+  A suggestion raised in round 1 and never repeated is still un-actioned work,
+  so it is still offered.
+- **A promoted item survives its own fix.** Matching is by identity — file,
+  dimension, and title — with a tolerance for line drift, not by an exact line
+  number. Otherwise the first edit above it would quietly drop it back to Low
+  and the pass would "converge" without doing what you asked.
+- **It runs once.** New suggestions that surface during the promotion pass are
+  waived, not re-offered — the phase is a triage moment, not a treadmill.
+- **One pick, one item.** A selection raises exactly the finding you picked, not
+  its neighbours — so promoting one suggestion never quietly enlists the two
+  next to it.
+- **The PR's review dossier covers the first pass only, for now.** A suggestion
+  you promoted and the second pass fixed still appears under *Waived
+  suggestions* there; the PR Summary states how many were promoted meanwhile.
+  Merging both passes into one dossier is tracked as
+  [#1064](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1064).
+- **The budget is a fresh allowance** — the promotion pass gets the same
+  five-round budget the blocking phase had, governed by that same single
+  constant rather than a second one, with the same extension offer if it runs
+  out. It is not the blocking phase's leftovers.
+- **A promoted item that has already vanished is reported, not silently
+  skipped.** If the code moved on and a promoted suggestion no longer exists,
+  you are told — a converged pass never implies work that was not done. And when
+  the run cannot confirm either way, it says exactly that ("could not verify")
+  rather than claiming the item is gone.
+
+If the promotion pass cannot clear what you picked, it escalates through the
+normal taxonomy rather than silently re-waiving it — you asked for those items,
+so they are treated as blockers. That has a cost worth knowing before you pick:
+an escalation ends the run **without opening a PR**, so promoting something
+unclearable can turn an otherwise-ready change into one that needs another
+session. The prompt says so at the point of choosing.
 
 ## When you stop, or a run is unattended
 

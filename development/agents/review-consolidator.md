@@ -21,8 +21,21 @@ arithmetic in your head** (that is how an LLM miscounts). Run it:
 
 ```bash
 "<skill-base-dir>/../skills/resolve-issue/scripts/consolidate-findings.zsh" \
-  --findings <round-aggregate.json> --round <N> [--prev <prev-changelist.json>]
+  --findings <round-aggregate.json> --round <N> [--prev <prev-changelist.json>] \
+  [--promote <promoted.json>]
 ```
+
+`--promote` (#994) carries a human-selected set of waived suggestions to raise to
+blocking for this round. It is a **caller-supplied overlay: forward it verbatim
+whenever your prompt gives you one, and never re-grade it** — running the engine
+without it during a promotion sub-loop silently drops those items back to Low and
+produces a changelist that disagrees with the loop's own. This is rule 3 ("Leave
+severities alone") applied to the one severity change the human, not a reviewer,
+asked for. **If your prompt indicates a promotion sub-loop — a promotion
+work-dir, or a statement that suggestions were promoted — but gives you no
+`--promote` path, stop and say so** rather than running the engine bare: a bare
+run demotes the promoted items back to Low and converges the phase without doing
+the work.
 
 Your prompt gives you the round's aggregate findings path, the round number, and
 (for round ≥ 2) the previous round's changelist path. The engine returns the
