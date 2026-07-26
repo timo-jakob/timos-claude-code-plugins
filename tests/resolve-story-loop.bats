@@ -853,3 +853,180 @@ seed_exhausted_wd() {
   [ "$status" -eq 2 ]
   contains "$output" "at most 18 digits"
 }
+
+# --- suggestion promotion pass-through (#994, test case #1021) ---------------
+#
+# The loop never interprets the promoted set — it forwards --promote to the
+# consolidator on EVERY round. The observable proof is behavioural rather than
+# argv-shaped: a SUGGESTION-only round converges immediately today, so if the
+# same round STOPS converging under --promote the overlay reached the
+# consolidator; and if it keeps blocking into round 2+ it was forwarded there
+# too, rather than applied once and dropped.
+
+# a reviewer panel that raises the same waived Low finding every round
+suggestion_loop() {
+  loop --review-cmd 'printf "%s" '"'"'[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d","reviewer":"q"}]'"'"' > "$REVIEW_FINDINGS"' \
+       --fix-cmd 'true' "$@"
+}
+
+@test "#1021 promote: without --promote a suggestion-only round still converges in round 1" {
+  # the baseline this feature must not disturb — and the headless/autonomous path
+  suggestion_loop
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 0 ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.low')" -eq 1 ]
+}
+
+@test "#1021 promote: --promote reaches the consolidator — the same round no longer converges" {
+  P="$BATS_TEST_TMPDIR/promote.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  suggestion_loop --promote "$P"
+  # the promoted suggestion is now a blocker the fix-cmd never clears, so the
+  # loop escalates instead of converging — it cannot have converged in round 1
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.round_changelists[0].blocking[0].priority')" = "High" ]
+}
+
+@test "#1021 promote: the overlay is forwarded on round 2+, not applied once" {
+  # If --promote were forwarded only on round 1, round 2 would consolidate
+  # WITHOUT it, the item would fall back to Low, blocking would drop to 0 and
+  # the loop would converge. Round 2 still blocking is the pass-through proof.
+  P="$BATS_TEST_TMPDIR/promote.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  suggestion_loop --promote "$P"
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.round_changelists | length')" -ge 2 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 0 ]
+}
+
+@test "#1021 promote: an EMPTY promoted set is refused — selecting none skips the sub-loop" {
+  # The contract is that selecting nothing converges immediately and the sub-loop
+  # is never invoked. `[]` reaching the loop is therefore a glue slip, and left
+  # accepted it would run a provably no-op overlay every round and converge
+  # reporting success on a phase that promoted nothing.
+  P="$BATS_TEST_TMPDIR/promote.json"
+  printf '[]' > "$P"
+  suggestion_loop --promote "$P"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty JSON array"
+}
+
+@test "#1021 promote: without --promote the same round converges on the inherited budget" {
+  # the no-flag baseline the empty-set case used to stand in for: max_rounds is 5
+  # for every invocation, so assert the whole round-1 verdict too
+  suggestion_loop
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 0 ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.low')" -eq 1 ]
+  # the promotion phase is an ordinary invocation of this same state machine, so
+  # its ceiling is MAX_REVIEW_ROUNDS; there is deliberately no second constant
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 5 ]
+}
+
+@test "#1021 promote: a malformed promote file is refused up front, not mid-round" {
+  # The promote file is HUMAN-authored, so a typo is the most likely failure of
+  # the whole feature — and the shapes a model produces (a bare string array, a
+  # truncated write) are likelier than a missing path. Caught only by the
+  # consolidator, they surfaced as a BARE exit 1 mid-round that writes no status
+  # JSON, leaving --status-file holding a previous verdict. The up-front guard
+  # validates the SHAPE, so these are typed usage errors before any round work.
+  P="$BATS_TEST_TMPDIR/promote.json"
+  ST="$BATS_TEST_TMPDIR/status.json"
+
+  printf 'not json' > "$P"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  suggestion_loop --promote "$P" --status-file "$ST"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty file and dimension and a string title"
+  # the prior verdict is untouched — no bogus status was written over it
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+}
+
+@test "#1021 promote: an array of NON-OBJECTS is refused up front too" {
+  P="$BATS_TEST_TMPDIR/promote.json"
+  ST="$BATS_TEST_TMPDIR/status.json"
+  printf '["a title"]' > "$P"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  suggestion_loop --promote "$P" --status-file "$ST"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty file and dimension and a string title"
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+}
+
+@test "#1021 promote: a --promote path that is a DIRECTORY is a usage error" {
+  # -s alone is true for a directory, so an existence-only guard would let the
+  # scratch dir through and fail inside jq mid-round
+  suggestion_loop --promote "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote must be a non-empty regular file"
+}
+
+@test "#1026 promote: the loop's --promote with no value exits 2" {
+  run zsh "$S" --repo "$R" --no-review --promote
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote requires a value"
+}
+
+@test "#1026 promote: the loop's --promote followed by another flag exits 2" {
+  run zsh "$S" --repo "$R" --no-review --promote --resume
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote requires a value (got the flag --resume)"
+}
+
+@test "#1026 promote: the loop's --promote with an empty value exits 2" {
+  run zsh "$S" --repo "$R" --no-review --promote ""
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote requires a non-empty value"
+}
+
+@test "#1021 promote: a file holding TWO concatenated JSON arrays is refused up front" {
+  # The realistic scratch-file-rewritten-with->> shape. `jq -e` takes its exit
+  # status from the LAST output value and jq runs the filter once per top-level
+  # value, so an unslurped guard emits true,true and passes — the path is then
+  # forwarded and only the consolidator refuses it, as a bare exit 1 that writes
+  # no status JSON and leaves --status-file holding the previous verdict.
+  P="$BATS_TEST_TMPDIR/promote.json"
+  ST="$BATS_TEST_TMPDIR/status.json"
+  printf '[]\n[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]\n' > "$P"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  suggestion_loop --promote "$P" --status-file "$ST"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty file and dimension and a string title"
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+}
+
+@test "#1021 promote: hook mode also persists and re-adopts the promoted set" {
+  # The persistence/adoption code is NOT step-mode gated, but every other test
+  # for it lives in the step-mode suite. A regression gating it behind step mode
+  # would leave every hook-mode --resume converging as a false success.
+  P="$BATS_TEST_TMPDIR/promote.json"
+  cat > "$P" <<'EOF'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+EOF
+  suggestion_loop --promote "$P" --max-rounds 1
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ -s "$BATS_TEST_TMPDIR/wd/.promote" ]
+
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd 'printf "%s" '"'"'[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d2","reviewer":"q2"}]'"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true' --resume --max-rounds 3
+  contains "$stderr" "adopting the run's promoted set"
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 0 ]
+}

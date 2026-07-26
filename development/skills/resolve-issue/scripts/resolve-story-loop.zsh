@@ -105,9 +105,11 @@
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --findings-file FILE [--test-cmd CMD] [--resume] \
 #       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
-#       [--issue N] [--telemetry-file PATH] [--gate-attest TREE_ID]  # step mode
+#       [--issue N] [--telemetry-file PATH] [--gate-attest TREE_ID] \
+#       [--promote FILE]                                          # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
-#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] ...       # hook mode
+#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
+#       [--promote FILE] ...                                      # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path)
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
@@ -147,7 +149,7 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
-local issue="" telemetry_file="" resume=0 gate_attest=""
+local issue="" telemetry_file="" resume=0 gate_attest="" promote=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -199,6 +201,15 @@ while [[ $# -gt 0 ]]; do
   --test-cmd) _need_val "$1" $# "${2:-}"; test_cmd="$2"; shift 2 ;;
   --gate-attest) _need_val_optional "$1" $# "${2:-}"; gate_attest="$2"; shift 2 ;;
   --findings-file) _need_val "$1" $# "${2:-}"; findings_file="$2"; shift 2 ;;
+  # --promote (#994): pass-through in SUBSTANCE. The loop never *interprets* the
+  # promoted set — but it does validate the file's shape up front
+  # (_validate_promote) and canonicalise the path, then forwards that path to the
+  # consolidator on EVERY round of a promotion sub-loop, so a promoted item stays
+  # promoted across rounds instead of silently reverting to Low after round 1.
+  # Both of those are load-bearing: without the shape check a bad file fails
+  # mid-round as a bare exit 1 that writes no status JSON (#912), and without the
+  # canonicalisation the persisted state is cwd-relative.
+  --promote) _need_val "$1" $# "${2:-}"; promote="$2"; shift 2 ;;
   --max-rounds) _need_val "$1" $# "${2:-}"; max_rounds="$2"; shift 2 ;;
   --status-file) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
@@ -209,6 +220,7 @@ while [[ $# -gt 0 ]]; do
   -h|--help)
     print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
     print -r -- "  [--test-cmd CMD] [--gate-attest TREE_ID] [--base REF] [--max-rounds N] [--resume] [--issue N]"
+    print -r -- "  [--promote FILE]"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--no-review]"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
@@ -456,7 +468,70 @@ fi
 [[ -n "$work_dir" ]] || work_dir=$(mktemp -d)
 mkdir -p "$work_dir"
 local history_file="$work_dir/history.jsonl"
+# --promote is an INPUT PATH, and the only one the loop used to forward blind.
+# Left unchecked, a typo survives parse and the run does a full round's setup —
+# per-round dispatch, scope refresh, truncating the round sink, consuming
+# --findings-file — before the consolidator rejects it; the loop maps that to a
+# BARE exit 1 that writes no status JSON, so --status-file keeps the previous
+# invocation's verdict (the #912 hazard every other refusal here is typed to
+# avoid). --repo and --findings-file are validated up front; so is this now.
+# ONE validator for the promote file, used by BOTH the explicit-flag path and the
+# resume-adoption path — two hand-written copies is how the two drift, and they
+# already did: the first spelling used `jq -e`, whose exit status reflects only
+# the LAST output value, so a file holding two concatenated arrays (written with
+# >> instead of >) emitted true,true and passed. `--slurp` makes jq see the whole
+# file as ONE value, so the count is checkable.
+#
+# Validating the SHAPE up front — not merely that a file exists — is the point:
+# every refusal the consolidator makes on this file would otherwise surface
+# mid-round as a BARE exit 1 that writes no status JSON, leaving --status-file
+# holding the previous invocation's verdict (#912). jq's own parse diagnostic is
+# kept (only the filter result is discarded): for a file a model wrote from a
+# multiSelect, "line N, column M" is what locates the slip.
+_validate_promote() {  # $1 = path, $2 = label for the diagnostic
+  [[ -f "$1" && -s "$1" ]] || {
+    print -u2 -- "resolve-story-loop: $2 must be a non-empty regular file: $1"; exit 2 }
+  # `type == "object"` alone accepts `[{}]` and mis-keyed objects (`path` for
+  # `file`, a missing `dimension`) — plausible slips for a file a model writes
+  # from a multiSelect. The consolidator would then compare against empty
+  # strings, match nothing, and the sub-loop would exit CONVERGED having done
+  # none of the work: the same terminal-SUCCESS failure the persistence
+  # machinery exists to prevent, reached by another road. Require the keys.
+  # Mirrors the consolidator's predicate exactly, so the two cannot drift:
+  # `file`/`dimension` must be non-empty (they are matched for equality, so an
+  # empty one is meaningless), `title` must be a string but MAY be empty (a
+  # genuinely untitled finding stays promotable, and the overlay caps a
+  # tokenless key at one item). A NON-EMPTY array is required on top: `[]` would
+  # run a provably no-op overlay every round and converge reporting success,
+  # when the contract is that selecting nothing skips the sub-loop entirely.
+  jq -e -s 'length == 1 and (.[0] | type == "array" and length > 0
+              and all(.[]; type == "object"
+                    and (.file | type == "string" and length > 0)
+                    and (.dimension | type == "string" and length > 0)
+                    and (.title | type == "string")))' \
+    -- "$1" >/dev/null || {
+    print -u2 -- "resolve-story-loop: $2 must be exactly ONE non-empty JSON array of objects with non-empty file and dimension and a string title: $1"; exit 2 }
+}
+
+if [[ -n "$promote" ]]; then
+  _validate_promote "$promote" "--promote"
+  # Persisted state must not be cwd-relative: step mode spans invocations whose
+  # cwd need not be stable, and a bare `promoted.json` would resolve differently
+  # (or, worse, resolve to a DIFFERENT same-named file) on the next one.
+  promote="${promote:A}"
+fi
+
 local changelists_file="$work_dir/changelists.jsonl"
+# The promoted set is CROSS-INVOCATION state, so it lives in the work-dir like
+# every other piece (history, changelists, .t0, findings digests). Forwarding it
+# per round only covers rounds inside ONE invocation — but step mode, the
+# canonical wiring, runs each round as its own invocation. A --resume that
+# omitted --promote would consolidate with no overlay, drop the promoted item
+# back to Low, reach `.summary.blocking == 0` and exit CONVERGED (0): the
+# feature failing as a terminal SUCCESS, and one non-convergence detection
+# cannot catch, because the demoted item is no longer in `.blocking` to match
+# against $prevblk. So persist it on a fresh run and adopt it on resume.
+local promote_state="$work_dir/.promote"
 # On --resume we CONTINUE a prior run: the work-dir IS the state. Read the last
 # completed round from history, and re-use its persisted changelist file as the
 # prior round so non-convergence detection spans the extension. A fresh run
@@ -505,6 +580,27 @@ if (( resume )); then
   # of the loop with an empty status — refuse it as a usage error instead
   (( resume_round + 1 <= max_rounds )) || {
     print -u2 -- "resolve-story-loop: --resume would start at round $(( resume_round + 1 )) but --max-rounds is $max_rounds — raise --max-rounds"; exit 2 }
+  # adopt the run's promoted set when this invocation did not carry it: dropping
+  # --promote on a resume is a one-flag slip in a long command line, and its
+  # failure mode is a silent CONVERGED rather than an error. An explicit
+  # --promote still wins (a caller may legitimately re-point it), but it must
+  # then be usable — a stale path would otherwise fail per-round as a bare exit 1.
+  # `-e`, not `-s`: a ZERO-BYTE .promote is BROKEN state, not absent state. With
+  # `-s` it would be skipped silently, no overlay forwarded, and the sub-loop
+  # could reach CONVERGED — the very silent success the file exists to prevent,
+  # reached through the file itself.
+  if [[ -z "$promote" && -e "$promote_state" ]]; then
+    promote=$(<"$promote_state")
+    [[ -n "$promote" ]] || {
+      print -u2 -- "resolve-story-loop: $promote_state is empty — the promoted set was lost; re-pass --promote"; exit 2 }
+    # the recovered path names a file OUTSIDE the work-dir (the scratch dir the
+    # promote file lives in), so between rounds it can have been cleaned up OR
+    # rewritten badly — validate it through the SAME helper as an explicit
+    # --promote, and refuse loudly rather than forwarding a bad path that would
+    # fail mid-round as an untyped exit 1
+    _validate_promote "$promote" "--resume adopted promoted set from $promote_state"
+    print -u2 -- "resolve-story-loop: --resume adopting the run's promoted set from $promote_state ($promote)"
+  fi
 else
   : > "$history_file"
   : > "$changelists_file"
@@ -512,10 +608,28 @@ else
   # work-dir must not let a previous run's round-N digest veto this run's
   # round N+1
   rm -f -- "$work_dir"/.findings-digest-*(N)
+  # the promoted set is per-run state too: record it for later --resume
+  # invocations, and clear a previous run's so a re-used work-dir cannot
+  # resurrect an overlay this run did not ask for
+  rm -f -- "$promote_state"
   # the loop's logical start — a step-mode run spans several invocations, and
   # the terminal telemetry must report whole-loop wall clock, not the last
   # round's (#971)
   print -r -- "$t0" > "$work_dir/.t0"
+fi
+
+# Persist AFTER the resume/fresh branch, so an explicit --promote is recorded on
+# EVERY invocation that carries one — not just a fresh run. Writing it only on the
+# fresh branch left `.promote` stale the moment a --resume re-pointed the flag:
+# the NEXT resume that omitted it would adopt the SUPERSEDED set, and a promotion
+# first added on a resume was never persisted at all (so a later omitted-flag
+# resume ran with no overlay and could reach CONVERGED). The fresh branch above
+# clears the file, so a re-used work-dir still cannot resurrect a previous run's
+# set. Losing this state silently would degrade to a false CONVERGED, so a failed
+# write is fatal rather than swallowed.
+if [[ -n "$promote" ]]; then
+  print -r -- "$promote" > "$promote_state" || {
+    print -u2 -- "resolve-story-loop: could not persist the promoted set to $promote_state"; exit 1 }
 fi
 
 # Step mode gates the PREVIOUS round's in-session fix here (#971): the fix ran
@@ -588,7 +702,7 @@ local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_chan
 local rp findings_path scoped scoped_filtered changelist blockers
 local digest prev_digest_file
 local blocking conflict nonconv nconf verdict ftrips
-local -a scope_lines
+local -a scope_lines consolidate_args
 while (( round <= max_rounds )); do
   # per-round dispatch: the round's well-known findings path AND a fresh scope
   rp=$("$DISPATCH" plan --repo "$repo" --base "$base" --round "$round"); rc=$?
@@ -701,13 +815,15 @@ while (( round <= max_rounds )); do
 
   # 3. consolidate (#561), carrying the previous round for non-convergence
   changelist="$work_dir/changelist-$round.json"
-  if [[ -n "$prev_changelist" ]]; then
-    "$CONSOLIDATE" --findings "$scoped" --round "$round" --prev "$prev_changelist" > "$changelist" || {
-      print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
-  else
-    "$CONSOLIDATE" --findings "$scoped" --round "$round" > "$changelist" || {
-      print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
-  fi
+  # built as an array so --prev and --promote compose: the old if/else pair had
+  # no room for a second optional flag without a four-way branch, and a promoted
+  # set must reach the consolidator on the --prev rounds too (round 2+ is exactly
+  # where an un-forwarded overlay would drop the item back to Low).
+  consolidate_args=( --findings "$scoped" --round "$round" )
+  [[ -n "$prev_changelist" ]] && consolidate_args+=( --prev "$prev_changelist" )
+  [[ -n "$promote" ]] && consolidate_args+=( --promote "$promote" )
+  "$CONSOLIDATE" "${consolidate_args[@]}" > "$changelist" || {
+    print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
   final_changelist="$changelist"
   cat "$changelist" >> "$changelists_file"   # one compact line per round (for the dossier, #563)
 

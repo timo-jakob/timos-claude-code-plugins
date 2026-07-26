@@ -1267,6 +1267,50 @@ reliable but the merging needs semantics:
   surviving conflict and a non-converging (verified/ambiguous) blocker are both
   `escalation_reasons`; the count of auto-continued false trips rides in
   `summary.false_trips` + a top-level `false_trips[]`, never an escalation reason.
+- **The promotion overlay** (`--promote FILE`, #994) is the one way a `Low`
+  finding ever blocks. `FILE` holds a JSON **array of identity keys**
+  `{file, line, dimension, title}` — a human's explicit selection from the
+  waived suggestions, made at convergence; the scripts stay non-interactive and
+  the interaction lives in `resolve-issue`'s `SKILL.md`. The overlay is applied
+  **after dedup and before** the conflict / non-convergence classification, so a
+  promoted item is raised `SUGGESTION→WARNING` (priority `High`, `blocking:
+  true`) and then flows through every downstream rule **exactly like a
+  reviewer-raised Warning** — including escalating if it survives two rounds.
+  Matching **reuses the #983 rules rather than exact key equality**: candidates
+  are **gathered** on `file`+`dimension`+line proximity, and the **verdict** is
+  title identity — an exact normalized title, a shared significant token, or a
+  tokenless side promotes; **fully disjoint** titles do not. Exact-line equality
+  would un-promote an item the moment its own fix shifted the line, so the
+  sub-loop could "converge" without doing the work the human asked for. The
+  overlay is **one-to-one**: each promote key raises **at most one** item — its
+  nearest eligible candidate — and claims it, so neither can two keys take the
+  same item nor can one key fan out across several neighbouring Lows. That bound
+  matters because the verdict is deliberately lenient (a shared token, or a
+  tokenless side, matches): unbounded, one selection could raise every
+  title-compatible Low in the window as blocking work the human never picked.
+  The overlay only ever **raises a finding the round already reported** — it never
+  *injects* one, which is why a promotion sub-loop's first round is seeded with
+  **only those promoted keys the fresh panel did not itself raise** (a key the
+  panel already raised needs no seed — the overlay raises the panel's own item,
+  at its current line; seeding a duplicate from the blocking phase's stale line
+  would survive dedup and raise the same defect twice). Each key is classified
+  against the fresh panel's **pre-seed** aggregate — never against the seeded
+  round, which matches by construction (resolve-issue SKILL.md, "Suggestion promotion", step 4). Without
+  `--promote`, or with an empty array, the emitted changelist is **byte-identical**
+  to a run without the flag — which is what keeps autonomous/headless runs
+  provably unchanged. Bad input is typed, and every refusal names the PROMOTE file rather
+  than the findings file: unreadable, not an array, **not an array of objects each
+  carrying a non-empty `file` and `dimension` and a string `title`** (`line` is
+  the one optional member — absent or null is a deliberate wildcard within the
+  file+dimension), or holding **more than one** top-level JSON value all exit **1** with a stderr
+  diagnostic and **no changelist on stdout**; a missing, flag-shaped or empty
+  value exits **2** (the `_need_val` contract both scripts share, now applied to
+  the consolidator's `--findings`/`--round`/`--prev` too, with `--round`
+  additionally validated as an integer because it is interpolated as raw JSON).
+  The element-shape and single-value checks matter because both failures
+  otherwise abort the *main* jq program and surface as "invalid findings JSON",
+  sending the caller to the wrong input — and the element-shape one is
+  input-dependent, silent on a round with no Low findings.
 - **`review-consolidator`** (agent, opus) runs the engine, then adds the
   judgment the exact-key heuristics can't: merging findings that describe the
   same defect in different words / across dimensions, and confirming or demoting
@@ -1277,9 +1321,11 @@ Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts,
 false_trips}, blocking[], suggestions[], conflicts[], non_converging,
 false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
 carries `false_trip: bool` (#983). The `blocking` array (Critical first, then
-High) is what the loop must clear; `suggestions` ride into the dossier (#563) but
-never loop; `false_trips[]` are the auto-continued clear false trips (a subset of
-`blocking`, `non_converging: false`).
+High) is what the loop must clear; `suggestions` ride into the dossier (#563) and
+never loop **unless a human promotes them** via `--promote` (#994), which moves
+the matched ones into `blocking` before any classification runs; `false_trips[]`
+are the auto-continued clear false trips (a subset of `blocking`,
+`non_converging: false`).
 
 ## Review-loop state machine (#562)
 
@@ -1335,6 +1381,42 @@ record, no progress `**Final:**` line; it does append a `**Refused (round N):**`
 line to `progress.md`), because the caller re-invokes with the round's real
 findings. `--no-review` yields `SKIPPED` — the fast path that bypasses the
 loop.
+
+**Suggestion promotion (#994).** `--promote FILE` is **pass-through in substance**: the
+loop never *interprets* the promoted set — it validates the file's shape up
+front, canonicalises the path, and forwards that path unchanged to
+`consolidate-findings.zsh` on **every** round (validated by the same
+`_need_val` as its siblings, so a missing/flag-shaped/empty value exits 2, plus
+an up-front file+shape check — one **non-empty** JSON array of correctly-keyed
+objects, a directory or an empty file refused — so a bad path or payload is a
+usage error before the round sink is touched rather than a bare mid-round exit 1
+that writes no status JSON. An empty array is refused there too: selecting
+nothing is contracted to skip the sub-loop entirely, so `[]` reaching the loop is
+a glue slip that would otherwise converge reporting success on a no-op overlay).
+The promote file's **PATH** (canonicalised, so it survives a cwd change between
+invocations) is recorded at `<work-dir>/.promote` on **every** invocation that
+carries `--promote`, and **re-adopted on `--resume` when the flag is absent**.
+The referenced file lives outside the repo and must still exist and still hold a
+one **non-empty** JSON array of correctly-keyed objects at adoption time — the
+same predicate the explicit flag gets, since both go through one validator. A
+vanished or malformed one is a **diagnosed exit 2 with no status JSON** (the
+up-front usage-error class above — not "typed" in the STALE_FINDINGS sense,
+which writes its own verdict), never a silent un-promotion. Persisting on every invocation (not
+just a fresh run) is what stops a re-pointed `--promote` leaving a stale path
+behind for the next resume to adopt — forwarding
+per round only covers rounds within ONE invocation, but step mode runs each
+round as its own invocation, so a resume that dropped the flag would consolidate
+with no overlay, demote the item back to Low, and exit **CONVERGED (0)**: the
+feature failing as a terminal *success*, which non-convergence detection cannot
+catch because the demoted item is no longer in `.blocking` to match against. The
+promotion phase is a **second, ordinary invocation** of this same state machine
+with `--promote` set and its own `--work-dir` — same round protocol, same full
+gate every round, and **no `--max-rounds` override**, so it inherits
+`MAX_REVIEW_ROUNDS` and the identical +3-per-approval extension rather than
+introducing a second budget constant. Forwarding it on *every* round (not just
+round 1) is load-bearing: an overlay applied only once would drop the promoted
+item back to `Low` on round 2 and the phase would converge without doing the
+work.
 
 **Gate attestation — one full-gate run per round (#981).** On `--resume` the
 loop re-runs `--test-cmd` first to gate the previous round's in-session fix
@@ -1609,6 +1691,11 @@ jq -s "$RL"' | [.[] | select(.payload.status == "CONVERGED")]
 jq -s "$RL"' | group_by(.payload.escalation) | map({(.[0].payload.escalation | tostring): length}) | add' "$S"
 ```
 
+A **promotion sub-loop** (#994) is a second full invocation with its own `.t0`
+and the same `--issue`, so an interactive story that promotes anything
+contributes an additional terminal record — a second multiplicity source, on top
+of the extended-loop case, that these recipes read as another group.
+
 A true **first-pass** rate needs per-loop grouping, which the v1 envelope does
 not key directly — group by `(repo, issue, ts)` (which groups one loop
 **whenever the work-dir's `.t0` survives** — a deleted or malformed `.t0` makes
@@ -1706,6 +1793,15 @@ non-clean dimension is where to look hardest; `waived_low` is context, never a
 `REQUEST_CHANGES` on its own. A PR **without** a dossier (`--no-review`, or a
 human-authored PR) is judged exactly as before — `build-dossier.zsh` emits
 nothing, so the body and the Approver's behavior are unchanged.
+
+**A suggestion-promotion phase (#994) leaves a SECOND status JSON that this
+contract does not yet merge.** `build-dossier.zsh` still takes one `--status`
+and the PR body still carries one section and one hidden block — built from the
+**blocking** phase — so the promotion phase's rounds are absent and an item the
+human promoted and the sub-loop fixed still appears in `waived_low`. That is a
+known gap, tracked as its own #563 change (#1064); resolve-issue's SKILL.md requires the
+PR Summary to state the promoted count meanwhile, so no reviewer is misled by
+the waived list.
 
 ## Typed escalation path (#564)
 

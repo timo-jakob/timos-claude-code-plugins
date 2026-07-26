@@ -632,7 +632,10 @@ last escalation, so that record is its final one, not an extra) to the shared si
 `.claude/telemetry/telemetry.jsonl` (git-ignored, #566/#1004) — via the family's
 shared emitter, with the loop's own detail under `payload` and its status
 narrowed onto the cross-pipeline `outcome` enum. Evidence for
-convergence rate, rounds-to-converge, and escalation breakdown. **Always pass an
+convergence rate, rounds-to-converge, and escalation breakdown. **A promotion
+sub-loop (#994) is a second, terminal invocation with the same `--issue`, so a
+story that promotes anything appends its own record too** — read the pair
+together rather than as two independent stories. **Always pass an
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
 is the loop's resumable state and the status file its verdict — the interactive
 extension below re-invokes the loop with `--resume` on the *same* work-dir, and
@@ -641,7 +644,11 @@ a defaulted `mktemp` dir is unrecoverable after the run exits.
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
 
-- **`CONVERGED`** (exit 0) → proceed to step 4. **Keep the loop's status JSON**
+- **`CONVERGED`** (exit 0) → on an **interactive** run with at least one waived
+  suggestion, first offer the **suggestion promotion** phase below (#994) —
+  unless this loop *is* the promotion sub-loop, which never re-offers it (the
+  phase runs once per story); then proceed to **§4 (Version bump)**. **Keep the
+  loop's status JSON**
   (`--status-file`) — step 6 feeds it to `build-dossier.zsh` so the **Review
   dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
   suggestions, reviewers) lands in the PR body, with a hidden JSON block the
@@ -664,6 +671,284 @@ with a status JSON + code:
 `--no-review` skips the loop entirely (status `SKIPPED`) — today's fast path,
 for when you deliberately want no local review round.
 
+#### Suggestion promotion on convergence — human-curated, opt-in (#994)
+
+Low suggestions never block, so every one the panel raises is **waived** the
+moment it is surfaced — logged and never actioned. That is the right default,
+but it leaves a human no way to say *"actually, do that one"* at the one moment
+they have the full picture and the PR is otherwise ready. This phase is that
+opt-in, and nothing else: **suggestions stay non-blocking by default and nothing
+is ever auto-promoted.**
+
+**Gate — both conditions, or skip the phase entirely.** Offer it only when the
+run is **interactive** (the same human-present determination §0a's remediation
+uses) **and** the waived set is non-empty. An **autonomous / headless run never
+prompts and never passes `--promote`**: it converges with its suggestions
+waived, byte-identically to before this feature existed. Selecting *none* is
+the same terminal — converge immediately, unchanged.
+
+1. **Derive the waived set.** It is the **cross-round union of distinct Low
+   findings**, keyed `[file, line, dimension, title]`, over the status JSON's
+   `round_changelists[]` — the same set `build-telemetry-record.zsh` already
+   counts as `waived`, so the prompt and the telemetry record can never
+   disagree. It is **not** the final round's `suggestions[]`: that converged
+   round holds only *its own* Lows, and a suggestion raised in round 1 and never
+   re-raised is still un-actioned work.
+
+   The pipeline must **dedup first, then filter** — the order
+   `build-telemetry-record.zsh` uses. Filtering first would offer a key that was
+   a *blocker* in an early round and Low in a later one; telemetry excludes it
+   (its earliest occurrence wins), so the two surfaces would disagree and the
+   human could be offered an item that was already fixed as a blocker. (The
+   mirror case — Low early, blocking-and-fixed later — keeps its Low priority and
+   is still offered, because the earliest occurrence wins; it falls out as
+   unmatched in step 4, and telemetry counts it as waived for the same reason,
+   so the two surfaces still agree.)
+
+   ```bash
+   jq -c '[ .round_changelists[]? | (.blocking[]?, .suggestions[]?)
+            | {file, line, dimension, title, priority: (.priority // "Low")} ]
+          | unique_by([.file, .line, .dimension, .title])
+          | map(select(.priority == "Low"))
+          | map({file, line, dimension, title})' <status.json>
+   ```
+
+   **If the derivation fails or yields `[]`** — a malformed status file, or a
+   `--no-review`/`SKIPPED` status with no `round_changelists` — there is no
+   waived set: **skip the phase and converge unchanged**. Never treat it as an
+   error, and never invent a set.
+
+2. **Render it** as a numbered list — title · `file:line` · dimension — and
+   **state the stake in one line**: promoted items become blockers, so if the
+   sub-loop cannot clear them the run escalates and **no PR is opened this
+   run**. A human promoting one cosmetic Low from an already-PR-ready change is
+   entitled to know that before they pick, not after.
+
+3. **Multi-select** which to promote (0..N) with `AskUserQuestion`
+   (`multiSelect: true`), at most **3 suggestions per question** so the fourth
+   option can carry the decline — declining should be a first-class choice, not
+   something the human has to express through the "Other" escape hatch.
+   - **One question covers the whole set** → label the fourth option
+     **"Promote nothing — converge now"**.
+   - **A larger set is chunked** → selections **accumulate across chunks**, and
+     the decline option is labelled **"None from this batch"** (it declines
+     *that chunk*, not the phase). **Ask every chunk before acting**, and
+     re-state the running selection before the last one so the human can see
+     what they have picked so far.
+   - Converge unchanged only when the **accumulated** selection over all chunks
+     is empty; otherwise proceed to step 4 of this phase with the accumulated set.
+
+4. **Write the promote file and run the sub-loop.** The selected identity keys
+   go to a JSON array file **outside the repo** (the scratch dir the work-dir
+   and findings files already live in, §3.5 — anything written inside the repo
+   changes the tree identity and defeats every `--gate-attest` match). Then run
+   the promotion sub-loop exactly like the blocking phase — a **fresh
+   `--work-dir`** and a **`--status-file` path distinct from the blocking
+   phase's kept status JSON** (the `rm -f` below deletes **the promotion status
+   file**, and §6 still needs the blocking-phase one), the same `--test-cmd`,
+   the round protocol above — adding `--promote`.
+
+   **Do not run the command below yet.** Round 1's `--findings-file` is the
+   **seeded** file built by the ordered procedure that follows, and a
+   NONE-matched classification means the sub-loop is never invoked at all. Read
+   the procedure first, then come back to this invocation.
+   **`rm -f <promotion-status.json>` immediately before every invocation**
+   (round 1, each `--resume`, each recovery re-invoke) so step 7's exit taxonomy
+   can tell a status this invocation wrote from one the last one left behind:
+
+   ```bash
+   "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
+     --work-dir <promotion-work-dir> --status-file <promotion-status.json> \
+     --issue <N> --findings-file <findings-promo-round-R.json> \
+     --promote <promoted.json> --test-cmd '<full gate>' [--resume] [--gate-attest <tree>]
+   ```
+
+   The consolidator raises each matching Low to `WARNING`/`High` **before** the
+   conflict and non-convergence classification, so a promoted item is blocking
+   in every downstream sense — and a regression introduced while fixing one is
+   gated exactly like any other blocker. Matching **reuses the #983 identity
+   rules** (gather on file + dimension + line proximity, decide by normalized
+   title), so **a promoted item survives its own fix shifting the line** rather
+   than silently reverting to Low.
+
+   **Establish what is still there, then seed only what needs it.** The overlay
+   can only *raise* a Low that is present in **that round's** findings — it never
+   injects one. But the waived set is the cross-round union, so a suggestion
+   raised in round 1 and never re-raised (exactly the case step 1 exists to
+   cover) would match nothing in the sub-loop's fresh panel: zero blockers,
+   `CONVERGED` on round 1, and step 7 would read that as the promoted set having
+   been cleared when it was never even seen.
+
+   This is an **ordered procedure**, not a set of independent rules — running it
+   out of order destroys the evidence the verification needs:
+
+   1. **Run the round-1 panel and keep its aggregate at its own path**
+      (`<pre-seed-round-1.json>`, in the same scratch dir outside the repo as
+      the promote file and the work-dir — §3.5). This is the verification
+      baseline; do not overwrite it.
+   2. **Classify each promoted key against that file**, in the *engine's* terms
+      and never by exact key equality: it was **raised** when the panel reported
+      an item with the same `file` and `dimension`, a line within the proximity
+      window (**±10 lines**; an absent or null line is a wildcard within the
+      file+dimension — ARCHITECTURE.md's consolidate-findings contract), and a
+      title not fully disjoint from the promoted one (the #983 rules the overlay
+      applies). A literal key-appearance check would call a
+      genuinely present item missing the moment dedup kept a different
+      representative title or its line drifted.
+      - **Raised** → **matched, and it needs no seed**: the overlay will raise
+        the panel's own item, which is the one at the *current* line. Seeding a
+        second copy from the blocking phase's stale `line` would survive dedup as
+        a separate entry, and the same defect would be raised twice — with the
+        fix pass sent to a line where it no longer is.
+      - **Not raised** → **look before calling it gone.** A panel is not
+        deterministic, so silence is absence of evidence, not evidence of
+        absence — and this branch ends in a claim in the PR body. Open the cited
+        **`file`** and look for the defect the changelist item's
+        `title`/`description` names — **search the file, not just the cited
+        line**: the blocking phase's own fixes shift lines, which is exactly why
+        the engine matches by identity rather than by line. Three outcomes, each
+        with its own class:
+        **still there (anywhere in the file)** → **matched**: this is what the
+        seed is for. Seed it (projected as below) using **the line you actually
+        found it at**, not the stale cited one — **and re-anchor the key to
+        match**: rewrite that key's `line` in `<promoted.json>` to the same found
+        line (or to `null`, the documented file+dimension wildcard) before
+        invoking the sub-loop. The overlay gathers candidates within ±10 of the
+        **key's** line, so a seed at the found line while the key keeps the stale
+        one is never gathered — the item stays Low and the promotion silently
+        fails to fire;
+        **confirmably gone** (the pattern is absent from the whole file, or the
+        file is) → **unmatched**;
+        **cannot tell** → **unverified** — a third class, not a flavour of
+        unmatched: do not seed it, do not count it matched, and never fabricate
+        a change to satisfy a blocker you cannot locate.
+   3. **Build the round-1 findings file** as the pre-seed aggregate **plus only
+      the still-present-but-unraised keys** from step 2.
+
+   **Projecting a seed.** `round_changelists[]` holds *consolidator output*
+   (`priority`, `blocking`, `reviewers[]`, `agreement`), not findings, so copying
+   one verbatim lands it with no `reviewer` — it then shows as `agreement: 0`,
+   attributed to nobody, in progress.md and the dossier. Project instead, taking
+   the fields from the **changelist item** you find by looking the promoted key
+   up in `<status.json>`'s `round_changelists[]` on
+   `[file, line, dimension, title]` (the key itself carries only those four, so
+   `description` and `suggested_fix` can come from nowhere else):
+   `{severity: "SUGGESTION", round: 1, dimension, file, line, title, description,
+   suggested_fix, reviewer}` (the #558 schema declares `round`), with `reviewer`
+   from that item's `reviewers[0]`, or `"promoted-by-human"` when it has none.
+
+   **Keep the matched set** — every key classed matched in step 2, seeded or not
+   — in the **same scratch dir outside the repo** as the promote file and the
+   work-dir (a file written inside the repo changes the tree identity, defeats
+   every `--gate-attest` match, and risks being committed at §5). It is what the
+   run reports as promoted.
+
+   - **Report each class in the PR body's Summary by its own name** — never
+     collapse them: **unmatched** keys are *promoted but no longer present*;
+     **unverified** keys are *promoted but could not be verified*. Saying "no
+     longer present" about a key you could not check is the one claim this whole
+     procedure exists to prevent.
+   - **If some keys matched**, continue as step 7. **If NONE matched**, treat the
+     run as converged **with nothing promoted**, say so plainly, note the split
+     between unmatched and unverified in the Summary, and continue to **§4
+     (Version bump)**. Do not escalate and do not re-prompt — but never let a
+     bare `CONVERGED` imply work that never happened.
+
+   **Re-pass `--promote` on EVERY invocation of the sub-loop** — each
+   `AWAITING_FIX` `--resume`, the interactive extension's resume, and a
+   `STALE_FINDINGS` recovery alike. The loop persists the promoted set in its
+   work-dir and re-adopts it when the flag is absent, so a slip degrades to a
+   warning rather than a silent un-promotion — but do not rely on that: pass it
+   explicitly, because an explicit `--promote` is what keeps the command you run
+   and the overlay that is applied the same thing.
+
+5. **Budget — the same one as the blocking phase.** Pass **no
+   `--max-rounds` override**: the sub-loop inherits the loop's own
+   `MAX_REVIEW_ROUNDS` default and is extended by the identical
+   +3-per-approval interactive extension. There is deliberately **no second
+   budget constant** — one number governs both phases.
+
+   **`grants` starts at 0 for the promotion phase.** It is a separate loop with
+   its own work-dir and its own ceiling, so it gets its own counter rather than
+   inheriting the blocking phase's total; otherwise a story that spent four
+   grants clearing real blockers would hit the soft-cap nudge on the promotion
+   phase's *first* grant and be told "this isn't converging" about a phase that
+   has consumed nothing. When you summarize an escalation here, report **both**
+   counts ("2 grants this phase; 4 earlier on the blocking phase") so the human
+   sees the story's true cost.
+
+6. **One-shot.** New suggestions surfacing *during* the sub-loop are waived, not
+   re-prompted — this phase runs once per story. New blockers (regressions)
+   gate normally.
+
+7. **Terminal.** The sub-loop clearing the promoted set is the run's final
+   `CONVERGED` → continue to **§4 (Version bump)**. If the sub-loop **cannot**
+   clear the promoted set — blockers still open when the budget runs out — it
+   escalates through the existing taxonomy and the existing interactive
+   extension: the human opted into making those items blocking, so they are
+   treated as blocking, not quietly re-waived.
+
+   **A round-1 `CONVERGED` with
+   a non-empty matched set is not a verdict yet** — first check that round 1's
+   `--findings-file` was the **seeded** file from step 3 and that `--promote` was
+   passed. The two answers lead opposite ways:
+
+   - **Either was wrong** → this `CONVERGED` is an artifact of the slip, not a
+     result. **Discard it**, fix the invocation, and re-invoke as a **fresh
+     round 1** (a new `--work-dir` and `--status-file`, never `--resume`, which
+     would run the seeded findings as round 2 against the phantom round's
+     changelist). **Report nothing as not-reproducible** — nothing has been
+     tested yet. Never re-invoke unchanged more than once.
+   - **Both were correct** → the engine legitimately raised nothing, most likely
+     because dedup kept a representative whose title is fully disjoint from the
+     promoted keys. **Note what this proves: ZERO keys were raised**, since any
+     raise would have produced a blocker and an `AWAITING_FIX`. So treat the
+     **entire** matched set as not-reproducible — never just the one key you
+     suspect — report every one of them in the Summary as
+     promoted-but-not-reproducible, converge with **nothing** promoted, and
+     continue to §4.
+
+   **Neither exit 1 nor exit 2 is an escalation or a convergence here.** Both
+   have several causes, so read the status file and stderr before acting —
+   and **delete the status file immediately before each sub-loop invocation**,
+   so "a status JSON exists afterwards" is an unambiguous signal rather than a
+   guess about whether the file is this round's or the last one's.
+
+   - **exit 2, `status: "STALE_FINDINGS"`** → the §3.5 step-2 refusal: recover
+     by cause and re-invoke (re-passing `--promote`). Not a bad command line.
+   - **exit 2, no status JSON written** → a genuine usage error in the
+     invocation. **Stderr names the offending argument**: a missing, empty,
+     non-file or wrong-shaped `--promote` path, a persisted promote path that
+     has since vanished or been rewritten badly, or a `--max-rounds` at or below
+     the resumed round. Fix the command and re-invoke.
+   - **exit 1** → an operational failure, and **not necessarily the promote
+     file**. A freshly written `status: "ERROR"` is a **red gate after the
+     previous round's fix** — follow §3's rule (fix the gate, or abandon and
+     report), never rewrite the promote file and never build an escalation
+     comment from it. With **no** status JSON, stderr names the cause:
+     `consolidate failed at round N` may be the promote file's contents *or* an
+     invalid round-findings aggregate; a dispatch failure is neither. Fix what
+     stderr names and re-invoke; if stderr names nothing you can act on, report
+     in the conversation and stop.
+
+8. **The dossier is the BLOCKING phase's — a known, deliberate limitation.**
+   The phase leaves a second status JSON, but `build-dossier.zsh` takes exactly
+   one `--status` and the Approver parses exactly **one** hidden
+   `<!-- review-dossier: … -->` block (#563). So §6 builds the dossier from the
+   **blocking-phase** status exactly as it does today: **do not run
+   `build-dossier.zsh` twice** (two blocks would leave the Approver reading the
+   first and silently ignoring the other phase) and **do not hand-edit its
+   output**.
+
+   The consequence, stated plainly because it is a real gap: the promotion
+   phase's rounds and reviewers do not appear in the dossier, and an item the
+   human promoted and the sub-loop fixed is still listed under **Waived
+   suggestions**. Teaching `build-dossier.zsh` to merge both phases is tracked
+   separately in **#1064** — it is a #563 change, not this story's. Until it lands, **say in
+   the PR body's Summary** how many suggestions were promoted and that the
+   dossier reflects the blocking phase only, so a reviewer is never misled by
+   the waived list.
+
 #### Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
 A bad escalation costs a human an afternoon; a good one costs two minutes. On
@@ -684,11 +969,16 @@ supply the missing constraint is right here; offer that in-session first. (Every
 other exit — `ESCALATE_CONFLICT`, `ESCALATE_AMBIGUOUS` — and **every autonomous
 run** skip this branch entirely and go straight to the typed comment below.)
 
-Run this extension loop, tracking a `grants` counter (starts at 0 the
-**first** time the extension is entered for this story; re-entering after an
-`AWAITING_FIX` detour or a later escalation **resumes the existing count —
-never reset it**, or the `--grants` figure shown to the human understates
-what was consumed and the step-6 soft cap can never fire across detours):
+Run this extension loop, tracking a `grants` counter **per loop** — where a
+"loop" is one `--work-dir` and its chain of `--resume` invocations. It starts at
+0 the **first** time the extension is entered for that loop; re-entering after an
+`AWAITING_FIX` detour or a later escalation **of the same loop** resumes the
+existing count — **never reset it**, or the `--grants` figure shown to the human
+understates what was consumed and the step-6 soft cap can never fire across
+detours. The **promotion sub-loop (#994) is a different loop** — its own
+work-dir, its own ceiling — so it starts its own counter at 0; pass the **current
+loop's** count to `--grants`, and mention the other phase's total as prose
+alongside the summary so the human still sees the story's full cost:
 
 1. **Summarize** the exit in the conversation — never make the human read a
    comment when they are right here:
@@ -778,11 +1068,23 @@ what was consumed and the step-6 soft cap can never fire across detours):
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <same-work-dir> --resume --max-rounds <prev_max + 3> \
      --findings-file <findings-round-R.json> --test-cmd '<full gate>' \
-     [--gate-attest <tree>] --issue <N> --status-file <status.json>
+     [--gate-attest <tree>] [--promote <promoted.json>] --issue <N> \
+     --status-file <status.json>
    ```
 
-   On `CONVERGED` (exit 0) → leave this branch and proceed to step 4 (version
-   bump) / PR as normal. On another `BUDGET_EXHAUSTED` /
+   **`--promote` is required here whenever the escalating loop IS the promotion
+   sub-loop** (#994). The loop persists the promoted set in its work-dir and
+   re-adopts it if you omit the flag, so a slip degrades to a warning rather
+   than a silent un-promotion — but pass it explicitly anyway, so the command
+   you run and the overlay that is applied never diverge. The same applies to
+   the `STALE_FINDINGS` recovery re-invoke below.
+
+   On `CONVERGED` (exit 0) → leave this branch, offer the **suggestion-promotion
+   phase** under its own gate (unless this loop *is* the promotion sub-loop —
+   the phase runs once per story), then proceed to §4 (Version bump) / PR as
+   normal. **Every** path to `CONVERGED` passes that gate exactly once; an
+   extended run is the one most likely to have accumulated waived suggestions,
+   so it is the last one that should skip the offer. On another `BUDGET_EXHAUSTED` /
    `ESCALATE_NO_CONVERGENCE` → go back to step 1 with the new status. On
    `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` → leave this branch and take the
    typed-comment terminal below (a resumed run can surface a different exit).
@@ -797,7 +1099,9 @@ what was consumed and the step-6 soft cap can never fire across detours):
    re-invocation neither increments nor decrements `grants`, and never re-runs
    step 1's `build-escalation.zsh` summary on the `STALE_FINDINGS` status. On
    any **other operational error** (exit 1/2), the loop wrote
-   either **no** new status (the file still holds the *previous* escalation) or
+   either **no** new status (on the blocking phase the file still holds the
+   *previous* escalation; on a promotion sub-loop it is absent, because that
+   phase deletes it before every invocation) or
    a status `ERROR` (a red gate after a fix) — neither is a typed escalation, so
    never build a comment from the file: report the error in the conversation and
    stop.
@@ -822,8 +1126,9 @@ what was consumed and the step-6 soft cap can never fire across detours):
    diff-so-far and any guidance are already on the issue; the human can resume
    later with `/development:resolve-issue <N>`.
 
-If the interactive extension ended in `CONVERGED`, skip the terminal below and
-continue to §4. A `STALE_FINDINGS` exit never ends it — recover and resume as
+If the interactive extension ended in `CONVERGED`, skip the terminal below,
+offer the suggestion-promotion phase under its own gate (as above — once per
+story), and continue to §4. A `STALE_FINDINGS` exit never ends it — recover and resume as
 step 5 says. If it ended in another **operational error**, it was already
 reported in-session (step 5) — stop, with **no** typed comment. Otherwise (a
 Stop / decline, or a `CONFLICT` / `AMBIGUOUS` exit):
@@ -882,7 +1187,13 @@ then `GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge <n> --auto --squash
 --delete-branch`. The PR body follows the template (Type / Summary /
 Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
 loop ran and converged (§3.5), append the **Review dossier** via
-`build-dossier.zsh` on the kept status JSON (#563).
+`build-dossier.zsh` on the kept status JSON (#563) — the **blocking-phase**
+status, once, even when the suggestion-promotion phase also ran. Running it a
+second time for the promotion phase would put two hidden blocks in one body and
+the Approver would read only the first; merging the two is a separate #563
+change (#1064, promotion step 8). When the promotion phase ran, **name in the Summary**
+how many suggestions were promoted and that the dossier covers the blocking
+phase only.
 
 **Joint closure of the story + its test-case issues (#696).** When the same-PR
 test-case lifecycle ran (Step 2's planner exited 0), the PR body carries **one

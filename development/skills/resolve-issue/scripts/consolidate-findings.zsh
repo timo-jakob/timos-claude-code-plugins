@@ -25,6 +25,18 @@
 #     opposite directions (performance vs code_quality) become a `conflicts`
 #     item — surfaced, not silently ordered; a surviving conflict is an
 #     escalation reason.
+#   - Promotion overlay (#994): with --promote, a human-selected set of waived
+#     Low findings is raised SUGGESTION->WARNING *after* dedup and *before* the
+#     conflict / non-convergence classification, so a promoted item lands in
+#     `blocking` and flows through everything downstream exactly like a
+#     reviewer-raised Warning. Matching REUSES the #983 rules rather than exact
+#     key equality: candidates are GATHERED on [file, dimension] + line
+#     proximity, and the VERDICT is title-identity — exact normalized title, a
+#     shared significant token, or a tokenless side promotes; FULLY DISJOINT
+#     titles do not. Exact-line equality would silently un-promote an item the
+#     moment its own fix shifted the line, which is the one thing a promoted
+#     item must survive. Without --promote (or with an empty array) the output
+#     is byte-identical to a run without the flag.
 #   - Non-convergence (#606 + #983): candidates for "this blocked last round too"
 #     are GATHERED on [file, dimension] + line proximity (within LINEWIN lines; a
 #     missing line on either side is a wildcard). The VERDICT on a candidate is
@@ -43,34 +55,132 @@
 #
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
+#                            [--promote FILE]
 #     --findings  aggregate findings JSON for THIS round (required)
 #     --round     round number (default 1)
 #     --prev      previous round's changelist JSON (this script's own output);
 #                 omitted on round 1
+#     --promote   JSON array of identity keys {file, line, dimension, title}
+#                 (#994) — the human-selected waived suggestions to raise to
+#                 blocking for this round. Omitted outside a promotion sub-loop.
 #
 # Exit codes: 0 ok · 2 usage error · 1 internal (unreadable / invalid JSON)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local findings="" round=1 prev=""
+local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE]"
+
+# A value flag with no value, or one whose value is the NEXT FLAG, is a caller
+# mistake that this script used to turn into the wrong failure. Under `nounset`
+# a dangling `--findings` aborted on the bare `$2` with zsh's raw "2: parameter
+# not set" and exit 1 — which this script's taxonomy reserves for *internal*
+# errors, so a usage mistake was indistinguishable from unreadable input. And
+# the unquoted `--prev $VAR` idiom with VAR unset collapses so the next flag
+# becomes the value: `--prev --promote` would swallow `--promote`, silently
+# consolidating with no overlay. resolve-story-loop.zsh has guarded exactly
+# this way since #971; a half-applied rule is the inconsistency the next caller
+# trips on, so it covers EVERY value flag here too (#994).
+_need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
+  [[ $2 -ge 2 ]] || {
+    print -u2 -- "consolidate-findings: $1 requires a value"; exit 2 }
+  [[ "$3" != --* ]] || {
+    print -u2 -- "consolidate-findings: $1 requires a value (got the flag $3)"; exit 2 }
+  # An EXPLICIT empty value is the same mistake wearing a third hat — the
+  # realistic `--flag "$VAR"` with VAR unset — and left alone it reads
+  # downstream as "flag omitted", exit 0: `--promote ""` would silently drop
+  # the whole promoted set and converge the sub-loop having promoted nothing.
+  [[ -n "$3" ]] || {
+    print -u2 -- "consolidate-findings: $1 requires a non-empty value"; exit 2 }
+}
+
+local findings="" round=1 prev="" promote=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --findings) findings="$2"; shift 2 ;;
-  --round) round="$2"; shift 2 ;;
-  --prev) prev="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]"; exit 0 ;;
+  --findings) _need_val "$1" $# "${2:-}"; findings="$2"; shift 2 ;;
+  --round) _need_val "$1" $# "${2:-}"; round="$2"; shift 2 ;;
+  --prev) _need_val "$1" $# "${2:-}"; prev="$2"; shift 2 ;;
+  --promote) _need_val "$1" $# "${2:-}"; promote="$2"; shift 2 ;;
+  -h|--help) print -r -- "$usage"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
-[[ -n "$findings" ]] || { print -u2 -- "usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]"; exit 2 }
+[[ -n "$findings" ]] || { print -u2 -- "$usage"; exit 2 }
+# --round is interpolated as RAW JSON via --argjson, so a junk value does not
+# fail here — it fails inside the final jq, whose `||` branch blames the
+# FINDINGS file and exits 1 (internal). That is the very confusion _need_val was
+# ported to end, so validate the one flag whose value becomes JSON. `<->` admits
+# leading zeros, which JSON forbids, hence the 10# normalisation.
+[[ "$round" == <-> ]] && [[ ${#round} -le 18 ]] || {
+  print -u2 -- "consolidate-findings: --round must be a non-negative integer (got: $round)"; exit 2 }
+round=$(( 10#$round ))
 [[ -s "$findings" ]] || { print -u2 -- "consolidate-findings: findings file missing or empty: $findings"; exit 1 }
 
 local prev_json='null'
 if [[ -n "$prev" ]]; then
   [[ -s "$prev" ]] || { print -u2 -- "consolidate-findings: --prev file missing or empty: $prev"; exit 1 }
   prev_json=$(<"$prev")
+fi
+
+# The promoted set defaults to [] so the overlay is a provable no-op when the
+# flag is absent — the byte-identity guarantee the story rests on (#994). A
+# non-array (an object, a bare string, a truncated write) is refused rather
+# than iterated: `$promote[]` over a non-array would abort jq mid-program and
+# blank the changelist, turning a caller mistake into a silent empty round.
+local promote_json='[]'
+if [[ -n "$promote" ]]; then
+  # The `-s` guard comes FIRST, exactly as --findings and --prev do. jq exits 0
+  # with EMPTY output on an empty file, so without it the capture lands empty,
+  # survives to `--argjson promote ""`, and blows up in the final jq — which
+  # this script would then report as "invalid findings JSON", pointing the
+  # caller at the wrong file entirely.
+  # -s alone is TRUE for a directory, so `--promote <a dir>` would pass here and
+  # fail inside jq with "Is a directory", which the || below would relabel as a
+  # content problem — pointing the caller at the file's CONTENTS when the problem
+  # is that it is not a file at all.
+  [[ -f "$promote" && -s "$promote" ]] || {
+    print -u2 -- "consolidate-findings: --promote must be a non-empty regular file: $promote"; exit 1 }
+  # The ELEMENT shape is checked, not just the container. `["a title"]` or `[113]`
+  # — the shapes a hand-written or model-written selection most plausibly takes —
+  # pass a bare `type == "array"` test, then abort the MAIN jq at `.file` on a
+  # string ("Cannot index string with ..."), landing in the final `||` branch
+  # that blames the findings file. Worse, that abort is input-dependent: the
+  # overlay only evaluates $promote[] for Low items, so the same bad file passes
+  # silently on a round with no suggestions and explodes on the next one.
+  # jq's stderr is KEPT, not discarded: the promote file is written by a model
+  # from a multiSelect, so a syntax slip is the expected failure and jq's
+  # "parse error ... at line N, column M" is the one diagnostic that locates it.
+  # The script's own message says WHICH input is at fault; jq's says WHERE.
+  # the identity keys are required, not just object-ness: `[{}]` or a mis-keyed
+  # object would compare against empty strings, match nothing, and turn a
+  # caller mistake into a silent no-op round
+  # `has()` is true for a key whose value is null or "", and both are meaningless
+  # for `file`/`dimension`: they are compared for EQUALITY, so an empty one
+  # matches only a finding whose own field was missing. Require real values there.
+  # `title` is deliberately allowed to be an empty STRING — a genuinely untitled
+  # finding must stay promotable, and the tokenless-title path is safe now that
+  # the overlay raises at most one item per key. It must still be a string, so a
+  # `null` cannot reach the title rules.
+  promote_json=$(jq -c 'if (type == "array")
+                           and (all(.[]; type == "object"
+                                 and (.file | type == "string" and length > 0)
+                                 and (.dimension | type == "string" and length > 0)
+                                 and (.title | type == "string")))
+                        then . else error("promote input is not an array of identity-key objects") end' \
+    -- "$promote") || {
+    print -u2 -- "consolidate-findings: --promote file unreadable, or not a JSON array of objects with non-empty file and dimension and a string title: $promote"; exit 1 }
+  # jq runs the filter once per TOP-LEVEL value, so a file holding two
+  # concatenated arrays (a scratch file re-written with >> instead of >) passes
+  # the filter twice and captures two lines. --argjson then rejects it, again in
+  # the final jq and again blaming the findings file. `jq -c` emits exactly one
+  # line per value, so a newline in the capture is a reliable discriminator.
+  [[ "$promote_json" != *$'\n'* ]] || {
+    print -u2 -- "consolidate-findings: --promote file must hold exactly ONE JSON array: $promote"; exit 1 }
+  # belt and braces: a jq that somehow exits 0 with no output must not reach
+  # --argjson either (the failure mode above, arrived at by a different road)
+  [[ -n "$promote_json" ]] || {
+    print -u2 -- "consolidate-findings: --promote file yielded no JSON value: $promote"; exit 1 }
 fi
 
 local -r PROG='
@@ -111,6 +221,14 @@ def shares_token($a; $b): (($a | length) > 0) and (($b | length) > 0)
 # below): exact => verified survivor, shared token => ambiguous, disjoint => false
 # trip.
 def LINEWIN: 10;
+# One line-recovery rule for BOTH sides of the proximity test. The findings side
+# already recovered a digit-only STRING line losslessly; without the same rule on
+# the promote side a key carrying "line": "113" is a non-number, which line_near
+# treats as a WILDCARD — silently widening "near line 113" to "anywhere in this
+# file+dimension" and over-promoting every title-compatible Low in the file.
+def normline: if (. | type) == "number" then .
+  elif ((. | type) == "string") and (test("^[0-9]+$")) then tonumber
+  else null end;
 # A missing or non-numeric line on either side is a wildcard (match) — never a
 # type error from subtracting a stray string line.
 def line_near($a;$b):
@@ -142,10 +260,10 @@ def nearest($c): sort_by(
     # number-or-null only: a digit-only string line is recovered losslessly
     # (a plausible model-output malformation), anything else becomes null —
     # already a wildcard for line_near — so no downstream renderer can ever
-    # interpolate a reviewer-crafted string line into markdown (#969)
-    line: (if (.line | type) == "number" then .line
-           elif ((.line | type) == "string") and (.line | test("^[0-9]+$")) then (.line | tonumber)
-           else null end),
+    # interpolate a reviewer-crafted string line into markdown (#969). ONE rule,
+    # shared with the promote-key side via `normline`: two hand-inlined copies is
+    # exactly how the two sides drifted apart before #994.
+    line: (.line | normline),
     title: (.title // ""),
     description: ((.description // "") | tostring),
     suggested_fix: (.suggested_fix // ""),
@@ -165,6 +283,66 @@ def nearest($c): sort_by(
       }
     | del(.reviewer)
   ) ) as $items
+
+# PROMOTION OVERLAY (#994) — human-selected waived suggestions raised to blocking.
+# Placed here deliberately: AFTER dedup (so one promoted key cannot bump the same
+# finding twice, and the key matches the consolidated title the human was shown)
+# and BEFORE conflicts / non-convergence (so a promoted item participates in every
+# downstream classification exactly like a reviewer-raised Warning — including
+# escalating if it survives two rounds).
+#
+# Matching REUSES the #983 rules, not exact key equality: GATHER on
+# [file, dimension] + line proximity, then decide by title identity — exact
+# normalized title, a shared significant token, or a tokenless side promotes;
+# FULLY DISJOINT titles do not. That is what lets a promoted item survive its own
+# fix shifting the line, which exact `[file,line,dimension,title]` equality could
+# not: the first edit above it would silently drop it back to Low and the sub-loop
+# would "converge" without doing the work the human asked for.
+#
+# Only Low items are eligible — an item already blocking needs no raise, and
+# re-stamping it would let a promoted key perturb a reviewer-raised finding.
+#
+# ONE-TO-ONE, like the cross-round matcher below: each promote key raises AT MOST
+# ONE item — its nearest eligible candidate — and claims it, so a second key
+# cannot take the same item and, crucially, ONE key cannot fan out across several
+# neighbouring Lows. The verdict is deliberately lenient (a shared token, or a
+# tokenless side, matches), so an unbounded map would let a single selection
+# raise every title-compatible Low in the window: blocking work the human never
+# picked, any of which can escalate the run at round 2. With an empty $promote
+# the reduce returns its seed, hence byte-identical output.
+| ( $promote
+    | reduce .[] as $k ({ its: $items, claimed: [] };
+        .its as $cur | .claimed as $cl
+        # gather the candidates for this key: still-Low, not already claimed by an
+        # earlier key, same file + dimension, line within the window
+        | ( [ $cur | to_entries[]
+              | select(.value.priority == "Low")
+              # bind the index first: `$cl | index(.key)` would evaluate .key
+              # against $cl (an array), not against the entry
+              | select(.key as $i | ($cl | index($i)) == null)
+              | select((($k.file // "") | normfile) == .value.file
+                       and (($k.dimension // "") | tostring) == .value.dimension
+                       and line_near(($k.line | normline); .value.line)) ] ) as $g
+        | ( [ $g[] | select((($k.title // "") | normtitle) != ""
+                 and (($k.title // "") | normtitle) == (.value.title | normtitle)) ] ) as $exact
+        | (($k.title // "") | sigtokens) as $kt
+        # verdict, same three arms as the cross-round matcher: exact title, a
+        # tokenless side, or a shared significant token; disjoint titles never
+        | ( if ($exact | length) > 0 then $exact
+            elif ($kt | length) == 0 then $g
+            else [ $g[] | select(((.value.title | sigtokens) | length) == 0
+                     or shares_token($kt; (.value.title | sigtokens))) ] end ) as $elig
+        | if ($elig | length) == 0 then .
+          else ( $elig | sort_by(
+                   if ((.value.line | type) == "number")
+                      and ((($k.line | normline) | type) == "number")
+                   then (((.value.line) - ($k.line | normline)) | if . < 0 then -. else . end)
+                   else LINEWIN + 1 end) | .[0] ) as $best
+            | { its: ($cur | .[$best.key] |= (. + { severity: "WARNING",
+                        priority: prio("WARNING"), blocking: blocks("WARNING") })),
+                claimed: ($cl + [$best.key]) }
+          end)
+    | .its ) as $items
 
 # conflicts: co-located, opposite-direction dimensions (performance vs code_quality)
 | ( $items | group_by([.file, (.line|tostring)]) | map(
@@ -270,6 +448,7 @@ def nearest($c): sort_by(
   }
 '
 
-jq -c --argjson round "$round" --argjson prev "$prev_json" "$PROG" "$findings" || {
+jq -c --argjson round "$round" --argjson prev "$prev_json" --argjson promote "$promote_json" \
+  "$PROG" -- "$findings" || {
   print -u2 -- "consolidate-findings: invalid findings JSON: $findings"; exit 1
 }

@@ -519,7 +519,10 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
   local attest; attest="$(TID)"
   step --test-cmd 'false' --gate-attest "$attest"
   [ "$status" -eq 20 ]
-  [ ! -f "$WD/progress.md" ] || ! grep -q 'attested green' "$WD/progress.md"
+  # position-independent and errexit-visible: a `|| !`-inverted list is exempt
+  # from errexit, so the old spelling passed even when the string WAS present
+  run grep -q 'attested green' "$WD/progress.md"
+  [ "$status" -ne 0 ]
 }
 
 @test "gate-attest: a NON-matching attestation still runs the gate (fail-closed, #981)" {
@@ -745,4 +748,364 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
   [ "$(jq -r '.wall_s | type' "$T")" = "number" ]
   run zsh "$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh" "$T" --require-records
   [ "$status" -eq 0 ]
+}
+
+# --- suggestion promotion across INVOCATIONS (#994, test case #1021) ---------
+#
+# In step mode each round is its own invocation, so "the overlay is applied every
+# round" is a claim about CROSS-INVOCATION state, not about one process's loop.
+# The promoted set therefore lives in the work-dir and is re-adopted on --resume.
+# Without that, a --resume which omitted --promote would consolidate with no
+# overlay, demote the item back to Low, reach zero blockers and exit CONVERGED —
+# the feature failing as a terminal SUCCESS.
+
+SUGG='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d","reviewer":"q"}]'
+SUGG2='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d2 (still there)","reviewer":"q2"}]'
+
+promote_file() {
+  P="$BATS_TEST_TMPDIR/promote.json"
+  printf '%s' '[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]' > "$P"
+}
+
+@test "#1021 step mode: --promote makes round 1 block instead of converging" {
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.round_changelists[0].blocking[0].priority')" = "High" ]
+}
+
+@test "#1021 step mode: a --resume that re-passes --promote keeps the item blocking" {
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+
+  printf '%s' "$SUGG2" > "$F"
+  step --resume --promote "$P"
+  # the promoted blocker survived two rounds unfixed, so this is the NAMED
+  # escalation — asserting the positive verdict, not a != CONVERGED negative
+  # which would pass just as happily on an operational abort
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  # still blocking in round 2, so the overlay reached the resumed invocation's
+  # consolidator alongside --prev
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 0 ]
+}
+
+@test "#1021 step mode: a --resume that OMITS --promote re-adopts it from the work-dir" {
+  # the one-flag slip in a long command line. Its failure mode was a silent
+  # CONVERGED, so the loop persists the set and recovers rather than converging.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+  [ -s "$WD/.promote" ]
+  # the path is canonicalised before it is persisted, so cross-invocation state
+  # cannot depend on the cwd of whichever invocation wrote it. Compare by INODE
+  # (-ef), not by string: the canonical form resolves symlinks (/tmp -> /private/tmp
+  # on macOS), so a string compare against the raw path is wrong, and ${P:A} is a
+  # zsh modifier bash would not expand here.
+  [ "$(cat "$WD/.promote")" -ef "$P" ]
+  case "$(cat "$WD/.promote")" in /*) ;; *) return 1 ;; esac
+
+  # separate the streams: the adoption prints a NOTICE to stderr (stdout stays
+  # exactly the status JSON), and the merged default would make $output unparseable
+  printf '%s' "$SUGG2" > "$F"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  contains "$stderr" "adopting the run's promoted set"
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 1 ]
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+}
+
+@test "#1021 step mode: a fresh run clears a previous run's persisted promoted set" {
+  # a re-used work-dir must not resurrect an overlay this run never asked for
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+  [ -s "$WD/.promote" ]
+
+  printf '%s' "$SUGG" > "$F"
+  step                      # fresh run, no --promote
+  [ ! -e "$WD/.promote" ]
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 0 ]
+  # the suggestion is still THERE, just not promoted — blocking==0 alone would
+  # also hold if the run had lost the finding
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.low')" -eq 1 ]
+}
+
+@test "#1021 step mode: a nonexistent --promote path is a usage error before any round work" {
+  # Unchecked, this survived parse and failed mid-round at a bare exit 1 that
+  # writes NO status JSON, leaving --status-file holding a previous verdict.
+  printf '%s' "$SUGG" > "$F"
+  ST="$BATS_TEST_TMPDIR/status.json"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  step --promote "$BATS_TEST_TMPDIR/nope.json" --status-file "$ST"
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote must be a non-empty regular file"
+  # the stale verdict is untouched, and the round sink was never consumed
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+  [ -s "$F" ]
+}
+
+@test "#1021 step mode: an empty --promote file is a usage error too" {
+  printf '%s' "$SUGG" > "$F"
+  : > "$BATS_TEST_TMPDIR/empty-promote.json"
+  step --promote "$BATS_TEST_TMPDIR/empty-promote.json"
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote must be a non-empty regular file"
+}
+
+@test "#1021 step mode: a --resume whose ADOPTED promote path has vanished is refused (2)" {
+  # The promote file lives in a scratch dir alongside the work-dir, so a cleaned
+  # or rotated scratch between rounds is the production shape of this branch.
+  # Forwarding a dead path would fail mid-round as a bare exit 1 that writes no
+  # status JSON — the untyped verdict the up-front guard exists to prevent.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+
+  rm -f "$P"
+  ST="$BATS_TEST_TMPDIR/status.json"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  printf '%s' "$SUGG2" > "$F"
+  step --resume --status-file "$ST"
+  [ "$status" -eq 2 ]
+  # the branch-specific phrase: asserting only the shared prefix could not tell
+  # the vanished-file refusal from the wrong-shape one
+  contains "$output" "--resume adopted promoted set"
+  contains "$output" "must be a non-empty regular file"
+  # the prior verdict survives and the round sink was never consumed
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+  [ -s "$F" ]
+}
+
+@test "#1021 step mode: an explicit --promote on --resume overrides AND refreshes the persisted set" {
+  # Re-passing the SAME path cannot distinguish "the explicit flag won" from
+  # "the persisted state was adopted". Re-point it at a set that matches nothing
+  # and the two paths diverge — and the NEXT omitted-flag resume must adopt the
+  # NEW path, not the superseded one.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+
+  P2="$BATS_TEST_TMPDIR/promote2.json"
+  printf '%s' '[{"file":"app.py","line":1,"dimension":"tests","title":"something else entirely"}]' > "$P2"
+  printf '%s' "$SUGG2" > "$F"
+  step --resume --promote "$P2"
+  # P2 matches nothing, so the suggestion stays Low and the loop converges
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 0 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 1 ]
+  # and the persisted state was REFRESHED to P2 — a stale P here would have the
+  # next omitted-flag resume silently revert to the superseded selection
+  [ "$(cat "$WD/.promote")" -ef "$P2" ]
+}
+
+@test "#1021 step mode: a --promote path that is a directory is refused up front" {
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 2 ]
+  contains "$output" "--promote must be a non-empty regular file"
+}
+
+@test "#1021 step mode: a wrong-SHAPE promote file is refused up front, not mid-round" {
+  printf '%s' "$SUGG" > "$F"
+  BAD="$BATS_TEST_TMPDIR/bad-promote.json"
+  printf '%s' '["a bare title"]' > "$BAD"
+  ST="$BATS_TEST_TMPDIR/status.json"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  step --promote "$BAD" --status-file "$ST"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty file and dimension and a string title"
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+  [ -s "$F" ]
+}
+
+@test "#1021 step mode: an ADOPTED promote file rewritten to a bad shape is refused (2)" {
+  # The promote file lives outside the work-dir, so between rounds it can be
+  # rewritten as well as removed. Both branches of the adoption guard must be
+  # distinguishable, and neither may forward a bad file into the round.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+
+  printf '%s' '["a bare title"]' > "$P"
+  ST="$BATS_TEST_TMPDIR/status.json"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  printf '%s' "$SUGG2" > "$F"
+  step --resume --status-file "$ST"
+  [ "$status" -eq 2 ]
+  contains "$output" "--resume adopted promoted set"
+  contains "$output" "non-empty file and dimension and a string title"
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+  [ -s "$F" ]
+}
+
+@test "#1021 step mode: a RELATIVE --promote is canonicalised, so a later resume from another cwd still adopts it" {
+  # With an already-absolute fixture the canonicalisation assertions are
+  # tautological — they pass with the :A modifier deleted. A relative path is
+  # the only input that can distinguish them.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  local rc=0
+  # round 1 from INSIDE the promote file's directory, naming it relatively.
+  # `run` in a subshell would not export its results, so invoke directly and
+  # assert on the persisted file instead.
+  ( cd "$BATS_TEST_TMPDIR" && \
+    DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+      zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" \
+      --promote promote.json >/dev/null 2>&1 ) || rc=$?
+  # assert the expected terminal rather than swallowing it: a regression to a
+  # usage error would otherwise surface opaquely at the .promote assertion below
+  [ "${rc:-0}" -eq 20 ]
+  # persisted ABSOLUTE and pointing at the same file, despite the relative input
+  # — this is the assertion the :A modifier exists for, and it fails without it
+  case "$(cat "$WD/.promote")" in /*) ;; *) return 1 ;; esac
+  [ "$(cat "$WD/.promote")" -ef "$P" ]
+
+  # resume with the flag omitted: a non-canonicalised relative path would now be
+  # unresolvable and refused (exit 2) instead of adopted
+  # separated streams: the adoption prints a NOTICE to stderr, and the merged
+  # default would make $output unparseable
+  printf '%s' "$SUGG2" > "$F"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  [ "$status" -eq 12 ]
+  contains "$stderr" "adopting the run's promoted set"
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 1 ]
+}
+
+@test "#1021 step mode: a failed persist of the promoted set is fatal, not swallowed" {
+  # Losing this state silently degrades to a false CONVERGED on a later resume,
+  # so the write is deliberately fatal. A directory at the target path defeats
+  # the redirect the same way the suite already does for progress.md.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  mkdir -p "$WD"
+  rm -f "$WD/.promote"
+  mkdir "$WD/.promote"
+  step --promote "$P"
+  [ "$status" -eq 1 ]
+  contains "$output" "could not persist the promoted set"
+}
+
+@test "#1021 step mode: a promote key with the dimension omitted is refused up front" {
+  # It used to match NOTHING — the human's selection silently dropped and the
+  # sub-loop converging having done none of the work, with no diagnostic. The
+  # identity keys are required now, so it is a typed usage error instead.
+  printf '%s' "$SUGG" > "$F"
+  BAD="$BATS_TEST_TMPDIR/nodim.json"
+  printf '%s' '[{"file":"app.py","line":1,"title":"extract the magic number"}]' > "$BAD"
+  step --promote "$BAD"
+  [ "$status" -eq 2 ]
+  contains "$output" "objects with non-empty file and dimension and a string title"
+}
+
+@test "#1021 step mode: the promoted item is fixed and the sub-loop converges with the overlay still active" {
+  # The feature's definition-of-done, and the one convergence path no other test
+  # covers: every other converge-with-overlay case happens because the overlay
+  # matched nothing. A regression making an ACTIVE overlay unable to converge
+  # would otherwise show up only as a production hang-to-budget.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
+
+  # the fix landed: the panel no longer raises it
+  printf '[]' > "$F"
+  step --resume --promote "$P"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.blocking')" -eq 0 ]
+  # the overlay was still active throughout
+  [ "$(cat "$WD/.promote")" -ef "$P" ]
+}
+
+@test "#1021 step mode: a zero-byte .promote is BROKEN state, refused rather than silently dropped" {
+  # `-s` would skip adoption and run with no overlay, converging as a false
+  # success — the failure the state file exists to prevent, via the file itself.
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+
+  : > "$WD/.promote"
+  printf '%s' "$SUGG2" > "$F"
+  step --resume
+  [ "$status" -eq 2 ]
+  contains "$output" "the promoted set was lost"
+}
+
+@test "#1021 step mode: a promote file of key-less objects is refused up front" {
+  printf '%s' "$SUGG" > "$F"
+  BAD="$BATS_TEST_TMPDIR/keyless.json"
+  printf '%s' '[{}]' > "$BAD"
+  step --promote "$BAD"
+  [ "$status" -eq 2 ]
+  contains "$output" "objects with non-empty file and dimension and a string title"
+}
+
+@test "#1021 step mode: an EMPTY file value is refused by the loop's validator" {
+  # The loop's predicate is documented as mirroring the consolidator's exactly.
+  # Every other loop shape test uses key ABSENCE, so a relaxation to presence-only
+  # checks would leave them green and let the two validators drift.
+  printf '%s' "$SUGG" > "$F"
+  BAD="$BATS_TEST_TMPDIR/emptyfile.json"
+  printf '%s' '[{"file":"","dimension":"code_quality","title":"extract the magic number"}]' > "$BAD"
+  step --promote "$BAD"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty file and dimension and a string title"
+}
+
+@test "#1021 step mode: a NULL title is refused by the loop's validator" {
+  printf '%s' "$SUGG" > "$F"
+  BAD="$BATS_TEST_TMPDIR/nulltitle.json"
+  printf '%s' '[{"file":"app.py","dimension":"code_quality","title":null}]' > "$BAD"
+  step --promote "$BAD"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty file and dimension and a string title"
+}
+
+@test "#1021 step mode: an EMPTY promoted array is refused (selecting none skips the sub-loop)" {
+  printf '%s' "$SUGG" > "$F"
+  BAD="$BATS_TEST_TMPDIR/emptyarr.json"
+  printf '%s' '[]' > "$BAD"
+  ST="$BATS_TEST_TMPDIR/status.json"
+  printf '%s' '{"status":"AWAITING_FIX","rounds":1}' > "$ST"
+  step --promote "$BAD" --status-file "$ST"
+  [ "$status" -eq 2 ]
+  contains "$output" "non-empty JSON array"
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+}
+
+@test "#1021 step mode: an ADOPTED promote file emptied to [] is refused on resume" {
+  # the shape a human "deselect everything" edit produces between rounds — and
+  # the adoption path is where a false CONVERGED is most costly
+  promote_file
+  printf '%s' "$SUGG" > "$F"
+  step --promote "$P"
+  [ "$status" -eq 20 ]
+
+  printf '%s' '[]' > "$P"
+  printf '%s' "$SUGG2" > "$F"
+  step --resume
+  [ "$status" -eq 2 ]
+  contains "$output" "--resume adopted promoted set"
+  contains "$output" "non-empty JSON array"
 }
