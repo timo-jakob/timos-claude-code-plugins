@@ -19,8 +19,15 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # tests/fixtures/** holds BYTE-EXACT goldens of generated output: a
+      # progress.md block legitimately ends with a trailing blank line, and a
+      # rendered table row can carry trailing spaces. Normalising either makes
+      # the golden stop matching what the script actually emits — the fixture
+      # silently becomes a test of the hook rather than of the code (#995).
       - id: trailing-whitespace
+        exclude: ^tests/fixtures/
       - id: end-of-file-fixer
+        exclude: ^tests/fixtures/
       - id: check-yaml
         # mkdocs.yml uses MkDocs' custom YAML tags (e.g.
         # `!!python/name:pymdownx.superfences.fence_code_format` for Mermaid),

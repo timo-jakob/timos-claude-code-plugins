@@ -5,3 +5,4 @@
 - promoted suggestion: `tests/consolidate-findings.bats:40` [tests] "Assertion could be stronger" — raised from Suggestion by the human at convergence; blocking until cleared
 - promoted suggestion: `development/skills/resolve-issue/SKILL.md` [prose_logic] "the gate paragraph contradicts step 3" — raised from Suggestion by the human at convergence; blocking until cleared
 - blockers remain
+
