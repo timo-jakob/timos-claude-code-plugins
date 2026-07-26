@@ -7,6 +7,8 @@
 #   - when absent, exit 1 with empty stdout so the caller falls back to prose;
 #   - an unrelated ```json code block in the prose is never mistaken for the spec.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/read-story-spec.zsh"
@@ -156,7 +158,7 @@ EOF
   run zsh "$S" --file "$BODY"
   # Either the real block (exit 0) or a clean fallback (exit 1) — never the placeholder.
   [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
-  [[ "$output" != *"PLACEHOLDER EXAMPLE"* ]]
+  lacks "$output" "PLACEHOLDER EXAMPLE"
 }
 
 @test "regression: an illustrative balanced json block before the real block loses to it (last wins)" {
@@ -238,17 +240,17 @@ EOF
 @test "a dangling --file (no value) is a usage error (exit 2), not a stdin read" {
   run zsh "$S" --file
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--file needs a value"* ]]
+  contains "$output" "--file needs a value"
 }
 
 @test "unknown arg is a usage error (exit 2)" {
   run zsh "$S" --bogus x
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown arg"* ]]
+  contains "$output" "unknown arg"
 }
 
 @test "missing file is a runtime error (exit 3)" {
   run zsh "$S" --file "$BATS_TEST_TMPDIR/nope.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"file not found"* ]]
+  contains "$output" "file not found"
 }

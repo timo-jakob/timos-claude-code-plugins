@@ -12,6 +12,8 @@
 # exit $DEPS_STATUS and records its argv, so the graph under test is fully
 # deterministic and needs no gh/network.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/dependency-precheck.zsh"
@@ -75,28 +77,28 @@ precheck() {  # $1 = reader result JSON ; rest = extra flags
     {"number":13,"state":"OPEN","open":true,"kind":"issue","depth":2}],"cycles":[],"truncated":false}'
   [ "$status" -eq 10 ]
   comment="$(echo "$output" | jq -r .comment_md)"
-  [[ "$comment" == *"#11"* ]]
-  [[ "$comment" == *"#13"* ]]
-  [[ "$comment" != *"#12"* ]]
+  contains "$comment" "#11"
+  contains "$comment" "#13"
+  lacks "$comment" "#12"
 }
 
 @test "an epic blocker is called out as an epic in the argumentation" {
   precheck '{"issue":50,"blocked":true,"open_blockers":[20],"blockers":[{"number":20,"state":"OPEN","open":true,"kind":"epic","depth":1}],"cycles":[],"truncated":false}'
   [ "$status" -eq 10 ]
-  [[ "$(echo "$output" | jq -r .comment_md)" == *"**epic**"* ]]
+  contains "$(echo "$output" | jq -r .comment_md)" "**epic**"
 }
 
 @test "the blocked comment carries the machine-findable marker and a re-run hint" {
   precheck '{"issue":50,"blocked":true,"open_blockers":[11],"blockers":[{"number":11,"state":"OPEN","open":true,"kind":"issue","depth":1}],"cycles":[],"truncated":false}'
   comment="$(echo "$output" | jq -r .comment_md)"
-  [[ "$comment" == *"<!-- dependency-precheck: REJECT_BLOCKED -->"* ]]
-  [[ "$comment" == *"/development:resolve-issue 11"* ]]
-  [[ "$comment" == *"/development:resolve-issue 50"* ]]
+  contains "$comment" "<!-- dependency-precheck: REJECT_BLOCKED -->"
+  contains "$comment" "/development:resolve-issue 11"
+  contains "$comment" "/development:resolve-issue 50"
 }
 
 @test "a truncated traversal adds the incompleteness caution" {
   precheck '{"issue":50,"blocked":true,"open_blockers":[11],"blockers":[{"number":11,"state":"OPEN","open":true,"kind":"issue","depth":1}],"cycles":[],"truncated":true}'
-  [[ "$(echo "$output" | jq -r .comment_md)" == *"may be incomplete"* ]]
+  contains "$(echo "$output" | jq -r .comment_md)" "may be incomplete"
 }
 
 # ---- REJECT_CYCLE -----------------------------------------------------------
@@ -106,8 +108,8 @@ precheck() {  # $1 = reader result JSON ; rest = extra flags
   [ "$status" -eq 11 ]
   [ "$(echo "$output" | jq -r .decision)" = "REJECT_CYCLE" ]
   comment="$(echo "$output" | jq -r .comment_md)"
-  [[ "$comment" == *"#50 → #21 → #50"* ]]
-  [[ "$comment" == *"<!-- dependency-precheck: REJECT_CYCLE -->"* ]]
+  contains "$comment" "#50 → #21 → #50"
+  contains "$comment" "<!-- dependency-precheck: REJECT_CYCLE -->"
 }
 
 @test "cycle wins over open blockers (both present -> REJECT_CYCLE)" {

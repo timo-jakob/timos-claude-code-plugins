@@ -23,6 +23,7 @@
 # count via GATE_NPROC — so the tests never depend on the host.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -114,8 +115,8 @@ calls() { wc -l < "$CALLS" | tr -d ' '; }
   # falling through to invoking $bats_bin would still exit 127 and keep this
   # test green. Assert what the guard is FOR — the actionable message, and a
   # fail-fast that emits no summary for a suite that never ran.
-  [[ "$stderr" == *"bats binary not found"* ]]
-  [[ "$stderr" == *"brew install bats-core"* ]]
+  contains "$stderr" "bats binary not found"
+  contains "$stderr" "brew install bats-core"
   [ -z "$output" ]
 }
 
@@ -382,5 +383,5 @@ EOF
     zsh "$isolated/run-gate.zsh" --tests-dir tests
   [ "$status" -eq 0 ]                                    # non-fatal: the gate verdict is untouched
   [ "$(echo "$output" | jq -r '.tree')" = "" ]          # no attestation
-  [[ "$stderr" == *"gate attestation unavailable"* ]]   # degradation is LOUD, not silent
+  contains "$stderr" "gate attestation unavailable"   # degradation is LOUD, not silent
 }

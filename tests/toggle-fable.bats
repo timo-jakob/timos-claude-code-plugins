@@ -8,6 +8,7 @@
 # test tmpdir, where its root resolves to that fixture.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -157,7 +158,7 @@ fm_model() {  # frontmatter model value of a file
   run zsh "$TOGGLE" on
   [ "$status" -eq 0 ]
   [ "$(fm_model "$WORK/plugin-a/agents/one.md")" = "haiku" ]   # NOT promoted to fable
-  [[ "$output" == *"leaving it alone"* ]]
+  contains "$output" "leaving it alone"
   # the other manifest agent still restored
   [ "$(fm_model "$WORK/plugin-b/agents/three.md")" = "fable" ]
 }
@@ -167,9 +168,9 @@ fm_model() {  # frontmatter model value of a file
   rm "$WORK/plugin-b/agents/three.md"
   run zsh "$TOGGLE" on
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no longer exists"* ]]
+  contains "$output" "no longer exists"
   [ "$(fm_model "$WORK/plugin-a/agents/one.md")" = "fable" ]   # survivor restored
-  [[ "$output" == *"Restored 1 agent"* ]]
+  contains "$output" "Restored 1 agent"
 }
 
 @test "off twice: idempotent, manifest preserved, no drift" {
@@ -194,8 +195,8 @@ fm_model() {  # frontmatter model value of a file
 @test "on with no saved manifest: exits 1 and says so on stderr" {
   run zsh "$TOGGLE" on
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No saved manifest"* ]]
-  [[ "$output" == *"off"* ]]
+  contains "$output" "No saved manifest"
+  contains "$output" "off"
   [ ! -f "$MANIFEST" ]
 }
 
@@ -206,26 +207,26 @@ fm_model() {  # frontmatter model value of a file
   done
   run zsh "$TOGGLE" off
   [ "$status" -eq 0 ]
-  [[ "$output" == *"nothing to do"* ]]
+  contains "$output" "nothing to do"
   [ ! -f "$MANIFEST" ]
 }
 
 @test "no arguments: exits 2 with usage" {
   run zsh "$TOGGLE"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage:"* ]]
+  contains "$output" "usage:"
 }
 
 @test "unknown argument: exits 2 with usage" {
   run zsh "$TOGGLE" sideways
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage:"* ]]
+  contains "$output" "usage:"
 }
 
 @test "too many arguments: exits 2 with usage" {
   run zsh "$TOGGLE" on off
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage:"* ]]
+  contains "$output" "usage:"
 }
 
 @test "off unions a newly-added fable agent without dropping prior entries" {

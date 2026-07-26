@@ -16,6 +16,7 @@
 # `run --separate-stderr` (used below to assert an empty stdout on exit 3)
 # requires bats >= 1.5.0.
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -105,32 +106,32 @@ setup() {
 @test "a bare (unquoted) label is a hard error naming the page (AC9)" {
   run zsh "$S" --file "$FIX/c4-container-barelabel.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"c4-container-barelabel.md"* ]]
+  contains "$output" "c4-container-barelabel.md"
 }
 
 @test "a line-broken entry is a hard error naming the page (AC9)" {
   run zsh "$S" --file "$FIX/c4-container-linebroken.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"c4-container-linebroken.md"* ]]
+  contains "$output" "c4-container-linebroken.md"
 }
 
 @test "a page present but carrying no C4Container block is exit 3, never a silent empty set" {
   run zsh "$S" --file "$FIX/c4-container-noblock.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"c4-container-noblock.md"* ]]
+  contains "$output" "c4-container-noblock.md"
 }
 
 @test "pointing the parser at a c4-context.md (C4Context, not C4Container) is exit 3 naming the page — container-only" {
   run zsh "$S" --file "$FIX/c4-context.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"c4-context.md"* ]]
+  contains "$output" "c4-context.md"
 }
 
 @test "a repeated alias is a hard error naming the alias and the page (join-key integrity)" {
   run zsh "$S" --file "$FIX/c4-container-dupalias.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"web_app"* ]]
-  [[ "$output" == *"c4-container-dupalias.md"* ]]
+  contains "$output" "web_app"
+  contains "$output" "c4-container-dupalias.md"
 }
 
 @test "a valid entry BEFORE a malformed one still exits 3 with an EMPTY stdout (never a partial set)" {
@@ -139,14 +140,14 @@ setup() {
   run --separate-stderr zsh "$S" --file "$FIX/c4-container-partial.md"
   [ "$status" -eq 3 ]
   [ -z "$output" ]
-  [[ "$stderr" == *"c4-container-partial.md"* ]]
+  contains "$stderr" "c4-container-partial.md"
 }
 
 @test "a bare keyword at end-of-line is a hard error, not a silent drop (the prefix_re '\$' branch)" {
   # distinct from the paren-typo case: 'Container' alone, no args at all
   run zsh "$S" --file "$FIX/c4-container-bareword.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"c4-container-bareword.md"* ]]
+  contains "$output" "c4-container-bareword.md"
 }
 
 @test "a well-formed entry that omits the required technology arg is a hard error (AC: technology required)" {
@@ -154,13 +155,13 @@ setup() {
   # tolerates it, this contract does not
   run zsh "$S" --file "$FIX/c4-container-notech.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"c4-container-notech.md"* ]]
+  contains "$output" "c4-container-notech.md"
 }
 
 @test "two C4Container blocks in one page is exit 3 — the declared set is singular" {
   run zsh "$S" --file "$FIX/c4-container-multiblock.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"multiple C4Container"* ]]
+  contains "$output" "multiple C4Container"
 }
 
 @test "an illustrative block inside a longer (4-backtick) fence is not extracted; only the real one is" {
@@ -182,20 +183,20 @@ setup() {
   mkdir -p "$BATS_TEST_TMPDIR/repo2/docs/architecture/c4-container.md"
   run zsh "$S" --repo "$BATS_TEST_TMPDIR/repo2"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"cannot read"* ]]
+  contains "$output" "cannot read"
 }
 
 @test "a dangling symlink at the target is exit 3 (cannot read), not exit 1 — a broken page is not non-adoption" {
   ln -s "$BATS_TEST_TMPDIR/does-not-exist.md" "$BATS_TEST_TMPDIR/dangling.md"
   run zsh "$S" --file "$BATS_TEST_TMPDIR/dangling.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"cannot read"* ]]
+  contains "$output" "cannot read"
 }
 
 @test "an unterminated mermaid fence is exit 3 naming the fence, not a misleading 'no C4Container block'" {
   run zsh "$S" --file "$FIX/c4-container-unterminated.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"unterminated mermaid fence"* ]]
+  contains "$output" "unterminated mermaid fence"
 }
 
 @test "no c4-container.md under the repo is exit 1 (precondition absent), not exit 3" {
@@ -207,7 +208,7 @@ setup() {
 @test "an unknown flag is a usage error (exit 2) naming the offending arg" {
   run zsh "$S" --bogus
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--bogus"* ]]
+  contains "$output" "--bogus"
 }
 
 @test "--file with no value is a usage error (exit 2)" {
@@ -228,13 +229,13 @@ setup() {
 @test "--help prints the usage contract to stdout and exits 0 (long form)" {
   run zsh "$S" --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *usage* ]]
+  contains "$output" "usage"
 }
 
 @test "-h prints usage and exits 0 (short form)" {
   run zsh "$S" -h
   [ "$status" -eq 0 ]
-  [[ "$output" == *usage* ]]
+  contains "$output" "usage"
 }
 
 @test "jq missing from PATH is a runtime error (exit 3), not a crash" {
@@ -243,7 +244,7 @@ setup() {
   zbin="$(command -v zsh)"
   run env PATH="/var/empty" "$zbin" "$S" --file "$FIX/c4-container.md"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"jq not found"* ]]
+  contains "$output" "jq not found"
 }
 
 @test "the contract's worked example is byte-identical to the fixture (AC10 — no drift)" {

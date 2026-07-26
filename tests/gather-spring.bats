@@ -9,6 +9,8 @@
 # (#694's delivery). spring_config / spring_container / spring_boot_upgrade
 # remain uncovered — not PR-2's scope.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   GATHER="$REPO_ROOT/development/skills/maintenance/scripts/gather-spring-findings.zsh"
@@ -56,8 +58,8 @@ dependencies { implementation("org.springframework.boot:spring-boot-starter-web"
   run zsh "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   msg="$(jq -r '.findings_by_tool.spring_api[0].message' <<<"$output")"
-  [[ "$msg" == *"Multi-major layout detected (v1, v2)"* ]]
-  [[ "$msg" == *"per LIVE major"* ]]
+  contains "$msg" "Multi-major layout detected (v1, v2)"
+  contains "$msg" "per LIVE major"
 }
 
 @test "gather-spring #694: a single major does NOT get the per-major note" {
@@ -70,8 +72,8 @@ dependencies { implementation("org.springframework.boot:spring-boot-starter-web"
   # "null" and the no-note assertion below would pass vacuously
   [ "$(jq -r '.findings_by_tool.spring_api | length' <<<"$output")" = "1" ]
   msg="$(jq -r '.findings_by_tool.spring_api[0].message' <<<"$output")"
-  [[ "$msg" == *"contract-first"* ]]
-  [[ "$msg" != *"Multi-major"* ]]
+  contains "$msg" "contract-first"
+  lacks "$msg" "Multi-major"
 }
 
 @test "gather-spring #694: majors are listed NUMERICALLY (v10 after v2, not lexically)" {
@@ -81,7 +83,7 @@ dependencies { implementation("org.springframework.boot:spring-boot-starter-web"
   run zsh "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   msg="$(jq -r '.findings_by_tool.spring_api[0].message' <<<"$output")"
-  [[ "$msg" == *"Multi-major layout detected (v1, v2, v10)"* ]]
+  contains "$msg" "Multi-major layout detected (v1, v2, v10)"
 }
 
 @test "gather-spring #694: a non-canonical filename under contracts/vN does NOT trigger the note" {
@@ -93,7 +95,7 @@ dependencies { implementation("org.springframework.boot:spring-boot-starter-web"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.findings_by_tool.spring_api | length' <<<"$output")" = "1" ]
   msg="$(jq -r '.findings_by_tool.spring_api[0].message' <<<"$output")"
-  [[ "$msg" != *"Multi-major"* ]]
+  lacks "$msg" "Multi-major"
 }
 
 @test "gather-spring #708: a major past its x-sunset -> sunset-passed finding" {
@@ -106,7 +108,7 @@ dependencies { implementation("org.springframework.boot:spring-boot-starter-web"
   [ "$(jq -r '[.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed")] | length' <<<"$output")" = "1" ]
   [ "$(jq -r '.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed") | .component' <<<"$output")" = "contracts/v1/openapi.yaml" ]
   msg="$(jq -r '.findings_by_tool.spring_api[] | select(.rule=="spring:sunset-passed") | .message' <<<"$output")"
-  [[ "$msg" == *"410 Gone"* ]]
+  contains "$msg" "410 Gone"
 }
 
 @test "gather-spring #708: a not-yet-expired sunset produces NO sunset-passed finding" {

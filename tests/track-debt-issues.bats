@@ -9,6 +9,8 @@
 # pipefail via SIGPIPE and the fallback `gh label create` died on
 # "already exists").
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   TRACK="$REPO_ROOT/development/skills/maintenance/scripts/track-debt-issues.zsh"
@@ -50,19 +52,19 @@ ONE_HOTSPOT='{"findings_by_tool":{"sonarcloud":[{"type":"SECURITY_HOTSPOT","rule
 @test "track-debt-issues: --findings is required (exit 2)" {
   run zsh "$TRACK"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--findings is required"* ]]
+  contains "$output" "--findings is required"
 }
 
 @test "track-debt-issues: nonexistent findings file (exit 1)" {
   run zsh "$TRACK" --findings "$BATS_TEST_TMPDIR/nope.json"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"findings file not found"* ]]
+  contains "$output" "findings file not found"
 }
 
 @test "track-debt-issues: unknown arg (exit 2)" {
   run zsh "$TRACK" --bogus x
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown arg"* ]]
+  contains "$output" "unknown arg"
 }
 
 @test "track-debt-issues: --run-ref is recognized, not treated as unknown (#384)" {
@@ -70,8 +72,8 @@ ONE_HOTSPOT='{"findings_by_tool":{"sonarcloud":[{"type":"SECURITY_HOTSPOT","rule
   # missing --findings — NOT complain about an unknown arg.
   run zsh "$TRACK" --run-ref "2026-06-20 (branch test)"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--findings is required"* ]]
-  [[ "$output" != *"unknown arg"* ]]
+  contains "$output" "--findings is required"
+  lacks "$output" "unknown arg"
 }
 
 @test "#530 a tool with exactly ONE finding is processed (singular title) and later tools still run" {
@@ -82,8 +84,8 @@ ONE_HOTSPOT='{"findings_by_tool":{"sonarcloud":[{"type":"SECURITY_HOTSPOT","rule
   track
   [ "$status" -eq 0 ]
   grep -qx "\[maintenance\] sonarcloud debt (1 finding)" "$TITLE_LOG"
-  [[ "$output" == *"created:"* ]]
-  [[ "$output" == *"container_scan has zero findings"* ]]   # the loop CONTINUED past count==1
+  contains "$output" "created:"
+  contains "$output" "container_scan has zero findings"   # the loop CONTINUED past count==1
 }
 
 @test "#530 plural stays plural (2 findings)" {
@@ -101,12 +103,12 @@ ONE_HOTSPOT='{"findings_by_tool":{"sonarcloud":[{"type":"SECURITY_HOTSPOT","rule
   findings '{"findings_by_tool":{}}'
   track GH_LABEL_EXISTS=1
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no-op"* ]]
+  contains "$output" "no-op"
 }
 
 @test "#530 a genuine label-create failure is still fatal and surfaced" {
   findings '{"findings_by_tool":{}}'
   track GH_LABEL_FAIL=1
   [ "$status" -ne 0 ]
-  [[ "$output" == *"HTTP 502"* ]]
+  contains "$output" "HTTP 502"
 }

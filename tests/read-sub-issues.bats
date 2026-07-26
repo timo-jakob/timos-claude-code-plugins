@@ -12,6 +12,8 @@
 # argument and serves a canned raw GraphQL response per issue number, so the
 # shapes under test are fully deterministic and need no network.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/read-sub-issues.zsh"
@@ -69,37 +71,37 @@ reader() { run env GH_BIN="$STUB" FIXTURE_DIR="$FIXTURE_DIR" zsh "$S" "$@"; }
 @test "usage: missing --repo exits 2" {
   reader --epic 5
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--repo OWNER/NAME is required"* ]]
+  contains "$output" "--repo OWNER/NAME is required"
 }
 
 @test "usage: --repo without a slash exits 2" {
   reader --repo just-a-name --epic 5
   [ "$status" -eq 2 ]
-  [[ "$output" == *"must be OWNER/NAME"* ]]
+  contains "$output" "must be OWNER/NAME"
 }
 
 @test "usage: neither --epic nor --child exits 2" {
   reader --repo owner/repo
   [ "$status" -eq 2 ]
-  [[ "$output" == *"one of --epic N or --child N is required"* ]]
+  contains "$output" "one of --epic N or --child N is required"
 }
 
 @test "usage: both --epic and --child exits 2" {
   reader --repo owner/repo --epic 5 --child 6
   [ "$status" -eq 2 ]
-  [[ "$output" == *"mutually exclusive"* ]]
+  contains "$output" "mutually exclusive"
 }
 
 @test "usage: non-numeric issue number exits 2" {
   reader --repo owner/repo --epic abc
   [ "$status" -eq 2 ]
-  [[ "$output" == *"must be numeric"* ]]
+  contains "$output" "must be numeric"
 }
 
 @test "usage: a dangling value flag exits 2, not a nounset abort" {
   reader --repo owner/repo --child
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--child needs a value"* ]]
+  contains "$output" "--child needs a value"
 }
 
 # ---- --epic: children + summary --------------------------------------------
@@ -134,13 +136,13 @@ reader() { run env GH_BIN="$STUB" FIXTURE_DIR="$FIXTURE_DIR" zsh "$S" "$@"; }
 @test "--epic on a nonexistent issue is an internal error (exit 1)" {
   reader --repo owner/repo --epic 999
   [ "$status" -eq 1 ]
-  [[ "$output" == *"not found"* ]]
+  contains "$output" "not found"
 }
 
 @test "--epic when gh itself fails is an internal error (exit 1) with the gh message" {
   run env GH_BIN=/bin/false zsh "$S" --repo owner/repo --epic 5
   [ "$status" -eq 1 ]
-  [[ "$output" == *"gh api graphql failed"* ]]
+  contains "$output" "gh api graphql failed"
 }
 
 @test "a cross-repo child carries its repo and is excluded from open_children" {
@@ -151,7 +153,7 @@ reader() { run env GH_BIN="$STUB" FIXTURE_DIR="$FIXTURE_DIR" zsh "$S" "$@"; }
   [ "$(echo "$output" | jq -r '.children[1].repo')" = "other/repo" ]
   # …but the work-list holds only the same-repo one, and stderr notes the exclusion
   [ "$(echo "$output" | jq -c '.open_children')" = '[790]' ]
-  [[ "$output" == *"cross-repo sub-issues excluded"* ]]
+  contains "$output" "cross-repo sub-issues excluded"
 }
 
 @test "the same-repo comparison is case-insensitive (GitHub slugs are)" {
@@ -174,7 +176,7 @@ reader() { run env GH_BIN="$STUB" FIXTURE_DIR="$FIXTURE_DIR" zsh "$S" "$@"; }
 @test "--child when gh itself fails is an internal error (exit 1), not no-parent" {
   run env GH_BIN=/bin/false zsh "$S" --repo owner/repo --child 791
   [ "$status" -eq 1 ]
-  [[ "$output" == *"gh api graphql failed"* ]]
+  contains "$output" "gh api graphql failed"
 }
 
 @test "--child on a parentless issue takes the typed no-parent exit 3 (JSON still emitted)" {

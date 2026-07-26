@@ -11,6 +11,7 @@
 # `run !` (negated assertions that must fail the test regardless of position)
 # needs bats >= 1.5.0; declare it so BW02 doesn't warn on every use.
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -26,7 +27,7 @@ setup() {
 @test "render: no args -> usage (exit 2)" {
   run zsh "$SCRIPT"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage:"* ]]
+  contains "$output" "usage:"
 }
 
 @test "render: missing file list -> usage (exit 2)" {
@@ -38,13 +39,13 @@ setup() {
   echo "x" > "$T/a.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --frobnicate yes a.tmpl
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown flag"* ]]
+  contains "$output" "unknown flag"
 }
 
 @test "render: nonexistent template -> error naming it (exit 1)" {
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" missing.tmpl
   [ "$status" -eq 1 ]
-  [[ "$output" == *"template not found"* ]]
+  contains "$output" "template not found"
 }
 
 # --- substitution + output mapping ---------------------------------------------
@@ -232,15 +233,15 @@ EOF
   printf 'a\n# --- MYSTERY-START ---\nx\n# --- MYSTERY-END ---\n' > "$T/u.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" u.tmpl
   [ "$status" -eq 1 ]
-  [[ "$output" == *"u.tmpl:2"* ]]
-  [[ "$output" == *"MYSTERY"* ]]
+  contains "$output" "u.tmpl:2"
+  contains "$output" "MYSTERY"
 }
 
 @test "render: unterminated block fails loudly" {
   printf '# --- JAVA-START ---\nx\n' > "$T/u.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" u.tmpl
   [ "$status" -eq 1 ]
-  [[ "$output" == *"unterminated"* ]]
+  contains "$output" "unterminated"
 }
 
 @test "render: 3+ blank lines left by adjacent stripped blocks collapse to one" {
@@ -267,8 +268,8 @@ EOF
   echo 'key: {{PROJECT_KEY}}' > "$T/f.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" f.tmpl
   [ "$status" -eq 1 ]
-  [[ "$output" == *"{{PROJECT_KEY}}"* ]]
-  [[ "$output" == *"unsubstituted placeholders"* ]]
+  contains "$output" "{{PROJECT_KEY}}"
+  contains "$output" "unsubstituted placeholders"
 }
 
 @test "render: GitHub \${{ }} expressions and docker-metadata literals are not flagged" {
@@ -448,7 +449,7 @@ EOF
     --default-branch main \
     common/.github/workflows/acceptance.yml.tmpl
   [ "$status" -eq 1 ]
-  [[ "$output" == *"ACCEPTANCE_INTERFACES"* ]]
+  contains "$output" "ACCEPTANCE_INTERFACES"
 }
 
 @test "render: acceptance.yml single interface renders a one-leg matrix (#697)" {
@@ -489,7 +490,7 @@ EOF
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
     languages/python/tests/acceptance/cli/test_smoke.py.tmpl
   [ "$status" -eq 1 ]
-  [[ "$output" == *"CLI_ENTRY_POINT"* ]]
+  contains "$output" "CLI_ENTRY_POINT"
 }
 
 @test "render: static file without placeholders or blocks passes through unchanged" {
@@ -557,5 +558,5 @@ TMPL
   printf 'site_url: {{PAGES_URL}}\n' > "$T/mk.yml.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" mk.yml.tmpl
   [ "$status" -eq 1 ]
-  [[ "$output" == *"PAGES_URL"* ]]
+  contains "$output" "PAGES_URL"
 }

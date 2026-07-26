@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 
 bats_require_minimum_version 1.5.0
+load assertions
+
 #
 # Behavioral tests for check-c4-currency.zsh (epic #746 child (c), #792):
 # resolve-issue's same-PR C4 currency check. Compares the declared containers
@@ -52,7 +54,7 @@ check() { zsh "$CHECK" --repo "$REPO" --detect-json "$DJ"; }
   run --separate-stderr check
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
-  [[ "$stderr" == *"no structural change"* ]]
+  contains "$stderr" "no structural change"
 }
 
 @test "neutral folds case and -/_ : declared web_app matches detected WEB-APP" {
@@ -69,7 +71,7 @@ check() { zsh "$CHECK" --repo "$REPO" --detect-json "$DJ"; }
   run --separate-stderr check
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
-  [[ "$stderr" == *"inconclusive"* ]]
+  contains "$stderr" "inconclusive"
 }
 
 @test "no docs/architecture/c4-container.md → exit 1 (precondition absent), never a failure (AC4)" {
@@ -85,7 +87,7 @@ check() { zsh "$CHECK" --repo "$REPO" --detect-json "$DJ"; }
   detect '{"containers":[{"name":"x"}],"detection_confidence":"complete"}'
   run --separate-stderr check
   [ "$status" -eq 3 ]
-  [[ "$stderr" == *"c4-container.md"* ]]
+  contains "$stderr" "c4-container.md"
 }
 
 @test "missing --detect-json is a usage error (exit 2)" {
@@ -99,7 +101,7 @@ check() { zsh "$CHECK" --repo "$REPO" --detect-json "$DJ"; }
   printf 'not json' > "$DJ"
   run --separate-stderr check
   [ "$status" -eq 3 ]
-  [[ "$stderr" == *"not valid JSON"* ]]
+  contains "$stderr" "not valid JSON"
 }
 
 @test "a detect JSON of the wrong shape (.containers is bare strings) is exit 3, not jq's exit 5" {
@@ -115,7 +117,7 @@ check() { zsh "$CHECK" --repo "$REPO" --detect-json "$DJ"; }
   run --separate-stderr check
   [ "$status" -eq 0 ]
   [ "$output" = "[]" ]
-  [[ "$stderr" == *"inconclusive"* ]]
+  contains "$stderr" "inconclusive"
 }
 
 @test "round-trip: a diagram seeded from a detect JSON is NEUTRAL against that same JSON (fold matches #791's seeder)" {

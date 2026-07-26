@@ -26,6 +26,8 @@ runner is already disposable; Docker is only for local isolation).
 | --- | --- |
 | `Dockerfile` | Disposable image (zsh, bats, jq, shellcheck, python3, git) |
 | `run-script-tests.zsh` | Runner — Docker by default, `--local` for host bats |
+| `assertions.bash` | Shared assertion helpers (`load assertions`) — the sanctioned way to assert (#1011) |
+| `find-inert-bracket-assertions.zsh` | Detector behind the `[[ ]]`-inertness suite lint (#1011) |
 | `fixtures/clean/` | A self-contained, finding-free mini plugin repo (a `development-fixture` plugin) |
 | `gather-claude-plugin.bats` | Tests `gather-claude-plugin-findings.zsh` — one mutation of `clean` per validator, asserting the matching finding |
 | `check-marketplace-sync.bats` | Tests `check-marketplace-sync.zsh` — in-sync, version mismatch, missing entry, missing plugin.json |
@@ -35,5 +37,23 @@ runner is already disposable; Docker is only for local isolation).
 Most tests copy `fixtures/clean` into `$BATS_TEST_TMPDIR`, apply one mutation, and
 assert. To cover a new script, add a `<script>.bats` and (if needed) a fixture
 under `fixtures/`. Keep each test to a single planted issue so a failure points at
-exactly one behaviour. More scripts (the bash gather, helpers) are follow-on
+exactly one behaviour.
+
+**Assert through the shared helpers.** Start the file with `load assertions` and
+use `contains` / `lacks` / `starts_with` / `ends_with` / `matches` from
+`assertions.bash`; plain `[ ... ]` is fine too. Never assert with a bare
+`[[ ... ]]`: bash 3.2 (macOS `/bin/bash`) does not apply errexit to it, so a
+false one on a non-final line is silently ignored and the test passes while
+proving nothing — while bash >= 4 catches it, making the same test mean
+different things on the macOS and Ubuntu CI legs.
+`no-inert-bracket-assertions.bats` fails the suite if one appears (#1011), just
+as `no-inert-negative-assertions.bats` does for a bare `!` negation (#829).
+
+Two carve-outs: `[[ ]]` inside a **named helper function** is fine — a call to
+the function is a simple command errexit catches — and `[[ ]]` used as an
+`if`/`while` **condition** is control flow, not an assertion, so leave it alone
+(converting it in a file without `load assertions` yields 127 and a silently
+false branch). Each helper takes exactly two arguments with a non-empty second
+one and returns 2 on misuse; keep one assertion per line, since `a && b` hides a
+failing `a`. More scripts (the bash gather, helpers) are follow-on
 increments of #263.

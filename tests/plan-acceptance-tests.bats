@@ -9,6 +9,8 @@
 #   - an unlinked case (issue null) is not planned;
 #   - an unknown tooling on a LINKED case is a hard error.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/plan-acceptance-tests.zsh"
@@ -75,8 +77,8 @@ FULL='{"schema":"story-spec/v1","test_cases":[
   put '{"test_cases":[{"id":"bad","tooling":"telnet","issue":5}]}'
   run zsh "$S" --file "$SPEC"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"unknown tooling"* ]]
-  [[ "$output" == *"bad:telnet"* ]]
+  contains "$output" "unknown tooling"
+  contains "$output" "bad:telnet"
 }
 
 @test "reads from stdin as well as --file" {
@@ -89,7 +91,7 @@ FULL='{"schema":"story-spec/v1","test_cases":[
   put '{not json'
   run zsh "$S" --file "$SPEC"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"not valid JSON"* ]]
+  contains "$output" "not valid JSON"
 }
 
 @test "regression: empty input is the story-only fallback (exit 1), not a bad-JSON error" {
@@ -104,25 +106,25 @@ FULL='{"schema":"story-spec/v1","test_cases":[
   put '{"test_cases":[{"id":"bad","issue":5}]}'
   run zsh "$S" --file "$SPEC"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"unknown tooling"* ]]
-  [[ "$output" == *"bad:"* ]]
+  contains "$output" "unknown tooling"
+  contains "$output" "bad:"
 }
 
 @test "regression: a linked case with a NON-STRING tooling gets the friendly named error (exit 3)" {
   put '{"test_cases":[{"id":"bad","tooling":5,"issue":5}]}'
   run zsh "$S" --file "$SPEC"
   [ "$status" -eq 3 ]
-  [[ "$output" == *"unknown tooling"* ]]
+  contains "$output" "unknown tooling"
 }
 
 @test "a dangling --file (no value) is a usage error (exit 2)" {
   run zsh "$S" --file
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--file needs a value"* ]]
+  contains "$output" "--file needs a value"
 }
 
 @test "unknown arg is a usage error (exit 2)" {
   run zsh "$S" --bogus x
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown arg"* ]]
+  contains "$output" "unknown arg"
 }

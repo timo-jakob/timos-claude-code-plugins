@@ -10,6 +10,7 @@
 # forgets the consumer variant is caught.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -68,7 +69,7 @@ render_workflows() {
   # anchor to the line immediately after the boundary rule opens.
   run grep -A1 '"no-restricted-imports": \[' "$CC/eslint.config.js"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"error"'* ]]
+  contains "$output" '"error"'
 }
 
 @test "contract-consumer: the eslint variant keeps EVERY base slice-1 essential (supersede invariant)" {

@@ -6,6 +6,8 @@
 # the refine-issue writer agree), while a real content edit changes the hash (so
 # staleness is detectable). Epic #573.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/refine-issue/scripts/story-spec-prose-hash.zsh"
@@ -14,7 +16,7 @@ setup() {
 @test "prints a lowercase 64-hex SHA-256 for a simple region" {
   run bash -c "printf 'Hello world\n' | zsh '$S'"
   [ "$status" -eq 0 ]
-  [[ "$output" =~ ^[0-9a-f]{64}$ ]]
+  matches "$output" '^[0-9a-f]{64}$'
 }
 
 # Golden (known-answer) vectors — pin the exact byte contract so a pipeline
@@ -91,5 +93,5 @@ setup() {
 @test "--help exits 0 and prints usage" {
   run zsh "$S" --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"usage:"* ]]
+  contains "$output" "usage:"
 }

@@ -7,6 +7,7 @@
 # APIM governance step must be a clean, skip-when-absent extension point (#706).
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -214,7 +215,7 @@ EOF
   local step ifval
   for step in 'APIM governance portal' 'API proxy from apim'; do
     ifval="$(yq -r ".jobs.publish.steps[] | select(.name | test(\"$step\")) | .if" "$wf")"
-    [[ "$ifval" == *"hashFiles('apim/**') != ''"* ]]
+    contains "$ifval" "hashFiles('apim/**') != ''"
   done
 }
 

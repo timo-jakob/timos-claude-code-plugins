@@ -6,6 +6,7 @@
 # hook). Detection is stubbed via DETECT_STACK_BIN; git runs for real.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -228,8 +229,8 @@ seed_awaiting() {
   # the session forgot to run the panel / rewrite the file — $F is untouched
   step --resume
   [ "$status" -eq 2 ]
-  [[ "$output" == *"byte-identical to round 1"* ]]
-  [[ "$output" == *"did this round's review panel run?"* ]]
+  contains "$output" "byte-identical to round 1"
+  contains "$output" "did this round's review panel run?"
 }
 
 @test "the guard is content-based: a fresh per-round path holding the previous round's bytes also exits 2" {
@@ -239,7 +240,7 @@ seed_awaiting() {
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F2" --resume
   [ "$status" -eq 2 ]
-  [[ "$output" == *"$F2"* ]]
+  contains "$output" "$F2"
 }
 
 @test "the refusal is typed: it overwrites the prior AWAITING_FIX verdict with STALE_FINDINGS" {
@@ -258,7 +259,7 @@ seed_awaiting() {
   # stdout is exactly the one-line status JSON; the human complaint is on stderr
   [ "$(printf '%s' "$output" | grep -c '')" -eq 1 ]
   [ "$(jq -r '.status' <<<"$output")" = "STALE_FINDINGS" ]
-  [[ "$stderr" == *"did this round's review panel run?"* ]]
+  contains "$stderr" "did this round's review panel run?"
   # no stale verdict survives: the status file names THIS invocation's refusal
   [ "$(jq -r '.status' "$ST")" = "STALE_FINDINGS" ]
   [ "$(jq -r '.rounds' "$ST")" -eq 1 ]
@@ -285,7 +286,7 @@ seed_awaiting() {
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$SINK"
   [ "$status" -eq 2 ]
   [ "$(jq -r '.status' <<<"$output")" = "STALE_FINDINGS" ]
-  [[ "$stderr" == *"must not be the round's own findings_path"* ]]
+  contains "$stderr" "must not be the round's own findings_path"
   # the refusal did not destroy the file it pointed at
   [ -s "$SINK" ]
   [ "$(cat "$SINK")" = "$CRIT" ]
@@ -297,8 +298,8 @@ seed_awaiting() {
   step --resume
   [ "$status" -eq 2 ]
   [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
-  [[ "$output" == *"missing or empty on --resume"* ]]
-  [[ "$output" == *"must still write []"* ]]
+  contains "$output" "missing or empty on --resume"
+  contains "$output" "must still write []"
 }
 
 @test "a zero-byte findings file on --resume is refused (2) too" {
@@ -306,7 +307,7 @@ seed_awaiting() {
   : > "$F"
   step --resume
   [ "$status" -eq 2 ]
-  [[ "$output" == *"missing or empty on --resume"* ]]
+  contains "$output" "missing or empty on --resume"
 }
 
 @test "the guard compares only the immediately preceding round — and the window moves with it" {
@@ -319,7 +320,7 @@ seed_awaiting() {
   # round 3 re-passing ROUND 2's bytes is refused: the comparison window moved
   step --resume --max-rounds 4
   [ "$status" -eq 2 ]
-  [[ "$output" == *"byte-identical to round 2"* ]]
+  contains "$output" "byte-identical to round 2"
   printf '%s' "$CRIT" > "$F"      # round 3: byte-identical to ROUND 1, not to round 2
   step --resume --max-rounds 4
   [ "$status" -eq 20 ]            # allowed through: only the adjacent round is compared
@@ -348,7 +349,7 @@ seed_awaiting() {
   printf '%s' "$CRIT2" > "$F"
   step --resume
   [ "$status" -eq 1 ]
-  [[ "$output" == *"could not copy"* ]]
+  contains "$output" "could not copy"
   [ ! -e "$WD/.findings-digest-2" ]
   chmod 755 "$R/.review"
   step --resume                   # same bytes, now consumable
@@ -405,7 +406,7 @@ _digest_arm_refuses() {
     DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F"
   [ "$status" -eq 20 ]                        # the run itself is unaffected
-  [[ "$output" == *"RESOLVE_LOOP_DIGEST_TOOL=sha256 not usable"* ]]
+  contains "$output" "RESOLVE_LOOP_DIGEST_TOOL=sha256 not usable"
   [ ! -e "$WD/.findings-digest-1" ]           # guard is off: no digest recorded
   # ...and with the guard off, byte-identical findings are consumed, not refused
   run env RESOLVE_LOOP_DIGEST_TOOL=sha256 DETECT_STACK_BIN="$STUB" \
@@ -478,7 +479,7 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
   # the skip emits a diagnostic to stderr, so pull the JSON line off the combined output
   [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
   # pin that the SKIP (not a generic converge) is what fired
-  [[ "$output" == *"skipping the duplicate --test-cmd run"* ]]
+  contains "$output" "skipping the duplicate --test-cmd run"
   grep -q 'attested green' "$WD/progress.md"
 }
 

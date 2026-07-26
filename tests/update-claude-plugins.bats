@@ -5,6 +5,7 @@
 # touching enabled/disabled state.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -62,7 +63,7 @@ run_it() { run env CLAUDE_BIN="$FAKE" zsh "$S" "$@"; }
 @test "--dry-run mutates nothing (no marketplace update, no plugin update)" {
   run_it --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"[dry-run]"* ]]
+  contains "$output" "[dry-run]"
   run ! grep -q "marketplace update" "$LOG"
   run ! grep -q "plugin update" "$LOG"
 }
@@ -72,7 +73,7 @@ run_it() { run env CLAUDE_BIN="$FAKE" zsh "$S" "$@"; }
   run_it
   [ "$status" -eq 0 ]
   grep -qx "plugin marketplace update timos-claude-code-plugins" "$LOG"
-  [[ "$output" == *"No installed plugins"* ]]
+  contains "$output" "No installed plugins"
 }
 
 @test "--marketplace overrides the default name (refresh happens first)" {

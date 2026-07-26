@@ -16,6 +16,8 @@
 # without that control these tests would take a different branch on CI than on
 # a maintainer's Homebrew macOS box, and the assertions would hide it.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   GATHER="$REPO_ROOT/development/skills/maintenance/scripts/gather-go-findings.sh"
@@ -97,7 +99,7 @@ stub_zsh() {
 @test "gather-go: missing repo path -> usage error on stderr, exit 2, no JSON on stdout" {
   run bash "$GATHER" "$BATS_TEST_TMPDIR/does-not-exist"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: gather-go-findings.sh"* ]]
+  contains "$output" "usage: gather-go-findings.sh"
   # The usage message must go to stderr — stdout is the JSON channel a caller
   # pipes into jq, so polluting it would break the pipeline rather than the guard.
   run bash -c 'bash "$1" "$2" 2>/dev/null' _ "$GATHER" "$BATS_TEST_TMPDIR/does-not-exist"
@@ -107,7 +109,7 @@ stub_zsh() {
 @test "gather-go: no repo path argument at all -> usage error, exit 2" {
   run bash "$GATHER"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: gather-go-findings.sh"* ]]
+  contains "$output" "usage: gather-go-findings.sh"
 }
 
 @test "gather-go: repo path that exists but is a FILE -> usage error, exit 2" {
@@ -116,7 +118,7 @@ stub_zsh() {
   printf 'x' > "$BATS_TEST_TMPDIR/afile"
   run bash "$GATHER" "$BATS_TEST_TMPDIR/afile"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: gather-go-findings.sh"* ]]
+  contains "$output" "usage: gather-go-findings.sh"
 }
 
 @test "gather-go: repo path containing a space is handled (quoting of cd)" {

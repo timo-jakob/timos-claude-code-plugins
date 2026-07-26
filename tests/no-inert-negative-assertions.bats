@@ -12,17 +12,27 @@
 # This guard scans the suite and fails if any bare `!`-negated line reappears, so
 # the inert idiom cannot creep back in. `run ! …` (the line starts with `run`)
 # and `refute_*` helper calls (no leading `!`) are the sanctioned forms and are
-# not matched.
+# not matched. For a negative SUBSTRING check the sanctioned form is `lacks`
+# from tests/assertions.bash (#1011).
+#
+# SCOPE (corrected in #1011): this guard covers the bare-`!` form ONLY. It does
+# NOT clear `[[ ! -f … ]]` — an earlier version of this comment cited that form
+# as a benign non-match, which read as a safety claim it was never entitled to
+# make. A `[[ ]]` assertion is inert for its own reason (bash 3.2 does not apply
+# errexit to it) and is guarded separately by
+# tests/no-inert-bracket-assertions.bats.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   TESTS_DIR="$REPO_ROOT/tests"
   SELF="$(basename "$BATS_TEST_FILENAME")"
   # A line whose first non-space token is `!` followed by whitespace — the
-  # errexit-exempt bare negation. `run ! …` starts with `run`; `[[ ! -f … ]]`
-  # starts with `[[`; neither matches.
+  # errexit-exempt bare negation. `run ! …` starts with `run`, so it does not
+  # match. `[[ ! -f … ]]` does not match either, but that is a scope boundary,
+  # NOT an all-clear: it is inert too, and #1011's sibling guard catches it.
   PATTERN='^[[:space:]]*![[:space:]]'
 }
 
@@ -43,5 +53,5 @@ setup() {
   printf '@test "x" {\n  ! grep -q forbidden "$f"\n  true\n}\n' >"$fixture"
   run grep -nE "$PATTERN" "$fixture"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'! grep -q forbidden'* ]]
+  contains "$output" '! grep -q forbidden'
 }

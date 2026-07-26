@@ -12,6 +12,8 @@
 # `gh` is shadowed via PATH with a fake keyed on issue number for the per-child
 # label lookups.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/refine-issue/scripts/list-refinement-children.zsh"
@@ -110,7 +112,7 @@ EOF
   [ "$status" -eq 0 ]
   # stdout carries only the qualifying child; the skip is noted on stderr
   # (bats merges the streams into $output, so assert on lines)
-  [[ "$output" == *"skipping #601"* ]]
+  contains "$output" "skipping #601"
   [ "$(echo "$output" | grep -v 'skipping')" = "604" ]
 }
 
@@ -122,7 +124,7 @@ EOF
   chmod +x "$STUB/gh"
   run_list --repo o/r --epic 500
   [ "$status" -eq 3 ]
-  [[ "$output" == *"every child's label fetch failed"* ]]
+  contains "$output" "every child's label fetch failed"
 }
 
 @test "a gh response missing the labels key skips that child without aborting the walk" {
@@ -169,47 +171,47 @@ EOF
   touch "$STUB/reader-fails"
   run_list --repo o/r --epic 500
   [ "$status" -eq 3 ]
-  [[ "$output" == *"failed to read sub-issues"* ]]
+  contains "$output" "failed to read sub-issues"
 }
 
 @test "a missing shared reader is the documented runtime error (exit 3)" {
   run env PATH="$STUB:$PATH" SUBISSUES_BIN="$STUB/does-not-exist.zsh" zsh "$S" --repo o/r --epic 500
   [ "$status" -eq 3 ]
-  [[ "$output" == *"shared reader not found"* ]]
+  contains "$output" "shared reader not found"
 }
 
 @test "missing --repo is a usage error (exit 2)" {
   run_list --epic 500
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--repo is required"* ]]
+  contains "$output" "--repo is required"
 }
 
 @test "missing --epic is a usage error (exit 2)" {
   run_list --repo o/r
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--epic is required"* ]]
+  contains "$output" "--epic is required"
 }
 
 @test "non-numeric --epic is a usage error (exit 2)" {
   run_list --repo o/r --epic abc
   [ "$status" -eq 2 ]
-  [[ "$output" == *"must be a number"* ]]
+  contains "$output" "must be a number"
 }
 
 @test "a dangling --repo (no value) is a usage error (exit 2)" {
   run_list --epic 500 --repo
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--repo needs a value"* ]]
+  contains "$output" "--repo needs a value"
 }
 
 @test "a dangling --epic (no value) is a usage error (exit 2)" {
   run_list --repo o/r --epic
   [ "$status" -eq 2 ]
-  [[ "$output" == *"--epic needs a value"* ]]
+  contains "$output" "--epic needs a value"
 }
 
 @test "unknown arg is a usage error (exit 2)" {
   run_list --repo o/r --epic 500 --bogus x
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown arg"* ]]
+  contains "$output" "unknown arg"
 }

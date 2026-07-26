@@ -4,6 +4,8 @@
 # Drives detect-template-drift.zsh against a fixture target repo, with a
 # fixture changelog injected via the TEMPLATE_CHANGELOG seam.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   DRIFT="$REPO_ROOT/development/skills/maintenance/scripts/detect-template-drift.zsh"
@@ -35,8 +37,8 @@ render_marker() {
   [ "$(printf '%s' "$f" | jq '.fixes | length')" -eq 1 ]
   [ "$(printf '%s' "$f" | jq '.fixes[0].issue')" -eq 999 ]
   [ "$(printf '%s' "$f" | jq '.blocking')" = "true" ]
-  [[ "$(printf '%s' "$f" | jq -r '.message')" == *"#999"* ]]
-  [[ "$(printf '%s' "$f" | jq -r '.message')" == *"BLOCKING"* ]]
+  contains "$(printf '%s' "$f" | jq -r '.message')" "#999"
+  contains "$(printf '%s' "$f" | jq -r '.message')" "BLOCKING"
 }
 
 @test "no fixes named when the marker is at/after the fix version" {
@@ -46,7 +48,7 @@ render_marker() {
   f="$(printf '%s' "$output" | jq -c '.[] | select(.severity=="drifted")')"
   [ "$(printf '%s' "$f" | jq '.fixes | length')" -eq 0 ]
   [ "$(printf '%s' "$f" | jq '.blocking')" = "false" ]
-  [[ "$(printf '%s' "$f" | jq -r '.message')" == *"pick up upstream fixes"* ]]
+  contains "$(printf '%s' "$f" | jq -r '.message')" "pick up upstream fixes"
 }
 
 @test "degrades gracefully when the changelog has no entry for the template" {
@@ -70,7 +72,7 @@ JSON
   f="$(printf '%s' "$output" | jq -c '.[] | select(.severity=="drifted")')"
   [ "$(printf '%s' "$f" | jq '.fixes | length')" -eq 1 ]
   [ "$(printf '%s' "$f" | jq '.blocking')" = "false" ]
-  [[ "$(printf '%s' "$f" | jq -r '.message')" != *"BLOCKING"* ]]
+  lacks "$(printf '%s' "$f" | jq -r '.message')" "BLOCKING"
 }
 
 @test "the shipped changelog is valid JSON" {

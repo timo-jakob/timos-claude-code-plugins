@@ -8,6 +8,8 @@
 # JDK + Gradle and are exercised by manual validation on a real repo, not here
 # (CI runners don't ship Gradle).
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   GATHER="$REPO_ROOT/development/skills/maintenance/scripts/gather-java-findings.sh"
@@ -218,8 +220,8 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r .tooling_configured.openapi <<<"$output")" = "true" ]
   msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
-  [[ "$msg" == *"Multi-major layout detected (v1, v2)"* ]]
-  [[ "$msg" == *"per LIVE major"* ]]
+  contains "$msg" "Multi-major layout detected (v1, v2)"
+  contains "$msg" "per LIVE major"
 }
 
 @test "gather-java #694: a single major does NOT get the per-major note" {
@@ -232,8 +234,8 @@ EOF
   # "null" and the no-note assertion below would pass vacuously
   [ "$(jq -r '.findings_by_tool.openapi | length' <<<"$output")" = "1" ]
   msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
-  [[ "$msg" == *"contract-first"* ]]
-  [[ "$msg" != *"Multi-major"* ]]
+  contains "$msg" "contract-first"
+  lacks "$msg" "Multi-major"
 }
 
 @test "gather-java #694: majors are listed NUMERICALLY (v10 after v2, not lexically)" {
@@ -243,7 +245,7 @@ EOF
   run bash "$GATHER" "$WORK"
   [ "$status" -eq 0 ]
   msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
-  [[ "$msg" == *"Multi-major layout detected (v1, v2, v10)"* ]]
+  contains "$msg" "Multi-major layout detected (v1, v2, v10)"
 }
 
 @test "gather-java #694: a non-canonical filename under contracts/vN does NOT trigger the note" {
@@ -260,7 +262,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r '.findings_by_tool.openapi | length' <<<"$output")" = "1" ]
   msg="$(jq -r '.findings_by_tool.openapi[0].message' <<<"$output")"
-  [[ "$msg" != *"Multi-major"* ]]
+  lacks "$msg" "Multi-major"
 }
 
 @test "gather-java #708: a major past its x-sunset -> sunset-passed finding" {
@@ -274,7 +276,7 @@ EOF
   [ "$(jq -r '.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .component' <<<"$output")" = "contracts/v1/openapi.yaml" ]
   [ "$(jq -r '.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .severity' <<<"$output")" = "MAJOR" ]
   msg="$(jq -r '.findings_by_tool.openapi[] | select(.rule=="openapi:sunset-passed") | .message' <<<"$output")"
-  [[ "$msg" == *"410 Gone"* ]]
+  contains "$msg" "410 Gone"
 }
 
 @test "gather-java #708: a not-yet-expired sunset produces NO sunset-passed finding" {
