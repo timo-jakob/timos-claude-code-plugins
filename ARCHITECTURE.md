@@ -1499,16 +1499,15 @@ Rules that carry the contract's weight:
 - **Versioning:** a breaking envelope change bumps to `telemetry/v2`; `payload`
   evolution is per-pipeline and non-breaking by definition.
 
-Of the two pre-existing streams, **review-loop is retrofitted** — child (b),
-issue #1004: it emits `telemetry/v1` through `emit-telemetry.zsh` into the
-shared sink, with its bespoke fields inside `payload` — see the section below.
-**Refine-issue is not yet** — it still emits the pre-contract (v0) shape,
-bespoke keys at the top level, into its own `.claude/telemetry/refine-issue.jsonl`.
-Retrofitting it (envelope and sink from `emit-telemetry.zsh`, bespoke fields into
-`payload`, its `refined-ready` / `parked` outcomes mapped onto the 4-value enum)
-is child (c) of #740. **No file migration is performed** either way: records
-written before a stream's retrofit stay where and as they are, and child (e)'s
-rollup reads them through a v0→v1 adapter.
+**Both pre-existing streams are now retrofitted** — review-loop as child (b),
+issue #1004, and refine-issue as child (c), issue #1005. Each emits
+`telemetry/v1` through `emit-telemetry.zsh` into the shared sink, with its
+bespoke fields inside `payload` and its own run endings narrowed onto the
+4-value `outcome` enum — see the two sections below. Neither builder carries an
+envelope key any more; both are payload builders. **No file migration is
+performed**: records written before a stream's retrofit stay where and as they
+are (`review-loop.jsonl`, `refine-issue.jsonl`), and child (e)'s rollup reads
+them through a v0→v1 adapter.
 
 ## Review-loop telemetry (#566)
 
@@ -1640,23 +1639,49 @@ migrated, and child (e)'s rollup is what reads both.
 This is the raw material for the DORA-style dashboard and for deciding future
 budgets (tokens, wall-clock) and risk-based review depth.
 
-### Refine-issue telemetry (#579)
+## Refine-issue telemetry (#579)
 
-`/development:refine-issue` mirrors the **pre-contract (v0) shape** of the above
-for the refinement phase — it has not been retrofitted yet (child (c), #1005), so
-unlike the review loop it still writes bespoke top-level keys, not a
-`telemetry/v1` envelope. Every run
-appends **one JSONL record** to `.claude/telemetry/refine-issue.jsonl` (same
-git-ignored sink convention), built deterministically by
-`build-refine-telemetry-record.zsh` from the run summary. Fields: `ts`, `issue`,
-`rounds`, `objections_raised` / `objections_resolved`, `outcome`
-(`refined-ready` when the story re-gated `READY`, or `parked` on a typed parked
-exit, #578), `park_type` (the park type, or `null`), `risk_classification`,
-`wall_s`, and the reserved `tokens`. The append is **never fatal** (`|| true`),
-exactly as the review loop's is, and one record is emitted per run at whichever
-ending it reached (Step 7). Together the two sinks feed the same
-self-improvement handoff — where refinement helps (fewer review rounds later)
-and where it stalls (parks, unresolved objections).
+`/development:refine-issue` sits on the **same `telemetry/v1` contract** as the
+review loop above — retrofitted by child (c), #1005, so neither of the two
+pre-existing streams is a copy-adapted one-off any more. Every run appends
+**one record** to the shared git-ignored sink
+`.claude/telemetry/telemetry.jsonl` through `emit-telemetry.zsh`, which owns the
+envelope and the sink; `build-refine-telemetry-record.zsh` is reduced to a
+**payload builder** and carries no envelope key at all (passing
+`--issue`/`--ts`/`--wall-s` to it is now a usage error).
+
+The skill supplies the linkage and lets the emitter derive the rest:
+`--pipeline refine-issue`, `--issue`, `--ts` (the run's Step 0 start stamp, so
+`ts` means run *start* here exactly as it does on the review-loop stream, not
+emission time), and `--wall-s`, which is **required** and always a number here
+rather than the old nullable field; `repo` is derived from `--repo-dir`.
+One record is emitted per **single-issue flow**, so an epic walk emits one per
+child (each with its own stamps), with no parent record and `parent_run_id:
+null`. The run's ending narrows onto the cross-pipeline `outcome` enum —
+`refined-ready` → `success`, `parked` → `parked` — via the builder's
+`--print-outcome`, so the mapping lives in tested code rather than in the
+skill's prose. Nothing is lost: the payload keeps `rounds`,
+`objections_raised` / `objections_resolved`, `park_type` — one of
+`needs-decision` | `split-recommended` | `deferred`, `null` only on a
+`refined-ready` run; which park type it was is pipeline detail, since the
+envelope enum is the 4-value cross-pipeline one. That set is enforced by the
+skill's Step 7 guard (a park outside it skips the record), **not** by the
+payload builder, which passes `payload` through unpoliced by design — and
+`risk_classification`. The emission is **never fatal** — the chain is
+wrapped as `{ … } || echo <advisory>`, so a failure is said once in-session and
+never changes the run's outcome (the review loop's `|| true` with a visible
+note) — and one record is emitted per run at whichever ending it reached
+(Step 7) — **except** where the run's own stamps, its decided outcome, its counts, or a
+park's type were never measured,
+in which case Step 7 **skips** the record rather than fabricate a `wall_s` or a
+round count. The stream is deliberately **lossy, never fabricated**: a gap means
+"not measured", not "no run".
+
+Records written **before** this retrofit are still `refine-issue.jsonl` in the
+pre-contract shape (top-level `ts`/`issue`/`outcome`, no `pipeline`); they are
+not migrated, and child (e)'s rollup is what reads both. Together the streams
+feed the same self-improvement handoff — where refinement helps (fewer review
+rounds later) and where it stalls (parks, unresolved objections).
 
 ## Review dossier + Approver re-ingest (#563)
 
