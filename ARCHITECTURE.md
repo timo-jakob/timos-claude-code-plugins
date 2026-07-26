@@ -2091,16 +2091,32 @@ contract (`development/agents/story-readiness.md`).
 `/development:resolve-issue` reads the block as its **authoritative structured
 interface** in its implement step, via the robust extractor
 `development/skills/resolve-issue/scripts/read-story-spec.zsh` (selects the fenced
-`json` object whose `.schema` is `story-spec/v1` by **content**, not position, so
-an unrelated code block in the prose can't be mistaken for it). It drives
+`json` object by **content** — `.schema` is exactly `story-spec/v1` — so an
+unrelated code block in the prose can't be mistaken for it; when several such
+blocks are present the last **parseable** one wins, because refine-issue appends
+the authoritative block below the prose — a block whose JSON does not parse is
+skipped, not selected). It drives
 implementation from `acceptance_criteria` / `testable_checks` (the definition of
 done the Step-3 gate must demonstrate) and bounds the change by
 `scope_boundaries`; dependencies are **never** read from the block (native
 `blockedBy` only, #583). Consumption is safe because step 0b's gate already
 proved the block fresh and consistent with the prose. When **no** block is
-present — the common case for unrefined issues — the extractor exits non-zero and
+present — the common case for unrefined issues — the extractor exits **1** and
 resolve-issue **falls back to the prose** exactly as before; a missing block is
-never an error. Implementing the block's `test_cases[]` as acceptance tests and
+never an error. Read exit 1 as "**no usable block was extracted**", not "the
+issue was never refined": a block that *is* present but whose JSON does not
+parse is skipped, so it reaches this fallback **only when no earlier parseable
+block exists** — with an earlier valid block present the extractor exits 0 and
+emits *that* one, so a corrupt appended block silently yields a superseded spec
+rather than a fallback. An existing-but-**unreadable** `--file` also lands on 1,
+because the guard is `-f` rather than `-r` and the later read then aborts under
+errexit as 1. The signal is typed, not
+merely "non-zero" — exits 2 (usage) and 3 (runtime — the named `--file` is not a
+regular file, `jq` missing) are genuine errors and are **never** a licence to
+fall back — but that typing is **not total**, so a caller that must tell a
+genuine I/O failure from an unrefined issue has to validate its own input first
+(the blessed call sites pipe `gh` output on stdin and never pass `--file`).
+Implementing the block's `test_cases[]` as acceptance tests and
 co-closing linked test-case issues is a separate concern (the same-PR test-case
 lifecycle, #696), not part of block-consumption.
 

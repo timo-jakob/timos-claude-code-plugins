@@ -20,10 +20,20 @@
 #
 # Exit codes:
 #   0 — a story-spec/v1 block was found and printed (valid JSON on stdout)
-#   1 — NO block present (older/unrefined issue) — caller falls back to prose.
-#       This is the normal, expected "no block" signal, NOT an error.
+#   1 — no USABLE block was extracted — caller falls back to prose. This is the
+#       normal, expected signal, NOT an error. Three causes reach it: no block
+#       at all (the older/unrefined issue); a block that IS present but whose
+#       JSON does not parse — a deliberate safe fallback (unlike
+#       read-parked-state.zsh, which types a corrupt payload as 3, because
+#       discarding a park would lose human input while re-reading prose does
+#       not), though note the selection loop SKIPS an unparseable block rather
+#       than failing on it, so this cause reaches exit 1 only when no earlier
+#       parseable block exists — otherwise the earlier one is emitted with
+#       exit 0; and the unreadable-file leak noted under exit 3 below.
 #   2 — usage error (bad args)
-#   3 — runtime error (unreadable file, jq missing)
+#   3 — runtime error (the named --file is not a regular file, jq missing).
+#       NOT every I/O failure: the guard below is `-f`, so an existing-but-
+#       unreadable file passes it and the later read aborts under errexit as 1.
 #
 # Usage:
 #   read-story-spec.zsh --file <issue-body.md>      # from a file
