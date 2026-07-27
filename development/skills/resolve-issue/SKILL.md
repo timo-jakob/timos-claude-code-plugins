@@ -849,12 +849,20 @@ orphaned.
    - **No `--wall-s`** — the emitter rejects it on an enrichment, and `wall_s`
      lands `null`; **`--outcome success`** describes *the enrichment event*
      (the promotion facts were settled), never the run's outcome.
-   - **`--repo-dir` must be the same `--repo` the loop was given, and
-     `--telemetry-file` the same `--telemetry-file`** — they are the two sink
-     determinants (with no `--telemetry-file`, the emitter resolves
-     `<repo-dir>/.claude/telemetry/telemetry.jsonl`), so either one differing
-     lands the record in a *different* sink where it can never be joined, and
-     the emitter still exits 0.
+   - **`--repo-dir` must be the loop's `--repo` value** (a *path* — not the
+     emitter's own `--repo`, which is the `owner/name` identity), **and
+     `--telemetry-file` the same `--telemetry-file`.** Since #1006 the emitter
+     has three sink determinants — `--telemetry-file`, `--telemetry-dir`, and
+     `--repo-dir` (via the local default) — in the precedence
+     `--telemetry-file` > `--telemetry-dir` > the local default
+     `<repo-dir>/.claude/telemetry/telemetry.jsonl`. A differing
+     `--telemetry-file`/`--telemetry-dir` lands the record in a *different*
+     sink; a differing `--repo-dir` mis-derives `repo` (and picks a different
+     sink too whenever `--telemetry-file` is absent — under `--telemetry-dir`
+     the derived `repo` also chooses the file inside `DIR`) — and the emitter exits 0
+     either way, so nothing surfaces the loss. The loop has no
+     `--telemetry-dir` of its own, so the enrichment must not pass one either:
+     mirror exactly what the loop was given and the two records share a sink.
    - **Emit exactly when the prompt was presented** — that is this step. A
      headless run, or one with nothing to offer, never reaches here and gets
      **no record at all**. Promoting **none** is a *settled* fact and **does**

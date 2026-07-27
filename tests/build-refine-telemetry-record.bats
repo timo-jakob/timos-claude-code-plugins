@@ -878,7 +878,7 @@ skill_step0() {
   # positive: the section must NAME the shared sink, not merely omit an override
   assert_contains "$step7" ".claude/telemetry/telemetry.jsonl"
   case "$step7" in
-    *--telemetry-file*) echo "Step 7 must not override the shared sink"; return 1 ;;
+    *--telemetry-file*|*--telemetry-dir*) echo "Step 7 must not override the shared sink"; return 1 ;;
   esac
   # Scan LINE BY LINE: matching the whole section would let the redirection in
   # the jq/builder chain pair with the legacy note further down and false-fire.

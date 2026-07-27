@@ -39,15 +39,15 @@ outcomes.
 |---|---|
 | Primary consumer | All three (human, cross-repo Grafana, self-improvement) — the contract is the deliverable |
 | Reach | Versioned contract; **every** pipeline instrumented (epic 2) |
-| Grafana path | JSONL → shared dir → the **separate reporting repo** runs Grafana (compose stack + file-reading datasource). Zero new deps in the plugins; skills stay offline-safe |
+| Grafana path | JSONL → cross-repo sink directory → the **separate reporting repo** runs Grafana (compose stack + file-reading datasource). Zero new deps in the plugins; skills stay offline-safe |
 | Human reports | Drop CSV (#595) + HTML one-pager (#596) as superseded by Grafana; keep a **thin jq rollup** as the infrastructure-free glance |
 | Measures | Process counters **plus downstream outcomes**, via append-only enrichment records (epic 3). `tokens` stays best-effort/null until reliably measurable — never guessed |
-| Local sink | **One file per repo**: `.claude/telemetry/telemetry.jsonl` (fields discriminate); shared mode `DIR/<owner>-<name>.jsonl` |
+| Local sink | **One file per repo**: `.claude/telemetry/telemetry.jsonl` (fields discriminate); cross-repo sink mode `DIR/<repo-slug>.jsonl` (as built — see below) |
 | GitHub packaging | **Close #592 superseded**; file 3 fresh epics chained with native blocked-by (#583) |
 
 Constraints carried over from #592 and repo policy: no third-party
 dependencies in the plugins (zsh + `jq`, stdlib-only `python3` escape hatch);
-records self-identify by `repo`; the shared output directory is the hand-off
+records self-identify by `repo`; the cross-repo output directory is the hand-off
 point to the reporting repo; reported numbers must be reliable or withheld.
 
 ## The `telemetry/v1` contract
@@ -113,10 +113,18 @@ Rules:
   One stream; `pipeline`/`kind` fields discriminate. The old per-pipeline
   files remain readable as legacy, and stop being written once children (b)/(c)
   retrofit the two streams.
-- **Shared mode:** `--telemetry-dir DIR` → append to `DIR/<owner>-<name>.jsonl`
-  (one file per repo, no cross-repo clobbering; the reporting repo globs
-  `*.jsonl`). Precedence: `--telemetry-file` > `--telemetry-dir` > local
-  default (as #593 specified).
+- **Cross-repo sink mode:** `--telemetry-dir DIR` → append to `DIR/<repo-slug>.jsonl`
+  (no cross-repo clobbering; the reporting repo globs `*.jsonl`). Precedence:
+  `--telemetry-file` > `--telemetry-dir` > local default (as #593 specified).
+  **As built (child (d), #1006)** the filename is `<owner>-<name>` only in the
+  normal case; in general it is a *sanitized, case-folded* projection of the
+  resolved `repo` — which is itself only `owner/name` in the normal case, since
+  the basename fallback and a caller-supplied `--repo` are equally possible
+  sources. That projection is deliberately **many-to-one**,
+  so it is not a per-repo-file guarantee: a consumer groups by the record's
+  `repo` field, never by filename. The emitter alone accepts the flag — no
+  pipeline forwards it yet. ARCHITECTURE.md's *Cross-repo sink mode* bullet is
+  the normative statement of both the slug rules and that open gap.
 
 ## Epic 1 — contract + retrofit + Grafana-ready hand-off
 
@@ -127,13 +135,18 @@ Children:
 - **(b)** Retrofit **review-loop**: payload builder over the shared emitter;
   `repo` field; existing loop bats stay green.
 - **(c)** Retrofit **refine-issue**: same.
-- **(d)** `--telemetry-dir` shared-sink support, stream-generic (absorbs #593's
-  scope beyond the review loop).
+- **(d)** `--telemetry-dir` cross-repo sink support, stream-generic (absorbs #593's
+  scope beyond the review loop). **As built (#1006) this is the *emitter's*
+  capability only**: it is stream-generic in the sense that any pipeline's
+  records can go to a cross-repo directory, not in the sense that any pipeline
+  *forwards* the flag — none does. Per-pipeline forwarding is unclaimed by any
+  filed child and belongs naturally to epic 2; ARCHITECTURE.md's *Cross-repo
+  sink mode* bullet is normative on that gap.
 - **(e)** **Thin rollup** (reshapes #594): a jq summary over any stream —
   per-pipeline run counts, outcome mix, mean rounds/wall, escalation rate —
   filterable by `--repo`/`--pipeline`. CLI-only, no HTML/CSV.
 - **(f)** **Grafana hand-off contract**: a doc defining exactly what the
-  reporting repo ingests (the shared dir, the glob, the envelope, the join),
+  reporting repo ingests (the cross-repo sink directory, the glob, the envelope, the join),
   plus one **reference Grafana dashboard JSON** committed here as that repo's
   starting point. The Grafana stack itself is the reporting repo's concern —
   out of scope here.
