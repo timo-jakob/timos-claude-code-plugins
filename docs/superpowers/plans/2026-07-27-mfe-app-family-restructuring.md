@@ -30,6 +30,12 @@ before predecessors close, so every closing comment can name its replacement.
 - **Only the epic carries the `epic` label.** Available labels: `epic`, `needs-refinement`, `test-case`, `blocked`.
 - **Issues are filed as prose.** `story-spec/v1` blocks and `test-case` spin-outs are minted later by
   `/development:refine-issue`; do not hand-author them here.
+- **Issue numbers are captured from the `gh issue create` URL, never by searching for the title.** GitHub's search
+  index is eventually consistent, so a search run immediately after a create routinely returns nothing and would
+  hand the next step an empty variable.
+- **Shell state does not survive between commands.** Every captured number is appended to the ID file
+  `.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env` and re-sourced by each later command. Any
+  command using `$EPIC` or `$A1`…`$A6` must source that file first, in the same invocation.
 
 ---
 
@@ -44,14 +50,16 @@ before predecessors close, so every closing comment can name its replacement.
 
 - Produces: `$EPIC` — the new epic's issue number, consumed by Tasks 2, 3, 4 and 6.
 
-- [ ] **Step 1: File the epic**
+- [ ] **Step 1: File the epic and capture its number in one invocation**
 
 The Children section deliberately lists titles rather than numbers; Task 3 replaces it with the numbered task list
-once the children exist.
+once the children exist. The number is taken from the URL `gh issue create` prints — never from a title search.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-gh issue create --repo "$R" --label epic \
+IDS=.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+mkdir -p "$(dirname "$IDS")"
+URL=$(gh issue create --repo "$R" --label epic \
   --title "Epic: MFE composition — shell + remote shapes over the mount contract" \
   --body "$(cat <<'EOF'
 ## Type
@@ -103,22 +111,21 @@ This epic builds that contract and the two repo shapes it connects. The position
 
 Blocked by #1059 — the positions must be recorded before the machinery encodes them.
 EOF
-)"
+)
+echo "EPIC=${URL##*/}" | tee -a "$IDS"
 ```
 
-- [ ] **Step 2: Capture and verify the epic number**
+- [ ] **Step 2: Verify the epic**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-EPIC=$(gh issue list --repo "$R" --label epic --state open --limit 5 \
-        --search "MFE composition in:title" --json number -q '.[0].number')
-echo "EPIC=$EPIC"
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue view "$EPIC" --repo "$R" --json number,title,labels \
   -q '"\(.number) \(.title) labels=\([.labels[].name]|join(","))"'
 ```
 
-Expected: a number is printed, the title matches, and `labels=epic`. If `EPIC` is empty, the create failed — stop
-and read the error rather than proceeding with an unset variable.
+Expected: the number matches `$EPIC`, the title matches, and `labels=epic`. If `$EPIC` is empty or non-numeric the
+create failed — stop and read the error rather than proceeding with an unset variable.
 
 ---
 
@@ -137,7 +144,9 @@ and read the error rather than proceeding with an unset variable.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-gh issue create --repo "$R" \
+IDS=.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+source "$IDS"
+URL=$(gh issue create --repo "$R" \
   --title "feat(mfe): mfe-contract/v1 — the shell↔remote mount contract" \
   --body "$(cat <<EOF
 Part of the MFE composition epic #$EPIC. Design: \`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md\` §3.
@@ -187,14 +196,17 @@ The design doc deliberately left these open because they need acceptance criteri
 
 Blocked by #1059 (the position this encodes).
 EOF
-)"
+)")
+echo "A1=${URL##*/}" | tee -a "$IDS"
 ```
 
 - [ ] **Step 2: File A2 — the shell repo shape**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-gh issue create --repo "$R" \
+IDS=.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+source "$IDS"
+URL=$(gh issue create --repo "$R" \
   --title "feat(development-react): shell repo shape — outer router, chrome, auth, remote loader" \
   --body "$(cat <<EOF
 Part of the MFE composition epic #$EPIC. Design: \`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md\` §4.1.
@@ -238,14 +250,17 @@ is deliberately no third archetype to maintain, and a small app can grow remotes
 
 Blocked by the contract child and by #957 (the common React overlay it layers onto).
 EOF
-)"
+)")
+echo "A2=${URL##*/}" | tee -a "$IDS"
 ```
 
 - [ ] **Step 3: File A3 — the remote repo shape**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-gh issue create --repo "$R" \
+IDS=.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+source "$IDS"
+URL=$(gh issue create --repo "$R" \
   --title "feat(development-react): remote repo shape — mount/unmount entry + asset container" \
   --body "$(cat <<EOF
 Part of the MFE composition epic #$EPIC. Design: \`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md\` §4.2.
@@ -287,14 +302,17 @@ so a team can release its slice of the UI without coordinating with anyone.
 
 Blocked by the contract child and by #957.
 EOF
-)"
+)")
+echo "A3=${URL##*/}" | tee -a "$IDS"
 ```
 
 - [ ] **Step 4: File A4 — the conformance check**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-gh issue create --repo "$R" \
+IDS=.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+source "$IDS"
+URL=$(gh issue create --repo "$R" \
   --title "feat(bootstrap): check-mfe-conformance.zsh + CI gate" \
   --body "$(cat <<EOF
 Part of the MFE composition epic #$EPIC. Design: \`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md\` §6.
@@ -328,14 +346,17 @@ standalone checker plus a bootstrap-installed CI job, so conformance is proven p
 
 Blocked by the contract, shell and remote children — there is nothing to check until they exist.
 EOF
-)"
+)")
+echo "A4=${URL##*/}" | tee -a "$IDS"
 ```
 
 - [ ] **Step 5: File A5 — the bootstrap UI shape question**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-gh issue create --repo "$R" \
+IDS=.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+source "$IDS"
+URL=$(gh issue create --repo "$R" \
   --title "feat(bootstrap): UI shape question — browser UI? shell or remote?" \
   --body "$(cat <<EOF
 Part of the MFE composition epic #$EPIC. Replaces #1043, which asked a framework question the family no longer has.
@@ -376,14 +397,17 @@ changes from *which framework* to *which shape*.
 
 Independent of the shell and remote template children; it selects a shape rather than rendering one.
 EOF
-)"
+)")
+echo "A5=${URL##*/}" | tee -a "$IDS"
 ```
 
 - [ ] **Step 6: File A6 — composition-repo UI integration**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-gh issue create --repo "$R" \
+IDS=.superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+source "$IDS"
+URL=$(gh issue create --repo "$R" \
   --title "feat(development-composition): UI members — gateway routes, import map, cross-MFE E2E" \
   --body "$(cat <<EOF
 Part of the MFE composition epic #$EPIC. Design: \`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md\` §5.
@@ -421,21 +445,24 @@ asserts gateway-path E2E for backends; UI members join that same flow rather tha
 
 Blocked by #687 (the composition repo type) and by the shell and remote children.
 EOF
-)"
+)")
+echo "A6=${URL##*/}" | tee -a "$IDS"
 ```
 
-- [ ] **Step 7: Capture and verify all six numbers**
+- [ ] **Step 7: Verify all six numbers**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
-for q in "mfe-contract/v1" "shell repo shape" "remote repo shape" \
-         "check-mfe-conformance" "UI shape question" "UI members"; do
-  gh issue list --repo "$R" --state open --limit 3 --search "$q in:title" \
-    --json number,title -q '.[0] | "\(.number)  \(.title)"'
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+cat .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+for n in "$A1" "$A2" "$A3" "$A4" "$A5" "$A6"; do
+  gh issue view "$n" --repo "$R" --json number,title,state -q '"#\(.number) [\(.state)] \(.title)"'
 done
 ```
 
-Expected: exactly six numbers, each matching its intended title. Record them as `$A1`…`$A6` in the order above.
+Expected: `ids.env` holds seven distinct numeric assignments (`EPIC`, `A1`…`A6`), and each issue resolves to its
+intended title in `OPEN` state. An empty or duplicated value means a create failed — stop rather than continuing
+with a bad id.
 
 ---
 
@@ -454,6 +481,7 @@ Expected: exactly six numbers, each matching its intended title. Record them as 
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue view "$EPIC" --repo "$R" --json body -q .body > /tmp/epic-body.md
 python3 - "$A1" "$A2" "$A3" "$A4" "$A5" "$A6" <<'PY'
 import sys, re, pathlib
@@ -479,6 +507,7 @@ gh issue edit "$EPIC" --repo "$R" --body-file /tmp/epic-body.md
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 development/skills/resolve-issue/scripts/backfill-sub-issues.zsh \
   --repo "$R" --epic "$EPIC" --dry-run
 ```
@@ -490,6 +519,7 @@ number that is not one of the six, **stop** — a parenthetical reference was pa
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 development/skills/resolve-issue/scripts/backfill-sub-issues.zsh --repo "$R" --epic "$EPIC"
 ```
 
@@ -499,6 +529,7 @@ Expected: exit 0, `added` holds the six numbers, `failed` is `[]`.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 development/skills/resolve-issue/scripts/read-sub-issues.zsh --repo "$R" --epic "$EPIC" \
   | jq -c '{summary, open_children}'
 ```
@@ -520,25 +551,31 @@ Expected: `summary.total == 6`, `summary.completed == 0`, and `open_children` li
 The edges from the design's §9 sequencing graph: the epic and A1 wait on #1059; A2 and A3 wait on A1 and #957; A4
 waits on A1, A2, A3; A6 waits on #687, A2, A3. A5 has none.
 
-- [ ] **Step 1: Define a helper that writes one edge and verifies it**
+- [ ] **Step 1: Write every edge, verifying each immediately**
+
+The helper and its uses must be one invocation — a shell function does not survive between commands. Run the first
+edge alone first: if the POST body shape is wrong it fails here, before eleven more attempts.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
+
 block() {  # block <issue> <blocker>
   local issue="$1" blocker="$2" bid
-  bid=$(gh api "repos/$R/issues/$blocker" --jq .id) || return 1
+  bid=$(gh api "repos/$R/issues/$blocker" --jq .id) || { echo "FAILED to resolve #$blocker"; return 1; }
   gh api -X POST "repos/$R/issues/$issue/dependencies/blocked_by" \
-    -F issue_id="$bid" >/dev/null || return 1
-  gh api "repos/$R/issues/$issue/dependencies/blocked_by" --jq '.[].number' \
-    | grep -qx "$blocker" || { echo "VERIFY FAILED: #$issue not blocked by #$blocker"; return 1; }
-  echo "ok: #$issue blockedBy #$blocker"
+    -F issue_id="$bid" >/dev/null 2>&1
+  # verify from the server regardless of the POST's reported status — an
+  # already-present edge returns an error we should treat as success
+  if gh api "repos/$R/issues/$issue/dependencies/blocked_by" --jq '.[].number' | grep -qx "$blocker"; then
+    echo "ok: #$issue blockedBy #$blocker"
+  else
+    echo "VERIFY FAILED: #$issue not blocked by #$blocker"; return 1
+  fi
 }
-```
 
-- [ ] **Step 2: Write the edges**
+block "$EPIC" 1059 || exit 1     # canary: proves the POST shape before the rest
 
-```bash
-block "$EPIC" 1059
 block "$A1" 1059
 block "$A2" "$A1"; block "$A2" 957
 block "$A3" "$A1"; block "$A3" 957
@@ -546,13 +583,15 @@ block "$A4" "$A1"; block "$A4" "$A2"; block "$A4" "$A3"
 block "$A6" 687;   block "$A6" "$A2"; block "$A6" "$A3"
 ```
 
-Expected: an `ok:` line per edge. Any `VERIFY FAILED` means the POST shape was wrong — fix before continuing, since
-a silently-missing edge is exactly the drift the native contract exists to prevent.
+Expected: twelve `ok:` lines. Any `VERIFY FAILED` means the edge did not land — stop and report, since a
+silently-missing edge is exactly the drift the native-relationship contract exists to prevent. If the canary itself
+fails, the endpoint shape is wrong and nothing after it is worth attempting.
 
-- [ ] **Step 3: Confirm the graph is acyclic and reads correctly**
+- [ ] **Step 2: Confirm the graph is acyclic and reads correctly**
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 for n in "$A1" "$A2" "$A3" "$A4" "$A5" "$A6"; do
   development/skills/resolve-issue/scripts/dependency-precheck.zsh --repo "$R" --issue "$n" \
     | jq -c "{issue: $n, decision, blockers: [.blockers[]? | {number, state}]}"
@@ -697,6 +736,7 @@ failed — fix before closing anything.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue edit 682 --repo "$R" \
   --title "Epic: JavaScript foundation + API lifecycle + ops surface" \
   --body "$(cat <<EOF
@@ -785,6 +825,7 @@ change.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue view 957 --repo "$R" --json body -q .body > /tmp/957.md
 cat >> /tmp/957.md <<EOF
 
@@ -806,6 +847,7 @@ gh issue edit 957 --repo "$R" \
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue view 1062 --repo "$R" --json body -q .body > /tmp/1062.md
 cat >> /tmp/1062.md <<EOF
 
@@ -864,6 +906,7 @@ Expected: #957 carries the new title, and all three report `rescope note: true`.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue close 954 --repo "$R" --comment "$(cat <<EOF
 Closed 2026-07-27 — superseded, not deferred.
 
@@ -902,6 +945,7 @@ Expected: `CLOSED`.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue close 1043 --repo "$R" --comment "$(cat <<EOF
 Closed 2026-07-27 — the question this story answers no longer exists.
 
@@ -927,6 +971,7 @@ EOF
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 for n in 1049 1050 1051 1052 1053 1054 1055 1056 1057; do
   gh issue close "$n" --repo "$R" --comment \
     "Closed 2026-07-27 with its parent story #1043 — the Angular-vs-React recommendation axis is gone (#1059). The replacement story is #$A5, whose test cases differ." \
@@ -970,6 +1015,7 @@ done
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue close 685 --repo "$R" --comment "$(cat <<EOF
 Closed 2026-07-27 — deferred, not rejected.
 
@@ -1015,6 +1061,7 @@ Expected: seven `CLOSED` lines.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 S=development/skills/resolve-issue/scripts
 echo "=== #682 (foundation) ==="; "$S/read-sub-issues.zsh" --repo "$R" --epic 682 | jq -c '{summary, open_children}'
 echo "=== #$EPIC (MFE composition) ==="; "$S/read-sub-issues.zsh" --repo "$R" --epic "$EPIC" | jq -c '{summary, open_children}'
@@ -1029,6 +1076,7 @@ Issue #686 → 4 open children, and #1058 → unchanged, with #1059 still open.
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 for n in 687 689 936 937 944 957 958 959 960 1062 "$A1" "$A2" "$A3" "$A4" "$A5" "$A6"; do
   development/skills/resolve-issue/scripts/dependency-precheck.zsh --repo "$R" --issue "$n" \
     | jq -c "{issue: $n, decision, open_blockers: [.blockers[]? | select(.state==\"OPEN\") | .number]}"
@@ -1056,6 +1104,7 @@ The rescoped epic is where a reader will look for what happened, so the record b
 
 ```bash
 R=timo-jakob/timos-claude-code-plugins
+source .superpowers/sdd/2026-07-27-mfe-app-family-restructuring/ids.env
 gh issue comment 682 --repo "$R" --body "$(cat <<EOF
 ## Restructured 2026-07-27
 
