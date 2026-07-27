@@ -261,24 +261,27 @@ out.
 plus #958, #959 and #960. Its children concern the React plugin's capabilities,
 which are orthogonal to how MFEs compose.
 
-**A new epic — MFE composition** — holds the new domain:
+**A new epic — MFE composition (#1122)** — holds the new domain. Filed
+2026-07-27:
 
 | Child | Scope |
 | --- | --- |
-| A1 | `mfe-contract/v1` — signature, `MfeContext`, the types-only package, versioning rules |
-| A2 | Shell repo shape — outer router, chrome, auth acquisition, remote loader, import-map injection |
-| A3 | Remote repo shape — mount/unmount entry, nested router under `basePath`, asset container |
-| A4 | `check-mfe-conformance.zsh` + CI gate (§6) |
-| A5 | Bootstrap shape question — "browser UI? shell or remote?" (the surviving part of #1043) |
-| A6 | Composition-repo UI integration — gateway routes, import map as the single pin, cross-MFE E2E, `/info` live-version assertions |
+| #1123 | `mfe-contract/v1` — signature, `MfeContext`, the types-only package, versioning rules |
+| #1124 | Shell repo shape — outer router, chrome, auth acquisition, remote loader, import-map injection |
+| #1125 | Remote repo shape — mount/unmount entry, nested router under `basePath`, asset container |
+| #1126 | `check-mfe-conformance.zsh` + CI gate (§6) |
+| #1127 | Bootstrap shape question — "browser UI? shell or remote?" (the surviving part of #1043) |
+| #1128 | Composition-repo UI integration — gateway routes, import map as the single pin, cross-MFE E2E, `/info` live-version assertions |
 
 ```text
-#1059 (positions) ──→ A1 (contract) ──┬─→ A2 (shell) ──┐
-                                      └─→ A3 (remote) ─┼─→ A4 (conformance)
-                                                       └─→ A5 (bootstrap question)
-#687 (composition repo) ─────────────────────────────────→ A6 (UI integration)
+#1059 (positions) ──→ #1123 (contract) ──┬─→ #1124 (shell) ──┐
+                                         └─→ #1125 (remote) ─┼─→ #1126 (conformance)
+                                                             └─→ #1127 (bootstrap question)
+#687 (composition repo) ────────────────────────────────────────→ #1128 (UI integration)
 ```
 
-Issue #1059 lands first: it is the position the rest rests on. A1 follows, since
-both repo shapes compile against the contract. A2 and A3 are independent of each
-other. A6 waits on #687.
+Issue #1059 lands first: it is the position the rest rests on. The contract
+(#1123) follows, since both repo shapes compile against it. The shell (#1124)
+and remote (#1125) are independent of each other. UI integration (#1128) waits
+on #687. The bootstrap shape question (#1127) carries no blockers at all — it
+selects a shape rather than rendering one, so it can start immediately.
