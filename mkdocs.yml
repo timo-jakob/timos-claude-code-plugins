@@ -86,6 +86,7 @@ nav:
       - Adopt C4 architecture docs: how-to/adopt-c4-architecture-docs.md
       - Amend a C4 diagram: how-to/amend-a-c4-diagram.md
       - Adopt the ops surface: how-to/adopt-the-ops-surface.md
+      - Read your pipeline telemetry: how-to/read-pipeline-telemetry.md
       - Switch fable agents to opus: how-to/switch-fable-agents-to-opus.md
       - Maintain this repo: how-to/maintain-this-repo.md
       - Contribute: how-to/contributing.md

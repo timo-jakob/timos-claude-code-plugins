@@ -24,8 +24,10 @@ separate.
 - [Write docs in a bootstrapped repo](how-to/write-docs-in-a-target-repo.md)
 - [Install and use the plugins](how-to/install-and-use-plugins.md)
 - [Adopt the Claude Approver on your repo](how-to/adopt-the-approver.md)
+- [Adopt the standardized ops surface on your service](how-to/adopt-the-ops-surface.md)
 - [Adopt C4 architecture docs on an existing repo](how-to/adopt-c4-architecture-docs.md)
 - [Amend a C4 diagram by hand](how-to/amend-a-c4-diagram.md)
+- [Read your pipeline telemetry](how-to/read-pipeline-telemetry.md)
 - [Switch fable agents to opus when the fable budget runs out](how-to/switch-fable-agents-to-opus.md)
 - [Maintain this repo (quarterly template refresh)](how-to/maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](how-to/contributing.md)
@@ -35,6 +37,8 @@ separate.
 
 - [Reference overview](reference/index.md)
 - [Plugin & command inventory](reference/plugins.md)
+- [Commands](reference/commands.md)
+- [Agents](reference/agents.md)
 - [`c4_drift` findings](reference/c4-drift-findings.md)
 - [Repo scripts](reference/repo-scripts.md)
 - [Requirements](reference/requirements.md)
@@ -47,6 +51,7 @@ separate.
 - [The Claude Approver — design summary](explanation/claude-approver.md)
 - [The C4 architecture docs](explanation/c4-architecture-docs.md)
 - [The target-repo docs stack](explanation/target-repo-docs-stack.md)
+- [The local review loop](explanation/review-loop.md)
 
 ## 🏗 Architecture
 
