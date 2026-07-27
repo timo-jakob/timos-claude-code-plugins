@@ -1710,11 +1710,14 @@ Rules that carry the contract's weight:
     a child there claims it, treat the gap as open rather than assuming it
     landed with (d) or (f).
 - **Legacy records** (the pre-contract per-pipeline files, which carry no
-  `schema` key) **will be** handled by a v0→v1 adapter in child (e)'s rollup —
-  **no file migration is performed**, so the old files stay readable where they
-  lie.
+  `schema` key) are handled by a v0→v1 adapter in child (e)'s rollup
+  (`rollup-telemetry.zsh`, below) — **no file migration is performed**, so the
+  old files stay readable where they lie.
 - **Versioning:** a breaking envelope change bumps to `telemetry/v2`; `payload`
-  evolution is per-pipeline and non-breaking by definition.
+  evolution is per-pipeline and non-breaking by definition — with **one named
+  exception**: `payload.rounds` is a shared reporting key the rollup below
+  joins on, so renaming or nesting it silently withholds that pipeline's
+  `mean rounds` (see "Telemetry rollup").
 
 **Both pre-existing streams are now retrofitted** — review-loop as child (b),
 issue #1004, and refine-issue as child (c), issue #1005. Each emits
@@ -1726,6 +1729,151 @@ envelope key any more; both are payload builders. **No file migration is
 performed**: records written before a stream's retrofit stay where and as they
 are (`review-loop.jsonl`, `refine-issue.jsonl`), and child (e)'s rollup reads
 them through a v0→v1 adapter.
+
+## Telemetry rollup (#1007)
+
+A human wanting "how is this repo's pipeline doing?" should not need Grafana
+(that's child (f), #1008, for the separate cross-repo reporting repo). Child
+(e)'s `development/scripts/telemetry/rollup-telemetry.zsh` gives that in one
+command, with zero infrastructure, over any `telemetry/v1` stream — a `FILE`,
+the (d) #1006 shared `DIR` of `<repo-slug>.jsonl` files, or `-` for stdin — and,
+built in, over the two pre-contract legacy files (`review-loop.jsonl`,
+`refine-issue.jsonl`) via a v0→v1 adapter. No file migration is ever performed;
+the legacy files stay exactly where they lie.
+
+```text
+rollup-telemetry.zsh [FILE|DIR|-] [--repo OWNER/NAME] [--pipeline NAME] [--json] [-h|--help]
+```
+
+With no operand it reads the local default sink
+(`.claude/telemetry/telemetry.jsonl`, resolved relative to the caller's
+**current directory** — the rollup has no `--repo-dir` of its own, unlike the
+emitter's sink precedence above) — silently treated as an empty stream if it
+doesn't exist yet, since naming no path is not a claim that one exists; an
+**explicit** `FILE`/`DIR` operand that is missing or unreadable, by contrast, is
+a usage error (exit 2) — naming a path *is* such a claim, including an
+explicit empty string. A `DIR` reads every plain-file `*.jsonl` directly inside
+it (non-recursive; a directory or dangling symlink named `*.jsonl` is ignored,
+while a symlink *to* a regular `*.jsonl` is followed and read) and ignores
+everything else. `--` ends option parsing, so a stream file whose name begins
+with `-` can still be named.
+
+Reports, per pipeline: run count, outcome mix (`success`/`parked`/`escalated`/
+`failed`), mean rounds, mean `wall_s`, escalation rate. **Any measure whose
+divisor is zero is withheld, never guessed** — `-` in the text report, `null`
+(key still present) under `--json` — applied identically to all three derived
+measures. **`mean rounds` and `mean wall_s` are both deliberately PER-RECORD
+means, not per-loop:** an extended review-loop run's consecutive terminal
+records overlap in both span *and* rounds (see "Review-loop telemetry" below —
+an escalate-then-converge loop contributes both its escalation's round count
+and its later convergence's), and grouping them back into one loop is out of
+scope for this thin rollup — ARCHITECTURE.md's per-loop `jq` recipes already
+cover that case; averaging `rounds` over all of a pipeline's records is a
+different number from any single loop's round count.
+
+`--json` emits a bare array of per-pipeline objects — `unknown` is just another
+entry, and there is **no** cross-pipeline totals object anywhere:
+
+```json
+[{"pipeline":"review-loop","run_count":2,
+  "outcome_mix":{"success":1,"parked":0,"escalated":1,"failed":0},
+  "mean_rounds":5,"mean_wall_s":4132,"escalation_rate":0.5}]
+```
+
+**`--repo` and `--pipeline` are filters, never grouping dimensions** — the
+per-pipeline object above carries no `repo` key at all; `repo` only narrows
+which records count. `--pipeline NAME` always reports exactly one section for
+`NAME`, even when it matches nothing (zero-filled, every measure withheld) —
+distinguishing "I looked, there's genuinely none" from a silently empty report
+— unless **no run records remain once `--repo` has been applied** (emptiness is
+judged *after* `--repo` and *before* this filter), which is the "no records"
+case below rather than a synthesized zero section.
+
+**v0 (legacy) attribution**, since a pre-contract record carries no `schema`,
+no `pipeline`, and no `repo` key at all:
+
+- **pipeline** — filename first (`review-loop.jsonl` → `review-loop`,
+  `refine-issue.jsonl` → `refine-issue`), else shape-sniff (a record with both
+  `status` and `findings_by_round` → `review-loop`; a record with
+  `objections_raised` → `refine-issue`), else `unknown`.
+- **outcome** — narrowed according to the *attributed* pipeline (mirroring the
+  (b)/(c) retrofits' own narrowing exactly), never by re-sniffing the shape a
+  second time: for `review-loop`, its `status` — `CONVERGED`/`SKIPPED` →
+  `success`, every `ESCALATE_*`/`BUDGET_EXHAUSTED` → `escalated`, `ERROR` →
+  `failed`; for `refine-issue`, its `outcome` — `refined-ready` → `success`,
+  `parked` → `parked`; anything else (including an `unknown`-pipeline record,
+  or a filename-attributed record whose own `status`/`outcome` field — the one
+  its attributed pipeline narrows on — is itself missing or unrecognized) →
+  `failed`, the same never-a-guess catch-all the retrofits use. (A
+  filename-attributed record that merely lacks the shape-sniff fields — e.g. a
+  `review-loop.jsonl` record with `status` but no `findings_by_round` — still
+  narrows normally: attribution never re-derives itself from the shape a
+  second time.)
+- **repo** — always `unknown` (no legacy record ever carried one). An
+  unfiltered run counts `unknown`-repo records normally; `--repo X` **excludes**
+  them (they are not `X`) and the report prints an explicit note to **stderr**
+  naming how many were excluded — never a silent drop, in both text and
+  `--json` mode. `--repo` matches **case-insensitively** (GitHub identities are
+  case-insensitive but case-preserving; see the emitter's `--telemetry-dir`
+  slug rules above for why the same repo can reach the sink under more than one
+  casing). **`--repo unknown` is the one exception**: it *selects* the
+  unknown bucket rather than excluding it, so nothing is reported excluded in
+  that case (reporting a bucket as simultaneously counted and excluded would be
+  self-contradictory).
+- `kind: "enrichment"` records (v1 only — no legacy record is ever one) are
+  excluded from every count; so is any other off-enum `kind` (excluded rather
+  than coerced — the opposite policy from `outcome`, which is coerced and kept
+  as `failed`). That includes an explicit `null` or `false` `kind`: only a
+  genuinely **absent** `kind` key defaults to `run`. A record declaring a
+  `schema` other than
+  `"telemetry/v1"` (a future `telemetry/v2`+) is likewise excluded entirely
+  rather than read through this v1-shaped path — only the *absence* of a
+  `schema` key means legacy v0.
+
+**Off-contract field types never crash the rollup.** A `kind` outside `run`/
+`enrichment`, an `outcome` outside the 4-value enum, a non-numeric
+`wall_s`/`rounds`, or a non-object `payload` is handled defensively — an
+off-enum `kind` is *excluded* (treated as not-a-run), an off-enum `outcome` is
+*coerced* to `failed`, a bad numeric is *withheld* as `null` — rather than
+raising a `jq` type error that would abort the whole run over one bad record.
+The **absent**-key defaults are deliberately different from the off-enum ones,
+so the two must not be conflated: an absent `kind` defaults to `run` and *is*
+counted (only a **present** off-enum `kind` is excluded), while an absent,
+`null`, non-string or empty-string `repo`/`pipeline` falls into the
+corresponding `unknown` bucket — which is why the `unknown` **repo** bucket is
+not legacy-only: a `telemetry/v1` record with `repo: null` lands there too, and
+`--repo X` excludes it with the same stderr note. `outcome` is the one field
+where the two rules coincide: absent *and* off-enum both give `failed`.
+
+**`mean rounds` reads exactly one payload key: `payload.rounds`** (top-level
+`rounds` on legacy v0 records). This is the one place the otherwise-open
+`payload` carries a **shared cross-pipeline reporting key** — so renaming or
+nesting it in a pipeline's payload, which the "payload evolution is
+non-breaking by definition" rule would otherwise bless, silently turns that
+pipeline's `mean rounds` into a withheld `-`/`null` rather than erroring. A
+pipeline that has no round concept simply never carries the key and gets the
+withheld value, which is the correct answer for it.
+
+**An empty stream exits 0 and prints an explicit `no records` line** (`[]`
+under `--json`) rather than a misleading table of zeros — and so does a stream
+a `--repo` filter emptied out entirely: emptiness is judged **after** `--repo`
+and **before** `--pipeline`, so `--repo` removing every record wins over any
+`--pipeline` synthesized section. `--pipeline NAME`, by contrast, reports its
+own synthesized zero-filled section (above) when run records survive `--repo`
+(or no `--repo` was given) and `--pipeline` alone matches none of them — the
+"no records" case is reserved for a stream with **no run records left once
+`--repo` has been applied**, whether that is because the stream held none at
+all, because everything it held is excluded before any filter runs
+(enrichments, off-enum `kind`s, non-`telemetry/v1` schemas, malformed lines),
+or because `--repo` excluded the rest. A malformed or
+non-object line is skipped with a warning to **stderr** naming its source and
+line number; the rest of the stream is still reported, and the exit stays 0.
+Exit codes follow the shared taxonomy `emit-telemetry.zsh`/`validate-telemetry.zsh`
+already use: 0 success, 2 usage (bad flag, missing value, more than one
+operand, an explicit operand — including an empty string — that doesn't exist
+or isn't readable), 3 internal (`jq` missing, a scratch-file or read failure
+while streaming, or a failure in the aggregation pass). See
+`docs/how-to/read-pipeline-telemetry.md` for the user-facing walkthrough.
 
 ## Review-loop telemetry (#566)
 
@@ -3069,8 +3217,10 @@ skills *within* `development` has no natural owner under
 `development/skills/<skill>/scripts/`, and parking it inside one skill's
 directory makes every other caller reach across a sibling. `telemetry/` (#740)
 is the first such area — `emit-telemetry.zsh` and `validate-telemetry.zsh`, the
-shared `telemetry/v1` emitter and contract validator. Skills reference these
-with the usual `<skill-base-dir>` placeholder
+shared `telemetry/v1` emitter and contract validator. (`rollup-telemetry.zsh`
+lives beside them for cohesion, but is a **human-facing CLI** rather than a
+cross-skill callee, so it is not what the shared-area rationale is about.)
+Skills reference these with the usual `<skill-base-dir>` placeholder
 (`<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh`), the same
 relative idiom already used for `<skill-base-dir>/../bootstrap/scripts/…`. This
 stays *inside* one plugin, so it does not reintroduce the cross-plugin coupling
