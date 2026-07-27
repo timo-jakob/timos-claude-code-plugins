@@ -88,6 +88,15 @@ has_bracket() { grep -q '\[\[' "$FIX"; }
 # `||` exemption is deliberately about a fixture with NO `&&` in it — asserting
 # one there would be asserting the fixture is the wrong fixture.
 has_helper() { grep -qE "($HELPER_RE)" "$FIX"; }
+# The `&&` join here is DELIBERATE and is not the #1067 defect, despite looking
+# like it. That defect is about a LEFT operand whose failure is swallowed — but
+# `&&` short-circuits: when `has_helper` fails, `grep` never runs and the list
+# returns has_helper's own non-zero status, so the canary rejects a fixture
+# carrying an `&&` but no helper. Verified on bash 3.2.57 both ways: with
+# errexit the two spellings behave identically, and WITHOUT it this one still
+# returns 1 while `has_helper` on its own line returns grep's 0 — i.e. the
+# obvious "one assertion per line" rewrite is strictly weaker here, because it
+# makes the canary depend on errexit being active. Leave it as an AND-list.
 has_and_tail() { has_helper && grep -q '&&' "$FIX"; }
 
 # Names every .bats under <dir> (recursively, matching the detector's own scan
@@ -120,9 +129,10 @@ unloaded_helper_users() {
   if [ "$status" -eq 2 ]; then
     # No offender list exists on this path — telling the reader to "convert
     # assertions" would send them looking for something that is not there.
-    printf 'The scan could not be trusted. Fix the reported parse desync\n'        >&2
-    printf '(heredoc terminator / block opener) before this guard can pass:\n%s\n' \
-      "$output" >&2
+    printf 'The scan could not be trusted. Fix the reported scan error — a\n'      >&2
+    printf 'parse desync (heredoc terminator / block opener / unclosed\n'          >&2
+    printf 'multi-line quoted literal / unrecognized nested-helper close) or a\n'  >&2
+    printf 'usage error — before this guard can pass:\n%s\n' "$output" >&2
     return 1
   fi
   if [ "$status" -ne 0 ]; then
@@ -401,6 +411,28 @@ unloaded_helper_users() {
   lacks "$output" "$b:"
 }
 
+@test "the two NEW desyncs are also reported in a non-final file (multi-file scan, #1068)" {
+  # Sibling of the test above, for the diagnostics #1068 added. Every other
+  # test of these two scans ONE fixture, so only the END path is exercised —
+  # yet CI always scans ~80 files at once, where a missing per-file reset or a
+  # mis-attributed filename would silently drop them.
+  local a="$BATS_TEST_TMPDIR/na.bats" b="$BATS_TEST_TMPDIR/nb.bats"
+  printf '@test "x" {\n  printf %%s "never closes\n' > "$a"
+  printf '@test "y" {\n  true\n}\n' > "$b"
+  run zsh "$DETECT" "$a" "$b"
+  [ "$status" -eq 2 ]
+  contains "$output" "multi-line quoted literal is never closed"
+  contains "$output" "$a"
+  lacks "$output" "$b:"
+
+  printf '@test "x" {\n  h() {\n    true\n' > "$a"
+  run zsh "$DETECT" "$a" "$b"
+  [ "$status" -eq 2 ]
+  contains "$output" "1 nested helper function(s) never closed"
+  contains "$output" "$a"
+  lacks "$output" "$b:"
+}
+
 @test "offenders are attributed per file, and a desync suppresses them all (#1011)" {
   local a="$BATS_TEST_TMPDIR/oa.bats" b="$BATS_TEST_TMPDIR/ob.bats"
   printf '@test "x" {\n  [[ -f /nonexistent ]]\n  true\n}\n' > "$a"
@@ -517,6 +549,26 @@ b.bats"
   [ -z "$output" ]
 
   mkfix '@test "x" {\n  while [[ -f /a ]] || [[ -f /b ]]; do\n    break\n  done\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # The condition set is (if|elif|while|until) in BOTH the rule-5 guard and the
+  # shared judge_code exemption, but only `if`/`while` were ever exercised.
+  # These pin the END-TO-END verdict, not either alternation individually: the
+  # two are redundant here, so dropping the keyword from just one still leaves
+  # the other exempting the line. The isolating pins are elsewhere — the
+  # post-closer test drives rule 5's set (judge_code would otherwise exempt the
+  # whole line), and the one-liner-interior test drives judge_code's set (a
+  # path rule 5 never claims).
+  mkfix '@test "x" {\n  if false; then\n    :\n  elif [[ -f /a ]] && [[ -f /b ]]; then\n    true\n  fi\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  until [[ -f /a ]] || [[ -f /b ]]; do\n    break\n  done\n  true\n}\n'
   has_bracket
   run zsh "$DETECT" "$FIX"
   [ "$status" -eq 0 ]
@@ -986,6 +1038,851 @@ b.bats"
   contains "$output" "bracket"
   lacks "$output" "and-tail"
   [ "${#lines[@]}" -eq 1 ]
+}
+
+# --- five closed parser blind spots (#1068) ---------------------------------
+#
+# Each was a documented, accepted limit of the line-oriented awk state
+# machine; #1068 closes all five within that same machine (no rewrite). Every
+# limit gets its own planted-offender test that fails when its fix is
+# reverted, plus a not-flagged counterpart — the same one-planted-issue
+# discipline the rest of this file follows.
+
+@test "a self-contained ONE-LINE block with several statements is scanned (#1068)" {
+  # Limit 1 (false negative): rule 3 used to treat every one-liner as having
+  # no body to hide an assertion in. A multi-statement one DOES have a body.
+  mkfix '@test "x" { [[ -f /nonexistent ]]; true; }\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:1: bracket: @test \"x\" { [[ -f /nonexistent ]]; true; }"
+
+  # A single-statement one-liner carries nothing to flag either way.
+  mkfix 'teardown() { rm -rf "$W"; }\n'
+  grep -qF -- 'teardown() { rm -rf "$W"; }' "$FIX"
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # judge_oneliner is reached from rule 3 by BOTH the @test and the hook
+  # alternations; the hook one-liner is the shape that motivated the limit, so
+  # it gets its own planted offender rather than only an offender-free case.
+  mkfix 'teardown() { rm -f x; [[ -f /nonexistent ]]; }\n@test "x" {\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:1: bracket: teardown() { rm -f x; [[ -f /nonexistent ]]; }"
+}
+
+@test "a BRACE inside the @test title does not shield a one-liner offender (#1068)" {
+  # judge_oneliner finds the opening `{` with a quote-aware walk rather than
+  # the first `{` on the line. With a plain index() the interior would start
+  # mid-title, inherit the title's unmatched closing quote, and the real
+  # `; [[` would then read as quoted — exit 0, offender hidden. Every other
+  # one-liner fixture uses a brace-free title, so nothing else reaches this.
+  mkfix '@test "expands {a}" { rm -f y; [[ -f /nonexistent ]]; }\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:1: bracket:"
+  contains "$output" "[[ -f /nonexistent ]]"
+}
+
+@test "a one-liner interior is judged, not merely skipped — exemptions apply inside it (#1068)" {
+  # The counterpart above cannot tell "judge_oneliner found nothing" from
+  # "judge_oneliner never ran": its interior has nothing flaggable at all.
+  # These two DO carry the input the exemption is about, so they pin the
+  # judgement rather than an absence of input.
+  #
+  # A quoted `[[` in the interior is text, via in_quotes on the substring.
+  mkfix '@test "x" { printf %s "a; [[ -f /x ]]"; true; }\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # A condition in the interior is control flow, via judge_code's exemption.
+  # This is also the isolating pin for judge_code's OWN keyword set: rule 5
+  # never claims a one-liner interior, so an `elif` missing from judge_code
+  # alone reds here via sep_bracket.
+  mkfix '@test "x" { elif [[ -f /a ]] && [[ -f /b ]]; then :; fi; }\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # COMPOUND, deliberately: a simple `if [[ … ]]; then` interior would be
+  # unflaggable anyway (its `[[` follows `if `, which is neither line-start nor
+  # a separator), so the assertion would hold with the exemption deleted and
+  # pin nothing. With `&& [[` present, sep_bracket reports it the moment the
+  # exemption is dropped — the same shape the whole-line sibling pins.
+  mkfix '@test "x" { if [[ -f /a ]] && [[ -f /b ]]; then true; fi; }\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a one-liner interior reaches the and-tail rule too, not just bracket (#1068)" {
+  # judge_oneliner routes through the shared judge_code, so BOTH offender
+  # rules apply to an interior. Without this, a regression that dropped the
+  # and-tail half on the one-liner path would stay green.
+  mkfix '@test "x" { contains "$o" "a" && true; }\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:1: and-tail:"
+}
+
+@test "an assertion AFTER a closed construct on the same line is caught (#1068)" {
+  # Limit 2 (false negative): the condition exemption used to skip the WHOLE
+  # line; the remainder after a top-level fi;/done; is now re-judged. Assert
+  # the full `<file>:<line>: <rule>: ` prefix, not a bare needle — the bare
+  # text also appears in the output produced by dropping the condition
+  # exemption altogether, which would pass a broken rule.
+  mkfix '@test "x" {\n  if true; then :; fi; [[ -f /nonexistent ]]\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket: if true; then :; fi; [[ -f /nonexistent ]]"
+
+  mkfix '@test "x" {\n  while true; do break; done; [[ -f /nonexistent ]]\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket: while true; do break; done; [[ -f /nonexistent ]]"
+
+  # An `&&`/`||` closer tail ends the construct exactly as `;` does, so the
+  # assertion after it is swallowed the same way and must be caught. Both
+  # alternatives are pinned: dropping either from the closer pattern is a
+  # false clean the other half would not catch.
+  mkfix '@test "x" {\n  if true; then :; fi && [[ -f /nonexistent ]]\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+
+  mkfix '@test "x" {\n  if true; then :; fi || [[ -f /nonexistent ]]\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+
+  # Isolates rule 5's keyword set: with `until` missing from rule 5 the line is
+  # never re-judged (judge_code exempts it whole) and the offender vanishes.
+  mkfix '@test "x" {\n  until true; do :; done; [[ -f /nonexistent ]]\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+
+  # The LAST top-level closer wins: with two closed constructs on one line,
+  # taking the FIRST match would hand back a remainder still containing the
+  # second construct, whose own `if` would then exempt the whole thing.
+  mkfix '@test "x" {\n  if true; then :; fi; if true; then :; fi; [[ -f /nonexistent ]]\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+
+  # A compound condition entirely on ONE line has no closer on that line, so
+  # it stays fully exempt — the fix must not widen into this shape.
+  mkfix '@test "x" {\n  if [[ -f /a ]] && [[ -f /b ]]; then\n    true\n  fi\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a QUOTED 'fi;' on a condition line yields no re-judged remainder (#1068)" {
+  # The in_quotes guard in closed_construct_tail. Without it the remainder
+  # would start inside the needle, `judge_code` would flag the quoted `[[`,
+  # and the guard would advise converting a CONDITION to a helper — the one
+  # rewrite the header explicitly forbids (127 makes the branch silently
+  # false in a file lacking `load assertions`).
+  mkfix '@test "x" {\n  if grep -q "x fi; [[ -f /y ]]" f; then :; fi\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a WORD ending in fi/done is not a closer — the boundary class (#1068)" {
+  # closed_construct_tail's boundary class is a coarse but portable
+  # word-boundary substitute. Drop it and `wifi;` matches as a closer, so the
+  # remainder ` then :; [[ -f /a ]]; fi` gets judged and its `; [[` reported —
+  # flagging genuine control flow with the one conversion the header forbids
+  # for conditions.
+  mkfix '@test "x" {\n  if grep -q wifi; then :; [[ -f /a ]]; fi\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  while grep -q undone; do :; [[ -f /a ]]; done\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the carry is fed comment-stripped code, so a trailing comment cannot open a literal (#1068)" {
+  # apply_quote_carry takes `code`, not `$0`. Feeding it the raw line would let
+  # an apostrophe in a trailing comment open a phantom multi-line literal that
+  # swallows the rest of the block — the offender below would vanish and the
+  # scan would end exit 2 on "never closed" instead. Held only by accident
+  # elsewhere in the suite, which is exactly the reasoning used for the
+  # phantom-heredoc pins.
+  mkfix '@test "x" {\n  run foo  # the marker'"'"'s absence\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:3: bracket:"
+}
+
+@test "a still-OPEN condition list is exempt in full, closers and all (#1068)" {
+  # A line ending in `; then`/`; do` has not closed its condition: every token
+  # on it, including anything after a NESTED construct's own `fi;`, is still a
+  # condition-list member whose status the construct consumes. Re-judging here
+  # would flag control flow with the forbidden conversion advice.
+  mkfix '@test "x" {\n  while if true; then :; fi; [[ -f /a ]]; do\n    break\n  done\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # The guard alternation is (then|do); the `do` branch is above, this is
+  # `then`. Narrowing it to one keyword would re-judge the other's remainder.
+  mkfix '@test "x" {\n  if if true; then :; fi; [[ -f /a ]]; then\n    true\n  fi\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a post-closer remainder reaches the and-tail rule too (#1068)" {
+  # The remainder routes through the shared judge_code, so both offender rules
+  # apply to it — not just `bracket`.
+  mkfix '@test "x" {\n  if true; then :; fi; contains "$o" "a" && true\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: and-tail:"
+}
+
+@test "a helper function defined INSIDE a scanned block is not flagged (#1068)" {
+  # Limit 3 (false positive): its own `[[` line used to be flagged even though
+  # a call to it, in the SAME block, is caught normally.
+  mkfix '@test "x" {\n  has_it() {\n    [[ -f "$1" ]]\n  }\n  has_it /nonexistent\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # An assertion OUTSIDE the nested helper, in the same outer block, is still
+  # caught — the suppression is scoped to the nested function's own body.
+  mkfix '@test "x" {\n  has_it() {\n    [[ -f "$1" ]]\n  }\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:5:"
+}
+
+@test "every legal nested-helper SPELLING is scoped alike (#1068)" {
+  # Recognizing only `name() {` would leave the other legal spellings flagged
+  # — and the guard would advise "convert it to a helper" on a line that
+  # already IS a helper definition. These are the same spellings the hook
+  # recognizer admits (pinned for hooks at "the alternative hook spellings").
+  local spelling
+  for spelling in 'has_it() {' 'has_it () {' 'function has_it() {' 'function has_it {'; do
+    mkfix '@test "x" {\n  '"$spelling"'\n    [[ -f "$1" ]]\n  }\n  true\n}\n'
+    has_bracket
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "a nested helper's close may carry a ';' or redirection tail (#1068)" {
+  # in_helper clears only on a recognized close. A helper closed `};` or
+  # `} 2>/dev/null` would otherwise leave it set forever, silently suppressing
+  # every later line of the enclosing block — so the planted offender AFTER
+  # the helper is what proves the state was released.
+  local closer
+  for closer in '  }' '  };' '  } 2>/dev/null'; do
+    mkfix '@test "x" {\n  has_it() {\n    [[ -f "$1" ]]\n'"$closer"'\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:5: bracket: [[ -f /nonexistent ]]"
+  done
+}
+
+@test "a nested helper whose close is never recognized is exit 2, not a silent skip (#1068)" {
+  # The stuck-state desync. Suppressing a helper body is only safe if the
+  # scanner can prove where that body ENDS; a close it cannot recognize would
+  # otherwise swallow the rest of the block behind a confident exit 0.
+  mkfix '@test "x" {\n  has_it() {\n    [[ -f "$1" ]]\n  } | cat\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 2 ]
+  contains "$output" "1 nested helper function(s) never closed"
+  contains "$output" "(line(s): 2)"
+}
+
+@test "a nested helper still open at END OF FILE is exit 2, not a silent skip (#1068)" {
+  # The sibling of the block-close case: rule 4 catches a helper still open
+  # when the enclosing block closes, but a TRUNCATED file never reaches that
+  # `}`. Without the flush_file check, rule 4b suppresses every line from the
+  # opener to EOF and the scan exits 0 — and before #1068 this same file
+  # reported the `[[` line, so it would be a regression, not just a gap.
+  mkfix '@test "x" {\n  has_it() {\n    [[ -f /nonexistent ]]\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 2 ]
+  contains "$output" "1 nested helper function(s) never closed"
+  contains "$output" "(line(s): 2)"
+}
+
+@test "stuck nested helpers are counted PER HELPER, not per file (#1068)" {
+  # Mirrors the two-malformed-opener test: a count that saturated at one would
+  # hide every stuck helper after the first, and the header claims per-helper.
+  mkfix '@test "a" {\n  h1() {\n    true\n  } | cat\n}\n@test "b" {\n  h2() {\n    true\n  } | cat\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 2 ]
+  contains "$output" "2 nested helper function(s) never closed"
+  contains "$output" "(line(s): 2 7)"
+}
+
+@test "a nested helper still open when a NEW block opener arrives is exit 2 (#1068)" {
+  # The third way a helper close can go unfound. Rule 3 runs BEFORE the
+  # suppression rule, so a column-0 opener reached while the helper is open
+  # lands there — and without folding it into the tally it would discard the
+  # whole suppressed span behind a clean exit. Reverting the fold makes this
+  # file exit 0 while origin/main reports the `[[` line, so it is a regression
+  # guard, not just a gap.
+  mkfix '@test "a" {\n  h() {\n    [[ -f /payload ]]\n@test "b" {\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 2 ]
+  contains "$output" "1 nested helper function(s) never closed"
+  contains "$output" "(line(s): 2)"
+}
+
+@test "an and-tail swallowed helper call inside a nested helper is a documented blind spot (#1068)" {
+  # The nested-helper suppression covers the whole body, so it inherits the
+  # top-level helper's `and-tail` false negative too — the header says so, and
+  # the top-level analogue is already pinned, so this one gets the same pin.
+  mkfix '@test "x" {\n  h() {\n    contains "$1" "a" && true\n  }\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a function nested inside a helper body closes the outer one early — documented limit (#1068)" {
+  # The nested-helper model is one level deep: the inner function's own
+  # indented `}` clears the suppression, so the rest of the OUTER helper body
+  # is judged as block code and its assertion is flagged.
+  mkfix '@test "x" {\n  outer() {\n    inner() {\n      true\n    }\n    [[ -f /nonexistent ]]\n  }\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:6: bracket:"
+}
+
+@test "a close line that itself opens a heredoc still tracks it (#1068)" {
+  # The accepted close tail is a redirection, and `[<>]+` also matches `<<` —
+  # so `} <<EOF` is a legal close that OPENS a heredoc. Consuming it without
+  # tracking leaves the payload read as code, its column-0 `}` clears the
+  # enclosing block, and the assertion after the terminator is never judged:
+  # exit 0 on a file origin/main reports. Both close paths carry the tail, so
+  # both are pinned.
+  mkfix '@test "x" {\n  h() {\n    cat\n  } <<EOF\n}\npayload\nEOF\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:8: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "payload"
+
+  # The outer block's own close, same shape: an untracked payload here would be
+  # read at top level, where a `@test`-shaped payload line opens a phantom
+  # block and gets its contents judged.
+  mkfix '@test "x" {\n  true\n} <<EOF\n@test "phantom" {\n  [[ -f /payload ]]\n}\nEOF\n@test "real" {\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:9: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+}
+
+@test "a heredoc inside a nested helper body is tracked as payload (#1068)" {
+  # Rule 4b `next`s the helper body, so without tracking, a heredoc opened in
+  # it would have its payload read as code — and a column-0 '}' in that
+  # payload would clear the OUTER block, unscanning the rest of the test.
+  mkfix '@test "x" {\n  has_it() {\n    cat <<EOF\n}\n[[ -f /payload ]]\nEOF\n  }\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:8: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+}
+
+@test "a continuation line of a multi-line quoted literal is judged as string (#1068)" {
+  # Limit 4 (false positive): quote parity now persists across lines, so a
+  # continuation line is text, not code. The `[[` sits in a FLAGGABLE position
+  # (first token of the line) — a `[[` mid-line would be unflaggable anyway,
+  # so the test would pass with the whole carry reverted and pin nothing.
+  mkfix '@test "x" {\n  printf %s "line one\n[[ -f /x ]] still text"\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # The paired POSITIVE: the very same text outside a literal IS flagged, so
+  # the carry — not the text — is what makes the difference.
+  mkfix '@test "x" {\n  [[ -f /x ]] still text\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+
+  # The sep_bracket path is a separate branch of judge_code, so it needs its
+  # own continuation-line shape.
+  mkfix '@test "x" {\n  printf %s "line one\n; [[ -f /x ]] still text"\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a multi-line literal left OPEN at end of file is exit 2, not a silent clean (#1068)" {
+  # The carry can only be trusted if a carry that never closes is loud. Left
+  # silent, rule 1b swallows every remaining line — including the block's own
+  # close and any later @test opener — behind a confident exit 0.
+  mkfix '@test "x" {\n  printf %s "never closes\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 2 ]
+  contains "$output" "multi-line quoted literal is never closed"
+}
+
+@test "a line the parity model cannot read never OPENS a carry (#1068)" {
+  # `$( … )` and backticks restart the shell's quoting context, which the flat
+  # parity walk does not model, so a balanced real line can count odd. Such a
+  # line must not open a phantom literal — these two shapes are adapted from
+  # tests/react-topic-marker.bats and tests/coverage-floor-hook.bats (quote
+  # parity, the load-bearing property, is preserved verbatim), both of which
+  # the detector must still scan clean.
+  mkfix '@test "x" {\n  s="$(printf '"'"'%s'"'"' "$M" | grep -oE "\\-path '"'"'[^'"'"']+'"'"'" | sort -u)"\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:3: bracket: [[ -f /nonexistent ]]"
+
+  # The backtick clause of the same screen, which no other fixture reaches: a
+  # backtick substitution whose inner quotes leave the flat model counting odd.
+  # Without that clause the carry opens here and swallows the offender below.
+  mkfix '@test "x" {\n  v="`grep -oE "a'"'"'b" f`"\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:3: bracket: [[ -f /nonexistent ]]"
+
+  # Neither boundary line of a multi-line $(...) opens a carry (the first
+  # carries `$(`, the last a `)`), so no phantom literal forms and the
+  # remainder of the block is scanned — the payload lines in between are
+  # judged per line as code.
+  mkfix '@test "x" {\n  E="$(awk '"'"'\n    /^x/ { n=1 }\n  '"'"' "$CFG")"\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:5: bracket: [[ -f /nonexistent ]]"
+}
+
+@test "rule 1b claims a continuation line before the establishment screen runs (#1068)" {
+  # The screen must gate ESTABLISHMENT only, never a close. Rule 1b consumes
+  # every line that BEGINS inside a literal before the screen rule is reached,
+  # which is what guarantees that — so a `)` on a continuation line cannot
+  # close the carry early and start judging the literal's tail as code. (The
+  # `!was_open` conjunct in the screen is belt-and-braces for that ordering;
+  # rule 1b makes it unreachable today, so it is not independently testable.)
+  mkfix '@test "x" {\n  printf %s "one\nmid ) text\n[[ -f /x ]] two"\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "an offender BEFORE a literal-opening quote on the same line is still caught (#1068)" {
+  # The round-1 regression this file exists to prevent a repeat of: seeding
+  # in_quotes from the carry (which the carry-advance rule has already moved to
+  # the line's END parity) inverts every quoted/unquoted verdict on a line with
+  # odd parity, so an offender sitting before the literal-opening quote reads
+  # as string and vanishes. Nothing else in the suite puts a judged offender on
+  # an odd-parity line, so without this the regression could return unnoticed.
+  # It must reach a path that consults in_quotes — the leading-`[[` branch
+  # never does — hence the separator form.
+  mkfix '@test "x" {\n  run true; [[ -f /nonexistent ]]; printf %s "opens\ncloses"\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+
+  # The and-tail sibling, covering helper_open/and_after rather than
+  # sep_bracket.
+  mkfix '@test "x" {\n  run true; contains "$o" "a" && true; printf %s "opens\ncloses"\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: and-tail:"
+}
+
+@test "a FLAGGED condition line still tracks its heredoc — the rule-5 exception (#1068)" {
+  # The header carves rule 5 out of the flagged-line-heredoc false positive:
+  # unlike rules 6/6b, it judges its post-closer remainder AND still tracks the
+  # opener. Mirroring rules 6/6b here (nexting after a positive judgement)
+  # would leave the payload scanned as code, its column-0 `}` would clear the
+  # block, and everything after would go unscanned. The TRAILING offender is
+  # the load-bearing assertion: it proves the block survived the payload.
+  mkfix '@test "x" {\n  if true; then :; fi; [[ -f /nonexistent ]]; cat <<EOF\n}\n[[ -f /payload ]]\nEOF\n  [[ -f /trailing ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+  contains "$output" "$FIX:6: bracket:"
+  lacks "$output" "/payload"
+}
+
+@test "a column-0 '}' inside a multi-line literal does not clear the block — false clean pinned (#1068)" {
+  # Limit 4's OTHER direction: per-line quote tracking used to read a
+  # column-0 '}' inside the still-open literal as the block's close, so every
+  # later assertion in that test went unscanned. The planted offender AFTER
+  # it must still be caught.
+  mkfix '@test "x" {\n  printf %s "line one\n}\nline two"\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:5: bracket: [[ -f /nonexistent ]]"
+}
+
+@test "a heredoc opened on a CONDITION line is tracked, payload skipped (#1068)" {
+  # Limit 5a (false negative): the condition exemption used to `next` before
+  # the heredoc-opener rule ever ran, so this shape was never tracked.
+  mkfix '@test "x" {\n  if grep -q y <<EOF; then\n  [[ -f /payload ]]\n}\nEOF\n    true\n  fi\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:8: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+
+  mkfix '@test "x" {\n  if grep -q y <<EOF; then\n  [[ -f /payload ]]\n}\nEOF\n    true\n  fi\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # False-clean direction pinned: a column-0 '}' INSIDE the payload must not
+  # clear the block either, once the opener is recognized.
+  mkfix '@test "x" {\n  if grep -q y <<EOF; then\n}\n[[ -f /payload ]]\nEOF\n    true\n  fi\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:8: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+}
+
+@test "a heredoc opened on a '; do' condition line is tracked too (#1068)" {
+  # The condition set is if/elif/while/until, so the opener rule accepts a
+  # `; do` tail as well as `; then`. Testing only `; then` would let an edit
+  # narrowing the alternation pass while `while … <<EOF; do` silently reverts
+  # to an untracked payload whose column-0 '}' clears the block.
+  mkfix '@test "x" {\n  while grep -q y <<EOF; do\n}\n[[ -f /payload ]]\nEOF\n    break\n  done\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:8: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+
+  # `until` is the fourth condition keyword and reaches the opener rule the
+  # same way; nothing else in the suite drives it there.
+  mkfix '@test "x" {\n  until grep -q y <<EOF; do\n}\n[[ -f /payload ]]\nEOF\n    break\n  done\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:8: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+}
+
+@test "a heredoc opener with a PIPE tail is tracked, payload skipped (#1068)" {
+  # Limit 5b (false negative): '<<EOF | tee f' was a tail the opener rule did
+  # not accept. The payload carries a column-0 '}' so this pins the FALSE-CLEAN
+  # direction the acceptance criteria name: with the fix reverted the '}'
+  # clears the block and the trailing offender goes unscanned (exit 0), rather
+  # than merely being misreported.
+  mkfix '@test "x" {\n  cat <<EOF | tee "$f"\n}\n[[ -f /payload ]]\nEOF\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:6: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+
+  mkfix '@test "x" {\n  cat <<EOF | tee "$f"\n[[ -f /payload ]]\nEOF\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a heredoc opener with an AND tail is tracked, payload skipped (#1068)" {
+  # Limit 5b (false negative), the other tail: '<<EOF && x'. Same column-0 '}'
+  # in the payload, for the same false-clean reason as the pipe tail above.
+  mkfix '@test "x" {\n  cat <<EOF && true\n}\n[[ -f /payload ]]\nEOF\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:6: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+
+  mkfix '@test "x" {\n  cat <<EOF && true\n[[ -f /payload ]]\nEOF\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the CONDITION-line opener alternative accepts '<<-' too (#1068)" {
+  # The `<<-` pin matrix: the redirection tail has one, and the `|`/`&&` tails
+  # share one — the condition-line alternative is its own independently
+  # editable branch, so it needs its own. Narrow its `<<-?` to `<<` and the
+  # opener stops being tracked, the payload is read as code, its column-0 `}`
+  # clears the block, and the trailing assertion goes unscanned at exit 0.
+  # Both condition spellings, each with a column-0 `}` in the payload: the
+  # tracked opener keeps the block alive, so the trailing offender is still
+  # judged. The terminator is tab-indented, which only a `<<-` opener accepts,
+  # so this pins `dash` on this branch as well as the branch itself.
+  local head tail
+  for head in 'if grep -q y <<-EOF; then' 'while grep -q y <<-EOF; do'; do
+    case "$head" in (if*) tail='    true\n  fi' ;; (*) tail='    break\n  done' ;; esac
+    mkfix '@test "x" {\n  '"$head"'\n}\n[[ -f /payload ]]\n\tEOF\n'"$tail"'\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:8: bracket: [[ -f /nonexistent ]]"
+    lacks "$output" "/payload"
+  done
+}
+
+@test "an arithmetic shift is not a heredoc opener (#1068)" {
+  # The `|`/`&&` alternatives accept `<<` + identifier + operator, which an
+  # arithmetic shift whose RHS is followed by a bitwise or logical operator
+  # also spells. Unscreened, `$((a<<b|c))` opens a phantom heredoc named `b`
+  # and the scan ends exit 2 "never terminated" on a perfectly valid file —
+  # a regression the widened alternatives introduced and the `$((` screen
+  # removes. The trailing offender is what proves the scan kept going.
+  local expr
+  for expr in 'a<<b|c' 'a<<b||c' 'a<<b&&c'; do
+    mkfix '@test "x" {\n  echo $(('"$expr"'))\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:3: bracket: [[ -f /nonexistent ]]"
+  done
+
+  # The bare arithmetic COMMAND form has no `$` and reaches the same widened
+  # alternatives; `if (( … )); then` gets there via rule 5. Both are screened.
+  local cmd
+  for cmd in '(( f = a<<b | c ))' 'if (( a<<b|c )); then :; fi'; do
+    mkfix '@test "x" {\n  '"$cmd"'\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:3: bracket: [[ -f /nonexistent ]]"
+  done
+
+  # A QUOTED unclosed `$((` must NOT refuse a real opener — the screen walks
+  # unquoted occurrences only. Blind to quoting, this reads the payload as
+  # code, its column-0 `}` clears the block, and the offender below vanishes.
+  mkfix '@test "x" {\n  lacks "$output" '"'"'echo $((a'"'"'; cat <<EOF\n}\n[[ -f /payload ]]\nEOF\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:6: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+
+  # ...and a REAL opener later on a line whose arithmetic already closed is
+  # still tracked, so the screen is scoped to the unclosed case.
+  mkfix '@test "x" {\n  echo $((a<<2)); cat <<EOF |\n}\n[[ -f /payload ]]\nEOF\n  [[ -f /nonexistent ]]\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:6: bracket: [[ -f /nonexistent ]]"
+  lacks "$output" "/payload"
+}
+
+@test "a heredoc opener whose '|' or '&&' ENDS the line is tracked too (#1068)" {
+  # The idiomatic line-continuation spelling: the downstream command sits on
+  # the next line. Requiring a command after the operator left these untracked,
+  # so the payload was read as code and its column-0 `}` cleared the block —
+  # exit 0 with the trailing assertion unscanned, on a shape the header claimed
+  # was accepted.
+  local op
+  for op in '|' '||' '&&'; do
+    mkfix '@test "x" {\n  cat <<EOF '"$op"'\n}\n[[ -f /payload ]]\nEOF\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:6: bracket: [[ -f /nonexistent ]]"
+    lacks "$output" "/payload"
+  done
+}
+
+@test "only ONE heredoc per line is tracked; which one follows the alternation order — documented limit (#1068)" {
+  # This fixture pins the `<<A <<B` spelling specifically: the end-anchored
+  # redirection alternative matches leftmost at `<<A`, absorbing ` <<B` into
+  # its redirection group, so `A` is tracked and body B is read as code, where
+  # its column-0 `}` clears the block. Do NOT generalize that to "the first
+  # opener wins" — for `cat <<A | cat <<B` the same alternative's leftmost
+  # match is `<<B`, so the SECOND is tracked and both bodies are skipped; see
+  # the detector header's three-spelling enumeration. Distinct from the other
+  # heredoc limits either way: the recognizer ACCEPTED an opener and saw its
+  # heredoc terminate, so no desync guard fires — hence exit 0, pinned here as
+  # the deliberate limit it is.
+  # A's payload carries a planted offender, so this also reds if NEITHER
+  # opener is tracked (then it would be judged and reported) — without it the
+  # test cannot tell "first tracked" from "none tracked".
+  mkfix '@test "x" {\n  cat <<A <<B\n[[ -f /payload-a ]]\nA\n}\n[[ -f /payload ]]\nB\n  [[ -f /nonexistent ]]\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a heredoc delimiter outside the accepted charset is untracked — documented limit (#1068)" {
+  # The recognizer requires [A-Za-z_][A-Za-z_0-9.-]*, so a digit-leading or
+  # punctuation delimiter is untracked on every tail: payload read as code, its
+  # column-0 `}` clears the block, trailing assertion unscanned. Exotic, and
+  # pinned as the deliberate limit it is.
+  mkfix '@test "x" {\n  cat <<'"'"'1EOF'"'"'\n}\n[[ -f /payload ]]\n1EOF\n  [[ -f /nonexistent ]]\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the new opener tails accept '<<-' too, with tab-stripping (#1068)" {
+  # All four alternatives spell `<<-?`, but only the ORIGINAL redirection tail
+  # has a `<<-` pin. Narrowing `<<-?` to `<<` in one of the new alternatives —
+  # or setting `dash` on the wrong path — would leave `cat <<-EOF | tee f`
+  # untracked, its payload read as code, and the column-0 `}` in that payload
+  # clearing the block: a silent exit-0 false clean of exactly the class
+  # limit 5 closed. The terminator is tab-indented, which only a `<<-` opener
+  # accepts, so this also pins that `dash` is set on these paths.
+  local tail
+  for tail in ' | tee "$f"' ' && true'; do
+    mkfix '@test "x" {\n  cat <<-EOF'"$tail"'\n}\n[[ -f /payload ]]\n\tEOF\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:6: bracket: [[ -f /nonexistent ]]"
+    lacks "$output" "/payload"
+  done
+}
+
+@test "a QUOTED mention of each new opener tail does not open a phantom heredoc (#1068)" {
+  # The in_quotes guard in try_open_heredoc. Each widened tail reaches it, and
+  # an assertion ABOUT such a heredoc must stay text — otherwise it swallows
+  # the rest of the file and reports it CLEAN, the same false-clean class as
+  # the '<<<' here-string bug. Today the guard is covered only by accident
+  # (fixtures in this very file happen to be such strings), which evaporates
+  # the moment they are rewritten.
+  local needle
+  for needle in 'cat <<EOF | tee f' 'cat <<EOF && true'; do
+    mkfix '@test "x" {\n  lacks "$output" "'"$needle"'"\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:3: bracket: [[ -f /nonexistent ]]"
+  done
+}
+
+@test "a quoted heredoc mention on a CONDITION line does not open a phantom heredoc (#1068)" {
+  # The condition-line opener path (rule 5) is a phantom surface that did NOT
+  # exist before #1068, and only in_quotes closes it. The needle's closing
+  # quote must land immediately AFTER the delimiter — that is the shape the
+  # opener regex accepts (its optional quote class absorbs the closing quote),
+  # so this genuinely reaches the guard. A needle whose quote falls after the
+  # `; then` matches no alternative at all and would pin nothing.
+  local stanza
+  for stanza in 'if grep -q "y <<EOF"; then\n    true\n  fi' 'while grep -q "y <<EOF"; do\n    break\n  done'; do
+    mkfix '@test "x" {\n  '"$stanza"'\n  [[ -f /nonexistent ]]\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$FIX:5: bracket: [[ -f /nonexistent ]]"
+  done
+}
+
+# Each limit #1068 ADDS to the header gets its own pin too, by the same rule
+# that governs the #1067 ones above: a limit the prose advertises must red when
+# someone widens or narrows it, or the docs and the code diverge quietly.
+
+@test "a nested in-block helper written as a ONE-LINER is judged whole-line — documented limit (#1068)" {
+  # Not recognized by rule 4c (which wants the line to END at `{`) and not
+  # routed through judge_oneliner (only rule 3 reaches that), so it is judged
+  # as an ordinary block line. A separator makes the `[[` visible...
+  mkfix '@test "x" {\n  h() { rm -f y; [[ -f "$1" ]]; }\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket:"
+
+  # ...while the same helper with the `[[` FIRST is silently accepted, because
+  # `{ ` is not a command separator. Both halves are documented; pinning them
+  # is what makes a future change to either a deliberate one.
+  mkfix '@test "x" {\n  h() { [[ -f "$1" ]]; }\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a nested helper whose brace is on the NEXT line is not scoped — documented limit (#1068)" {
+  # Rule 4c admits only single-line openers, so this body is judged as
+  # ordinary block code and its assertion is flagged.
+  mkfix '@test "x" {\n  has_it()\n  {\n    [[ -f "$1" ]]\n  }\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:4: bracket:"
+}
+
+@test "a one-liner interior starting with a condition is exempt in full — documented limit (#1068)" {
+  # The limit-1 x limit-2 intersection: the post-closer re-judging lives in
+  # rule 5, which sees whole condition LINES, not extracted interiors.
+  mkfix '@test "x" { if true; then :; fi; [[ -f /nonexistent ]]; }\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a heredoc opener with a generic ';' or '&' tail is untracked — documented limit (#1068)" {
+  # #1068 narrowed this limit from "every non-redirection tail" to the residual
+  # shapes below: a generic `;` tail, a backgrounding `&`, a redirection
+  # composed with another accepted tail, and a condition whose construct
+  # continues on the same line.
+  # Both newly ACCEPTED tails (| and &&) have planted-offender pins; the
+  # residual pair gets the same treatment in the other direction, so widening
+  # the opener rule later is a visible change rather than a quiet one. The
+  # column-0 `}` in the payload is what makes the current verdict exit 0: the
+  # payload is read as code and clears the block.
+  local tail
+  for tail in '; echo after' ' &' ' > "$f" | tee x' '; then :; fi'; do
+    mkfix '@test "x" {\n  cat <<EOF'"$tail"'\n}\n[[ -f /payload ]]\nEOF\n  [[ -f /nonexistent ]]\n}\n'
+    has_bracket
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "a carry refused by the establishment screen leaves the block clearable — a documented residual gap (#1068)" {
+  # ONE of the residual exit-0 gaps the detector enumerates (see its FOUR-gap
+  # section) — not a desync: the opening line carries a `$(`, so no carry is
+  # established, the literal's body is judged as code, and its column-0 `}`
+  # clears the block — so the later planted offender goes unscanned. Pinned as
+  # a deliberate limit; if a future change closes it, this test reds and the
+  # header entry must move.
+  mkfix '@test "x" {\n  printf %s "opens $( and stays open\n}\n[[ -f /payload ]]\nstill"\n  [[ -f /nonexistent ]]\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a phantom carry closed MID-FILE swallows the span between — a documented residual gap (#1068)" {
+  # The second of the four residual exit-0 gaps. A parity misread opens a
+  # carry the shell would not (the documented backslash-inside-single-quotes
+  # shape: the model treats the backslash as an escape, so the closing quote is
+  # swallowed). Rule 1b then eats every line until some later line flips the
+  # parity back — a full-line comment holding one apostrophe does it, because
+  # rule 1b consumes continuation lines BEFORE the comment rule. The offender
+  # in between is skipped and the scan ends exit 0. Pinned as the deliberate
+  # limit it is: origin/main reports that line, so if a future change bounds
+  # this, the test reds and the header entry must move.
+  mkfix '@test "x" {\n  contains "$o" '"'"'x\\'"'"' && true\n  [[ -f /nonexistent ]]\n  # don'"'"'t\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "code after a literal's mid-line close on a continuation line is not judged — documented limit (#1068)" {
+  # Rule 1b treats the whole continuation line as text once the literal is
+  # established, so real code after the closing quote is never judged. The
+  # pre-#1068 per-line model missed the same remainder, so this is carried
+  # over rather than new — but it is advertised, so it is pinned.
+  mkfix '@test "x" {\n  printf %s "one\ntwo"; [[ -f /nonexistent ]]\n  true\n}\n'
+  has_bracket
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # --- the companion convention ----------------------------------------------
