@@ -59,24 +59,25 @@ review panel, upgrade agent) is speculative cost until something real needs it;
 the contract in §3 is framework-agnostic at the boundary, so admitting Angular
 later costs a plugin, not a redesign.
 
-### 2.3 The MFE contract is an exported mount function over an import-map-pinned ES module
+### 2.3 The MFE contract is an exported mount function over an import-map-resolved ES module
 
 A remote's entry module exports `mount(el, ctx)` and `unmount(el)`. The shell
 resolves the module through an import map and calls it. Module Federation is
 explicitly rejected.
 
-*Rationale.* Federation couples every remote to the shell's bundler and to a
-negotiated set of shared dependency versions. A remote can then no longer
-upgrade React on its own schedule without risking a shared-scope conflict — and
-because remotes deploy independently, that conflict surfaces in production
-rather than at build time. It defeats the independence the whole shape exists to
-provide. A plain ES module with a function boundary keeps remotes genuinely
-independent.
+*Rationale.* Under route ownership only one remote is mounted at a time, so the
+shared framework runtime that federation exists to deduplicate buys us very
+little — the cost it saves is roughly one framework runtime per route
+transition, served from an immutable bundle that caches indefinitely. What it
+adds is a build plugin, a runtime container protocol, and a shared-scope
+negotiation whose misconfiguration surfaces at runtime rather than at build.
 
-The usual argument for federation is avoiding a duplicated framework runtime.
-Route ownership (§2.1) defuses it: only one remote is mounted at a time, so the
-cost is roughly one framework runtime per route transition, from an immutable
-bundle that caches indefinitely — not N concurrent copies.
+We reject it as unearned complexity for this shape, not as forced coupling —
+a distinction worth stating precisely, because the sloppier version of this
+argument is wrong. Modern federation can be configured to share nothing and to
+interoperate across bundlers, so it does not *inherently* stop a remote
+upgrading React on its own schedule. But a mechanism we would deliberately
+configure into inertness is one we should not adopt at all.
 
 ## 3. The contract — `mfe-contract/v1`
 
@@ -96,8 +97,11 @@ export interface MfeContext {
   signal: AbortSignal;
 }
 
-export function mount(el: HTMLElement, ctx: MfeContext): void | Promise<void>;
-export function unmount(el: HTMLElement): void | Promise<void>;
+/** The shape a remote's entry module must satisfy. */
+export interface MfeModule {
+  mount(el: HTMLElement, ctx: MfeContext): void | Promise<void>;
+  unmount(el: HTMLElement): void | Promise<void>;
+}
 ```
 
 Two details this sketch deliberately leaves to A1, because they need their own
@@ -109,12 +113,14 @@ that never completed.
 
 **Why a function boundary rather than a custom element.** With route ownership
 the shell must hand each remote real context — a session, a base path, a
-navigation callback. Custom elements carry that badly: attributes are strings,
-so anything structured travels by property assignment or `CustomEvent`, untyped
-and hand-rolled on both sides. Custom-element registration is also a
-process-global side effect, so two versions in one document is a hard failure
-rather than a graceful one. A function signature is typed, collision-free, and
-trivially assertable by a conformance check.
+navigation callback. Custom elements carry that less directly: attributes are
+strings, so anything structured travels by property assignment or
+`CustomEvent`. That is workable and can be typed, but it is hand-rolled per
+element rather than falling out of a signature. The decisive objection is
+different and unavoidable: `customElements.define` is a process-global
+registration that throws on a duplicate tag name, so a shell loading two
+versions of the same remote — which route ownership permits during a rollout —
+is a hard failure rather than a graceful one.
 
 The cost, stated plainly: this is a family convention rather than a web
 standard, so the family owns documenting and versioning it. The `v1` in the
@@ -202,11 +208,11 @@ conflicts into production, which is precisely the failure the shape exists to
 prevent. Its dedup benefit is small under route ownership.
 
 **Custom elements + import maps.** A genuine contender, and the standards-based
-option. Rejected per §3 because route ownership demands rich typed context,
-which custom elements carry poorly, and because global tag registration turns
-version overlap into a hard error. Retained as the natural answer *if* the
-family ever needs to embed into host pages it does not control — that would be a
-new position, filed as such.
+option. Rejected because `customElements.define` is a process-global
+registration that throws on a duplicate tag name, making two live versions of a
+remote a hard failure; the context-passing ergonomics are a secondary cost.
+Retained as the natural answer *if* the family ever needs to embed into host
+pages it does not control — that would be a new position, filed as such.
 
 **Build-time composition via npm packages.** Simplest toolchain and best type
 safety, but the shell must rebuild and redeploy for any remote change. That is a
@@ -257,9 +263,10 @@ exactly the non-UI foundation, which is what it actually delivered. It is
 retitled to that scope and keeps #687, #689, #936, #937, #944. The UI work moves
 out.
 
-**#686 (`development-react` topic plugin) is unchanged**, with #957 (rescoped),
-plus #958, #959 and #960. Its children concern the React plugin's capabilities,
-which are orthogonal to how MFEs compose.
+**#686 (`development-react` topic plugin) keeps its scope but changes position** —
+detached from #682, it is now a standalone top-level epic — with #957
+(rescoped), plus #958, #959 and #960. Its children concern the React plugin's
+capabilities, which are orthogonal to how MFEs compose.
 
 **A new epic — MFE composition (#1122)** — holds the new domain. Filed
 2026-07-27:
@@ -274,14 +281,16 @@ which are orthogonal to how MFEs compose.
 | #1128 | Composition-repo UI integration — gateway routes, import map as the single pin, cross-MFE E2E, `/info` live-version assertions |
 
 ```text
-#1059 (positions) ──→ #1123 (contract) ──┬─→ #1124 (shell) ──┐
-                                         └─→ #1125 (remote) ─┼─→ #1126 (conformance)
-                                                             └─→ #1127 (bootstrap question)
-#687 (composition repo) ────────────────────────────────────────→ #1128 (UI integration)
+#1059 ──→ #1123 (contract) ──┬─→ #1124 (shell) ──┐
+                             └─→ #1125 (remote) ─┼─→ #1126 (conformance)
+                                                 └─→ #1128 (UI integration) ←── #687
+#1127 (bootstrap shape question) — no blockers
 ```
 
 Issue #1059 lands first: it is the position the rest rests on. The contract
 (#1123) follows, since both repo shapes compile against it. The shell (#1124)
-and remote (#1125) are independent of each other. UI integration (#1128) waits
-on #687. The bootstrap shape question (#1127) carries no blockers at all — it
-selects a shape rather than rendering one, so it can start immediately.
+and remote (#1125) are independent of each other, and both also wait on #957
+(the common React overlay they layer onto). Conformance (#1126) and UI
+integration (#1128) each wait on both shapes; #1128 additionally waits on #687.
+The bootstrap shape question (#1127) carries no blockers at all — it selects a
+shape rather than rendering one, so it can start immediately.
