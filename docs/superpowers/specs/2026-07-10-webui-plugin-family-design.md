@@ -1,5 +1,10 @@
 # WebUI plugin family, API lifecycle, and cross-repo composition — design
 
+> **Superseded (2026-07-27).** §2's framework decision table and its Module
+> Federation micro-frontend shape are reversed by
+> `2026-07-27-mfe-app-family-design.md`. The rewrite of this document is tracked
+> by #1059; until it lands, treat the newer spec as authoritative.
+
 **Date:** 2026-07-10
 **Status:** Approved design, pre-implementation
 **Builds on:** ARCHITECTURE.md "Polyrepo, contracts, and the cross-repo big
