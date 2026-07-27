@@ -42,14 +42,32 @@ gaps, weak assertions, and test-quality issues that let script regressions ship.
   `tests/no-inert-bracket-assertions.bats` guards this (#1011) for the shapes it can detect, which is why
   reading for it still pays. The fix is a helper rostered in `tests/README.md` — `lacks` for a negative
   substring check — or plain `[ ... ]` for file and numeric tests, which errexit catches on every bash and is
-  never a finding. Two carve-outs. The first is about code outside those blocks and is qualified — outside the
-  qualification the assertion is still a finding: a `[[ ]]` inside a **named helper function** is fine when it
+  never a finding *as a command of its own*; joined to another command it is a finding like any other
+  assertion, per the joining bullet below. Two carve-outs. The first is about code outside those blocks and is
+  qualified — outside the qualification the assertion is still a finding: a `[[ ]]` inside a **named helper
+  function** is fine when it
   is the statement whose status the helper returns, typically its last command or one carrying an explicit
   `|| return`; one whose status the helper discards is as inert as one in a test body, and no suite lint scans
   helper bodies, so that one IS a finding. The second holds anywhere, inside a test body or hook included: a
   `[[ ]]` used as an **`if`/`elif`/`while`/`until` condition** is control flow, not an assertion — never flag
   it and never ask for it to be converted, since rewriting it as a helper call in a file without
   `load assertions` yields 127 and a silently false branch
+- Assertions neutralised by **how they are joined** (#1067), which switching to a helper does not fix: in
+  `contains "$output" "a" && contains "$output" "b"` the first call is swallowed, because the AND-list errexit
+  exemption applies to a function call exactly as it does to `[[ ]]` — and unlike the `[[ ]]` inertness this
+  one holds on **every** bash, so neither CI leg catches it. The fix is one assertion per line.
+  `tests/find-inert-bracket-assertions.zsh`'s `and-tail` rule flags the swallowed **left** operand of `&&`
+  inside a scanned block, so most instances are already red before you read them — but the shapes it cannot
+  see are still findings, and are the ones worth reading for; among them: the same `&&` join on a plain
+  `[ ... ]` (`[ -n "$a" ] && [ -f "$b" ]`, matched by neither rule), the same join inside a **named helper
+  function** (unscanned, and here the helper-function carve-out above does NOT apply — wrapping it changes
+  nothing about the swallowed status), an `||` tail that cannot fail (`contains … || true`, `… || echo note`),
+  a **pipeline** join (`contains … | tee f` — a pipeline's status is its last command's, and bats test bodies
+  do not run under `pipefail`), an AND-list continued onto the next line with a trailing `\`, and the same
+  join on a project-local wrapper around a rostered helper. Never flag the converse: a helper that **ends**
+  the list
+  (`true && contains …`, `false || contains …`) is the status errexit sees, and an `||` tail that can fail
+  (`contains … || return 1`) is a real assertion
 - JSON output checked by grep instead of `jq` field assertions — brittle to formatting, blind to structure
 - Tautological assertions that pass regardless of the script's behaviour
 - Missing assertions on side effects the script's contract promises (files written, labels applied, branches

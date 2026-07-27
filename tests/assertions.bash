@@ -24,23 +24,60 @@
 # on every bash, which is why it is never flagged.
 #
 # Each helper below is an ordinary function, so calling it is a simple command
-# that errexit catches wherever it appears AS A COMMAND OF ITS OWN — position
-# stops mattering. tests/no-inert-bracket-assertions.bats bans the inert
-# `[[ ]]` form these replace, and fails any tests/*.bats that calls a helper
-# without `load assertions`; plain `[ ... ]` remains correct and is never
-# flagged.
+# that errexit catches wherever it appears AS A COMMAND OF ITS OWN — which is the
+# whole of the guarantee, and no more: position stops mattering, the WAY YOU
+# JOIN IT TO OTHER COMMANDS does not. See the neutralisation list below (#1067);
+# an earlier version of this paragraph stopped at "position stops mattering",
+# which is precisely the belief that produces `contains … && contains …`.
+# tests/no-inert-bracket-assertions.bats bans the inert `[[ ]]` form these
+# replace, and fails any tests/*.bats that calls a helper without
+# `load assertions`. Plain `[ ... ]` is never flagged and needs no ban — errexit
+# catches it on every bash — but "never flagged" is not "always safe": it is
+# subject to the same joining rules below.
 #
-# Two ways to neutralise a helper call, both still your responsibility:
+# Ways to neutralise a helper call. The first is now caught by a lint; the rest
+# are caught partially or not at all, so read this list as the convention, not as
+# a description of what the guards enforce (#1067):
 #   * `a && b` — the AND-list errexit exemption applies to a function call
 #     exactly as it does to `[[ ]]`, so a failing `a` is swallowed. Put each
-#     assertion on its own line. An `||`-joined pair is fine (the command after
-#     the final `||` is what errexit sees).
-#   * a bare `!` negation — inert for its own reason, guarded by #829 in
-#     tests/no-inert-negative-assertions.bats. Use `lacks` instead of negating
+#     assertion on its own line. The `and-tail` rule of
+#     tests/find-inert-bracket-assertions.zsh flags the swallowed left operand.
+#   * a bare `!` negation — inert for its own reason. #829's
+#     tests/no-inert-negative-assertions.bats catches it at LINE START only, so a
+#     mid-line `run x; ! lacks …` is on you. Use `lacks` instead of negating
 #     `contains`.
+#   * `<helper> … || <something that succeeds>` — NOT flagged by anything, and
+#     the easiest of these to write by accident. An `||` list is fine only
+#     when its LAST member can itself fail: `contains … || return 1` is an
+#     assertion, `contains … || true` (or `|| echo note`) discards the result
+#     entirely. The `and-tail` rule deliberately stays out of `||` because that
+#     judgment is about the tail, not the shape.
+#   * `<helper> … | <cmd>` — also unflagged. A pipeline's status is its LAST
+#     command's, and bats does not run test bodies under `pipefail`, so piping an
+#     assertion discards it just as `|| true` does. Never pipe an assertion.
+#
+# ALL FOUR apply to a plain `[ ... ]` as well — none of them is about helpers.
+# `[ -n "$a" ] && [ -f "$b" ]` swallows the left test on EVERY bash and no rule
+# here flags it (`bracket` keys on `[[`, `and-tail` on the helper roster); so do
+# `[ … ] || true`, a piped `[ … ]`, and a bare `! [ … ]` — that last one caught
+# by #829 only at line start, exactly as for a helper. One assertion per line is
+# the rule for every form.
 #
 # Load from a test file with `load assertions` (bats resolves it relative to the
 # test's directory).
+#
+# NAMING IS LOAD-BEARING: a public, top-level function in this file IS an
+# assertion helper; internals are `_`-prefixed. Both bats guards derive the
+# roster from that rule rather than restating it (#1067) — the detector's awk
+# `H` is the only other CODE copy, and a roster-sync test fails if the two
+# disagree. So a new helper is named plainly, a new internal starts with `_`,
+# and a non-assertion utility does not belong here at all.
+#
+# Adding one also means updating the copies no derivation can reach: the
+# LITERAL-vs-REGEX paragraph just below, which owes every helper a verdict
+# (nothing checks it), and tests/README.md's roster (a guard test does check
+# that). tests/find-inert-bracket-assertions.zsh's header carries the full
+# checklist.
 #
 # LITERAL vs REGEX: `contains`, `lacks`, `starts_with` and `ends_with` match
 # LITERALLY — `${1#*"$2"}` and `case` with a quoted pattern both treat `$2` as
@@ -73,22 +110,61 @@ _assert_args() {
   fi
 }
 
+# The mismatch (1) diagnostic, shared by every helper — and the reason a failure
+# is now debuggable from a CI log (#1067). bats prints the failing SOURCE line,
+# so the needle was always visible; the haystack never was, which is what the
+# `[[ "$output" == *x* ]]` form these helpers replaced at least left inspectable
+# in context.
+#
+# ON fd 2, deliberately: hundreds of call sites pin `$status` after
+# `run <helper>`, and bats folds a helper's stdout into `$output`. Writing the
+# diagnostic to stdout would rewrite `$output` under every one of them. Sending
+# it to stderr leaves plain `run` callers seeing it in `$output` only when they
+# do not use `--separate-stderr`, which is exactly where a human wants it.
+#
+# `${FUNCNAME[1]}` names the helper that failed, so one shared printer needs no
+# per-helper label. It is guarded with `-` because a helper called from a context
+# without a call stack would otherwise be an unbound-variable error INSIDE the
+# failure path — turning a legible mismatch into a confusing one.
+#
+# The haystack is truncated because `$output` in this suite routinely runs to
+# kilobytes (a whole bats run, a whole JSON dossier); an untruncated dump would
+# bury the assertion it is meant to explain. The truncation is announced with the
+# full length, so a reader is never misled into thinking they saw everything.
+_assert_mismatch() {
+  local who="${FUNCNAME[1]-assertion helper}" hay="$1" needle="$2" max=400
+  printf '%s: assertion failed\n  needle:   %s\n' "$who" "$needle" >&2
+  if [ "${#hay}" -gt "$max" ]; then
+    printf '  haystack: %s\n  … haystack truncated at %s of %s characters\n' \
+      "${hay:0:$max}" "$max" "${#hay}" >&2
+  else
+    printf '  haystack: %s\n' "$hay" >&2
+  fi
+  return 1
+}
+
 # `$1` contains the literal substring `$2`.
-contains() { _assert_args "$#" "${2-}" || return 2; [ "${1#*"$2"}" != "$1" ]; }
+contains() {
+  _assert_args "$#" "${2-}" || return 2
+  [ "${1#*"$2"}" != "$1" ] || _assert_mismatch "$1" "$2"
+}
 
 # `$1` does NOT contain the literal substring `$2`.
-lacks() { _assert_args "$#" "${2-}" || return 2; [ "${1#*"$2"}" = "$1" ]; }
+lacks() {
+  _assert_args "$#" "${2-}" || return 2
+  [ "${1#*"$2"}" = "$1" ] || _assert_mismatch "$1" "$2"
+}
 
 # `$1` begins with the literal string `$2`.
 starts_with() {
   _assert_args "$#" "${2-}" || return 2
-  case "$1" in "$2"*) return 0 ;; *) return 1 ;; esac
+  case "$1" in "$2"*) return 0 ;; *) _assert_mismatch "$1" "$2" ;; esac
 }
 
 # `$1` ends with the literal string `$2`.
 ends_with() {
   _assert_args "$#" "${2-}" || return 2
-  case "$1" in *"$2") return 0 ;; *) return 1 ;; esac
+  case "$1" in *"$2") return 0 ;; *) _assert_mismatch "$1" "$2" ;; esac
 }
 
 # `$1` matches the extended regular expression `$2` — the replacement for
@@ -97,7 +173,29 @@ ends_with() {
 # anchors per LINE and would have silently weakened every anchored assertion to
 # "some line matches".) `$2` is deliberately unquoted — quoting it would make
 # the ERE literal.
+# An UNCOMPILABLE `$2` is misuse (2), not a mismatch (1). `[[ =~ ]]` returns 2
+# for an ERE it cannot compile — verified on bash 3.2.57 — where a plain
+# non-match returns 1. Routing every non-zero status through _assert_mismatch
+# would flatten the two, so a typo'd pattern in the sanctioned negative form
+# (`run matches …; [ "$status" -eq 1 ]`) would PASS while matching nothing at
+# all: the vacuous-assertion class this whole library exists to remove, and the
+# reason misuse is a distinct status in the first place.
 matches() {
   _assert_args "$#" "${2-}" || return 2
-  [[ "$1" =~ $2 ]]
+  local rc=0
+  # shellcheck disable=SC2319  # the condition's status IS what we want here:
+  # `[[ =~ ]]` returns 2 for an uncompilable ERE and 1 for a non-match, and
+  # telling those apart is the entire point. The `|| rc=$?` form is also what
+  # keeps the assertion out of errexit's way while we read it — a bare
+  # `[[ … ]]` followed by `rc=$?` would abort the function on bash >= 4 before
+  # the assignment ran, and silently not abort it on bash 3.2.
+  [[ "$1" =~ $2 ]] || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) _assert_mismatch "$1" "$2" ;;
+    *)
+      printf 'assertion helper: not a valid extended regular expression: %s\n' "$2" >&2
+      return 2
+      ;;
+  esac
 }

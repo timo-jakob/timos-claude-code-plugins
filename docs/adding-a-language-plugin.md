@@ -204,7 +204,9 @@ issue per slice, and resolve them one at a time. Validate each slice on a **real
   `load assertions` and use the helpers rostered in
   [`tests/README.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/tests/README.md)
   (the contributor-facing source of truth for that list); plain `[ ... ]` stays
-  correct and is never flagged. A bare `[[ ... ]]` in an `@test` body or a bats
+  correct and is never flagged **as a command of its own** — joined to another
+  command it obeys the one-assertion-per-line rule below like anything else.
+  A bare `[[ ... ]]` in an `@test` body or a bats
   `setup`/`teardown` hook (including the `_file` variants) is **inert** under
   the bash 3.2 macOS ships — errexit is not applied to it at all, so a false one
   on a non-final line is silently ignored and the test passes while proving
@@ -224,6 +226,17 @@ issue per slice, and resolve them one at a time. Validate each slice on a **real
   `[[ ]]` used as an **`if`/`elif`/`while`/`until` condition** is control flow,
   not an assertion — don't convert it, since rewriting it as a helper call in a
   file without `load assertions` yields 127 and a silently false branch.
+- **Keep one assertion per line** (#1067). A helper call is only caught by
+  errexit as a command of its own: `contains "$output" "a" && contains "$output"
+  "b"` swallows the first call, because the AND-list exemption applies to a
+  function call exactly as it does to `[[ ]]` — and this one holds on *every*
+  bash, so neither CI leg catches it. The same guard's `and-tail` rule rejects
+  the swallowed left operand of `&&`. The condition carve-out above carries
+  over; the named-function one does not, since wrapping the join in a function
+  only hides it. The rule is about joining, not about helpers, so `[ -n "$a" ]
+  && [ -f "$b" ]` is inert too even though no rule flags it — as is
+  `contains … || true`, since an `||` tail is an assertion only when its last
+  member can itself fail.
 - **End-to-end:** `/development-claude-plugin:test` drives a headless session with
   the local plugins against an isolated clone of a real repo — use it to verify a
   slice actually does what you intend.

@@ -1,6 +1,22 @@
 #!/usr/bin/env bats
 #
-# Suite lint (#1011): a `[[ ... ]]` assertion inside an `@test` body — or inside
+# Suite lint (#1011, extended #1067). TWO inert shapes, one detector:
+#
+#   * `bracket`  — a `[[ ... ]]` assertion inside a scanned block (#1011),
+#                  described at length below;
+#   * `and-tail` — an assertion-helper call swallowed by an `&&` tail (#1067),
+#                  described above its own section of tests further down.
+#
+# They are different defects with the same consequence: an assertion whose
+# status errexit never sees, so the test passes while proving nothing. #1011
+# closed the first and #829 closed the bare-`!` form; the `&&` tail was left
+# documented-but-unguarded, which #1067 closes — the belief that produces the
+# line ("calling a helper makes position stop mattering") was in this repo's own
+# prose, so prose alone was never going to hold it back.
+#
+# ---------------------------------------------------------------------------
+#
+# `bracket`: a `[[ ... ]]` assertion inside an `@test` body — or inside
 # setup/teardown — is SILENTLY INERT unless it happens to be the block's last
 # statement, because bash 3.2 (macOS `/bin/bash`) exempts a failing `[[ ]]` from
 # errexit where it catches `[ ... ]` correctly. bash >= 4 catches both — which
@@ -15,9 +31,13 @@
 # tests/find-inert-bracket-assertions.zsh on the tree immediately before the
 # #1011 sweep.
 #
-# The sanctioned fix is tests/assertions.bash: `contains`, `lacks`,
-# `starts_with`, `ends_with`, `matches` are ordinary functions, so calling one
-# is a simple command that errexit catches wherever it appears.
+# The sanctioned fix is a helper from tests/assertions.bash (the roster lives in
+# tests/README.md, and is derived — never restated — everywhere in this file).
+# They are ordinary functions, so calling one
+# is a simple command that errexit catches wherever it appears AS A COMMAND OF
+# ITS OWN. That is the whole of the guarantee: position stops mattering, the way
+# you JOIN the call to other commands does not — see the `and-tail` section
+# below, and the neutralisation list in tests/assertions.bash.
 #
 # The detection itself lives in tests/find-inert-bracket-assertions.zsh (block
 # tracking + heredoc skipping is past what a single grep should carry); this
@@ -32,12 +52,21 @@
 bats_require_minimum_version 1.5.0
 
 load assertions
+load roster
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   TESTS_DIR="$REPO_ROOT/tests"
   DETECT="$TESTS_DIR/find-inert-bracket-assertions.zsh"
   FIX="$BATS_TEST_TMPDIR/f.bats"
+  HELPER_ROSTER="$(helper_roster_of "$TESTS_DIR/assertions.bash")"
+  HELPER_RE="$(printf '%s' "$HELPER_ROSTER" | tr ' ' '|')"
+  # Fail EVERY test, loudly and at one legible place, if the derivation came back
+  # empty (a renamed library, a regex slip). The pipeline ends in `sed`, so its
+  # status is sed's and errexit would not otherwise fire — and an empty roster
+  # makes `has_helper` the pattern `()`, which matches anything, so every
+  # fixture-sanity check in this file would pass vacuously.
+  [ -n "$HELPER_ROSTER" ]
 }
 
 # Fixtures are built with printf, never a heredoc: bats' own parser treats a
@@ -53,16 +82,26 @@ mkfix() { printf '%b' "$1" > "$FIX"; [ -s "$FIX" ]; }
 # the test pins a deliberate exemption rather than an absence of input.
 has_bracket() { grep -q '\[\[' "$FIX"; }
 
+# The `and-tail` counterparts: prove the fixture really does carry the input the
+# exemption is about. Without them an exemption test would pass on a typo'd
+# fixture that carries neither, proving nothing at all. Two of them, because the
+# `||` exemption is deliberately about a fixture with NO `&&` in it — asserting
+# one there would be asserting the fixture is the wrong fixture.
+has_helper() { grep -qE "($HELPER_RE)" "$FIX"; }
+has_and_tail() { has_helper && grep -q '&&' "$FIX"; }
+
 # Names every .bats under <dir> (recursively, matching the detector's own scan
 # scope) that CALLS an assertion helper without loading the library. Matches a
 # call, not the English words: the helper name must be followed by an argument
 # (a quote or `$`), and comment / `@test` title lines are dropped first — "round
-# 1 lacks the stamp" and "matches as a wildcard" are prose, not code.
+# 1 lacks the stamp" and "matches as a wildcard" are prose, not code. A `run
+# <helper>` call needs no alternative of its own: the space after `run` is
+# already matched by `[[:space:]]`.
 unloaded_helper_users() {
   local dir="$1" f uses has_load out=""
   while IFS= read -r f; do
     uses="$(grep -vE '^[[:space:]]*#|^[[:space:]]*@test' "$f" \
-      | grep -cE '(^|[[:space:];&|(]|\brun )(contains|lacks|starts_with|ends_with|matches)[[:space:]]+["'"'"'$]' || true)"
+      | grep -cE "(^|[[:space:];&|(])($HELPER_RE)[[:space:]]+[\"'\$]" || true)"
     if [ "$uses" -eq 0 ]; then
       continue
     fi
@@ -74,7 +113,7 @@ unloaded_helper_users() {
   printf '%s' "$out"
 }
 
-@test "no inert '[[ ]]' assertion survives in any tests/*.bats (#1011)" {
+@test "no inert assertion survives in any tests/*.bats (#1011, #1067)" {
   # No arguments: also exercises the detector's default (self-directory,
   # recursive) scan mode, which nothing else covers.
   run zsh "$DETECT"
@@ -87,9 +126,13 @@ unloaded_helper_users() {
     return 1
   fi
   if [ "$status" -ne 0 ]; then
-    printf 'Inert `[[ ]]` assertion(s) found — these pass even when FALSE.\n'      >&2
-    printf 'Convert each to a helper from tests/assertions.bash (contains /\n'     >&2
-    printf 'lacks / starts_with / ends_with / matches) and `load assertions`.\n' >&2
+    # Advice per rule: "convert it to a helper" is nonsense for an `and-tail`
+    # line, which already calls one — the whole reason offenders carry a tag.
+    printf 'Inert assertion(s) found — these pass even when FALSE.\n'              >&2
+    printf 'A `bracket:` offender is a `[[ ]]` assertion: convert it to a helper\n' >&2
+    printf 'rostered in tests/README.md and add `load assertions`.\n'              >&2
+    printf 'An `and-tail:` offender is a helper call swallowed by an `&&` tail:\n' >&2
+    printf 'put each assertion on its own line.\n'                                 >&2
     printf 'If a flagged line is one of the false-positive shapes listed under\n'   >&2
     printf '"Known, accepted limits" in the detector, leave it alone instead:\n%s\n' \
       "$output" >&2
@@ -376,6 +419,69 @@ unloaded_helper_users() {
   [ -z "$output" ]
 }
 
+@test "a record the splitter cannot type is exit 2, not a dropped offender (#1067)" {
+  # The fail-closed default arm is the only exit-2 path with no other coverage,
+  # and it is reachable: a scanned path containing a NEWLINE splits one `O\t…`
+  # record across two rows, and the second row is untypeable. A regression that
+  # replaced `exit 2` with `continue` would silently drop offender rows and
+  # report a clean — the exact false clean the typed records exist to prevent.
+  local dir="$BATS_TEST_TMPDIR/nl"
+  mkdir -p "$dir"
+  local weird="$dir/a
+b.bats"
+  printf '@test "x" {\n  [[ -f /nonexistent ]]\n  true\n}\n' > "$weird"
+  run --separate-stderr zsh "$DETECT" "$weird"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "unrecognized record"
+  [ -z "$output" ]
+}
+
+@test "the detector's roster matches the library's, name for name (#1067)" {
+  # A sixth helper added to assertions.bash but not to the detector's `H` would
+  # ship with its `&&`-swallowed call sites unflagged, and the suite would stay
+  # green. This is the only remaining CODE copy of the roster — everything in
+  # this file derives from the library — so one set equality closes the drift in
+  # both directions: a name added to the library and missing from `H`, and a
+  # name left in `H` after the library dropped it.
+  [ -n "$HELPER_ROSTER" ]
+  local detector_roster
+  detector_roster="$(grep -oE 'H = "\([A-Za-z0-9_|]+\)"' "$DETECT" \
+    | sed -E 's/.*\(([A-Za-z0-9_|]+)\).*/\1/' | tr '|' '\n' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+  [ "$detector_roster" = "$HELPER_ROSTER" ]
+}
+
+@test "the roster derivation is not vacuous and skips internals (self-test, #1067)" {
+  # `helper_roster_of` is what makes every other roster check meaningful; if it
+  # ever returned empty, or the same value regardless of input, the sync test
+  # above would compare two empty strings and pass forever.
+  # All four spellings bash admits, a digit-bearing name, a CAPITALISED name, and
+  # an internal. Each of the unusual shapes is one an earlier version of this
+  # derivation silently dropped: a name it cannot see is absent from BOTH sides
+  # of the sync test below, so the two agree vacuously and the helper ships
+  # unguarded — which is why breadth here is load-bearing, not tidiness.
+  local lib="$BATS_TEST_TMPDIR/lib.bash"
+  printf 'alpha() { :; }\nbeta () { :; }\nfunction gamma() { :; }\nfunction delta {\n:\n}\neps2() { :; }\ncontainsJSON() { :; }\n_private() { :; }\n' \
+    > "$lib"
+  run helper_roster_of "$lib"
+  [ "$status" -eq 0 ]
+  [ "$output" = "alpha beta containsJSON delta eps2 gamma" ]
+
+  # And it really does see the live library's five, in the spellings it uses.
+  contains "$HELPER_ROSTER" "contains"
+  contains "$HELPER_ROSTER" "matches"
+}
+
+@test "tests/README.md's contributor-facing roster names every helper (#1067)" {
+  # ARCHITECTURE.md designates README the source of truth for the roster, and it
+  # is prose — no derivation can reach it, so a sixth helper would silently leave
+  # it naming five. This is the one roster copy a human has to keep, so it gets
+  # the one check that can be written for it.
+  local h tick='`'
+  for h in $HELPER_ROSTER; do
+    grep -qF -- "$tick$h$tick" "$TESTS_DIR/README.md"
+  done
+}
+
 @test "an unreadable path is a usage error (exit 2), not a false clean (#1011)" {
   run zsh "$DETECT" "$BATS_TEST_TMPDIR/does-not-exist.bats"
   [ "$status" -eq 2 ]
@@ -547,6 +653,339 @@ unloaded_helper_users() {
   run zsh "$DETECT" "a=b.bats"
   [ "$status" -eq 1 ]
   contains "$output" "a=b.bats:2:"
+}
+
+# --- the `and-tail` rule: a helper call swallowed by an `&&` (#1067) --------
+#
+# The AND-list errexit exemption applies to a function call exactly as it does to
+# `[[ ]]`, so `contains "$output" "a" && contains "$output" "b"` silently drops
+# the FIRST assertion. Unlike the `bracket` inertness this holds on EVERY bash
+# (verified 3.2.57 and 5.2, pinned in tests/assertions.bats), so no platform or
+# positional reasoning rescues it.
+#
+# Only the LEFT operand is inert. A helper that ENDS the list is the status
+# errexit catches, so `true && contains …` is deliberately not flagged — and the
+# exemption tests below are what stop a future widening of the rule from
+# reddening every legitimate line in the suite.
+
+@test "the guard catches a helper call swallowed by an '&&' tail (self-test, #1067)" {
+  # The shape from the issue: the FIRST call is the one that vanishes.
+  mkfix '@test "planted" {\n  contains "$output" "a" && contains "$output" "b"\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" 'contains "$output" "a" && contains "$output" "b"'
+  contains "$output" "and-tail"
+
+  # `<helper> && <anything>` is the same defect — the tail need not be a helper.
+  mkfix '@test "planted" {\n  lacks "$output" "a" && true\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" 'lacks "$output" "a" && true'
+
+  # A helper in the MIDDLE of a three-member list is swallowed exactly as a
+  # leading one is. This is where "earliest opener" and "a helper that ends the
+  # list is exempt" meet: narrowing helper_open to line-start-only would leave
+  # this inert shape unflagged while both extremes stayed green.
+  mkfix '@test "planted" {\n  true && contains "$o" "a" && lacks "$o" "b"\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "and-tail"
+}
+
+@test "the '&&' rule sees a helper opening a command after ';' too (#1067)" {
+  # Same opener rule as `bracket`: first token of the line, or first after a
+  # separator. A first-token-only rule would miss this.
+  mkfix '@test "planted" {\n  run foo; starts_with "$output" "a" && true\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" 'run foo; starts_with "$output" "a" && true'
+
+  mkfix '@test "planted" {\n  false || ends_with "$output" "a" && true\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" 'ends_with "$output" "a" && true'
+
+  # helper_open must keep SCANNING past a quoted separator+helper, not stop at
+  # it. A regression that returned 0 on the first quoted match would silently
+  # unflag the real offender later on the line — a false clean, the worst
+  # direction. This is the `and-tail` counterpart of the `bracket` rule's
+  # "a quoted one early on the line must not mask a real one later".
+  mkfix '@test "planted" {\n  printf %s '"'"'x; contains "a" "b"'"'"'; lacks "$o" "z" && true\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "and-tail"
+}
+
+@test "the '&&' rule covers every helper in the roster (#1067)" {
+  # The roster is one awk variable. Pin every name in it, so dropping one
+  # cannot silently unguard that helper while the suite stays green.
+  local h
+  for h in $HELPER_ROSTER; do
+    mkfix '@test "planted" {\n  '"$h"' "$output" "a" && true\n  true\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "$h"
+    contains "$output" "and-tail"
+  done
+}
+
+@test "the '&&' rule fires in a fixture hook, not just a test body (#1067)" {
+  local h
+  for h in setup teardown setup_file teardown_file; do
+    mkfix "$h"'() {\n  contains "$x" "a" && true\n  true\n}\n@test "x" {\n  true\n}\n'
+    run zsh "$DETECT" "$FIX"
+    [ "$status" -eq 1 ]
+    contains "$output" "and-tail"
+  done
+}
+
+@test "a helper that ENDS the AND-list is caught by errexit — not flagged (#1067)" {
+  # `true && contains …` returns the helper's own status as the list's status,
+  # which is exactly what errexit sees. Flagging it would red legitimate lines.
+  mkfix '@test "x" {\n  true && contains "$output" "a"\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  false || contains "$output" "a"\n  true\n}\n'
+  has_helper
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a plain helper call on its own line is the sanctioned form (#1067)" {
+  mkfix '@test "x" {\n  contains "$output" "a"\n  lacks "$output" "b"\n  true\n}\n'
+  has_helper
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "an '&&' inside the needle is text, not a tail (#1067)" {
+  # Quote tracking is what keeps this rule usable at all: this suite builds
+  # almost every fixture as a printf string that quotes the offending shape
+  # verbatim, so a quote-blind rule would flag its own test files.
+  mkfix '@test "x" {\n  contains "$output" "a && b"\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  printf %s '"'"'contains "a" "b" && true'"'"'\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # ...but a quoted `&&` must not MASK a real one later: and_after keeps
+  # scanning past it. Every case above ends at the quoted `&&`, so without this
+  # a regression to "return 0 on the first quoted hit" would report a genuinely
+  # inert line as clean and no test would see it.
+  mkfix '@test "x" {\n  contains "$output" "a && b" && true\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "and-tail"
+}
+
+@test "an '&&' in a TRAILING comment is prose, not a tail (#1067)" {
+  # The `and-tail` counterpart of the `bracket` rule's trailing-comment test:
+  # the rule judges the line with the comment stripped. If it ever stopped
+  # stripping, this perfectly legitimate line would be flagged with advice
+  # ("one assertion per line") that does not apply.
+  mkfix '@test "x" {\n  contains "$output" "a"  # a note about x && y\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the documented '|| true' FALSE NEGATIVE is recorded, not silently missed (#1067)" {
+  # `contains … || true` discards the assertion exactly as an `&&` tail does,
+  # and the header lists it as a FALSE NEGATIVE — "a blind spot, not a
+  # blessing". Pin the current verdict so widening `and_after` to cover a
+  # non-failing `||` tail is a deliberate, visible change rather than an
+  # accidental one, exactly as the unscanned-named-function false negative is
+  # pinned below.
+  mkfix '@test "x" {\n  contains "$output" "a" || true\n  true\n}\n'
+  has_helper
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Each documented limit gets its OWN test, per tests/README.md's one-planted-
+# issue rule: bundled, a regression names none of them and errexit stops at the
+# first, leaving the rest unevaluated. Same rationale as the `|| true` pin above
+# — a limit the prose ADVERTISES must be pinned, so widening or narrowing the
+# rule is a deliberate change with a red test rather than a quiet divergence
+# between the docs and the code.
+
+@test "a PIPED helper call is a documented blind spot (#1067)" {
+  # A pipeline's status is its last command's and bats runs no `pipefail`, so
+  # the assertion is discarded — but `and_after` keys on `&&`, so nothing flags
+  # it.
+  mkfix '@test "x" {\n  contains "$output" "a" | cat\n  true\n}\n'
+  has_helper
+  grep -q '|' "$FIX"
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "an AND-list continued with a trailing backslash is a documented blind spot (#1067)" {
+  # The rule is per line, so the left operand is hidden on the line above.
+  mkfix '@test "x" {\n  contains "$o" "a" \\\n    && contains "$o" "b"\n  true\n}\n'
+  has_helper
+  # The canary that matters here: the fixture must really END a line with ONE
+  # backslash. An escaping slip yields `\\` — an escaped literal backslash, a
+  # complete command — which is a different (and syntactically invalid) shape,
+  # and the test would go on passing while pinning nothing.
+  grep -qE '[^\\]\\$' "$FIX"
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "'[ … ] && [ … ]' is matched by NEITHER rule (#1067)" {
+  # Inert on every bash — the AND-list exemption is not about helpers — but
+  # `bracket` keys on `[[` and `and-tail` on the helper roster, so it is missed.
+  # Its own canary: this fixture carries neither a `[[` nor a helper, so neither
+  # of the standard ones applies.
+  mkfix '@test "x" {\n  [ -n "$a" ] && [ -f "$b" ]\n  true\n}\n'
+  grep -qF -- '[ -n "$a" ] && [ -f "$b" ]' "$FIX"
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "an '&&' belonging to a CLOSED construct still flags the helper — documented false positive (#1067)" {
+  # Pinned in the other direction: the rule judges the whole line, so a helper
+  # whose own status IS caught is flagged anyway when an `&&` appears later.
+  mkfix '@test "x" {\n  contains "$x" "a"; if true; then true; fi && true\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "and-tail"
+}
+
+@test "a heredoc opened on a FLAGGED line still reports that line (#1067)" {
+  # The header's safety claim for this false positive rests entirely on rule
+  # order: the offender rules run BEFORE the heredoc-opener rule. Hoist the
+  # heredoc rule and this line would open a tracked heredoc, `next` without
+  # reporting, and swallow its payload — the offender vanishes and the file
+  # reports CLEAN. Nothing else pins that ordering.
+  mkfix '@test "x" {\n  contains "$o" "a" && cat > "$f" <<EOF\npayload\nEOF\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: and-tail:"
+}
+
+@test "a helper as the LEFT operand of '||' is deliberately not flagged (#1067)" {
+  # The documented asymmetry: a `[[ ]]` carrying an `|| return 1` tail is
+  # flagged for uniformity with the ban on the idiom, but a helper call has no
+  # idiom to ban, so `contains … || return 1` is a legitimate assertion. Pinning
+  # it is what stops a future widening of and_after to `(&&|\|\|)` from
+  # reddening real call sites with advice that does not apply.
+  mkfix '@test "x" {\n  contains "$output" "a" || return 1\n  true\n}\n'
+  has_helper
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "an '&&' helper CONDITION is control flow, not an assertion (#1067)" {
+  # Same carve-out as `bracket`: the construct consumes the status, so nothing
+  # is swallowed — and there is no one-assertion-per-line fix to advise.
+  mkfix '@test "x" {\n  if contains "$o" "a" && contains "$o" "b"; then\n    true\n  fi\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  while contains "$o" "a" && contains "$o" "b"; do\n    break\n  done\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "'run <helper> && …' is not the flagged shape (#1067)" {
+  # `run` is the command; the helper is its argument, and `run` succeeds
+  # regardless, so nothing is swallowed that was not already the caller's to
+  # check via `$status`.
+  mkfix '@test "x" {\n  run contains "$output" "a" && true\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a helper name is matched as a whole token, not a substring (#1067)" {
+  # `foo_matches` / `matches_all` are different commands. Matching loosely would
+  # flag them and send the reader looking for an assertion that is not there.
+  mkfix '@test "x" {\n  foo_matches "$o" "a" && true\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  matches_all "$o" "a" && true\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the '&&' rule is scoped to blocks and skips heredocs and comments (#1067)" {
+  # A named helper function is not scanned. For `and-tail` that is a documented
+  # FALSE NEGATIVE, not a carve-out: `h() { contains … && true; }` is just as
+  # inert as the same line in a test body — the wrapper hides it, it does not
+  # rescue it. Pinned so the scoping is a deliberate limit rather than an
+  # accident, and so widening the scan later is a visible decision.
+  mkfix 'h() {\n  contains "$1" "a" && true\n}\n@test "x" {\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  cat > "$f" <<EOF\ncontains "a" "b" && true\nEOF\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  mkfix '@test "x" {\n  # contains "a" "b" && true is inert\n  true\n}\n'
+  has_and_tail
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# --- offenders carry the rule that found them -------------------------------
+
+@test "each offender is tagged with its rule, and a mixed file reports both (#1067)" {
+  # The tag is what lets the guard give advice that fits: "convert it to a
+  # helper" is wrong for a line that already calls one. Assert the whole
+  # `<file>:<line>: <rule>: ` prefix, so a tag emitted in the wrong field (where
+  # it would read as part of the source line) still fails this.
+  mkfix '@test "x" {\n  [[ -f /nonexistent ]]\n  contains "$output" "a" && true\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "$FIX:2: bracket: [[ -f /nonexistent ]]"
+  contains "$output" "$FIX:3: and-tail: contains"
+}
+
+@test "a line that is BOTH shapes is reported once, as 'bracket' (#1067)" {
+  # `[[ … ]] && contains …` is a `[[ ]]` assertion first; converting it is the
+  # fix either way, so two reports for one line would just be noise.
+  mkfix '@test "x" {\n  [[ -f /nonexistent ]] && contains "$output" "a"\n  true\n}\n'
+  run zsh "$DETECT" "$FIX"
+  [ "$status" -eq 1 ]
+  contains "$output" "bracket"
+  lacks "$output" "and-tail"
+  [ "${#lines[@]}" -eq 1 ]
 }
 
 # --- the companion convention ----------------------------------------------

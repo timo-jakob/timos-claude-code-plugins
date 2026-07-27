@@ -1,7 +1,17 @@
 #!/usr/bin/env zsh
 #
-# Suite-lint detector (#1011): find `[[ ... ]]` assertions that are SILENTLY
-# INERT because of where they sit.
+# Suite-lint detector (#1011, extended #1067): find assertions that are SILENTLY
+# INERT because of where — or how — they are written.
+#
+# TWO RULES, reported with their own tag so the advice can differ:
+#   * `bracket`  — a `[[ ... ]]` assertion inside a scanned block (#1011). The
+#     fix is a helper from tests/assertions.bash.
+#   * `and-tail` — an assertion-helper call that is the LEFT operand of `&&`
+#     (#1067). The fix is one assertion per line.
+# Both are inert for the SAME reason at bottom — a status errexit never sees —
+# but they reach it differently, which is why they are separate rules: the
+# `bracket` inertness is bash-3.2-specific, the `and-tail` inertness is the POSIX
+# AND-list exemption and therefore holds on EVERY bash.
 #
 # bash 3.2 — macOS `/bin/bash`, and what `#!/usr/bin/env bash` resolves to on
 # this repo's primary platform — does not apply errexit to a failing `[[ ]]`, so
@@ -14,18 +24,62 @@
 # given test proves. The bats version is not a factor (1.10.0 through 1.14.0 all
 # behave identically on a given bash). The inertness survives an `&&` tail (the
 # AND-list errexit
-# exemption, which applies to `[ ... ]` and to a function call identically) and
+# exemption, which applies to `[ ... ]` and to a function call identically — which
+# is exactly why the `and-tail` rule below exists) and
 # `=~`. A `|| return 1` tail is NOT inert — the command after the final `||` is
 # exactly what errexit catches — but it is flagged anyway so the fix stays
 # uniform.
 #
-# DETECTION RULE: a `[[` that OPENS A COMMAND inside a scanned block — either
+# DETECTION RULE (`bracket`): a `[[` that OPENS A COMMAND inside a scanned
+# block — either
 # the first token of the line, or the first token after a `;`, `&&` or `||` on
 # the same line (ignoring one inside a quoted string). Generally: a `[[` that is
 # neither the first token of a line nor immediately preceded by `;`, `&&` or
 # `||` is NOT seen — so a `[[` after `then`, `do`, or a `case` arm's `)`, or
 # inside `( … )` / `{ …; }` grouping, is a blind spot. None are present in this
 # suite. Keep assertions one per line and the rule holds.
+#
+# DETECTION RULE (`and-tail`, #1067): an assertion helper from
+# tests/assertions.bash — the roster is the awk `H` variable below, and is
+# deliberately not restated in this prose — that OPENS A COMMAND (the same opener
+# rule as above) inside a
+# scanned block, with an unquoted `&&` anywhere AFTER it on the line. That helper
+# call is then a non-final member of an AND-list, which errexit does not see:
+#
+#   contains "$output" "a" && contains "$output" "b"   # a failing FIRST call is
+#                                                      # SWALLOWED
+#
+# tests/assertions.bats pins this empirically; #1011 documented it in prose but
+# nothing enforced it, so the belief "calling a helper makes position stop
+# mattering" could reintroduce it silently. Only the LEFT operand is inert — a
+# helper that ends the list (`true && contains …`, `false || contains …`) IS the
+# status errexit catches, so it is deliberately not flagged. Neither is
+# `<helper> … || …`: unlike a `[[ ]]`, whose `|| return 1` tail is flagged for
+# uniformity with the ban on the idiom itself, a helper call has no idiom to ban
+# — but `<helper> … || true` IS inert, so that exemption is a blind spot, not a
+# blessing (see FALSE NEGATIVES).
+#
+# The helper roster lives in the awk `H` variable — the only copy outside
+# tests/assertions.bash that a machine has to keep. The two bats files DERIVE it
+# from the library (public, non-`_`-prefixed top-level functions), so their
+# greps and loops cannot drift, and a roster-sync test fails if `H` and the
+# library disagree in either direction.
+#
+# ADDING A HELPER therefore means editing, in order:
+#   1. tests/assertions.bash — the definition, plus the LITERAL-vs-REGEX
+#      paragraph, which owes every helper a verdict. Nothing checks that.
+#   2. this `H`. The roster-sync test reds until you do.
+#   3. tests/README.md — the contributor-facing roster ARCHITECTURE.md
+#      designates the source of truth. A guard test reds until each name is
+#      named there.
+#   4. the PER-HELPER enumerations in tests/assertions.bats (the mismatch
+#      diagnostic and the success-path silence). These are deliberately NOT
+#      derived: each helper reaches the shared printer through a different
+#      construct, so only a human can write the case. A roster-size tripwire in
+#      that file reds until you update its count — the red is the instruction,
+#      not a check that you wrote the cases.
+# Steps 2 and 3 are verified. Step 4 is prompted but not verified, and the
+# LITERAL-vs-REGEX paragraph is on you alone.
 #
 # CONDITIONS are control flow, not assertions: their status is consumed by the
 # construct, so they are not inert and must NOT be converted (rewriting
@@ -34,7 +88,9 @@
 # whose first token is `if`, `elif`, `while` or `until` is therefore exempt in
 # full — including the second half of a compound condition such as
 # `if [[ -f a ]] && [[ -f b ]]; then`, which the separator rule would otherwise
-# flag with advice that does not apply.
+# flag with advice that does not apply. The exemption covers BOTH rules for the
+# same reason: `if contains "$x" "a" && contains "$x" "b"; then` is a compound
+# condition, not two swallowed assertions.
 #
 # WHERE it is inert — the scoping rule this detector implements:
 #   * `@test` bodies, and `setup` / `teardown` / `setup_file` / `teardown_file`
@@ -43,9 +99,15 @@
 #     line ending in `{`, and closed by a `}` at column 0. A self-contained
 #     one-line block (`teardown() { rm -rf "$W"; }`) is neither scanned nor
 #     reported: it has no body to hide an assertion in.
-#   * a named helper function is NOT scanned — calling it is a simple command,
-#     which errexit does catch, so `contains() { [ … ]; }` and friends are the
-#     sanctioned fix rather than the defect. tests/assertions.bash is the shared
+#   * a named helper function is NOT scanned. For `bracket` that is a sanctioned
+#     fix WHEN the `[[ ]]`'s status is what the function returns — its last
+#     command, or one carrying an explicit `|| return` — because the call site is
+#     then a simple command errexit catches; `contains() { [ … ]; }` and friends
+#     are the answer rather than the defect. A `[[ ]]` whose status the function
+#     DISCARDS is as inert as one in a test body and, being unscanned, is missed
+#     (FALSE NEGATIVES, below). For `and-tail` the unscanned-ness is a plain
+#     false negative in every case — wrapping `contains … && true` in a function
+#     does not rescue it, it only hides it. tests/assertions.bash is the shared
 #     helper library and the reference for the idiom.
 #   * heredoc bodies are payload, not assertions — a test that *writes* a script
 #     containing `[[ ]]` is fine — so heredocs are skipped;
@@ -60,22 +122,72 @@
 # suite. They run in BOTH directions, so read the direction before acting on a
 # flag.
 #
-# FALSE POSITIVES (a safe `[[ ]]` is flagged — do NOT convert it; restructure
-# the line so the detector can see it, or leave it alone):
+# FALSE POSITIVES (a safe `[[ ]]` or helper call is flagged — do NOT convert it;
+# restructure the line so the detector can see it, or leave it alone):
 #   * a helper function *defined inside* a scanned block and spread across lines
 #     has its `[[` line flagged even though a call to it is caught;
+#   * `and-tail` judges the WHOLE line, so a helper call followed later on the
+#     same line by an `&&` belonging to a *closed* construct
+#     (`contains "$x" a; if …; then …; fi && y`) is flagged even though the
+#     helper's own status is caught;
 #   * quote tracking is per line, so a continuation line of a multi-line quoted
 #     literal that begins with `[[`, or a column-0 `}` inside such a literal, is
 #     read as code;
-#   * a heredoc opened on a condition line, or with a tail the opener rule does
-#     not accept (`<<EOF | tee f`, `<<EOF && x`), is not tracked, so a payload
-#     line beginning with `[[` is reported as an offender.
+#   * a heredoc opened on a line an offender rule flags and `next`s on
+#     (`contains … && cat > "$f" <<EOF`) is not tracked, so its payload is
+#     scanned as code and a payload line beginning with `[[` is reported as an
+#     offender. Here the verdict is not a false clean — the line that caused it
+#     is itself reported (exit 1) — or, if the misread payload happens to carry
+#     a block-opener shape or a `<<` of its own, the scan trips a desync
+#     (exit 2) and suppresses the list. Non-zero either way. The OTHER two untracked-
+#     heredoc shapes are worse and are listed under FALSE NEGATIVES, not here.
 #
 # FALSE NEGATIVES (an inert assertion is missed):
 #   * a self-contained ONE-LINE block with several statements
 #     (`@test "x" { [[ -f a ]]; true; }`) is skipped rather than scanned;
 #   * the condition exemption skips the WHOLE line, so an assertion that follows
-#     a closed construct on that line (`if …; then …; fi; [[ -f a ]]`) is missed.
+#     a closed construct on that line (`if …; then …; fi; [[ -f a ]]`) is missed;
+#   * `and-tail` is per line, so an AND-list continued onto the next line with a
+#     trailing `\` hides its left operand from the rule;
+#   * `and-tail` knows only the names in `H`, so a project-local wrapper
+#     around a helper is not recognized as one;
+#   * `and-tail` inside a named helper function is not scanned, so
+#     `h() { contains … && true; }` is missed even though it is just as inert as
+#     the same line in a test body;
+#   * a `[ … ]` assertion swallowed by an `&&` — `[ -n "$a" ] && [ -f "$b" ]` —
+#     is missed by BOTH rules: `bracket` keys on `[[`, `and-tail` on the helper
+#     roster. The AND-list exemption is not about helpers, so this is inert on
+#     every bash; it is convention, not lint, that keeps it out of the suite;
+#   * `<helper> … || true` (any `||` tail that cannot fail) discards the
+#     assertion, and the `||` exemption above means nothing flags it;
+#   * `<helper> … | <cmd>` — a pipeline's status is its LAST command's, and bats
+#     test bodies do not run under `pipefail`, so a piped assertion is discarded
+#     exactly like `|| true`. `and_after` keys on `&&` only, so nothing flags it;
+#   * a needle ending in a literal backslash inside SINGLE quotes
+#     (`contains "$o" 'x\' && true`): the quote-parity helper treats a backslash
+#     as an escape everywhere, but the shell does not inside single quotes, so
+#     the closing quote is swallowed, the rest of the line reads as string, and
+#     the real `&&` is missed. Shared with the `bracket` rule, which has the same
+#     model; no such literal exists in this suite;
+#   * a `[[ ]]` inside a named helper function whose status the function
+#     DISCARDS (not its last command, no `|| return`) is as inert as one in a
+#     test body — and function bodies are not scanned, so it is missed. Only the
+#     status-returning shape is the sanctioned fix;
+#   * a heredoc opened on a CONDITION line (`if grep -q y <<EOF; then`, consumed
+#     by the condition exemption) or with a tail the opener rule does not accept
+#     (`<<EOF | tee f`, `<<EOF && x`) is never tracked and nothing reports the
+#     line. Its payload is then scanned as code, so a column-0 `}` in the payload
+#     clears the block and every later assertion in it goes unscanned. Neither
+#     exists in this suite; keep heredoc openers off condition lines and out of
+#     pipelines;
+#   * a column-0 `}` inside a MULTI-LINE quoted literal is read as code (quote
+#     tracking is per line — also listed under FALSE POSITIVES, for the
+#     continuation line it misreads). It clears the block the same way, so every
+#     later assertion in that test goes unscanned.
+#
+# Those last two are the shapes that can exit 0 on a file the scanner did not
+# fully read — the desync guards below catch a heredoc or opener it could not
+# parse, but a block cleared EARLY looks exactly like a block that ended.
 #
 # Both the offender rules and the heredoc-opener rule judge the line with any
 # trailing comment removed and skip a `<<`/`[[` that sits inside a string, so an
@@ -90,8 +202,10 @@
 # Usage: find-inert-bracket-assertions.zsh [<file>...]
 #   With no arguments, scans tests/**/*.bats next to this script.
 #
-# Output: one `<file>:<line>:<text>` per offender on stdout; diagnostics on
-#         stderr.
+# Output: one `<file>:<line>: <rule>: <text>` per offender on stdout, where
+#         `<rule>` is `bracket` or `and-tail`; diagnostics on stderr. The tag is
+#         what lets the guard print advice that fits the offender — "convert to a
+#         helper" is wrong advice for a line that already calls one.
 # Exit:   0 = no offenders, 1 = offenders found, 2 = usage or scan error.
 #         Exit 2 takes precedence: when the scan desynced the offender list is
 #         suppressed, because it cannot be trusted.
@@ -149,6 +263,37 @@ out="$(awk '
     return (n_s % 2) || (n_d % 2)
   }
 
+  # The EARLIEST position at which an assertion helper opens a command, as the
+  # first token of the line or the first token after `;`, `&&` or `||`; 0 when
+  # there is none. Returns the position just PAST the token, which is where the
+  # `&&` that would swallow it has to be. Earliest is enough: an `&&` after a
+  # later opener is also after this one, so no other opener can widen the match.
+  function helper_open(line,   p, abs) {
+    # Position 1 can never be inside a string (quotes are tracked per line), so
+    # the line-start case needs no in_quotes check.
+    if (match(line, "^[[:blank:]]*" H "[[:blank:]]")) return RSTART + RLENGTH
+    p = 1
+    while (match(substr(line, p), "(;|&&|\\|\\|)[[:blank:]]*" H "[[:blank:]]")) {
+      abs = p + RSTART - 1
+      if (!in_quotes(substr(line, 1, abs - 1))) return abs + RLENGTH
+      p = abs + RLENGTH
+    }
+    return 0
+  }
+
+  # An unquoted `&&` at or after `from` — the tail that makes the helper call a
+  # non-final member of an AND-list. A quoted one is text: nearly every fixture
+  # in this suite is a printf string that quotes exactly this shape.
+  function and_after(line, from,   p, abs) {
+    p = from
+    while (match(substr(line, p), /&&/)) {
+      abs = p + RSTART - 1
+      if (!in_quotes(substr(line, 1, abs - 1))) return 1
+      p = abs + RLENGTH
+    }
+    return 0
+  }
+
   # A `[[` opening a command after a separator, ignoring any that sit inside a
   # quoted string. Scans EVERY match, not just the leftmost: a quoted one early
   # on the line must not mask a real one later.
@@ -190,6 +335,14 @@ out="$(awk '
     if (n_bad_open > 0)
       printf "D\t%s\t%d block opener(s) not recognized (line(s):%s) — an opener must be written on one line ending in {, at column 0\n", prev_file, n_bad_open, bad_lines
   }
+
+  # The assertion-helper roster, spelled ONCE and used as a dynamic regex by
+  # helper_open. Keep it in sync with tests/assertions.bash: a helper missing
+  # here is not covered by the `and-tail` rule — but NOT silently. The
+  # roster-sync test in tests/no-inert-bracket-assertions.bats derives the
+  # roster from the library and reds in BOTH directions when this disagrees
+  # with it. See the ADDING A HELPER checklist in the header.
+  BEGIN { H = "(contains|lacks|starts_with|ends_with|matches)" }
 
   FNR == 1 {
     if (prev_file != "") flush_file()
@@ -256,14 +409,27 @@ out="$(awk '
   in_block && code ~ /^[[:blank:]]*\[\[/ {
     text = $0
     sub(/^[[:blank:]]+/, "", text)
-    printf "O\t%s\t%d\t%s\n", FILENAME, FNR, text
+    printf "O\t%s\t%d\tbracket\t%s\n", FILENAME, FNR, text
     next
   }
   in_block && sep_bracket(code) {
     text = $0
     sub(/^[[:blank:]]+/, "", text)
-    printf "O\t%s\t%d\t%s\n", FILENAME, FNR, text
+    printf "O\t%s\t%d\tbracket\t%s\n", FILENAME, FNR, text
     next
+  }
+
+  # 6b. The other offender (#1067): a helper call swallowed by an `&&` tail. It
+  #     runs AFTER the bracket rules, so a line carrying both is reported once,
+  #     under `bracket` — whose fix (convert the `[[ ]]`) has to happen anyway.
+  in_block {
+    h = helper_open(code)
+    if (h && and_after(code, h)) {
+      text = $0
+      sub(/^[[:blank:]]+/, "", text)
+      printf "O\t%s\t%d\tand-tail\t%s\n", FILENAME, FNR, text
+      next
+    }
   }
 
   # 7. Heredoc opener: the delimiter, optionally followed only by redirections,
@@ -307,7 +473,7 @@ rows=("${(@f)out}")
 offenders=()
 diagnostics=()
 
-local r rest rfile rline rtext
+local r rest rfile rline rrule rtext
 for r in "${rows[@]}"; do
   if [[ -z "$r" ]]; then
     continue
@@ -316,13 +482,23 @@ for r in "${rows[@]}"; do
     (O$'\t'*)
       rest="${r#O$'\t'}"
       rfile="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
-      rline="${rest%%$'\t'*}"; rtext="${rest#*$'\t'}"
-      offenders+=("$rfile:$rline:$rtext")
+      rline="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+      # The rule tag is a fixed field; everything after it is the source line
+      # verbatim, tabs included.
+      rrule="${rest%%$'\t'*}"; rtext="${rest#*$'\t'}"
+      offenders+=("$rfile:$rline: $rrule: $rtext")
       ;;
     (D$'\t'*)
       rest="${r#D$'\t'}"
       rfile="${rest%%$'\t'*}"; rtext="${rest#*$'\t'}"
       diagnostics+=("$rfile: $rtext")
+      ;;
+    (*)
+      # Fail closed, per "exit 0 is a verdict, not a shrug": a record type this
+      # loop does not know is information being dropped, and a silently dropped
+      # offender row is exactly the false clean the typed records exist to avoid.
+      print -u2 "find-inert-bracket-assertions.zsh: unrecognized record: $r"
+      exit 2
       ;;
   esac
 done

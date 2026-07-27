@@ -3044,22 +3044,26 @@ working directory. Documented here
 rather than only in the scripts, so the exemption is visible from the convention
 it deviates from; see the `development/hooks/` bullet under "`development` owns".
 
-**Exception — the bats suite** (`tests/`): `tests/*.bats` and the shared
-assertion helper library `tests/assertions.bash` are **bash**, not zsh, because
-bats is a bash harness — a `.bats` file is preprocessed into bash, so the tests
-and anything they `load` have no choice in the matter. `tests/assertions.bash`
-is a standalone `.bash` file that bats sources (`load assertions`), indented
-like the `.bats` files that source it rather than in shfmt's tab style — which
-is why pre-commit runs **shellcheck on `.sh` and `.bash`** but **shfmt on `.sh`
-only**. Having no shebang of its own (bats sources it, never executes it), it
-carries a `# shellcheck shell=bash` directive instead, so the
-extension-matches-shebang rule still needs no per-file exception.
+**Exception — the bats suite** (`tests/`): `tests/*.bats` and the `.bash`
+libraries they `load` are **bash**, not zsh, because bats is a bash harness — a
+`.bats` file is preprocessed into bash, so the tests and anything they source
+have no choice in the matter. Those libraries are `tests/assertions.bash` (the
+shared assertion helpers, `load assertions`) and `tests/roster.bash` (the helper
+roster derived from it, `load roster`). They are standalone `.bash` files,
+indented like the `.bats` files that source them rather than in shfmt's tab
+style — which is why pre-commit runs **shellcheck on `.sh` and `.bash`** but
+**shfmt on `.sh` only**. Having no shebang of their own (bats sources them,
+never executes them), each carries a `# shellcheck shell=bash` directive
+instead, so the extension-matches-shebang rule still needs no per-file
+exception — and a new one added here must carry it too.
 
 Inside that suite, **assert through the shared helpers**: `load assertions` at
 the top of the file, then the helpers whose roster lives in `tests/README.md`
 — the contributor-facing source of truth for that list, deliberately not
 restated here. Plain `[ ... ]` stays correct on every bash and is never
-flagged. Never assert with a bare `[[ ... ]]` in an `@test` body or a bats
+flagged **as a command of its own** (joined to another command it obeys the
+one-assertion-per-line rule below like anything else). Never assert with a bare
+`[[ ... ]]` in an `@test` body or a bats
 `setup`/`teardown` hook (including the `_file` variants): bash 3.2 (the
 `/bin/bash` macOS ships) does not apply errexit to it, so a false one on a
 non-final line is silently ignored and the test passes while proving nothing,
@@ -3079,6 +3083,33 @@ as inert as one in a test body. The second holds anywhere, inside a test body or
 hook included: a `[[ ]]` used as an **`if`/`elif`/`while`/`until` condition** is
 control flow, not an assertion, so leave it alone — rewriting it as a helper
 call in a file without `load assertions` yields 127 and a silently false branch.
+
+**One assertion per line** (#1067). Switching to a helper does not make position
+stop mattering: `contains "$output" "a" && contains "$output" "b"` swallows the
+first call, because the POSIX AND-list exemption applies to a function call
+exactly as it does to `[[ ]]` — and unlike the `[[ ]]` inertness, which is
+bash-3.2-specific, this one holds on every bash, so neither CI leg would catch
+it. The guard's detector (`tests/find-inert-bracket-assertions.zsh`) carries an
+`and-tail` rule for it, flagging a helper call that is the **left** operand of
+`&&` inside a scanned block and tagging every offender `bracket:` or `and-tail:`
+so the advice fits what was found. A helper that *ends* the list
+(`true && contains …`, `false || contains …`) is deliberately not flagged: its
+status is the list's status, which is what errexit sees. The **condition**
+carve-out above carries over unchanged; the **named-function** one does not — an
+`&&`-swallowed helper call inside a function is equally inert, and going
+unscanned only hides it.
+
+The rule is about how commands are joined, not about helpers, so it governs
+`[ ... ]` too — `[ -n "$a" ] && [ -f "$b" ]` swallows the left test on every
+bash. Neither lint rule sees that (`bracket` keys on `[[`, `and-tail` on the
+helper roster), and neither sees `<helper> … || true`, where an `||` tail that
+cannot fail discards the assertion outright. Those are conventions the detector
+documents as blind spots rather than enforces; the enforced subset is the `&&`
+tail on a helper call. On a genuine mismatch a helper prints the needle and a
+truncated haystack to **stderr** — never stdout, because hundreds of
+`run <helper>` call sites pin `$status` and bats folds stdout into `$output` —
+and an uncompilable `matches` pattern stays misuse (2), never a mismatch (1),
+so a typo'd regex cannot pass a negative assertion vacuously.
 
 Why zsh:
 
