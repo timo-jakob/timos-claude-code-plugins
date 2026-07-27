@@ -202,10 +202,15 @@ enforceable rather than documentation.
 
 ## 7. Considered and rejected
 
-**Module Federation (`@module-federation/vite`).** Rejected per §2.3: it couples
-remotes to the shell's bundler and shared-dependency versions, moving version
-conflicts into production, which is precisely the failure the shape exists to
-prevent. Its dedup benefit is small under route ownership.
+**Module Federation (`@module-federation/vite`).** Rejected per §2.3 as unearned
+complexity for this shape. Under route ownership only one remote is mounted at a
+time, so the shared runtime it exists to deduplicate saves little, while it adds
+a build plugin, a runtime container protocol, and a shared-scope negotiation that
+fails at runtime rather than at build. Note what this argument does *not* claim:
+modern federation can be configured to share nothing and to interoperate across
+bundlers, so it does not inherently prevent a remote from upgrading on its own
+schedule. It is rejected because we would configure it into inertness, not
+because it forces coupling.
 
 **Custom elements + import maps.** A genuine contender, and the standards-based
 option. Rejected because `customElements.define` is a process-global
@@ -290,7 +295,8 @@ capabilities, which are orthogonal to how MFEs compose.
 Issue #1059 lands first: it is the position the rest rests on. The contract
 (#1123) follows, since both repo shapes compile against it. The shell (#1124)
 and remote (#1125) are independent of each other, and both also wait on #957
-(the common React overlay they layer onto). Conformance (#1126) and UI
-integration (#1128) each wait on both shapes; #1128 additionally waits on #687.
-The bootstrap shape question (#1127) carries no blockers at all — it selects a
-shape rather than rendering one, so it can start immediately.
+(the common React overlay they layer onto). Conformance (#1126) waits on the
+contract and both shapes; UI integration (#1128) waits on both shapes and
+additionally on #687. The bootstrap shape question (#1127) carries no blockers
+at all — it selects a shape rather than rendering one, so it can start
+immediately.
