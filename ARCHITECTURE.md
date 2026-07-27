@@ -1630,10 +1630,85 @@ Rules that carry the contract's weight:
   one for *did my pipeline emit anything?*, so a caller asserting that emission
   happened passes `--require-records`, which turns it into a failure. Blank and
   whitespace-only lines are not records, so a file of blanks fails it too.
-- **Sink precedence:** `--telemetry-file` > the local default
+- **Sink precedence:** `--telemetry-file` > `--telemetry-dir` > the local default
   `<repo-dir>/.claude/telemetry/telemetry.jsonl` (git-ignored). One stream per
-  repo; the `pipeline` and `kind` fields discriminate. Child (d) inserts a
-  `--telemetry-dir DIR` shared mode (`DIR/<owner>-<name>.jsonl`) between the two.
+  repo **in the local default**; the `pipeline` and `kind` fields discriminate.
+  (Cross-repo mode below keeps one file per repo but not one repo per file —
+  see its many-to-one note.)
+- **Cross-repo sink mode (child (d), #1006):** `--telemetry-dir DIR` appends to
+  `DIR/<repo-slug>.jsonl`, so many repos emit into one directory that a
+  cross-repo reporting stack globs as `*.jsonl` without any of them clobbering
+  the others. The mode is filesystem-only: JSONL on a path, never a network
+  transport. It is named for the axis it shares — *one directory, many repos* —
+  to keep it distinct from "the shared sink" below, which is the opposite axis:
+  *one file, many pipelines, within a repo*.
+  - The **slug is derived from the resolved `repo`**, so a repo always lands in
+    the same file: `/` → `-` (`timo-jakob/foo` → `timo-jakob-foo.jsonl`), any
+    character outside `[A-Za-z0-9._-]` → `-`, and a **leading** `.` or `-` → `_`.
+    (That character mapping is `LC_CTYPE`-dependent for **non-ASCII** input —
+    one `-` per character under a multibyte locale, one per *byte* otherwise —
+    so the stable-slug promise holds *within* a locale. One more many-to-one
+    wrinkle, and one more reason to group by the `repo` field.)
+    The surviving set is a *superset* of what GitHub allows in an owner or repo
+    name, so the character-class substitution never alters a real slug; beyond
+    the `/` mapping, only the final case-fold does. That fold is the last step:
+    the result is
+    **lowercased**, because GitHub identities are case-insensitive but case-preserving,
+    so without folding the same repo reaching us as `Foo/Bar` from a remote and
+    `foo/bar` from a caller's `--repo` would split across two files on a
+    case-sensitive filesystem. Consumers grouping by the `repo` field should
+    compare case-insensitively for the same reason.
+  - Sanitizing is not cosmetic: `repo` is only `owner/name` in the normal case —
+    the basename fallback yields whatever a directory is called, and `--repo` is
+    caller-supplied. Mapping `/` is what keeps a slug from ever being a *path*
+    (no record can escape `DIR`); rewriting a leading `.` keeps the file from
+    being a dotfile the `*.jsonl` glob silently misses, and a leading `-` from
+    being read as an option by every CLI that later touches it.
+  - **The mapping is pure but MANY-TO-ONE**, so it is not a per-repo file
+    *guarantee*: `a/b-c` and `a-b/c` both slug to `a-b-c.jsonl`, as do the
+    basename identities `my repo` and `my-repo`. Colliding repos interleave in
+    one append-only file and neither is truncated or misattributed — because
+    **the `repo` field itself is never sanitized**, the record keeps the identity
+    verbatim and only the filename is normalized. **A consumer groups by the
+    `repo` field, never by filename**; the filename partitions the directory
+    only enough that no repo's stream is lost.
+  - A **relative** `DIR` resolves against the caller's CWD, never `--repo-dir`
+    — the two flags are different concepts (an identity source vs a write
+    target), and conflating them would silently relocate every record.
+  - **Naming the wrong kind of thing to `--telemetry-dir` is a usage error
+    (exit 2), not an internal one.** A `--telemetry-dir` that exists and is not
+    a directory is caught up front, because it is a caller mistake fixed by
+    editing the invocation, exactly like `--repo-dir`. That check runs *before*
+    precedence, so it fires even when `--telemetry-file` would have shadowed the
+    flag for sink selection — "ignored" means ignored as a **sink**, never
+    unvalidated, and a caller forwarding both from config learns about a stale
+    value loudly instead of losing the record. **One deliberate edge:** the
+    check tests existence *through* symlinks, so a symlink to a real directory
+    is accepted, while a **dangling** symlink is not "exists and is not a
+    directory" and instead surfaces at `mkdir` time as exit 3. Both sides are
+    pinned in the bats suite so the boundary cannot drift unnoticed. Only what the arguments cannot reveal (a bad path
+    *component*, permissions, a read-only or full filesystem) is discovered at
+    build/append time and stays exit 3 — and those diagnostics now carry the
+    underlying OS error, so a 3 says what actually failed. **`--telemetry-file`
+    is deliberately not given the symmetric check**: a directory there has
+    always exited 3, and tightening a *shipped* flag's exit contract is an
+    incompatible change that belongs in its own release, not as a passenger on
+    an additive one.
+  - `DIR` is created if absent (missing parents included). An uncreatable or
+    unappendable sink is an internal error (exit 3) with **nothing appended to
+    any sink** (the record still reaches stdout, per the stdout-first rule
+    above) and **no fallback to the local default** — a caller that asked for
+    `DIR` must never have its records land somewhere it isn't looking.
+  - **No pipeline forwards `--telemetry-dir` yet, and no filed child owns
+    doing so.** It is the emitter's capability, reached today only by invoking
+    `emit-telemetry.zsh` directly; `resolve-story-loop.zsh` and refine-issue's
+    Step 7 still pass at most `--telemetry-file`. Child (d) (#1006) scoped
+    itself to the emitter, and child (f) (#1008) is the hand-off *document* plus
+    a reference dashboard — neither carries the caller wiring. Forwarding a sink
+    flag from every pipeline entry point is per-pipeline instrumentation, so its
+    natural home is the trilogy's **epic 2 (instrument-every-pipeline)**; until
+    a child there claims it, treat the gap as open rather than assuming it
+    landed with (d) or (f).
 - **Legacy records** (the pre-contract per-pipeline files, which carry no
   `schema` key) **will be** handled by a v0→v1 adapter in child (e)'s rollup —
   **no file migration is performed**, so the old files stay readable where they
@@ -1643,7 +1718,8 @@ Rules that carry the contract's weight:
 
 **Both pre-existing streams are now retrofitted** — review-loop as child (b),
 issue #1004, and refine-issue as child (c), issue #1005. Each emits
-`telemetry/v1` through `emit-telemetry.zsh` into the shared sink, with its
+`telemetry/v1` through `emit-telemetry.zsh` into the repo's shared sink
+`.claude/telemetry/telemetry.jsonl`, with its
 bespoke fields inside `payload` and its own run endings narrowed onto the
 4-value `outcome` enum — see the two sections below. Neither builder carries an
 envelope key any more; both are payload builders. **No file migration is
@@ -1658,7 +1734,7 @@ record per terminal exit — never per round; an extended loop (escalate → gra
 → `--resume`) therefore emits one record per escalation, plus a final one only
 if it later reaches a different terminal status (a run whose human declines the
 grant ends ON its last escalation, so that escalation is its final record, not
-an extra one)** to the shared sink `.claude/telemetry/telemetry.jsonl`
+an extra one)** to the repo's shared sink `.claude/telemetry/telemetry.jsonl`
 (git-ignored — the bootstrap gitignore fragments for every language carry
 `.claude/telemetry/`), or to an explicit `--telemetry-file`. Emission is
 **best-effort**: it is skipped when `--repo` is not an existing directory (only
