@@ -74,7 +74,7 @@ registry is empty, per [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-c
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | `/development-swift:maintenance <json>` | Validates the payload, runs the coverage pre-flight (may raise coverage first), plans the per-tool groups, returns the plan + `ci_fixer_agent`. |
-| Approve | `/development-swift:approve [<pr>]` | Runs `swift-approver` against an open PR and posts the verdict as the Claude Approver identity (same agent as CI). |
+| Approve | `/development-swift:approve [<pr>]` | Runs `swift-approver` against an open PR and posts the verdict as the Claude Approver identity. |
 | Review | `/development-swift:review [paths]` | Spawns 6 specialized agents in parallel to analyze bugs, security, performance, Swift 6 compliance, code quality, and test coverage |
 
 **Agents:**
@@ -126,7 +126,7 @@ input and dispatches here.
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | `/development-python:maintenance <json>` | Parses input, runs coverage pre-flight, spawns per-tool agents in parallel worktrees, aggregates results. Standalone invocation prints usage and stops. |
-| Approve | `/development-python:approve [<pr>]` | Runs `python-approver` against an open PR and posts the verdict as the Claude Approver identity (same agent as CI) |
+| Approve | `/development-python:approve [<pr>]` | Runs `python-approver` against an open PR and posts the verdict as the Claude Approver identity |
 | Improve Test Coverage | `/development-python:improve-test-coverage` | Raises coverage toward a target by spawning `python-coverage-improver` agents in parallel worktrees — deliberate investment outside the maintenance pipeline |
 | Review | `/development-python:review [paths]` | Spawns 5 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449) |
 
@@ -181,7 +181,7 @@ gather-script + dispatch contract).
 | Skill | Command | Description |
 | --- | --- | --- |
 | Maintenance dispatcher | `/development-java:maintenance <json>` | Validates the payload, runs the JaCoCo coverage pre-flight (may raise coverage first), plans the per-tool groups, returns the plan + `ci_fixer_agent`. |
-| Approve (local dry-run) | `/development-java:approve [<pr>]` | Runs the `java-approver` against an open PR locally — prints the verdict instead of posting. |
+| Approve | `/development-java:approve [<pr>]` | Runs `java-approver` against an open PR and posts the verdict as the Claude Approver identity. |
 | Review | `/development-java:review [paths]` | Spawns 5 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449) |
 
 **Agents:**
@@ -360,11 +360,18 @@ remediation reuses `development-javascript`'s `js-ci-fixer`.
 
 ## development-go
 
-Go maintenance — the **core-loop tier** so far, the MVP slice of the
+Go maintenance — a **full-maintenance tier**, mirroring `development-python` /
+`development-java` / `development-swift`. The
 [#868](https://github.com/timo-jakob/timos-claude-code-plugins/issues/868) epic
-that brings Go into the family (the platform's backend stack). Pure function of
+that brings Go into the family (the platform's backend stack) is **complete** —
+all nine slices (A–I) have merged, so the surface below is what ships today, not
+a roadmap. One wiring gap outlived the epic: bootstrap renders no Go
+Approver-policy overlay, so `/development-go:approve` needs a hand-authored
+`.claude/approver-policy.md` — see the Skills table. The **maintenance
+dispatcher** is a pure function of
 its JSON input — dispatched by `/development:maintenance`; it runs no detection
-of its own. **Adding it required zero edits to the generic orchestrator**: Go
+of its own (`review` and `approve` are invoked by you directly).
+**Adding it required zero edits to the generic orchestrator**: Go
 became a *maintained* language purely by `gather-go-findings.sh` appearing next
 to its siblings, which is exactly what the contract-driven dispatch
 ([#249](https://github.com/timo-jakob/timos-claude-code-plugins/issues/249))
@@ -433,8 +440,17 @@ alternative.
 
 | Skill | Command | Description |
 | --- | --- | --- |
-| Maintenance dispatcher | `/development-go:maintenance <json>` | Validates the v2 payload, plans the per-tool groups via `go-maintenance-planner`, returns the plan + `ci_fixer_agent`. Single-phase: no coverage pre-flight until Slice E, so it never emits `improver_result`. |
+| Maintenance dispatcher | `/development-go:maintenance <json>` | Validates the v2 payload, runs the per-package coverage pre-flight, plans the per-tool groups via `go-maintenance-planner`, returns the plan + `ci_fixer_agent`. Two-phase, keyed on whether the improver produced a diff: only when `go-coverage-improver` **commits tests** does Phase A return `improver_result` and no `plan` (the orchestrator merges that PR, then re-invokes for Phase B, which reconciles against it). When no improver is needed — **or it commits nothing**, leaving no diff to push — the phases collapse into one invocation returning `plan` and no `improver_result`. Either way, a region the improver could not clear is recorded in `human_action_required` and its findings are excluded from the plan. |
+| Approve | `/development-go:approve [<pr>] [--dry-run]` | Runs `go-approver` against an open PR and posts the verdict as the Claude Approver identity; `--dry-run` (Go-only, any position) prints the rendered verdict and posts nothing. **The agent ships, its bootstrap wiring does not yet:** `/development:bootstrap` doesn't resolve `go` as an Approver-capable language and renders no Go policy overlay, and the agent hard-fails without `.claude/approver-policy.md` — so that file must be hand-authored on a Go repo today. |
 | Review panel | `/development-go:review [scope]` | Comprehensive Go review with 5 parallel read-only agents (bugs, security, performance, code quality, tests). Emits #558-schema findings alongside the prose report. Generated `*.pb.go` / `*.pb.gw.go` are excluded — the fix for those belongs in the proto or the codegen config. |
+
+**Agents (core loop, Slice B):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `go-maintenance-planner` | opus | Ranks + groups findings and routes each to its agent — one tool's findings stay together, except the vendor-PR sources (split per ecosystem + bump level) and govulncheck (one group per vulnerable module) |
+| `go-format-lint-fixer` | haiku | golangci-lint v2 — the single pinned binary doing both `fmt` (gofumpt + import ordering) and `run --fix`; behaviour-preserving |
+| `go-ci-fixer` | opus | Fixes a failing CI run on a maintenance PR (build/test, lint, coverage), verifying locally before it pushes |
 
 **Agents (review panel):**
 
@@ -459,3 +475,24 @@ alternative.
 | Agent | Model | Focus |
 | --- | --- | --- |
 | `go-coverage-improver` | fable | Raises per-package coverage on an under-covered affected function (or whole package) to Required by writing meaningful table-driven Go tests; never modifies production code under test. Spawned by the dispatcher's coverage pre-flight. |
+
+**Agents (vendor PRs + upgrades, Slice G):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `go-dependabot-snyk-triage` | opus | Vendor PRs (Dependabot / Snyk / Renovate): auto-merges green gomod + github-actions patch/minor and same-tag digest-only base-image / `.ko.yaml` refreshes it re-verifies (never self-approves — arms native auto-merge otherwise); the rest pass through to human-review |
+| `go-major-upgrade` | fable | Module majors — semantic import versioning means a `/vN` bump rewrites import sites tree-wide, not just `go.mod`; reads release notes, migrates call sites, iterates on `go build` + `go test`. Also the govulncheck fix path (a patch/minor fix skips the rewrite) |
+| `go-runtime-upgrade` | fable | Go toolchain bumps — `go.mod`'s `go`/`toolchain` directives + the CI `setup-go` matrix. **No Dockerfile leg**: ko builds with the CI toolchain, so there is no `FROM golang:X` to swap. Cascades toolchain-sensitive deps, then applies release-note-licensed code adaptations |
+
+**Agent (approver, Slice H):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `go-approver` | fable | Synthesis-layer PR reviewer once every other CI gate is green — reads `.claude/approver-policy.md`, builds a risk register from the five review dimensions, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT as the Approver identity |
+
+**Agents (proto-first platform advisors, Slice I):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `go-grpc-advisor` | opus | buf `generate` with pinned protoc-gen-go + protoc-gen-go-grpc, `buf lint` / `buf breaking` gating the contract in CI, and generated sources excluded from coverage |
+| `go-api-contract-advisor` | opus | Proto-first REST: buf wiring, `google.api.http` completeness on external RPCs, grpc-gateway mux registration, and the OpenAPI 2.0→3.0 spec pipeline. Opt-in — an unconfigured repo is reported informationally, never pushed toward REST |

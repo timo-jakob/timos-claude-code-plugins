@@ -36,6 +36,19 @@ on:
       - 'development/agents/**'
       - 'ARCHITECTURE.md'
       - 'docs/explanation/**'
+      # the hand-written plugin overview + the Go plugin's own inventory:
+      # tests/go-docs-parity.bats asserts one against the other (#1129), and
+      # BOTH sides of that check are edited by PRs this filter otherwise misses
+      # — a docs-only edit to plugins.md, and a PR adding/renaming a Go agent
+      # or skill (which is literally how #868 reached 18 agents against a
+      # 12-agent doc). Same non-**-prefixed hazard as the lines above:
+      # 'development/**' does NOT match 'development-go/**'.
+      - 'docs/reference/plugins.md'
+      - 'development-go/**'
+      # the third side of the same check: go-docs-parity.bats asserts the Go
+      # approver-policy overlay does NOT exist yet, so the PR that finally lands
+      # it must red this suite at PR time rather than after merge
+      - 'development/skills/bootstrap/templates/**'
       - '.github/workflows/script-tests.yml'
   push:
     branches: [main]
