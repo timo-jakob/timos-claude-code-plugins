@@ -1621,6 +1621,77 @@ Rules that carry the contract's weight:
   runs, `null` on enrichments). It does **not** check the `run_id` *format* (only
   that it is a non-empty string), so the format above is the emitter's promise
   for minted ids rather than a validated invariant.
+- **The validator prints its own key list — `--print-envelope-keys` (#1008).**
+  The flag prints the validator's `envelope_keys` definition as a JSON array on
+  stdout and exits 0. That array is the **authoritative** key list: a consumer
+  reads it from the enforcer instead of copying 14 names into a second place that
+  can then drift from the first. The key table in
+  `docs/reference/telemetry-grafana-handoff.md`
+  and the prose above are the **human** statements of the same list and are
+  explicitly **non-authoritative for a test** — a test that hard-codes the 14 names
+  is the drift this contract exists to remove. Internally the definition is
+  shared: one jq `def` feeds both the query mode and the validating program, so
+  the printed list and the enforced list cannot disagree.
+  It is a **query mode**: it reads no input (not even stdin) and validates
+  nothing, so pairing it with an input operand or `--require-records` is a usage
+  error (exit 2) rather than a silent no-op — `… --print-envelope-keys sink.jsonl`
+  means to validate that file, and printing keys and exiting 0 over an
+  unvalidated stream would be a false green. Repeating the flag is idempotent
+  (one array), not additive.
+- **The Grafana hand-off artifacts (child (f), #1008)** live at
+  `development/scripts/telemetry/grafana/`: `reference-dashboard.json` (a
+  committed Grafana export, Loki/LogQL, with the `DS_TELEMETRY` `__inputs`
+  indirection so no environment-specific uid is committed) and
+  `reference-dashboard.fields.json` — a **manifest mapping panel title → the
+  envelope fields that panel's queries reference**. The manifest exists so the
+  dashboard cannot rot silently against the envelope, and it is only meaningful
+  next to its **field-reference rule**: a field reference inside a LogQL query is
+  exactly (1) a JSON-extraction assignment `| json <name>="<name>"`, or (2) the
+  left-hand side of a label-filter comparison (`<name> = "…"` / `<name> != "…"`)
+  after a `| json` stage — nothing else, which is what lets the test check
+  queries without parsing LogQL. `tests/telemetry-grafana-dashboard.bats`
+  enforces it in **both** directions (every manifest field is a real envelope key
+  per `--print-envelope-keys` *and* appears in its panel's queries; every
+  rule-matched reference in a query is manifested), plus a **closure guard** that
+  keeps the queries inside the rule's reach. Several of its parts are
+  **allowlists**, so the guard fails closed on LogQL nobody anticipated rather
+  than only on named offenders. A query must carry at least one `| json` stage
+  spelled with a following space — a stage-less query, or one spelled `|json`
+  (which the extraction rule cannot see at all, so its identity pairs go
+  unextracted while the query still reads those fields), is rejected outright. Every
+  **JSON-stage body** must reduce to nothing
+  once identity `name="name"` pairs, commas and whitespace are removed and must
+  carry at least one (rejecting a bare `| json`, which would auto-extract every
+  key so a `sum by (…)` becomes an unmatched reference; LogQL's shorthand
+  `| json kind, outcome`; a renaming `| json p="pipeline"`; and a backquoted
+  parameter), and every remaining **pipeline stage** must *begin with* a label
+  filter the rule matched (rejecting `logfmt`, `unpack`, `unwrap`,
+  `line_format`, `pattern`, `regexp` and any future stage unnamed). Further arms
+  reach what the stage rule structurally cannot: any surviving comparison
+  operator — `=`, `<`, `>` **and `~`**, the last because a negated-regex *line*
+  filter `!~ "…"` carries none of the other three; any **label list**
+  (`by`/`without`/`on`/`ignoring`/`group_left`/`group_right`) naming a label that
+  no identity pair extracts and that is not the `job` stream label; a **stream
+  selector** matching on anything but `job` (the `{…}` is stripped before the
+  other arms, so a matcher on a promoted envelope label would otherwise be
+  invisible); and `label_replace` / `label_join`, which name a label in a plain
+  function argument. It is one `guard_expr` predicate that
+  the query tests and the probes both **call**, with every arm pinned by at least
+  one probe — enforced by a **mutation harness** that neutralises each
+  `# ARM:<name>` rejection in turn and requires the probe suite to fail, so an
+  arm added without a probe reddens immediately rather than silently widening
+  the hole. (Building it also proved one arm dead, and removed it.)
+  **It is a checked approximation of LogQL, not a parser** — each escape
+  was found by review and closed deliberately, and the allowlist arms generalise
+  past the named shapes, but a novel construct could still slip through. So the
+  reverse direction is **strong, not total**: a green suite means "no known
+  escape", and the manifest remains a human's to own when a query changes.
+  Changing the envelope
+  means changing these two files with it; the human-facing statement is
+  `docs/reference/telemetry-grafana-handoff.md`, which also carries the one
+  consumer-side precondition the queries cannot express — the scrape config must
+  promote each record's `ts` onto the Loki entry timestamp, or `count_over_time`
+  charts ingest time.
 - **Nothing lands on a rejected record.** Every validation failure in the emitter
   exits non-zero *before* the append, so a malformed record never reaches a sink.
   The record is also written to stdout *before* the append, so a downstream pipe
@@ -1713,6 +1784,14 @@ Rules that carry the contract's weight:
   `schema` key) are handled by a v0→v1 adapter in child (e)'s rollup
   (`rollup-telemetry.zsh`, below) — **no file migration is performed**, so the
   old files stay readable where they lie.
+  - **The shared `--telemetry-dir` directory is `telemetry/v1`-only.** Legacy
+    records stay in their per-repo locations and are never promoted into it, so
+    every line in that directory carries a `schema` key. A cross-repo consumer
+    therefore needs **no** missing-`schema` tolerance and no version sniffing —
+    which is why child (f)'s reference dashboard (#1008) references `schema` in
+    no query at all. That is a property of the *shared* sink specifically: the
+    local default sink can still sit alongside pre-contract files on the same
+    machine.
 - **Versioning:** a breaking envelope change bumps to `telemetry/v2`; `payload`
   evolution is per-pipeline and non-breaking by definition — with **one named
   exception**: `payload.rounds` is a shared reporting key the rollup below
@@ -3219,7 +3298,10 @@ directory makes every other caller reach across a sibling. `telemetry/` (#740)
 is the first such area — `emit-telemetry.zsh` and `validate-telemetry.zsh`, the
 shared `telemetry/v1` emitter and contract validator. (`rollup-telemetry.zsh`
 lives beside them for cohesion, but is a **human-facing CLI** rather than a
-cross-skill callee, so it is not what the shared-area rationale is about.)
+cross-skill callee, so it is not what the shared-area rationale is about. The
+same goes for `grafana/` — `reference-dashboard.json` and its
+`reference-dashboard.fields.json` manifest are committed hand-off **data** for a
+second repo to import, not code any skill calls.)
 Skills reference these with the usual `<skill-base-dir>` placeholder
 (`<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh`), the same
 relative idiom already used for `<skill-base-dir>/../bootstrap/scripts/…`. This

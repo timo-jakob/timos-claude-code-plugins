@@ -663,3 +663,136 @@ check() { run bash -c "set -o pipefail; printf '%s\n' '$VALID' | jq -c '$1' | zs
   run zsh "$S" "$F" --require-records
   [ "$status" -eq 0 ]
 }
+
+# ------------------------------------------- --print-envelope-keys (#1008)
+#
+# The query mode that makes the validator the AUTHORITATIVE key list, so the
+# hand-off contract page and its dashboard tests read the 14 names from the
+# enforcer instead of copying them. These arms are the acceptance tests for
+# test-case issues #1105 (happy), #1106 (corner) and #1107 (error).
+#
+# The list is deliberately NOT hard-coded here either — this file asserts the
+# mode's SHAPE and its self-consistency with the validator's own enforcement.
+# Pinning the names here would recreate, inside the test suite, the second
+# source of truth the flag exists to remove.
+
+@test "tc-happy-print-envelope-keys: prints a 14-element JSON array on stdout and exits 0 (#1105)" {
+  run --separate-stderr zsh "$S" --print-envelope-keys
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  run bash -c "zsh '$S' --print-envelope-keys | jq -e 'type == \"array\" and length == 14
+                and (map(type == \"string\" and length > 0) | all)'"
+  [ "$status" -eq 0 ]
+}
+
+@test "tc-happy-print-envelope-keys: the printed keys are the ones actually ENFORCED (#1105)" {
+  # The whole point of the flag: a record built from exactly the printed keys
+  # must validate, and dropping any one of them must be reported as missing. A
+  # printed list that had drifted from `def envelope_keys` would fail here.
+  local built="$BATS_TEST_TMPDIR/built.jsonl"
+  zsh "$S" --print-envelope-keys \
+    | jq -c --argjson v "$VALID" '. as $k | reduce $k[] as $key ({}; .[$key] = $v[$key])' \
+    > "$built"
+  run zsh "$S" "$built" --require-records
+  [ "$status" -eq 0 ]
+
+  # Guard the list before iterating it: an empty one would make this half of the
+  # test prove nothing. (The sibling suite adopted the same convention for every
+  # loop — the guard belongs with the loop it protects, not in another test.)
+  local keys key
+  keys="$(zsh "$S" --print-envelope-keys | jq -r '.[]')"
+  [ "$(printf '%s' "$keys" | grep -c '')" -eq 14 ]
+  while IFS= read -r key; do
+    echo "$VALID" | jq -c --arg k "$key" 'del(.[$k])' > "$F"
+    run zsh "$S" "$F"
+    [ "$status" -eq 1 ]
+    contains "$output" "missing envelope key(s): $key"
+  done <<< "$keys"
+}
+
+@test "tc-happy-print-envelope-keys: the mode reads no input at all (#1105)" {
+  # A query mode that consumed stdin would hang a caller running it inside a
+  # pipeline, and would quietly swallow data the caller still needed. The
+  # downstream `cat` proves the bytes were left unread rather than discarded.
+  run bash -c "printf 'untouched\n' | { zsh '$S' --print-envelope-keys >/dev/null; cat; }"
+  [ "$status" -eq 0 ]
+  [ "$output" = "untouched" ]
+}
+
+@test "tc-corner-print-envelope-keys-repeated: repeating the flag is idempotent, not additive (#1106)" {
+  run zsh "$S" --print-envelope-keys --print-envelope-keys
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | grep -c '')" -eq 1 ]
+  run bash -c "zsh '$S' --print-envelope-keys --print-envelope-keys | jq -e 'length == 14'"
+  [ "$status" -eq 0 ]
+}
+
+@test "tc-error-print-envelope-keys-with-input: a FILE operand is a usage error (#1107)" {
+  # `… --print-envelope-keys sink.jsonl` means "validate sink.jsonl". Printing
+  # keys and exiting 0 over an unvalidated stream would be a false green.
+  printf '%s\n' "$VALID" > "$F"
+  run --separate-stderr zsh "$S" --print-envelope-keys "$F"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--print-envelope-keys reads no input"
+  contains "$stderr" "usage:"
+}
+
+@test "tc-error-print-envelope-keys-with-input: operand order does not change the verdict (#1107)" {
+  # Exit 2 alone proves too little — it is the shared code for EVERY usage error,
+  # so a regression routing the reversed order into "only one input may be given"
+  # or "unknown flag" would keep these green while the title became false. Pin
+  # the message, which is the actual claim: the post-loop conflict check makes
+  # order irrelevant.
+  printf '%s\n' "$VALID" > "$F"
+  run --separate-stderr zsh "$S" "$F" --print-envelope-keys
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--print-envelope-keys reads no input"
+  run --separate-stderr zsh "$S" - --print-envelope-keys
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--print-envelope-keys reads no input"
+}
+
+@test "tc-error-print-envelope-keys-with-input: --require-records is a usage error too (#1107)" {
+  # It asserts something about a stream, and this mode reads no stream.
+  run --separate-stderr zsh "$S" --print-envelope-keys --require-records
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--require-records is meaningless"
+  run --separate-stderr zsh "$S" --require-records --print-envelope-keys
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--require-records is meaningless"
+}
+
+@test "--print-envelope-keys reports a missing jq as an internal error, not an empty list" {
+  # The failure mode this guards is silent and downstream: if the mode ever
+  # exited 0 while printing nothing, tests/telemetry-grafana-dashboard.bats's
+  # envelope_keys() would hand its loops an EMPTY list and several assertions
+  # there would pass vacuously. So the contract is "never exit 0 with no array".
+  local empty="$BATS_TEST_TMPDIR/empty-path"
+  mkdir -p "$empty"
+  run --separate-stderr env PATH="$empty" "$ZSH_BIN" "$S" --print-envelope-keys
+  [ "$status" -eq 3 ]
+  [ -z "$output" ]
+  contains "$stderr" "jq not found on PATH"
+}
+
+@test "--print-envelope-keys reports a FAILING jq as exit 3 with no output" {
+  # The `|| { … exit 3 }` guard on the print itself. Drop it and a broken jq
+  # yields exit 0 plus an empty stdout — the false green described above.
+  local stub="$BATS_TEST_TMPDIR/stub"
+  mkdir -p "$stub"
+  printf '#!/bin/sh\nexit 1\n' > "$stub/jq"
+  chmod +x "$stub/jq"
+  run --separate-stderr env PATH="$stub:$PATH" "$ZSH_BIN" "$S" --print-envelope-keys
+  [ "$status" -eq 3 ]
+  [ -z "$output" ]
+  contains "$stderr" "failed to print the envelope keys"
+}
+
+@test "--print-envelope-keys is documented in the script's own usage block" {
+  run zsh "$S" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "--print-envelope-keys"
+}

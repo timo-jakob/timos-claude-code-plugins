@@ -7,9 +7,8 @@ an extended review-loop run (escalate → grant more rounds → resume) appends
 more than one such terminal record, so a "run" here means one ending, not one
 whole loop. `rollup-telemetry.zsh` gives you a one-command
 glance at how those pipelines are doing — no Grafana, no infrastructure.
-(Cross-repo reporting via Grafana is a separate, opt-in path — planned as
-epic #740 child (f), issue #1008 — documented on its own hand-off contract
-page once that lands.)
+(Cross-repo reporting via Grafana is a separate, opt-in path — see the
+[Grafana hand-off contract](../reference/telemetry-grafana-handoff.md).)
 
 ## Run it
 
