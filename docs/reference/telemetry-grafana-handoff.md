@@ -52,7 +52,8 @@ which owns the sink. Sink precedence, highest first:
 2. `--telemetry-dir DIR` — the **shared** cross-repo mode: appends to
    `DIR/<repo-slug>.jsonl`. This is the mode the reporting repo consumes.
 3. The local default — `<repo-dir>/.claude/telemetry/telemetry.jsonl`, which is
-   git-ignored and never leaves the machine.
+   git-ignored (via the entry bootstrap installs) and never leaves the
+   machine.
 
 The slug is derived from the record's resolved `repo`: `/` becomes `-`, any
 character outside `[A-Za-z0-9._-]` becomes `-`, a leading `.` or `-` becomes `_`,

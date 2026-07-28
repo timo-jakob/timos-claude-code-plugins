@@ -108,6 +108,7 @@ nav:
       - The C4 architecture docs: explanation/c4-architecture-docs.md
       - The target-repo docs stack: explanation/target-repo-docs-stack.md
       - The local review loop: explanation/review-loop.md
+      - Pipeline telemetry: explanation/pipeline-telemetry.md
       - The Grafana hand-off: explanation/telemetry-grafana-handoff.md
   - Architecture:
       - architecture/index.md

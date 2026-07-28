@@ -1954,6 +1954,14 @@ or isn't readable), 3 internal (`jq` missing, a scratch-file or read failure
 while streaming, or a failure in the aggregation pass). See
 `docs/how-to/read-pipeline-telemetry.md` for the user-facing walkthrough.
 
+**The rollup is deliberately unfiltered on `payload.promotion_phase`.** A
+review-loop suggestion-promotion pass (#995) is a second terminal run, so its
+record is counted here like any other. Only the convergence-**rate** recipes
+under *Review-loop telemetry* exclude it with
+`select(.payload.promotion_phase != true)`; the mean-rounds and
+escalation-breakdown cuts there keep it, exactly as this rollup does. So a
+discrepancy against those cuts is never promotion filtering.
+
 ## Review-loop telemetry (#566)
 
 Raising autonomy safely needs evidence, so the loop appends **one `telemetry/v1`

@@ -219,3 +219,11 @@ implementation context when it builds the change again.
 `/development:resolve-issue` can run with the loop disabled (the `--no-review`
 fast path) when you deliberately want no local review round — for example on a
 trivial change you will review yourself.
+
+## See also
+
+- [Read your pipeline telemetry](../how-to/read-pipeline-telemetry.md) — the
+  loop appends one record per run ending; this is how you read them back.
+- [Pipeline telemetry](pipeline-telemetry.md) — why the loop records anything,
+  and what it deliberately does not. The five-round default on this page is
+  itself a telemetry-driven number.

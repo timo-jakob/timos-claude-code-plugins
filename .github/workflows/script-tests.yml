@@ -33,6 +33,10 @@ on:
       # those restatements must trigger the suite at PR time — not turn up as a
       # red main on the unfiltered push run
       - 'development/skills/**/SKILL.md'
+      # per-skill docs the suite asserts on: tests/telemetry-user-docs.bats
+      # (#1009) pins the refine-issue walkthrough's telemetry cross-links, and
+      # 'development/skills/**/scripts/**' above does not match a docs/ path
+      - 'development/skills/**/docs/**'
       - 'development/agents/**'
       - 'ARCHITECTURE.md'
       - 'docs/explanation/**'

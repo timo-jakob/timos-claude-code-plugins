@@ -18,6 +18,9 @@ behind the plugins. Read these to understand *why* things are the way they are.
 - [The local review loop](review-loop.md) — the pre-push review→fix→test loop
   `/development:resolve-issue` runs before any PR, and the interactive
   escalation that lets a present human grant more rounds or give guidance.
+- [Pipeline telemetry](pipeline-telemetry.md) — why the pipelines record
+  anything, what is deliberately not collected, and why the sink stays on your
+  machine.
 - [The Grafana hand-off](telemetry-grafana-handoff.md) — why the reporting stack
   lives in another repo, why the telemetry envelope is closed, and why the
   hand-off is a committed artifact rather than a conversation.
