@@ -99,13 +99,19 @@ issue with a comment.
 `refine-issue` re-runs `story-readiness` on the edited issue. Now check 5 passes
 (concrete `use_case`, happy+error test cases in `curl`, both spun-out issues
 exist and are linked), so the verdict is `READY` and the `needs-refinement` label
-is cleared. One `telemetry/v1` record is appended to the shared, git-ignored sink
-`.claude/telemetry/telemetry.jsonl` (#579, retrofitted onto the contract
-by #1005) — the envelope comes from the shared `emit-telemetry.zsh`, the five
-bespoke fields from `build-refine-telemetry-record.zsh` as the `payload`, and the
-run's `refined-ready` ending narrows onto the envelope's `success`. (The stream
+is cleared. One `telemetry/v1` record is appended to the shared sink
+`.claude/telemetry/telemetry.jsonl`, which bootstrap git-ignores (#579,
+retrofitted onto the contract by #1005). The envelope comes from the shared
+`emit-telemetry.zsh`, the five bespoke fields from
+`build-refine-telemetry-record.zsh` as the `payload`, and the run's
+`refined-ready` ending narrows onto the envelope's `success`. (The stream
 is deliberately **lossy** — Step 7 skips the record rather than fabricate an
 unmeasured `wall_s`, count, outcome or park type.)
+
+To read these records back, see
+[Read your pipeline telemetry](https://timo-jakob.github.io/timos-claude-code-plugins/how-to/read-pipeline-telemetry/);
+for what is and is not collected, and why, see
+[Pipeline telemetry](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/pipeline-telemetry/).
 
 ```json
 {"schema":"telemetry/v1","kind":"run","run_id":"refine-issue-1720000000-8f3a","parent_run_id":null,"ts":1720000000,"repo":"owner/app","repo_type":null,"pipeline":"refine-issue","issue":900,"pr":null,"outcome":"success","wall_s":180,"tokens":null,"payload":{"rounds":2,"objections_raised":2,"objections_resolved":2,"park_type":null,"risk_classification":"normal"}}

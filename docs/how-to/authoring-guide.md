@@ -79,9 +79,12 @@ for the why and [Amend a C4 diagram](amend-a-c4-diagram.md) for the how.
 
 ## Mechanics specific to this repo
 
-- **Add every new page to the nav.** `mkdocs build --strict` fails on a page
-  that isn't in `mkdocs.yml`'s `nav:` (the `omitted_files` validation). Add your
-  page under the right section when you create it.
+- **Register every new page in three places.** `mkdocs build --strict` fails on
+  a page that isn't in `mkdocs.yml`'s `nav:` (the `omitted_files` validation) —
+  but that is the *only* one it catches. The `docs/index.md` MOC entry and the
+  bucket's own `index.md` entry can both be dropped with the site still building
+  green, so several suites pin all three (see `tests/telemetry-user-docs.bats`).
+  Add all three when you create the page.
 - **Links are checked strictly.** A broken internal link fails the build. Links
   *out* of `docs/` (to repo-root `ARCHITECTURE.md`, per-plugin docs, scripts)
   are written as **absolute repo URLs**, not relative paths — relative links
@@ -101,5 +104,6 @@ for the why and [Amend a C4 diagram](amend-a-c4-diagram.md) for the how.
 1. What is the reader *doing*? → picks the bucket (table above).
 2. Is it a listing derivable from frontmatter? → it's **generated**; edit the
    source, not the page.
-3. New page → add it to `mkdocs.yml` `nav:`.
+3. New page → add it to `mkdocs.yml` `nav:`, the `docs/index.md` MOC, **and**
+   the bucket's `index.md` (only the first is caught by the strict build).
 4. Run `mkdocs build --strict` before pushing.

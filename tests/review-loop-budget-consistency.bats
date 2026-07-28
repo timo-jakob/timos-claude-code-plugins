@@ -43,8 +43,17 @@ setup() {
   MOTIV="$REPO_ROOT/docs/explanation/motivation.md"
   GATE="$REPO_ROOT/development/agents/story-readiness.md"
   PROSE="$REPO_ROOT/development-claude-plugin/agents/claude-plugin-prose-logic.md"
+  # #1009: the user-facing telemetry explanation cites the budget as its worked
+  # example of a telemetry-driven decision, so it is a live restatement too.
+  # NOTE it also narrates the OLD budget (the 3 -> 5 raise is the whole point of
+  # the passage), which the stale sweeps below would flag if it were reworded to
+  # any of their banned spellings. Phrase that history so it never collides with
+  # them — "defaulted to 3", not "up to three rounds" — and, on a retune, reword
+  # the whole evidence sentence rather than only the word form: the 1,3,3,3,6,10
+  # data produced *five*, and must not be re-attached to a later cap.
+  TELEM="$REPO_ROOT/docs/explanation/pipeline-telemetry.md"
   # every live prose site, for the sweeps that must cover all of them at once
-  ALL_SITES=("$SKILL" "$ARCH" "$EXPLAIN" "$MOTIV" "$GATE" "$PROSE")
+  ALL_SITES=("$SKILL" "$ARCH" "$EXPLAIN" "$MOTIV" "$GATE" "$PROSE" "$TELEM")
 
   # the executable copies — every prose site is checked AGAINST these
   MAXR="$(grep -Eom1 'MAX_REVIEW_ROUNDS=[0-9]+' "$LOOP" | cut -d= -f2)"
@@ -131,6 +140,19 @@ grep_site() {  # grep_site <file> <fixed-string>
 @test "no stale round-count spelling survives at any live site (#993)" {
   run -1 grep -Eq 'three rounds by default|up to three rounds|three review rounds|escalates after 3 rounds|(^|[^0-9])3-round default' \
     "${ALL_SITES[@]}"
+}
+
+@test "the telemetry explanation states the CURRENT round cap (#1009)" {
+  # It cites the 3 -> 5 raise as its worked example of a telemetry-driven
+  # decision, so a retune that left it saying "five" would make the page's
+  # evidence story quietly false.
+  local word
+  case "$MAXR" in
+    5) word="five" ;;
+    *) printf 'no word form mapped for MAX_REVIEW_ROUNDS=%s — extend this case\n' "$MAXR" >&2
+       return 1 ;;
+  esac
+  grep -Fq "raised to **$word rounds**" "$TELEM"
 }
 
 @test "the extension increment is +3 at every live site (#993)" {

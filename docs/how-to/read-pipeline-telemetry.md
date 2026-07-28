@@ -2,7 +2,8 @@
 
 The review loop and `/development:refine-issue` — the two pipelines
 instrumented so far, with more joining incrementally — each append one
-`telemetry/v1` JSONL record per run **ending** to a local, git-ignored sink —
+`telemetry/v1` JSONL record per run **ending** to a local sink (git-ignored in
+a bootstrapped repo — see below) —
 an extended review-loop run (escalate → grant more rounds → resume) appends
 more than one such terminal record, so a "run" here means one ending, not one
 whole loop. `rollup-telemetry.zsh` gives you a one-command
@@ -103,6 +104,15 @@ There's no cross-pipeline totals entry — every entry describes one pipeline,
 | `mean_wall_s` | Average wall-clock seconds **per record**, not per logical loop — the same reason as `mean_rounds`: this rollup does not group an extended loop's records back into one loop. |
 | `escalation_rate` | `escalated` runs divided by total runs, for that pipeline. |
 
+**These figures count *every* run record, including a review-loop
+suggestion-promotion pass.** That pass is a second, terminal run of its own, so
+it lands as its own record. Only `ARCHITECTURE.md`'s convergence-**rate**
+recipes exclude it (`select(.payload.promotion_phase != true)`), and this rollup
+prints no rate of that kind; its mean-rounds and escalation-breakdown cuts
+deliberately **keep** the pass, exactly as these figures do. So a discrepancy
+against those cuts is not promotion filtering — look to their other selections
+instead.
+
 **A measure you can't honestly compute is withheld, never guessed.** If no
 record in a group carries a rounds count, `mean_rounds` prints `-` in text and
 comes back `null` (the key stays present) under `--json` — the same rule
@@ -120,20 +130,79 @@ vocabulary onto the same 4-value enum newer records use. You don't need to do
 anything to benefit from this — point the rollup at a directory holding both
 old and new files and it aggregates all of it.
 
+## Share it across repos (opt-in)
+
+By default nothing leaves your machine. If you *want* several repos' telemetry
+in one place — for a separate reporting stack to read — point the **emitter** at
+a shared directory:
+
+```bash
+zsh development/scripts/telemetry/emit-telemetry.zsh \
+  --pipeline example --outcome success --wall-s 42 \
+  --telemetry-dir ~/telemetry-share
+```
+
+> **This appends a real record.** The emitter has no dry-run: what it writes is
+> indistinguishable from a genuine run to every consumer of that directory, and
+> the sink is append-only. So the example uses `--pipeline example` — the
+> identifier is open — rather than `review-loop`, which would inflate
+> `run_count` and dilute `escalation_rate` in every rollup and dashboard over
+> that directory. Try it against a scratch directory first.
+
+It appends to `~/telemetry-share/<repo-slug>.jsonl` — one file per repo *slug*
+(a many-to-one name, see below), so many repos can share the directory without
+clobbering each other. The rollup reads
+such a directory directly:
+
+```bash
+zsh development/scripts/telemetry/rollup-telemetry.zsh ~/telemetry-share/
+```
+
+Three things to know before you rely on it:
+
+- **The slug is not an identity.** It is derived from `repo` and is
+  many-to-one (`a/b-c` and `a-b/c` both become `a-b-c.jsonl`), so group by the
+  `repo` *field*, never by filename.
+- **No pipeline forwards `--telemetry-dir` yet.** It is the emitter's
+  capability, reached today by invoking `emit-telemetry.zsh` directly; the
+  review-loop and refine-issue callers still write to the local default (or an
+  explicit `--telemetry-file`, when one was given). So an empty shared directory
+  means *that* gap, not a broken emitter.
+- **The shared directory is `telemetry/v1`-only.** Every line in it carries a
+  `schema` key, which is what lets a consumer skip version sniffing entirely.
+  The legacy pre-contract files described above stay where they are — **never copy them
+  in**, even though the rollup itself reads old and new together quite happily.
+
+What a cross-repo consumer may rely on is specified in the
+[Grafana hand-off contract](../reference/telemetry-grafana-handoff.md).
+
 ## What's collected, and what isn't
 
-- Telemetry is written to a **local, git-ignored** file
+- Telemetry is written to a **local** file
   (`.claude/telemetry/telemetry.jsonl`) and is **never sent anywhere** by
-  default. Nothing leaves your machine unless *you* choose to point
-  `emit-telemetry.zsh` at a shared directory for cross-repo reporting — a
-  separate, opt-in path (the emitter's `--telemetry-dir`, epic #740 child (d),
-  issue #1006).
+  default — there is no network transport in the emitter at all. In a repo this
+  family bootstrapped that path is **git-ignored**; if you adopted the plugins
+  into an existing repo without bootstrap, add `.claude/telemetry/` to your
+  `.gitignore` yourself — that exact entry, not all of `.claude/`, which would
+  also untrack files meant to be committed (`.claude/approver-policy.md`). See
+  [Pipeline telemetry](../explanation/pipeline-telemetry.md). Even the
+  shared-directory path above moves nothing off-machine: it only redirects the
+  append to a directory you choose, which a separate reporting stack may then
+  read.
 - `tokens` is deliberately **never estimated** — it stays `null` until the
   harness gives a real number, because a withheld figure beats a confidently
   wrong one.
+- Records carry counts, outcomes, durations and issue/PR numbers — **not** your
+  code, diffs, or the text of any review finding.
+
+[Pipeline telemetry](../explanation/pipeline-telemetry.md) explains why it is
+collected at all, and why the stream deliberately undercounts rather than
+guesses.
 
 ## See also
 
+- [Pipeline telemetry](../explanation/pipeline-telemetry.md) — why this data is
+  collected, what is deliberately left out, and why it stays on your machine.
 - [The local review loop](../explanation/review-loop.md) — one of the two
   pipelines that emit into the sink this page reads (the other is
   `/development:refine-issue`).
