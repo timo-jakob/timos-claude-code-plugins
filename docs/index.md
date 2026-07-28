@@ -40,6 +40,7 @@ separate.
 - [Commands](reference/commands.md)
 - [Agents](reference/agents.md)
 - [`c4_drift` findings](reference/c4-drift-findings.md)
+- [Grafana hand-off contract](reference/telemetry-grafana-handoff.md)
 - [Repo scripts](reference/repo-scripts.md)
 - [Requirements](reference/requirements.md)
 
@@ -52,6 +53,7 @@ separate.
 - [The C4 architecture docs](explanation/c4-architecture-docs.md)
 - [The target-repo docs stack](explanation/target-repo-docs-stack.md)
 - [The local review loop](explanation/review-loop.md)
+- [The Grafana hand-off](explanation/telemetry-grafana-handoff.md)
 
 ## 🏗 Architecture
 

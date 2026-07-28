@@ -49,6 +49,17 @@ on:
       # approver-policy overlay does NOT exist yet, so the PR that finally lands
       # it must red this suite at PR time rather than after merge
       - 'development/skills/bootstrap/templates/**'
+      # same rule, extended for the Grafana hand-off suite (#1008): it asserts
+      # the reference page's envelope table against the validator's own key
+      # list, its flag table against each script's --help, and that both new
+      # pages are registered — so docs/reference, the MOC and the nav are all
+      # prose this suite gates
+      - 'docs/reference/**'
+      # tests/telemetry-rollup.bats asserts docs/how-to/read-pipeline-telemetry.md
+      # exists and is registered in the how-to index (#1007) — same rule
+      - 'docs/how-to/**'
+      - 'docs/index.md'
+      - 'mkdocs.yml'
       - '.github/workflows/script-tests.yml'
   push:
     branches: [main]

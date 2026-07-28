@@ -16,6 +16,7 @@
 # Usage:
 #   validate-telemetry.zsh [FILE|-] [--require-records]
 #                                        # FILE defaults to - (stdin)
+#   validate-telemetry.zsh --print-envelope-keys
 #
 #     --require-records  exit 1 when the stream contains NO RECORDS instead of 0
 #                        (blank and whitespace-only lines do not count, so a
@@ -27,6 +28,34 @@
 #                        step silently wrote nothing would otherwise pass this
 #                        gate green. Callers asserting that emission HAPPENED
 #                        should pass this flag.
+#
+#     --print-envelope-keys
+#                        print THIS script's own `envelope_keys` — the closed
+#                        envelope it enforces — as a JSON array on stdout, and
+#                        exit 0. It is the authoritative key list: a consumer
+#                        (the Grafana hand-off tests, #1008) reads it from the
+#                        enforcer rather than copying 14 names into a second
+#                        place that can then drift from the first. Prose —
+#                        ARCHITECTURE.md, the hand-off page — states the same
+#                        list for humans and is explicitly NOT authoritative for
+#                        a test.
+#
+#                        It is a QUERY mode: it reads no input (not even stdin)
+#                        and validates nothing. Pairing it with an input operand
+#                        or --require-records is therefore a usage error (exit
+#                        2), not a silent no-op — a caller writing
+#                        `… --print-envelope-keys sink.jsonl` means to validate
+#                        that file, and quietly printing keys instead would exit
+#                        0 over an unvalidated stream. Repeating the flag is
+#                        idempotent (one array), not additive.
+#
+#                        ONE EXCEPTION, the usual shell convention: -h/--help
+#                        supersedes every mode and exits 0 with the usage text on
+#                        stdout, so `--print-envelope-keys --help` prints usage
+#                        rather than an array. That is the only exit-0 path on
+#                        which the flag is present and no array is emitted; a
+#                        caller parsing the output gets a loud jq failure, never
+#                        a silently empty key list.
 #
 # Output: nothing on success. On a contract violation, one line per VIOLATION on
 # stdout — a single record breaking several rules reports several lines:
@@ -51,13 +80,26 @@ setopt nounset pipefail
 # shell with 141 before the contractual exit code is returned.
 trap '' PIPE
 
-local src="-" src_seen="" require_records=""
-local usage="usage: validate-telemetry.zsh [FILE|-] [--require-records]"
+local src="-" src_seen="" require_records="" print_keys=""
+local usage="usage: validate-telemetry.zsh [FILE|-] [--require-records]
+       validate-telemetry.zsh --print-envelope-keys"
+
+# The CLOSED envelope, defined ONCE. Both the validator program below and
+# --print-envelope-keys are built from this single jq definition, so the list a
+# consumer READS can never drift from the list this script ENFORCES — which is
+# the entire reason the query mode exists rather than a hand-copied constant.
+local envelope_keys_def='def envelope_keys: ["schema","kind","run_id","parent_run_id","ts","repo",
+                        "repo_type","pipeline","issue","pr","outcome","wall_s",
+                        "tokens","payload"];'
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
   -h|--help) print -r -- "$usage"; exit 0 ;;
   --require-records) require_records=1; shift ;;
+  # Idempotent, not additive: the mode is a question, and asking twice has the
+  # same answer. Conflicts are judged AFTER the loop so flag order never
+  # changes the verdict.
+  --print-envelope-keys) print_keys=1; shift ;;
   -) # stdin, spelled explicitly — still only ONE input
     [[ -z "$src_seen" ]] || {
       print -u2 -- "validate-telemetry: only one input may be given
@@ -74,8 +116,29 @@ $usage"; exit 2 }
   esac
 done
 
+# Conflicts are judged here, after parsing, so `--print-envelope-keys FILE` and
+# `FILE --print-envelope-keys` reach the same verdict. Both operands below say
+# "validate this stream", which the query mode cannot do — refusing beats
+# printing keys and exiting 0 over a stream nobody checked.
+if [[ -n "$print_keys" ]]; then
+  [[ -z "$src_seen" ]] || {
+    print -u2 -- "validate-telemetry: --print-envelope-keys reads no input (got: $src)
+$usage"; exit 2 }
+  [[ -z "$require_records" ]] || {
+    print -u2 -- "validate-telemetry: --print-envelope-keys validates nothing, so --require-records is meaningless
+$usage"; exit 2 }
+fi
+
 command -v jq >/dev/null 2>&1 || {
   print -u2 -- "validate-telemetry: jq not found on PATH"; exit 3 }
+
+# Answer and exit BEFORE any input is touched — the mode's promise is that it
+# never reads stdin, which a caller relies on when running it inside a pipeline.
+if [[ -n "$print_keys" ]]; then
+  jq -n -c "$envelope_keys_def"' envelope_keys' || {
+    print -u2 -- "validate-telemetry: failed to print the envelope keys"; exit 3 }
+  exit 0
+fi
 
 if [[ "$src" != "-" ]]; then
   # A DIRECTORY satisfies -r and would fall through to `cat`, surfacing as an
@@ -100,11 +163,11 @@ fi
 local raw
 raw=$(
   if [[ "$src" == "-" ]]; then cat; else cat -- "$src"; fi \
-  | jq -R -r -n '
-    # the CLOSED envelope: exactly these 14 keys, no more, no fewer
-    def envelope_keys: ["schema","kind","run_id","parent_run_id","ts","repo",
-                        "repo_type","pipeline","issue","pr","outcome","wall_s",
-                        "tokens","payload"];
+  | jq -R -r -n "$envelope_keys_def"'
+    # `envelope_keys` — the CLOSED envelope, exactly 14 keys — is prepended from
+    # $envelope_keys_def above, so `--print-envelope-keys` and this program can
+    # only ever agree. Everything below is single-quoted and must stay free of
+    # apostrophes.
     def outcomes: ["success","parked","escalated","failed"];
     def kinds: ["run","enrichment"];
 

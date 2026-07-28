@@ -1,0 +1,18 @@
+{
+  "Runs over time": [
+    "kind",
+    "ts"
+  ],
+  "Outcome mix": [
+    "kind",
+    "outcome"
+  ],
+  "Escalation rate": [
+    "kind",
+    "outcome"
+  ],
+  "Per-pipeline breakdown": [
+    "kind",
+    "pipeline"
+  ]
+}

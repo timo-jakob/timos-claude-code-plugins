@@ -39,7 +39,7 @@ outcomes.
 |---|---|
 | Primary consumer | All three (human, cross-repo Grafana, self-improvement) — the contract is the deliverable |
 | Reach | Versioned contract; **every** pipeline instrumented (epic 2) |
-| Grafana path | JSONL → cross-repo sink directory → the **separate reporting repo** runs Grafana (compose stack + file-reading datasource). Zero new deps in the plugins; skills stay offline-safe |
+| Grafana path | JSONL → cross-repo sink directory → the **separate reporting repo** runs Grafana. *As built (#1008): a **Loki** datasource fed by that repo's scrape/aggregation service, panels in **LogQL** — not a file-reading datasource.* Zero new deps in the plugins; skills stay offline-safe |
 | Human reports | Drop CSV (#595) + HTML one-pager (#596) as superseded by Grafana; keep a **thin jq rollup** as the infrastructure-free glance |
 | Measures | Process counters **plus downstream outcomes**, via append-only enrichment records (epic 3). `tokens` stays best-effort/null until reliably measurable — never guessed |
 | Local sink | **One file per repo**: `.claude/telemetry/telemetry.jsonl` (fields discriminate); cross-repo sink mode `DIR/<repo-slug>.jsonl` (as built — see below) |
@@ -150,6 +150,15 @@ Children:
   plus one **reference Grafana dashboard JSON** committed here as that repo's
   starting point. The Grafana stack itself is the reporting repo's concern —
   out of scope here.
+  **As built (child (f), #1008)** the consumer architecture is **Loki, queried in
+  LogQL** — not the file-reading datasource this brainstorm originally assumed.
+  That makes an ingestion stage mandatory on the reporting side: a scrape of the
+  shared directory into Loki, including a `timestamp` stage promoting the
+  record's `ts` onto the entry timestamp (without it `count_over_time` buckets by
+  ingest time, and a backfill piles every historical run onto one instant). The
+  hand-off also ships a field manifest and a closure guard that pin the committed
+  queries to the envelope. `docs/reference/telemetry-grafana-handoff.md` and
+  ARCHITECTURE.md's *telemetry/v1* section are the normative statements.
 - **(g)** User-facing docs (absorbs #597).
 
 Closes when both existing streams emit v1 and the rollup reads them.
