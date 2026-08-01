@@ -11,7 +11,16 @@
 #                   where every entry has an integer major and a lifecycle of
 #                   active|deprecated; a DEPRECATED major MUST carry a sunset date
 #                   (RFC 8594), an active one need not.
-#   /health       — 200 + JSON status "ok" (aggregate, human-facing).
+#   /health       — 200 + JSON status "ok" or "degraded" (aggregate, human-facing;
+#                   a degraded service is still serving, so it still conforms —
+#                   an aggregate of "down" is a legitimate runtime state but NOT
+#                   a conforming one, because conformance asserts a service that
+#                   is serving). When the OPTIONAL `components` map is present
+#                   (ops-api v1.1, #965) its shape is validated and the aggregate
+#                   is checked against it: a HARD dependency DOWN means the
+#                   aggregate must be "down"; ANY other dependency down or
+#                   degraded (hard or soft — a hard dependency that is merely
+#                   half-open counts here, not above) means at least "degraded".
 #   /health/live  — 200 + JSON status "ok" (K8s liveness — process only).
 #   /health/ready — 200 + JSON status "ok" (K8s readiness — dependencies).
 #   /metrics      — 200 + a Prometheus/OpenMetrics exposition content type
@@ -143,8 +152,12 @@ check_info() {
   done < <(jq -c '.api[]?' "$BODY_FILE" 2>/dev/null)
 }
 
-# ---- /health, /health/live, /health/ready ----------------------------------
-# check_status_endpoint <ep> — a health-style endpoint: 200 + JSON status "ok".
+# ---- /health/live, /health/ready -------------------------------------------
+# check_status_endpoint <ep> — a BINARY Kubernetes probe: 200 + JSON status "ok".
+# The probes stay binary by contract (the kubelet acts on one yes/no answer), so
+# "degraded" is not a probe value — the tri-state aggregate lives on /health
+# (check_health). A soft dependency being down must NOT fail readiness; that rule
+# is the service's to implement, and is asserted end-to-end, not from here.
 # NB: the parameter must NOT be named `path` — in zsh `path` is the special array
 # tied to $PATH, and clobbering it breaks command lookup (env can't find bash).
 check_status_endpoint() {
@@ -157,6 +170,99 @@ check_status_endpoint() {
   fi
   jq -e '.status == "ok"' "$BODY_FILE" >/dev/null 2>&1 \
     || fail "${ep}: expected JSON status \"ok\""
+}
+
+# ---- /health (aggregate + optional dependency components, #965) ------------
+# The components set a FLOOR on the aggregate: "down" if any HARD dependency is
+# DOWN, else "degraded" if ANY dependency (hard or soft) is down or degraded,
+# else "ok". Note the middle branch is deliberately kind-agnostic — a HARD
+# dependency that is merely `degraded` (breaker half-open, re-probing) floors the
+# aggregate at "degraded", not "down"; only a hard dependency that is fully down
+# forces "down".
+#
+# It is a FLOOR, not an equality: a service may report itself degraded for an
+# internal reason no dependency models (a backed-up queue), and failing that
+# would be a false alarm. What can never be legitimate is UNDER-reporting — a
+# hard dependency down while the aggregate still claims to be serving — so that
+# is what this rejects.
+#
+# "degraded" is a CONFORMANT aggregate: a soft dependency is down, the breaker is
+# open, and the service is deliberately still serving (that is the whole point of
+# the hard/soft split). Only "down" fails.
+check_health() {
+  local ep="/health" url="$BASE/health" agg floor="ok" hard_down="" c name cstatus kind breaker since
+  if ! fetch "$url"; then
+    fail "${ep}: unreachable at $url"; return
+  fi
+  if [[ "$HTTP_CODE" != "200" ]]; then
+    fail "${ep}: expected HTTP 200, got $HTTP_CODE"; return
+  fi
+  if ! jq -e . "$BODY_FILE" >/dev/null 2>&1; then
+    fail "${ep}: body is not valid JSON"; return
+  fi
+  # A non-string status (true / 1 / null) is not the contract's enum member.
+  agg=$(jq -r 'if (.status | type) == "string" then .status else "" end' "$BODY_FILE")
+  case "$agg" in
+    ok|degraded|down) : ;;
+    *) fail "${ep}: expected JSON status \"ok\", \"degraded\" or \"down\", got '${agg}'"; return ;;
+  esac
+
+  # `components` is OPTIONAL — a service with no declared dependencies omits it.
+  if jq -e 'has("components")' "$BODY_FILE" >/dev/null 2>&1; then
+    if ! jq -e '.components | objects' "$BODY_FILE" >/dev/null 2>&1; then
+      fail "${ep}: components must be an object keyed by dependency name"
+      return
+    fi
+    # One compact JSON object per dependency, carrying its key — the same
+    # no-base64 iteration /info uses, portable across macOS/Debian jq.
+    while IFS= read -r c; do
+      [[ -z "$c" ]] && continue
+      # to_entries yields {key, value} — the dependency name is the KEY.
+      name=$(jq -r '.key' <<< "$c")
+      cstatus=$(jq -r 'if (.value.status | type) == "string" then .value.status else "" end' <<< "$c")
+      kind=$(jq -r 'if (.value.kind | type) == "string" then .value.kind else "" end' <<< "$c")
+      breaker=$(jq -r 'if (.value.breaker | type) == "string" then .value.breaker else "" end' <<< "$c")
+      since=$(jq -r 'if (.value | has("since")) then ((.value.since | type)) else "absent" end' <<< "$c")
+      case "$cstatus" in
+        up|degraded|down) : ;;
+        *) fail "${ep}: dependency '${name}' has an invalid status '${cstatus}' (want up|degraded|down)" ;;
+      esac
+      # kind is the readiness hinge — an undeclared one leaves readiness undefined.
+      case "$kind" in
+        hard|soft) : ;;
+        *) fail "${ep}: dependency '${name}' has an invalid kind '${kind}' (want hard|soft)" ;;
+      esac
+      # breaker + since are optional, but a present one must be well-formed.
+      if [[ -n "$breaker" ]]; then
+        case "$breaker" in
+          closed|open|half_open) : ;;
+          *) fail "${ep}: dependency '${name}' has an invalid breaker '${breaker}' (want closed|open|half_open)" ;;
+        esac
+      elif jq -e '.value | has("breaker")' >/dev/null 2>&1 <<< "$c"; then
+        fail "${ep}: dependency '${name}' has a non-string breaker"
+      fi
+      [[ "$since" == "string" || "$since" == "absent" ]] \
+        || fail "${ep}: dependency '${name}' has a non-string since (want an RFC 3339 timestamp)"
+      # Raise the floor the aggregate must meet.
+      if [[ "$cstatus" == "down" && "$kind" == "hard" ]]; then
+        floor="down"; hard_down="$name"
+      elif [[ "$cstatus" == "down" || "$cstatus" == "degraded" ]]; then
+        [[ "$floor" == "down" ]] || floor="degraded"
+      fi
+    done < <(jq -c '.components | to_entries[]?' "$BODY_FILE" 2>/dev/null)
+
+    if [[ "$floor" == "down" && "$agg" != "down" ]]; then
+      fail "${ep}: hard dependency '${hard_down}' is down but the aggregate status is '${agg}' (want \"down\")"
+    elif [[ "$floor" == "degraded" && "$agg" == "ok" ]]; then
+      fail "${ep}: a dependency is down or degraded but the aggregate status is \"ok\" (want at least \"degraded\")"
+    fi
+  fi
+
+  # Reported after the component checks, so the output names the dependency that
+  # caused it rather than only the aggregate.
+  [[ "$agg" == "down" ]] \
+    && fail "${ep}: aggregate status is \"down\" — the service is not serving"
+  return 0
 }
 
 # ---- /metrics --------------------------------------------------------------
@@ -177,7 +283,7 @@ check_metrics() {
 }
 
 check_info
-check_status_endpoint /health
+check_health
 check_status_endpoint /health/live
 check_status_endpoint /health/ready
 check_metrics

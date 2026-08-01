@@ -40,6 +40,10 @@ while [ $# -gt 0 ]; do
 done
 ep="${url##*/}"
 d="$OPS_STUB_DIR"
+# A per-endpoint <ep>.rc makes the stub EXIT with that code, so the checker's
+# "curl could not reach the host" branch is reachable from the suite.
+rc="$(cat "$d/$ep.rc" 2>/dev/null || echo 0)"
+if [ "$rc" != "0" ]; then exit "$rc"; fi
 if [ -n "$out" ] && [ -f "$d/$ep.body" ]; then cp "$d/$ep.body" "$out"; fi
 code="$(cat "$d/$ep.code" 2>/dev/null || echo 000)"
 ct="$(cat "$d/$ep.ct" 2>/dev/null || echo application/json)"
@@ -64,6 +68,10 @@ serve() {
   printf '%s' "$3" > "$STUB_DIR/$1.ct"
   printf '%s' "$4" > "$STUB_DIR/$1.body"
 }
+
+# serve_rc <endpoint> <curl-exit-code> — make the stub curl FAIL for <endpoint>,
+# so the checker sees an unreachable host rather than an HTTP response.
+serve_rc() { printf '%s' "$2" > "$STUB_DIR/$1.rc"; }
 
 run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
 
@@ -132,11 +140,297 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   echo "$output" | grep -qi 'sunset'
 }
 
-@test "error: /health not ok -> non-zero, names /health" {
+@test "error: /health status down -> exit 1, says the service is not serving" {
+  # "down" is the one aggregate that is NOT serving. ("degraded" became a
+  # conformant aggregate in ops-api v1.1 — see the components tests below.)
+  # The needle is unique to THIS branch: '/health' alone would also match a
+  # /health/live or /health/ready failure line.
+  serve health 200 'application/json' '{"status":"down"}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'not serving'
+}
+
+@test "error: /health status not a contract value -> exit 1, names the enum" {
+  serve health 200 'application/json' '{"status":"wobbly"}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'expected JSON status'
+}
+
+@test "error: /health status non-string -> exit 1 (type not erased)" {
+  # jq -r would turn `true` into the string "true"; the checker's type guard
+  # must reject it as it does for /info's major and sunset.
+  serve health 200 'application/json' '{"status":true}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'expected JSON status'
+}
+
+@test "error: /health 503 -> exit 1, names the HTTP code (entry guard)" {
+  serve health 503 'application/json' '{"status":"down"}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'expected HTTP 200'
+}
+
+@test "error: /health body not JSON -> exit 1 (entry guard)" {
+  serve health 200 'application/json' '<html>gateway error</html>'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'not valid JSON'
+}
+
+@test "error: /health unreachable -> exit 1, names /health (entry guard)" {
+  serve_rc health 7
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '/health: unreachable'
+}
+
+# ---- dependency components (ops-api v1.1, #965) ----------------------------
+
+@test "components: degraded aggregate with a soft dep down -> exit 0 (still serving)" {
+  serve health 200 'application/json' \
+    '{"status":"degraded","components":{"orders-db":{"status":"up","kind":"hard"},"pricing-api":{"status":"down","kind":"soft","breaker":"open","since":"2026-07-23T09:12:04Z"}}}'
+  run_check
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '/health +PASS'
+}
+
+@test "components: all up with an ok aggregate -> exit 0" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"up","kind":"hard","breaker":"closed"}}}'
+  run_check
+  [ "$status" -eq 0 ]
+}
+
+@test "components: absent entirely -> exit 0 (a service with no declared deps)" {
+  serve health 200 'application/json' '{"status":"ok"}'
+  run_check
+  [ "$status" -eq 0 ]
+}
+
+@test "components: a bare degraded aggregate with NO components -> exit 0" {
+  # The headline v1.1 behaviour change, on the components-free path: pre-v1.1
+  # this exact body was rejected. Both other degraded-passes tests carry a
+  # components map, so without this one a revert of the aggregate enum to
+  # ok-only would go unnoticed here.
   serve health 200 'application/json' '{"status":"degraded"}'
   run_check
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q '/health'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '/health +PASS'
+}
+
+@test "components: hard dep down must make the aggregate down, not degraded" {
+  serve health 200 'application/json' \
+    '{"status":"degraded","components":{"orders-db":{"status":"down","kind":"hard","breaker":"open"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'orders-db'
+  # 'hard dependency', not bare 'hard' — the latter also matches "(want hard|soft)"
+  echo "$output" | grep -q 'hard dependency'
+}
+
+@test "components: soft dep down must make the aggregate at least degraded, not ok" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"pricing-api":{"status":"down","kind":"soft","breaker":"open"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  # 'at least' is unique to the floor message; bare 'degraded' also appears in
+  # the invalid-status enum text (want up|degraded|down).
+  echo "$output" | grep -q 'at least'
+}
+
+@test "components: a hard dep down with a down aggregate still fails (not serving)" {
+  # The derivation is satisfied, but the service is not serving — conformance
+  # must not pass just because the aggregate is honest about being down.
+  serve health 200 'application/json' \
+    '{"status":"down","components":{"orders-db":{"status":"down","kind":"hard","breaker":"open"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'not serving'
+  # ...and NOT because the floor rule tripped: the aggregate matches its floor.
+  run ! grep -q 'want "down"' <<< "$output"
+}
+
+@test "components: a half-open (degraded) soft dep needs at least a degraded aggregate" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"pricing-api":{"status":"degraded","kind":"soft","breaker":"half_open"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'at least'
+  echo "$output" | grep -q 'pricing-api\|dependency is down or degraded'
+}
+
+@test "components: a HARD dep that is only degraded floors at degraded, not down" {
+  # The kind-agnostic middle branch: half-open is not down, so it must NOT
+  # demand a "down" aggregate. If the elif were changed to force "down" for any
+  # non-up hard dependency, this would fail.
+  serve health 200 'application/json' \
+    '{"status":"degraded","components":{"orders-db":{"status":"degraded","kind":"hard","breaker":"half_open"}}}'
+  run_check
+  [ "$status" -eq 0 ]
+}
+
+@test "components: a HARD dep that is only degraded still forbids an ok aggregate" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"degraded","kind":"hard","breaker":"half_open"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'at least'
+}
+
+@test "components: hard-down wins over a later soft-down (floor never downgrades)" {
+  # Guards the `[[ "$floor" == "down" ]] || floor="degraded"` line: with a
+  # hard-down dependency FOLLOWED by a soft-down one, dropping that guard would
+  # downgrade the floor to degraded and let this under-reporting body pass.
+  serve health 200 'application/json' \
+    '{"status":"degraded","components":{"orders-db":{"status":"down","kind":"hard"},"pricing-api":{"status":"down","kind":"soft"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'hard dependency'
+  echo "$output" | grep -q 'orders-db'
+}
+
+@test "components: soft-down FIRST then hard-down still demands a down aggregate" {
+  # The mirror order — jq's to_entries preserves insertion order, so this is the
+  # case where the floor is raised to degraded before the hard-down is seen.
+  serve health 200 'application/json' \
+    '{"status":"degraded","components":{"a-cache":{"status":"down","kind":"soft"},"orders-db":{"status":"down","kind":"hard"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'hard dependency'
+  echo "$output" | grep -q 'orders-db'
+}
+
+@test "components: internal degradation with all deps up is allowed (floor, not equality)" {
+  # A service may be degraded for a reason no dependency models; over-reporting
+  # must never be a conformance failure.
+  serve health 200 'application/json' \
+    '{"status":"degraded","components":{"orders-db":{"status":"up","kind":"hard"}}}'
+  run_check
+  [ "$status" -eq 0 ]
+}
+
+@test "components: invalid kind -> exit 1, names the dependency and the kind rule" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"up","kind":"critical"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'orders-db'
+  echo "$output" | grep -q 'invalid kind'
+}
+
+@test "components: missing kind -> exit 1 (readiness would be undefined)" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"up"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'orders-db'
+  echo "$output" | grep -q 'invalid kind'
+}
+
+@test "components: invalid dependency status -> exit 1, names the status rule" {
+  # "ok" is the AGGREGATE's healthy spelling, never a dependency's — a
+  # dependency is up|degraded|down. This pins that asymmetry.
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"ok","kind":"hard"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'orders-db'
+  echo "$output" | grep -q 'invalid status'
+}
+
+@test "components: invalid breaker state -> exit 1, names the breaker rule" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"up","kind":"hard","breaker":"tripped"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'orders-db'
+  echo "$output" | grep -q 'invalid breaker'
+}
+
+@test "components: non-string breaker -> exit 1 (type not erased)" {
+  # The dedicated present-but-not-a-string branch; the "tripped" test above
+  # takes the invalid-enum branch instead, so without this one that elif is dead.
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"up","kind":"hard","breaker":123}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'non-string breaker'
+}
+
+@test "components: non-string since -> exit 1 (type not erased)" {
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"up","kind":"hard","since":true}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'non-string since'
+}
+
+@test "components: not an object -> exit 1, names the components rule" {
+  serve health 200 'application/json' '{"status":"ok","components":[]}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'components must be an object'
+}
+
+@test "components: /health/live and /health/ready stay binary (no degraded)" {
+  # The probes are deliberately NOT tri-state — the kubelet acts on one yes/no.
+  # BOTH probes are overridden: asserting only /health/live would leave the
+  # readiness half of the title unverified, and readiness is exactly what v1.1
+  # re-specifies.
+  serve live 200 'application/json' '{"status":"degraded"}'
+  serve ready 200 'application/json' '{"status":"degraded"}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '/health/live: expected JSON status'
+  echo "$output" | grep -q '/health/ready: expected JSON status'
+}
+
+@test "components: an invalid SECOND dependency is still caught" {
+  # Guards against validation that stops after the first entry: the first
+  # dependency here is well-formed, so only a loop that validates every entry
+  # reports the second one.
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"a-ok":{"status":"up","kind":"hard"},"z-bad":{"status":"up","kind":"critical"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'z-bad'
+  echo "$output" | grep -q 'invalid kind'
+}
+
+@test "components: TWO invalid dependencies are both reported" {
+  # The third truncation direction: the previous test proves entry 2 is reached
+  # when entry 1 is CLEAN, but not that validation continues past a dependency
+  # that has already failed. A break/return after the first failing entry would
+  # survive both of the others; the exact problem count is what pins it.
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"a-bad":{"status":"up","kind":"critical"},"z-bad":{"status":"ok","kind":"hard"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'a-bad'
+  echo "$output" | grep -q 'z-bad'
+  echo "$output" | grep -q 'invalid kind'
+  echo "$output" | grep -q 'invalid status'
+  echo "$output" | grep -q 'FAILED: 2 problem(s)'
+}
+
+@test "components: every bad field of one dependency is reported independently" {
+  # Guards against a `continue` after the first failure inside the loop body:
+  # all four field checks must fire for the same dependency, and the failure
+  # count pins the accumulator itself.
+  serve health 200 'application/json' \
+    '{"status":"ok","components":{"orders-db":{"status":"bogus","kind":"critical","breaker":"tripped","since":true}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'invalid status'
+  echo "$output" | grep -q 'invalid kind'
+  echo "$output" | grep -q 'invalid breaker'
+  echo "$output" | grep -q 'non-string since'
+  # Anchored: a bare '4 problem(s)' would also match '14 problem(s)'.
+  echo "$output" | grep -q 'FAILED: 4 problem(s)'
 }
 
 @test "error: /info missing build.git_sha -> non-zero, names /info" {

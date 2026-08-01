@@ -365,6 +365,74 @@ accordingly — it never flags a repo that ships no ops fragment. Design:
   the same fragment (Python and Java-non-Spring are the blessed non-Spring
   references; #936/#937 track Node/Swift).
 
+### Resilience policy + dependency health (#964, #965)
+
+A service depends on things it does not control. Two gaps, and they are two
+halves of one story: **observability** (report own health, each direct
+upstream's, and the aggregate) and **resilience** (losing a dependency must
+never make the service unresponsive). The unifying idea: **the circuit breaker
+keeps you serving; the dependency-health surface tells you what's degraded** —
+an open breaker *is* a **down** dependency, and a service still serving despite
+one *is* a degraded service. (Breaker → dependency status is exact: closed =
+`up`, half-open = `degraded`, open = `down`.) Design:
+[`docs/superpowers/specs/2026-07-23-resilience-dependency-health-design.md`](docs/superpowers/specs/2026-07-23-resilience-dependency-health-design.md).
+
+- **The six mandates.** Every outbound dependency call MUST have: a
+  **timeout**; a **circuit breaker** (one per dependency — the unit `/health`
+  reports); **bounded retry + jittered backoff** (never an unbounded or tight
+  retry loop, which turns a blip into a stampede); a **registered fallback**;
+  **background reconnect** (an open breaker probes, and full function resumes
+  with no deploy); and **stay-stable** (a lost dependency fast-fails through the
+  open breaker — it never exhausts threads/connections, hangs the event loop, or
+  crashes the process). The plugin enforces that a fallback is *wired*, never
+  what it returns — structure, not business logic.
+- **Health is read passively from breaker state, and only one hop out.** A
+  service never probes a dependency on a schedule and **never transitively calls
+  a downstream's `/health`** — that is the cascading health-check-storm
+  anti-pattern, where one slow leaf hangs every ancestor's health check. Real
+  traffic (or the breaker's own probe) already moves the breaker, so reading it
+  costs nothing. Each service reports one hop; the observability layer assembles
+  the graph.
+- **Hard vs soft is the readiness hinge.** Each dependency is declared **hard**
+  (nothing works without it — its loss **fails `/health/ready`** so Kubernetes
+  sheds traffic) or **soft** (degraded operation is possible — its loss never
+  fails readiness; the breaker opens, the pod stays ready, and `/health` reports
+  it degraded). This single classification resolves the tension between naive
+  readiness (shed traffic on any dependency loss) and resilience (stay up and
+  degrade). **Liveness is never a function of a dependency** — that is the
+  restart-storm anti-pattern #688 already split away from; mandate 6 is what
+  keeps the process alive when a dependency dies.
+- **The contract extension is additive — ops-api v1 → v1.1.** `/health` gains an
+  optional `components` map (per-dependency `status`, `kind`, `breaker`,
+  `since`) and a `degraded` aggregate; `check-ops-conformance.zsh` validates the
+  shape when present and rejects an aggregate that **under-reports** its
+  components (a hard dependency down while the aggregate still claims to serve).
+  The components set a **floor**, not an equality — over-reporting is legal, so
+  a service may be `degraded` for an internal reason no dependency models — and
+  a `down` aggregate **fails conformance outright**, because the check asserts a
+  *serving* service: `down` is a legitimate runtime state, not one the
+  conformance job can pass in. `/health` itself always answers **200** while the
+  process can respond (the verdict is in the body); 503 is the two probes'
+  vocabulary, not the human-facing aggregate's. **The blessed Python and Java
+  ops-api templates do not yet implement this**: both still alias `/health` to
+  the readiness handler and answer 503 when readiness fails, which the v1.0
+  checker already rejected (it has always required HTTP 200 on `/health`) — a
+  healthy service conforms either way, so the divergence only surfaces during an
+  outage. v1.1 states the rule; fixing the two templates is #1139, and populating
+  `components` from breaker state is the per-language slice (#967).
+  Two encoding constraints are load-bearing, both empirically pinned by the
+  repo's own gate: the healthy aggregate stays **`ok`** (renaming it to `up`
+  would break every v1.0 consumer), and the widened states are declared
+  **`x-extensible-enum`** rather than `enum`, because oasdiff classifies
+  `response-property-enum-value-added` as breaking — a plain `enum` widening
+  would have forced an ops **major** for a semantically additive change.
+- **Realized per language, enforced two ways.** The policy and contract are
+  central and language-agnostic (#965); each language plugin picks its one
+  blessed breaker library and ships the scaffolding (#967). A **review
+  dimension** (#966) catches violations on new diffs and a **maintenance
+  advisor** (#968) catches them on the back catalogue — the same defect classes,
+  before and after the fact.
+
 ### Cross-repo Claude: the big-picture problem
 
 A Claude session in one repo cannot see siblings by default, and in a

@@ -113,6 +113,111 @@ migrated off the major:
 After step 3 the major is no longer a live major, so the semver gate stops running
 for it and the `sunset-passed` finding clears on the next maintenance run.
 
+## The ops contract: dependency health + the resilience policy
+
+Alongside the business API, this repo serves the **org-standard ops surface**
+([`contracts/ops/v1/openapi.yaml`](contracts/ops/v1/openapi.yaml)) — `/info`,
+`/health`, `/health/live`, `/health/ready`, `/metrics`. It rides the same
+machinery as the business contract (same version triangle, same Spectral +
+oasdiff gates), so a breaking change to it is a new **ops** major, never an
+in-place edit.
+
+**Ops-api v1.1** adds dependency health to `/health`, additively.
+
+### Reporting dependency health
+
+`/health` may carry an optional `components` map — **one entry per direct
+dependency**, whose health is read from that dependency's **circuit-breaker
+state**, not from probing it:
+
+```json
+{
+  "status": "degraded",
+  "components": {
+    "orders-db":   {"status": "up",   "kind": "hard"},
+    "pricing-api": {"status": "down", "kind": "soft",
+                    "breaker": "open", "since": "2026-07-23T09:12:04Z"}
+  }
+}
+```
+
+Two rules are absolute:
+
+- **Direct dependencies only.** Report what *this* service calls. **Never** call
+  a downstream's `/health` and fold it into your own — that is the cascading
+  health-check-storm anti-pattern, where one slow leaf makes every ancestor's
+  health check hang. One hop each; the observability layer assembles the graph.
+- **Passive.** An open breaker means down, closed means up, half-open means
+  degraded (being re-probed). Real traffic already drives the breaker, so this
+  adds no health-check traffic of its own.
+
+A service with **no declared dependencies simply omits `components`**. But if
+you *do* have direct dependencies, report **all** of them: the map is optional
+in the *schema* (so an ops-api v1.0 service stays valid), not optional in
+*policy*. Omitting it — or listing your soft dependencies and quietly leaving a
+hard one out — is a violation the conformance checker **cannot** catch, because
+it has no independent knowledge of what you depend on. Closing that gap is the
+review dimension's and the maintenance advisor's job, not the checker's.
+
+### Hard vs soft — the readiness hinge
+
+Declare every dependency **`hard`** or **`soft`**. This one classification
+decides what happens when it dies:
+
+| Kind | Meaning | `/health/ready` | `/health` |
+| --- | --- | --- | --- |
+| **hard** | Nothing works without it | **Fails** — K8s sheds traffic | `down` |
+| **soft** | Degraded operation is possible | **Stays ready** | `degraded` |
+
+The components set a **floor** on the aggregate `status`: `down` if any hard
+component is down, else `degraded` if **any** component (hard or soft) is down
+or degraded, else `ok`. A hard dependency that is only `degraded` (half-open)
+floors the aggregate at `degraded`, not `down`. You may report a **more** severe
+aggregate than your components imply — internal degradation no dependency
+models is a legitimate `degraded`, and a service that genuinely cannot serve
+reports `down` even with every dependency up — but **never a less severe one**.
+
+The healthy value stays **`ok`** (not `up`) — v1.1 widened this field, it did
+not rename it. **`/health/live` is never a function of a dependency**: a
+liveness probe that checks a database turns a transient outage into a restart
+storm. Liveness is process-only; dependencies live in readiness (hard) or
+degradation (soft). Readiness likewise fails for **non-dependency** reasons —
+still starting up, or draining on shutdown — and the hard/soft rule does not
+license serving traffic in those states.
+
+`/health` always answers **200** while the process can respond; the verdict
+(including `down`) is in the body. HTTP 503 is the two probes' vocabulary, not
+this endpoint's.
+
+### The six mandates
+
+Every outbound dependency call MUST have:
+
+1. **Timeout** — a bounded wait; no call blocks forever.
+2. **Circuit breaker** — opens on a failure threshold, half-opens to probe
+   recovery. One breaker per dependency (the unit `/health` reports).
+3. **Bounded retry + jittered backoff** — never unbounded, never a tight loop
+   (that turns a blip into a stampede).
+4. **Registered fallback** — what the service returns while the circuit is open.
+   That a fallback is *wired* is the standard; what it *returns* is yours.
+5. **Background reconnect** — an open breaker probes; full function resumes
+   automatically, with no deploy or manual step.
+6. **Stay stable** — a lost dependency fast-fails through the open breaker. It
+   never exhausts threads or connections, hangs the event loop, or crashes the
+   process.
+
+`scripts/check-ops-conformance.zsh` validates the `components` shape when
+present and rejects an aggregate that **under-reports** it — a hard dependency
+down while `/health` still claims to be serving. Over-reporting is allowed: a
+service may be `degraded` for an internal reason no dependency models.
+
+**A `down` aggregate fails the conformance check** even when it is perfectly
+honest about a dead hard dependency. That is deliberate: the check asserts a
+*serving* service, so `down` is a legitimate runtime state that the
+`ops-conformance` job cannot pass in. If you are running the checker against a
+service whose hard dependency is genuinely down, the red result is telling you
+about the dependency, not about your contract.
+
 ## Minimum deprecation window
 
 **Policy knob (default: 6 months).** A major must stay deprecated — `deprecated:
