@@ -75,7 +75,7 @@ registry is empty, per [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-c
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | `/development-swift:maintenance <json>` | Validates the payload, runs the coverage pre-flight (may raise coverage first), plans the per-tool groups, returns the plan + `ci_fixer_agent`. |
 | Approve | `/development-swift:approve [<pr>]` | Runs `swift-approver` against an open PR and posts the verdict as the Claude Approver identity. |
-| Review | `/development-swift:review [paths]` | Spawns 6 specialized agents in parallel to analyze bugs, security, performance, Swift 6 compliance, code quality, and test coverage |
+| Review | `/development-swift:review [paths]` | Spawns 7 specialized agents in parallel to analyze bugs, security, performance, Swift 6 compliance, code quality, test coverage, and resilience |
 
 **Agents:**
 
@@ -91,13 +91,14 @@ registry is empty, per [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-c
 | swift6-compliance | fable | Strict concurrency, typed throws, modern syntax — review mode; also the v6 language-mode migration agent (migrate mode, #447) |
 | swift-maintenance-planner | opus | Ranks + groups findings, routes each to its agent |
 | swift-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (build/test, format, coverage) |
-| swift-approver | fable | Synthesis-layer PR reviewer once CI is green; risk register fed by the five review dimensions (#448) |
+| swift-approver | fable | Synthesis-layer PR reviewer once CI is green; risk register fed by the five review dimensions the Approver walks (#448; resilience and swift6_compliance are not lenses yet — #1147) |
 | swift-lint-format | haiku | Runs SwiftFormat and SwiftLint, fixes issues in-place |
 | bug-hunter | fable | Logic errors, nil crashes, race conditions, stability |
 | security-reviewer | fable | Secrets, injection, insecure storage, ATS, keychain |
 | performance-reviewer | opus | Retain cycles, allocations, O(n²), main thread blocking |
 | code-quality | opus | Naming, SOLID, readability, dead code, API design |
 | test-reviewer | opus | Coverage gaps, assertion quality, flaky tests |
+| swift-resilience-reviewer | opus | Dependency calls with no breaker/timeout/registered fallback, unbounded or un-jittered retries, `try!`/`fatalError` on a dependency result, hard/soft misdeclarations (#966) |
 
 ## development-python
 
@@ -128,7 +129,7 @@ input and dispatches here.
 | Maintenance dispatcher | `/development-python:maintenance <json>` | Parses input, runs coverage pre-flight, spawns per-tool agents in parallel worktrees, aggregates results. Standalone invocation prints usage and stops. |
 | Approve | `/development-python:approve [<pr>]` | Runs `python-approver` against an open PR and posts the verdict as the Claude Approver identity |
 | Improve Test Coverage | `/development-python:improve-test-coverage` | Raises coverage toward a target by spawning `python-coverage-improver` agents in parallel worktrees — deliberate investment outside the maintenance pipeline |
-| Review | `/development-python:review [paths]` | Spawns 5 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449) |
+| Review | `/development-python:review [paths]` | Spawns 6 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449), resilience (#966) |
 
 **Agents:**
 
@@ -150,6 +151,7 @@ input and dispatches here.
 | python-performance-reviewer | opus | Accidental O(n²), event-loop blocking, N+1 I/O, unbounded caches (#449) |
 | python-code-quality | opus | Naming, SOLID, readability, dead code, API design (#449) |
 | python-test-reviewer | opus | Coverage gaps, assertion quality, flaky tests, mock misuse (#449) |
+| python-resilience-reviewer | opus | Dependency calls with no breaker/timeout/registered fallback, unbounded or un-jittered retries, blocking calls in coroutines, hard/soft misdeclarations (#966) |
 
 All worktree-modifying agents run their fixes through the project's
 test suite locally before declaring success. CI is the secondary
@@ -182,7 +184,7 @@ gather-script + dispatch contract).
 | --- | --- | --- |
 | Maintenance dispatcher | `/development-java:maintenance <json>` | Validates the payload, runs the JaCoCo coverage pre-flight (may raise coverage first), plans the per-tool groups, returns the plan + `ci_fixer_agent`. |
 | Approve | `/development-java:approve [<pr>]` | Runs `java-approver` against an open PR and posts the verdict as the Claude Approver identity. |
-| Review | `/development-java:review [paths]` | Spawns 5 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449) |
+| Review | `/development-java:review [paths]` | Spawns 6 specialized review agents in parallel — bugs, security, performance, code quality, tests (#449), resilience (#966) |
 
 **Agents:**
 
@@ -201,12 +203,13 @@ gather-script + dispatch contract).
 | java-openapi-advisor | opus | Audits **non-Spring** contract-first OpenAPI — openapi-generator's `jaxrs-spec` (Jakarta REST) generator from a committed spec, so code/spec drift fails the build (the Spring case is `development-spring`'s `spring-api-advisor`) |
 | java-maintenance-planner | opus | Ranks + groups findings, routes each to its agent (defers `org.springframework.boot` bumps to `development-spring`) |
 | java-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
-| java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`); risk register fed by the five review dimensions (#449) |
+| java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`); risk register fed by the five review dimensions the Approver walks (#449; resilience is not a lens yet — #1147) |
 | java-bug-hunter | fable | Logic errors, NPEs, `==` vs `equals`, resource leaks, race conditions (#449) |
 | java-security-reviewer | fable | Secrets, injection, unsafe deserialization, TLS validation, data exposure (#449) |
 | java-performance-reviewer | opus | Accidental O(n²), allocation pressure, N+1 I/O, lock contention, unbounded caches (#449) |
 | java-code-quality | opus | Naming, SOLID, readability, dead code, API design (#449) |
 | java-test-reviewer | opus | Coverage gaps, assertion quality, flaky tests, mock misuse (#449) |
+| java-resilience-reviewer | opus | Dependency calls with no breaker/timeout/registered fallback, unbounded or un-jittered retries, thread-pool exhaustion on a stalled dependency, hard/soft misdeclarations (#966) |
 
 **API-style convention.** gRPC is the standard for **internal, inter-service
 communication** — efficient on the wire, low-latency, with bidirectional /
@@ -383,9 +386,9 @@ the plugin scaffold, the gather script, the maintenance dispatcher, the planner,
 the CI fixer, and the mechanical `format_lint` fixer, i.e. a runnable
 lint/format → CI-fix → PR loop. Slice C
 ([#872](https://github.com/timo-jakob/timos-claude-code-plugins/issues/872)) —
-the **review panel**: `/development-go:review` running five specialists in
-parallel (bugs, security, performance, code quality, tests), built to double as
-risk-register lenses for the Slice H approver (the
+the **review panel**: `/development-go:review` running six specialists in
+parallel (bugs, security, performance, code quality, tests, resilience); the
+first five double as risk-register lenses for the Slice H approver (the
 [#449](https://github.com/timo-jakob/timos-claude-code-plugins/issues/449)
 pattern). Slice D
 ([#873](https://github.com/timo-jakob/timos-claude-code-plugins/issues/873)) —
@@ -442,7 +445,7 @@ alternative.
 | --- | --- | --- |
 | Maintenance dispatcher | `/development-go:maintenance <json>` | Validates the v2 payload, runs the per-package coverage pre-flight, plans the per-tool groups via `go-maintenance-planner`, returns the plan + `ci_fixer_agent`. Two-phase, keyed on whether the improver produced a diff: only when `go-coverage-improver` **commits tests** does Phase A return `improver_result` and no `plan` (the orchestrator merges that PR, then re-invokes for Phase B, which reconciles against it). When no improver is needed — **or it commits nothing**, leaving no diff to push — the phases collapse into one invocation returning `plan` and no `improver_result`. Either way, a region the improver could not clear is recorded in `human_action_required` and its findings are excluded from the plan. |
 | Approve | `/development-go:approve [<pr>] [--dry-run]` | Runs `go-approver` against an open PR and posts the verdict as the Claude Approver identity; `--dry-run` (Go-only, any position) prints the rendered verdict and posts nothing. **The agent ships, its bootstrap wiring does not yet:** `/development:bootstrap` doesn't resolve `go` as an Approver-capable language and renders no Go policy overlay, and the agent hard-fails without `.claude/approver-policy.md` — so that file must be hand-authored on a Go repo today. |
-| Review panel | `/development-go:review [scope]` | Comprehensive Go review with 5 parallel read-only agents (bugs, security, performance, code quality, tests). Emits #558-schema findings alongside the prose report. Generated `*.pb.go` / `*.pb.gw.go` are excluded — the fix for those belongs in the proto or the codegen config. |
+| Review panel | `/development-go:review [scope]` | Comprehensive Go review with 6 parallel read-only agents (bugs, security, performance, code quality, tests, resilience). Emits #558-schema findings alongside the prose report. Generated `*.pb.go` / `*.pb.gw.go` are excluded — the fix for those belongs in the proto or the codegen config. |
 
 **Agents (core loop, Slice B):**
 
@@ -461,6 +464,7 @@ alternative.
 | `go-performance-reviewer` | opus | Allocation pressure, N+1 I/O, lock contention, unbounded goroutine/channel growth, `defer`-in-loop |
 | `go-code-quality` | opus | Idiomatic Go (Effective Go norms), consumer-side interfaces, API design, error-wrapping discipline (`%w` vs `%v`) |
 | `go-test-reviewer` | opus | Coverage gaps, assertions that cannot fail, table-test quality, flakiness, and a missing `-race` in CI |
+| `go-resilience-reviewer` | opus | Dependency calls with no breaker/timeout/registered fallback, unbounded or un-jittered retries, a lost dependency hanging or panicking the service, hard/soft misdeclarations (#966) |
 
 **Agents (static-analysis triage, Slice D):**
 
@@ -488,7 +492,7 @@ alternative.
 
 | Agent | Model | Focus |
 | --- | --- | --- |
-| `go-approver` | fable | Synthesis-layer PR reviewer once every other CI gate is green — reads `.claude/approver-policy.md`, builds a risk register from the five review dimensions, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT as the Approver identity |
+| `go-approver` | fable | Synthesis-layer PR reviewer once every other CI gate is green — reads `.claude/approver-policy.md`, builds a risk register from the five review dimensions the Approver walks (resilience is not a lens yet — #1147), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT as the Approver identity |
 
 **Agents (proto-first platform advisors, Slice I):**
 

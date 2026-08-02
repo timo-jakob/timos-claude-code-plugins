@@ -427,11 +427,25 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   `response-property-enum-value-added` as breaking — a plain `enum` widening
   would have forced an ops **major** for a semantically additive change.
 - **Realized per language, enforced two ways.** The policy and contract are
-  central and language-agnostic (#965); each language plugin picks its one
-  blessed breaker library and ships the scaffolding (#967). A **review
-  dimension** (#966) catches violations on new diffs and a **maintenance
-  advisor** (#968) catches them on the back catalogue — the same defect classes,
-  before and after the fact.
+  central and language-agnostic (#965). The **review dimension** (#966) is
+  shipped and catches violations on new diffs. Two halves are **not yet built**:
+  each language plugin will pick its one blessed breaker library and ship the
+  scaffolding (#967, decomposed into six per-language children), and a
+  **maintenance advisor** will catch the same defect classes on the back
+  catalogue (#968). Until #968 lands, the pattern is enforced on new diffs
+  only.
+- **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
+  agent in each **service** language plugin (Go, Java, Python, Swift), wired
+  into that language's review panel alongside bugs/security/performance. It
+  flags four defect classes on a diff: an outbound dependency call with no
+  breaker, timeout, or registered fallback; an unbounded or un-backed-off
+  retry; a path where a lost dependency hangs or crashes the service (the
+  language-specific shapes — a blocked event loop in Python, thread-pool
+  exhaustion in Java, `try!` in Swift, goroutine growth in Go); and a hard/soft
+  misdeclaration. Severity is anchored to **what happens when the dependency
+  dies**, not to style, and findings are scoped to the dependency calls the
+  diff actually touches — both bounds exist so the review loop converges
+  instead of drowning in speculative hardening notes.
 
 ### Cross-repo Claude: the big-picture problem
 
@@ -1108,8 +1122,8 @@ skill to post the verdict. The orchestrator detects the posted review and procee
 
 ## Review finding schema (review panels → consolidator)
 
-The `development-<lang>:review` panels (Swift 6 agents, Python 5, Java 5,
-Go 5 — #449)
+The `development-<lang>:review` panels (Swift 7 agents, Python 6, Java 6,
+Go 6 — #449, #966)
 report findings as prose in the native `[CRITICAL|WARNING|SUGGESTION]` format,
 for humans. The autonomous story-delivery loop (#557) also needs those findings
 in a form a consolidator can parse, deduplicate, and count. So the review panel
@@ -1118,7 +1132,7 @@ has **every reviewer emit a machine-readable JSON block alongside its prose**
 machine. The severity taxonomy is untouched — the JSON carries the same
 severities.
 
-**The emission directive lives in one place, not sixteen.** Rather than copy the
+**The emission directive lives in one place, not copied into every reviewer definition.** Rather than copy the
 JSON instruction into every reviewer agent's definition, the `review` skill
 **injects it into each agent's launch prompt**, substituting that agent's
 `dimension` and `reviewer` name from its Step 1 table. The reviewer agents stay
@@ -1147,10 +1161,45 @@ fields:
 **Dimension enum.** The five core dimensions are shared across all languages
 (the #449 enum): `bugs` (`*-bug-hunter`), `security` (`*-security-reviewer`),
 `performance` (`*-performance-reviewer`), `code_quality` (`*-code-quality`),
-`tests` (`*-test-reviewer`). Swift adds one language-specific dimension,
-`swift6_compliance` (`swift6-compliance`), for six Swift dimensions in total. A
-language may extend the enum with its own dimension the same way; the core five
-never change meaning.
+`tests` (`*-test-reviewer`). A sixth, **`resilience`**
+(`*-resilience-reviewer`, #966), is shared by every **service** language — Go,
+Java, Python, Swift — and checks the six-mandate resilience policy on a diff
+(below). It is deliberately absent from `development-claude-plugin`, which
+reviews a plugin repo: there is no outbound dependency call to circuit-break.
+Swift adds one language-specific dimension, `swift6_compliance`
+(`swift6-compliance`), for seven Swift dimensions in total. A language may
+extend the enum with its own dimension the same way; the core five never change
+meaning.
+
+The **consolidator** needs no teaching about a new dimension: it keys findings
+on `[file, line, dimension, title]`, with no dimension allow-list. Two
+downstream surfaces are **not** so accommodating, and both gaps predate
+`resilience` — Swift's `swift6_compliance` has had them since #447:
+
+- **`build-dossier.zsh` carries a new dimension only when it reports
+  findings.** `$core` is the hardcoded #449 five; `$dims` is that set unioned
+  with the dimensions that actually produced findings. So a **clean** run of a
+  non-core dimension emits no key at all, which is byte-indistinguishable from
+  "never ran" — while a clean *core* dimension is emitted with `clean: true`.
+  That inverts the very purpose of the clean signal (letting the Approver lower
+  a lens's residual-risk weight). Making `$core` panel-aware is tracked in
+  **#1148**; it has to be `repo_type`-aware, since a `development-claude-plugin`
+  review legitimately never runs `resilience`.
+- **The Approver neither labels nor looks through the `resilience` lens.** Every
+  `*-approver` **agent** pins `"dimension"` to a closed
+  `bugs | security | performance | code_quality | tests | null` enum *and*
+  instructs a risk-register walk of "the five lenses the panel uses" — so a
+  resilience risk has neither a legal enum value nor a lens to be found through.
+  The bootstrap `approver-policy-core.md.tmpl` pins the same enum but has no
+  lens walk of its own (its register comes from the per-type risk factors); what
+  it does carry is a **dossier lens list**, and that list already names
+  `swift6_compliance` alongside the core five — just not `resilience`. Finally,
+  each language ships an operator-facing mirror
+  (`development-<lang>/docs/<lang>-approver.md`) that restates the lens walk —
+  and, on Go/Java/Python, the enum too (Swift's is a delta-doc and carries only
+  the walk). Those restatements go stale with them. So the surfaces to
+  widen are the agents' enum, the agents' lens walk, the template's enum +
+  dossier list, and the four operator mirrors; all are tracked in **#1147**.
 
 The claude-plugin panel (`development-claude-plugin:review`, the fallback
 `repo_type` for repos that detect no language — epic #810) extends the enum the
@@ -1204,8 +1253,8 @@ in-scope defects, which keep their full severity. The rule currently lives in th
 per-file *Reviewing thoroughness (#982)* section of each panel's test reviewer
 (`go-`/`java-`/`python-`/`claude-plugin-test-reviewer` and swift's `test-reviewer`)
 and `claude-plugin-script-reviewer`; extending it to the remaining review-panel
-dimensions (bugs, security, performance, code-quality, and the claude-plugin
-prose-logic/contract/manifest reviewers) is tracked follow-up (#987), not yet
+dimensions (bugs, security, performance, code-quality, resilience, and the
+claude-plugin prose-logic/contract/manifest reviewers) is tracked follow-up (#987), not yet
 done — no shared convention file or prompt-injection carries it. It is honoured mechanically
 downstream: `SUGGESTION → Low`, and Low never blocks a round (see the consolidator
 below).
@@ -2299,10 +2348,12 @@ converged clean final round lacks is still available) into two things appended t
 the PR body by `open-pr`:
 
 1. a **"Review dossier"** section — rounds run, per-round blockers found & fixed,
-   dimensions reviewed (the #449 lenses, each `clean` or with a fixed count),
-   waived Low suggestions, and the reviewers who contributed; and
-2. a hidden `<!-- review-dossier: {…} -->` JSON block, dimension-tagged with the
-   #449 enum.
+   dimensions reviewed — the #449 core five plus any panel-specific dimension
+   that reported findings (a CLEAN non-core one is dropped, #1148) — each
+   `clean` or with a fixed count, waived Low suggestions, and the reviewers who
+   contributed; and
+2. a hidden `<!-- review-dossier: {…} -->` JSON block, dimension-tagged the same
+   way.
 
 The Approver re-ingests the hidden block **the same way maintenance re-ingests
 Approver findings** — via the shared `approver-policy-core` (#555), so all three

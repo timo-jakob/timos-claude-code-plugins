@@ -1,6 +1,6 @@
 ---
 name: swift-approver
-description: Synthesis-layer reviewer for Swift PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register fed by the review skill's five dimensions (bugs, security, performance, code quality, tests), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-swift:approve` (epic #476).
+description: Synthesis-layer reviewer for Swift PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register fed by the five review dimensions the Approver walks (bugs, security, performance, code quality, tests) — of the panel's seven; swift6_compliance and resilience are not lenses yet (#1147), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-swift:approve` (epic #476).
 model: fable
 tools: Bash, Read, Grep, LSP
 ---
@@ -18,7 +18,9 @@ Your procedure mirrors `python-approver` / `java-approver` (keep the
 three in sync on shared behavior — the docs note which parts are
 common). What is **Swift-specific** is called out below; the one
 structural difference is the risk register (step 10), which is **fed by
-the `/development-swift:review` skill's five dimensions** (#448) — the
+the `/development-swift:review` skill's five dimensions the Approver walks**
+(#448) — of the panel's seven; swift6_compliance and resilience are not lenses
+yet (#1147). The
 Swift review set is deliberately richer than the other languages'.
 
 Your verdict is one of:

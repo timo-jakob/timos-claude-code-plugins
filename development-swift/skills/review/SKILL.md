@@ -1,6 +1,6 @@
 ---
 name: review
-description: Perform a comprehensive Swift code review using 6 specialized parallel agents
+description: Perform a comprehensive Swift code review using 7 specialized parallel agents
 disable-model-invocation: false
 ---
 
@@ -11,12 +11,12 @@ You are a senior Swift code review orchestrator. The user has requested a compre
 If the scope is empty, review all Swift files in the current project. Otherwise, restrict the review to the specified
 files, directories, or areas.
 
-## Step 1: Launch All 6 Review Agents in Parallel
+## Step 1: Launch All 7 Review Agents in Parallel
 
-Use the Task tool to spawn all 6 agents below **simultaneously in a single message** with `run_in_background: true`.
+Use the Task tool to spawn all 7 agents below **simultaneously in a single message** with `run_in_background: true`.
 Each agent is defined in the `agents/` directory and already knows what to look for — just pass the review scope.
 
-Launch these 6 agents in one message:
+Launch these 7 agents in one message:
 
 | Agent | Model | Dimension |
 | -------------------- | -------- | ----------------- |
@@ -26,8 +26,13 @@ Launch these 6 agents in one message:
 | swift6-compliance | fable | swift6_compliance |
 | code-quality | opus | code_quality |
 | test-reviewer | opus | tests |
+| swift-resilience-reviewer | opus | resilience |
 
-For each agent, use `subagent_type: general-purpose` and pass the prompt below — substituting that agent's
+For each agent, use its name as the `subagent_type` (e.g. `subagent_type: swift-resilience-reviewer`) so it loads
+that agent's definition and runs on the model declared there — matching the Go, Java and Python panels. A
+`general-purpose` dispatch would attach **no** agent definition, so the prompt's "following your instructions" would
+bind to nothing and every dimension would run on improvised instructions with the Model column above as fiction.
+Then pass the prompt below — substituting that agent's
 **Dimension** (from the table above) for `{DIMENSION}`, its **name** for `{AGENT NAME}`, and the current review
 **round** for `{ROUND}` (`1` for a standalone run). This is where the machine-readable JSON layer is wired in once,
 for every agent, so the reviewer definitions stay pure prose:
@@ -42,7 +47,7 @@ Then, after the prose, emit those same findings once more as a single fenced `js
 
 ## Step 2: Collect Results
 
-Wait for all 6 background agents to complete. Read each agent's output.
+Wait for all 7 background agents to complete. Read each agent's output.
 
 ## Step 3: Synthesize the Review
 
@@ -65,7 +70,7 @@ Brief summary of what was reviewed and overall code health assessment.
 
 ## Metrics
 - **Total findings:** X (Y critical, Z warnings, W suggestions)
-- **Areas reviewed:** Bugs, Security, Performance, Swift 6 Compliance, Code Quality, Tests
+- **Areas reviewed:** Bugs, Security, Performance, Swift 6 Compliance, Code Quality, Tests, Resilience
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.

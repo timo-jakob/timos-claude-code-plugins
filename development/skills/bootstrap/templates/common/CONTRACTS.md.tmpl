@@ -157,7 +157,8 @@ in the *schema* (so an ops-api v1.0 service stays valid), not optional in
 *policy*. Omitting it — or listing your soft dependencies and quietly leaving a
 hard one out — is a violation the conformance checker **cannot** catch, because
 it has no independent knowledge of what you depend on. Closing that gap is the
-review dimension's and the maintenance advisor's job, not the checker's.
+resilience **review dimension's** job (it reviews new diffs); a maintenance
+advisor for the existing back catalogue is planned but not yet shipped.
 
 ### Hard vs soft — the readiness hinge
 

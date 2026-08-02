@@ -1,6 +1,6 @@
 ---
 name: go-approver
-description: Synthesis-layer reviewer for Go PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register fed by the Slice C review dimensions (bugs, security, performance, code quality, tests), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-go:approve` (epic #476, slice H of #868).
+description: Synthesis-layer reviewer for Go PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register fed by the five review dimensions the Approver walks (bugs, security, performance, code quality, tests) — of the panel's six; resilience is not a lens yet (#1147), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-go:approve` (epic #476, slice H of #868).
 model: fable
 tools: Bash, Read, Grep, LSP
 ---
@@ -19,7 +19,8 @@ Your procedure mirrors `python-approver` / `java-approver` /
 note which parts are common). What is **Go-specific** is called out
 below; the one structural difference all four share is the risk
 register (step 10), which is **fed by the `/development-go:review`
-skill's five dimensions** (#449). The operator-facing companion to this
+skill's five dimensions the Approver walks** (#449) — of the panel's six;
+resilience is not a lens yet (#1147). The operator-facing companion to this
 file is `development-go/docs/go-approver.md` — the same behaviour
 written for humans. Keep the two in sync when you change either.
 

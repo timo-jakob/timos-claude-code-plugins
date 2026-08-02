@@ -684,3 +684,44 @@ EOF
   con
   [ "$status" -eq 1 ]
 }
+
+# ---- non-core dimensions (resilience #966, swift6_compliance #447) ----------
+#
+# ARCHITECTURE.md's dimension-enum section claims the consolidator "needs no
+# teaching about a new dimension" — it keys on [file, line, dimension, title]
+# with no allow-list. Every other test in this file uses only the #449 core
+# five, so that claim was asserted nowhere. It matters: this engine is where a
+# resilience blocker would be silently downgraded (prio() maps anything outside
+# CRITICAL/WARNING to Low, and Low never blocks), which would let the loop
+# report CONVERGED with unfixed resilience blockers.
+
+@test "a non-core dimension round-trips as a blocker, untouched" {
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"resilience","file":"client.go","line":42,"title":"no breaker on the pricing-api call","description":"d","reviewer":"go-resilience-reviewer"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].dimension')" = "resilience" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].priority')" = "High" ]
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 0 ]
+}
+
+@test "cross-round matching is dimension-agnostic too (non-core survivor)" {
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"resilience","file":"client.go","line":42,"title":"Unbounded retry on the pricing-api call","description":"d","reviewer":"go-resilience-reviewer"}]
+EOF
+  run zsh "$S" --findings "$F" --round 1
+  [ "$status" -eq 0 ]
+  echo "$output" > "$BATS_TEST_TMPDIR/r1res.json"
+  [ "$(echo "$output" | jq '.non_converging')" = "false" ]
+
+  # same defect, shifted line, reworded punctuation — the #983 identity rules
+  # must recognise it regardless of the dimension being outside the core five.
+  cat > "$BATS_TEST_TMPDIR/r2res.json" <<'EOF'
+[{"severity":"CRITICAL","dimension":"resilience","file":"client.go","line":44,"title":"Unbounded retry on the pricing-api call!","description":"still here","reviewer":"go-resilience-reviewer"}]
+EOF
+  run zsh "$S" --findings "$BATS_TEST_TMPDIR/r2res.json" --round 2 --prev "$BATS_TEST_TMPDIR/r1res.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+}

@@ -10,7 +10,8 @@ on work that still has open review blockers.
 Each round, scoped to the story's diff:
 
 1. **Review** — a language-appropriate reviewer panel inspects the change and
-   emits findings (bugs, security, performance, code quality, tests). The
+   emits findings (bugs, security, performance, code quality, tests — plus
+resilience on the service languages, and Swift-6 compliance on Swift). The
    panel runs as visible in-session agents, never as a hidden background
    process.
 2. **Consolidate** — findings are de-duplicated and split into **blockers**
