@@ -30,9 +30,6 @@ site/
 # under .claude/ is already covered above)
 .review/
 
-# toggle-fable.zsh saved manifest (local dev tooling state, #990)
-scripts/.fable-agents
-
 # Gradle local caches. The Java template payloads (e.g. the ops-api one) are
 # real Gradle projects, so building one to verify it leaves a .gradle/ behind.
 .gradle/

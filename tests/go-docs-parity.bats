@@ -139,12 +139,10 @@ _slice_section() {
 }
 
 @test "each agent's Model cell matches its frontmatter model: (#1129)" {
-  # The fable/opus split is a real contract this repo edits in bulk:
-  # scripts/toggle-fable.zsh (tests/toggle-fable.bats) rewrites `model: fable` →
-  # `model: opus` across */agents/*.md without touching any doc, so a stale
-  # Model column is a genuine regression. Note a toggled working tree reds this
-  # test for the fable agents exactly as it reds
-  # `generate-docs-reference.py --check` — restore with `toggle-fable.zsh on`.
+  # The fable/opus split is a real contract: a bulk edit of `model:` across
+  # */agents/*.md that doesn't touch the docs leaves a stale Model column, and
+  # that is a genuine regression — the same drift `generate-docs-reference.py
+  # --check` catches.
   # Anchor on the agent's OWN row: a whole-file grep for `opus` would be
   # satisfied by surrounding prose.
   for f in "$AGENTS_DIR"/*.md; do

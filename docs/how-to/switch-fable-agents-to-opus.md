@@ -107,19 +107,4 @@ so the hook processes are spawned with a freshly-read environment.
 
 If all four check out and dispatches are *still* landing on fable, please open an
 issue. The redirect ultimately rests on the Agent tool's `model` parameter
-selecting the model — that is the step to verify first. Note the
-`toggle-fable.zsh` fallback described below only helps if you run these plugins
-**from a checkout** (`--plugin-dir`, or the plugin test harness); it rewrites the
-working tree, so it does nothing for plugins installed from the marketplace cache.
-
-## Relationship to `toggle-fable.zsh`
-
-The repo also has [`scripts/toggle-fable.zsh`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/scripts/toggle-fable.zsh),
-which rewrites `model:` frontmatter across the agent files in a checkout. The two
-are independent and do not conflict — the script edits files in the repo working
-tree, the variable changes runtime dispatch from the installed cache. An agent
-the script has already rewritten to `model: opus` simply is not fable, so the
-hook ignores it.
-
-Use the variable when you want your *sessions* to keep working; use the script
-when you want the *repo* to declare something different.
+selecting the model — that is the step to verify first.
