@@ -1,0 +1,137 @@
+---
+# Canonical Spring Boot resilience + dependency-health configuration (#1141, epic
+# #964). NOT a standalone config file -- MERGE these blocks into your service's
+# own application.yml.
+#
+# Together with the four Java files beside this file it realizes the org's
+# six-mandate resilience policy (ARCHITECTURE.md, "Resilience policy + dependency
+# health"). Every governed outbound call gets: (1) a timeout, (2) a circuit
+# breaker, (3) bounded retry with jittered backoff, (4) a registered fallback,
+# (5) background reconnect, (6) stay-stable behaviour on dependency loss.
+#
+# The two dependency names below -- orders-db and pricing-api -- are worked
+# EXAMPLES showing one hard and one soft dependency. Replace them with your
+# service's real direct dependencies; the names are the keys the ops-api /health
+# `components` map is reported under, so pick stable ones.
+
+management:
+  # The ops surface is INTERNAL: a separate management port, never the public app
+  # port. Exposing /info's build data and the dependency graph in `components` on
+  # the public port is an information leak.
+  server:
+    port: 9090
+  endpoints:
+    web:
+      base-path: /
+      # Actuator's own `health` is deliberately ABSENT: its JSON nests custom
+      # fields under `details` and spells its states UP/DOWN, so it cannot express
+      # the ops-api v1.1 component shape ({status, kind, breaker, since}).
+      # `opshealth` is OpsHealthEndpoint, which can -- and the path-mapping below
+      # puts it at the contract's /health (with /health/live and /health/ready as
+      # its selector paths). Exposing Actuator's `health` alongside it would map
+      # two endpoints onto the same path.
+      exposure:
+        include: info,prometheus,opshealth
+      path-mapping:
+        opshealth: health
+        prometheus: metrics
+
+# The hard/soft declaration -- the readiness hinge (bound by DependencyCatalog).
+#   hard: nothing works without it. Its loss FAILS /health/ready, so Kubernetes
+#         sheds traffic away from this pod.
+#   soft: degraded operation is possible. Its loss NEVER fails readiness -- the
+#         breaker opens, the pod stays ready, and /health reports it degraded.
+# `breaker` is optional and defaults to the dependency name; set it only when the
+# resilience4j instance is named differently from the dependency.
+resilience:
+  dependencies:
+    orders-db:
+      kind: hard
+    pricing-api:
+      kind: soft
+
+resilience4j:
+  # Mandate 2 -- one circuit breaker PER DEPENDENCY. The instance is the unit
+  # /health reports, so never share one breaker across two dependencies.
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        # A dependency that answers, but far too slowly, is down for practical
+        # purposes -- count slow calls as failures so the breaker opens instead
+        # of letting callers queue behind it.
+        slow-call-duration-threshold: 2s
+        slow-call-rate-threshold: 100
+        # Mandate 5 -- background reconnect. The breaker moves itself from open to
+        # half-open after the wait, probes with a few real calls, and closes on
+        # success. Full function resumes with no deploy and no restart.
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        # OpsHealthEndpoint reads breaker state directly from the registry, so
+        # resilience4j's own Actuator health indicators are not needed.
+        register-health-indicator: false
+    instances:
+      orders-db:
+        base-config: default
+      pricing-api:
+        base-config: default
+
+  # Mandate 3 -- BOUNDED retry with jittered backoff. max-attempts caps the
+  # retries; exponential backoff spreads them; randomized wait adds the jitter
+  # that stops every caller retrying in lockstep and turning a blip into a
+  # stampede.
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        exponential-max-wait-duration: 2s
+        enable-randomized-wait: true
+        randomized-wait-factor: 0.5
+        # Load-bearing (mandate 6). resilience4j's default aspect order puts Retry
+        # OUTSIDE CircuitBreaker, so without this an open breaker's fast-fail is
+        # itself retried -- burning the full backoff schedule on a dependency
+        # already known to be down. Ignoring it makes the call fall through to the
+        # fallback immediately.
+        ignore-exceptions:
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
+    instances:
+      orders-db:
+        base-config: default
+      pricing-api:
+        base-config: default
+
+  # Mandate 1 -- a timeout on every governed call. This is the ceiling on the
+  # whole operation; the transport timeouts below bound the individual socket.
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 2s
+        cancel-running-future: true
+    instances:
+      orders-db:
+        base-config: default
+      pricing-api:
+        base-config: default
+
+# Mandate 1 at the transport layer. A client with no connect/read timeout can
+# hang a request thread indefinitely -- the breaker never sees a failure to count,
+# so it never opens, and mandate 6 fails with it.
+#
+# The prefix is `spring.http.clients` (PLURAL) -- verified against
+# spring-boot-http-client 4.1.0's spring-configuration-metadata.json, where
+# `spring.http.clients.connect-timeout` / `.read-timeout` are current and the
+# singular `spring.http.client.*` forms are marked deprecated with these as their
+# replacement. Getting this wrong binds nothing and silently unwires mandate 1, so
+# do not "correct" it to the singular Boot 3 spelling.
+spring:
+  http:
+    clients:
+      connect-timeout: 1s
+      read-timeout: 2s

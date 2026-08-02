@@ -73,16 +73,49 @@ Instrumentation is **OpenTelemetry only** (OTel SDK + semantic conventions);
 OTLP push to a collector is the primary pipeline and `/metrics` is the mandatory
 pull-compat surface served by the SDK's Prometheus exporter.
 
-- **Spring** — Actuator does **not** conform out of the box. Put it on a
-  management port (`management.server.port: 9090`); expose `health`, `info`,
-  `prometheus`; remap to the root (`management.endpoints.web.base-path: /` and
-  `path-mapping.prometheus: metrics`); enable the probes
-  (`management.endpoint.health.probes.enabled: true`) for `/health/live` +
-  `/health/ready`, keeping liveness dependency-free; add
-  `micrometer-registry-prometheus` and an `InfoContributor` for the served-majors
-  table; and represent `/health` as `{"status":"ok"}` (Actuator returns `UP` —
-  this part needs a small custom health representation, not just config).
-  `spring-config-advisor` flags a non-conforming config with these specifics.
+- **Spring** — Actuator does **not** conform out of the box. Use the blessed
+  reference implementation bootstrap installs, the **Spring resilience payload**
+  (`templates/languages/spring/resilience/`, #1141): its `OpsHealthEndpoint`
+  serves `/health`, `/health/live` and `/health/ready` in the contract's shape,
+  including the per-dependency `components` map read from circuit-breaker state,
+  and it brings the hard/soft declaration that drives readiness. See its
+  `README.md`.
+
+  Adopting it is three steps — mechanical except where noted: place its sources,
+  **merge its `application-resilience.yml`** into your `application.yml`, and fold
+  its `build.gradle.kts` block into your build. Three things in there are **not**
+  mechanical, and each fails quietly if you skip it: re-set every `.java` file's
+  flagged `package com.example.ops;` line to the package you place it in;
+  **adapt `PricingApiClient.java` to a real dependency before placing it, or leave
+  it out** (as shipped it reads `${pricing-api.base-url}`, which the payload
+  deliberately never defines, so an unadapted placement breaks startup and every
+  `@SpringBootTest` context load); and **replace the worked-example `orders-db` /
+  `pricing-api` entries with your real direct dependencies** during the merge —
+  merged verbatim they *work*, and `/health` then reports two dependencies you do
+  not have as `up`, which is the lying health surface this payload exists to
+  prevent. Those three steps supply the management
+  port (`management.server.port: 9090`), the `info,prometheus,opshealth` exposure
+  list — deliberately **without** Actuator's own `health`, which would map onto
+  the same path — the root remap (`management.endpoints.web.base-path: /`,
+  `path-mapping.opshealth: health`, `path-mapping.prometheus: metrics`), and
+  `micrometer-registry-prometheus`.
+
+  What is genuinely still yours: Gradle **build-info** plus a custom
+  **`InfoContributor`** emitting `build.version`, `build.git_sha` and the
+  served-majors `api[]` table, which the payload does not provide and the
+  conformance checker requires.
+
+  *Not adopting the payload?* Then the pre-#1141 route still applies — expose
+  `health` too and write your own health representation, since Actuator returns
+  `UP` and that part needs code, not config. Note that
+  `management.endpoint.health.probes.enabled: true` is **not** enough for the two
+  probe paths: its groups are named `liveness`/`readiness`, so they serve
+  `/health/liveness` and `/health/readiness` while the checker fetches
+  `/health/live` and `/health/ready`. Declare groups named to match —
+  `management.endpoint.health.group.live.include: livenessState` and
+  `…group.ready.include: readinessState` — keeping the `live` group
+  dependency-free. `spring-config-advisor` flags a non-conforming config with
+  these specifics either way, and branches on whether the payload is present.
 - **Python (non-Spring)** — use the blessed reference implementation bootstrap
   installs under your package (`ops_api.py` + `requirements.txt`); it serves the
   full surface on the management port and passes the conformance checker

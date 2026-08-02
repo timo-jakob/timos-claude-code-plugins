@@ -1573,7 +1573,7 @@ The installed set:
   the fragment's shapes (incl. the deprecated-major-needs-sunset rule); exit 0 on
   conformance, non-zero naming the failing path. Installed verbatim.
 - `.github/workflows/ops-conformance.yml` (#688) — a **standalone** job that
-  builds the canonical container, waits for `/health`, and runs the checker
+  builds the canonical container, waits for `/health/ready`, and runs the checker
   against the running service (independent of epic #704's rest harness; #704 may
   later fold it into the `acceptance (rest)` leg). Also **path-conditional**
   (`paths: contracts/ops/**` + its own wiring) — never a required context.
@@ -1611,9 +1611,10 @@ Then render the ops-conformance workflow **only when `has_dockerfile == true`**
 
 The ops surface (`contracts/ops/`, the checker, and its Dockerfile-gated
 workflow) installs **alongside the contracts block** — it is a contract artifact
-gated by the same lint/semver machinery. Spring gets it via Actuator (`spring-config-advisor`'s
-conforms-to-ops-api check); every other language plugin owns its canonical
-implementation of the same fragment.
+gated by the same lint/semver machinery. Spring gets `/info` and `/metrics` via
+Actuator (`spring-config-advisor`'s conforms-to-ops-api check) and the three
+health paths from the **Spring resilience payload below** (#1141); every other
+language plugin owns its canonical implementation of the same fragment.
 
 **Python canonical implementation (#688).** For a Python service repo, also
 install the blessed non-Spring realization — a self-contained OTel-SDK +
@@ -1645,8 +1646,9 @@ first match wins** — a *skip* always beats an *install*, so the Spring and Mav
 checks are tested **before** the build-DSL branch (a Groovy-DSL Spring Boot repo
 must skip, not install):
 
-1. **Spring → skip this block** (covered by `spring-config-advisor`'s
-   conforms-to-ops-api check). *Spring* means the `org.springframework.boot`
+1. **Spring → skip this block**; Spring is handled by the **resilience payload
+   below** (#1141, which serves the three health paths) plus
+   `spring-config-advisor`'s conforms-to-ops-api check. *Spring* means the `org.springframework.boot`
    Gradle plugin is applied **or** any `org.springframework.boot` dependency
    appears in a build file (check the build files from Step-1 detection). Plain
    Spring *Framework* without Boot/Actuator is the ambiguous middle — treat it as
@@ -1703,6 +1705,130 @@ Like the Python payload these need an explicit destination, plus a Java-specific
 
 The remaining languages' canonical implementations are tracked follow-ups under
 epic #682: development-javascript/Node (#936) and development-swift (#937).
+
+**Spring resilience + dependency health (#1141).** For a **Spring Boot** service
+repo, install the blessed resilience payload — resilience4j wired around
+dependency clients per the six-mandate policy, plus the ops-api v1.1 `/health`,
+`/health/live` and `/health/ready` served from breaker state. This is the block
+the Java one above skips Spring *for*: Actuator gives Spring `/info` and
+`/metrics`, but its health JSON spells states `UP`/`DOWN` and nests custom fields
+under `details`, so it cannot express the ops-api `components` shape — the payload
+serves those three paths itself.
+
+*Applicability — gate before you install.* Evaluate in order, first match wins:
+
+1. **Not Spring → skip** (the Java block above covers non-Spring). *Spring* is the
+   same test that block uses: the `org.springframework.boot` Gradle plugin is
+   applied **or** an `org.springframework.boot` dependency appears in a build file.
+2. **A Spring LIBRARY rather than a service → skip**, and say so in the Step-5
+   checklist: a library has no ops surface and no dependency clients to
+   circuit-break, so installing a management port and a health endpoint into one
+   is noise at best. Judge it from **runnable-service evidence**, not from
+   `interfaces`: interface detection is Python-only in v1, so on a Spring repo
+   `interfaces` is `[]` unless the user overrode it, and a `["library"]` test
+   would never fire. A **service** applies the `org.springframework.boot` Gradle
+   plugin (or `application`), has a `@SpringBootApplication` main class, or is the
+   artifact a Dockerfile entrypoint runs; a shared starter with Boot only on the
+   *dependency* path and no runnable artifact is a library. When `interfaces`
+   **is** populated (Python in the same repo, or an explicit `--interfaces`), treat
+   it as confirmation — it is a **set**, so `["rest", "library"]` is a service that
+   also publishes a library and does **not** skip. If the evidence is genuinely
+   ambiguous, surface the install-or-skip choice in the Step-2 plan rather than
+   defaulting either way.
+3. **Maven repo → skip entirely** — as for the Java payload, the Step-3 Java gate
+   already rejected Java-specific generation; an orphan Kotlin-DSL dependency
+   fragment in a Maven repo is worse than nothing. Note the unimplemented ops
+   health surface in the Step-5 checklist, so the gap is recorded rather than
+   silent.
+4. **Groovy-DSL Gradle (Kotlin conversion declined in Step 4c)** → either fold the
+   dependencies into the existing `build.gradle` (Groovy syntax) **and** place the
+   sources, or **defer the ENTIRE payload** behind a single Step-5 checklist TODO.
+   Never place the `.java` files without their dependencies — the
+   `io.github.resilience4j.*` imports won't resolve and the repo stops compiling.
+5. **Kotlin-DSL Gradle, Spring service → install** per the render command below.
+
+**The render commands below apply only to cases 4 (fold-and-install) and 5** — in
+the skip/defer cases (1, 2, 3, and 4-defer) do **not** run them.
+
+**Deps — `build.gradle.kts` is a FRAGMENT, never a build file.** Fold its
+dependencies block into the target module's own `build.gradle.kts` (case 5) or the
+existing Groovy `build.gradle` (case 4-fold-and-install). Dropping it in as a second
+build script shadows or clobbers the module's real one, and never create a
+`build.gradle.kts` beside an existing `build.gradle`.
+
+Placement mirrors the Java payload's rules — target the module producing the
+runnable service artifact, and derive the ops package from the service's base
+package with `.ops` appended. All four `.java` files ship the flagged placeholder
+`package com.example.ops;`, and **each file's `package` line must be re-set to
+match the directory it actually lands in** — which is *not* the same package for
+all four: the three ops files (`DependencyCatalog`, `DependencyHealth`,
+`OpsHealthEndpoint`) go to `<base>.ops`, while `PricingApiClient`, if placed at
+all, takes the domain package it sits beside (next rule). Three payload-specific
+rules:
+
+- **`PricingApiClient.java` is a worked EXAMPLE, not service code — adapt it
+  BEFORE the Step-4d commit, or do not place it.** It is a `@Component` reading
+  `@Value("${pricing-api.base-url}")`, so dropping it into a scanned source set
+  unadapted breaks every `@SpringBootTest` context load on a property nothing
+  defines — a red bot PR in Step 4e, with the "adapt or delete" note sitting in a
+  Step-5 checklist the user only reads afterwards. So pick one, in the plan:
+  **adapt** it (repackage/rename to the real dependency and define that
+  dependency's `base-url` in the merged config, replacing the `pricing-api`
+  entries below with it), or **omit** it entirely and point the Step-5 checklist
+  at the shipped `README.md` for the reference shape, and drop it from the render
+  command below. Never place it as-is.
+- **Merge `application-resilience.yml` into the service's own `application.yml`**
+  (the existing confirmed-edit model) rather than dropping a second config file.
+  Two keys in it are load-bearing and must survive the merge intact:
+  `management.endpoints.web.exposure.include` lists **`opshealth`** (the payload's
+  Actuator endpoint) and **not** Actuator's own `health`, and
+  `management.endpoints.web.path-mapping.opshealth: health` is what puts that
+  endpoint at the contract's `/health` (with `/health/live` and `/health/ready` as
+  its selector paths). Exposing Actuator's `health` alongside it maps two
+  endpoints onto the same path; dropping the path-mapping leaves the surface at
+  `/opshealth`, which the conformance checker does not fetch.
+- **Replace the worked-example dependencies during that merge.** `orders-db` and
+  `pricing-api` appear four times each (the `resilience.dependencies` declaration
+  plus the circuitbreaker/retry/timelimiter instance blocks) and are illustrations,
+  not the service's dependencies. Merged verbatim they *work* — the breakers exist,
+  so the startup guard passes — and `/health` then reports two dependencies the
+  service does not have as `up`: a conformant-shaped health surface that lies,
+  which is the exact failure this payload exists to prevent. Substitute the
+  service's real direct dependencies (ask, or derive them from the detected
+  clients), keeping every declared name in lockstep with its instance keys and with
+  its `kind:`. If they genuinely cannot be determined during the run, carry an
+  explicit Step-5 checklist item saying `/health` reports placeholder dependencies
+  until they are replaced.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/spring/resilience/build.gradle.kts \
+  languages/spring/resilience/application-resilience.yml \
+  languages/spring/resilience/DependencyCatalog.java \
+  languages/spring/resilience/DependencyHealth.java \
+  languages/spring/resilience/OpsHealthEndpoint.java \
+  languages/spring/resilience/README.md
+```
+
+Render `PricingApiClient.java` **only when the Step-2 plan chose to adapt it** (the
+first rule above) — it is the one payload file that must not be staged on the omit
+path, since placing it unadapted is what breaks the context load:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/spring/resilience/PricingApiClient.java
+```
+
+Put the shipped `README.md` alongside the placed sources — it carries the
+hard/soft declaration model, the two silent-failure wiring rules (`fallbackMethod`
+on `@Retry`, `CallNotPermittedException` in the retry's `ignore-exceptions`), and
+why the health surface is an Actuator `@Endpoint` rather than a `@RestController`
+(the management child context has no `RequestMappingHandlerMapping`, so a
+controller there is never mapped — and one in the main context lands on the public
+app port). The other five service languages are epic #967's remaining
+children (#1142 java, #1143 python, #1144 go, #1145 javascript, #1146 swift).
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the

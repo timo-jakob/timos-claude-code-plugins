@@ -84,10 +84,19 @@ auto-apply:
 - **Actuator over-exposure** —
   `management.endpoints.web.exposure.include: "*"` or a broad list:
   recommend narrowing to the minimum, but do **not** auto-narrow — that can
-  break dashboards/probes. The minimum must keep the **ops surface**:
-  `health,info,prometheus` (#688) — do **not** recommend `health,info` alone, or
-  the narrowing would itself break ops-api conformance. Flag with the concrete
-  recommendation.
+  break dashboards/probes. The minimum must keep the **ops surface**, and which
+  endpoints that is **depends on whether the repo has adopted the #1141
+  resilience payload** (detected as under *ops-api conformance* below):
+  - **Not adopted** — `health,info,prometheus` (#688). Do **not** recommend
+    `health,info` alone, or the narrowing would itself break ops-api conformance.
+  - **Adopted, or a broken half** — `info,prometheus,opshealth`, **without
+    `health`**. The payload's `opshealth` endpoint owns `/health` via its
+    path-mapping; recommending Actuator's `health` back into the list maps two
+    endpoints onto the same path. Recommending a narrowing that breaks the
+    surface is worse than leaving `*` in place, so resolve the adoption test
+    before flagging.
+
+  Flag with the concrete recommendation for whichever branch applies.
 - A property the Boot 4 migration guide marks **removed with no 1:1
   replacement** — i.e. the fix is a code/security change, not a rename
   (e.g. it now requires explicit Spring Security configuration): flag with
@@ -107,24 +116,62 @@ auto-apply:
   - **Expose the endpoints** — `management.endpoints.web.exposure.include` must
     contain `health`, `info`, and `prometheus` (`*` **satisfies** this presence
     check; narrowing `*` is the separate over-exposure finding above, not an
-    ops-api gap).
+    ops-api gap). **Exception — the #1141 resilience payload owns `/health`.**
+
+    *Adoption test — BOTH signals, never either alone.* The repo counts as
+    **adopted** when (a) a source file declares the payload's Actuator endpoint —
+    `@Endpoint(id = "opshealth")`, normally in an `OpsHealthEndpoint` class —
+    **and** (b) the merged config both exposes `opshealth` and carries
+    `management.endpoints.web.path-mapping.opshealth: health`. **Exactly one**
+    signal present is a **broken half**, and it is silent: with the endpoint class
+    but no config the surface answers at `/opshealth` (or nowhere, if unexposed),
+    and with the config but no class there is no endpoint at all — either way the
+    app starts perfectly and `/health` 404s. Name the broken half **inside the
+    repo's single `ops-api-conformance` entry** (never as a second entry), and do
+    **not** treat health as satisfied.
+
+    *When adopted:* Actuator's own `health` must be **absent** from the exposure
+    list — the two would map onto the same path — while `opshealth` must be
+    present. Check `info`, `prometheus` and `opshealth` here; if `health` **is**
+    present, say so in the same entry as something to remove. Of the bullets
+    below, treat exactly two as already satisfied — *Represent health as
+    `{"status":"ok"}`* and *Split liveness and readiness*. **Still check** the
+    remap, the management port, the micrometer dependency and the `/info` majors
+    bullets: they govern `/info` and `/metrics`, which the payload does not serve.
+
+    *When exactly one signal is present (the broken half):* recommend the
+    **adopted** exposure list (`info,prometheus,opshealth`) *together with*
+    repairing the missing half in the same entry — never recommend `health` back
+    into the list of a repo that carries the endpoint class, and never recommend
+    `opshealth` without the class that serves it.
   - **Remap the paths** — Actuator serves `/actuator/health|info|prometheus`,
     but the fragment and `check-ops-conformance.zsh` expect `/health`, `/info`,
     `/metrics` at the base. Conformance needs `management.endpoints.web.base-path:
-    /` **and** `management.endpoints.web.path-mapping.prometheus: metrics` (health
-    and info keep their names). Flag this remap explicitly.
+    /` **and** `management.endpoints.web.path-mapping.prometheus: metrics` (`info`
+    keeps its name; `health` keeps its name only on the **not-adopted** branch —
+    an adopted repo gets `/health` from `path-mapping.opshealth: health` instead).
+    Flag this remap explicitly.
   - **Represent health as `{"status":"ok"}`** — Actuator's health returns
     `{"status":"UP"}`, which the checker rejects. There is **no pure-config**
     fix; conforming needs a small custom health representation (application
-    code). Call this out as the hardest part, not a config rename.
+    code). Call this out as the hardest part, not a config rename. **Recommend
+    the blessed payload rather than a bespoke one**: bootstrap ships it at
+    `templates/languages/spring/resilience/` (#1141), which serves `/health`,
+    `/health/live` and `/health/ready` in the ops-api v1.1 shape — including the
+    per-dependency `components` map read from resilience4j breaker state — so a
+    repo that adopts it satisfies this bullet and the *Split liveness and readiness* one below.
   - **Split liveness and readiness** — the fragment requires distinct
     `/health/live` and `/health/ready` (a single `/health` cannot drive both K8s
-    probes without the liveness-checks-dependencies anti-pattern). Enable the
-    Actuator probes (`management.endpoint.health.probes.enabled: true` —
-    automatic on Kubernetes) so `/actuator/health/liveness` and
-    `/actuator/health/readiness` exist, mapping to the fragment's `/health/live`
-    and `/health/ready`; keep the **liveness group dependency-free** (never add a
-    datastore check to it).
+    probes without the liveness-checks-dependencies anti-pattern). Enabling the
+    Actuator probes (`management.endpoint.health.probes.enabled: true`) is **not
+    sufficient on its own**: those groups are named `liveness`/`readiness`, so
+    with `base-path: /` they serve `/health/liveness` and `/health/readiness`
+    while `check-ops-conformance.zsh` fetches `/health/live` and `/health/ready`
+    literally — a config that looks right and 404s both probes. Recommend groups
+    named to match the contract:
+    `management.endpoint.health.group.live.include: livenessState` and
+    `management.endpoint.health.group.ready.include: readinessState`. Keep the
+    **`live` group dependency-free** (never add a datastore check to it).
   - **Serve on a separate management port** — the ops surface is INTERNAL and
     must not be on the public app port. Spring supports this natively: recommend
     `management.server.port` (e.g. 9090), so the deployment excludes it from the
@@ -211,15 +258,15 @@ structure, or a relocation you can't verify is 1:1).
       "finding_id": "src/main/resources/application.yml",
       "type": "actuator-exposure",
       "severity": "MAJOR",
-      "recommendation": "management.endpoints.web.exposure.include is '*'; narrow to the minimum, keeping the ops surface (e.g. health,info,prometheus).",
-      "rationale": "narrowing can break dashboards/probes — needs human confirmation"
+      "recommendation": "management.endpoints.web.exposure.include is '*'; narrow to health,info,prometheus, keeping the ops surface.",
+      "rationale": "narrowing can break dashboards/probes — needs human confirmation. NB this example is the NOT-adopted branch; on a repo carrying the #1141 payload the recommendation reads info,prometheus,opshealth instead"
     },
     {
       "finding_id": "src/main/resources/application.yml",
       "type": "ops-api-conformance",
       "severity": "MAJOR",
-      "recommendation": "ops-api (#688) needs /info, /health, /health/live, /health/ready, /metrics at the root with health status 'ok', on a separate internal management port: set management.server.port (e.g. 9090); expose health,info,prometheus; set management.endpoints.web.base-path: / and path-mapping.prometheus: metrics; enable management.endpoint.health.probes.enabled (liveness dependency-free); add micrometer-registry-prometheus; add an InfoContributor for the served API majors; and represent /health as {\"status\":\"ok\"} (Actuator returns 'UP' — no pure-config fix).",
-      "rationale": "conformance needs config remaps, a management port, a dependency, AND application code (health representation + InfoContributor) — Actuator does not conform out of the box; needs human confirmation"
+      "recommendation": "ops-api (#688) needs /info, /health, /health/live, /health/ready, /metrics at the root with health status 'ok', on a separate internal management port: set management.server.port (e.g. 9090); expose health,info,prometheus; set management.endpoints.web.base-path: / and path-mapping.prometheus: metrics; declare health groups named to match the contract (management.endpoint.health.group.live.include: livenessState and group.ready.include: readinessState, live kept dependency-free) -- probes.enabled alone serves /health/liveness and /health/readiness, which the checker never fetches; add micrometer-registry-prometheus; add an InfoContributor for the served API majors; and represent /health as a v1.1 aggregate — {\"status\":\"ok\"} when healthy, \"degraded\" also conforming (Actuator returns 'UP' — no pure-config fix; the blessed answer is the #1141 Spring resilience payload, whose opshealth endpoint also serves /health/live and /health/ready).",
+      "rationale": "NB this example is the NOT-adopted branch; on a repo carrying the #1141 payload the exposure list reads info,prometheus,opshealth (health dropped, opshealth path-mapped to /health). Conformance needs config remaps, a management port, a dependency, AND application code (health representation + InfoContributor) — Actuator does not conform out of the box; needs human confirmation"
     }
   ],
   "unable_to_fix": []
