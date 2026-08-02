@@ -18,15 +18,26 @@
 openapi: 3.1.0
 info:
   title: Ops API
-  version: "1.0.0"
+  version: "1.1.0"
   description: >
     The org-standard operations surface every backend service exposes:
     /info (build + served API majors with lifecycle and sunset),
-    /health (human-facing aggregate), /health/live (K8s liveness — process
-    only, dependency-free), /health/ready (K8s readiness — dependencies), and
-    /metrics (Prometheus/OpenMetrics exposition). Instrumentation is
-    OpenTelemetry-only; /metrics is the mandatory pull-compat surface served by
-    the OTel SDK's Prometheus exporter.
+    /health (human-facing aggregate + per-dependency health), /health/live
+    (K8s liveness — process only, dependency-free), /health/ready (K8s
+    readiness — dependencies), and /metrics (Prometheus/OpenMetrics
+    exposition). Instrumentation is OpenTelemetry-only; /metrics is the
+    mandatory pull-compat surface served by the OTel SDK's Prometheus exporter.
+
+
+    DEPENDENCY HEALTH (v1.1, #965) — /health may carry an optional `components`
+    map: one entry per DIRECT dependency, whose health is read PASSIVELY from
+    that dependency's circuit-breaker state. A service never transitively calls
+    a downstream's /health (the cascading health-check-storm anti-pattern); it
+    reports one hop and the observability layer assembles the graph. Each
+    dependency is declared `hard` (nothing works without it — its loss fails
+    /health/ready) or `soft` (degraded operation is possible — its loss keeps
+    the pod ready). A service with no declared dependencies simply omits
+    `components`.
 
 
     TRUST MODEL — this is an INTERNAL management surface. It MUST be served on a
@@ -69,19 +80,40 @@ paths:
       operationId: getHealth
       summary: Aggregate health (human/dashboard-facing).
       description: >
-        Overall service health for humans and dashboards — 200 when the service
-        is healthy. NOT a Kubernetes probe target: liveness and readiness are
+        Overall service health for humans and dashboards — always 200 while the
+        process can respond; the verdict is in the body (see STATUS CODE
+        below). NOT a Kubernetes probe target: liveness and readiness are
         distinct (see /health/live and /health/ready), because a single health
         endpoint cannot drive both without the liveness-checks-dependencies
         anti-pattern (a transient dependency blip restarting every pod).
+
+
+        This is the only endpoint that carries `components` — per-direct-
+        dependency health read from breaker state (#965). /health/live is
+        dependency-free BY CONTRACT and so can never carry it.
+
+
+        STATUS CODE — /health answers **200 whenever the process can respond at
+        all**, including when the aggregate is "down". The health verdict rides
+        in the BODY, not in the HTTP status: this endpoint is for humans and
+        dashboards, so an operator reading it during an outage needs the
+        diagnosis, not a bare 503. HTTP status codes are the two PROBES'
+        vocabulary (/health/live, /health/ready), which is why those two —
+        and only those two — document a 503.
       tags: ["ops"]
       responses:
         "200":
-          description: The service is healthy.
+          description: >
+            The service responded. The aggregate ("ok", "degraded" or "down")
+            and any `components` are in the body — a "down" aggregate is still
+            a 200 here. NOTE that ops CONFORMANCE (check-ops-conformance.zsh)
+            additionally requires the aggregate to be "ok" or "degraded": it
+            asserts a SERVING service, so "down" is a legitimate runtime state
+            that the conformance job cannot pass in.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: "#/components/schemas/AggregateHealth"
   /health/live:
     get:
       operationId: getLiveness
@@ -115,6 +147,18 @@ paths:
         checks (datastore, downstream services) belong. A failing readiness
         removes the pod from the Service endpoints (no traffic) WITHOUT
         restarting it. Wire it to the container's readinessProbe.
+
+
+        FORMALIZED (v1.1, #965) — AMONG DEPENDENCIES, readiness fails ONLY for
+        one declared `hard` that is down. A `soft` dependency being down
+        MUST NOT fail readiness: its breaker opens, the service serves degraded
+        responses and reconnects in the background, and the pod stays ready
+        while /health reports it as degraded. Non-dependency reasons to be
+        unready are unaffected by this rule and remain correct — a service
+        still starting up, or draining during a graceful shutdown, MUST fail
+        readiness even though no hard dependency is down. This is a tightening
+        of the stated semantics, not a schema change: the response shape is
+        unchanged.
       tags: ["ops"]
       responses:
         "200":
@@ -207,11 +251,116 @@ components:
     Health:
       type: object
       description: >
-        Health status envelope, shared by /health, /health/live, and
+        Binary health envelope for the two Kubernetes probes, /health/live and
         /health/ready. A 200 response carries status "ok"; a 503 carries "down".
+        The probes are deliberately binary — a probe answers one yes/no question
+        the kubelet acts on. The tri-state aggregate lives on /health
+        (AggregateHealth).
       required: ["status"]
       properties:
         status:
           type: string
           description: Health indicator — "ok" on a 200, "down" on a 503.
           enum: ["ok", "down"]
+    AggregateHealth:
+      type: object
+      description: >
+        The human/dashboard-facing aggregate served by /health (v1.1, #965).
+        Extends the binary probe envelope with a "degraded" aggregate and the
+        optional per-dependency `components` map.
+
+
+        The components set a FLOOR on the aggregate, they do not fix it
+        exactly: "down" if any HARD component is down, else "degraded" if ANY
+        component (hard or soft) is down or degraded, else "ok". A service MAY
+        report a MORE severe aggregate than its components imply — it may be
+        "degraded" for an internal reason no dependency models (a backed-up
+        work queue) — but it MUST NEVER report a less severe one. A service
+        that declares no dependencies omits `components`, and its aggregate is
+        then bounded only by its own internal state. Over-reporting reaches
+        "down" as well as "degraded": a service that cannot serve MUST say so
+        even when every dependency is up.
+
+
+        COMPLETENESS — `components` is optional in the SCHEMA (so an ops-api
+        v1.0 service stays valid), but a service that HAS direct dependencies
+        is expected to report ALL of them. Omitting the map, or hiding one
+        dependency in it, is a policy violation that this schema cannot
+        express and the conformance checker cannot detect: it has no
+        independent knowledge of what you depend on. That gap is the review
+        dimension's and the maintenance advisor's to close.
+
+
+        NOTE the hard/degraded case: a HARD dependency whose breaker is
+        half-open is `degraded`, not down, so it floors the aggregate at
+        "degraded" — not "down". Only a hard dependency that is fully DOWN
+        forces "down" (and fails readiness).
+      required: ["status"]
+      properties:
+        status:
+          type: string
+          description: >
+            Aggregate health, named by MEANING rather than by cause — "ok"
+            (nothing is known to be wrong), "degraded" (still serving, but
+            impaired: a dependency is down or degraded, or the service is
+            internally degraded), or "down" (NOT serving: a hard dependency is
+            down, or the service has otherwise declared itself unable to
+            serve). Because the components are only a floor, a service with no
+            declared dependencies — or with all of them up — can still
+            legitimately report "degraded" or "down" from its own internal
+            state. The healthy value stays "ok" (never "up") so the aggregate
+            keeps the exact spelling ops-api v1.0 shipped — widening this
+            field is additive, never a rename.
+          # Declared as an OPEN enum: adding a value to a RESPONSE enum is a
+          # breaking change to consumers that exhaustively match on it (oasdiff
+          # flags response-property-enum-value-added), which would force an ops
+          # major for what is semantically an additive widening. x-extensible-enum
+          # states the closed-today set while keeping the field growable — the
+          # remedy oasdiff itself recommends. check-ops-conformance.zsh enforces
+          # the concrete values at runtime.
+          x-extensible-enum: ["ok", "degraded", "down"]
+        components:
+          type: object
+          description: >
+            One entry per DIRECT dependency, keyed by the dependency's stable
+            name (e.g. "orders-db", "pricing-api"). Optional: a service with no
+            declared dependencies omits it entirely. Never transitive — a
+            service reports only the dependencies it calls itself.
+          additionalProperties:
+            $ref: "#/components/schemas/DependencyHealth"
+    DependencyHealth:
+      type: object
+      description: >
+        One direct dependency's health, derived PASSIVELY from its circuit
+        breaker (v1.1, #965) — an open breaker IS a down dependency. No extra
+        health-check traffic is generated: real request traffic (or the
+        breaker's own background probe) already drives the state.
+      required: ["status", "kind"]
+      properties:
+        status:
+          type: string
+          description: >
+            The dependency's health as read from its breaker: "up" (closed),
+            "degraded" (half-open — being re-probed), "down" (open).
+          x-extensible-enum: ["up", "degraded", "down"]
+        kind:
+          type: string
+          description: >
+            The readiness hinge. "hard" — nothing works without it, so its loss
+            FAILS /health/ready and Kubernetes sheds traffic. "soft" — degraded
+            operation is possible, so its loss never fails readiness; the pod
+            stays ready and serves degraded responses.
+          enum: ["hard", "soft"]
+        breaker:
+          type: string
+          description: >
+            The circuit-breaker state this status was read from. "closed" =
+            passing through, "open" = fast-failing to the registered fallback,
+            "half_open" = probing recovery in the background.
+          x-extensible-enum: ["closed", "open", "half_open"]
+        since:
+          type: string
+          format: date-time
+          description: >
+            When the dependency entered its current state (RFC 3339), so a
+            dashboard can distinguish a blip from a sustained outage.
