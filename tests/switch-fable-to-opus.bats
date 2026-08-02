@@ -316,9 +316,8 @@ assert_rewritten() {
 }
 
 @test "ON + a TAB-separated frontmatter model still resolves as fable" {
-  # The script deliberately matches `^model:[ \t]` where toggle-fable.zsh matches
-  # `^model: ` exactly. Narrowing it back — an easy copy-paste drift given the
-  # shared lineage — would silently stop switching such agents.
+  # The script deliberately matches `^model:[ \t]`, not `^model: ` exactly.
+  # Narrowing it to a literal space would silently stop switching such agents.
   printf -- '---\nname: x\nmodel:\tfable\n---\n\nBody.\n' \
     > "$CACHE/development-go/0.8.0/agents/go-bug-hunter.md"
   run_hook 1 "$(payload_for development-go:go-bug-hunter)"

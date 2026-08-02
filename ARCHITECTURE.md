@@ -2960,9 +2960,9 @@ what a dispatch actually runs on. Two things can override it:
 
 Fable is metered as its own weekly bucket, so when it drains, all 32
 fable-declaring agents fail at once; the variable is the runtime remedy that
-needs no file edits (contrast `scripts/toggle-fable.zsh`, which rewrites
-frontmatter in a checkout and so cannot affect the installed cache a session
-dispatches from). Truthiness is `1` / `true` / `yes` in any case; **unset, `""`,
+needs no file edits (rewriting `model:` frontmatter in a checkout would not help
+— a session dispatches from the installed cache, not from the working tree).
+Truthiness is `1` / `true` / `yes` in any case; **unset, `""`,
 `0`, `false` and any unrecognised value are off**, so both an emptied variable
 and a typo fail safe.
 

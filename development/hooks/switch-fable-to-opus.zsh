@@ -4,10 +4,10 @@
 # `switch_fable_to_opus` is truthy (#1017).
 #
 # Why this exists: fable is metered as its own scoped weekly bucket. When it runs
-# dry, every agent declaring `model: fable` fails. `scripts/toggle-fable.zsh`
-# (#990) rewrites frontmatter in the REPO worktree, which is not what a session
-# dispatches from (`~/.claude/plugins/cache/`), and it leaves a dirty tree to
-# revert. This is the runtime equivalent: one variable, no files touched.
+# dry, every agent declaring `model: fable` fails. Rewriting frontmatter in the
+# REPO worktree is not a remedy — a session dispatches from the installed cache
+# (`~/.claude/plugins/cache/`), not from a checkout, and the rewrite leaves a
+# dirty tree to revert. This is the runtime fix: one variable, no files touched.
 #
 # Why not CLAUDE_CODE_SUBAGENT_MODEL: it overrides EVERY subagent. The fleet is
 # 55 opus / 32 fable / 8 haiku / 2 sonnet, so a blanket `=opus` would promote 10
@@ -28,34 +28,28 @@ setopt nounset pipefail
 
 # Capture the plugin root HERE, at top level: inside a function zsh rebinds $0 to
 # the FUNCTION name, so `${0:A:h:h}` computed in resolve_agent_file would resolve
-# against the function name instead of this file. scripts/toggle-fable.zsh
-# documents the same trap. This script lives at <plugin-root>/hooks/<file>.zsh.
+# against the function name instead of this file. This script lives at
+# <plugin-root>/hooks/<file>.zsh.
 readonly SCRIPT_PLUGIN_ROOT="${0:A:h:h}"
 
 # frontmatter_model <file> — print the value of the frontmatter `model:` line, or
 # nothing when the file has no *proper* frontmatter (a `---` on line 1 AND a
-# closing `---`) or no model line. Adapted from scripts/toggle-fable.zsh, where
-# the same two cases already matter: awk (no pipe) so it can't hit a SIGPIPE
+# closing `---`) or no model line. It is awk (no pipe) so it can't hit a SIGPIPE
 # under pipefail, and it never reads past the closing fence — a prose
 # "model: ..." in the body is invisible here.
 #
-# Three deliberate differences from toggle-fable.zsh. The first two are because
-# that script REWRITES the line (and must round-trip it byte-exactly) while this
-# one only READS it to compare against "fable"; the third follows from the
-# fail-safe posture above:
+# Three properties matter, the first two because this only READS the line to
+# compare it against "fable", the third because of the fail-safe posture above:
 #   * the value is trimmed and unquoted, so `model: "fable"` or a stray trailing
 #     space cannot silently mean "not fable";
-#   * the match is tab-tolerant (`^model:[ \t]`, slicing from 7) where
-#     toggle-fable.zsh matches `^model: ` exactly (slicing from 8), so a
-#     tab-separated `model:<TAB>fable` is visible here and invisible there;
-#     the two therefore disagree about which agents count as fable-declaring for
-#     such a file, and erring toward *seeing* the declaration is the right
-#     direction, since missing it would silently disable the switch;
+#   * the match is tab-tolerant (`^model:[ \t]`, slicing from 7), so a
+#     tab-separated `model:<TAB>fable` is still seen as a declaration — erring
+#     toward *seeing* it is the right direction, since missing it would
+#     silently disable the switch;
 #   * awk is invoked with `2>/dev/null`, so an unreadable definition yields
 #     silence rather than a diagnostic on stderr (pinned by a bats case).
-# A fourth divergence lives outside this function: the caller case-folds the
-# parsed value, where toggle-fable.zsh compares case-sensitively — so
-# `model: FABLE` is fable-declaring here and invisible there.
+# The caller additionally case-folds the parsed value, so `model: FABLE` is
+# fable-declaring too.
 frontmatter_model() {
   awk '
     NR == 1     { if ($0 != "---") exit; next }
