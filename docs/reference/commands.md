@@ -43,7 +43,7 @@ For the narrative overview of what each plugin is for, see the
 | --- | --- |
 | `/development-go:approve` | Review and post approval/rejection to an open PR using the Claude Approver identity. Mints token locally, posts as claude-approver-bot. Same agent as CI. Pass a PR number or use current branch's PR. |
 | `/development-go:maintenance` | Go project maintenance dispatcher. Receives findings from /development:maintenance (or equivalent JSON input), validates the payload, runs a coverage pre-flight (may spawn `go-coverage-improver` in a worktree when affected code sits below Required), and otherwise invokes `go-maintenance-planner` to return a PR-grouped plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection. Mirrors development-python / development-java / development-swift. Tool universe so far (#868 epic): format_lint (golangci-lint v2 — one pinned binary doing both `fmt` and `run --fix`, Slice B #871) plus the static-analysis triple sonarcloud + code_scanning + semgrep (Slice D #873 — all three ship, Go's support in each is deep), gated by the per-package coverage pre-flight (Slice E #874), plus govulncheck (the Go vuln source of truth) and the vendor-PR sources dependabot + snyk_prs + renovate (Slice G #876), plus the proto-first config-audit advisors grpc + api_contract (Slice I #878 — buf/protobuf gRPC codegen and the proto-first REST contract pipeline). See ARCHITECTURE.md for the schema and dispatch contract. |
-| `/development-go:review` | Perform a comprehensive Go code review using 5 specialized parallel agents |
+| `/development-go:review` | Perform a comprehensive Go code review using 6 specialized parallel agents |
 
 ## development-java
 
@@ -51,7 +51,7 @@ For the narrative overview of what each plugin is for, see the
 | --- | --- |
 | `/development-java:approve` | Review and post approval/rejection to an open PR using the Claude Approver identity. Mints token locally, posts as claude-approver-bot. Same agent as CI. Pass a PR number or use current branch's PR. |
 | `/development-java:maintenance` | Java/Gradle project maintenance dispatcher. Receives findings from /development:maintenance (or equivalent JSON input), validates the payload, runs a JaCoCo coverage pre-flight (may spawn `java-coverage-improver` in a worktree when affected classes sit below Required — topping up toward Required, or bootstrapping a below-floor (0%) class toward the Floor, #429), and otherwise invokes `java-maintenance-planner` and returns its plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection. Mirrors development-python. Tool universe so far (#296 epic): format_lint (Spotless) + sonarcloud + JaCoCo coverage; semgrep / code_scanning / dependabot land in later slices. See ARCHITECTURE.md for the schema and dispatch contract. |
-| `/development-java:review` | Perform a comprehensive Java code review using 5 specialized parallel agents |
+| `/development-java:review` | Perform a comprehensive Java code review using 6 specialized parallel agents |
 
 ## development-python
 
@@ -60,7 +60,7 @@ For the narrative overview of what each plugin is for, see the
 | `/development-python:approve` | Review and post approval/rejection to an open PR using the Claude Approver identity. Mints token locally, posts as claude-approver-bot. Same agent as CI. Pass a PR number or use current branch's PR. |
 | `/development-python:improve-test-coverage` | Raise test coverage on a Python project toward a target threshold by spawning `python-coverage-improver` agents in parallel worktrees. Brings legacy projects or under-covered modules up to desired coverage as deliberate investment outside the maintenance pipeline. |
 | `/development-python:maintenance` | Python project maintenance dispatcher. Receives findings from /development:maintenance (or equivalent JSON input), validates the payload, runs a coverage pre-flight (may spawn `python-coverage-improver` in a worktree when affected modules sit below Required — topping up toward Required, or bootstrapping a below-floor (0%) module toward the Floor, #429), and otherwise invokes `python-maintenance-planner` and returns its plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection. See ARCHITECTURE.md for the schema and dispatch contract. |
-| `/development-python:review` | Perform a comprehensive Python code review using 5 specialized parallel agents |
+| `/development-python:review` | Perform a comprehensive Python code review using 6 specialized parallel agents |
 
 ## development-react
 
@@ -80,4 +80,4 @@ For the narrative overview of what each plugin is for, see the
 | --- | --- |
 | `/development-swift:approve` | Review and post approval/rejection to an open PR using the Claude Approver identity. Mints token locally, posts as claude-approver-bot. Same agent as CI. Pass a PR number or use current branch's PR. |
 | `/development-swift:maintenance` | Swift project maintenance dispatcher. Receives findings from /development:maintenance (or equivalent JSON input), validates the payload, runs a coverage pre-flight (may spawn `swift-coverage-improver` in a worktree when affected sources sit below Required), and otherwise invokes `swift-maintenance-planner` to return a PR-grouped plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection. Mirrors development-python / development-java. Tool universe so far (#297 epic): format_lint (swift-format + SwiftLint), sonarcloud (Sonar Swift), code_scanning (CodeQL swift + Scorecard), coverage (xccov / llvm-cov, #444), and the vendor-PR sources dependabot + snyk_prs + renovate (Slice F #446 — triage + swift majors). semgrep is deferred for Swift (#443). See ARCHITECTURE.md for the schema and dispatch contract. |
-| `/development-swift:review` | Perform a comprehensive Swift code review using 6 specialized parallel agents |
+| `/development-swift:review` | Perform a comprehensive Swift code review using 7 specialized parallel agents |

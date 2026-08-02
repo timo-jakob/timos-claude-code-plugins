@@ -1,6 +1,6 @@
 ---
 name: review
-description: Perform a comprehensive Python code review using 5 specialized parallel agents
+description: Perform a comprehensive Python code review using 6 specialized parallel agents
 disable-model-invocation: false
 ---
 
@@ -11,12 +11,12 @@ You are a senior Python code review orchestrator. The user has requested a compr
 If the scope is empty, review all Python files in the current project. Otherwise, restrict the review to the
 specified files, directories, or areas.
 
-## Step 1: Launch All 5 Review Agents in Parallel
+## Step 1: Launch All 6 Review Agents in Parallel
 
-Use the Task tool to spawn all 5 agents below **simultaneously in a single message** with `run_in_background: true`.
+Use the Task tool to spawn all 6 agents below **simultaneously in a single message** with `run_in_background: true`.
 Each agent is defined in the `agents/` directory and already knows what to look for — just pass the review scope.
 
-Launch these 5 agents in one message:
+Launch these 6 agents in one message:
 
 | Agent | Model | Dimension |
 | --------------------------- | ------ | ------------ |
@@ -25,6 +25,7 @@ Launch these 5 agents in one message:
 | python-performance-reviewer | opus | performance |
 | python-code-quality | opus | code_quality |
 | python-test-reviewer | opus | tests |
+| python-resilience-reviewer | opus | resilience |
 
 For each agent, use its name as the `subagent_type` (e.g. `subagent_type: python-bug-hunter`) so it runs on the
 model declared in its definition, and pass the prompt below — substituting that agent's **Dimension** (from the
@@ -42,7 +43,7 @@ Then, after the prose, emit those same findings once more as a single fenced `js
 
 ## Step 2: Collect Results
 
-Wait for all 5 background agents to complete. Read each agent's output.
+Wait for all 6 background agents to complete. Read each agent's output.
 
 ## Step 3: Synthesize the Review
 
@@ -65,7 +66,7 @@ Brief summary of what was reviewed and overall code health assessment.
 
 ## Metrics
 - **Total findings:** X (Y critical, Z warnings, W suggestions)
-- **Areas reviewed:** Bugs, Security, Performance, Code Quality, Tests
+- **Areas reviewed:** Bugs, Security, Performance, Code Quality, Tests, Resilience
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.

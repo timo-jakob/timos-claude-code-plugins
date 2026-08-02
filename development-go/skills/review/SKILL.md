@@ -1,6 +1,6 @@
 ---
 name: review
-description: Perform a comprehensive Go code review using 5 specialized parallel agents
+description: Perform a comprehensive Go code review using 6 specialized parallel agents
 disable-model-invocation: false
 ---
 
@@ -15,12 +15,12 @@ Exclude generated sources from the review scope — `*.pb.go` and `*.pb.gw.go` a
 authoritative `.proto` files, so findings against them are unactionable: the fix belongs in the proto or the codegen
 config. Say so if the scope named them explicitly.
 
-## Step 1: Launch All 5 Review Agents in Parallel
+## Step 1: Launch All 6 Review Agents in Parallel
 
-Use the Task tool to spawn all 5 agents below **simultaneously in a single message** with `run_in_background: true`.
+Use the Task tool to spawn all 6 agents below **simultaneously in a single message** with `run_in_background: true`.
 Each agent is defined in the `agents/` directory and already knows what to look for — just pass the review scope.
 
-Launch these 5 agents in one message:
+Launch these 6 agents in one message:
 
 | Agent | Model | Dimension |
 | ------------------------ | ------ | ------------ |
@@ -29,6 +29,7 @@ Launch these 5 agents in one message:
 | go-performance-reviewer | opus | performance |
 | go-code-quality | opus | code_quality |
 | go-test-reviewer | opus | tests |
+| go-resilience-reviewer | opus | resilience |
 
 For each agent, use its name as the `subagent_type` (e.g. `subagent_type: go-bug-hunter`) so it runs on the model
 declared in its definition, and pass the prompt below — substituting that agent's **Dimension** (from the table
@@ -66,7 +67,7 @@ Resolve it explicitly rather than assuming one root module:
 
 ## Step 2: Collect Results
 
-Wait for all 5 background agents to complete. Read each agent's output.
+Wait for all 6 background agents to complete. Read each agent's output.
 
 **An agent that fails is not an agent that found nothing.** If one errors, times out, or returns prose with no
 fenced `json` block, re-launch that one agent once. If it fails again:
@@ -75,10 +76,10 @@ fenced `json` block, re-launch that one agent once. If it fails again:
 2. **Do not write the findings file at all.** Report the round as **failed** to the caller, naming the dimension
    that did not run.
 
-Step 4's aggregate is only written when all five dimensions completed. This is deliberately blunt because the
+Step 4's aggregate is only written when all six dimensions completed. This is deliberately blunt because the
 machine channel cannot express partial: the #558 finding schema is a flat array of finding objects with no
-round-status field, so a four-dimension array written to `findings_path` is byte-indistinguishable from a clean
-five-dimension review, and the consolidator would waive the missing dimension's blockers. Writing nothing is not a
+round-status field, so a five-dimension array written to `findings_path` is byte-indistinguishable from a clean
+six-dimension review, and the consolidator would waive the missing dimension's blockers. Writing nothing is not a
 safe fallback either — a caller that maps an absent file to `[]` reads that as clean too — which is exactly why the
 failure has to be surfaced **to the caller**, not merely recorded in prose. (The schema gap is family-wide, not
 Go-specific; it is tracked separately.)
@@ -104,7 +105,7 @@ Brief summary of what was reviewed and overall code health assessment.
 
 ## Metrics
 - **Total findings:** X (Y critical, Z warnings, W suggestions)
-- **Areas reviewed:** Bugs, Security, Performance, Code Quality, Tests
+- **Areas reviewed:** Bugs, Security, Performance, Code Quality, Tests, Resilience
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.
@@ -119,7 +120,7 @@ is one issue seen through two lenses — merge it, keeping both framings' detail
 
 Alongside the human-readable summary above, aggregate the machine-readable JSON
 blocks the agents emitted (schema: ARCHITECTURE.md → *Review finding schema*)
-into one findings array for this round — **only when all five dimensions
+into one findings array for this round — **only when all six dimensions
 completed** (Step 2 owns the incomplete case, and it does not reach here). Each
 agent emitted a fenced `json` block of finding objects; concatenate them all
 into a single flat array. Every finding

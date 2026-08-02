@@ -49,6 +49,20 @@ on:
       # 'development/**' does NOT match 'development-go/**'.
       - 'docs/reference/plugins.md'
       - 'development-go/**'
+      # the other three SERVICE-language plugins, for the same reason:
+      # tests/resilience-review-dimension.bats (#966) asserts each panel's
+      # agent table, launch counts and reviewer definitions against
+      # development-{java,python,swift}/, and — same non-**-prefixed hazard —
+      # none of the 'development/**' lines above match those paths. Without
+      # these, a PR renumbering Swift's panel or dropping the Java resilience
+      # row would match no filter and only red the unfiltered push-to-main run.
+      - 'development-java/**'
+      - 'development-python/**'
+      - 'development-swift/**'
+      # the marketplace manifest: resilience-review-dimension.bats asserts the
+      # development-go entry's description byte-equal to its plugin.json, and a
+      # marketplace-only edit matches none of the per-plugin globs above
+      - '.claude-plugin/marketplace.json'
       # the third side of the same check: go-docs-parity.bats asserts the Go
       # approver-policy overlay does NOT exist yet, so the PR that finally lands
       # it must red this suite at PR time rather than after merge

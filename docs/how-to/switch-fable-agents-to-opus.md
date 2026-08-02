@@ -2,7 +2,7 @@
 
 Fable is metered as its own weekly bucket, separate from the shared pools. When
 that bucket runs dry, every agent in this family that declares `model: fable`
-fails — and that is 32 of the 97 agents, including reviewers the
+fails — and that is 32 of the 101 agents, including reviewers the
 [local review loop](../explanation/review-loop.md) depends on.
 
 The `development` plugin ships a runtime switch for exactly this: set one
@@ -62,7 +62,7 @@ declared one — an `opus`-declaring agent called with an explicit `model: "fabl
 
 This is the reason the feature is a hook rather than the built-in
 `CLAUDE_CODE_SUBAGENT_MODEL`, which overrides *every* subagent: with a fleet of
-55 opus / 32 fable / 8 haiku / 2 sonnet, a blanket `=opus` would promote 10 cheap
+59 opus / 32 fable / 8 haiku / 2 sonnet, a blanket `=opus` would promote 10 cheap
 agents to opus while you were trying to conserve budget.
 
 **Marketplace scope applies to the frontmatter path only.** When the call passes
