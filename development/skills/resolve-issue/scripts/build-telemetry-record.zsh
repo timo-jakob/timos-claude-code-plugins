@@ -116,7 +116,8 @@ jq -c '
       # (internally Warning == priority High, Suggestion == the Low bucket).
       # The stamped/carried/new/fixed derivation is one of THREE copies kept
       # in lockstep with render-progress-block.zsh and build-escalation.zsh;
-      # change all three together.
+      # change all three together. build-dossier.zsh is NOT one of them — it
+      # shares only the per-item `promoted` expression (see below).
       findings_by_round: [ range(0; ($rounds | length)) as $i | $rounds[$i] as $r
         | ($r.blocking // []) as $blk
         | ((($blk | length) == 0) or ([ $blk[] | has("non_converging") ] | all)) as $stamped
@@ -134,8 +135,10 @@ jq -c '
         },
         # human-promoted blockers this round (#995): a SUBSET of
         # by_severity.Warning (the overlay raises a Low to WARNING), never a
-        # fourth severity to add to it. Same per-item expression as the two
-        # sibling copies; no stamp gate, so an unstamped changelist counts 0.
+        # fourth severity to add to it. Same per-item expression as the four
+        # sibling copies — progress block, escalation table, and the two
+        # build-dossier reads: raised-set + round suffix (#1064); no stamp
+        # gate, so an unstamped changelist counts 0.
         promoted: ([ $blk[] | select(.promoted == true) ] | length),
         by_dimension: ( reduce ($blk + ($r.suggestions // []))[] as $f
                           ({}; .[($f.dimension // "")] = ((.[($f.dimension // "")] // 0) + 1)) ),

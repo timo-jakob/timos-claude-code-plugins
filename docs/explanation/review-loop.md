@@ -124,9 +124,10 @@ polishing a suggestion is caught exactly like any other blocker.
 A few properties worth knowing:
 
 - **Nothing is ever auto-promoted.** The list is a menu, not a plan. Selecting
-  none converges immediately — the only trace is a telemetry line recording that
+  none converges immediately — the traces are a telemetry line recording that
   you were asked and chose nothing (when the run's own telemetry line exists;
-  see *What gets recorded about it*).
+  see *What gets recorded about it*), and a `0` picked / `0` cleared note in the
+  PR summary.
 - **Unattended runs are untouched.** An autonomous or headless run is never
   prompted, passes no promoted set, and converges with its suggestions waived —
   behaviour identical to before this existed.
@@ -142,11 +143,18 @@ A few properties worth knowing:
 - **One pick, one item.** A selection raises exactly the finding you picked, not
   its neighbours — so promoting one suggestion never quietly enlists the two
   next to it.
-- **The PR's review dossier covers the first pass only, for now.** A suggestion
-  you promoted and the second pass fixed still appears under *Waived
-  suggestions* there; the PR Summary states how many were promoted meanwhile.
-  Merging both passes into one dossier is tracked as
-  [#1064](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1064).
+- **The PR's review dossier covers both passes** — whenever the second pass ran
+  to a verdict the run kept. A suggestion you promoted and that pass fixed is listed as
+  found-and-fixed, not under *Waived suggestions*, and the dossier records how
+  many suggestions you picked versus how many the engine actually raised; those
+  differ whenever a pick was no longer there to raise. (When *none* of your picks
+  could be confirmed still present — each either no longer there or
+  unverifiable — the second pass never runs, so those counts appear in the PR
+  summary instead.) One caveat worth knowing: an item is dropped from the
+  waived list only when its title still matches exactly, so a suggestion the
+  panel re-worded between passes can stay listed even though it was fixed. That
+  direction is deliberate — the alternative risks hiding a genuinely un-actioned
+  suggestion that merely shares a word.
 - **The budget is a fresh allowance** — the promotion pass gets the same
   five-round budget the blocking phase had, governed by that same single
   constant rather than a second one, with the same extension offer if it runs

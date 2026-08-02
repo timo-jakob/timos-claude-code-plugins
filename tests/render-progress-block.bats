@@ -330,7 +330,7 @@ EOF
   # $fixed, which need the #913 per-item stamp. Every promotion fixture is fully
   # stamped, so a regression that "harmonised" this derivation with its gated
   # neighbours (wrapping it in `if $stamped then ... else [] end`) would ship
-  # green across all three lockstep copies. The #983 sibling invariant has
+  # green across all five lockstep copies. The #983 sibling invariant has
   # exactly this test; this is its twin.
   cat > "$CL" <<'EOF'
 {"round":2,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0},

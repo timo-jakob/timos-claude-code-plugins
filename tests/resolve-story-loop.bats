@@ -1169,7 +1169,7 @@ EOF
   [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
   [ "$(echo "$output" | jq -r '.round_changelists[0].blocking[0].priority')" = "High" ]
   # #995: the per-item stamp must survive INTO the loop's status JSON — that is
-  # the single link between the consolidator that writes it and the three
+  # the single link between the consolidator that writes it and the four
   # surfaces that read it (all of whose tests otherwise run on hand-written
   # fixtures). A loop that reshaped or key-filtered the changelist would leave
   # every fixture-based test green while production rendered no label at all.
@@ -1179,7 +1179,7 @@ EOF
 
 @test "#1029 a reviewer-raised blocker in the same round is NOT stamped promoted" {
   # the stamp must mark the human's pick alone; stamping everything would make
-  # the label meaningless in all three surfaces
+  # the label meaningless in all four surfaces
   P="$BATS_TEST_TMPDIR/promote-mixed.json"
   cat > "$P" <<'EOF'
 [{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]

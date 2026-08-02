@@ -75,7 +75,7 @@ EOF
 @test "#1029 promote: the raised item is STAMPED promoted:true, and only it (#995)" {
   # Without the stamp a promoted item is indistinguishable from a
   # reviewer-raised Warning in every surface that reads the changelist, so the
-  # three lockstep copies have nothing to count. It is a direct per-item flag —
+  # five lockstep copies have nothing to count. It is a direct per-item flag —
   # no stamp gate — so an absent one simply counts 0 downstream.
   cat > "$F" <<EOF
 [{"severity":"SUGGESTION","dimension":"code_quality","file":"$TARGET_FILE","line":113,
@@ -305,7 +305,7 @@ EOF
   # "left alone" now also means UNSTAMPED (#995): this is the only case where a
   # promote key actually MATCHES an already-blocking finding, so a regression
   # moving the stamp outside the still-Low filter would label reviewer-raised
-  # blockers as human-promoted in all three surfaces and pass everywhere else
+  # blockers as human-promoted in all four surfaces and pass everywhere else
   [ "$(jq '[.blocking[] | has("promoted")] | any' <<<"$output")" = "false" ]
 }
 

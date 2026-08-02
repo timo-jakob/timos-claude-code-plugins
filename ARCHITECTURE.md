@@ -1230,14 +1230,16 @@ downstream surfaces are **not** so accommodating, and both gaps predate
   resilience risk has neither a legal enum value nor a lens to be found through.
   The bootstrap `approver-policy-core.md.tmpl` pins the same enum but has no
   lens walk of its own (its register comes from the per-type risk factors); what
-  it does carry is a **dossier lens list**, and that list already names
-  `swift6_compliance` alongside the core five — just not `resilience`. Finally,
+  it does carry is a **dossier lens list**, and that list already names **both**
+  `resilience` and `swift6_compliance` alongside the core five; only the
+  template's finding-emission **enum** is still un-widened. Finally,
   each language ships an operator-facing mirror
   (`development-<lang>/docs/<lang>-approver.md`) that restates the lens walk —
   and, on Go/Java/Python, the enum too (Swift's is a delta-doc and carries only
   the walk). Those restatements go stale with them. So the surfaces to
-  widen are the agents' enum, the agents' lens walk, the template's enum +
-  dossier list, and the four operator mirrors; all are tracked in **#1147**.
+  widen are the agents' enum, the agents' lens walk, the template's enum (its
+  dossier list is widened, though a clean non-core lens carries no signal until
+  **#1148**), and the four operator mirrors; all are tracked in **#1147**.
 
 The claude-plugin panel (`development-claude-plugin:review`, the fallback
 `repo_type` for repos that detect no language — epic #810) extends the enum the
@@ -1444,16 +1446,22 @@ reliable but the merging needs semantics:
   makes a promoted item *readable* as such everywhere downstream, where it would
   otherwise be indistinguishable from a reviewer-raised Warning: the per-round
   `promoted` count in the telemetry payload, the `promoted:` term and the
-  per-item `- promoted suggestion:` line in `progress.md`, and the `Promoted`
-  column plus `[<dimension>/Warning (promoted)]` bullets in the escalation. Both
+  per-item `- promoted suggestion:` line in `progress.md`, the `Promoted`
+  column plus `[<dimension>/Warning (promoted)]` bullets in the escalation, and
+  — since #1064 — **two reads in `build-dossier.zsh`**: the `promotion.promoted`
+  count, which also drives the waived-list exclusion, and the `(N promoted)`
+  suffix on a rendered `Promotion round N` line. Both
   the `promoted:` term and the `Promoted` column are rendered **only when there
   is one** (the column table-wide, since a column present in one row and absent
   in another is not a table) — which is what keeps a run without `--promote`
   byte-identical to before the label existed. All
-  three read the stamp with the **identical** expression
-  (`[ $blk[] | select(.promoted == true) ] | length`) — the same three-copy
+  **five** read the stamp with the **identical** expression
+  (`[ $blk[] | select(.promoted == true) ] | length`, modulo the dossier count
+  mapping it to an identity and deduping across rounds) — the same
   lockstep the stamped/carried/new/fixed derivation carries; change them
-  together. The count is a **subset of the Warning count**, never added to it.
+  together, and note that the dossier's exclusion **silently stops firing** if
+  the stamp moves, so a fixed item would reappear as waived. The count is a
+  **subset of the Warning count**, never added to it.
   The overlay is **one-to-one**: each promote key raises **at most one** item — its
   nearest eligible candidate — and claims it, so neither can two keys take the
   same item nor can one key fan out across several neighbouring Lows. That bound
@@ -2402,14 +2410,75 @@ non-clean dimension is where to look hardest; `waived_low` is context, never a
 human-authored PR) is judged exactly as before — `build-dossier.zsh` emits
 nothing, so the body and the Approver's behavior are unchanged.
 
-**A suggestion-promotion phase (#994) leaves a SECOND status JSON that this
-contract does not yet merge.** `build-dossier.zsh` still takes one `--status`
-and the PR body still carries one section and one hidden block — built from the
-**blocking** phase — so the promotion phase's rounds are absent and an item the
-human promoted and the sub-loop fixed still appears in `waived_low`. That is a
-known gap, tracked as its own #563 change (#1064); resolve-issue's SKILL.md requires the
-PR Summary to state the promoted count meanwhile, so no reviewer is misled by
-the waived list.
+**A suggestion-promotion phase (#994) leaves a SECOND status JSON, and both are
+merged into the ONE section and ONE hidden block (#1064).** The Approver parses
+exactly one `<!-- review-dossier: … -->` block, so a second one would be silently
+ignored; `build-dossier.zsh --status FILE [--promotion-status FILE --promoted
+FILE]` therefore folds the phases together instead of emitting twice:
+
+- the two promotion flags are an **atomic pair** — either alone is a usage error
+  (exit 2), never a silent fallback to the blocking-phase-only dossier. The
+  selection file gets the same element-shape and single-value checks the loop
+  applies to `--promote`, **including its non-empty requirement**: the
+  consolidator *engine* tolerates `[]` (a provably no-op overlay), but the loop
+  refuses it up front (exit 2) and so does this (exit 1), for the same reason —
+  selecting nothing is contracted to skip the sub-loop entirely, so `[]` means
+  no phase ran and the pair should not have been passed; emitting `selected: 0`
+  would assert a phase happened that by contract cannot have;
+- `rounds` is **summed** across phases, and the per-round list renders the
+  promotion phase's rounds labelled `Promotion round N`. The renderer is shared
+  by both phases, so **any** round whose changelist carries a promoted blocker
+  gets a `(N promoted)` suffix — decided per round, like `progress.md`'s
+  `promoted:` term, **not** table-wide like the escalation's `Promoted` column.
+  In practice only promotion rounds have one, since the blocking phase never
+  runs with `--promote`;
+- `status` and `final` describe the **promotion** phase — the run's terminal
+  state — and a `promotion: {rounds, status, selected, promoted}` object records
+  how many suggestions the human **picked** versus how many the phase **actually
+  raised**. Those are deliberately two numbers: a selection the phase never
+  raised was never promoted in fact.
+- a **promoted-and-raised** item is dropped from `waived_low`, from the rendered
+  waived list, and from the per-dimension `suggestions`/`clean` counts — filtered
+  **once**, upstream of all three, so the rendered and machine-readable halves
+  cannot disagree. It still counts as `blocking` for its dimension, because it
+  genuinely was found and fixed. A **selected-but-never-raised** item is *not*
+  dropped: it is still un-actioned work.
+
+The set to drop is the engine's own verdict — the `promoted: true` stamp the
+overlay writes on each item it raises (#995) — never a re-run of the match here,
+so the dossier and the overlay can never disagree about what was promoted. The
+identity used for the drop is `[file, dimension, normalized title]`:
+**line-insensitive** (the promotion phase re-reports an item at its current line,
+which has drifted from the line the blocking phase recorded) but requiring an
+**exact** normalized title, which is deliberately *stricter* than the overlay,
+whose own verdict also promotes on a shared significant token. The asymmetry is
+chosen for its failure direction — the strict rule can only leave a fixed item
+listed as waived (conservative, visible, and contradicted by the promotion counts
+rendered directly above it), whereas token-matching here could **drop** a
+genuinely waived neighbour that merely shares a word. The overlay can afford
+leniency because it is line-windowed and one-to-one; the dossier reconstructs
+neither bound.
+
+Two further rules complete the contract. **`reviewers` is unioned over the
+pre-dedupe, pre-exclusion finding set** whenever a promotion phase is present:
+both the exclusion and the cross-phase dedupe drop whole findings, and a dropped
+copy may name a reviewer the surviving one does not, who would then vanish from
+the audit record; the single-phase arm keeps the old post-dedupe source so output
+stays byte-identical. And **both status inputs are validated alike** — each must
+be a regular non-empty file holding exactly ONE JSON object, so a `null`-holding,
+multi-object or directory operand is exit 1 rather than the pre-#1064 silent
+exit-0-with-no-output; the human section is buffered and printed once, so **any**
+non-zero exit emits nothing on stdout, which is what makes "empty output at exit
+0 after a known round" diagnosable at the call sites.
+
+One further merge rule changes `waived_low`, and belongs beside the exclusion: a
+Low that **both** phases report at drifted lines is listed **once**. The merged
+stream is deduped on `[file, line, dimension, title]`, which line drift defeats,
+so the Lows are deduped again on the same line-insensitive identity — via an
+order-preserving reduce (a second `unique_by` would re-sort the waived list) and
+**only when a promotion phase is present**, because the same collision is
+reachable within one phase, where the pre-#1064 dossier listed both and must
+keep doing so.
 
 ## Typed escalation path (#564)
 

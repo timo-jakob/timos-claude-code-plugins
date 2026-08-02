@@ -157,15 +157,18 @@ esac
 # grant prompt, the escalation comment, AND progress.md all read the SAME
 # computed numbers — the stamped/carried/new/fixed derivation below is one of
 # THREE copies kept in lockstep with render-progress-block.zsh and
-# build-telemetry-record.zsh; change all three together.
+# build-telemetry-record.zsh; change all three together. (build-dossier.zsh is
+# NOT one of them — it has no such derivation; it shares only the per-item
+# `promoted` expression, whose own copy count is noted at that expression.)
 # The new/carried/fixed columns need the #913 per-item non_converging stamp;
 # a stamp-less round degrades those cells to "–" rather than a confident wrong
 # number. Fixed counts DISTINCT matched priors (two current blockers matching
 # the same prior must not hide a genuinely fixed second one). An empty
 # .round_changelists (older status JSONs, ambiguous-dispatch carriers) renders
 # neither block — the round history above still carries the bare trend. The
-# Promoted column (#995) is a SUBSET of Warning, never added to it, and is the
-# third of those lockstep copies' per-item `promoted` derivation.
+# Promoted column (#995) is a SUBSET of Warning, never added to it. NB: the
+# `(N promoted)` round suffix in build-dossier.zsh decides PER ROUND, unlike
+# this table-wide column — see ARCHITECTURE.md.
 local round_table assessment
 round_table=$(jq -r '
   (.round_changelists // []) as $rs
@@ -193,8 +196,10 @@ round_table=$(jq -r '
              then (((($rs[$i-1].blocking // []) | length) - $carried_priors) | if . < 0 then 0 else . end)
              else null end) as $fixed
           # human-promoted blockers (#995) — a SUBSET of the Warning column, not
-          # an addition to it. Same per-item expression as the two sibling
-          # copies, and no stamp gate: an unstamped round counts 0, never "–".
+          # an addition to it. Same per-item expression as the four sibling
+          # copies (progress block, telemetry payload, and the two
+          # build-dossier reads: raised-set + round suffix, #1064), and no
+          # stamp gate: an unstamped round counts 0, never "–".
           | ([ $blk[] | select(.promoted == true) ] | length) as $promoted
           | "| \($r.round // ($i + 1)) | \($r.summary.critical // 0) | \($r.summary.high // 0) | \($r.summary.low // 0) |"
             + (if $anyprom then " \($promoted) |" else "" end)
