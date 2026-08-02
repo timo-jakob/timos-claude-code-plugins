@@ -428,12 +428,50 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   would have forced an ops **major** for a semantically additive change.
 - **Realized per language, enforced two ways.** The policy and contract are
   central and language-agnostic (#965). The **review dimension** (#966) is
-  shipped and catches violations on new diffs. Two halves are **not yet built**:
-  each language plugin will pick its one blessed breaker library and ship the
-  scaffolding (#967, decomposed into six per-language children), and a
-  **maintenance advisor** will catch the same defect classes on the back
-  catalogue (#968). Until #968 lands, the pattern is enforced on new diffs
-  only.
+  shipped and catches violations on new diffs. The per-language scaffolding is
+  #967's six children, of which **Spring has landed** (#1141 — see below); java,
+  python, go, javascript and swift are #1142-#1146. A **maintenance advisor**
+  will catch the same defect classes on the back catalogue (#968) and is **not
+  yet built** — until it lands, the pattern is enforced on new diffs only.
+- **The Spring realization is resilience4j (#1141).** One blessed library per
+  language, and for Spring Boot it is
+  `io.github.resilience4j:resilience4j-spring-boot4`, pinned directly rather than
+  through `resilience4j-bom` (which still manages only the Boot 3 starter).
+  **Spring Cloud Circuit Breaker is deliberately rejected**: its
+  `CircuitBreakerFactory` exists to make the breaker library swappable — a
+  portability layer that contradicts one-blessed-library — and it hides the
+  registry the `/health` binding must read. The bootstrap payload
+  (`templates/languages/spring/resilience/`) ships the six-mandate client shape,
+  a `resilience.dependencies` hard/soft declaration, and an **Actuator
+  `@Endpoint`** serving `/health`, `/health/live` and `/health/ready` from breaker
+  state. It serves those three paths **instead of Actuator's health endpoint**,
+  which cannot express the contract (it spells states `UP`/`DOWN` and nests custom
+  fields under `details`, whereas ops-api needs `{status, kind, breaker, since}`
+  at the component root). **An `@Endpoint` rather than a `@RestController`, for a
+  structural reason**: the management port is served by a *child* application
+  context whose MVC stack is deliberately minimal — a `DispatcherServlet` plus a
+  `CompositeHandlerMapping` over the `HandlerMapping` beans present, with no
+  `RequestMappingHandlerMapping` — so a controller registered there is never
+  mapped at all, while one in the main context is mapped on the **public app
+  port**, publishing the dependency graph. (`@RestControllerEndpoint`, the old
+  bridge, has been deprecated for removal since Boot 3.3.) The endpoint's id is
+  `opshealth`, since Actuator's own `HealthEndpoint` bean would otherwise collide
+  on the id, and `management.endpoints.web.path-mapping` puts it at `/health`; the
+  exposure list therefore carries `info,prometheus,opshealth` and not `health`.
+  Actuator still supplies `/info`, `/metrics` (given
+  `micrometer-registry-prometheus`, which the starter does **not** bring and the
+  payload therefore declares — without it Boot never auto-configures the
+  `prometheus` endpoint and `/metrics` 404s), and the `ApplicationAvailability`
+  state readiness is built on, so startup and graceful-shutdown behaviour stays
+  Spring's own. The payload covers the **health** third of the surface only:
+  `/info` still needs build-info plus a custom `InfoContributor` for the
+  served-majors table, which `check-ops-conformance.zsh` enforces. Two wiring rules are
+  load-bearing because breaking them fails **silently**: `fallbackMethod` goes on
+  `@Retry`, not `@CircuitBreaker` (resilience4j makes Retry the outer aspect, so
+  a fallback on the breaker converts the failure to a success before Retry ever
+  sees it and the call is never retried), and `CallNotPermittedException` must be
+  in the retry's `ignore-exceptions` (else an open breaker's fast-fail is itself
+  retried through the full backoff schedule).
 - **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
   agent in each **service** language plugin (Go, Java, Python, Swift), wired
   into that language's review panel alongside bugs/security/performance. It
