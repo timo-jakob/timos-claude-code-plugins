@@ -32,6 +32,7 @@
 # a bad flag). Requires jq and the claude CLI on PATH.
 
 setopt err_exit nounset pipefail
+zmodload zsh/datetime   # strftime, for locale-formatted "last updated" dates
 
 readonly MARKETPLACE="timos-claude-code-plugins"
 readonly DEFAULT_REPO="timo-jakob/timos-claude-code-plugins"
@@ -92,6 +93,28 @@ command -v jq >/dev/null 2>&1 \
   || { print -u2 -- "jq required, not on PATH."; exit 2; }
 command -v claude >/dev/null 2>&1 \
   || { print -u2 -- "claude CLI required, not on PATH."; exit 2; }
+
+# --- snapshot what is installed NOW, so the summary can report old -> new ---
+# The authoritative installed version is the version dir on disk under
+# cache/<marketplace>/<plugin>/<version>. The `n` glob qualifier sorts
+# numerically, so 1.148.1 wins over 1.9.0 (a lexical sort gets that backwards).
+installed_version() {
+  local -a dirs=("${PLUGINS_DIR}/cache/${MARKETPLACE}/$1"/*(/Nn))
+  (( ${#dirs} )) && print -- "${dirs[-1]:t}" || print -- "(not installed)"
+}
+
+# Just the version field of `claude --version` ("2.1.220 (Claude Code)").
+cli_version() {
+  local raw
+  raw="$(claude --version 2>/dev/null || true)"
+  print -- "${${raw%% *}:-(unknown)}"
+}
+
+typeset -A version_before
+for d in "${PLUGINS_DIR}/cache/${MARKETPLACE}"/*(/Nn); do
+  version_before[${d:t}]="$(installed_version "${d:t}")"
+done
+cli_version_before="$(cli_version)"
 
 # --- resolve the marketplace's GitHub source before we wipe the registry ---
 repo="$DEFAULT_REPO"
@@ -183,6 +206,12 @@ plugin_names=("${(@f)$(jq -r '.plugins[].name' "$FRESH_MANIFEST")}")
 (( ${#plugin_names} )) \
   || { print -u2 -- "No plugins found in $FRESH_MANIFEST"; exit 1; }
 
+# Index-aligned with plugin_names; a non-string (git/URL) source yields an empty
+# entry, which the summary reports as an unknown last-updated date.
+plugin_sources=("${(@f)$(jq -r \
+  '.plugins[] | if (.source | type) == "string" then .source else "" end' \
+  "$FRESH_MANIFEST")}")
+
 print -- ":: Reinstalling ${#plugin_names} plugin(s)..."
 failed=0
 for name in "${plugin_names[@]}"; do
@@ -194,23 +223,68 @@ for name in "${plugin_names[@]}"; do
 done
 
 # --- summary: report the installed versions --------------------------------
-# The authoritative "installed version" is the version dir on disk under the
-# cache (cache/<marketplace>/<plugin>/<version>), not what the manifest claims —
-# so a plugin whose install failed shows "(not installed)".
-installed_version() {
-  local -a dirs=("${PLUGINS_DIR}/cache/${MARKETPLACE}/$1"/*(/N))
-  (( ${#dirs} )) && print -- "${dirs[-1]:t}" || print -- "(not installed)"
+# Versions come from the disk cache (cache/<marketplace>/<plugin>/<version>),
+# not from what the manifest claims — so a plugin whose install failed shows
+# "(not installed)". Each line reports "<was> -> <now>" when this run changed
+# the version, and the bare version when it did not.
+#
+# "last updated" is the date of the newest commit touching that plugin's
+# directory in the marketplace repo. `claude plugin marketplace add` makes a
+# SHALLOW clone (a single commit), in which every plugin would report that one
+# commit's date — so deepen it first, best-effort.
+if [[ -f "${MARKETPLACE_CLONE}/.git/shallow" ]] && command -v git >/dev/null 2>&1; then
+  print -- ":: Fetching marketplace history (for last-updated dates)..."
+  git -C "$MARKETPLACE_CLONE" fetch --unshallow --quiet 2>/dev/null \
+    || print -u2 -- "  (could not deepen the clone; last-updated dates unavailable)"
+fi
+
+# Date + time of the last commit touching <source> in the marketplace clone,
+# formatted with %x %X so it follows the system's locale settings (LC_TIME/LANG)
+# and rendered in local time — the time matters because a plugin can be updated
+# several times in one day.
+plugin_updated_at() {
+  local src="${1#./}" epoch
+  if [[ -z "$src" ]] || [[ -f "${MARKETPLACE_CLONE}/.git/shallow" ]] \
+     || ! command -v git >/dev/null 2>&1; then
+    print -- "unknown"
+    return
+  fi
+  epoch="$(git -C "$MARKETPLACE_CLONE" log -1 --format=%ct -- "$src" 2>/dev/null || true)"
+  [[ -n "$epoch" ]] && strftime '%x %X' "$epoch" || print -- "unknown"
 }
 
-# Widest plugin name, for column alignment.
-width=0
-for name in "${plugin_names[@]}"; do (( ${#name} > width )) && width=${#name}; done
+# Build the version cells first, so both columns can be width-aligned.
+typeset -a version_cells
+name_width=0
+version_width=0
+for i in {1..${#plugin_names}}; do
+  name="${plugin_names[i]}"
+  now="$(installed_version "$name")"
+  was="${version_before[$name]:-}"
+  if [[ -n "$was" && "$was" != "$now" ]]; then
+    version_cells[i]="${was} -> ${now}"
+  else
+    version_cells[i]="$now"
+  fi
+  (( ${#name} > name_width )) && name_width=${#name}
+  (( ${#version_cells[i]} > version_width )) && version_width=${#version_cells[i]}
+done
+
+cli_version_now="$(cli_version)"
+if [[ "$cli_version_before" != "$cli_version_now" ]]; then
+  cli_cell="${cli_version_before} -> ${cli_version_now}"
+else
+  cli_cell="$cli_version_now"
+fi
 
 print -- ""
 print -- "Installed versions:"
-print -- "  Claude Code CLI    $(claude --version 2>/dev/null || print -- '(unknown)')"
-for name in "${plugin_names[@]}"; do
-  printf '  %-*s  %s\n' "$width" "$name" "$(installed_version "$name")"
+printf '  %-*s  %s\n' "$name_width" "Claude Code CLI" "$cli_cell"
+for i in {1..${#plugin_names}}; do
+  printf '  %-*s  %-*s  (last updated: %s)\n' \
+    "$name_width" "${plugin_names[i]}" \
+    "$version_width" "${version_cells[i]}" \
+    "$(plugin_updated_at "${plugin_sources[i]:-}")"
 done
 print -- ""
 
