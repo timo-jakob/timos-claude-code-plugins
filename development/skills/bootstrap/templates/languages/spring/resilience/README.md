@@ -24,8 +24,12 @@ One library, no options.
   library — and it hides the registry the `/health` binding has to read.
 - The version is **pinned directly, not through `resilience4j-bom`**: the BOM
   (2.4.0) still lists only the Boot 3 starter, so importing it would leave this
-  artifact unmanaged while implying otherwise. Renovate/Dependabot keeps the pin
-  current.
+  artifact unmanaged while implying otherwise. **Two bots keep it current, in two
+  different places**: Renovate's gradle manager reads this pin out of the shipped
+  template — the fragment needs no surrounding Gradle project — so each new
+  bootstrap starts on a current version; and once you have folded the block into
+  your build, the copy in **your** repo is yours, kept moving by your own
+  Renovate/Dependabot. An upstream bump never reaches you retroactively.
 - `spring-boot-starter-aop` is **required, not optional** — `@CircuitBreaker`,
   `@Retry` and `@TimeLimiter` are Spring AOP aspects, and without it they are
   silently inert: the calls run unprotected and nothing warns you.

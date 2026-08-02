@@ -13,7 +13,15 @@
 // through resilience4j-bom. The BOM (2.4.0) still lists only the Boot 3 starter
 // (`resilience4j-spring-boot3`); the Boot 4 module is published but not yet
 // managed by it, so importing the BOM would leave this artifact unmanaged anyway
-// while implying otherwise. Renovate/Dependabot keeps the pin current.
+// while implying otherwise.
+//
+// TWO bots keep this current, in two different places. In the plugin repo that
+// SHIPS this template, Renovate's gradle manager reads the pin straight out of
+// this fragment (it needs no surrounding Gradle project) and bumps it, so a
+// freshly bootstrapped repo starts on a current version. Once you have folded
+// the block into your own build, the copy in YOUR repo is yours -- your own
+// Renovate or Dependabot keeps it moving; an upstream bump never reaches you
+// retroactively.
 //
 // The starter transitively brings resilience4j-spring6 -> framework-common ->
 // circuitbreaker + retry + timelimiter + bulkhead + micrometer, so the four
