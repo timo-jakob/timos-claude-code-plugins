@@ -50,7 +50,7 @@ C4Container
             Container(development-claude-plugin, "development-claude-plugin", "Claude Code plugin", "Plugin-repo overlay")
             Container(development-docs, "development-docs", "Claude Code plugin", "C4 docs topic — owns c4_drift")
             Container(development-react, "development-react", "Claude Code plugin", "React framework overlay")
-            Container(development-kubernetes, "development-kubernetes", "Claude Code plugin", "Infrastructure-as-code topic — manifests, Helm, Kustomize, Argo CD; may be primary (skeleton, #1151)")
+            Container(development-kubernetes, "development-kubernetes", "Claude Code plugin", "Infrastructure-as-code topic — manifests, Helm, Kustomize, Argo CD; may be primary")
         }
     }
 
@@ -69,7 +69,7 @@ C4Container
     Rel(development, development-claude-plugin, "dispatches")
     Rel(development, development-docs, "dispatches")
     Rel(development, development-react, "dispatches")
-    Rel(development, development-kubernetes, "dispatches (planned, #1152)")
+    Rel(development, development-kubernetes, "dispatches")
     Rel(development-spring, development-java, "composes onto")
     Rel(development-react, development-javascript, "composes onto")
     Rel(development, maint_app, "mints token via")

@@ -53,6 +53,8 @@ helm, kustomize, trivy, GitHub Actions.
 | `development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` | The workflow template |
 | `tests/kubernetes-plugin-skeleton.bats` | Skeleton + registry invariants (the #1151 gate) |
 | `tests/gather-kubernetes.bats` | Gather behaviour |
+| `tests/kubernetes-topic-marker.bats` | Extracts + EXECUTES the SKILL.md marker and manifests recipes; derives marker/prune parity against the gather |
+| `tests/kubernetes-dispatcher.bats` | The dispatcher's prose contract, clause by clause |
 | `tests/fixtures/kubernetes-repo/` | Self-contained end-to-end fixture (chart + **kustomize overlay** + Argo CD + policies + broken/) |
 
 ---
@@ -92,7 +94,8 @@ Establishes the ownership boundary before anything fills it. Child #1151.
 
 **Interfaces:**
 
-- Produces: plugin name `development-kubernetes`, version `0.1.0`. Every later task references this name.
+- Produces: plugin name `development-kubernetes` — the identity every later
+  task references. Version `0.2.0` as of #1152 (Tasks 2-4). Every later task references this name.
 
 - [x] **Step 1: Establish a green baseline**
 
@@ -109,8 +112,8 @@ root and is what actually gates this task.
 ```json
 {
   "name": "development-kubernetes",
-  "description": "Infrastructure-as-code topic plugin (foundation slice, #1151) for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice ships the ownership boundary and the marketplace registration ONLY; the topic marker, gather script and dispatcher (#1152), the five agents and review skill (#1153), and the bootstrap CI pipeline (#1154) land in later children of #1150.",
-  "version": "0.1.0",
+  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the maintenance dispatcher, backed by the kubernetes topic marker and gather-kubernetes-findings.zsh in the development plugin (#1152); the dispatcher registers the routing table but escalates every group to a human until the five agents and review skill land (#1153), followed by the bootstrap CI pipeline (#1154).",
+  "version": "0.2.0",
   "author": {
     "name": "Timo Jakob"
   },
@@ -137,8 +140,8 @@ exact equality. Edit one, edit both.
 ```json
 {
   "name": "development-kubernetes",
-  "description": "Infrastructure-as-code topic plugin (foundation slice, #1151) for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice ships the ownership boundary and the marketplace registration ONLY; the topic marker, gather script and dispatcher (#1152), the five agents and review skill (#1153), and the bootstrap CI pipeline (#1154) land in later children of #1150.",
-  "version": "0.1.0",
+  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the maintenance dispatcher, backed by the kubernetes topic marker and gather-kubernetes-findings.zsh in the development plugin (#1152); the dispatcher registers the routing table but escalates every group to a human until the five agents and review skill land (#1153), followed by the bootstrap CI pipeline (#1154).",
+  "version": "0.2.0",
   "author": {
     "name": "Timo Jakob"
   },
@@ -193,20 +196,30 @@ that approval lands.
 **One deliberate exception to the `missing_tooling` rule.** The family default
 builds `missing_tooling` from `tooling_configured` entries that are `false`, and
 dispatches the tool's agent to say "here's how to add it". This plugin exempts
-`policy` and `policy_tests`: a repo with no `policies/kyverno/` has not failed to
+`policy` and `policy_tests`: a repo with no file matching
+`policies/kyverno/**/*.{yaml,yml}` has not failed to
 configure a tool, it has declined to declare opinions — which is the whole point
 of mechanism-here-policy-in-the-consumer — so surfacing it would re-emit the
-adopt-Kyverno recommendation the charter forbids. Every other `false` entry
-populates `missing_tooling` normally.
+adopt-Kyverno recommendation the charter forbids. Every other **known** `false` entry
+populates `missing_tooling` normally; an **unknown** key arriving `false` is the
+`tooling_configured` face of routing drift and is escalated via
+`human_action_required` instead, never listed as missing tooling. Plus one
+narrower point the dispatcher records in full: `manifest_validation` is **presence detection**, not
+configuration, so it cannot be `false` on a payload that reached the dispatcher
+at all (the gather and the topic marker share one recipe). Should one ever
+arrive, that is a payload-contract break the dispatcher **escalates** via
+`human_action_required`, never a `missing_tooling` entry recommending
+kubeconform to a repo that has no manifests.
 
 A repo declaring `primary: kubernetes` in `.maintenance.yml` is entitled to
 the full pipeline; the primary/auxiliary model already permits a topic to be
-primary, so no new mechanism is needed. It arrives in two steps, and
-conflating them over-promises the first: until `kubernetes` is in the
-detected+supported set the orchestrator **treats the declaration as stale**
-and dispatches every target as primary — that ends when the topic marker
-and gather script land (#1152). The **gates themselves** arrive later still,
-with the agents (#1153) and the check pipeline (#1154).
+primary, so no new mechanism is needed. **#1152 landed the first half**: the
+topic marker and `gather-kubernetes-findings.zsh` exist, so `kubernetes` now
+enters the detected+supported set and such a declaration **selects this
+plugin** rather than being treated as stale. The **gates themselves** arrive
+later, with the agents (#1153) and the check pipeline (#1154) — until then the
+dispatcher validates the payload and escalates each group to a human rather
+than routing it to an agent that does not exist yet.
 
 "Full pipeline" here means the **six checks** bootstrap's
 `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit** (#1154) — render → schema →
@@ -225,46 +238,74 @@ Landed as `feat(development-kubernetes): plugin skeleton, marketplace entry, ARC
 
 ### Task 2: Register the `kubernetes` topic marker
 
-> **Tasks 2-4 are child #1152 and land as ONE PR**; the boxed doc-flips in Tasks
-> 3 and 4 are commits within it. Read as per-task PRs they would briefly leave
-> the two registries disagreeing — the topic-row caveat retired while the
-> dispatcher does not yet exist.
+> **LANDED (#1152).** Tasks 2-4 shipped as ONE PR. The blocks below are
+> **re-synced from the shipped files**, not a source those files are generated
+> from — exactly as Task 1's banner says of its own. The review loop on that PR
+> changed several things this plan originally specified: the marker recipe became
+> a **pure predicate** carrying `kubernetes-marker:begin`/`:end` sentinels (a
+> side-effecting `topics=...` form exits 0 on every repo, so a caller reading
+> `$?` uniformly across the recipes would detect this topic everywhere) and gained
+> `! -type d`; the gather's finding object gained `id`/`type`/`fix`/`files` and
+> severity `high`; and the dispatcher gained an unknown-key halt exception,
+> presence-detection semantics for `manifest_validation`, and a maintainer-note
+> framing for its ARCHITECTURE cross-reference. **Do not regenerate the shipped
+> files from an older draft**; when they change, re-sync these blocks in the
+> same PR.
+>
+> Three suites gate them: `tests/gather-kubernetes.bats` (the payload contract),
+> `tests/kubernetes-topic-marker.bats` (extracts and EXECUTES the SKILL.md
+> recipe, and derives marker/prune parity against the gather), and
+> `tests/kubernetes-dispatcher.bats` (the dispatcher's prose contract).
 
 The orchestrator must detect the topic before any gather runs. Child #1152.
 
 **Files:**
 
-- Modify: `development/skills/maintenance/SKILL.md` (topic marker table, ~line 247)
+- Modify: `development/skills/maintenance/SKILL.md` — five sites, not one:
+  the topics table row, the marker recipe (Step 2), the **Required-language**
+  row (`| kubernetes | none |`), the Phase 4 **hybrid `language_meta.manifests`**
+  clause with its own `kubernetes-manifests:begin`/`:end` recipe, and the
+  Phase 6 / 7 / 9 **`human_action_required` topic cases** — without which a
+  dispatcher that halts every group is summarised as "Clean" (see Task 4)
 
 **Interfaces:**
 
 - Produces: topic name `kubernetes`, gather script name `gather-kubernetes-findings.zsh`. Task 3
   creates that script at exactly that path.
-- [ ] **Step 1: Add the marker row**
+- [x] **Step 1: Add the marker row**
 
 Add to the "Known topics" table:
 
 ```markdown
-| `kubernetes` | a Helm `Chart.yaml`, a `kustomization.yaml`, **or** a file containing `argoproj.io` — language-agnostic, so it composes with any language, or none | `gather-kubernetes-findings.zsh` |
+| `kubernetes` | a Helm `Chart.yaml`, a Kustomize manifest (`kustomization.yaml`, `kustomization.yml` or `Kustomization` — all three spellings kustomize accepts), **or** a file containing `argoproj.io` — language-agnostic, so it composes with any language, or none | `gather-kubernetes-findings.zsh` |
 ```
 
-- [ ] **Step 2: Add the detection recipe**
+- [x] **Step 2: Add the detection recipe**
 
 Add alongside the existing marker recipes. The marker is deliberately *not* "any YAML with
 `apiVersion`", which would match half the repos in existence:
 
 ```bash
 # kubernetes marker (file presence OR content; prune vendored trees).
+# A PREDICATE, like every recipe above — its EXIT STATUS is the verdict, and the
+# partition step below does the registering. Never make a recipe register the
+# topic itself: a side-effecting `if … fi` exits 0 whether or not the marker
+# fired, so a caller reading `$?` uniformly across these recipes would detect
+# the topic on every repo.
 # Capture before filtering: `find | grep -q` loses the match to SIGPIPE under
 # `set -o pipefail`, which every maintenance script sets.
+# `! -type d` for the same reason the react recipe carries it: a DIRECTORY named
+# `Kustomization` is not a manifest, while a symlinked one still counts.
+# kubernetes-marker:begin
 k8s_hits="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
-                       -o -name kustomization.yml -o -name Kustomization \) 2>/dev/null \
+                       -o -name kustomization.yml -o -name Kustomization \) \
+                 ! -type d 2>/dev/null \
               | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
-if [[ -n "$k8s_hits" ]] \
-   || grep -rqlF 'argoproj.io' --include='*.yaml' --include='*.yml' \
-        --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git . 2>/dev/null; then
-  topics+=(kubernetes)
-fi
+[ -n "$k8s_hits" ] || grep -rqlF 'argoproj.io' \
+  --include='*.yaml' --include='*.yml' \
+  --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+  --exclude-dir=templates . 2>/dev/null
+# kubernetes-marker:end
 ```
 
 > **Also register the Required-language row.** `development/skills/maintenance/SKILL.md`
@@ -283,7 +324,7 @@ fi
 > catches only *disagreement* between the two files, never an omitted bump, so
 > nothing will flag it. Stage both files.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add development/skills/maintenance/SKILL.md
@@ -315,82 +356,28 @@ Child #1152. TDD — the test defines the contract.
 - Produces: v2 gather payload with `tooling_configured` keys `manifest_validation`, `policy`, and
   `policy_tests`; `findings_by_tool` keyed the same; `coverage` always `null` (a topic has no app
   test suite); `notes` array. Task 4's dispatcher consumes exactly these keys.
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
-Create `tests/gather-kubernetes.bats`:
+Create `tests/gather-kubernetes.bats`. **The shipped suite is 48 tests and is
+authoritative** — read it rather than a draft reproduced here. It pins the
+payload contract the dispatcher consumes: `has()` (never `length`) for
+unconfigured keys, the `tooling_configured` key set, the finding-object shape,
+all three Kustomize spellings, every prune entry, the `argoproj.io`
+include/exclude branches, the repo-relative-path guarantee, and exits 2 and 3.
+
+Two sibling suites land with it: `tests/kubernetes-topic-marker.bats` and
+`tests/kubernetes-dispatcher.bats`.
 
 ```bash
-#!/usr/bin/env bats
-#
-# Behavioral tests for gather-kubernetes-findings.zsh (epic #1150, child #1152).
-
-setup() {
-  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-  GATHER="$REPO_ROOT/development/skills/maintenance/scripts/gather-kubernetes-findings.zsh"
-  W="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$W"
-  (cd "$W" && git init -q)
-}
-chart() { mkdir -p "$W/charts/app"; printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > "$W/charts/app/Chart.yaml"; }
-policy() { mkdir -p "$W/policies/kyverno"; printf 'apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: p\n' > "$W/policies/kyverno/p.yaml"; }
-policy_test() { mkdir -p "$W/policies/kyverno"; printf 'name: p-test\npolicies:\n  - p.yaml\n' > "$W/policies/kyverno/kyverno-test.yaml"; }
-gather() { zsh "$GATHER" "$W"; }
-
-@test "a Helm chart alone: manifest_validation configured, policy NOT configured" {
-  chart
-  run gather
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.tooling_configured.manifest_validation')" = "true" ]
-  [ "$(echo "$output" | jq -r '.tooling_configured.policy')" = "false" ]
-}
-
-@test "no policy directory: emits a skip note, and NO policy keys at all" {
-  chart
-  run gather
-  [ "$status" -eq 0 ]
-  # per the v2 contract an unconfigured tool is ABSENT from findings_by_tool —
-  # asserted with has(), since `jq '.missing | length'` is also 0 and would pass
-  # for an empty array, making "not configured" and "clean" indistinguishable
-  [ "$(echo "$output" | jq -r '.findings_by_tool | has("policy")')" = "false" ]
-  [ "$(echo "$output" | jq -r '.findings_by_tool | has("policy_tests")')" = "false" ]
-  echo "$output" | jq -r '.notes[]' | grep -q "no policies declared"
-}
-
-@test "policies without test fixtures: exactly one policy_tests finding" {
-  chart; policy
-  run gather
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.tooling_configured.policy')" = "true" ]
-  [ "$(echo "$output" | jq -r '.findings_by_tool.policy_tests | length')" = "1" ]
-}
-
-@test "policies with test fixtures: no policy_tests finding" {
-  chart; policy; policy_test
-  run gather
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.findings_by_tool.policy_tests | length')" = "0" ]
-}
-
-@test "coverage is null — a topic has no application test suite" {
-  chart
-  run gather
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.coverage')" = "null" ]
-}
-
-@test "a repo with no kubernetes markers still emits a well-formed payload" {
-  run gather
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.tooling_configured.manifest_validation')" = "false" ]
-}
+bats tests/gather-kubernetes.bats  # the suite itself is the contract
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bats tests/gather-kubernetes.bats`
 Expected: FAIL — the gather script does not exist.
 
-- [ ] **Step 3: Write the gather script**
+- [x] **Step 3: Write the gather script**
 
 Create `development/skills/maintenance/scripts/gather-kubernetes-findings.zsh`:
 
@@ -398,18 +385,25 @@ Create `development/skills/maintenance/scripts/gather-kubernetes-findings.zsh`:
 #!/usr/bin/env zsh
 # gather-kubernetes-findings.zsh — the kubernetes topic's finding gatherer
 # (epic #1150, child #1152). Emits the v2 gather payload the
-# `development-kubernetes` dispatcher consumes.
+# `development-kubernetes` dispatcher consumes:
+# `tooling_configured` / `findings_by_tool` / `coverage` / `notes`.
 #
 # Tools:
 #   manifest_validation — rendered-output checks (kubeconform, kube-linter).
-#   policy              — the repo's OWN Kyverno policies at policies/kyverno/.
-#                         Absent ⇒ tooling_configured.policy=false + a note.
+#                         PRESENCE-DETECTED here; the tools themselves run in
+#                         the CI pipeline (#1154), never in this gather.
+#   policy              — the repo's OWN Kyverno policies, matched by the GLOB
+#                         policies/kyverno/**/*.{yaml,yml} rather than by the
+#                         directory's existence, so an empty (or .json-only)
+#                         directory skips exactly like an absent one and a repo
+#                         writing .yml policies is enforced rather than silently
+#                         ignored (the ARCHITECTURE.md contract).
+#                         No match ⇒ tooling_configured.policy=false + a note.
 #                         NEVER a finding: a public plugin must work in a repo
 #                         with no opinions yet.
-#   policy_tests        — this topic's coverage-gate analogue. A policy
-#                         directory with no `kyverno test` fixtures passes
-#                         everything silently, which is the failure mode
-#                         hardest to notice.
+#   policy_tests        — this topic's coverage-gate analogue. A declared policy
+#                         set with no `kyverno test` fixtures passes everything
+#                         silently, which is the failure mode hardest to notice.
 #
 # `coverage` is always null — a topic has no application test suite.
 #
@@ -419,90 +413,162 @@ Create `development/skills/maintenance/scripts/gather-kubernetes-findings.zsh`:
 emulate -L zsh
 set -euo pipefail
 
-repo="${1:-.}"
+local repo="${1:-.}"
 [[ -d "$repo" ]] || { print -r -u2 -- "gather-kubernetes-findings.zsh: not a directory: $repo"; exit 2; }
+# and TRAVERSABLE. Every search below is wrapped in `|| true` / `2>/dev/null`, so
+# a directory that exists but cannot be entered would yield an all-false payload
+# with exit 0 — "could not look" rendered as "looked and found nothing", the one
+# outcome this script's comments repeatedly refuse to produce.
+[[ -r "$repo" && -x "$repo" ]] || { print -r -u2 -- "gather-kubernetes-findings.zsh: not a readable directory: $repo"; exit 2; }
+# normalise a relative path to an explicit ./ prefix: a repo path beginning with
+# `-` clears the `[[ -d ]]` gate (test operators parse no options) but is then
+# read as an OPTION by `cd` and as a PRIMARY by `find` — and every such failure is
+# absorbed by the `|| true` below, yielding a confident all-false payload instead
+# of an error. Absolute paths are already unambiguous.
+[[ "$repo" == /* ]] || repo="./$repo"
 command -v jq >/dev/null 2>&1 || { print -r -u2 -- "gather-kubernetes-findings.zsh: jq not found on PATH"; exit 3; }
 
-typeset -a notes=()
-# run find from INSIDE the repo so these substrings only ever test the
-# repo-relative portion: an absolute $repo under ~/templates/ would otherwise
-# filter every hit and report a chart-full repo as manifest-free. Dots escaped.
-typeset prune='-e /node_modules/ -e /\.git/ -e /vendor/ -e /templates/'
+local -a notes=()
 
 # --- manifest_validation: is there anything to render? ------------------------
-has_manifests=false
-# Capture BEFORE filtering. `grep -q` exits at its first match; find, still
-# writing, then dies of SIGPIPE (141), and under `set -o pipefail` the whole
-# condition goes FALSE even though a chart WAS found — nondeterministically, on
-# any repo whose find output outruns the pipe buffer.
-# `cd` so the emitted paths are repo-RELATIVE: with an absolute "$repo" the
-# prune substrings would also test the checkout's own prefix, and a repo living
-# under ~/templates/ or a workspace named vendor would filter every hit and be
-# reported manifest-free. All three marker filenames, per kustomize.
-manifest_hits="$(cd "$repo" && find . \
+# The marker is deliberately NOT "any YAML with apiVersion", which would match a
+# workflow file or an OpenAPI document in half the repos in existence. It is a
+# Helm Chart.yaml, a Kustomize manifest (all three spellings kustomize accepts),
+# or the literal `argoproj.io`, which nothing else carries by accident.
+local has_manifests="false"
+
+# Capture BEFORE filtering. `find … | grep -q` looks equivalent but inverts under
+# `set -o pipefail`: grep -q exits at its first match, find — still writing — dies
+# of SIGPIPE, and the whole condition goes FALSE even though a chart WAS found.
+# It misfires only once find's output outruns the pipe buffer, which is the worst
+# possible failure mode. `grep -v` reads its input to EOF, so the filter itself is
+# safe; the capture keeps it that way if the filter is ever changed.
+#
+# `cd` into the repo so the emitted paths are repo-RELATIVE: with an absolute
+# "$repo" the prune substrings would also test the checkout's own prefix, and a
+# repo living under ~/templates/ (or a workspace directory named vendor) would
+# filter every hit and be reported manifest-free.
+local manifest_hits
+#
+# `! -type d` for the same reason the react marker carries it: a DIRECTORY named
+# `Kustomization` is not a manifest, while a symlinked one still counts. Kept
+# identical to the SKILL.md marker recipe — tests/kubernetes-topic-marker.bats
+# derives the comparison, so the two cannot drift into detecting different repos.
+manifest_hits="$(cd -- "$repo" && find . \
                    \( -name Chart.yaml -o -name kustomization.yaml \
-                      -o -name kustomization.yml -o -name Kustomization \) 2>/dev/null \
-                   | grep -v ${=prune} || true)"
+                      -o -name kustomization.yml -o -name Kustomization \) \
+                   ! -type d 2>/dev/null \
+                   | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
 if [[ -n "$manifest_hits" ]]; then
-  has_manifests=true
-elif grep -rqlF 'argoproj.io' --include='*.yaml' --include='*.yml' \
-       --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git "$repo" 2>/dev/null; then
-  has_manifests=true
+  has_manifests="true"
+elif ( cd -- "$repo" && grep -rqlF 'argoproj.io' \
+         --include='*.yaml' --include='*.yml' \
+         --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+         --exclude-dir=templates . 2>/dev/null ); then
+  # `cd` first, and grep the literal `.` — for the SAME reason the find branch
+  # does it, but a sharper failure: GNU grep documents --exclude-dir as skipping
+  # any COMMAND-LINE directory whose name matches, so passing "$repo" would skip
+  # a repo literally named `templates`/`vendor`/`node_modules` in its ENTIRETY
+  # and report it manifest-free with exit 0. `.` can never match a pattern.
+  has_manifests="true"
 fi
 
-# --- policy: the repo's own rules --------------------------------------------
-typeset policy_dir="$repo/policies/kyverno"
-typeset has_policies=false
-typeset -a policy_files=()
+# --- policy: the repo's own rules, matched as a GLOB --------------------------
+# `-L` (not `-H`) on both finds below. `-H` follows only the COMMAND-LINE
+# symlink, so a symlinked policies/kyverno is searched but a symlinked policy
+# FILE inside a real one is type `l` and `-type f` drops it — reporting a
+# symlink-shared policy set as undeclared, and a symlinked kyverno-test.yaml as
+# missing coverage (a false untested-policies accusation). `-L` resolves both:
+# a symlink-to-file becomes type `f`, a directory named `p.yaml` stays type `d`
+# so the -type f guard still holds, and a dangling symlink is still excluded.
+# Note the asymmetry with the manifest half, which is deliberate and NOT parity:
+# the manifest finds stay at the default `-P`, so they count a symlinked manifest
+# FILE but do not descend a symlinked chart DIRECTORY. That is the boundary the
+# three manifest copies share (SKILL.md's marker recipe, SKILL.md's manifests
+# lister, and the manifest find ABOVE in this file — not the two policy finds
+# below, which are the `-L` ones this block declares), and the parity oracles in
+# tests/kubernetes-topic-marker.bats hold
+# them identical — so do not "fix" the policy side down to match, and do not
+# raise the manifest side to `-L` without changing all three copies together.
+local policy_dir="$repo/policies/kyverno"
+local has_policies="false"
+local policy_hits=""
 if [[ -d "$policy_dir" ]]; then
-  policy_files=(${(f)"$(find "$policy_dir" -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null)"})
-  (( ${#policy_files} > 0 )) && has_policies=true
+  # the same rule as the repo gate, one level deeper: an unreadable policy
+  # directory would fail into `2>/dev/null || true` and emit "no policies
+  # declared" for a repo that declared several — the silent skip the glob
+  # contract exists to prevent
+  [[ -r "$policy_dir" && -x "$policy_dir" ]] || { print -r -u2 -- "gather-kubernetes-findings.zsh: policies/kyverno exists but is not readable"; exit 2; }
+  policy_hits="$(find -L "$policy_dir" -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null || true)"
+  [[ -n "$policy_hits" ]] && has_policies="true"
 fi
-$has_policies || notes+=("policy: no policies declared at policies/kyverno/ — step skipped, not failed")
+if [[ "$has_policies" != "true" ]]; then
+  notes+=("policy: no policies declared at policies/kyverno/**/*.{yaml,yml} — step skipped, not failed")
+fi
 
 # --- policy_tests: fixtures for those policies -------------------------------
-typeset -a policy_test_findings=()
-if $has_policies; then
-  if ! find "$policy_dir" -type f \( -name 'kyverno-test.yaml' -o -name 'kyverno-test.yml' \) -print -quit 2>/dev/null | grep -q . 2>/dev/null; then
-    policy_test_findings=('{"tool":"policy_tests","severity":"medium","file":"policies/kyverno/","message":"Policy directory has no kyverno test fixtures. An untested policy usually matches nothing and passes everything silently."}')
+# Recursive and both extensions: fixtures are commonly grouped per policy in a
+# subdirectory, and .yml is as valid as .yaml — missing either would report a
+# tested policy set as untested, which is a false accusation rather than a
+# missed one, and trains users to ignore this finding.
+local policy_tests_findings="[]"
+if [[ "$has_policies" == "true" ]]; then
+  local test_hits
+  test_hits="$(find -L "$policy_dir" -type f \
+                 \( -name 'kyverno-test.yaml' -o -name 'kyverno-test.yml' \) 2>/dev/null || true)"
+  if [[ -z "$test_hits" ]]; then
+    policy_tests_findings="$(jq -n '[{
+      id: "policy_tests:untested-policies",
+      tool: "policy_tests",
+      type: "untested_policies",
+      severity: "high",
+      message: "policies/kyverno/ declares policies but has no kyverno test fixtures. An untested policy usually matches nothing, so it passes everything silently.",
+      fix: "Add a kyverno-test.yaml beside the policies, declaring at least one resource each policy must PASS and one it must FAIL, and run `kyverno test policies/kyverno`.",
+      files: ["policies/kyverno/"]
+    }]')"
   fi
 fi
 
 # --- emit ---------------------------------------------------------------------
+# ALWAYS carry the presence-detection note. The orchestrator reads an empty topic
+# plan with a NON-empty tooling_configured as "this topic is clean — its tools ran
+# and found nothing", which for this gather would be a lie: nothing ran. The note
+# is the only thing that reaches the Phase 9 summary and can contradict that
+# rendering.
+notes+=("manifest_validation: presence-detected only — kubeconform/kube-linter/kyverno run in the CI pipeline (#1154), not in this gather")
+
+local notes_json
+notes_json="$(printf '%s\n' "${notes[@]}" | jq -R . | jq -s '.')"
+
 jq -n \
   --argjson manifests "$has_manifests" \
   --argjson policies "$has_policies" \
-  --argjson policy_tests "[${(j:,:)policy_test_findings}]" \
-  --argjson notes "$(printf '%s\n' ${notes:-} | jq -R . | jq -s 'map(select(length>0))')" \
-  '{
-     tooling_configured: {
-       manifest_validation: $manifests,
-       policy: $policies,
-       policy_tests: $policies
-     },
-     # The v2 contract in ARCHITECTURE.md: findings_by_tool carries keys ONLY for
-     # configured tools. Emitting an empty array for an unconfigured tool would
-     # make "not configured" indistinguishable from "configured and clean", and
-     # an orchestrator validating the envelope against the family contract would
-     # reject the payload.
-     findings_by_tool: (
-       (if $manifests then { manifest_validation: [] } else {} end)
-       + (if $policies then { policy: [], policy_tests: $policy_tests } else {} end)
-     ),
-     coverage: null,
-     # ALWAYS carry the presence-detection note. The orchestrator reads an empty
-     # topic plan with a NON-empty tooling_configured as "this topic is clean —
-     # its tools ran and found nothing", which for this gather would be a lie:
-     # nothing ran. The note is the only thing that reaches the Phase 9 summary
-     # and can contradict that rendering.
-     notes: ($notes + ["manifest_validation: presence-detected only — kubeconform/kube-linter/kyverno run in the CI pipeline (#1154), not in this gather"])
-   }'
+  --argjson policy_tests "$policy_tests_findings" \
+  --argjson notes "$notes_json" '
+{
+  tooling_configured: {
+    manifest_validation: $manifests,
+    policy: $policies,
+    policy_tests: $policies
+  },
+  # The v2 contract in ARCHITECTURE.md: findings_by_tool carries keys ONLY for
+  # configured tools. Emitting an empty array for an unconfigured tool would make
+  # "not configured" indistinguishable from "configured and clean" — which for the
+  # policy skip is exactly the confusion the charter must never create.
+  findings_by_tool: (
+    (if $manifests then { manifest_validation: [] } else {} end)
+    + (if $policies then { policy: [], policy_tests: $policy_tests } else {} end)
+  ),
+  coverage: null,
+  notes: $notes
+}
+'
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `bats tests/gather-kubernetes.bats`
-Expected: PASS — all six tests.
+Expected: PASS — the whole suite (48 tests as shipped).
 
 > **Before committing, flip the #1151 skeleton gate (the gather half).**
 > `tests/kubernetes-plugin-skeleton.bats` asserts
@@ -537,7 +603,7 @@ Expected: PASS — all six tests.
 > catches only *disagreement* between the two files, never an omitted bump, so
 > nothing will flag it. Stage both files.
 
-- [ ] **Step 5: Make the script executable and commit**
+- [x] **Step 5: Make the script executable and commit**
 
 ```bash
 chmod +x development/skills/maintenance/scripts/gather-kubernetes-findings.zsh
@@ -572,9 +638,9 @@ Child #1152. A pure function of its input — validates the payload, returns a P
 - Consumes: the exact `tooling_configured` / `findings_by_tool` keys from Task 3.
 - Produces: routing — `manifest_validation` → `kubernetes-manifest-fixer`; `policy` and
   `policy_tests` → `kubernetes-policy-triage`. Task 5 creates both agents under those exact names.
-- [ ] **Step 1: Write the dispatcher skill**
+- [x] **Step 1: Write the dispatcher skill**
 
-```markdown
+````markdown
 ---
 name: maintenance
 description: >
@@ -583,25 +649,42 @@ description: >
   kubernetes topic gather (gather-kubernetes-findings.zsh), validates it, and
   returns a plan routing each finding group to an agent. A TOPIC plugin that can
   also be PRIMARY: a GitOps repo with no application language declares
-  `primary: kubernetes` and gets the full pipeline. v1 REGISTERS the routing table
+  `primary: kubernetes` and gets the full pipeline. v0.2 REGISTERS the routing table
   (manifest_validation → kubernetes-manifest-fixer; policy + policy_tests →
   kubernetes-policy-triage) but ships NO agents, so every group returns as a
   human_action_required entry naming #1153, where those agents land.
   A single invocation returns the plan; the per-group work agents are the
   orchestrator's job. Pure function of its JSON input; runs no detection of its
   own. Ships NO approver — a cluster definition is approved by a human.
+disable-model-invocation: false
 ---
 
 # Kubernetes maintenance dispatcher
 
 Read the payload at `$ARGUMENTS`. Spawn nothing.
 
+You are the **kubernetes-topic maintenance dispatcher**. You receive a v2
+maintenance payload that `/development:maintenance` built from the kubernetes
+topic gather, and you return a **plan**: an ordered list of finding groups, each
+routed to the agent that fixes that category. You do **not** run detection, the
+gather, or the validation **tools** (kubeconform / kube-linter / `kyverno test`,
+which run in CI — #1154) yourself, and you do **not** spawn the work agents —
+Phase 8 of the orchestrator does, one PR per group. *Payload* validation is a
+different thing and it **is** yours: see *Validation* immediately below.
+
+Like the other topic plugins (`development-docs`, `development-claude-plugin`),
+you have **no language coverage gate and no Phase A/B dance** — a topic has no
+application test suite of its own. This dispatcher is a single invocation
+returning one `plan`. Its one analogue is `policy_tests` (see *No coverage gate,
+one analogue*).
+
 ## Validation
 
 Each check terminates — a dispatcher that routes whatever happens to parse is
 worse than one that stops:
 
-- `$ARGUMENTS` empty → print the invocation help and **stop**.
+- `$ARGUMENTS` empty → print one line explaining this is a dispatch target for
+  `/development:maintenance`, not a standalone command, and **stop**.
 - the file is missing, or does not parse as JSON → **error and stop**.
 - `.schema_version != "2"` → **error and stop**, naming the version found.
 - `.language != "kubernetes"` → **error and stop**. (For a topic dispatch the
@@ -611,76 +694,74 @@ worse than one that stops:
 - a key appears in `findings_by_tool` that the routing table below has no entry
   for → **halt** with `human_action_required`, rather than dropping it silently.
 
+```bash
+command -v jq >/dev/null 2>&1 || { echo "jq not found on PATH — cannot validate the payload"; exit 1; }
+[ -n "$ARGUMENTS" ] || { echo "development-kubernetes:maintenance is a dispatch target for /development:maintenance, not a standalone command"; exit 1; }
+test -f "$ARGUMENTS" || { echo "no payload file at: $ARGUMENTS"; exit 1; }
+jq -e . "$ARGUMENTS" >/dev/null 2>&1 || { echo "payload is not valid JSON: $ARGUMENTS"; exit 1; }
+jq -e '.schema_version == "2"' "$ARGUMENTS" >/dev/null \
+  || { echo "unexpected payload schema (want 2, found: $(jq -r '.schema_version // "absent"' "$ARGUMENTS"))"; exit 1; }
+jq -e '.language == "kubernetes"' "$ARGUMENTS" >/dev/null \
+  || { echo "payload is not a kubernetes dispatch (language: $(jq -r '.language // "absent"' "$ARGUMENTS"))"; exit 1; }
+```
+
+**Stop on any failure in the block above** — every check except the unknown-key
+bullet (the bullets and the guards are not 1:1; the JSON bullet is two guards).
+Never fall through to *Response* and return the empty-plan envelope for a payload
+you could not validate: the empty plan is for a *valid* v2 payload that carries no
+kubernetes findings, **not** for a broken or wrong-version one, and masking a
+payload-contract break (a future v3 orchestrator, say) as "nothing to do" would be
+a silent failure.
+
+**The unknown-key bullet is the one exception, and it is not a fall-through.**
+That payload *did* validate — it is well-formed v2 for this topic; only its
+routing is unknown. So it does not error out: it **returns** the halt envelope
+defined in *Response* (the four fields plus `human_action_required`), which is
+the only way the escalation reaches a human. Erroring instead would make the
+orchestrator record `dispatch failed` in `unsupported_topics` and swallow it.
+
 ## Dispatch mode
 
 `dispatch_mode` is `"primary"` | `"auxiliary"`; **absent is treated as
-`"primary"`**, as every sibling dispatcher states. This topic composes ALONGSIDE a
-language plugin, so **auxiliary is the common case** — any language repo that
-also holds charts. The disposition of all three routed keys, so nothing falls
-through to a guess:
+`"primary"`**, per `ARCHITECTURE.md` § *Primary / auxiliary model* (the language
+dispatchers restate it; the sibling topic dispatchers only accept the field).
+Any **other** value is a payload-contract break, and it is handled exactly like
+the `manifest_validation: false` case in *Response*: **route nothing** and return
+the halt envelope with **one** `human_action_required` entry naming the value
+found — that single entry is the trace for the whole payload, so do not
+additionally enumerate the groups. Do **not** "treat it as primary and carry on":
+any non-empty `human_action_required` *is* the halt branch, and Phase 7 skips
+every remaining phase for the target, so a plan built alongside the note would be
+discarded and the routed work would silently never run. The orchestrator only
+ever emits the two values, so a third means the payload was not built by it.
+This topic composes ALONGSIDE a language plugin, so auxiliary is the expected
+case for a repo that **declares a language primary** — note that a repo which
+declares no primary at all dispatches every target as `"primary"`, so auxiliary
+is not simply the default. Here is the disposition of all three routed keys, so
+nothing falls through to a guess:
 
 - `manifest_validation` → routed as usual. Mechanical, always in scope.
 - `policy` → routed as usual. A violation of a policy the repo *declared* is a
   real defect whatever the repo's primary language is; suppressing it would lose
   the finding with no trace.
-- `policy_tests` → **omitted entirely** in auxiliary mode. This is the
-  app-grade coverage analogue, and it is the only one that is. Planning ordering-blocking
-fixture-writing on a repo whose primary is Java or Go is exactly the category
-error the primary/auxiliary split exists to prevent.
-
-## Response
-
-Return the family's v2 envelope — every field, every time; the orchestrator's
-per-group CI cycle branches on `ci_fixer_agent` and its summary renders
-`missing_tooling`:
-
-    {
-      "schema_version": "2",
-      "ci_fixer_agent": null,
-      "plan": [],
-      "missing_tooling": []
-    }
-
-"Every field, every time" scopes to the **non-halt** path. The halt branch in
-*Validation* adds a fifth top-level field — but **keeps `plan` and
-`missing_tooling`**. The orchestrator moves a topic whose response "is not a
-JSON object carrying `plan`" to `unsupported_topics` with a
-`dispatch failed` note, which would swallow the very escalation the halt exists
-to deliver:
-
-    {
-      "schema_version": "2",
-      "ci_fixer_agent": null,
-      "plan": [],
-      "missing_tooling": [],
-      "human_action_required": [
-        { "reason": "...", "recommendation": "..." }
-      ]
-    }
-
-**`missing_tooling` — the positive rule.** The family default builds it from
-`tooling_configured` entries that are `false`. This dispatcher takes ONE
-deliberate exception: `policy` and `policy_tests`. A repo with no
-`policies/kyverno/` has not failed to configure a tool — it has declined to
-declare opinions, which is the charter's whole point, and listing it would
-re-emit the adopt-Kyverno recommendation as a "here's how to add it". Every
-other `false` entry (today: `manifest_validation`) populates `missing_tooling`
-normally. This exception is **already recorded** in `ARCHITECTURE.md`'s
-`### development-kubernetes owns` section — it shipped with #1151. Verify the
-two still agree; do **not** add a second statement of it.
-
-`ci_fixer_agent` is `null`: this topic ships no CI fixer, so on a red PR the
-orchestrator **escalates to the user** in its summary. It does **not**
-substitute another plugin's fixer — reusing one requires naming it, which is
-exactly what `null` does not do (`development-docs` states the same rule;
-`development-react` names `js-ci-fixer` because it genuinely reuses it). The gather's "no policies declared" skip
-note surfaces **nowhere** in the response — it is a deliberate skip, not missing
-tooling, so putting it in `missing_tooling` would turn it into exactly the
-adopt-Kyverno recommendation the charter forbids.
+- `policy_tests` → **omitted entirely** in auxiliary mode. This is the app-grade
+  coverage analogue, and it is the only one that is. Planning ordering-blocking
+  fixture-writing on a repo whose primary is Java or Go is exactly the category
+  error the primary/auxiliary split exists to prevent.
 
 ## Routing
 
-**Until #1153 lands, this table routes nothing.** The agents below are created
+**One name, two things — read the qualified paths.** This topic's `policy`
+*tool* is `tooling_configured.policy` / `findings_by_tool.policy`. The payload
+also carries a **top-level `policy` object** (`{coverage_threshold,
+severity_gate, …}`) — the family's maintenance policy, present and truthy on
+every payload, and **never** read by this dispatcher. Resolving a bare "policy"
+to that object would read a repo with no Kyverno files as having policies
+configured, inverting the charter's central skip.
+
+**Until #1153 lands, this table dispatches nothing** — its entries still define
+the known-key universe *Validation*'s unknown-key check tests against; it is the
+routing they authorise that is suspended. The agents below are created
 by #1153; #1152 ships the dispatcher alone. A `policy_tests` finding is
 reachable the moment the gather exists, so routing it now would have the
 orchestrator spawn a `subagent_type` with no definition and the group would
@@ -689,10 +770,16 @@ fail. Until the agent files exist, return every group as a
 language dispatchers use — escalate via `human_action_required` rather than
 `development-react`'s empty-plan-plus-`missing_tooling` summary, because an
 unroutable group must **halt**, and because this dispatcher forbids
-`missing_tooling` for the policy skip. Borrow only the mechanism: `development-java`'s
-and `development-go`'s halt objects both omit `plan` (and Java's additionally
-omits `ci_fixer_agent`), which the *Response* section above forbids here — keep
-both fields, per that section. Delete this paragraph in #1153.
+`missing_tooling` for the policy skip. Borrow only the mechanism:
+`development-java`'s and `development-go`'s halt objects both omit `plan` (and
+Java's additionally omits `ci_fixer_agent`), which the *Response* section below
+forbids here — keep both fields, per that section.
+
+**Delete this paragraph in #1153 — and rewrite the "v0.2 REGISTERS ... NO agents"
+sentence of this file's frontmatter `description` in the same PR.** The
+description restates the same override, and it is what a model reads *first* at
+invocation time; deleting only the paragraph leaves a description licensing
+escalation against a body licensing routing.
 
 | Finding tool | Agent |
 |---|---|
@@ -700,33 +787,155 @@ both fields, per that section. Delete this paragraph in #1153.
 | `policy` | `kubernetes-policy-triage` |
 | `policy_tests` | `kubernetes-policy-triage` |
 
+**A group exists only for a ROUTED `findings_by_tool` key whose array is
+NON-EMPTY.** A routed key present with an **empty** array means "configured, and
+it found nothing" —
+it forms no group, no plan entry, and (until #1153) no `human_action_required`
+entry either. This is not a corner case: `manifest_validation: []` is on *every*
+payload this dispatcher receives, because that tool is presence-detected and its
+checks run in CI, and `policy: []`/`policy_tests: []` is the shape of a clean
+policy set. Treating each routed *key* as a group would escalate the ordinary
+clean dispatch — the most common payload there is — to a human as "Halted".
+
+**"Routed" is the load-bearing word, and *Validation* wins over this rule for
+anything else.** An **unknown** key — one this table has no row for — halts on
+its mere *presence*, empty array or not; it is not a group and this paragraph
+does not exempt it. The two rules answer different questions: this one asks "is
+there work here?", *Validation*'s asks "do I still understand this payload?".
+A future gather adding a presence-detected tool would ship exactly that shape —
+an unknown key with an empty array — and silently dropping it is the routing
+drift the halt exists to surface.
+
 Group `policy` and `policy_tests` into **one** PR: they touch the same
 directory, and splitting them would produce two PRs racing on the same files.
 
+Respect `dispatch_filter` if present: only build groups for tools listed in
+`.dispatch_filter.only_tools`. In practice the orchestrator **omits
+`dispatch_filter` for topics** and skips topic dispatch entirely under
+`--tool`/`--concern`, so this handling is **defensive**: if a filter naming no
+kubernetes tool ever did arrive, an empty plan is the correct result.
+
 ## No coverage gate, one analogue
 
-A topic has no application test suite, so there is no line-coverage
-pre-flight. The analogue is `policy_tests`: a policy directory with no
-`kyverno test` fixtures. Treat a `policy_tests` finding as **ordering-blocking**
-for the group — the group is still dispatched (`kubernetes-policy-triage` is what
-WRITES the missing fixtures), but the plan must order fixture-writing before any
-policy-driven manifest fix in it. Never drop the group: that would permanently
-preserve the untested-policy state the gate exists to eliminate. This rule is
-**primary-mode only** — in auxiliary mode the `policy_tests` group is omitted
-before it is ever formed (see *Dispatch mode*).
+A topic has no application test suite, so there is no line-coverage pre-flight.
+The analogue is `policy_tests`: a declared policy set with no `kyverno test`
+fixtures. Treat a `policy_tests` finding as **ordering-blocking** for the group —
+**once #1153 ships `kubernetes-policy-triage`**, the group is dispatched (that
+agent is what WRITES the missing fixtures) and the plan must order
+fixture-writing before any policy-driven manifest fix in it. Never drop the
+group: that would permanently preserve the untested-policy state the gate exists
+to eliminate.
+
+**Until #1153, this section describes the destination, not today's behaviour.**
+*Routing* governs: the agent does not exist, so the group is **escalated** as
+`human_action_required`, not dispatched — which is not dropping it either. Where
+the two sections seem to disagree, *Routing* wins until its paragraph is deleted;
+delete this qualifier in the same PR.
+
+The ordering rule is also **primary-mode only** — in auxiliary mode the
+`policy_tests` group is omitted before it is ever formed (see *Dispatch mode*).
 
 ## Absent policies are not a finding
 
-`tooling_configured.policy: false` means the repo declared no policies. Return
-a plan with no policy group. The gather's "no policies declared" note stays in
-the gather payload and is reproduced **nowhere** in the response — not in
-`missing_tooling`, not in the plan (see *Response* above; `missing_tooling`
-would turn a deliberate skip into an adopt-Kyverno recommendation). Do not
-synthesise a finding, and do not suggest the repo adopt policies — that is the
-consumer's decision, not this plugin's.
+`tooling_configured.policy: false` means the repo declared no policies — the
+gather's glob `policies/kyverno/**/*.{yaml,yml}` matched nothing. Return a plan
+with no policy group. The gather's "no policies declared" note stays in the
+gather payload and is reproduced **nowhere** in the response — not in
+`missing_tooling`, not in the plan (see *Response*; `missing_tooling` would turn
+a deliberate skip into an adopt-Kyverno recommendation). Do not synthesise a
+finding, and do not suggest the repo adopt policies — that is the consumer's
+decision, not this plugin's.
+
+## Response
+
+Return the family's v2 envelope **inline** (NOT via a file) — every field, every
+time; the orchestrator's per-group CI cycle branches on `ci_fixer_agent` and its
+summary renders `missing_tooling`:
+
+```json
+{
+  "schema_version": "2",
+  "ci_fixer_agent": null,
+  "plan": [],
+  "missing_tooling": []
+}
 ```
 
-- [ ] **Step 2: Verify the frontmatter parses**
+"Every field, every time" scopes to the **non-halt** path. The halt branch in
+*Validation* adds a fifth top-level field — but **keeps `plan` and
+`missing_tooling`**. The orchestrator moves a topic whose response "is not a
+JSON object carrying `plan`" to `unsupported_topics` with a `dispatch failed`
+note, which would swallow the very escalation the halt exists to deliver:
+
+```json
+{
+  "schema_version": "2",
+  "ci_fixer_agent": null,
+  "plan": [],
+  "missing_tooling": [],
+  "human_action_required": [
+    { "reason": "...", "recommendation": "..." }
+  ]
+}
+```
+
+**`missing_tooling` — the positive rule.** The family default builds it from
+`tooling_configured` entries that are `false`. This dispatcher takes ONE
+deliberate exception: `policy` and `policy_tests`. A repo with no matching
+policy file has not failed to configure a tool — it has declined to declare
+opinions, which is the charter's whole point, and listing it would re-emit the
+adopt-Kyverno recommendation as a "here's how to add it".
+
+Every other **known** `false` entry — one the routing table has a row for —
+populates `missing_tooling` normally. An **unknown** key arriving `false` does
+not: that is the `tooling_configured` face of the very routing drift *Validation*
+halts on, and it reaches you *instead of* that halt, because the gather emits
+`findings_by_tool` keys only for **configured** tools. So the same future tool
+splits by repo — present, and the unknown key halts; absent, and only
+`tooling_configured.<new_tool>: false` arrives. Treat both as the same event:
+note it in `human_action_required`, **never** in `missing_tooling`. Recommending
+that a repo adopt a tool this dispatcher cannot route is the same category error
+the policy exemption prevents.
+
+Of the known keys there is today exactly one besides the two exempted ones,
+`manifest_validation`, and **it cannot be `false` on a
+payload that reached you**. It is *presence detection*, not configuration: the
+gather sets it from the same `find`/`grep` recipe the orchestrator's topic marker
+uses, so a repo with no manifests never fires the marker and never dispatches
+here. If one ever does arrive `false` — the two recipes having drifted, or a
+hand-built payload — **note it in `human_action_required` and route nothing**:
+"no manifests found" is not "kubeconform is unconfigured", and emitting the
+family's adopt-a-tool recommendation for it would be the same category error the
+policy exemption exists to prevent. That one halt entry is the trace for the
+**whole** payload — do not additionally enumerate the other groups, because the
+payload itself is what is suspect.
+
+*Maintainers of this file:* this exemption is also recorded in the plugin
+repo's `ARCHITECTURE.md`, under `### development-kubernetes owns` (shipped
+with #1151) — keep the two in agreement, and never add a third statement of it.
+This is an editing note, **not** a dispatch step: at dispatch time you are in the
+consumer's repo, where that file is absent or belongs to someone else, so never
+read it, and never let its absence affect the response.
+
+`ci_fixer_agent` is `null`: this topic ships no CI fixer, so on a red PR the
+orchestrator **escalates to the user** in its summary. It does **not** substitute
+another plugin's fixer — reusing one requires naming it, which is exactly what
+`null` does not do (`development-docs` states the same rule;
+`development-react` names `js-ci-fixer` because it genuinely reuses it).
+
+## What you never do
+
+- Don't edit any file or spawn any agent — you only plan.
+- Don't run the gather or re-derive findings — trust the payload (the
+  orchestrator already gathered).
+- Don't trim or restructure the payload's findings when echoing them into a
+  group's `findings` list — echo the finding objects through **in full**, ids
+  included (Phase 8 builds the work agent's prompt from them).
+- Don't approve anything. This plugin ships **no approver agent** — a cluster
+  definition is the origin of everything running on it, so a human approves.
+````
+
+- [x] **Step 2: Verify the frontmatter parses**
 
 Run — one physical line; a wrapped inline code span would put literal newlines
 inside the `-c` string and raise `SyntaxError` before the check runs:
@@ -798,7 +1007,7 @@ Expected: `frontmatter ok`
 > `development-kubernetes/.claude-plugin/plugin.json`
 > and `.claude-plugin/marketplace.json`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add development-kubernetes/skills/maintenance/SKILL.md
@@ -1243,11 +1452,38 @@ Expected: five `ok` lines.
 >    the key in that script's header output block and stage `detect-stack.sh`;
 >    Task 6 depends on it. Without this the new panel is unreachable from the
 >    very loop its Step 3 claims to feed;
-> 5. **delete the "Until #1153 lands, this table routes nothing" paragraph** from
->    `development-kubernetes/skills/maintenance/SKILL.md` (that paragraph says
->    so itself) and flip its frontmatter description back to the present-tense
->    routing sentence — otherwise post-#1153 runs keep halting every group with
->    a `human_action_required` naming a closed issue;
+> 5. **delete the "Until #1153 lands, this table dispatches nothing" paragraph**
+>    from `development-kubernetes/skills/maintenance/SKILL.md` (that paragraph
+>    says so itself), flip its frontmatter description's
+>    "v0.2 REGISTERS … NO agents" sentence back to the present-tense routing
+>    sentence, and delete the *No coverage gate, one analogue* qualifier — which
+>    means **exactly** its "**Until #1153, this section describes the
+>    destination, not today's behaviour.**" paragraph, plus the
+>    "**once #1153 ships `kubernetes-policy-triage`**" hedge in the sentence
+>    above it. **Keep** that section's `ordering-blocking` rule and its
+>    "Never drop the group" sentence — `tests/kubernetes-dispatcher.bats` still
+>    requires both — otherwise
+>    post-#1153 runs keep halting every group with a `human_action_required`
+>    naming a closed issue, and the coverage section keeps deferring to a
+>    paragraph that no longer exists;
+> 5b. **retire `tests/kubernetes-dispatcher.bats`'s self-expiring pins in the
+>    same PR** — the suite is deliberately built to red here. **Nine** assertions
+>    fail the moment this task lands — count them against the list below, not
+>    against the four enclosing `@test` blocks: `'Until #1153 lands, this table dispatches
+>    nothing'`, `'Delete this paragraph in #1153'`, the
+>    `'rewrite the "v0.2 REGISTERS ... NO agents" sentence'` needle,
+>    `contains "$FRONTMATTER" 'ships NO agents'`,
+>    `contains "$FRONTMATTER" 'v0.2 REGISTERS the routing table'` (item 5
+>    rewrites exactly that sentence), `'return every group as a
+>    \`human_action_required\` entry'` (that string lives only in the paragraph
+>    item 5 deletes, and the needle is scoped to the whole *Routing* section),
+>    `'once #1153 ships \`kubernetes-policy-triage\`'`,
+>    `'*Routing* wins until its paragraph is deleted'`, and the final
+>    `[ ! -d "$REPO_ROOT/development-kubernetes/agents" ]`. **Flip** each to its
+>    post-landing form (assert the routing table is live and the agents exist)
+>    rather than deleting them, so the contract stays pinned in its new
+>    direction. The skeleton suite's `[ ! -d "$PLUGIN_DIR/agents" ]` (item 1's
+>    entry-set assertion) flips with them;
 > 6. register the new `reliability` and `argocd` dimensions in ARCHITECTURE.md's
 >    *Dimension enum* paragraph, per Step 6;
 > 7. **bump `plugin.json` + `marketplace.json` in lockstep** (minor) and update
@@ -1266,7 +1502,8 @@ Expected: five `ok` lines.
 > 10. **last**, run the whole suite.
 >
 > `git add` must therefore also stage `tests/kubernetes-plugin-skeleton.bats`,
-> `docs/reference/`, `ARCHITECTURE.md`, `README.md`,
+> `tests/kubernetes-dispatcher.bats` (item 5b), `docs/reference/`,
+> `ARCHITECTURE.md`, `README.md`,
 > `docs/explanation/motivation.md`,
 > `docs/superpowers/plans/2026-08-02-development-kubernetes.md` (re-sync Task 1's
 > blocks), `development-kubernetes/skills/maintenance/SKILL.md`,
@@ -1609,7 +1846,7 @@ jobs:
             exit 0
           fi
           kyverno apply "$RUNNER_TEMP/policies/" --resource "$RENDER_DIR/"
-          # A policy set with no fixtures is a MEDIUM MAINTENANCE FINDING
+          # A policy set with no fixtures is a HIGH MAINTENANCE FINDING
           # (policy_tests -> kubernetes-policy-triage), not a build failure — the
           # six-check design names no policy-tests check. Running `kyverno test`
           # unconditionally would exit non-zero here and make that a hard red.
@@ -1807,8 +2044,9 @@ Expected: `yamllint ok`
 > paragraph to the present tense here, and **bump both manifests in lockstep**
 > (minor) with the slice-status sentence updated. Also bump
 > `docs/reference/plugins.md`'s `**What's built (vX):**` label and rewrite its
-> narrative — it still says "the ownership boundary and the marketplace
-> registration, and nothing else", which the CI pipeline falsifies. `git add`
+> narrative — whatever wording the earlier children left it at (#1152 rewrote it
+> to name the dispatcher, marker and gather; #1153 rewrites it again), it will
+> not mention the CI pipeline this task ships. `git add`
 > must stage `ARCHITECTURE.md`, `docs/reference/plugins.md`, `README.md`,
 > `docs/explanation/motivation.md`, **`tests/kubernetes-plugin-skeleton.bats`**,
 > `docs/superpowers/plans/2026-08-02-development-kubernetes.md` (re-sync Task 1's

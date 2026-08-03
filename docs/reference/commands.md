@@ -53,6 +53,12 @@ For the narrative overview of what each plugin is for, see the
 | `/development-java:maintenance` | Java/Gradle project maintenance dispatcher. Receives findings from /development:maintenance (or equivalent JSON input), validates the payload, runs a JaCoCo coverage pre-flight (may spawn `java-coverage-improver` in a worktree when affected classes sit below Required — topping up toward Required, or bootstrapping a below-floor (0%) class toward the Floor, #429), and otherwise invokes `java-maintenance-planner` and returns its plan. The per-group work agents are the orchestrator's job, not the dispatcher's. Pure function of its JSON input; does not run its own detection. Mirrors development-python. Tool universe so far (#296 epic): format_lint (Spotless) + sonarcloud + JaCoCo coverage; semgrep / code_scanning / dependabot land in later slices. See ARCHITECTURE.md for the schema and dispatch contract. |
 | `/development-java:review` | Perform a comprehensive Java code review using 6 specialized parallel agents |
 
+## development-kubernetes
+
+| Command | Description |
+| --- | --- |
+| `/development-kubernetes:maintenance` | Kubernetes/IaC maintenance dispatcher. Receives a v2 maintenance payload (a file path in $ARGUMENTS) that /development:maintenance built from the kubernetes topic gather (gather-kubernetes-findings.zsh), validates it, and returns a plan routing each finding group to an agent. A TOPIC plugin that can also be PRIMARY: a GitOps repo with no application language declares `primary: kubernetes` and gets the full pipeline. v0.2 REGISTERS the routing table (manifest_validation → kubernetes-manifest-fixer; policy + policy_tests → kubernetes-policy-triage) but ships NO agents, so every group returns as a human_action_required entry naming #1153, where those agents land. A single invocation returns the plan; the per-group work agents are the orchestrator's job. Pure function of its JSON input; runs no detection of its own. Ships NO approver — a cluster definition is approved by a human. |
+
 ## development-python
 
 | Command | Description |

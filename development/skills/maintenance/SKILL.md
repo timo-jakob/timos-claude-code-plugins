@@ -252,10 +252,12 @@ manifest. Known topics:
 | `spring` | an `org.springframework.boot` Gradle plugin **or** a `spring-boot-starter-*` dependency in `build.gradle.kts` (composes alongside `java` — only meaningful when Java is also detected) | `gather-spring-findings.zsh` |
 | `docs` | a `docs/architecture/` **directory** (the C4 architecture docs home — language-agnostic, so it composes with any language, or none) | `gather-docs-findings.zsh` |
 | `react` | `react` in the **`dependencies`** (runtime, **not** `devDependencies`) of **any** `package.json`, monorepo-aware, under `detect_lang`'s prune set (`node_modules`, `.git`, `vendor`, `.build`, `dist`, `templates`). Requires `jq`; **requires language `javascript`** | `gather-react-findings.zsh` |
+| `kubernetes` | a Helm `Chart.yaml`, a Kustomize manifest (`kustomization.yaml`, `kustomization.yml` or `Kustomization` — all three spellings kustomize accepts), **or** a file containing `argoproj.io` — language-agnostic, so it composes with any language, or none | `gather-kubernetes-findings.zsh` |
 
 **Detecting a marker — use these exact recipes, don't improvise.** A
 *file-presence* marker (the `claude-plugin` dir) is robust to test with
-`test -e`. The **content** markers (`spring`, `react`) must look *inside*
+`test -e`. The **content** markers (`spring`, `react`, and the
+`argoproj.io` half of `kubernetes`) must look *inside*
 files — `spring` greps `build.gradle.kts`, `react` reads `package.json`
 with `jq`. Kotlin DSL only (#343) — the family maintains
 `build.gradle.kts`, so the marker greps only that; a Groovy/Maven repo is
@@ -311,7 +313,35 @@ else
   [ -n "$react_hits" ]
 fi
 # react-marker:end
+
+# kubernetes marker (file presence OR content; prune vendored trees).
+# A PREDICATE, like every recipe above — its EXIT STATUS is the verdict, and the
+# partition step below does the registering. Never make a recipe register the
+# topic itself: a side-effecting `if … fi` exits 0 whether or not the marker
+# fired, so a caller reading `$?` uniformly across these recipes would detect
+# the topic on every repo.
+# Capture before filtering: `find | grep -q` loses the match to SIGPIPE under
+# `set -o pipefail`, which every maintenance script sets.
+# `! -type d` for the same reason the react recipe carries it: a DIRECTORY named
+# `Kustomization` is not a manifest, while a symlinked one still counts.
+# kubernetes-marker:begin
+k8s_hits="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
+                       -o -name kustomization.yml -o -name Kustomization \) \
+                 ! -type d 2>/dev/null \
+              | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
+[ -n "$k8s_hits" ] || grep -rqlF 'argoproj.io' \
+  --include='*.yaml' --include='*.yml' \
+  --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+  --exclude-dir=templates . 2>/dev/null
+# kubernetes-marker:end
 ```
+
+**The `kubernetes-marker:begin`/`:end` sentinels are load-bearing**, exactly as
+react's are: `tests/kubernetes-topic-marker.bats` extracts the text between them
+and executes it, so the suite tests *this* recipe rather than a copy of it, and a
+second test derives the recipe's marker names and prune set from
+`gather-kubernetes-findings.zsh` and requires the two to agree. Keep the whole
+recipe between them, and keep them a single unique pair.
 
 **The `react-marker:begin`/`:end` sentinels are load-bearing**, not decoration:
 `tests/react-topic-marker.bats` extracts exactly the text between them and executes
@@ -395,6 +425,29 @@ whose app directory is a *symlink* is not traversed. This is a deliberate trade,
 an oversight: `-L` would follow the pnpm/yarn `node_modules` symlink farms the prune
 list exists to avoid, and can loop.
 
+The `kubernetes` topic (#1152) has **no** language gate — like `docs`, and unlike
+`spring`/`react`. Charts and overlays are language-agnostic, so the topic composes
+with any detected language, or with **none at all**: a GitOps repo declaring
+`primary: kubernetes` is exactly the case it exists for, and requiring a language
+would make that repo undispatchable. Two things about its marker are deliberate:
+
+- **It is not "any YAML with `apiVersion`".** That would match half the repos in
+  existence — every GitHub Actions workflow, every OpenAPI document. The marker is
+  a Helm `Chart.yaml`, a Kustomize `kustomization.yaml` (all three spellings
+  kustomize itself accepts — `kustomization.yaml`, `kustomization.yml`,
+  `Kustomization`), or the literal string `argoproj.io`, which no non-Argo file
+  carries by accident.
+- **The find output is captured before it is filtered.** `find … | grep -q` looks
+  equivalent but inverts under `set -o pipefail`: `grep -q` exits at its first
+  match, `find` — still writing — dies of SIGPIPE, and the pipeline reports
+  non-zero even though a chart *was* found. It fails only on repos whose `find`
+  output outruns the pipe buffer, which is the worst possible failure mode.
+  Capture, then test the variable.
+
+Both the marker and `gather-kubernetes-findings.zsh` prune `node_modules`,
+`.git`, `vendor` and `templates` — the last one matters here, since this very repo
+ships chart *templates* under bootstrap's `templates/` tree.
+
 **`gather-docs-findings.zsh` landed in #793**, so `docs` is a **supported** topic
 whenever its marker fires: #801 stood up the `development-docs` dispatcher and this
 marker, and #793 added the gather plus the `c4_drift` tool. Never hard-code a topic's
@@ -420,6 +473,7 @@ marker prose and then quietly skipped:
 | --- | --- |
 | `claude-plugin` | none |
 | `docs` | none |
+| `kubernetes` | none |
 | `spring` | `java` |
 | `react` | `javascript` |
 
@@ -940,13 +994,20 @@ Build a payload per `topic` in `supported_topics` the same way, with these
 differences:
 
 - `language`: the **topic name** (e.g. `"claude-plugin"`) — it identifies the
-  dispatch target; topic dispatchers don't branch on it.
+  dispatch target. Most topic dispatchers don't branch on it, but the value is
+  **contractual, not informational**: a topic dispatcher MAY validate it, and
+  `development-kubernetes` does — it errors and stops when `.language` is not
+  `"kubernetes"`, because the v2 payload has no `topic` key for it to check
+  instead. So never null it, normalise it, or move the topic name to a new key
+  without updating the topic dispatchers in the same change: every kubernetes
+  dispatch would land in `unsupported_topics` as `dispatch failed`.
 - `dispatch_mode`: `"primary"` if this topic == the declared `primary` (or no
   declaration); else `"auxiliary"` — same rule as language payloads (Phase 1).
 - `language_meta`: `{ "version": null, "manifests": ["<the topic marker>"] }` —
   the marker path, whether a file (`claude-plugin`) or a directory
   (`docs` → `"docs/architecture"`). For a **content** marker — one that matches
-  *inside* files rather than by path (`spring`, `react`) — `manifests` is the list of
+  *inside* files rather than by path (`spring`, `react`, and the `argoproj.io`
+  half of `kubernetes`) — `manifests` is the list of
   **every matching file path**, repo-relative, in `find` order: e.g.
   `["packages/web/package.json", "apps/admin/package.json"]`. Never invent a
   conventional root path for a content marker: a monorepo whose React app lives in
@@ -975,7 +1036,44 @@ differences:
   # spring → grep -REl already prints paths (sed strips find/grep's leading ./ so
   # both content markers emit the same repo-relative form the example above shows)
   grep -REl --include='build.gradle.kts' 'org\.springframework\.boot|spring-boot-starter-' . 2>/dev/null | sed 's|^\./||'
+
+  # kubernetes → the HYBRID case (see below): the marker's own filtered path list,
+  # falling back to the argoproj.io matches only when it is empty. The final
+  # printf is GUARDED, so an empty result prints NOTHING — matching the two
+  # recipes above, whose consumers read "one path per line" and would otherwise
+  # turn a lone blank line into a `[""]` manifest naming no file.
+  # kubernetes-manifests:begin
+  k8s_paths="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
+                         -o -name kustomization.yml -o -name Kustomization \) \
+                   ! -type d 2>/dev/null \
+                 | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ \
+                 | sed 's|^\./||' || true)"
+  [ -n "$k8s_paths" ] || k8s_paths="$(grep -rlF 'argoproj.io' \
+    --include='*.yaml' --include='*.yml' \
+    --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+    --exclude-dir=templates . 2>/dev/null | sed 's|^\./||' || true)"
+  [ -z "$k8s_paths" ] || printf '%s\n' "$k8s_paths"
+  # kubernetes-manifests:end
   ```
+
+  **`kubernetes` is a HYBRID marker and needs its own clause**, because it is
+  neither purely path-based nor purely content-based: it fires on a *file
+  presence* set (`Chart.yaml`, the three `kustomization` spellings) **or** on
+  `argoproj.io` *content*. Its `manifests` is the filtered path list the recipe
+  above produces — many paths, not one — falling back to the `argoproj.io`
+  matches when the presence half found nothing. Note the fallback drops `-q`:
+  the verdict recipe's `grep -rqlF` deliberately prints nothing, so reusing it
+  here would emit an empty list. And, per the rule above, never substitute a
+  conventional root path such as `["kustomization.yaml"]` for an Argo-only
+  repo — no such file exists there.
+
+  **The `kubernetes-manifests:begin`/`:end` sentinels are load-bearing too**, like
+  the verdict recipe's: `tests/kubernetes-topic-marker.bats` extracts this block by
+  them, executes it, and holds its marker names and prune set to the *same* derived
+  oracle as the verdict recipe and `gather-kubernetes-findings.zsh` — all three must
+  stay identical. Keep them a single unique pair, keep the whole recipe between
+  them, and keep the block at its current two-space indent inside this list item
+  (the extractor de-indents by exactly that much).
 
   **The `react-manifests:begin`/`:end` sentinels are load-bearing too**, exactly as
   the verdict recipe's are: `tests/react-topic-marker.bats` extracts this block by
@@ -1172,17 +1270,41 @@ dispatch that found nothing are reported identically.
 
 A topic's `plan` groups join the **same Phase 8 queue** as language groups and
 are processed by the same sequential per-stage PR cycle. **How to read an empty
-topic `plan` depends on `tooling_configured`:** non-empty means "this topic is clean
-— its tools ran and found nothing"; **empty** means "no tools are registered for this
-topic yet — nothing was inspected". Render the second case as such and cite the
-topic's `notes`, so a no-op is never reported as a clean bill of health.
+topic `plan` depends first on `human_action_required`, then on
+`tooling_configured`:**
+
+- the response carries a non-empty **`human_action_required`** → the dispatcher
+  *deliberately halted*, whatever `plan` and `tooling_configured` say. Carry its
+  `{reason, recommendation}` entries into the Phase 9 summary (Phase 7's rule,
+  which is not language-only) and **never render a clean verdict for that
+  topic**. This is a real shape, not a hypothetical: `development-kubernetes`
+  returns exactly it — empty `plan`, empty `missing_tooling` (both its policy
+  keys are exempt from that list), and one entry per unroutable group — for
+  every finding it gathers until #1153 lands its agents.
+- else `tooling_configured` **non-empty** → "this topic is clean — its tools ran
+  and found nothing";
+- else (**empty**) → "no tools are registered for this topic yet — nothing was
+  inspected". Render it as such and cite the topic's `notes`, so a no-op is never
+  reported as a clean bill of health.
+
+A topic's `notes` can also contradict a clean reading directly — the kubernetes
+gather always carries `manifest_validation: presence-detected only`, meaning its
+tools have **not** run in the gather at all. Cite the notes whenever they say so,
+even on the "clean" branch.
 
 ## Phase 7 — handle `human_action_required` early-outs
 
-For any response that contains `human_action_required`, the language
-plugin halted because coverage was below floor. Pass the reasons +
-recommendations through to the user-facing summary and **skip all
-remaining phases for that language**. Other languages still proceed.
+For any response that contains `human_action_required`, the dispatcher halted
+deliberately. Pass the reasons + recommendations through to the user-facing
+summary and **skip all remaining phases for that dispatch target**. Every other
+target still proceeds.
+
+**This is not language-only.** For a *language* plugin the halt means coverage
+was below floor. A **topic** dispatcher halts for its own reasons — a finding
+whose routing table has no entry, or an agent that has not shipped yet
+(`development-kubernetes` until #1153) — and the same handling applies: the
+reasons reach the summary, and Phase 9 renders the topic as **halted**, never as
+clean.
 
 ## Phase 8 — per-stage PR cycle
 
@@ -2306,11 +2428,21 @@ pushed fixes for — detected, never dispatched:>
   <If the topic was never DISPATCHED — no plan exists (topic dispatch skipped
    under --tool/--concern, or --dry-run):>
   Gathered but not dispatched — no verdict for this run.
+  <Else if the RESPONSE carried a non-empty human_action_required — the
+   dispatcher deliberately halted. This case comes BEFORE the two below: the
+   halt shape is an empty plan with an empty missing_tooling, which would
+   otherwise fall through to "Clean" and report an escalation as a clean bill of
+   health. `development-kubernetes` returns exactly this shape for every group
+   it gathers until #1153:>
+  Halted — <N> group(s) need a human decision.
+    <one line per entry: <reason> → <recommendation>>
   <Else if tooling_configured is EMPTY (no tools registered for this topic yet):>
   No tools registered for this topic yet — nothing was inspected.
     <cite the topic's gather `notes` here>
   <Else if the plan was empty AND missing_tooling is empty:>
   Clean — the topic's tools ran and found nothing.
+    <cite any gather `note` that CONTRADICTS that reading — e.g. kubernetes'
+     "presence-detected only", which means the tools did not run in the gather>
   <Else if groups were planned:>
   <N> group(s) planned, <M> processed.
   <Otherwise: state the observed state plainly.>
