@@ -1,7 +1,7 @@
 # development-kubernetes — design
 
 - **Date:** 2026-08-02
-- **Status:** approved design, not yet implemented
+- **Status:** approved; in implementation — child 1 (#1151) landed, #1152-#1155 open
 - **Drives:** the `development-kubernetes` epic
 - **Motivating consumer:** a private platform-infrastructure repo (GitOps,
   Argo CD, Helm, no application language) that cannot currently be
@@ -17,9 +17,17 @@ require that anything *builds*, because no check exists to require.
 
 `ARCHITECTURE.md` already anticipates the answer by name:
 
-> a future `development-kubernetes` plugin would defer to language plugins
-> for the application's entrypoints, and own only the k8s-manifest
-> concerns (resource limits, probes, network policy, security contexts).
+> the `development-kubernetes` plugin defers to language plugins for the
+> application's entrypoints and images, and owns only the manifest-side
+> concerns — see `development-kubernetes` owns for the concern boundary,
+> which deliberately leaves generic manifest hygiene to `kube-linter`
+> rather than restating it here.
+
+(The wording ARCHITECTURE.md carried when this design was written listed
+"resource limits, probes, network policy, security contexts" as the plugin's
+own concerns. #1151 corrected it: that generic hygiene is `kube-linter`'s, per
+§3 below, and duplicating it would mean two places to silence one false
+positive.)
 
 Two properties of the motivating repo shape the design:
 
@@ -70,9 +78,13 @@ check for**. This is what allows a public plugin to serve a repo whose
 architectural decisions are confidential, and it is also what keeps the
 plugin genuinely reusable by third parties.
 
-**Discovery is by convention:** `policies/kyverno/**/*.yaml` in the repo
-under test. Absent, the policy step **skips and reports "no policies
-declared"** — it does not fail. A public plugin has to work in a repo that
+**Discovery is by convention:** `policies/kyverno/**/*.{yaml,yml}` in the repo
+under test. The **glob**, not the directory, is the contract: the skip
+condition is **no matching files**, so an empty or `.json`-only policy
+directory skips exactly like an absent one, and a repo that writes its
+policies as `.yml` is enforced rather than silently ignored. When nothing
+matches, the policy step **skips and reports "no policies declared"** — it
+does not fail. When policies *are* declared, violations **do** fail. A public plugin has to work in a repo that
 has no opinions yet; a hard failure would make it unusable by anyone but
 its first consumer.
 
@@ -123,11 +135,11 @@ failures surface first:
 | # | Step | Tool |
 |---|---|---|
 | 1 | **Render** charts and overlays into a temp tree | `helm template`, `kustomize build` |
-| 2 | **Schema** validation against the target API version, CRDs included | `kubeconform` |
+| 2 | **Schema** validation against the target API version (core kinds; CRD-defined kinds are skipped in v1 — see below) | `kubeconform` |
 | 3 | **Best practice** — probes, limits, privileged containers, `latest` | `kube-linter` |
 | 4 | **Policy** — the repo's own rules, plus their tests | `kyverno apply`, `kyverno test` |
 | 5 | **Config scan** — misconfiguration | `trivy config` |
-| 6 | **Argo CD** — `Application`/`AppProject` validity; every app the app-of-apps references exists | |
+| 6 | **Argo CD** — every app path the app-of-apps references exists (path integrity, not schema validity) | `yq` |
 
 Everything downstream validates **rendered output, not templates**: a
 chart that lints clean can render an invalid manifest, and the rendered
@@ -136,6 +148,14 @@ form is what reaches a cluster.
 Step 1 is why this works on a repo with no application code — there is
 always something to render, so the checks are meaningful before the first
 service exists.
+
+**v1 does not schema-validate CRD-defined resources.** `kubeconform` runs with
+`-ignore-missing-schemas` and no CRD schema location, so `argoproj.io` kinds —
+the resource class this plugin centres on — are skipped silently rather than
+validated. Step 6 checks Argo CD app-path integrity, not schema validity, so the
+gap is not covered elsewhere. Saying so plainly matters: a reader who believed
+"CRDs included" would trust a validation that never ran. Wiring a CRD schema
+catalog into the schema step is deliberate later work.
 
 Each step becomes a required status check once green.
 
@@ -146,8 +166,24 @@ discovered by the orchestrator's existing convention so nothing hardcodes
 the new plugin. Detection marker is a Helm `Chart.yaml`, a
 `kustomization.yaml`, or `argoproj.io` resources — deliberately *not* "any
 YAML with `apiVersion`", which would match half the repos in existence. It
-runs the same tools as §4 and emits v2 JSON, so CI and maintenance cannot
-disagree about what is wrong.
+emits v2 JSON whose tool keys MAP onto §4's checks rather than repeating their
+names: `manifest_validation` covers the render/schema/lint surface (§4 steps
+1-3), and `policy` plus `policy_tests` cover step 4. Stating the mapping matters
+because the dispatcher's routing table keys on those three names — a payload
+keyed by the CI check names instead would produce groups the dispatcher does not
+route — which its validation **halts** on with `human_action_required`, rather
+than dropping. Either way the findings never reach an agent; the halt at least
+says so out loud.
+
+**v1 is presence-detection, not a second execution of §4's tools.** The gather
+reports which tooling is *configured* (charts/overlays present, a policy set
+declared, whether that policy set has `kyverno test` fixtures) and leaves
+`manifest_validation` / `policy` findings empty; CI is where those tools
+actually run. Stating it plainly matters, because the alternative reading —
+that maintenance re-runs kubeconform/kube-linter/kyverno — would make an empty
+findings list mean "this repo is clean" when it only means "nothing was run".
+Executing the tools in the gather is a deliberate later step, not a gap this
+slice silently carries.
 
 **Dispatcher:** `development-kubernetes/skills/maintenance/SKILL.md` —
 validates the payload, returns a PR-grouped plan, spawns nothing. A pure

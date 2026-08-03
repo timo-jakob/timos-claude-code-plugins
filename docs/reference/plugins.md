@@ -361,6 +361,49 @@ remediation reuses `development-javascript`'s `js-ci-fixer`.
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan. Empty tool universe in v0.1 — always an empty plan until [#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)–[#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960) register tools. |
 
+## development-kubernetes
+
+Topic plugin for **infrastructure-as-code** — Kubernetes manifests, Helm charts
+and values, Kustomize overlays, and Argo CD `Application` / `ApplicationSet` /
+`AppProject` resources. Like `development-claude-plugin`, it can also be
+**primary**: a GitOps repo has no application language, and the
+primary/auxiliary model already permits a topic to hold that slot, so such a
+repo gets a real pipeline rather than an auxiliary lint pass.
+
+Its defining split is **mechanism here, policy in the consumer**. The plugin
+knows *how* to render and check manifests; the repo under test declares *what*
+to check for, at `policies/kyverno/**/*.{yaml,yml}`. When no policy file
+matches, the policy step skips and reports "no policies declared" — that absence
+is never an error, because a public plugin has to work in a repo with no
+opinions yet. When policies *are* declared, violations fail. The plugin ships
+**no policies of its own**: generic hygiene (probes, resource limits, non-root,
+`latest` tags) is `kube-linter`'s job, and two tools enforcing one rule means
+two places to silence a false positive. Following `development-claude-plugin`,
+there is **no approver agent** — a cluster definition is the origin of
+everything running on it, so a human approves.
+
+**What's built (v0.1):** the ownership boundary and the marketplace
+registration, and nothing else
+([#1151](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1151)).
+Getting the boundary wrong is the expensive mistake — a topic plugin that creeps
+into Dockerfiles or application code contradicts language-first and has to be
+unpicked across several plugins later — so it is settled before anything fills
+it. The rest of epic
+[#1150](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1150)
+follows: the topic marker, gather script and maintenance dispatcher
+([#1152](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1152)),
+the five agents and the review skill
+([#1153](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1153)),
+the bootstrap check pipeline
+([#1154](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1154)),
+and the self-contained test fixtures
+([#1155](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1155)).
+Until #1152 lands there is no `kubernetes` topic marker, so a repo declaring
+`primary: kubernetes` is treated as a stale declaration.
+
+**Skills:** none yet — the dispatcher lands with
+[#1152](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1152).
+
 ## development-go
 
 Go maintenance — a **full-maintenance tier**, mirroring `development-python` /

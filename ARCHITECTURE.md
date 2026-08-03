@@ -15,12 +15,13 @@ development-java         ← language: Java (Gradle); composes with development-
 development-javascript   ← language: JavaScript + TypeScript (combined); composes with development-react
 development-go           ← language: Go (modules; golangci-lint v2, ko, buf)
 development-…            ← future: rust, …
-development-container    ← topic: containers / OCI images
+development-container    ← topic: containers / OCI images (planned, #172)
 development-claude-plugin ← topic: projects that ARE Claude Code plugins
 development-spring       ← topic: Spring framework (composes with development-java)
 development-docs         ← topic: documentation (C4 architecture docs; marker docs/architecture/)
 development-react        ← topic: React framework (composes with development-javascript)
-development-…            ← future topics: kubernetes, terraform, …
+development-kubernetes   ← topic: infrastructure-as-code (manifests, Helm, Kustomize, Argo CD; may be primary)
+development-…            ← future topics: opentofu, …
 ```
 
 All plugins live in this monorepo. End users install whichever subset
@@ -32,7 +33,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-container`, `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, future: `development-kubernetes`, `development-terraform` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes` (dispatch lands with #1152), future: `development-container`, `development-opentofu` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -87,10 +88,12 @@ for these idioms — it owns:
 - Multi-language Dockerfiles (Python + Node bundled in one image,
   etc.) — the case no single language plugin claims
 
-The principle generalizes: a future `development-kubernetes` plugin
-would defer to language plugins for the application's entrypoints, and
-own only the k8s-manifest concerns (resource limits, probes, network
-policy, security contexts).
+The principle generalizes: the `development-kubernetes` plugin defers to
+language plugins for the application's entrypoints and images, and owns
+only the manifest-side concerns — see
+[`development-kubernetes` owns](#development-kubernetes-owns) for the
+concern boundary, which deliberately leaves generic manifest hygiene to
+`kube-linter` rather than restating it here.
 
 ### Primary / auxiliary model
 
@@ -614,6 +617,66 @@ per-language policy templates.
 - For topic plugins: anything a language plugin can do better
   (see "Language-first principle").
 
+### `development-kubernetes` owns
+
+Kubernetes manifests, Helm charts and values, Kustomize overlays, and
+Argo CD `Application` / `ApplicationSet` / `AppProject` resources.
+
+It does **not** own Dockerfiles or image builds — language-first puts
+those with the language plugins and later `development-container` — nor
+cloud provisioning, nor application code of any kind.
+
+**Mechanism here, policy in the consumer.** The plugin knows how to run
+checks; the repo under test declares what to check for, at
+`policies/kyverno/**/*.{yaml,yml}`. That glob — **not** the mere
+existence of the `policies/kyverno/` directory — is the contract: the
+skip condition is **no matching files**, so an empty (or `.json`-only)
+policy directory skips exactly like an absent one, and a repo that
+writes its policies as `.yml` is enforced rather than silently ignored.
+
+When nothing matches, the policy step **skips and reports "no policies
+declared"**. *That absence* is never an error — a public plugin has to
+work in a repo that has no opinions yet. The guarantee scopes to the
+absence and nothing else: when policies **are** declared, violations
+**fail** the step, or the mechanism would be decorative.
+
+The plugin ships **no policies of its own**: generic hygiene (probes,
+resource limits, non-root, `latest` tags) is `kube-linter`'s job, and two
+tools enforcing one rule means two places to silence a false positive.
+
+**No approver agent**, following `development-claude-plugin`: a cluster
+definition is the origin of everything running on it, so a human
+approves. Note this is *not* the same as no auto-merge — the Maintenance
+App cannot approve its own pull request, so a human approval is
+structurally required, and auto-merge armed afterwards fires only once
+that approval lands.
+
+**One deliberate exception to the `missing_tooling` rule.** The family default
+builds `missing_tooling` from `tooling_configured` entries that are `false`, and
+dispatches the tool's agent to say "here's how to add it". This plugin exempts
+`policy` and `policy_tests`: a repo with no `policies/kyverno/` has not failed to
+configure a tool, it has declined to declare opinions — which is the whole point
+of mechanism-here-policy-in-the-consumer — so surfacing it would re-emit the
+adopt-Kyverno recommendation the charter forbids. Every other `false` entry
+populates `missing_tooling` normally.
+
+A repo declaring `primary: kubernetes` in `.maintenance.yml` is entitled to
+the full pipeline; the primary/auxiliary model already permits a topic to be
+primary, so no new mechanism is needed. It arrives in two steps, and
+conflating them over-promises the first: until `kubernetes` is in the
+detected+supported set the orchestrator **treats the declaration as stale**
+and dispatches every target as primary — that ends when the topic marker
+and gather script land (#1152). The **gates themselves** arrive later still,
+with the agents (#1153) and the check pipeline (#1154).
+
+"Full pipeline" here means the **six checks** bootstrap's
+`templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit** (#1154) — render → schema →
+lint → policy → config-scan → argocd. Note where they will live: the workflow
+is a *bootstrap* template owned by the generic `development` plugin, not
+something this plugin's skills run, which is the same boundary that keeps
+detection in `development`. A manifests repo has no test suite, so the language-app
+gates — the coverage floor above all — do not apply to it.
+
 ## Build policy — Gradle + Kotlin DSL only (Java/Spring)
 
 The Java/Spring plugins maintain exactly **one** blessed build format:
@@ -940,7 +1003,15 @@ auxiliary model"). The orchestrator sets it from the repo's
 `.maintenance.yml` declaration: the declared primary stack gets
 `"primary"`, every other detected stack gets `"auxiliary"`. Defaults to
 `"primary"` when there is no declaration, so existing runs are
-unaffected. In `"auxiliary"` mode a language plugin runs only its
+unaffected. A declaration that names a stack **not in the
+detected+supported set** is **stale** — it selects nothing, so it is not
+allowed to demote everything else to `"auxiliary"`: every target
+dispatches as `"primary"` and the Phase 9 summary notes the stale
+declaration (`development/skills/maintenance/SKILL.md`). That is the case
+a repo hits when it declares a primary the orchestrator cannot yet
+dispatch, e.g. `primary: kubernetes` before #1152 registers the marker.
+
+In `"auxiliary"` mode a language plugin runs only its
 mechanical fixers and **skips its app-grade gates** (coverage
 pre-flight, dependency upgrades) — a policy override, not a separate
 code path per tool.
@@ -1352,7 +1423,8 @@ of the worktree with two subcommands.
 
 - **Repo-type detection reuses the maintenance logic** — it runs
   `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
-  review types are `swift` | `python` | `java` | `go`, each mapping to that language's
+  review types are `swift` | `python` | `java` | `go` | `claude-plugin` — the
+  last is the no-language FALLBACK, not a `.languages` value — each mapping to that type's
   `:review` skill. When several apply, `.maintenance.yml`'s `primary`
   disambiguates.
 - **The review scope is the story's diff, never the whole repo.** `changed_files`

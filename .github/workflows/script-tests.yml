@@ -76,6 +76,20 @@ on:
       # tests/telemetry-rollup.bats asserts docs/how-to/read-pipeline-telemetry.md
       # exists and is registered in the how-to index (#1007) — same rule
       - 'docs/how-to/**'
+      # tests/dogfood-c4.bats asserts this repo's own C4 pages against the
+      # c4/v1 parser and against marketplace.json (#795, #1151) — a PR touching
+      # only a diagram matched nothing here, so it ran no bats leg at all
+      - 'docs/architecture/**'
+      # tests/kubernetes-plugin-skeleton.bats derives the plan's reproduced
+      # ARCHITECTURE block against the shipped section (#1151), so a PR editing
+      # only that plan must trigger the suite at PR time — not turn up as a red
+      # main on the unfiltered push run
+      - 'docs/superpowers/**'
+      # tests/kubernetes-plugin-skeleton.bats asserts the plugin manifest's
+      # load-bearing description clauses and README's plugin table (#1151);
+      # note 'development/**' above does NOT match 'development-kubernetes/**'
+      - 'development-kubernetes/**'
+      - 'README.md'
       - 'docs/index.md'
       - 'mkdocs.yml'
       - '.github/workflows/script-tests.yml'
