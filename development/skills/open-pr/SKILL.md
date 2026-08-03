@@ -137,7 +137,23 @@ pinned to `types: [opened, synchronize]` would not re-run on the nudge.)
 **Review dossier (#563).** When the caller ran the local review loop (#562) and
 it exited `CONVERGED`, append the **Review dossier** to the PR body, after the
 Test plan — it is the durable audit record for why auto-merge happened. Build it
-from the loop's status JSON:
+from the loop's status JSON, appending **exactly ONE** dossier — so decide the
+flags *before* you run anything: pass the promotion pair when the caller kept a
+promotion-phase status JSON (the condition is spelled out below), and the plain
+`--status` form otherwise.
+
+The once-only rule is about **appended output**, not processes: never append two
+dossier outputs (two hidden blocks) to one body. So if you ran the wrong form and
+its output has **not** been appended anywhere, discard it and run the single
+correct invocation; if it **has** been appended, stop and report to the caller
+rather than appending or hand-editing a second block.
+
+Plain form — **no kept promotion-phase status JSON**. Note a discard does *not*
+put you here: resolve-issue step 7 mandates a re-invoke after a discarded
+phantom, and it is the re-invoked sub-loop's **kept** status, never the discarded
+file, that the condition tests — so a discard-then-re-invoke run takes the pair
+form. The plain form applies only when the run ended with no kept promotion
+status at all (the no-op case is described just below):
 
 ```bash
 "<skill-base-dir>/../resolve-issue/scripts/build-dossier.zsh" --status <status.json>
@@ -145,8 +161,37 @@ from the loop's status JSON:
 
 It emits the human-readable dossier section **and** a hidden
 `<!-- review-dossier: {…} -->` JSON block the Approver re-ingests into its risk
-register. When no loop ran (`--no-review` / zero rounds) it prints nothing, so
-the PR body is exactly as it is today — no dossier, no behavior change.
+register. When no loop ran — a `SKIPPED` / `--no-review` status, or a status
+with zero rounds — it prints nothing, so the PR body is exactly as it is
+today — no dossier, no behavior change.
+
+When the caller kept a **promotion-phase status JSON** — one this run wrote and
+did **not** discard (a sub-loop can be invoked and its round-1 status discarded
+as a phantom, and a reused scratch dir can hold an earlier story's leftover),
+including a run where it raised nothing — that
+same single invocation merges both phases into the one section and one block
+(#1064); the Approver parses exactly one, so never **append** its output twice:
+
+```bash
+"<skill-base-dir>/../resolve-issue/scripts/build-dossier.zsh" --status <status.json> \
+  --promotion-status <promotion-status.json> --promoted <promoted.json>
+```
+
+The two promotion flags are an **atomic pair** — one without the other is a
+usage error (exit 2), never a silent fall back to a blocking-phase-only dossier.
+The condition is the *artifact*, not the phrase "the phase ran": resolve-issue's
+promotion step 8 owns it, and its *If NONE matched* terminal never invokes the
+sub-loop (plain `--status`) while its not-reproducible terminal does (pass the
+pair, and the dossier honestly reports `promoted: 0`).
+
+**Check the exit status before appending.** build-dossier prints nothing on
+stdout when it fails (2 = usage / broken pair, 1 = bad input), which is
+indistinguishable from the legitimate no-loop no-op — so an unchecked append
+opens a dossier-less PR and reads the silence as sanctioned. On non-zero, fix
+the input stderr names and re-run rather than opening the PR; and when the loop
+is known to have converged, treat empty output at exit 0 as the same error. If
+the input cannot be restored, **stop and report to the caller instead of opening
+the PR** — never reconstruct the status JSON by hand to satisfy the command.
 
 > Optional cleaner attribution: if you want the *commits* (not just the PR)
 > attributed to the bot, amend/rebase with

@@ -124,7 +124,9 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
   # stated here too because this is the surface where an additive misreading is
   # most likely (the term sits inside the same severity parentheses). NB: no
   # apostrophes in this block — the jq program is single-quoted. Same
-  # per-item expression as the two sibling copies, and — like $auto_ftrips — a
+  # per-item expression as the four sibling copies (escalation table, telemetry
+  # payload, and the two build-dossier reads: raised-set + round suffix, #1064),
+  # and — like $auto_ftrips — a
   # direct flag with NO $stamped gate: an unstamped changelist simply counts 0
   # and renders neither the term nor a line, keeping a no-promote run
   # byte-identical.

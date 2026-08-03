@@ -888,9 +888,9 @@ orphaned.
    **seeded** file built by the ordered procedure that follows, and a
    NONE-matched classification means the sub-loop is never invoked at all. Read
    the procedure first, then come back to this invocation.
-   **`rm -f <promotion-status.json> || { echo "could not delete the promotion
-   status file — its existence is no longer a signal; do NOT invoke the
-   sub-loop"; }` immediately before
+   **`rm -f <promotion-status.json> && [[ ! -e <promotion-status.json> ]] ||
+   { echo "could not delete the promotion status file — its existence is no
+   longer a signal; do NOT invoke the sub-loop"; exit 1; }` immediately before
    every invocation** (round 1, each `--resume`, each recovery re-invoke) so
    step 7's exit taxonomy can tell a status this invocation wrote from one the
    last one left behind — and so a *failed* delete is visible rather than
@@ -992,8 +992,10 @@ orphaned.
    **Keep the matched set** — every key classed matched in step 2, seeded or not
    — in the **same scratch dir outside the repo** as the promote file and the
    work-dir (a file written inside the repo changes the tree identity, defeats
-   every `--gate-attest` match, and risks being committed at §5). It is what the
-   run reports as promoted.
+   every `--gate-attest` match, and risks being committed at §5). It is the set
+   §6 **reconciles against the engine's raised count** (`promotion.promoted`) —
+   not itself the cleared figure: a matched key the engine never raised is
+   reported as promoted-but-not-reproducible, never counted as cleared.
 
    - **Report each class in the PR body's Summary by its own name** — never
      collapse them: **unmatched** keys are *promoted but no longer present*;
@@ -1075,12 +1077,37 @@ orphaned.
      non-file or wrong-shaped `--promote` path, a persisted promote path that
      has since vanished or been rewritten badly, a `--max-rounds` at or below
      the resumed round, or `--promote` passed together with `--no-review`. Fix the command and re-invoke.
-   - **On an exit 1 or 2**, a status JSON that is neither `STALE_FINDINGS` nor
-     `ERROR` is a **LEFTOVER** — the previous invocation's, because the delete
-     above failed or was skipped. It is never this invocation's verdict: treat
-     it exactly as "no status JSON written", report in the conversation, and
-     stop. Reading a leftover round-1 `CONVERGED` as this exit's result would
-     converge the promotion phase on a run that actually failed.
+   - **On an exit 1 or 2 whose pre-invocation delete was NOT verified**, any
+     status JSON found is a **LEFTOVER** — the previous invocation's, because
+     the delete above failed or was skipped. **The content test only works when the
+     pre-invocation delete provably succeeded** — verify the path is absent
+     (`[[ ! -e <promotion-status.json> ]]`) before invoking, and then any status
+     found afterwards is provably this invocation's. If absence was **not**
+     verified, the taxonomy is unreliable for *every* status, `STALE_FINDINGS`
+     and `ERROR` included: a skipped delete can leave the previous
+     invocation's refusal or red gate behind, and the cross-matched
+     combinations (exit 2 over a leftover `ERROR`, exit 1 over a leftover
+     `STALE_FINDINGS`) match no branch at all. Treat them all as leftovers.
+     (Under a **verified-absent** delete the reverse holds, and it is keyed on
+     the **write contract**, not on the status shape: exit 2 writes only
+     `STALE_FINDINGS` or nothing, exit 1 only `ERROR` or nothing. So **any**
+     freshly-written pairing those rules forbid — a neither-status, but equally
+     exit 1 over a `STALE_FINDINGS` or exit 2 over an `ERROR` — is an **engine
+     anomaly**, never a previous invocation's verdict, and never the
+     same-status branch keyed to the other exit code. The action is the same,
+     report and stop — the repoint-and-re-invoke option below applies only to a
+     **LEFTOVER** (a stale path); re-invoking cannot fix an engine that just
+     violated its write contract. Exit 0 and exits 20 / 10-13
+     always write their own status, so they are never in question.)
+     A **LEFTOVER** is never this invocation's verdict, and
+     the delete discipline that makes the taxonomy readable has broken:
+     **report the leftover in the conversation and stop** — or repoint
+     `--status-file` at a fresh, deletable path (step 4) before any re-invoke.
+     Do **not** take the "no status JSON written" branches' fix-and-re-invoke
+     handling: re-invoking without clearing the stale file leaves the next
+     exit's taxonomy just as unreadable, which is the hazard this rule exists
+     to prevent. Reading a leftover round-1 `CONVERGED` as this exit's result
+     would converge the promotion phase on a run that actually failed.
      **Exits 20 and 10-13 are not covered by this rule**: each always writes its
      own status, so that status *is* this invocation's verdict — take the round
      protocol (`AWAITING_FIX`) or the escalation branch, never this one.
@@ -1094,24 +1121,72 @@ orphaned.
      stderr names and re-invoke; if stderr names nothing you can act on, report
      in the conversation and stop.
 
-8. **The dossier is the BLOCKING phase's — a known, deliberate limitation.**
-   The phase leaves a second status JSON, but `build-dossier.zsh` takes exactly
-   one `--status` and the Approver parses exactly **one** hidden
-   `<!-- review-dossier: … -->` block (#563). So §6 builds the dossier from the
-   **blocking-phase** status exactly as it does today: **do not run
-   `build-dossier.zsh` twice** (two blocks would leave the Approver reading the
-   first and silently ignoring the other phase) and **do not hand-edit its
-   output**.
+8. **Keep BOTH status files — the dossier covers both phases (#1064).** The
+   phase leaves a second status JSON, and §6 merges the two into the **one**
+   section and **one** hidden `<!-- review-dossier: … -->` block the Approver
+   parses (#563), by passing the promotion pair alongside the blocking-phase
+   `--status`:
 
-   The consequence, stated plainly because it is a real gap: the promotion
-   phase's rounds and reviewers do not appear in the dossier, and an item the
-   human promoted and the sub-loop fixed is still listed under **Waived
-   suggestions**. Teaching `build-dossier.zsh` to merge both phases is tracked
-   separately in **#1064** — it is a #563 change, not this story's. Until it lands, **say in
-   the PR body's Summary** — per §6, which owns the count contract: **both**
-   counts plus step 4's unmatched / unverified split, and the dossier caveat
-   only when the sub-loop actually ran — so a reviewer is never misled by the
-   waived list.
+   ```bash
+   "<skill-base-dir>/scripts/build-dossier.zsh" --status <blocking-status.json> \
+     --promotion-status <promotion-status.json> --promoted <promoted.json>
+   ```
+
+   So keep all three paths: the blocking-phase status, the promotion-phase
+   status, and the promote file. **Append its output exactly once** — never two
+   hidden blocks in one body, or the Approver reads only the first — and
+   **never hand-edit its output**. The rule is about *appended output*, not
+   processes: a wrong-form run whose output was never appended is discarded and
+   the correct invocation re-run (open-pr owns that recovery); one already
+   appended means stop and report.
+
+   The two promotion flags are an **atomic pair**: passing one without the other
+   is a usage error (exit 2), never a silent fall back to a blocking-only
+   dossier. Pass them exactly when **a promotion-phase status JSON that THIS run
+   wrote and did not discard exists** — and not otherwise. Stated as the artifact
+   rather than as "the phase ran", but note the two qualifiers, because a bare
+   "a file is at that path" would be wrong twice over: the scratch dir is reused
+   within a session, so an earlier story can leave one there (step 4's `rm -f`
+   before every invocation is exactly what makes its later existence a signal —
+   step 7's **LEFTOVER** rule), and step 7's discard branch abandons a phantom
+   status that must never be passed either. Neither hazard is a terminal and
+   neither prescribes a dossier form: a **LEFTOVER** means report and stop
+   (step 7) — no PR, so no invocation at all — and after a **discard** it is the
+   re-invoked sub-loop's own status, never the discarded file, that this
+   condition tests. With that settled, the two terminals differ:
+
+   - the *If NONE matched* terminal (step 4) **never invokes** the sub-loop, so
+     there is no promotion status to pass → the plain `--status` invocation;
+   - the **not-reproducible** terminal (step 7) *did* invoke it — a full round 1
+     that wrote a `CONVERGED` status — so **pass the pair**. The dossier then
+     records `selected: N, promoted: 0`, which is the honest shape: the human
+     picked N and the engine raised none. Dropping the pair here would discard a
+     real phase's rounds and the pick count, which is exactly the record #1064
+     exists to preserve.
+
+   The merged dossier drops a promoted-and-fixed item from the waived list and
+   from the per-dimension suggestion counts, and carries a
+   `promotion: {rounds, status, selected, promoted}` object — so the waived list
+   no longer contradicts what the run did. §6 still owns the Summary's count
+   contract (both counts plus step 4's unmatched / unverified split); what it no
+   longer needs is the "dossier covers the blocking phase only" caveat.
+
+   **On a non-zero exit, do not open the PR without the dossier.** The script
+   prints nothing on stdout when it fails, so an unchecked invocation is
+   indistinguishable from the legitimate "no loop ran" no-op — the silent-loss
+   failure its own validation exists to prevent. Check the status: **2** is a
+   usage error (a broken atomic pair, a flag missing its value) and **1** an
+   input error (a status that is not one JSON object, a `null`-holding or
+   two-object scratch file, a wrong-shaped promote file); stderr names the
+   offending flag and file in both cases. Fix what it names and re-run. Treat
+   **empty output at exit 0** the same way whenever the loop is known to have run
+   a round — it means `--status` points at the wrong file.
+
+   If what stderr names **cannot be restored** — a kept status or promote file
+   lost or clobbered after convergence — **report in the conversation and stop**:
+   no PR. Never reconstruct a status or promote file by hand to satisfy the
+   command; the dossier is an audit record, and a hand-built input fabricates
+   exactly the history it exists to attest.
 
 #### Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
@@ -1352,21 +1427,56 @@ then `GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge <n> --auto --squash
 --delete-branch`. The PR body follows the template (Type / Summary /
 Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
 loop ran and converged (§3.5), append the **Review dossier** via
-`build-dossier.zsh` on the kept status JSON (#563) — the **blocking-phase**
-status, once, even when the suggestion-promotion phase also ran. Running it a
-second time for the promotion phase would put two hidden blocks in one body and
-the Approver would read only the first; merging the two is a separate #563
-change (#1064, promotion step 8). When the promotion phase ran, **name in the Summary**
-both counts — **how many suggestions the human picked and how many the sub-loop
-actually cleared** (the size of step 4's kept **matched set** on a sub-loop
-`CONVERGED`, and `0` on the *If NONE matched* and not-reproducible terminals;
-**never** the sub-loop's total `fixed`, which counts regressions it cleared
-along the way) — plus step 4's unmatched / unverified split. They are not
-the same number: step 4's *If NONE matched* terminal converges with a non-zero
-pick count and a sub-loop that never ran, so reporting the picks alone would
-claim work that never happened. A select-none answer is `0` and `0`. Add the
-"dossier covers the blocking phase only" caveat **only when the sub-loop
-actually ran** — with no second pass there is nothing for it to be missing.
+`build-dossier.zsh` on the kept status JSON (#563) — appending its output
+**once**, whether or not the suggestion-promotion phase also ran. Two hidden
+blocks in one body would leave the Approver reading only the first. (Once-only
+governs the *appended output*: an un-appended wrong-form run is discarded and
+re-run correctly — open-pr's recovery.) When the
+run **kept a promotion-phase status JSON** — one it wrote and did not discard,
+step 8's condition — that single invocation merges both phases (#1064) by
+also taking the pair `--promotion-status <promotion-status.json> --promoted
+<promoted.json>`. Otherwise — including the *If NONE matched* terminal, where
+the sub-loop was never invoked even though the phase was offered and its prompt
+answered — it is the plain `--status` invocation. State it as the artifact, never
+as "the phase ran": that phrase is true on *If NONE matched* and would send you
+hunting for a status file to pass, which is exactly how a reused-scratch leftover
+gets folded into the audit record. Passing one promotion flag without the other is a usage
+error, not a fallback.
+
+When the promotion **prompt was presented**, **name in the Summary** both
+counts — **how many suggestions the human picked, and how many the sub-loop
+actually cleared**; whenever the selection was **non-empty**, add step 4's
+unmatched / unverified split — the *If NONE matched* terminal **included**,
+where every key is one or the other and the split carries all the information
+there is (step 4 requires it there explicitly, and the dossier carries no
+promotion record on that terminal to back it up). Gate the split on step 4
+having classified, never on the sub-loop having run. (Only a select-none answer
+— prompt presented, nothing picked, step 4 never reached — is `0` and `0` with
+no split to report.)
+
+**The cleared count is the ENGINE's raised count** — `promotion.promoted`, the
+number of items it stamped — and `0` on the *If NONE matched* and
+not-reproducible terminals. It is **never** the sub-loop's total `fixed`, which
+also counts regressions cleared along the way; and it is **not** the raw size of
+step 4's matched set. That distinction is the one to get right: step 4's
+*matched* class is your approximation of the engine's #983 verdict, so the engine
+can raise **fewer** keys than you classed matched, and the sub-loop then
+converges at round ≥2 having cleared only those. Since the dossier rendered in
+the same PR body carries the engine's figure, reporting the larger matched set
+would make the PR contradict itself. So report the engine's count, and name every
+matched-but-never-raised key as promoted-but-not-reproducible — step 7's
+vocabulary.
+
+The two Summary counts are **not** the same number: the *If NONE matched*
+terminal converges with a non-zero pick count and a sub-loop that never ran, so
+reporting the picks alone would claim work that never happened. A select-none
+answer is `0` and `0`.
+
+The dossier now carries the promotion phase itself, so **no "blocking phase
+only" caveat is owed** — but the Summary counts still are, because the dossier
+never carries step 4's **matched / unmatched / unverified** split or the
+promoted-but-not-reproducible naming, and on the *If NONE matched* terminal it
+carries no promotion record at all.
 
 **Joint closure of the story + its test-case issues (#696).** When the same-PR
 test-case lifecycle ran (Step 2's planner exited 0), the PR body carries **one

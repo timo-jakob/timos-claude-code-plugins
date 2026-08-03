@@ -455,7 +455,10 @@ CI and the per-type criteria still decide):
 
 - **A `clean` dimension lowers that lens's residual-risk weight.** If
   `dimensions.<lens>.clean == true`, the panel reviewed that lens (bugs,
-  security, performance, code_quality, tests — and swift6_compliance on Swift)
+  security, performance, code_quality, tests — plus resilience on the service
+  languages and swift6_compliance on Swift; note that until #1148 lands a CLEAN
+  non-core lens emits **no key at all**, so the ABSENCE of `resilience` or
+  `swift6_compliance` is never itself a clean signal)
   and found nothing on the changed surface; treat a fresh risk you would
   otherwise raise in that lens as lower-probability, and do not manufacture one
   just to fill the register.
@@ -463,7 +466,22 @@ CI and the per-type criteria still decide):
   there; confirm the fix rather than assume it.
 - **`waived_low` is context, not a finding.** Those are Low suggestions the loop
   logged and deliberately did not act on; never turn a waived-Low into a
-  `REQUEST_CHANGES` on its own.
+  `REQUEST_CHANGES` on its own. An item a human **promoted** and the loop then
+  fixed is normally **not** in this list — it is excluded from `waived_low` and
+  counted under its dimension's `blocking` instead. The exclusion requires an
+  **exact** normalized title, though, so a suggestion the panel *reworded*
+  between the two phases can remain listed even though it was promoted and
+  fixed. So when a `promotion` object with `promoted > 0` is present, read
+  `waived_low` as **conservative — it may over-list**, never as proof an item
+  went un-actioned.
+- **A `promotion` object means a human curated the suggestions.** When present,
+  `promotion: {rounds, status, selected, promoted}` records a second, opt-in
+  phase in which the human raised some waived suggestions to blocking and the
+  loop cleared them: `selected` is how many they picked, `promoted` how many the
+  engine actually raised. `rounds` at the top level already includes that phase.
+  Read it as *extra* scrutiny the change has had, never as a defect signal — and
+  note that `selected > promoted` is normal (a pick the engine never raised was
+  never promoted in fact), not evidence of a missed fix.
 
 A PR **without** a dossier (e.g. `--no-review`, or a human-authored PR) is judged
 exactly as before — the dossier only ever *reduces* unnecessary friction, never
