@@ -29,6 +29,7 @@ Read more: [Motivation & current gaps](docs/explanation/motivation.md) ·
 | **development-claude-plugin** | Topic plugin for repos that *are* Claude Code plugins — validators + test harness |
 | **development-docs** | Topic plugin for documentation (C4 architecture docs; marker `docs/architecture/`) — dispatch path only in v1 |
 | **development-react** | Topic plugin for React (composes alongside development-javascript; marker `react` in a `package.json`'s runtime deps) — composition wiring only in v0.1 |
+| **development-kubernetes** | Topic plugin for infrastructure-as-code (Kubernetes manifests, Helm, Kustomize, Argo CD; may be *primary* for a repo with no application language) — ownership boundary only in v0.1 |
 
 Full command + agent inventory: **[docs/reference/plugins.md](docs/reference/plugins.md)**.
 

@@ -19,7 +19,7 @@ fire; a topic plugin composes alongside the language plugin for that run.
 > services, and build images. Run here it finds exactly **one** container —
 > `tests` (`tests/Dockerfile`, the bats-in-Docker test runner, #263) — which
 > this diagram **declares**, so there is no `detected_not_declared` drift. The
-> ten **plugins**, by contrast, are the product's real deployable units but
+> eleven **plugins**, by contrast, are the product's real deployable units but
 > are not Docker/compose-detectable, so they read as `declared_not_detected` —
 > a direction the pipeline **escalates for human judgement, never auto-removes**
 > (removing a declared container is an architectural statement). That asymmetry
@@ -50,6 +50,7 @@ C4Container
             Container(development-claude-plugin, "development-claude-plugin", "Claude Code plugin", "Plugin-repo overlay")
             Container(development-docs, "development-docs", "Claude Code plugin", "C4 docs topic — owns c4_drift")
             Container(development-react, "development-react", "Claude Code plugin", "React framework overlay")
+            Container(development-kubernetes, "development-kubernetes", "Claude Code plugin", "Infrastructure-as-code topic — manifests, Helm, Kustomize, Argo CD; may be primary (skeleton, #1151)")
         }
     }
 
@@ -68,6 +69,7 @@ C4Container
     Rel(development, development-claude-plugin, "dispatches")
     Rel(development, development-docs, "dispatches")
     Rel(development, development-react, "dispatches")
+    Rel(development, development-kubernetes, "dispatches (planned, #1152)")
     Rel(development-spring, development-java, "composes onto")
     Rel(development-react, development-javascript, "composes onto")
     Rel(development, maint_app, "mints token via")
@@ -77,8 +79,8 @@ C4Container
     UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
 ```
 
-The **declared container set** is the eleven `Container(...)` entries above — the
-ten installed plugins plus the `tests` runner image — recoverable by the
+The **declared container set** is the twelve `Container(...)` entries above — the
+eleven installed plugins plus the `tests` runner image — recoverable by the
 `c4/v1` parser (`extract-declared-containers.zsh`) without a Mermaid engine.
 `github` and `maint_app` are `System_Ext` — outside the marketplace's container
 boundary, so outside the system this diagram decomposes and therefore outside

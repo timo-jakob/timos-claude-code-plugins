@@ -12,6 +12,8 @@
 
 bats_require_minimum_version 1.5.0
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   CTX="$REPO_ROOT/docs/architecture/c4-context.md"
@@ -44,11 +46,75 @@ setup() {
   # a non-empty JSON array with the FULL c4/v1 per-entry shape (incl. description)
   echo "$output" | jq -e 'type == "array" and length > 0' >/dev/null
   echo "$output" | jq -e 'all(.[]; has("alias") and has("label") and has("technology") and has("description"))' >/dev/null
-  # the declared set is the real one — the ten plugins plus the detected tests
-  # image — so a mass-deletion of Container entries fails rather than passing on a
-  # single survivor
-  echo "$output" | jq -e 'map(.alias) as $a | ($a | index("development")) and ($a | index("development-docs")) and ($a | index("tests"))' >/dev/null
-  echo "$output" | jq -e 'length >= 11' >/dev/null
+  # the declared set is the real one — every marketplace plugin plus the detected
+  # tests image — so a mass-deletion of Container entries fails rather than
+  # passing on a single survivor. DERIVED, not a hardcoded floor: a floor goes
+  # stale the moment a plugin is added (it did, at #1151) and then tolerates
+  # exactly one silently deleted entry.
+  # DERIVE THE WHOLE SET, not just its size: a count plus a few literals still
+  # passes when an alias is misspelled or a renamed plugin keeps its old alias,
+  # which is the identity half of the same rot the length floor had.
+  local declared expected
+  declared="$(echo "$output" | jq -r '.[].alias' | sort)"
+  expected="$( { jq -r '.plugins[].name' "$REPO_ROOT/.claude-plugin/marketplace.json"; echo tests; } | sort)"
+  [ -n "$declared" ]
+  [ "$declared" = "$expected" ]
+}
+
+# the page states its own totals in words ("the twelve Container(...) entries
+# above — the eleven installed plugins plus the tests runner image"). Those were
+# hand-bumped at #1151 and nothing derived them, so the NEXT plugin would leave
+# them silently wrong — which is exactly how the length >= 11 floor above rotted.
+# Split across two tests so a stale COUNT and a stale SPELLING are reported by
+# distinct names: errexit aborts a test at its first failure, so bundling both
+# would hide the second behind the first.
+_count_words() {
+  # sets n_plugins / n_containers / w_plugins / w_containers, or returns nonzero
+  n_plugins=$(jq '.plugins | length' "$REPO_ROOT/.claude-plugin/marketplace.json")
+  n_containers=$(( n_plugins + 1 ))
+  word_for() {
+    case "$1" in
+      9) echo nine ;; 10) echo ten ;; 11) echo eleven ;; 12) echo twelve ;;
+      13) echo thirteen ;; 14) echo fourteen ;; 15) echo fifteen ;;
+      *) echo "UNMAPPED-$1" ;;
+    esac
+  }
+  w_plugins="$(word_for "$n_plugins")"
+  w_containers="$(word_for "$n_containers")"
+  # plain [ ] — errexit catches it on every bash, unlike an inert [[ ]] (#1011).
+  # Reds loudly when the family outgrows word_for rather than asserting nothing.
+  [ "${w_plugins#UNMAPPED-}" = "$w_plugins" ]
+  [ "${w_containers#UNMAPPED-}" = "$w_containers" ]
+}
+
+@test "the Container page's prose states the counts derived from the marketplace (#1151)" {
+  local n_plugins n_containers w_plugins w_containers flat
+  _count_words
+  # whitespace-normalized: the page wraps at ~80 cols, so a needle that spans a
+  # line break must be matched against flattened text, not line by line
+  flat="$(tr -s '[:space:]' ' ' < "$CONT")"
+  # rostered helpers, so a stale count prints needle + haystack rather than a
+  # bare `return 1` at a line number (#1067)
+  contains "$flat" "the $w_containers \`Container(...)\` entries"
+  contains "$flat" "$w_plugins installed plugins"
+  contains "$flat" "$w_plugins **plugins**, by contrast"
+}
+
+@test "no STALE count spelling survives anywhere on the Container page (#1151)" {
+  # a correct occurrence elsewhere would otherwise hide a stale duplicate. Swept
+  # for ALL THREE phrasings over a FLATTENED page, since a stale count split
+  # across a line break is invisible to a line-based grep.
+  local n_plugins n_containers w_plugins w_containers words
+  _count_words
+  words='(nine|ten|eleven|twelve|thirteen|fourteen|fifteen)'
+  tr -s '[:space:]' ' ' < "$CONT" > "$BATS_TEST_TMPDIR/flat.txt"
+
+  run bash -c "grep -oE '$words installed plugins' '$BATS_TEST_TMPDIR/flat.txt' | sort -u | grep -v '^$w_plugins installed plugins\$'"
+  [ -z "$output" ]
+  run bash -c "grep -oE '$words \\*\\*plugins\\*\\*' '$BATS_TEST_TMPDIR/flat.txt' | sort -u | grep -v '^$w_plugins \\*\\*plugins\\*\\*\$'"
+  [ -z "$output" ]
+  run bash -c "grep -oE \"$words .Container\" '$BATS_TEST_TMPDIR/flat.txt' | sort -u | grep -v \"^$w_containers .Container\\\$\""
+  [ -z "$output" ]
 }
 
 @test "the Container diagram declares the one container the detector finds — no detected_not_declared drift (#795)" {
@@ -87,9 +153,9 @@ setup() {
 
 @test "the landing page dropped the placeholder framing (#795)" {
   # no self-description as a placeholder, no #746 future-work pointer, no sketch
-  run ! grep -Eqi 'placeholder' "$INDEX"
-  run ! grep -Fq '#746' "$INDEX"
-  run ! grep -Fq 'flowchart LR' "$INDEX"
+  run -1 grep -Eqi 'placeholder' "$INDEX"
+  run -1 grep -Fq '#746' "$INDEX"
+  run -1 grep -Fq 'flowchart LR' "$INDEX"
 }
 
 @test "the landing page keeps ARCHITECTURE.md + MAINTAINING.md as absolute repo URLs (#795)" {
@@ -100,7 +166,7 @@ setup() {
 @test "the docs MOC no longer frames architecture as a placeholder (#795)" {
   # broadened from the exact legacy string to the concept, so any reworded
   # placeholder label is caught too
-  run ! grep -Fqi 'placeholder' "$MOC"
+  run -1 grep -Fqi 'placeholder' "$MOC"
   # and it now links both diagrams
   grep -Fq 'architecture/c4-context.md' "$MOC"
   grep -Fq 'architecture/c4-container.md' "$MOC"

@@ -40,6 +40,7 @@ PLUGINS = [
     "development-docs",
     "development-go",
     "development-java",
+    "development-kubernetes",
     "development-python",
     "development-react",
     "development-spring",
