@@ -1,7 +1,7 @@
 {
   "name": "development-kubernetes",
-  "description": "Infrastructure-as-code topic plugin (foundation slice, #1151) for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice ships the ownership boundary and the marketplace registration ONLY; the topic marker, gather script and dispatcher (#1152), the five agents and review skill (#1153), and the bootstrap CI pipeline (#1154) land in later children of #1150.",
-  "version": "0.1.0",
+  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the maintenance dispatcher, backed by the kubernetes topic marker and gather-kubernetes-findings.zsh in the development plugin (#1152); the dispatcher registers the routing table but escalates every group to a human until the five agents and review skill land (#1153), followed by the bootstrap CI pipeline (#1154).",
+  "version": "0.2.0",
   "author": {
     "name": "Timo Jakob"
   },

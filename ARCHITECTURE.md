@@ -33,7 +33,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes` (dispatch lands with #1152), future: `development-container`, `development-opentofu` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes` (agents land with #1153), future: `development-container`, `development-opentofu` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -654,20 +654,30 @@ that approval lands.
 **One deliberate exception to the `missing_tooling` rule.** The family default
 builds `missing_tooling` from `tooling_configured` entries that are `false`, and
 dispatches the tool's agent to say "here's how to add it". This plugin exempts
-`policy` and `policy_tests`: a repo with no `policies/kyverno/` has not failed to
+`policy` and `policy_tests`: a repo with no file matching
+`policies/kyverno/**/*.{yaml,yml}` has not failed to
 configure a tool, it has declined to declare opinions — which is the whole point
 of mechanism-here-policy-in-the-consumer — so surfacing it would re-emit the
-adopt-Kyverno recommendation the charter forbids. Every other `false` entry
-populates `missing_tooling` normally.
+adopt-Kyverno recommendation the charter forbids. Every other **known** `false` entry
+populates `missing_tooling` normally; an **unknown** key arriving `false` is the
+`tooling_configured` face of routing drift and is escalated via
+`human_action_required` instead, never listed as missing tooling. Plus one
+narrower point the dispatcher records in full: `manifest_validation` is **presence detection**, not
+configuration, so it cannot be `false` on a payload that reached the dispatcher
+at all (the gather and the topic marker share one recipe). Should one ever
+arrive, that is a payload-contract break the dispatcher **escalates** via
+`human_action_required`, never a `missing_tooling` entry recommending
+kubeconform to a repo that has no manifests.
 
 A repo declaring `primary: kubernetes` in `.maintenance.yml` is entitled to
 the full pipeline; the primary/auxiliary model already permits a topic to be
-primary, so no new mechanism is needed. It arrives in two steps, and
-conflating them over-promises the first: until `kubernetes` is in the
-detected+supported set the orchestrator **treats the declaration as stale**
-and dispatches every target as primary — that ends when the topic marker
-and gather script land (#1152). The **gates themselves** arrive later still,
-with the agents (#1153) and the check pipeline (#1154).
+primary, so no new mechanism is needed. **#1152 landed the first half**: the
+topic marker and `gather-kubernetes-findings.zsh` exist, so `kubernetes` now
+enters the detected+supported set and such a declaration **selects this
+plugin** rather than being treated as stale. The **gates themselves** arrive
+later, with the agents (#1153) and the check pipeline (#1154) — until then the
+dispatcher validates the payload and escalates each group to a human rather
+than routing it to an agent that does not exist yet.
 
 "Full pipeline" here means the **six checks** bootstrap's
 `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit** (#1154) — render → schema →

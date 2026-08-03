@@ -88,6 +88,12 @@ setup() {
   # anchored — an unanchored pattern accepts v0.1.0-SNAPSHOT and 0.1.0.9
   matches "$from_plugin" '^[0-9]+\.[0-9]+\.[0-9]+$'
   [ "$from_marketplace" = "$from_plugin" ]
+  # the shipped-slice label is pinned by VALUE elsewhere in this file (the README
+  # row says "maintenance dispatch in v0.2", plugins.md says "What's built
+  # (v0.2)"), so the manifests must agree — otherwise a PR could land dispatcher
+  # content and prose while leaving both manifests at 0.1.0, staying green while
+  # installs never see the change
+  starts_with "$from_plugin" "0.2."
 }
 
 @test "the marketplace source resolves to the real plugin directory (#1151)" {
@@ -135,8 +141,10 @@ setup() {
   # marketplace.json's copy is asserted only by equality, so dropping it here
   # silently drops it from the marketplace surface too
   contains "$desc" "Defers Dockerfiles and image builds to language plugins"
-  # a foundation slice must say so — v0.1.0 ships no skills or agents
-  contains "$desc" "foundation slice"
+  # the slice label must track what actually shipped: v0.2.0 carries the
+  # dispatcher, so a stale "foundation slice" claim would understate it
+  lacks "$desc" "foundation slice"
+  contains "$desc" "adds the maintenance dispatcher"
 }
 
 @test "the marketplace description matches plugin.json's exactly (#1151)" {
@@ -149,24 +157,31 @@ setup() {
   [ "$from_marketplace" = "$from_plugin" ]
 }
 
-@test "the skeleton really is content-free — no skills or agents yet (#1151)" {
-  # an asserted decision, not an oversight: skills land in #1152, agents in #1153.
-  # When they arrive this test must be updated in the same PR, which is the point.
-  # The [ -d "$PLUGIN_DIR" ] guard matters: a mis-derived path makes every child
-  # absent, so both assertions below would pass having proven nothing.
+@test "the plugin ships exactly the dispatcher — no agents yet (#1152)" {
+  # an asserted decision, not an oversight: the dispatcher landed with #1152,
+  # agents land with #1153. When they arrive this test must be updated in the
+  # same PR, which is the point. The [ -d "$PLUGIN_DIR" ] guard matters: a
+  # mis-derived path makes every child absent, so the assertions below would
+  # pass having proven nothing.
   [ -d "$PLUGIN_DIR" ]
-  # the whole entry set, not two enumerated kinds: a later hooks/, commands/ or
-  # templates/ directory would leave a pair of [ ! -d ] negatives green while
-  # the shipped description still claims the slice contains nothing
+  # the whole entry set, not enumerated kinds: a later hooks/, commands/ or
+  # templates/ directory would leave a set of [ ! -d ] negatives green while the
+  # shipped description still enumerates what the slice contains
   local entries
   entries="$(cd "$PLUGIN_DIR" && ls -A | sort | tr '\n' ' ')"
-  [ "$entries" = ".claude-plugin " ]
+  [ "$entries" = ".claude-plugin skills " ]
+  # the positive half — an entry-set equality alone is satisfied by an EMPTY
+  # skills/ directory, which is exactly what a half-applied change looks like
+  [ -f "$PLUGIN_DIR/skills/maintenance/SKILL.md" ]
+  [ ! -d "$PLUGIN_DIR/agents" ]
 }
 
-@test "a registered but content-free plugin produces no generated reference section (#1151)" {
-  # development-kubernetes is the FIRST entry in the generator's PLUGINS list
-  # with zero skills and zero agents, so this change is what first exercises the
-  # `if not skills: continue` guards. Landing #1152/#1153 must flip this test.
+@test "the dispatcher skill reaches the generated reference; agents still do not (#1152)" {
+  # #1151 shipped this plugin as the generator's first zero-skill PLUGINS entry,
+  # exercising the `if not skills: continue` guards; #1152 gives it a skill, so
+  # the commands page must now carry it while the agents page must NOT — the
+  # asymmetry is the assertion, since a generator that emitted an empty agents
+  # section would look identical to a correct one on the commands page alone.
   local commands agents
   [ -f "$REPO_ROOT/docs/reference/commands.md" ]
   [ -f "$REPO_ROOT/docs/reference/agents.md" ]
@@ -175,30 +190,31 @@ setup() {
   # prove the haystacks are the real generated pages before asserting absence
   contains "$commands" '## development-react'
   contains "$agents" '## development-docs'
-  lacks "$commands" '## development-kubernetes'
+  contains "$commands" '## development-kubernetes'
   lacks "$agents" '## development-kubernetes'
-  # and prove that is what the generator WOULD emit, not merely what is
-  # committed: this plugin is its first content-free PLUGINS entry, so this is
-  # what first exercises the `if not skills: continue` guards
+  # and prove that is what the generator WOULD emit, not merely what is committed
   run python3 "$REPO_ROOT/scripts/generate-docs-reference.py" --check
   [ "$status" -eq 0 ]
 }
 
-@test "the stale-declaration premise is true today — no kubernetes gather exists yet (#1151)" {
-  # ARCHITECTURE claims primary: kubernetes is treated as stale "until kubernetes
-  # is in the detected+supported set". A topic enters supported_topics only when
-  # its gather script exists (the orchestrator's discovery-by-convention rule), so
-  # this asserts the FACT the prose depends on. #1152 must flip this test and that
-  # paragraph together.
-  [ ! -f "$REPO_ROOT/development/skills/maintenance/scripts/gather-kubernetes-findings.zsh" ]
+@test "primary: kubernetes now SELECTS the plugin — the gather exists (#1152)" {
+  # ARCHITECTURE used to claim primary: kubernetes was treated as stale "until
+  # kubernetes is in the detected+supported set". A topic enters supported_topics
+  # only when its gather script exists AND is executable (the orchestrator's
+  # discovery-by-convention rule is `test -x`), so this asserts the FACT the
+  # post-#1152 prose depends on. Flipped rather than deleted, so the claim stays
+  # pinned in its new direction.
+  [ -x "$REPO_ROOT/development/skills/maintenance/scripts/gather-kubernetes-findings.zsh" ]
 
-  # the Container diagram carries the same time-bounded claims, and nothing else
-  # points at that page — so pin them to THIS trigger, forcing the #1152 author
-  # to retire the "planned"/"skeleton" labels in the same PR
+  # the Container diagram carried the same time-bounded claims, and nothing else
+  # points at that page — so the post-landing strings are pinned here, and the
+  # retired ones asserted GONE, which is what makes the flip irreversible-by-accident
   local c4
   c4="$(cat "$REPO_ROOT/docs/architecture/c4-container.md")"
-  contains "$c4" 'dispatches (planned, #1152)'
-  contains "$c4" 'may be primary (skeleton, #1151)'
+  lacks "$c4" 'dispatches (planned, #1152)'
+  lacks "$c4" 'may be primary (skeleton, #1151)'
+  contains "$c4" 'Rel(development, development-kubernetes, "dispatches")'
+  contains "$c4" 'may be primary")'
 }
 
 @test "ARCHITECTURE.md records the ownership boundary (#1151)" {
@@ -267,7 +283,22 @@ setup() {
   contains "$flat" 'This plugin exempts `policy` and `policy_tests`'
   contains "$flat" 'has not failed to configure a tool, it has declined to declare opinions'
   # the scoping half — without it the exemption reads as blanket suppression
-  contains "$flat" 'Every other `false` entry populates `missing_tooling` normally'
+  contains "$flat" 'Every other **known** `false` entry populates `missing_tooling` normally'
+  # the unknown-key half, mirrored from the dispatcher per the keep-in-agreement note
+  # the WHOLE clause: the nearby 'escalates via human_action_required' needle
+  # matches the SEPARATE manifest_validation sentence, so without this the
+  # unknown-key escalation could be deleted from ARCHITECTURE with the suite
+  # green — leaving it and the dispatcher stating different rules, which the
+  # dispatcher's own keep-in-agreement note depends on
+  contains "$flat" 'is the `tooling_configured` face of routing drift and is escalated via `human_action_required` instead, never listed as missing tooling'
+  # the second half of the same rule, added with the dispatcher: manifest_validation
+  # is presence detection, so a `false` value is a payload-contract break the
+  # dispatcher ESCALATES — not a missing_tooling entry recommending kubeconform to
+  # a repo that has no manifests. Unpinned, ARCHITECTURE could drift into
+  # licensing the family default the dispatcher forbids.
+  contains "$flat" 'presence detection**, not configuration'
+  contains "$flat" 'escalates** via `human_action_required`'
+  contains "$flat" 'never a `missing_tooling` entry'
 }
 
 @test "the plan's reproduced ARCHITECTURE block still matches the shipped section (#1151)" {
@@ -307,11 +338,16 @@ setup() {
   [ "$v_sites" -eq "$v_ok" ]
 }
 
-@test "ARCHITECTURE.md records the primary capability AND its stale-declaration caveat (#1151)" {
-  # promising the pipeline without the caveat over-promises: until #1152
-  # registers the marker, primary: kubernetes selects nothing
+@test "ARCHITECTURE.md records the primary capability, now that it SELECTS (#1152)" {
+  # #1152 registered the marker and gather, so the caveat is retired — but the
+  # capability itself stays pinned, and the retired wording is asserted gone so
+  # the flip cannot be silently reverted
   contains "$ARCH_SECTION" 'A repo declaring `primary: kubernetes`'
-  contains "$ARCH_SECTION" 'treats the declaration as stale'
+  lacks "$ARCH_SECTION" 'treats the declaration as stale'
+  contains "$ARCH_SECTION" '**selects this'
+  # the honest remainder: the GATES are still outstanding, and dropping that
+  # clause would over-promise exactly as the old caveat's absence would have
+  contains "$ARCH_SECTION" 'The **gates themselves** arrive'
 }
 
 @test "the dispatch_mode payload contract states the stale-declaration rule too (#1151)" {
@@ -381,7 +417,8 @@ setup() {
   # check is scoped to the pre-future segment, so a mention in the future list
   # cannot satisfy it, and it pins the caveat that keeps the row honest
   contains "${topic_row%%future:*}" '`development-kubernetes`'
-  contains "$topic_row" 'dispatch lands with #1152'
+  lacks "$topic_row" 'dispatch lands with #1152'
+  contains "$topic_row" 'agents land with #1153'
   # the tree is column-aligned, so match the gap as whitespace rather than
   # pinning a literal run of spaces that reflows when a longer name is added
   matches "$(grep -F 'development-kubernetes ' "$ARCH" | head -n1)" \
@@ -461,7 +498,8 @@ setup() {
   local row
   row="$(grep -F '| **development-kubernetes** |' "$readme")"
   [ -n "$row" ]
-  contains "$row" 'ownership boundary only in v0.1'
+  lacks "$row" 'ownership boundary only in v0.1'
+  contains "$row" 'maintenance dispatch in v0.2'
 }
 
 @test "every marketplace plugin has a section in the plugin overview (#1151)" {
@@ -502,13 +540,14 @@ setup() {
   # the never-fails scoping must survive here too, or the published contract
   # reads as decorative while ARCHITECTURE says otherwise
   contains "$section" 'When policies *are* declared, violations fail'
-  # the caveat that keeps "can also be primary" honest — pinned in ARCHITECTURE,
-  # the dispatch_mode contract and the topic table, and needed here too: this is
-  # the page users actually read
-  contains "$section" 'Until #1152 lands there is no `kubernetes` topic marker'
-  contains "$section" 'is treated as a stale declaration'
+  # the caveat that kept "can also be primary" honest is retired with #1152 —
+  # the marker exists — but its REPLACEMENT must be pinned just as tightly, or
+  # the page users actually read would over-promise a plugin that routes nothing
+  lacks "$section" 'Until #1152 lands there is no `kubernetes` topic marker'
+  lacks "$section" 'is treated as a stale declaration'
+  contains "$section" 'until #1153 lands the dispatcher routes nothing'
   contains "$section" 'creeps into Dockerfiles or application code contradicts'
-  contains "$section" "**What's built (v0.1):**"
+  contains "$section" "**What's built (v0.2):**"
 }
 
 @test "the bats suite's PR path filter covers every tree this file reads (#1151)" {

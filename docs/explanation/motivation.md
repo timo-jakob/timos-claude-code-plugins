@@ -183,8 +183,10 @@ this section when it lands.
    [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
    but not implemented. `development-kubernetes` has landed its ownership
    boundary and marketplace registration
-   ([#1151](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1151));
-   its gather, dispatcher, agents and CI pipeline are the remaining children of
+   ([#1151](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1151))
+   and its topic marker, gather script and maintenance dispatcher
+   ([#1152](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1152));
+   its agents, CI pipeline and test fixtures are the remaining children of
    [#1150](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1150).
    Security-by-default really wants the container plugin
    (Trivy, SBOM, distroless) shipped. Tracked:
