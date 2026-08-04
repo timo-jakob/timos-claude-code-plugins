@@ -223,13 +223,46 @@ pull-compat surface served by the SDK's Prometheus exporter.
     **active major 1**, which conformance accepts, so an undeclared table is as
     wrong-but-green as the shipped illustration copied verbatim.
 
-  All three non-Spring payloads expose the same v1.1 seam; what differs is that
-  Go's ships **unfilled**. `Config.Dependencies` takes a `DependencyHealthSource`,
-  but the Go resilience payload that will supply one — and pick the blessed
-  breaker library — is #1144, which has not landed. Where Python and Java arrive
-  with seam *and* source together, Go's stays unset for now, and the surface is a
-  conforming ops-api **v1.0** until it is filled. Nothing about the handler
-  changes when you do wire it.
+  Bootstrap installs the **resilience payload** alongside it (the two are placed
+  together or not at all), which is what fills in the v1.1 half — per-dependency
+  `components` on `/health` and the hard/soft readiness hinge, both read from
+  circuit-breaker state. The blessed library is **`sony/gobreaker`**, and unlike
+  Python it is a *single* library: mandate 3's bounded jittered retry is thirty
+  lines of stdlib in the catalog rather than a second dependency. Five things are
+  yours to do, and three fail quietly if you skip them:
+
+  - declare your direct dependencies in `resilience-dependencies.properties`
+    (`<name>=hard|soft`, one per line, **full-line `#` comments only**, no
+    duplicates), placed **in the same directory as the `.go` files** — it is
+    `//go:embed`-ed into the binary, so that path is resolved by the compiler and
+    the declaration travels inside the deployable (the blessed ko/distroless image
+    ships no data files, so a working-directory read would find nothing).
+    `$OPS_DEPENDENCIES_FILE` still overrides it for a mounted ConfigMap. **Replace
+    the shipped `orders-db`/`pricing-api` examples** — left verbatim they fail startup on `RequireAllDeclaredGuarded`
+    (nothing guards them), and if you skip that call `/health` reports two
+    dependencies you do not have as `up`;
+  - **claim each dependency in its client's constructor** with
+    `catalog.RequireDeclared(name)`. It is the only writer of the guarded set, so
+    a service that claims only by routing through `resilience.Call` — which runs
+    at request time, after the startup guard — reaches
+    `catalog.RequireAllDeclaredGuarded()` below with an empty set, and it then
+    refuses *every* declared dependency and the pod never boots;
+  - route every outbound call through `resilience.Call(ctx, catalog, name, call,
+    fallback)`, and give the call its **own timeout** — the one mandate the catalog
+    cannot impose, because it does not own your socket. In Go it does double duty:
+    gobreaker has **no slow-call detection**, so your timeout *is* the slow-call
+    threshold, and a generous one lets a brownout pass unnoticed;
+  - pass `resilience.NewDependencyHealth(catalog)` to `ops.Config.Dependencies`,
+    and fix the one flagged import in `dependency_health.go` to your service's real
+    ops package path (the payload's only placeholder);
+  - call `catalog.RequireAllDeclaredGuarded()` once at startup, after your clients
+    are built. It is the only thing that catches a dependency you declared but
+    never wired — whose breaker can never leave `closed`, so `/health` would report
+    it `up` throughout an outage.
+
+  `pricing_api_client.go` is a worked example, not service code: adapt it to a real
+  dependency or leave it out. The payload's own `README.md` is the reference for
+  the shape, including why `gobreaker` was chosen and what its two silent gaps are.
 - **Other languages** — canonical implementations are tracked per language
   (Node, Swift).
 
