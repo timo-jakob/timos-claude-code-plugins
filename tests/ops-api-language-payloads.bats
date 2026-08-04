@@ -296,8 +296,9 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
 }
 
 @test "go opsapi omits components entirely when no dependency source is wired" {
-  # This is what keeps an unwired service a valid ops-api v1.0 body — the state
-  # every bootstrapped repo is in until #1144 lands.
+  # This is what keeps an unwired service a valid ops-api v1.0 body — the state of
+  # any service that leaves Config.Dependencies unset, i.e. a repo where the
+  # resilience payload (#1144) was skipped or deferred along with this one.
   local fn; fn="$(go_flat '(c Config) components()')"
   contains "$fn" 'if c.Dependencies == nil { return nil }'
   contains "$fn" 'if len(raw) == 0 { return nil }'

@@ -31,6 +31,54 @@ Every outbound dependency call MUST have:
    never exhausts goroutines or connections, blocks indefinitely, or panics
    the process.
 
+**`sony/gobreaker` is the reference implementation** for Go (#1144) — one
+library, not a pair: the breaker is gobreaker and the bounded jittered retry is a
+small stdlib loop inside the bootstrap payload's catalog, because the retry has to
+be breaker-aware anyway (it must never retry an open breaker's rejection). Code
+using it correctly is the baseline to compare against; code hand-rolling the same
+concerns is worth a finding only when the hand-rolled version is actually missing
+a mandate.
+
+A call routed through the payload's `resilience.Call(ctx, catalog, name, call,
+fallback)` **already carries mandates 2-5 and mandate 6's open-breaker fast-fail** — the
+per-dependency breaker, the
+bounded jittered retry, the registered fallback, the recovery window and the
+open-breaker fast-fail are inside that wrapper — so **mandates 2-5, and
+mandate 6's open-breaker fast-fail, need no re-review on such a call**. Four
+things stay the client's own and stay in scope, because the wrapper cannot supply
+them:
+
+- **mandate 1**, the timeout the client owns (§1 below). In Go it does double
+  duty: **gobreaker has no slow-call detection**, so the client's transport
+  timeout *is* the slow-call threshold. A generous one lets a brownout pass
+  unnoticed — every call succeeds slowly, nothing fails, the breaker stays closed
+  and `/health` reports the dependency `up` while the service is unusable. Flag a
+  client whose timeout is absent *or* implausibly generous for the call it guards.
+- **the error classification**, since a client that never wraps a caller-side 4xx
+  in `resilience.NotADependency` lets a user-driven 404 count toward the breaker
+  and open it on a healthy dependency — and, for a `hard` dependency, start
+  failing readiness (§3 below). A cancelled caller context belongs in the same
+  bucket.
+- **the rest of mandate 6** — §4's hang/crash shapes. `resilience.Call` fast-fails
+  an open breaker, but it cannot stop the caller holding a mutex or a `WaitGroup`
+  **across** the call, spawning an unbounded goroutine per request around it,
+  leaking a response body inside the `call` closure, uncapping `SetMaxOpenConns`,
+  or `log.Fatal`-ing on the error the fallback returns. The shipped payload proves
+  the body case stays the client's: its worked example does its own
+  `defer response.Body.Close()` *inside* the closure `Call` runs.
+- **the hard/soft declaration** in `resilience-dependencies.properties`: a
+  dependency guarded in code but undeclared appears nowhere in `/health`, and one
+  declared but guarded by nobody keeps a breaker that can never leave `closed`, so
+  `/health` reports it `up` through an outage. `RequireDeclared` refuses the
+  first at startup **only when it is called from the client's constructor** — via
+  `resilience.Call` it claims at request time, after the boot guard has already
+  run — and `RequireAllDeclaredGuarded` refuses the second. So flag **both** a
+  client that bypasses the catalog entirely (neither guard ever sees it) **and**
+  one that claims only through `resilience.Call` with no
+  `catalog.RequireDeclared(<name>)` in its constructor: that leaves the guarded
+  set empty at boot, so `RequireAllDeclaredGuarded()` refuses *every* declared
+  dependency and the pod never starts.
+
 ## What Counts as a Dependency Call
 
 A call leaving this process to something it does not control: an HTTP or gRPC
@@ -156,8 +204,16 @@ does when it stops answering. If a wrapper you cannot see might already supply
 the timeout or breaker, say so and drop to SUGGESTION rather than asserting a
 violation you cannot prove.
 
-**Only review dependency calls the diff actually touches.** Do not audit the
-whole service; a finding on untouched code is noise the fix pass cannot act on.
+**Scope FINDINGS to the dependency calls the diff actually touches — but the
+declaration file (`resilience-dependencies.properties`) and the startup wiring are
+always in scope FOR THOSE CALLS, even when the diff does not touch them.** A client the diff
+adds with no `<name>=hard|soft` line, or a declaration the diff adds that no client
+claims, is a finding reported against the touched side — otherwise the whole
+hard/soft dimension is unreachable, because a diff that adds a client rarely edits
+the declaration too.
+
+Beyond those two, do not audit the whole service: a finding on a dependency call
+the diff does not touch is noise the fix pass cannot act on.
 
 **Do not flag a missing fallback's contents.** The policy mandates that a
 fallback is wired, not what it returns — that is the application's domain

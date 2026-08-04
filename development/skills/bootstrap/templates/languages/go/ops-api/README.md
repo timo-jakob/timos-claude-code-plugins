@@ -108,12 +108,13 @@ dependency, read passively from that dependency's circuit-breaker state, plus a
 `/health/ready`; a **soft** one never does. Wire it by setting
 `Config.Dependencies` to any type implementing `DependencyHealthSource`.
 
-**There is no blessed source yet.** The Go resilience payload that will supply
-one is issue **#1144**, a tracked follow-up that has not landed — and it, not
-this file, is where the blessed breaker library gets chosen. Until then leave
-`Config.Dependencies` unset: the surface is then a conforming ops-api **v1.0**,
-with no `components` field and readiness decided by your `Readiness` func alone.
-Nothing about the handler changes when the seam is later filled.
+**The blessed source is the Go resilience payload** (#1144), which bootstrap
+installs alongside this one — the two are placed together or not at all. It wires
+`sony/gobreaker` around your dependency clients and derives these entries from
+breaker state; its own `README.md` covers the wiring and the two startup guards.
+Leaving `Config.Dependencies` unset is still legal and still conforms: the surface
+is then an ops-api **v1.0** body, with no `components` field and readiness decided
+by your `Readiness` func alone.
 
 If you implement `DependencyHealthSource` by hand in the meantime, **return a
 freshly built map every call.** Handing back your registry's live map lets a

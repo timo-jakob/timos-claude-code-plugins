@@ -2159,9 +2159,154 @@ Like the Python and Java payloads these need an explicit destination:
   languages/go/ops-api/README.md
 ```
 
-The Go resilience payload that fills in the v1.1 `components` map is #1144; until
-it lands, `Config.Dependencies` stays unset and the surface is ops-api v1.0 —
-which conforms on its own.
+Whenever this block installs, the **Go resilience payload below** (#1144) installs
+with it — it supplies the ops-api v1.1 `components` map and the hard/soft readiness
+hinge that `opsapi.go` reports.
+
+**Go resilience + dependency health (#1144).** Whenever the Go ops-api block above
+**installed**, also install the blessed resilience payload — `sony/gobreaker` wired
+around dependency clients per the six-mandate policy, plus the `components` map and
+the hard/soft readiness hinge, both read passively from breaker state. It
+**extends** the ops-api payload rather than standing alone: `dependency_health.go`
+implements that payload's `DependencyHealthSource` and returns its `Dependency`
+values, so the two are placed together or not at all.
+
+*Applicability — gate before you install.* The gate is **the Go ops-api block's own
+outcome and nothing else**, which is what makes "placed together or not at all"
+true rather than aspirational — every condition that could skip this payload is
+tested *there* (its library case, its ambiguous-so-ask case, and the go-directive
+deferral). Two exhaustive cases:
+
+1. **The Go ops-api block skipped or deferred** → **skip this too**, for the same
+   reason it skipped. A library has nothing to circuit-break, and a payload whose
+   routes 404 has nothing to report to. That judgement is made *there*, never
+   re-tested here.
+2. **The Go ops-api block installed** → **install** per the render command below.
+
+If you ever need a condition that skips *this* payload but not the ops-api one, add
+it to the ops-api gate instead — a fresh condition here would silently re-introduce
+the split this gate exists to prevent (a `Config.Dependencies` wired to report
+`components` with no source to supply them).
+
+This payload also shares the ops-api block's **`go` ≥ 1.22 floor** for a second,
+independent reason — `dependency_catalog.go` imports `math/rand/v2` — so the
+inherited gate is a requirement here, not a coincidence.
+
+Placement follows the ops-api block's rules, with these payload-specific ones:
+
+- **Every file you place goes in ONE directory of their own, conventionally
+  `internal/resilience/`** — `dependency_catalog.go`, `dependency_health.go`,
+  `resilience-dependencies.properties` and the shipped `README.md`, plus
+  `pricing_api_client.go` **only on the adapt path** (see the adapt-or-omit bullet
+  below). That directory must be **empty or already `package resilience`**:
+  dropped beside files declaring any other package it is the same compile error,
+  so pick a fresh directory rather than the nearest plausible one. Beside, not
+  inside, the ops package: the import direction is one-way
+  and load-bearing (`resilience` imports `ops`, never the reverse), which is what
+  keeps the ops package free of any breaker library exactly as its own doc comment
+  promises. Every `.go` file here declares `package resilience`, so splitting them
+  across directories is a compile error (`found packages … and resilience`) and the
+  unqualified `Call`/`Catalog`/`NotADependency` references stop resolving. **Unlike
+  the Python payload, the worked-example client does NOT move next to its domain
+  code** — adapt it in place.
+- **This payload's `README.md` and `go.mod.deps` do NOT take the ops-api block's
+  "alongside it" rule.** Both payloads ship files with those exact names; staged
+  into `internal/ops/` the second silently clobbers the first, destroying the
+  ops-api payload's own adoption doc and its OTel require fragment. Place this
+  payload's `README.md` in `internal/resilience/` with its sources, and treat its
+  `go.mod.deps` as a fold-only fragment (see *Deps*) — do not copy it anywhere the
+  ops-api one already sits.
+- **Fix the ONE flagged import.** `dependency_health.go` carries
+  `ops "example.com/service/internal/ops"` with a `<-- CHANGE THIS IMPORT` marker;
+  re-point it at the real module path **of the module you placed `opsapi.go` into**
+  — its `go.mod` `module` line plus the path of the directory `opsapi.go`
+  **actually landed in, relative to THAT MODULE'S root** (the directory holding
+  the `go.mod` you folded into, *not* the repo root), normally `internal/ops`
+  (the ops-api block allows another when `internal/ops/` is occupied). The
+  distinction bites in a multi-module repo: for module
+  `github.com/org/svc/services/api` with the file at
+  `services/api/internal/ops/`, the import is
+  `github.com/org/svc/services/api/internal/ops` — the repo-relative reading
+  doubles the `services/api` segment and does not resolve.
+  **Fix it BEFORE running `go mod tidy`**: an unfixed `example.com/service/…`
+  makes tidy fail, and the failure branch below sends you straight back to this
+  bullet rather than letting you defer it. It is the only *flagged* placeholder
+  in this payload — a Go file declares its own package name, so unlike the Java
+  sibling there is no `package` line to re-set.
+- **`resilience-dependencies.properties` must sit in the SAME directory as the
+  `.go` files**, because it is `//go:embed`-ed into the binary at build time — the
+  compiler resolves that path, so it is a build-time requirement, not a convention.
+  Embedding is what makes the declaration reach the runtime at all: the blessed Go
+  image is ko onto `distroless/static`, which ships no data files, so a declaration
+  read from the working directory would simply not exist there.
+  `$OPS_DEPENDENCIES_FILE` still overrides it at runtime for a mounted ConfigMap.
+- **Substitute the repo's real direct dependencies** for the two worked examples,
+  **classifying each `hard` or `soft`** (ask, or derive them from the detected
+  stack). **If they genuinely cannot be determined during the run, leave the
+  examples and carry an explicit Step-5 checklist item** naming this payload's
+  symptom: `/health` reports two dependencies the service does not have as `up`,
+  and startup fails on `RequireAllDeclaredGuarded` once that call is wired. Never
+  guess names or kinds, and never leave them verbatim and unrecorded.
+- **Record — do not perform — the startup wiring.** Bootstrap does not edit the
+  entrypoint, and at staging time no client is routed through the catalog, so
+  calling the guard here would only guarantee a startup failure in the adopter's
+  deployable. Carry Step-5 checklist items instead: (a) startup must call
+  `catalog.RequireAllDeclaredGuarded()` once every client is built, and (b)
+  `resilience.NewDependencyHealth(catalog)` must be passed to
+  `ops.Config.Dependencies`, and (c) **each dependency client's constructor must
+  call `catalog.RequireDeclared(<name>)`** — the only writer of the guarded set
+  that (a) reads, so without it (a) refuses every declared dependency and the pod
+  never boots. Without (b) `/health` stays a blind ops-api v1.0;
+  without (a) a declared-but-unguarded dependency keeps a breaker that can never
+  leave `closed`, so `/health` reports it `up` straight through an outage. The
+  placed `README.md` shows both wirings.
+- **`pricing_api_client.go` is a worked example, not service code.** **Decide
+  adapt-or-omit in the Step-2 plan**, as its own line — the second render command
+  below is keyed on that decision. On the **omit** path do not run it, and point a
+  Step-5 checklist item at the placed `README.md` for the reference shape. On the
+  **adapt** path rename it to the real dependency and keep its `DependencyName` in
+  lockstep with the declaration file, or its `RequireDeclared` claim fails at
+  startup. As shipped it requires `PRICING_API_BASE_URL` and refuses to construct
+  without it.
+- **Deps — the same rules as the ops-api block, not just its order rule.** Place
+  the `.go` files first, then fold `go.mod.deps`' single `require` line into the
+  same `go.mod`, then `go mod tidy` from the module directory. Run tidy first and
+  it strips the gobreaker line (nothing in the tree imports it yet) and exits 0.
+  **If `go mod tidy` fails, read the message before deciding.** When it names
+  **any unresolvable import of the ops package** — the shipped
+  `example.com/service/…` or a path you derived yourself — the flagged import
+  was left unfixed or derived wrongly: re-derive it from the `module` line plus
+  the placement directory relative to that module's root, fix it, and re-run.
+  Only when it names module-proxy/network access or a `vendor/` tree that also
+  needs `go mod vendor`, **keep the folded require** and record a Step-5 line
+  naming the command to re-run. Any other failure: stop and surface it rather
+  than deferring. Never drop the require to make the command
+  succeed, and **never place these `.go` files without it** (the
+  `github.com/sony/gobreaker/v2` import won't resolve and the module stops
+  building).
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/go/resilience/dependency_catalog.go \
+  languages/go/resilience/dependency_health.go \
+  languages/go/resilience/go.mod.deps \
+  languages/go/resilience/resilience-dependencies.properties \
+  languages/go/resilience/README.md
+```
+
+Then the worked example, unless the Step-2 plan says to omit it:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/go/resilience/pricing_api_client.go
+```
+
+**Both payloads ship a `go.mod.deps`, and they are different files** — the ops-api
+one requires the OTel and Prometheus modules, this one requires `gobreaker`. Fold
+**both** into the module's `go.mod`; taking only the second leaves the ops surface
+without its exporters, and only the first leaves the catalog without its breaker.
 
 The remaining languages' canonical implementations are tracked follow-ups under
 epic #682: development-javascript/Node (#936) and development-swift (#937).
@@ -2387,9 +2532,9 @@ on `@Retry`, `CallNotPermittedException` in the retry's `ignore-exceptions`), an
 why the health surface is an Actuator `@Endpoint` rather than a `@RestController`
 (the management child context has no `RequestMappingHandlerMapping`, so a
 controller there is never mapped — and one in the main context lands on the public
-app port). Non-Spring Java (#1142) and Python (#1143) have landed too — both the
-blocks above; the other three service languages are epic #967's remaining children
-(#1144 go, #1145 javascript and #1146 swift).
+app port). Non-Spring Java (#1142), Python (#1143) and Go (#1144) have landed
+too — the blocks above; the remaining children of epic #967 are #1145
+javascript and #1146 swift.
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the

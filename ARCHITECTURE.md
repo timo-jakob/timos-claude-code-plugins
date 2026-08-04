@@ -445,9 +445,10 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
 - **Realized per language, enforced two ways.** The policy and contract are
   central and language-agnostic (#965). The **review dimension** (#966) is
   shipped and catches violations on new diffs. The per-language scaffolding is
-  #967's six children, of which **Spring (#1141), non-Spring Java (#1142) and
-  Python (#1143) have landed** — see below; go, javascript and swift are
-  #1144-#1146. A
+  #967's six children, of which **Spring (#1141), non-Spring Java (#1142),
+  Python (#1143) and Go (#1144) have landed** — see below; javascript and swift
+  are #1145/#1146, each still waiting on its language's ops-api surface
+  (#936/#937), which is the gap #1192 closed for Go. A
   **maintenance advisor** will catch the same defect classes on the back
   catalogue (#968) and is **not yet built** — until it lands, the pattern is
   enforced on new diffs only.
@@ -607,6 +608,39 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   exception, while `circuitbreaker` records it as a **success** — so under
   Python's library a rate-limit storm would otherwise zero the failure count on
   every 429 and hold the breaker closed on a dependency that is visibly struggling.
+- **The Go realization is `sony/gobreaker` — one library, no retry pair (#1144).**
+  Unlike Python, which needed a *pair* because no maintained library is
+  resilience4j, Go needs only the breaker: mandate 3's bounded jittered retry is
+  ~30 lines of `math/rand/v2` + `time` inside the catalog. That is a deliberate
+  rejection of a second dependency, on the reasoning that the retry must be
+  **breaker-aware regardless** — never retry an open breaker's rejection (mandate
+  6), a caller's own error, or a spent context — so any library would be wrapped in
+  that predicate anyway, while adding a version surface to every bootstrapped repo.
+  gobreaker was **confirmed, not assumed**: measured against v2.4.0, four
+  concurrent 1s calls through one breaker take 1.00s, which is precisely the
+  property that disqualified `pybreaker` for Python (4.01s — it holds a lock across
+  the guarded call). Two gaps are load-bearing and documented because each fails
+  silently: gobreaker has **no slow-call detection**, so the client's transport
+  timeout *is* the slow-call threshold, and its default trip rule is *consecutive*
+  failures, so the payload ships a failure **rate** with a minimum volume instead.
+  One gap runs the other way and is worth having: open → half-open is computed from
+  elapsed time inside `State()`, so recovery is visible on `/health` with no
+  traffic and no deploy — the same property the Python payload gained from
+  `circuitbreaker`. The payload (`templates/languages/go/resilience/`) keeps the
+  siblings' `resilience-dependencies.properties` hard/soft declaration, but
+  **`//go:embed`s it into the binary** rather than reading it at runtime — the one
+  genuinely Go-specific decision here. Java resolves its copy on the classpath and
+  Python via `Path(__file__)`, so in both the declaration already travels inside
+  the deployable; a Go binary has no equivalent, and the blessed image path is ko
+  onto `distroless/static`, which ships no data files at all. `$OPS_DEPENDENCIES_FILE`
+  still overrides it for a mounted ConfigMap, and there is deliberately no
+  working-directory fallback — that tier would be present in local dev and absent
+  in the image, so a mistake would surface only after deploy. The trade is that
+  changing a Go service's hard/soft classification is a rebuild, not a
+  config edit. The payload is a **separate `resilience` package** that
+  imports
+  `ops` and never the reverse, which is what keeps the #1192 ops package free of a
+  breaker import as its own contract promises.
 - **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
   agent in each **service** language plugin (Go, Java, Python, Swift), wired
   into that language's review panel alongside bugs/security/performance. It

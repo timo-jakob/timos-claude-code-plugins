@@ -23,12 +23,12 @@
 // DEPENDENCY HEALTH (ops-api v1.1, #965 / epic #964): /health carries an optional
 // `components` map -- one entry per DIRECT dependency, read PASSIVELY from that
 // dependency's circuit-breaker state -- and a declared HARD dependency being down
-// also fails /health/ready. Wire it with Config.Dependencies; the blessed source
-// WILL BE the Go resilience payload (#1144) -- a tracked follow-up that has NOT
-// landed, so today there is no blessed source and no blessed breaker library
-// (#1144 picks it). Leave Config.Dependencies unset and this package behaves
-// exactly as ops-api v1.0: no `components` field, and readiness is your
-// Config.Readiness alone. The binding is an INTERFACE over a plain struct, so this
+// also fails /health/ready. Wire it with Config.Dependencies; the blessed source is
+// DependencyHealth in the resilience payload beside this one
+// (templates/languages/go/resilience/, #1144), which derives these entries
+// PASSIVELY from sony/gobreaker state. Leave Config.Dependencies unset and this
+// package behaves exactly as ops-api v1.0: no `components` field, and readiness is
+// your Config.Readiness alone. The binding is an INTERFACE over a plain struct, so this
 // package needs no breaker library on its import path -- and must never grow one.
 //
 // NOTE that /health answers 200 even when the aggregate is "down" -- the verdict is
@@ -168,10 +168,10 @@ type Dependency struct {
 // Deliberately an interface over a plain struct rather than a dependency on a
 // breaker library: this package stays importable by a service that has no outbound
 // dependencies at all, and the ops surface never grows a breaker on its import
-// path. The blessed implementation WILL BE the Go resilience payload (#1144, not
-// yet landed), which will derive these entries PASSIVELY from circuit-breaker
-// state -- an open breaker IS a down dependency. Until then, implement it by hand
-// or leave Config.Dependencies unset.
+// path. The blessed implementation is DependencyHealth in the resilience payload
+// (#1144), which derives these entries PASSIVELY from circuit-breaker state -- an
+// open breaker IS a down dependency. Implementing it by hand is the escape hatch,
+// not the default; leaving Config.Dependencies unset keeps a conforming v1.0.
 //
 // DIRECT dependencies only. A service reports the one hop it calls itself and
 // never transitively calls a downstream's /health (the health-check-storm

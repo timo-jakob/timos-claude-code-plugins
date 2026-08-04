@@ -1,0 +1,22 @@
+// Canonical Go resilience module requirements (#1144).
+//
+// A go.mod FRAGMENT, not a module file: fold this require line into the same
+// go.mod you folded the ops-api payload's into, then `go mod tidy`. Place
+// dependency_catalog.go and dependency_health.go into the repo FIRST -- tidy
+// removes any requirement no package in the working tree imports, so run against a
+// tree that does not yet contain them and it silently strips this line and exits 0.
+//
+// ONE library, deliberately. gobreaker is the blessed Go circuit breaker; the
+// bounded jittered retry is ~30 lines of stdlib inside dependency_catalog.go
+// rather than a second dependency. See README.md, "Why gobreaker and no retry
+// library" -- the short version is that the retry has to be breaker-aware anyway
+// (never retry an open breaker's rejection), so a library would be wrapped in that
+// predicate regardless, and every bootstrapped repo would carry a second version
+// surface for it.
+//
+// The version is a floor, not a pin -- Renovate/Dependabot move it. Note the /v2
+// import path: gobreaker v2 made the breaker generic (CircuitBreaker[T]), and the
+// payload stores CircuitBreaker[any] so one catalog can hold breakers for
+// dependencies whose calls return different types.
+
+require github.com/sony/gobreaker/v2 v2.4.0
