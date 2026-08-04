@@ -2060,8 +2060,9 @@ this makes a JavaScript/TypeScript **consumer** talk to that contract through a
 **generated, drift-proof** client — with **zero repo-to-repo dependency**. A
 consumer pins the producer's published `*-api-spec` npm package (the #684 machine
 channel) and the plugin scaffolds generation of a typed `fetch` client + MSW
-mocks from it. It is **framework-agnostic** — it owns *generation*; the Angular
-`HttpClient` / React Query *binding* is the topic plugins' job (#685/#686).
+mocks from it. It is **framework-agnostic** — it owns *generation*; the React
+Query *binding* is the framework topic's job (#686). React is the family's
+single browser-UI default (#1059), so there is no second binding to own.
 
 **Detection is the seed script's exit code, not a `detect-stack` field**, and it
 slots into the Step 1→2→2.5→3 pipeline like every other artifact:

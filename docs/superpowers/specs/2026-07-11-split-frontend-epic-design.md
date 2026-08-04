@@ -1,5 +1,27 @@
 # Split-frontend — epic decomposition design (2026-07-11)
 
+> **Angular references superseded (#1059).** This document sequences work behind
+> a `development-angular` topic (#685) that the family no longer builds: React +
+> TypeScript is the single browser-UI default and Angular is not scaffolded, so
+> every `#685` dependency below is historical. Two consequences, stated here so
+> the doc still reads unambiguously rather than merely being struck through:
+>
+> - **Where `#685` appears as a surviving prerequisite, read `#686`** — the one
+>   remaining framework topic. That is the Dependencies section's own reading, so
+>   the isolation table's ui-bootstrap row and the Sequencing list mean
+>   `#683 + #686 + #684(a)`. Deleting `#685` outright would leave the epic with
+>   no UI-bootstrap prerequisite at all, which is not what any section intends.
+> - **Detecting an *existing* repo's Angular markers is unaffected** — that is
+>   reading what a repo already is, not scaffolding a second framework. What
+>   changes is the outcome: a detected Angular frontend is still extracted with
+>   its history into the `-ui` repo, but **the framework bootstrap step is
+>   skipped** — the family scaffolds no Angular toolchain, and that repo
+>   participates by exporting the MFE contract like any other remote. The split
+>   is not blocked on a topic plugin that will never exist.
+>
+> Positions: `ARCHITECTURE.md`; design:
+> [`2026-07-27-mfe-app-family-design.md`](2026-07-27-mfe-app-family-design.md).
+
 Tracking epic: **#717**. Depends on epic **#682** (WebUI plugin family + API
 lifecycle).
 
@@ -110,8 +132,10 @@ Filed as bounded stories when work starts (after #682 lands the prerequisites):
 cannot run until they exist:
 
 - **#683** — `development-javascript` foundation **+ consumer-side client generation**
-- **#686** — `development-react` bootstrap (stands up the new `-ui` repo; React
-  first per the 2026-07-22 reordering on #682 — an Angular frontend needs #685)
+- **#686** — `development-react` bootstrap (stands up the new `-ui` repo; a
+  detected *Angular* frontend is extracted with its history but skips the
+  framework bootstrap step entirely — see the banner — so it needs no framework
+  topic at all)
 - **#684(a)** — producer-side per-major `contracts/` layout + npm spec publish
 
 GitHub-native `blocked-by` (#583) is authoritative.

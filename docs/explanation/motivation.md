@@ -167,13 +167,18 @@ this section when it lands.
    dispatches `python-coverage-improver` to rewrite the offending
    tests. Live validation that this works end-to-end is part of
    Phase 6.
-3. **Maintenance language parity.** Python, Java, and Swift each have the
-   full triage + worktree + autonomous-fix pipeline (Java via epic #296,
-   Swift via epic #297). JavaScript / Angular, PowerShell, zsh, Go, and Rust
-   are not yet implemented. This is intentional sequencing — Python was the
+3. **Maintenance language parity.** Python, Java, Swift, and Go each have
+   the full triage + worktree + autonomous-fix pipeline (Java via epic #296,
+   Swift via epic #297, Go via epic #868). JavaScript has the dispatcher and
+   a format/lint group only (epic #683; that slice is #729); PowerShell, zsh,
+   and Rust are not implemented. Those gaps are intentional sequencing — Python was the
    proving ground for the dispatch contract; the other languages follow once
    each prior loop is solid. Tracked:
    [#170](https://github.com/timo-jakob/timos-claude-code-plugins/issues/170).
+   Angular is a different case entirely: it is **not** a sequencing gap but a
+   standing position — React is the family's single browser-UI default, so
+   Angular is deliberately not a target and no `development-angular` is
+   planned. It is not waiting its turn.
 4. **macOS + Homebrew lock-in.** `/development:bootstrap`'s automation
    scripts assume macOS + Homebrew. The generated `SETUP.md` is
    platform-agnostic but the one-shot bootstrap isn't. Tracked:

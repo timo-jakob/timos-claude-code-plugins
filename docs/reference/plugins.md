@@ -338,6 +338,19 @@ dependencies of any `package.json`, monorepo-aware). It composes *alongside*
 language plugin. The topic **requires** `javascript` to be detected too, so it can
 never compose onto a non-JS repo.
 
+**Why React and only React.** The family's browser-UI positions are recorded in
+[`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md):
+**React + TypeScript is the default for any browser UI**, so this is the one
+framework topic — there is no `development-angular`, and bootstrap asks no
+Angular-vs-React question. An existing Angular asset may still participate by
+exporting the same micro-frontend contract; the family just builds no
+Angular-specific tooling until such an asset exists. Substantial UI splits into
+**micro-frontends behind a SPA shell**, and the blessed shell↔remote contract is
+an exported `mount(el, ctx)` / `unmount(el)` pair over an import-map-resolved ES
+module — **Module Federation is rejected**, with the reasoning recorded so it can
+be argued with. Design:
+[`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/superpowers/specs/2026-07-27-mfe-app-family-design.md).
+
 **What's built (v0.1):** the composition wiring and nothing else
 ([#956](https://github.com/timo-jakob/timos-claude-code-plugins/issues/956)). The
 tool universe is deliberately **empty** — the gather (`gather-react-findings.zsh`)

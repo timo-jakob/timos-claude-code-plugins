@@ -1,5 +1,15 @@
 # Composition deploy-test — two-epic design (2026-07-11)
 
+> **Angular references superseded (#1059).** The Dependencies section names
+> `#685` — the `development-angular` topic — among the prerequisites that
+> produce real images. The family no longer builds it: React + TypeScript is the
+> single browser-UI default and Angular is not scaffolded. **Read `#685` there as
+> `#686`**, the one remaining framework topic; deleting it outright would leave
+> the line with no UI-image prerequisite, which is not what it intends. Nothing
+> else in this document depends on the reversed two-framework plan. Positions:
+> `ARCHITECTURE.md`; design:
+> [`2026-07-27-mfe-app-family-design.md`](2026-07-27-mfe-app-family-design.md).
+
 Tracking epics: **#719** (docker-compose, first) and **#720** (Kubernetes,
 second). Both build on **#687** (`development-composition` repo type) and **#688**
 (ops-api). Downstream of **#682** (WebUI family) and **#717** (split-frontend).

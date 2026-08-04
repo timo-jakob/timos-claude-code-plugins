@@ -1,9 +1,14 @@
 # WebUI plugin family, API lifecycle, and cross-repo composition — design
 
-> **Superseded (2026-07-27).** §2's framework decision table and its Module
-> Federation micro-frontend shape are reversed by
-> `2026-07-27-mfe-app-family-design.md`. The rewrite of this document is tracked
-> by #1059; until it lands, treat the newer spec as authoritative.
+> **§2 superseded (2026-07-27), rewritten (#1059).** The framework decision
+> table, its tie-break rule, and the Module Federation micro-frontend shape this
+> document originally carried are reversed by
+> `2026-07-27-mfe-app-family-design.md`, which is authoritative for every
+> browser-UI position. §2 below is rewritten to record only what survives and
+> point there; §1's gap list, §8's epic ordering, and §9's rejected alternatives
+> carry matching annotations where they named the reversed mechanism, and §6's
+> frontend test-stack row drops its Angular entry. **§§3–5 and §7 are
+> unaffected.**
 
 **Date:** 2026-07-10
 **Status:** Approved design, pre-implementation
@@ -18,9 +23,10 @@ ARCHITECTURE.md: many small repos, each independently deployable, held
 together by stable published contracts — DDD bounded contexts, polyrepo by
 default. This design fills three gaps:
 
-1. **WebUI plugins** — TypeScript/JavaScript as a language plugin, Angular
-   and React as framework topic plugins, with a use-case-based
-   recommendation between them.
+1. **WebUI plugins** — TypeScript/JavaScript as a language plugin, with the
+   browser framework as a topic plugin on top of it. (This document originally
+   proposed *two* framework topics chosen by a recommendation heuristic; §2
+   records the single-default position that replaced it.)
 2. **Contract lifecycle** — how a frontend repo consumes a backend's
    OpenAPI contract with zero drift risk and **zero repo-to-repo
    dependencies** (a hard rule: a repo may depend on published, versioned
@@ -43,14 +49,29 @@ Constraints carried throughout:
 
 ## 2. Plugin decomposition
 
-Three new plugins, layered exactly like `development-java` +
-`development-spring`:
+> **This section was rewritten by #1059.** It originally proposed Angular and
+> React as co-equal framework topics chosen by a bootstrap-time recommendation
+> heuristic, and named Module Federation as the blessed micro-frontend
+> mechanism. Both are reversed. The browser-UI positions — SPA shell plus
+> micro-frontends, React + TypeScript as the single default, and a
+> `mount(el, ctx)` / `unmount(el)` contract over an import-map-resolved ES
+> module with Module Federation rejected — live in
+> [`2026-07-27-mfe-app-family-design.md`](2026-07-27-mfe-app-family-design.md)
+> §2 and §3, and are summarised as family positions in `ARCHITECTURE.md`.
+> What follows is the plugin decomposition that survives them.
+
+Two plugins, layered exactly like `development-java` + `development-spring`:
 
 ```text
 development-javascript   ← language: TypeScript + JavaScript (combined)
-development-angular      ← topic: composes with development-javascript
 development-react        ← topic: composes with development-javascript
 ```
+
+There is no `development-angular`. Angular is not scaffolded; an existing
+Angular asset participates by exporting the same MFE contract, and a second
+framework topic is built only if such an asset actually exists — at which
+point the boundary is already framework-agnostic, so it costs a plugin rather
+than a redesign.
 
 ### development-javascript (language plugin, the foundation)
 
@@ -77,45 +98,30 @@ Mirrors `development-python` / `development-java` structurally:
   for published packages; the design-system repo case is library mode plus
   visual-regression expectations.
 
-### development-angular / development-react (topic plugins)
+### development-react (topic plugin)
 
 Framework idioms and framework-specific maintenance only; everything
 JS/TS-generic stays in the language plugin.
 
-- **Angular:** standalone components, signals, strict templates, Angular
-  CLI/esbuild. Its framework-upgrade agent is built on **`ng update` and
-  its versioned migration schematics** — the direct analog of
-  `spring-boot-upgrade`, and more mechanical than anything the family has
-  for Spring.
 - **React:** hooks rules, one blessed data-fetching/state default
-  (TanStack Query for server state), Vite SPA as the default shape.
-- **Framework binding for generated API clients:** Angular
-  `HttpClient`-based client vs. React Query hooks — the topic plugin owns
-  the binding; the language plugin owns the generation.
+  (TanStack Query for server state), Vite as the default build.
+- **Framework binding for generated API clients:** React Query hooks — the
+  topic plugin owns the binding; the language plugin owns the generation.
 - **WebUI-generic concerns** (a11y auditing, Playwright, Lighthouse
-  budgets) live **in each framework topic for now**. A shared
-  `development-webui` layer is factored out only if a third framework
-  arrives. Two copies are cheaper than a fourth plugin.
+  budgets) live **in the framework topic for now**. A shared
+  `development-webui` layer is factored out only if a second framework
+  topic ever arrives — which, per the single-default position, requires a
+  real Angular asset to serve first.
 
-### Angular vs. React: a bootstrap-time recommendation, not an open menu
+### Framework choice: a single default, not a recommendation heuristic
 
-Bootstrap asks 3–4 questions and recommends one; the user can override.
-
-| Signal | Points to |
-| --- | --- |
-| Form/CRUD-heavy business app, long-lived, larger team, org wants enforced conventions | **Angular** — DI, router, forms, i18n in the box; the framework itself enforces one blessed path |
-| Highly custom design-driven UI; design-system component library; embedding / micro-frontend into existing pages | **React** — composition model and ecosystem fit custom UX work |
-| Tie | Angular for internal business apps; React for consumer-facing custom UX |
-
-**Build order: React first, Angular second.**
-
-> **Amended 2026-07-22** (epic #682): originally "Angular first, React
-> second". Reversed while designing the target platform architecture — it
-> is micro-frontend-based, which the decision table above itself points at
-> React. Consequences: the recommendation heuristic ships with the *second*
-> framework topic (#685, Angular) since it needs both to exist, and the
-> blessed MFE app shape (Module Federation host/remote repo shapes) is
-> scoped as #954, a #686 follow-up; Vite SPA remains React's default shape.
+Bootstrap asks nothing about the framework. React + TypeScript is the default
+for any browser UI, and the SPA shell + micro-frontend shape is the default
+composition. Bootstrap's remaining UI question is *which repo shape to
+scaffold* — **shell or remote** — not which framework to use; that axis is
+gone. A remote is then a route-owned page or a canvas widget, but that is a
+variant under one contract and one template tree, not a third scaffold choice.
+See the 2026-07-27 design for the shapes and the contract they share.
 
 ## 3. Contract flow — versioned spec artifact, consumer generates
 
@@ -284,7 +290,7 @@ stay internal — never published as APIM products.
 | Repo | Tests | Needs the other side? |
 | --- | --- | --- |
 | Backend | Unit + per-major spec-conformance (drift gate; optionally schemathesis) + testcontainers | Never |
-| Frontend | Unit/component (vitest + testing-library / TestBed) + integration against **MSW handlers generated from the pinned spec version** | Never |
+| Frontend | Unit/component (vitest + testing-library) + integration against **MSW handlers generated from the pinned spec version** | Never |
 | Composition | Thin Playwright smoke suite over composed released images, **through the gateway** (the production path) — critical user journeys only | The only place both meet |
 
 ## 7. Composition repo — a new repo type
@@ -323,13 +329,14 @@ Each epic is independently shippable.
 2. **API lifecycle** — spec publish (npm + APIM), semver triangle gate,
    per-major `contracts/` layout + ACL pattern, deprecation
    headers/gates, Spectral socket. Overlaps/absorbs parts of #174.
-3. **`development-react`** (first framework topic — see the 2026-07-22
-   amendment in §2; the MFE app shape follow-up is #954).
-4. **`development-angular`** + the bootstrap recommendation heuristic.
-5. **`development-composition`** (composition repo type).
-6. **Standardized ops surface** — the `ops-api` fragment + per-language
+3. **`development-react`** (the framework topic — see §2). The MFE
+   composition work is its own epic, built to the 2026-07-27 contract; the
+   Module-Federation-shaped follow-up this list used to name is superseded
+   along with the mechanism.
+4. **`development-composition`** (composition repo type).
+5. **Standardized ops surface** — the `ops-api` fragment + per-language
    canonical implementations + OTel defaults.
-7. **API styleguide** — separate, later. The enforcement vehicle is a
+6. **API styleguide** — separate, later. The enforcement vehicle is a
    **Spectral ruleset** linting `contracts/` in CI; bootstrap installs
    Spectral with a minimal starter ruleset in epic 2, and the styleguide
    epic later replaces the ruleset content without touching the pipeline.
@@ -338,6 +345,13 @@ Each epic is independently shippable.
 
 - **Single `development-webui` plugin owning both frameworks** — breaks
   the one-framework-one-topic convention (Spring precedent); grows large.
+  (Moot since #1059: there is one framework topic. Kept as the record of
+  what was weighed when two were still on the table.)
+- **Module Federation as the micro-frontend mechanism, and custom elements
+  as the alternative contract** — both rejected with reasons in
+  [`2026-07-27-mfe-app-family-design.md`](2026-07-27-mfe-app-family-design.md)
+  §2.3 and its rejected-alternatives section, which supersede this
+  document's original §2 on the point.
 - **Skipping the language layer** (all TS tooling inside each framework
   topic) — duplicates ~90% of tooling; leaves Node services/CLIs
   unserved.

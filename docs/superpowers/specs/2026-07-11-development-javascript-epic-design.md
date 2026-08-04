@@ -1,5 +1,14 @@
 # development-javascript — epic decomposition design (2026-07-11)
 
+> **Angular references superseded (#1059).** This document was written when the
+> family planned two framework topics — "Angular is #685, React is #686" — and
+> orders slices around an Angular binding. Both are reversed: React + TypeScript
+> is the single browser-UI default, Angular is not scaffolded, and there is no
+> `development-angular`. Read every `#685` / Angular mention below as historical;
+> the JS/TS language-layer decisions it settles are unaffected. Positions:
+> `ARCHITECTURE.md`; design:
+> [`2026-07-27-mfe-app-family-design.md`](2026-07-27-mfe-app-family-design.md).
+
 Tracking epic: **#683** (promoted from a single issue). Part of epic **#682**.
 Builds on the WebUI family design
 (`2026-07-10-webui-plugin-family-design.md` §2); this doc adds the slice
