@@ -22,8 +22,8 @@ BUILD_VERSION="$(git describe --tags --always)" GIT_SHA="$(git rev-parse HEAD)" 
 ```
 
 Declare the API majors your service serves so `/info` reports the lifecycle table
-the deprecation machinery (#684) reads, and plug your readiness check (liveness
-stays dependency-free):
+the deprecation machinery (#684) reads, and plug the **non-dependency half** of
+readiness (liveness stays dependency-free):
 
 ```python
 from <pkg>.ops_api import ApiMajor, OpsConfig, serve
@@ -33,9 +33,39 @@ serve(config=OpsConfig(
         ApiMajor(major=1, lifecycle="deprecated", sunset="2027-01-31"),
         ApiMajor(major=2, lifecycle="active"),
     ),
-    readiness=lambda: db_pool.healthy(),  # /health/ready + /health; liveness never checks deps
+    readiness=lambda: not draining,  # NON-dependency reasons only: starting up, draining
 ))
 ```
+
+## Dependency health (ops-api v1.1) — #1143
+
+`/health` carries an optional `components` map: one entry per **direct**
+dependency, read passively from that dependency's circuit-breaker state, plus a
+`degraded` aggregate. A declared **hard** dependency being down also fails
+`/health/ready`; a **soft** one never does. Wire it by passing a
+`DependencyHealthSource`:
+
+```python
+serve(config=OpsConfig(dependencies=DependencyHealth(catalog)))
+```
+
+The blessed source is `DependencyHealth` from the **resilience payload** shipped
+beside this one (`RESILIENCE.md` once placed) — bootstrap installs the two
+together. Without it this module behaves exactly as before: no `components`
+field, and readiness is your `readiness` callable alone. The binding is a
+protocol over a plain dataclass, so this file needs no breaker library installed.
+
+`readiness` remains the **non-dependency** half of the answer — still starting
+up, draining during a graceful shutdown, an internal resource exhausted — and is
+checked first. `internal_status` is the over-reporting hook: components set a
+**floor** on the aggregate, so a service impaired for a reason no dependency
+models must report a *more* severe aggregate, never a less severe one.
+
+**`/health` answers HTTP 200 even when the aggregate is `down`** — the verdict is
+in the body. 503 is the two probes' vocabulary (`/health/live`, `/health/ready`),
+not the human-facing aggregate's. An earlier revision of this template aliased
+`/health` to the readiness handler and answered 503, which the contract forbids
+and the checker rejects (#1139, Python half — fixed here).
 
 ## Instrumentation is OpenTelemetry-only
 

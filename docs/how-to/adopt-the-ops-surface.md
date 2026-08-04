@@ -120,6 +120,41 @@ pull-compat surface served by the SDK's Prometheus exporter.
   installs under your package (`ops_api.py` + `requirements.txt`); it serves the
   full surface on the management port and passes the conformance checker
   unchanged. See its `README.md`.
+
+  Bootstrap installs the **resilience payload** alongside it (the two are placed
+  together or not at all), which is what fills in the v1.1 half — per-dependency
+  `components` on `/health` and the hard/soft readiness hinge, both read from
+  circuit-breaker state. The blessed libraries are **`circuitbreaker` +
+  `tenacity`** (a pair, because no Python library is resilience4j — `pybreaker`
+  is deliberately rejected: it serializes every caller of one dependency behind a
+  lock). Four things are yours to do, and three of them fail quietly if you skip
+  them:
+
+  - declare your direct dependencies in `resilience-dependencies.properties`
+    (`<name>=hard|soft`, one per line, **full-line `#` comments only**), placed
+    **beside `dependency_catalog.py`**, and **replace the shipped
+    `orders-db`/`pricing-api` examples** — left verbatim they fail startup on
+    `require_all_declared_guarded()` (nothing guards them), and if you skip that
+    call `/health` reports two dependencies you do not have as `up`;
+  - route every outbound call through `catalog.call(name, call, fallback)` (or
+    `await catalog.call_async(...)` on asyncio), and give the call its **own
+    timeout** — the one mandate the catalog cannot impose, because it does not
+    own your socket. In Python it does double duty: `circuitbreaker` has no
+    slow-call detection, so your timeout **is** the slow-call threshold, and a
+    generous one lets a brownout pass unnoticed;
+  - pass `dependencies=DependencyHealth(catalog)` to your `OpsConfig`, placing
+    `dependency_health.py` in the same package as `ops_api.py` (it imports
+    `Dependency` from it — relative-first behind an `except ImportError`
+    fallback, so leave those intra-payload imports as shipped; flattening them
+    to the bare form raises `ModuleNotFoundError` inside a package);
+  - call `catalog.require_all_declared_guarded()` once at startup, after your
+    clients are built. It is the only thing that catches a dependency you
+    declared but never wired — whose breaker can never leave `closed`, so
+    `/health` would report it `up` throughout an outage.
+
+  `pricing_api_client.py` is a worked example, not service code: adapt it to a
+  real dependency or leave it out. The payload's own `RESILIENCE.md` is the
+  reference for the shape.
 - **Java (non-Spring)** — use the blessed reference implementation bootstrap
   installs (`OpsApi.java` + a `build.gradle.kts` dependency fragment): place it
   under a package in your service's source set, set its `package` line to match,

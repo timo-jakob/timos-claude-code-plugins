@@ -1,0 +1,11 @@
+# Canonical Python resilience dependencies (#1143, epic #964). Fold these into the
+# project's own dependency set (pyproject.toml / requirements.txt) -- do not drop this
+# file at the repo root beside another one.
+#
+# TWO libraries, because no maintained Python library is resilience4j: `circuitbreaker`
+# is the breaker (mandate 2), `tenacity` the bounded jittered retry (mandate 3), and
+# dependency_catalog composes them in the nesting order resilience4j's decorators
+# produce. See the payload README (placed as RESILIENCE.md) for the evaluation
+# and the rejected alternatives.
+circuitbreaker>=2.1,<3
+tenacity>=9.0,<10

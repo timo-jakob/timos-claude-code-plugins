@@ -30,6 +30,37 @@ Every outbound dependency call MUST have:
 6. **Stay stable** — a lost dependency fast-fails through the open breaker. It
    never exhausts the worker pool, blocks the event loop, or kills the process.
 
+**`circuitbreaker` + `tenacity` is the reference implementation** for Python
+(#1143) — the breaker and the retry come from two libraries because no
+maintained Python library is resilience4j. Code using them correctly is the
+baseline to compare against; code hand-rolling the same concerns is worth a
+finding only when the hand-rolled version is actually missing a mandate. A call
+routed through the bootstrap payload's
+`catalog.call(name, call, fallback)` / `await catalog.call_async(...)` **already
+carries mandates 2-6** — the breaker, the bounded jittered retry, the registered
+fallback, the recovery window and the open-breaker fast-fail are all inside that
+wrapper — so **mandates 2-6 need no re-review on such a call**. Four things stay
+the client's own and stay in scope, because the wrapper cannot supply them:
+
+- **mandate 1**, the timeout the client owns (§1 below);
+- **the exception classification**, since a client that never raises
+  `NotADependencyFailure` (or registers a third-party type via
+  `not_a_dependency_failure=`) for a caller-side 4xx — 408 and 429 excepted — lets
+  the catalog retry a deterministic error and count it toward the breaker
+  (§3 below);
+- **the hard/soft declaration** the call is wired to (§5 below) — a
+  misdeclaration is CRITICAL by this agent's own severity guide, and routing
+  through the catalog does nothing to make it right;
+- **the sync/async form match** — the *sync* `catalog.call(...)` inside an
+  `async def` still blocks the event loop (§4 below): the transport call and the
+  retry's backoff sleeps both run on it. Only `await catalog.call_async(...)`
+  carries mandate 6 in an async context, so the wrong form on an async path is
+  still the highest-impact Python variant, wrapper or no wrapper.
+
+**`pybreaker` IS a finding**: its `call()` holds a lock for the whole
+guarded call, so every caller of one dependency serializes behind the slowest —
+a breaker that makes contention worse than none.
+
 ## What Counts as a Dependency Call
 
 A call leaving this process to something it does not control: an HTTP or gRPC
@@ -79,11 +110,22 @@ pure function, a local dict read, or a `threading.Lock`.
 - `urllib3` / `requests` `Retry(total=...)` with `backoff_factor=0` (the
   default) — immediate retries, no backoff at all.
 - `tenacity` `@retry` with **no** `stop=stop_after_attempt(...)` — the default
-  retries forever; or `wait_fixed` where `wait_exponential_jitter` belongs.
+  retries forever; or `wait_fixed` where a jittered exponential belongs
+  (`wait_random_exponential`, tenacity's Full Jitter, is what the blessed payload
+  emits; `wait_exponential_jitter` is acceptable).
+- A `tenacity` retry whose predicate is overridden **without** bounding it to
+  `Exception` (e.g. a bare `retry_if_not_exception_type(...)`). Tenacity's
+  attempt manager records `BaseException` too and defers to the predicate, so the
+  override silently widens retrying to `asyncio.CancelledError` and
+  `KeyboardInterrupt` — a graceful shutdown then sleeps the backoff and re-calls
+  the dead dependency instead of unwinding.
 - Exponential growth with **no jitter** — synchronised clients retrying in
   lockstep is the thundering-herd shape.
-- Retrying an error that cannot succeed on repeat (a 4xx, a validation error,
-  `asyncio.CancelledError` that should propagate).
+- Retrying an error that cannot succeed on repeat (a 4xx **other than 408/429**,
+  a validation error, `asyncio.CancelledError` that should propagate). 408 and
+  429 are the dependency saying "come back", so retrying them with backoff is
+  correct — the blessed payload excludes exactly those two from its caller-error
+  band, and flagging them would be a finding against conformant code.
 - Retries nested inside retries (a session-level `Retry` under a `@retry`
   decorator): attempt counts multiply.
 
