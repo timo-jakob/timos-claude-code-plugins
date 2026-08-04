@@ -140,6 +140,30 @@ The script reports:
   - Step 4 done" from "files present + Step 4 never ran" — see State D
   handling below.
 
+> **A language token can be absent because detection could not see the module,
+> not because the language is absent.** `go` is the case that bites today:
+> detection reads only a **root** `go.mod`, so a Go workspace whose modules all
+> live in subdirectories (a `go.work` layout) is classified as *not Go* — and
+> every Go-gated block later in this skill, including the Go ops-api payload,
+> is silently skipped. **So when `languages` does not include `go`, look for
+> nested modules before believing it** — `git ls-files -- '*/go.mod'` (or a
+> `*/go.mod` glob) — because the detection JSON cannot tell you this: it reports
+> only what it parsed at the root. What you do with a hit depends on **Q4**:
+>
+> - **Detection found nothing at all (`languages=[]`), so Q4 will run** — say what
+>   you found *before* asking, so the user answers knowing their Go modules
+>   exist. If they name `go`, the run continues with a non-empty languages list
+>   and **every Go-gated block runs normally**; target the nested module you found
+>   in the Go ops-api block's *Placement*. Nothing is missing, so record no
+>   not-installed line.
+> - **Detection found other languages, so Q4 never fires** — the Go blocks stay
+>   skipped and nothing downstream will ask. **Record a Step-5 checklist line**
+>   saying the repo's nested Go modules were not classified and the Go ops-api
+>   payload (#1192) was not installed.
+>
+> Either way the duty lives here: the Go blocks cannot catch it, because in the
+> second case they never run.
+
 ### Decision tree (handle these in order — each step builds on the prior)
 
 Decide the starting state from the detection output, then run the matching
@@ -1850,6 +1874,166 @@ Like the Python payload these need an explicit destination, plus a Java-specific
   languages/java/ops-api/build.gradle.kts \
   languages/java/ops-api/README.md
 ```
+
+**Go canonical implementation (#1192).** For a Go **service** repo, also install
+the blessed Go realization — a self-contained OTel-SDK + Prometheus-exporter
+package serving all five endpoints on the management port (it passes
+`check-ops-conformance.zsh` unchanged). Copied verbatim (no placeholders). Unlike
+the Java payload there is no `package` fix-up: a Go file's package name is
+declared, not derived from its directory, so `package ops` needs no edit — but
+only because you give it **its own directory**. Dropped beside files that declare
+a different package it is a hard compile error (`found packages … and ops`), so
+the placement rule below is what makes the no-fix-up claim true.
+
+*Applicability — gate before you install.* Evaluate in order, first match wins:
+
+1. **A Go LIBRARY rather than a service → skip this block**, and say so in the
+   Step-5 checklist: a library has no ops surface to expose and no dependency
+   clients to circuit-break. Judge it from **runnable-service evidence** — a
+   `package main` with a `func main()`, a `cmd/` tree, or the import path
+   `.ko.yaml` builds — not from `interfaces` (interface detection is Python-only
+   in v1, so on a Go repo it is `[]` unless the user overrode it, and a
+   `["library"]` test would never fire). A module of packages with no `main` is a
+   library.
+
+   **Read `interfaces` only through its evidence, everywhere in this gate.** An
+   entry counts as the user's word **only** when its evidence is
+   `"user override"`. On a polyglot repo the Python-only detector populates
+   `interfaces` from the *Python* half, so a detected `["library"]` describes a
+   Python package and a detected `["rest"]` a Python service — neither says
+   anything about the Go module beside it. **Detector-populated entries neither
+   confirm nor contradict, in any case of this gate: judge from the
+   runnable-service evidence alone.** Read the other way, a Python package's
+   `["library"]` would stop the run to ask about a contradiction the user never
+   made, and a Python service's `["rest"]` would install an ops surface into a Go
+   library.
+
+   With that scoping, a **user-override** `interfaces` behaves as you would
+   expect: treat it as confirmation — it is a **set**, so `["rest", "library"]` is
+   a service that also publishes a library and does **not** skip. **But a
+   user-override `interfaces` that CONTRADICTS the evidence is case 2, not a
+   skip** — if it carries any non-`library` entry while the evidence says library,
+   do **not** skip here; fall through.
+2. **Genuinely ambiguous** → **surface the install-or-skip choice in the Step-2
+   plan** for the user to confirm, rather than defaulting either way. Three shapes
+   qualify; the last two are the easily-missed ones, and they are **mirror images**
+   of each other:
+   - a library that also ships a demo `cmd/`;
+   - **user says library, evidence says service** — a user-set `["library"]` on a
+     repo with a `cmd/` tree. Without this the contradiction falls through to case
+     3 and installs an ops surface into a repo the user explicitly called a
+     library;
+   - **user says service, evidence says library** — a user-set `["rest"]` on a
+     repo with no `main`. This one reaches case *1* first, so case 1 carries the
+     matching escape above; without it the payload is silently skipped for a repo
+     the user explicitly called a service.
+
+   The principle behind all three: a **user-override** `interfaces` is
+   *confirmation* when it agrees with the evidence and an *ambiguity* when it does
+   not, and is never overridden without asking, in **either** direction. A
+   detector-populated one is neither — see case 1.
+3. **Otherwise (a runnable Go service)** → **install** per the render command
+   below.
+
+**Check the `go` directive before you install, and fix it in the same pass.** The
+payload registers `http.ServeMux` **method patterns** (`GET /health`), a grammar
+the standard library gates on the module's **`go` directive** — not on the
+installed toolchain. So a `go.mod` still declaring `go 1.21` compiles the payload
+without error or warning and then answers **404 on every ops endpoint**.
+
+**Read the directive of the `go.mod` you are actually folding the requires into**
+— the module you chose in *Placement* below. `language_meta.go.version` from
+Step-1 detection answers this **only for a single-module repo**: detection parses
+the **root** `go.mod` and ignores nested ones, so in the multi-module case the
+placement rule explicitly contemplates, a root saying `go 1.24` tells you nothing
+about a service submodule still saying `go 1.21`. Re-read the target module's
+directive there. (Detection only ever sees a **root** `go.mod`, so a repo whose
+`go.mod`s all live in subdirectories is not classified as Go at all and this block
+never runs for it *unless the user names `go` at Q4*, which is why **Step 1**
+carries the rule: it surfaces the nested modules before Q4, and records the
+not-installed checklist line only when Q4 never fires. Nothing here can catch it.)
+
+Then branch on the directive you just read:
+
+- **Detection reported `version_source == "default"` for the root, OR you could
+  not read a directive from the target `go.mod`** → **you have a guess, not a
+  directive.** Detection substitutes a default (`1.26`) when the `go` directive
+  is missing or unparseable, and that guess sails through the `≥ 1.22` test below
+  — while a `go.mod` with *no* `go` directive is treated by the toolchain as
+  `go1.16`, precisely the 404 case this paragraph exists to prevent. So read the
+  target `go.mod` directly and treat a missing directive exactly as `< 1.22`.
+- **`go` ≥ 1.22 (parsed)** → install as normal.
+- **`go` < 1.22, missing, or unparseable** → **raise the directive to at least
+  `go 1.22`** — a routine, additive edit in that no syntax is removed, but **not
+  a semantic no-op**: `go 1.22` also switches the module to per-iteration `for`-loop
+  variable scoping, which applies to all of its existing code. Say so on the plan
+  line rather than presenting the bump as inert, and run the module's tests after
+  applying it. **Surface that bump as its own line in the Step-2 plan**: it edits a file
+  the payload does not own, and it is the only place the user can say no —
+  *declining that line* is exactly what triggers the deferral below. Note the
+  applied bump in the Step-5 checklist too.
+
+  **When the target module is itself a Step-2 question** (the *Placement* rule
+  below surfaces the choice whenever zero or several modules qualify), the bump
+  cannot name one module yet — so read the `go` directive of **every candidate**
+  and put one line per candidate in the same plan, each giving its current
+  directive and the bump that would apply if it is chosen. The user's decline of
+  the bump **for the module they pick** is the deferral trigger. Never bump a
+  directive that was not named in the plan, and never substitute the root's
+  directive to have something concrete to show — that is the substitution the
+  paragraph above forbids.
+
+  If the user **declines**,
+  **defer the ENTIRE payload** behind a Step-5 TODO rather than placing a package
+  whose every route silently 404s — a surface that answers 404 is worse than an
+  absent one, because the `ops-conformance` job then reports a *broken* service
+  rather than a missing one.
+
+Like the Python and Java payloads these need an explicit destination:
+
+- **Placement** — `opsapi.go` → `internal/ops/opsapi.go` (the conventional spot;
+  `internal/` keeps it unimportable outside the module, which is right for a
+  management surface). It must land in a directory that is **empty or already
+  `package ops`** — anywhere else the declared `package ops` collides with the
+  neighbours' package and the module stops compiling. In a **multi-module** repo,
+  or one whose layout puts service code elsewhere, target the module that produces
+  the **runnable service binary** — the one `.ko.yaml` builds or that owns
+  `cmd/<service>` — and if zero or several qualify, surface the choice in the
+  Step-2 plan rather than guessing. That module is also the one whose `go`
+  directive the check above must read. Put the shipped `README.md` **and
+  `go.mod.deps`** alongside it — the README points at `go.mod.deps` "beside this
+  file", so discarding the fragment after folding leaves that reference dangling.
+- **Deps** — **place `opsapi.go` into the repo FIRST**, then **fold
+  `go.mod.deps`' `require` block into that module's own `go.mod`** (the shipped
+  file is a fragment, not a module file) and run `go mod tidy` **from the module
+  directory** — or run the equivalent `go get` line from the README and let the
+  toolchain write them.
+
+  **The order is load-bearing: never run `go mod tidy` while `opsapi.go` is still
+  only in the staging directory.** Tidy removes every requirement no package in
+  the working tree imports, so it would silently strip the block you just folded
+  and exit 0 — leaving the payload placed with unresolvable
+  `go.opentelemetry.io/*` imports, which is exactly the never-place-without-its-
+  requires failure below, arriving through the one door that rule does not guard.
+
+  If `go mod tidy` **fails** (no module-proxy access in a sandboxed run, or a
+  `vendor/` tree that also needs `go mod vendor`), **keep the folded `require`
+  block** and record a Step-5 checklist line naming the command to re-run. Never
+  drop requires to make the command succeed. **Never place `opsapi.go` without its
+  requires** — its `go.opentelemetry.io/*` imports won't resolve and the module
+  stops building.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/go/ops-api/opsapi.go \
+  languages/go/ops-api/go.mod.deps \
+  languages/go/ops-api/README.md
+```
+
+The Go resilience payload that fills in the v1.1 `components` map is #1144; until
+it lands, `Config.Dependencies` stays unset and the surface is ops-api v1.0 —
+which conforms on its own.
 
 The remaining languages' canonical implementations are tracked follow-ups under
 epic #682: development-javascript/Node (#936) and development-swift (#937).
