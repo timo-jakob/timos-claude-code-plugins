@@ -1616,17 +1616,43 @@ Actuator (`spring-config-advisor`'s conforms-to-ops-api check) and the three
 health paths from the **Spring resilience payload below** (#1141); every other
 language plugin owns its canonical implementation of the same fragment.
 
-**Python canonical implementation (#688).** For a Python service repo, also
+**Python canonical implementation (#688).** For a Python **service** repo, also
 install the blessed non-Spring realization — a self-contained OTel-SDK +
 Prometheus-exporter module serving `/info`, `/health`, `/metrics` (it passes
-`check-ops-conformance.zsh` unchanged). Copied verbatim (no placeholders). Unlike
-the `common/…` artifacts (whose relpath maps 1:1 into the repo), these need an
-explicit destination — **detect the package directory** and place them there:
+`check-ops-conformance.zsh` unchanged). Copied verbatim (no placeholders).
+
+*Applicability — gate before you install.* Evaluate in order, first match wins:
+
+1. **A Python LIBRARY rather than a service → skip this block**, and say so in the
+   Step-5 checklist: a library has no ops surface to expose and no dependency
+   clients to circuit-break, so a management port and a health endpoint are noise
+   at best. Judge it from **runnable-service evidence** — a `__main__`, a console
+   script / entry point, or the module a Dockerfile entrypoint runs — and from
+   `interfaces`, which unlike the Java case **is** populated on Python (v1
+   interface detection is Python-only). `interfaces` is a **set**, so
+   `["rest", "library"]` is a service that also publishes a library and does
+   **not** skip; only a library-only repo with no runnable artifact does.
+2. **Genuinely ambiguous** (a library that also ships a demo entrypoint) →
+   **surface the install-or-skip choice in the Step-2 plan** for the user to
+   confirm, rather than defaulting either way.
+3. **Otherwise (a runnable Python service)** → **install** per the render command
+   below.
+
+Unlike the `common/…` artifacts (whose relpath maps 1:1 into the repo), these need
+an explicit destination — **detect the package directory** and place them there:
 `ops_api.py` → `src/<package>/ops_api.py` (the package that `python -m
-<package>.ops_api` resolves), the shipped `README.md` alongside it, and **fold
+<package>.ops_api` resolves) — and **if zero or several candidate packages
+qualify** (a multi-package `src/`, or a flat layout with no package at all),
+**surface the destination choice in the Step-2 plan** for the user to confirm
+rather than guessing: placed in a package the entrypoint never imports, the ops
+surface and the resilience payload coupled to it are simply dead code nothing
+detects. Then the shipped `README.md` alongside it, and **fold
 `requirements.txt`'s three deps into the project's dependency set** (the existing
 Python confirmed-edit model — `pyproject.toml`/`requirements.txt`) rather than
-dropping a second root `requirements.txt`:
+dropping a second root `requirements.txt`. Whenever this block installs, the
+**Python resilience payload below** (#1143) installs with it — it supplies the
+ops-api v1.1 `components` map and the hard/soft readiness hinge that `ops_api`
+reports.
 
 ```bash
 "<skill-base-dir>/scripts/render.zsh" \
@@ -1634,6 +1660,113 @@ dropping a second root `requirements.txt`:
   languages/python/ops-api/ops_api.py \
   languages/python/ops-api/requirements.txt \
   languages/python/ops-api/README.md
+```
+
+**Python resilience + dependency health (#1143).** Whenever the Python ops-api
+block above **installed**, also install the blessed resilience payload —
+`circuitbreaker` + `tenacity` wired around dependency clients per the six-mandate
+policy, plus the ops-api v1.1 `components` map on `/health` and the hard/soft
+readiness hinge, both read passively from breaker state. It **extends** the
+ops-api payload rather than standing alone: `dependency_health` imports
+`Dependency` from `ops_api` and is passed to `OpsConfig`, so the two are placed
+together or not at all.
+
+*Applicability — gate before you install.* The gate is **the Python ops-api
+block's own outcome and nothing else**, which is what makes "placed together or
+not at all" true rather than aspirational — every condition that could skip this
+payload is tested *there* (its cases 1 library and 2 ambiguous-so-ask), so there
+is no second gate to disagree with. Two exhaustive cases:
+
+1. **The Python ops-api block skipped** — its case 1, or its case 2 answered
+   *skip* → **skip this too**, for the same reason it skipped. A library has
+   nothing to circuit-break. That judgement is made *there*, never re-tested here.
+2. **The Python ops-api block installed** → **install** per the render command
+   below.
+
+If you ever need a condition that skips *this* payload but not the ops-api one,
+add it to the ops-api gate instead — a fresh condition here would silently
+re-introduce the split this gate exists to prevent (an `OpsConfig` wired to
+report `components` with no `DependencyHealth` to supply them).
+
+**Deps — fold `requirements.txt`'s two pins into the project's dependency set**
+(`pyproject.toml` / the existing `requirements.txt`), exactly as the ops-api
+block's three were folded. Never drop a second `requirements.txt` at the repo
+root, and never place `dependency_catalog.py` without its pins — its
+`circuitbreaker` / `tenacity` imports won't resolve and the service stops starting.
+
+Placement follows the ops-api block's rules, with these payload-specific ones:
+
+- **`dependency_health.py` goes in the SAME package as `ops_api.py`** — it imports
+  `Dependency` from it and is handed to `OpsConfig`. `dependency_catalog.py`
+  normally sits there too; `pricing_api_client.py` takes whatever module its domain
+  code lives in.
+- **Leave the intra-payload imports alone — they are already placement-proof.**
+  `dependency_health.py` and `pricing_api_client.py` import their siblings through
+  a `try: from .sibling import X / except ImportError: from sibling import X`
+  pair, relative FIRST. That is the Python counterpart of the Java payload's
+  flagged `package` line, and it needs no fix-up: inside a package (the normal
+  case) the relative form binds, and in a flat layout the fallback does. **Do not
+  "tidy" it into a single bare `from ops_api import …`** — Python 3 has no
+  implicit relative imports, so inside `src/<pkg>/` that raises
+  `ModuleNotFoundError` at startup and the service never boots. If you place the
+  three modules in *different* packages, that is the one case the pair cannot
+  cover: qualify the imports to match.
+- **`resilience-dependencies.properties` goes BESIDE `dependency_catalog.py`**,
+  not at the repo root: `DependencyCatalog.load()` reads it from
+  `Path(__file__).with_name(...)` so it resolves the same under any working
+  directory. `$OPS_DEPENDENCIES_FILE` overrides it for a mounted ConfigMap.
+- **The shipped `README.md` must NOT take the ops-api block's README rule.** That
+  rule ("alongside `ops_api.py`") would put this payload's README at the exact
+  path the ops-api payload's README already occupies, and whichever is staged
+  second silently clobbers the other. Place this one beside it as
+  **`RESILIENCE.md`** instead, and keep both.
+- **Replace the two worked-example dependencies during placement.** `orders-db`
+  and `pricing-api` are illustrations. Left verbatim they **fail startup** on
+  `require_all_declared_guarded()`, because no client guards them — and if that
+  call is skipped, `/health` instead reports two dependencies the service does not
+  have as `up`: a conformant-shaped health surface that lies, which is the exact
+  failure this payload exists to prevent. Substitute the service's real direct
+  dependencies (ask, or derive them from the detected stack), classifying each
+  `hard` or `soft`. If they genuinely cannot be determined during the run, carry an
+  explicit Step-5 checklist item — and state **THIS payload's symptom**: startup
+  will **fail** on `require_all_declared_guarded()` until the placeholders are
+  replaced with guarded real dependencies, and skipping that guard instead yields a
+  `/health` that reports dependencies the service does not have. Never leave them
+  verbatim and unrecorded.
+- **Record — do not perform — the `require_all_declared_guarded()` wiring.**
+  Bootstrap does not edit the service entrypoint, and at staging time no
+  dependency clients are routed through the catalog yet, so calling it here would
+  only guarantee a startup failure in the adopter's deployable. Carry a Step-5
+  checklist item instead: startup must call
+  `DependencyCatalog.require_all_declared_guarded()` once the dependency clients
+  are constructed (the placed `RESILIENCE.md` shows the four-line wiring). A
+  declared dependency that no client guards keeps a breaker that can never leave
+  `closed`, so `/health` would swear it is `up` straight through an outage — the
+  mirror of the undeclared-in-code case, and the reason the two guards are only
+  useful as a pair.
+
+**`pricing_api_client.py` is rendered by its own command** so the omit path can
+drop it. It cannot break startup (nothing imports it until you do, and it takes
+its base URL as a constructor argument), so placing it unadapted leaves dead code
+rather than a red build — but it still names a dependency the service does not
+have. **Adapt** it to the real dependency, or **omit** it and point the Step-5
+checklist at the placed `RESILIENCE.md` for the reference shape.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/python/resilience/requirements.txt \
+  languages/python/resilience/resilience-dependencies.properties \
+  languages/python/resilience/dependency_catalog.py \
+  languages/python/resilience/dependency_health.py \
+  languages/python/resilience/README.md
+```
+
+```bash
+# only on the ADAPT path -- see above
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/python/resilience/pricing_api_client.py
 ```
 
 **Java canonical implementation (#935).** For a **non-Spring** Java service repo,
@@ -1755,7 +1888,7 @@ fragment into. Never create a `build.gradle.kts` beside an existing
 build lacks these dependencies — its `io.github.resilience4j.*` imports won't
 resolve and the repo stops compiling.
 
-Placement follows the ops-api block's rules, with three payload-specific ones:
+Placement follows the ops-api block's rules, with these payload-specific ones:
 
 - **`DependencyHealth.java` goes in the SAME package as `OpsApi.java`**
   (`<base>.ops`) — it implements `OpsApi.DependencyHealthSource` and returns
@@ -1942,9 +2075,9 @@ on `@Retry`, `CallNotPermittedException` in the retry's `ignore-exceptions`), an
 why the health surface is an Actuator `@Endpoint` rather than a `@RestController`
 (the management child context has no `RequestMappingHandlerMapping`, so a
 controller there is never mapped — and one in the main context lands on the public
-app port). Non-Spring Java has landed too (#1142, the block above); the other four
-service languages are epic #967's remaining children (#1143 python, #1144 go,
-javascript #1145 and swift #1146).
+app port). Non-Spring Java (#1142) and Python (#1143) have landed too — both the
+blocks above; the other three service languages are epic #967's remaining children
+(#1144 go, #1145 javascript and #1146 swift).
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the

@@ -416,13 +416,13 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   *serving* service: `down` is a legitimate runtime state, not one the
   conformance job can pass in. `/health` itself always answers **200** while the
   process can respond (the verdict is in the body); 503 is the two probes'
-  vocabulary, not the human-facing aggregate's. **The blessed Python ops-api
-  template does not yet implement this**: it still aliases `/health` to the
-  readiness handler and answers 503 when readiness fails, which the v1.0 checker
-  already rejected (it has always required HTTP 200 on `/health`) — a healthy
-  service conforms either way, so the divergence only surfaces during an outage.
-  **The Java template was fixed by #1142** (below), which had to rework the same
-  handler to report `components`; #1139 stays open for the Python half.
+  vocabulary, not the human-facing aggregate's. **Both blessed non-Spring ops-api
+  templates now implement this**, each fixed by the slice that had to rework the
+  same handler to report `components` — Java by #1142, Python by #1143 — which
+  together closed #1139, where both had aliased `/health` to the readiness
+  handler and answered 503 when readiness failed. The v1.0 checker had always
+  rejected that (it has always required HTTP 200 on `/health`), but a healthy
+  service conforms either way, so the divergence only surfaced during an outage.
   Populating `components` from breaker state is the per-language slice (#967).
   Two encoding constraints are load-bearing, both empirically pinned by the
   repo's own gate: the healthy aggregate stays **`ok`** (renaming it to `up`
@@ -433,8 +433,9 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
 - **Realized per language, enforced two ways.** The policy and contract are
   central and language-agnostic (#965). The **review dimension** (#966) is
   shipped and catches violations on new diffs. The per-language scaffolding is
-  #967's six children, of which **Spring (#1141) and non-Spring Java (#1142)
-  have landed** — see below; python, go, javascript and swift are #1143-#1146. A
+  #967's six children, of which **Spring (#1141), non-Spring Java (#1142) and
+  Python (#1143) have landed** — see below; go, javascript and swift are
+  #1144-#1146. A
   **maintenance advisor** will catch the same defect classes on the back
   catalogue (#968) and is **not yet built** — until it lands, the pattern is
   enforced on new diffs only.
@@ -518,7 +519,82 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   `withInternalStatus` over-reporting hook, and the hard-dependency half of
   readiness. That rework also **fixes the Java half of #1139**: `/health` now
   answers 200 with the verdict in the body, as the contract requires, instead of
-  503 (the Python half is untouched and #1139 stays open for it).
+  503. That was the **Java half** of #1139; #1143 fixed the Python half the same
+  way, which closed the issue.
+- **The Python realization is a PAIR — `circuitbreaker` + `tenacity` (#1143)** —
+  and the pair *is* the decision: no maintained Python library is resilience4j,
+  so the breaker (mandate 2) and the bounded jittered retry (mandate 3) come from
+  two libraries that `dependency_catalog` composes into the same
+  `fallback(retry(breaker(call)))` nesting the Java payload spells out. The
+  payload (`templates/languages/python/resilience/`) ships that catalog, a
+  `DependencyHealth` that reads the `components` map from breaker state, the same
+  `resilience-dependencies.properties` hard/soft declaration as the Java sibling
+  (deliberately the same file name and syntax — the file an on-call human has to
+  find is in the same place in every service), and both guards
+  (`require_declared` from a client's `__init__`, `require_all_declared_guarded()`
+  from startup). **`pybreaker` is rejected despite being the popular choice**: its
+  `call()` holds a `threading.RLock` for the whole guarded call, so four
+  concurrent 1s calls through one breaker take 4s (measured on 1.4.1) — a breaker
+  that makes contention *worse* than none, which is the parked-caller behaviour
+  mandate 6 forbids — and its async path is Tornado's `gen.coroutine`, which
+  would hold that threading lock across an `await`. **`purgatory` is rejected**
+  as a near-miss: asyncio-native and properly concurrent, but its sync and async
+  APIs are separate factories and reading a circuit's state in async mode is
+  itself a coroutine, awkward from the synchronous thread that serves `/health`.
+  **Three `circuitbreaker` gaps are load-bearing and documented in the payload**,
+  because each fails silently: it has **no slow-call detection**, so *the client's
+  transport timeout IS the slow-call threshold* (a brownout raises nothing, and a
+  breaker that sees no exception never opens); it counts **consecutive** failures
+  rather than a rate, so the threshold is set low; and it publishes **no
+  state-change callback**, so `since` is stamped when a change was first
+  *observed* (only a `/health` scrape is an observation, so the stamp lands
+  within one scrape interval of the transition). One gap runs
+  the other way and is worth having: `state` computes the open → half-open
+  transition from elapsed time inside the property, so a recovering dependency
+  reads `degraded` on the next scrape with **no traffic and no deploy** — mandate
+  5's visibility for free, where resilience4j needs
+  `automaticTransitionFromOpenToHalfOpenEnabled`. **The one trap the payload must
+  never "simplify" away**: `circuitbreaker`'s `call()` and context manager do *not*
+  check whether the circuit is open — only its decorator form does — so
+  `DependencyCatalog._reject_if_open` is what makes mandate 6 real; without it the
+  breaker still opens and `/health` still says `down` while every request keeps
+  hammering the dead dependency for its full timeout. **`NotADependencyFailure`
+  carries the same job as its Java namesake with the opposite override
+  semantics**, deliberately: the constructor's `not_a_dependency_failure=`
+  argument **extends** the built-in ignored set (which always holds
+  `NotADependencyFailure` and `CircuitBreakerError`) and one tuple feeds both the
+  breaker predicate and the retry policy — so the Java payload's two standing
+  hazards, an `ignoreExceptions` that *assigns* and a widening applied to only one
+  of the pair, are not expressible here. **Two more details are load-bearing for
+  the same reason they are invisible**: the retry predicate keeps an explicit
+  `retry_if_exception_type(Exception)` clause, because tenacity's attempt manager
+  records `BaseException` too and defers to the predicate — overriding the default
+  without it silently retries `asyncio.CancelledError` through the whole backoff
+  budget, hanging the graceful shutdown mandate 6 exists to protect; and the
+  modules' sibling imports are written relative-first behind an `except
+  ImportError` fallback, because Python 3 has no implicit relative imports and the
+  bare form raises `ModuleNotFoundError` at startup under the documented
+  `src/<pkg>/` placement. **Two Python-only hardenings round it out**, both
+  fail-toward-severity: an off-contract component `status`/`kind` arriving through
+  the `DependencyHealthSource` protocol is coerced to `down`/`hard` rather than
+  read as healthy/soft (the Java sibling has no equivalent, and its `Dependency`
+  record holds equally unconstrained `String`s — that silence is a gap, not type
+  safety), and an off-contract `internal_status` return is read as `down` too
+  (Python-only for the opposite reason: Java's `internalStatus` is a
+  `Supplier<Status>` over an enum, where the value is unrepresentable rather than
+  merely unhandled). **A third guard is SHARED with the Java sibling**, which
+  answers the same way: a dependency source that *raises* is reported as `down` at
+  HTTP 200 rather than allowed to unwind out of the handler, where the connection
+  would close and the checker would report `/health` unreachable instead of a
+  diagnosis. Only its refinement is Python's own — the response is **serialized
+  inside the same guard**, because `json.dumps` is where a source-supplied value
+  of the wrong *type* fails, one frame after the source call itself returned. The
+  worked
+  client also **excludes 408 and 429 from its caller-error band**, where the Java
+  client classifies the whole 4xx range: resilience4j merely *ignores* an ignored
+  exception, while `circuitbreaker` records it as a **success** — so under
+  Python's library a rate-limit storm would otherwise zero the failure count on
+  every 429 and hold the breaker closed on a dependency that is visibly struggling.
 - **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
   agent in each **service** language plugin (Go, Java, Python, Swift), wired
   into that language's review panel alongside bugs/security/performance. It
