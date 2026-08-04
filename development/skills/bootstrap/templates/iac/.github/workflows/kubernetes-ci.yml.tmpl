@@ -1,0 +1,606 @@
+name: kubernetes-ci
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  # one non-hidden work directory. A DOT-prefixed path (`.rendered`) is fatal
+  # here: actions/upload-artifact@v4 excludes hidden files and folders by
+  # default (>= v4.4), so a hidden tree uploads NOTHING and every downstream
+  # job dies at download — or, worse, uploads partially and the checks go green
+  # having validated nothing.
+  RENDER_DIR: rendered-out
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: helm template every top-level chart
+        run: |
+          set -euo pipefail
+          mkdir -p "$RENDER_DIR"
+          find . -name Chart.yaml -not -path './.git/*' | while IFS= read -r c; do
+            d="$(dirname "$c")"
+            # Skip a VENDORED subchart — one whose charts/ parent is itself a
+            # chart. A blanket `-not -path '*/charts/*'` would also skip a
+            # TOP-LEVEL charts/ collection, which is the most common GitOps
+            # layout: helm would render nothing and every check would pass green
+            # with the charts entirely unvalidated.
+            owner="${d%/charts/*}"
+            if [ "$owner" != "$d" ] && [ -f "$owner/Chart.yaml" ]; then
+              continue
+            fi
+            # a library chart is a render-time INPUT to other charts, not
+            # renderable output — `helm template` refuses it outright ("library
+            # charts are not installable"), so a repo with a shared charts/common
+            # would red the render job, and every other job needs: render
+            # optional quotes and an optional trailing comment: `type: "library"`
+            # is ordinary house style (yamllint's quoted-strings: required), and an
+            # unquoted-only match would hand a library chart to `helm template`,
+            # which refuses it — reddening render on a legitimate repo. The same
+            # tolerance is applied to every `kind:`/`type:` probe in this file.
+            if grep -qE '^type:[[:space:]]*["'"'"']?library["'"'"']?[[:space:]]*(#.*)?$' "$c"; then
+              continue
+            fi
+            # `${d#./}` leaves a ROOT chart's dirname as ".", which is neither
+            # empty nor a usable slug — it would name the artifact `helm_..yaml`.
+            # Normalise it to the same "root" the release name falls back to, so
+            # the two agree.
+            rel="${d#./}"; [ "$rel" = "." ] && rel=""; rel="${rel:-root}"
+            # release name AND filename derive from the full path: basename alone
+            # makes `helm template . .` (invalid release name) for a root chart,
+            # and silently overwrites when two charts share a leaf directory name.
+            # `_` is escaped to `__` first so services/a_b and services/a/b cannot
+            # collapse onto the same filename.
+            slug="$(printf '%s' "$rel" | sed 's/_/__/g' | tr / _)"
+            name="$(printf '%s' "$rel" | tr 'A-Z' 'a-z' | tr '/_' '--' \
+                      | tr -cd 'a-z0-9-' | cut -c1-53)"
+            # strip ALL leading/trailing dashes — a `--` run survives a single
+            # ${name#-}, and a leading or trailing dash is an invalid release name
+            name="$(printf '%s' "$name" | sed 's/^-*//; s/-*$//')"
+            # a chart declaring dependencies: fails to render without them
+            # tolerate the status (dependency-free charts), but let stderr reach
+            # the log: otherwise the later `helm template` failure is undiagnosable
+            helm dependency build "$d" >/dev/null || true
+            helm template "${name:-root}" "$d" > "$RENDER_DIR/helm_$slug.yaml"
+          done
+      - name: kustomize build every overlay
+        run: |
+          set -euo pipefail
+          # all THREE marker filenames kustomize accepts — finding only
+          # kustomization.yaml leaves the others silently unrendered, and a
+          # kustomization.yml would then be scooped up as a "standalone manifest"
+          # and fed to kubeconform as if it were output rather than input
+          : > "$RUNNER_TEMP/kustomize-roots.txt"
+          : > "$RUNNER_TEMP/kustomize-buildable.txt"
+          find . \( -name kustomization.yaml -o -name kustomization.yml -o -name Kustomization \) \
+            -not -path './.git/*' | while IFS= read -r k; do
+              d="$(dirname "$k")"
+              # RECORD FIRST, then decide whether to build. A Component is
+              # correctly not built standalone (kustomize rejects it), but its
+              # directory still holds kustomize INPUTS — partial patches — so it
+              # must be excluded from the plain-manifest sweep below or those
+              # fragments get validated unrendered.
+              printf '%s\n' "$d" >> "$RUNNER_TEMP/kustomize-roots.txt"
+              if grep -qE '^kind:[[:space:]]*["'"'"']?Component["'"'"']?[[:space:]]*(#.*)?$' "$k"; then
+                continue
+              fi
+              printf '%s\n' "$d" >> "$RUNNER_TEMP/kustomize-buildable.txt"
+            done
+          # SECOND pass: build only roots that no OTHER root consumes. A base is
+          # `kind: Kustomization` too, so building every root would render the
+          # base standalone — and a base is deliberately partial (the overlay
+          # supplies image, resources, securityContext), so its output would red
+          # kube-linter on manifests that are kustomize INPUTS. That is the same
+          # "rendered output, not templates" violation the plain-manifest sweep
+          # excludes bases for; the roots file keeps them excluded there, and
+          # this pass keeps them from being built here.
+          while IFS= read -r d; do
+            consumed=""
+            while IFS= read -r other; do
+              if [ "$other" = "$d" ]; then continue; fi
+              # does another root reference this one? compare resolved paths, so
+              # ../../base from an overlay matches the base's own entry
+              # strip the leading dash AND any surrounding quotes: `- "../../base"`
+              # is ordinary YAML house style (yamllint's quoted-strings: required
+              # mandates it), and an unstripped quote makes the cd fail, so the
+              # base would be treated as unconsumed and built standalone — the
+              # exact failure this pass exists to prevent
+              for ref in $(grep -hE '^[[:space:]]*-[[:space:]]' \
+                             "$other"/kustomization.y*ml "$other"/Kustomization 2>/dev/null \
+                             | sed -e 's/^[[:space:]]*-[[:space:]]*//' \
+                                   -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"); do
+                # anchored on the scheme separator, not a bare `http*` prefix:
+                # `- httpbin` is a perfectly ordinary local ref (httpbin is a
+                # canonical example service), and skipping it would leave the
+                # root it names reading as unconsumed and built standalone
+                case "$ref" in /*|*://*|'') continue ;; esac
+                if [ "$(cd "$other" && cd "$ref" 2>/dev/null && pwd)" = "$(cd "$d" && pwd)" ]; then
+                  consumed=1; break
+                fi
+              done
+              # if-statements, not `[ … ] && break` AND-lists: a while loop exits
+              # with its LAST body command's status, so an AND-list whose test
+              # fails on the final iteration makes the whole inner loop return 1 —
+              # and that loop is a plain statement in the outer body, so errexit
+              # kills the step. Reachable on the canonical base/ + overlays/dev +
+              # overlays/prod layout, which would red render on most real repos.
+              if [ -n "$consumed" ]; then break; fi
+            # ROOTS, not buildable: a Component is never built, but it may still
+            # declare `resources:` — a base consumed only via a Component would
+            # otherwise read as unconsumed and be built standalone, and its
+            # deliberately partial output can red kube-linter.
+            done < "$RUNNER_TEMP/kustomize-roots.txt"
+            if [ -n "$consumed" ]; then continue; fi
+            rel="${d#./}"; [ "$rel" = "." ] && rel=""; rel="${rel:-root}"
+            slug="$(printf '%s' "$rel" | sed 's/_/__/g' | tr / _)"
+            kustomize build "$d" > "$RENDER_DIR/kustomize_$slug.yaml"
+          done < "$RUNNER_TEMP/kustomize-buildable.txt"
+      # A repo may legitimately hold Argo CD manifests and NO chart/overlay —
+      # the topic marker fires on an argoproj.io reference alone. Without this
+      # the render job would upload nothing and every downstream job would die
+      # at download-artifact, so bootstrap would ship CI red on every PR.
+      #
+      # Chart-owned trees are EXCLUDED: templates/*.yaml are Go templates, not
+      # YAML, and Chart.yaml/values.yaml are chart metadata. Copying them would
+      # feed raw templates to kubeconform/kube-linter and red every real chart
+      # repo — the opposite of "validate rendered output, not templates".
+      - name: copy standalone manifests so there is always something to validate
+        run: |
+          set -euo pipefail
+          # `|| true`: find propagates a non-zero status from an -exec ... {} +
+          # batch, and grep -l exits 1 when nothing in the batch matches — which
+          # is the legitimate "no standalone manifests" case, not an error
+          { find . \( -name '*.yaml' -o -name '*.yml' \) \
+              -not -path './.git/*' -not -path "./$RENDER_DIR/*" \
+              -not -path '*/templates/*' -not -name 'Chart.yaml' -not -name 'values.yaml' \
+              -not -name 'kustomization.yaml' -not -name 'kustomization.yml' -not -name 'Kustomization' \
+              -exec grep -lE '^kind:' {} + 2>/dev/null || true; } \
+            | while IFS= read -r m; do
+                # skip kustomize INPUTS: a base or patch fragment is deliberately
+                # partial (the overlay supplies image, resources, securityContext),
+                # so validating it unrendered reds a valid repo — the opposite of
+                # this step's own "rendered output, not templates" charter
+                skip=""
+                while IFS= read -r root; do
+                  case "$m" in "$root"/*) skip=1; break ;; esac
+                done < "$RUNNER_TEMP/kustomize-roots.txt"
+                if [ -n "$skip" ]; then continue; fi
+                cp "$m" "$RENDER_DIR/plain_$(printf '%s' "${m#./}" | sed 's/_/__/g' | tr / _)"
+              done
+          # never upload an empty artifact — downstream jobs must have an input.
+          # NON-hidden, or upload-artifact drops it and we are back to the
+          # if-no-files-found: error failure this guard exists to prevent. And a
+          # VALID object, not a comment: `kube-linter lint` errors with "no valid
+          # objects found" on a tree containing none, so a comment-only sentinel
+          # would red the lint check in exactly the corner it exists to keep green.
+          # object presence, not `ls -A`: a chart whose manifests are all
+          # value-gated off renders an object-FREE file, which would suppress the
+          # sentinel while `kube-linter lint` still errors with "no valid objects
+          # found" — the corner the sentinel exists to keep green, reached through
+          # a side door a file-count test cannot see.
+          if ! grep -rqE '^kind:' "$RENDER_DIR" 2>/dev/null; then
+            # printf, not an indented heredoc: inside a YAML block scalar the
+            # terminator would carry the block's indentation and never match
+            printf '%s\n' \
+              'apiVersion: v1' \
+              'kind: ConfigMap' \
+              'metadata:' \
+              '  name: render-sentinel' \
+              'data:' \
+              '  note: "nothing to render - placeholder so downstream checks have a valid input"' \
+              > "$RENDER_DIR/EMPTY.yaml"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rendered
+          path: ${{ env.RENDER_DIR }}
+          if-no-files-found: error
+
+  schema:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: rendered
+          path: ${{ env.RENDER_DIR }}
+      # ubuntu-latest ships helm and kustomize but NONE of kubeconform,
+      # kube-linter, kyverno or yq — without an install step the job exits 127
+      # and the check can never go green, so it can never become required
+      - name: install kubeconform
+        run: |
+          set -euo pipefail
+          url="https://github.com/yannh/kubeconform/releases/download"
+          curl -sSfL "$url/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+        env:
+          KUBECONFORM_VERSION: 0.6.7
+      - run: kubeconform -strict -summary -ignore-missing-schemas "$RENDER_DIR/"
+
+  lint:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # same reason as config-scan: kube-linter reads a repo-level
+      # `.kube-linter.yaml` from the workspace, so a consumer tuning the linter
+      # needs its sources present
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: rendered
+          path: ${{ env.RENDER_DIR }}
+      - name: install kube-linter
+        run: |
+          set -euo pipefail
+          url="https://github.com/stackrox/kube-linter/releases/download"
+          curl -sSfL "$url/v${KUBE_LINTER_VERSION}/kube-linter-linux.tar.gz" \
+            | tar -xz -C /usr/local/bin kube-linter
+        env:
+          KUBE_LINTER_VERSION: 0.7.2
+      - run: kube-linter lint "$RENDER_DIR/"
+
+  policy:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # JOB-level, not step-level: the apply/test step names the version too, and a
+    # step-level env would leave it unset there — fatal under `set -u`
+    env:
+      KYVERNO_VERSION: 1.13.4
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: rendered
+          path: ${{ env.RENDER_DIR }}
+      - name: install kyverno CLI
+        run: |
+          set -euo pipefail
+          url="https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}"
+          curl -sSfL "$url/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz" \
+            | tar -xz -C /usr/local/bin kyverno
+      - name: kyverno apply + test
+        run: |
+          set -euo pipefail
+          # Dereference the policy tree IN PLACE. Kyverno's own file discovery
+          # is lstat-based: it will not descend a symlinked DIRECTORY, so a
+          # symlink-shared policy set — which gather-kubernetes-findings.zsh
+          # DOES report, via its `-L` walk — is invisible to the CLI. Probing
+          # with `-L` instead was tried and reverted: it fires the fixture gate
+          # on tests the CLI then cannot find, turning a wrong-but-green check
+          # into a hard red on a required check.
+          #
+          # The mirror is built in $RUNNER_TEMP and MOVED BACK over
+          # policies/kyverno rather than read from where it was built, because
+          # `kyverno test` resolves each fixture's `policies:`/`resources:`
+          # entries RELATIVE TO THE TEST FILE. A fixture reaching outside the
+          # tree (`resources: [../../manifests/deployment.yaml]` — an ordinary
+          # shape) resolves against the checkout and would break the moment the
+          # CLI read the tree from $RUNNER_TEMP: hard red on a repo whose
+          # policies and fixtures are correct, the very outcome that got `-L`
+          # reverted, reintroduced through path context instead of discovery.
+          # Dereferencing in place keeps every relative path in its authored
+          # context while still handing the CLI real directories.
+          POLICY_SRC=policies/kyverno
+          # a SIBLING of the tree, so the swap below is a same-filesystem
+          # rename. $RUNNER_TEMP need not share a mount with $GITHUB_WORKSPACE
+          # on a self-hosted or container job, where `mv` degrades to a
+          # non-atomic copy+unlink that can leave a half-populated tree.
+          MIRROR="$(dirname "$POLICY_SRC")/.kyverno-deref"
+          stripped=""
+          # `[ -L ]` as well as `[ -d ]`: `[ -d ]` follows symlinks and is FALSE
+          # for a dangling one, which would take the skip branch and report a
+          # green check over a policy set the repo does declare. Letting it
+          # reach `cp -RL` turns it into the reported error below instead.
+          if [ -d "$POLICY_SRC" ] || [ -L "$POLICY_SRC" ]; then
+            # Dangling links are unrelated to the policy set's validity — a link
+            # into an unfetched submodule, or to a gitignored build artifact —
+            # but `cp -RL` cannot stat one and fails the WHOLE copy, which would
+            # hard-red the required check over an entirely readable policy set.
+            #
+            # `-type l ! -exec test -e {} \;` — a symlink whose target does not
+            # resolve. Deliberately NOT `-xtype l`, which is a GNU extension the
+            # BSD `find` on a macOS developer box rejects outright: this suite
+            # executes these very steps, and the `2>/dev/null` below would turn
+            # that rejection into a SILENT no-op — the strip would appear to work
+            # while doing nothing. Deliberately NOT `-L … -type l` either: `-L`
+            # DESCENDS a valid symlinked subdirectory, so the deletion would
+            # reach files at their real location outside this tree
+            # (`shared -> ../../common-policies` prunes the shared tree;
+            # `all -> ../..` sweeps the whole checkout).
+            # `-mindepth 1` keeps the start point out of it, so a dangling
+            # policies/kyverno still reaches cp's typed error instead of being
+            # unlinked here and misreported as a cycle. A broken link nested
+            # inside a valid symlinked subdirectory is therefore NOT stripped —
+            # it falls through to cp's failure, which is the outcome the
+            # charter prefers for a declared-but-unreadable set.
+            stripped="$(find "$POLICY_SRC" -mindepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null || true)"
+            if [ -n "$stripped" ]; then
+              # never silently: what was dropped has to be visible, and the
+              # empty-selection gate below turns an ENTIRELY unresolvable set
+              # into a red rather than the skip it would otherwise look like
+              echo "::warning::dropped unresolvable symlinks under policies/kyverno:"
+              printf '%s\n' "$stripped"
+              # the removal runs inside find, NOT `printf … | while IFS= read -r l`:
+              # a bare `read` splits on IFS, so a link named `shared ` (trailing
+              # space) would `rm` the REAL `shared` beside it while the dangling
+              # one survived to red cp, and a newline-bearing name would unlink a
+              # path outside this tree — the very escape `-xtype`/`-L` was
+              # rejected for. -exec passes each path as one exact argument.
+              if ! find "$POLICY_SRC" -mindepth 1 -type l ! -exec test -e {} \; -exec rm -f {} +; then
+                echo "::error::could not remove unresolvable symlinks under policies/kyverno"
+                exit 1
+              fi
+            fi
+            # a leftover mirror (a self-hosted runner that does not clear its
+            # temp, a second invocation) would make `cp` copy INTO it and the
+            # swap install policies/kyverno/kyverno/** — every escaping fixture
+            # ref then off by one level, the exact regression this rework exists
+            # to prevent
+            rm -rf "$MIRROR"
+            if ! cp -RL "$POLICY_SRC" "$MIRROR"; then
+              # a symlink cycle, a dangling policies/kyverno, or a path we still
+              # cannot read. Reporting beats taking the skip branch: these are
+              # DECLARED policies we cannot read, the same
+              # green-over-unenforced-policies outcome the unevaluable-kinds
+              # branch below refuses.
+              echo "::error::could not dereference policies/kyverno (a dangling" \
+                   "policies/kyverno symlink, a symlink cycle, or an unreadable path —" \
+                   "see cp's output above) — refusing to report a green check on" \
+                   "policies that cannot be read"
+              exit 1
+            fi
+            # `rm -rf` on a SYMLINKED policies/kyverno removes the link, never
+            # the target; the checkout is disposable per job either way.
+            if ! rm -rf "$POLICY_SRC"; then
+              echo "::error::could not replace the policies/kyverno tree"
+              exit 1
+            fi
+            if ! mv "$MIRROR" "$POLICY_SRC"; then
+              # the tree is already gone at this point, so a bare errexit death
+              # here would red the required check with only mv's raw stderr —
+              # every other failure path in this step is typed
+              echo "::error::could not install the dereferenced policies/kyverno tree"
+              exit 1
+            fi
+          fi
+          # gate on a MATCHING FILE, not on the directory: an empty or
+          # .json-only policies/kyverno/ must skip exactly like an absent one,
+          # and a .yml-only repo must be ENFORCED, not silently ignored.
+          # `-print -quit` rather than `| head -n1`: head closes the pipe, find
+          # dies of SIGPIPE, and pipefail then fails the assignment.
+          # `|| true` is load-bearing: when policies/kyverno does not exist at
+          # all — the DEFAULT state this whole design centres on — find exits 1,
+          # the assignment inherits that status, and errexit would kill the step
+          # before the skip branch below could run. The never-fail guarantee has
+          # to survive its own most common case.
+          policies="$(find "$POLICY_SRC" -type f \( -name '*.yaml' -o -name '*.yml' \) \
+                        -print -quit 2>/dev/null || true)"
+          if [ -z "$policies" ]; then
+            # …but an empty tree we EMPTIED ourselves is not an absent one. If
+            # the strip above removed links and nothing evaluable is left, the
+            # repo declared a policy set whose every member is unresolvable (a
+            # link into an unfetched submodule is the realistic case, and the
+            # maintenance gather's `-L` walk REPORTS that set as present). The
+            # charter's one skip condition is "no matching file" — reporting
+            # green here would be the green-over-unenforced-policies outcome it
+            # forbids, and it would silently replace the typed red this step
+            # produced before the strip existed.
+            # BOTH conjuncts: `stripped` matches any dangling link by name, while
+            # `policies` matches only *.{yaml,yml}. Gating on `stripped` alone
+            # would red a `.json`-only tree that happens to carry one unrelated
+            # broken link — a tree this step's own contract says must skip
+            # exactly like an absent one. Require that nothing survived instead.
+            if [ -n "$stripped" ] &&
+               [ -z "$(find "$POLICY_SRC" -mindepth 1 ! -type d -print -quit 2>/dev/null || true)" ]; then
+              echo "::error::policies/kyverno declares only unresolvable symlinks" \
+                   "(unfetched submodule? gitignored artifact?) — refusing to report a" \
+                   "green check on policies that cannot be read"
+              exit 1
+            fi
+            echo "::notice::no policies declared at policies/kyverno/**/*.{yaml,yml} — policy step skipped"
+            exit 0
+          fi
+          # kyverno test fixtures live in the SAME directory by convention, and
+          # `kyverno apply` errors when handed a non-policy document — so select
+          # the policy documents explicitly rather than passing the directory
+          mkdir -p "$RUNNER_TEMP/policies"
+          # `|| true` for the same reason as the render step: grep -l exits 1
+          # when no file in the batch matches and find propagates it
+          # hoisted so the -exec line stays inside the 120-column lint limit.
+          # Optional quotes and an optional trailing comment, the same tolerance
+          # the render job's `type:`/`kind:` probes apply: an unquoted-only match
+          # would drop every policy file of a repo writing `kind: "ClusterPolicy"`,
+          # and the empty-selection branch below would then report on a policy set
+          # that was in fact perfectly evaluable.
+          kind_re='^kind:[[:space:]]*["'"'"']?(Cluster)?Policy["'"'"']?[[:space:]]*(#.*)?$'
+          { find "$POLICY_SRC" -type f \( -name '*.yaml' -o -name '*.yml' \) \
+              -exec grep -lE "$kind_re" {} + 2>/dev/null || true; } \
+            | while IFS= read -r pol; do
+                # flatten the path RELATIVE to the mirror root, so the escaping
+                # keeps its collision guarantee without carrying the runner's
+                # temp prefix into every name
+                rel="${pol#"$POLICY_SRC"/}"
+                cp "$pol" "$RUNNER_TEMP/policies/$(printf '%s' "$rel" | sed 's/_/__/g' | tr / _)"
+              done
+          if [ -z "$(ls -A "$RUNNER_TEMP/policies")" ]; then
+            # RED, not a skip. YAML is present but nothing matched the kinds the
+            # pinned CLI can evaluate — Kyverno 1.14 added ValidatingPolicy /
+            # ImageValidatingPolicy / CleanupPolicy, which 1.13.4 cannot run. The
+            # charter has exactly ONE skip condition: no file matching
+            # policies/kyverno/**/*.{yaml,yml}. Once policies ARE declared,
+            # violations fail the step — so a set this pipeline cannot evaluate is
+            # a failure to report, not a second silent skip. Skipping here would
+            # hand the repo a green required check with its declared policies
+            # entirely unenforced, which is the one outcome the contract forbids.
+            echo "::error::policies/kyverno holds YAML but no Policy/ClusterPolicy" \
+                 "document the pinned kyverno CLI (v${KYVERNO_VERSION}) can evaluate —" \
+                 "refusing to report a green check on unenforced policies"
+            exit 1
+          fi
+          kyverno apply "$RUNNER_TEMP/policies/" --resource "$RENDER_DIR/"
+          # A policy set with no fixtures is a HIGH MAINTENANCE FINDING
+          # (policy_tests -> kubernetes-policy-triage), not a build failure — the
+          # six-check design names no policy-tests check. Running `kyverno test`
+          # unconditionally would exit non-zero here and make that a hard red.
+          # EXACTLY the names `kyverno test <dir>` discovers — a broader glob
+          # (kyverno-test-registry.yaml) would pass this gate while the CLI finds
+          # nothing and errors, and the gather would simultaneously report
+          # fixtures present so no policy_tests finding is ever filed
+          if find "$POLICY_SRC" -type f \( -name 'kyverno-test.yaml' -o -name 'kyverno-test.yml' \) \
+               -print -quit 2>/dev/null | grep -q .; then
+            # the tree at its ORIGINAL path, now dereferenced: the CLI's
+            # lstat-based walker can descend what the probe above matched, and
+            # every fixture's relative `policies:`/`resources:` entry still
+            # resolves against the directory it was authored in
+            kyverno test "$POLICY_SRC/"
+          else
+            echo "::warning::policies declared but no kyverno test fixtures — maintenance reports this as policy_tests"
+          fi
+
+  config-scan:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # the checkout is what makes the `.trivyignore` escape hatch below real:
+      # trivy reads it from the workspace, so without the sources a repo that
+      # followed this file's own tuning advice would still red forever
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: rendered
+          path: ${{ env.RENDER_DIR }}
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: ${{ env.RENDER_DIR }}/
+          exit-code: '1'
+          # threshold, or the check reds on a fresh repo's FIRST PR: trivy's
+          # default k8s checks fire LOW/MEDIUM on essentially every Deployment
+          # (seccompProfile, drop-capabilities, readOnlyRootFilesystem) — the
+          # plan's own "clean" fixture chart included. Start requirable, tighten
+          # deliberately; a repo that wants the lower bands owns a .trivyignore
+          # exactly as it owns policies/kyverno/.
+          severity: HIGH,CRITICAL
+
+  argocd:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # the rendered tree too: a very common app-of-apps authors its Application
+      # documents AS a Helm chart (argo-apps/templates/*.yaml). Those are Go
+      # templates in the source tree — correctly pruned below — so scanning only
+      # the checkout would extract zero paths and exit 0, a green check that
+      # verified nothing on exactly the repos with the most paths to verify.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: rendered
+          path: ${{ env.RENDER_DIR }}
+      - name: install yq
+        run: |
+          set -euo pipefail
+          curl -sSfLo /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          chmod +x /usr/local/bin/yq
+        env:
+          YQ_VERSION: 4.44.3
+      - name: every app path this repo owns exists
+        run: |
+          set -euo pipefail
+          # Read .spec.source.path from Argo CD Application/ApplicationSet docs
+          # ONLY. A bare `grep 'path:'` matches every path: key in the repo — a
+          # readinessProbe's `path: /healthz` included.
+          #
+          # Per-file yq, not one batched invocation: yq ABORTS on the first
+          # unparseable document, and Helm templates/*.yaml are Go templates, so
+          # a single batch would silently truncate the path list and the check
+          # would pass having extracted nothing. Templates are pruned as well.
+          # A parse failure is reported per file via ::warning below; yq's own
+          # stderr is deliberately suppressed there to keep the log readable
+          # (the PROBE, by contrast, lets it through — that is the one place a
+          # diagnostic is worth the noise, because it fails the whole step).
+          paths_file="$RUNNER_TEMP/argocd-paths.txt"
+          : > "$paths_file"
+
+          # ONE definition of the expression, shared by the probe and the loop —
+          # a probe that tested a different string would prove nothing.
+          #
+          # Evaluated with JQ over `yq -o=json`, not by yq directly: this is jq
+          # dialect. mikefarah yq implements neither `ascii_downcase` (its
+          # operator is `downcase`), nor `endswith`, and its `sub` takes
+          # comma-separated arguments — so handing this to `yq -N -r` would fail
+          # to parse for EVERY file. ubuntu-latest ships jq, and multi-document
+          # YAML converts to a JSON stream jq consumes natively. Note jq's env
+          # accessor is `env.VAR` — `strenv()` is itself one of the yq-isms this
+          # comment warns about, and would fail to compile here.
+          JQ_EXPR='
+            select(type == "object")
+            | select(.apiVersion == "argoproj.io/v1alpha1")
+            | select(.kind == "Application" or .kind == "ApplicationSet")
+            | [ .spec.source, .spec.template.spec.source,
+                (.spec.sources // [])[], (.spec.template.spec.sources // [])[] ]
+            | .[]
+            | select(. != null)
+            | select(
+                ((.repoURL // "") | sub("/$"; "") | sub("\\.git$"; "") | ascii_downcase) as $u
+                | (env.REPO_SLUG | ascii_downcase) as $s
+                | ($u | endswith("/" + $s)) or ($u | endswith(":" + $s)))
+            | (.path // empty)'
+          # BOTH source shapes above: Argo CD >= 2.6 multi-source Applications
+          # carry .spec.sources, and reading only the singular form extracts zero
+          # paths from them, so the check would pass vacuously on exactly the
+          # repos it should scrutinise. The repoURL filter is anchored on the
+          # PATH BOUNDARY with literal operators: test() would treat a "." in the
+          # repo name as match-any, and contains() would match the sibling repo
+          # `acme/k8s-apps` for slug `acme/k8s`, whose paths are correctly absent
+          # locally. Case folded, since GitHub slugs are case-insensitive.
+
+          # Probe the EXPRESSION against a known-good document first. yq exits
+          # non-zero both for "this file will not parse" and "this expression
+          # will not compile", and the per-file `|| echo` below cannot tell them
+          # apart — so a expression the pinned yq rejects would warn on every
+          # file, extract nothing, and exit 0: a required check permanently green
+          # while validating nothing. Fail loudly here instead.
+          printf '%s\n' \
+            'apiVersion: argoproj.io/v1alpha1' \
+            'kind: Application' \
+            'spec:' \
+            '  source:' \
+            "    repoURL: https://github.com/$REPO_SLUG.git" \
+            '    path: .' > "$RUNNER_TEMP/probe.yaml"
+          if [ "$(yq -o=json '.' "$RUNNER_TEMP/probe.yaml" | jq -r "$JQ_EXPR")" != "." ]; then
+            echo "::error::the Argo CD path expression does not compile or match — refusing to report a vacuous pass"
+            exit 1
+          fi
+          while IFS= read -r f; do
+            yq -o=json '.' "$f" 2>/dev/null | jq -r "$JQ_EXPR" >> "$paths_file" \
+              || echo "::warning::could not parse $f as YAML — skipped"
+          # ONE start point: the artifact is downloaded inside the workspace, so
+          # `find .` already covers it. Adding "$RENDER_DIR" as a second start
+          # point lists every rendered file twice under two spellings
+          # (`./rendered-out/f` and `rendered-out/f`), which `sort -u` cannot
+          # collapse — each would be parsed twice and every warning duplicated.
+          done < <(find . \( -name '*.yaml' -o -name '*.yml' \) \
+                     -not -path './.git/*' -not -path '*/templates/*' 2>/dev/null | sort -u)
+
+          # report inline rather than accumulating into a word-split string: a
+          # path containing a space or a glob character would otherwise be
+          # re-split or expanded in the reporting loop
+          fail=0
+          while IFS= read -r p; do
+            [ -n "$p" ] || continue
+            # an ApplicationSet generator templates its path ('{{path}}'), which
+            # cannot exist on disk and is not statically verifiable
+            case "$p" in *'{{'*) echo "::notice::templated path not statically checkable: $p"; continue ;; esac
+            [ -e "$p" ] || { echo "::error::app-of-apps references missing path: $p"; fail=1; }
+          done < <(sort -u "$paths_file")
+          exit "$fail"
+        env:
+          REPO_SLUG: ${{ github.repository }}

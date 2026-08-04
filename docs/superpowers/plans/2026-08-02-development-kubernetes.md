@@ -113,8 +113,8 @@ root and is what actually gates this task.
 ```json
 {
   "name": "development-kubernetes",
-  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. The bootstrap CI pipeline follows (#1154).",
-  "version": "0.3.0",
+  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. Its CI pipeline ships as a `development` bootstrap template — six requirable checks over rendered manifests (#1154).",
+  "version": "0.3.1",
   "author": {
     "name": "Timo Jakob"
   },
@@ -141,8 +141,8 @@ exact equality. Edit one, edit both.
 ```json
 {
   "name": "development-kubernetes",
-  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. The bootstrap CI pipeline follows (#1154).",
-  "version": "0.3.0",
+  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. Its CI pipeline ships as a `development` bootstrap template — six requirable checks over rendered manifests (#1154).",
+  "version": "0.3.1",
   "author": {
     "name": "Timo Jakob"
   },
@@ -181,7 +181,11 @@ When nothing matches, the policy step **skips and reports "no policies
 declared"**. *That absence* is never an error — a public plugin has to
 work in a repo that has no opinions yet. The guarantee scopes to the
 absence and nothing else: when policies **are** declared, violations
-**fail** the step, or the mechanism would be decorative.
+**fail** the step, or the mechanism would be decorative. So does a declared set
+the pinned Kyverno CLI **cannot evaluate** — policies written only in kinds it
+does not know (Kyverno 1.14's `ValidatingPolicy` and friends) fail rather than
+skipping, because that absence of a *matching file* is the one and only skip
+condition; anything else would be a green check over unenforced policies.
 
 The plugin ships **no policies of its own**: generic hygiene (probes,
 resource limits, non-root, `latest` tags) is `kube-linter`'s job, and two
@@ -212,24 +216,37 @@ arrive, that is a payload-contract break the dispatcher **escalates** via
 `human_action_required`, never a `missing_tooling` entry recommending
 kubeconform to a repo that has no manifests.
 
-A repo declaring `primary: kubernetes` in `.maintenance.yml` is entitled to
-the full pipeline; the primary/auxiliary model already permits a topic to be
-primary, so no new mechanism is needed. **#1152 landed the first half**: the
+A repo declaring `primary: kubernetes` in `.maintenance.yml` **selects this
+plugin for maintenance dispatch**; the primary/auxiliary model already permits a
+topic to be primary, so no new mechanism is needed. The *bootstrap* half is
+narrower, and the two must not be conflated: bootstrap renders the six-check
+workflow and calls `branch-protection.sh --iac-only true` for the kubernetes
+marker with an **empty resolved language set**. There a recorded `primary:` can
+**veto** the path (any other value takes the repo off it) but never **grant**
+it, so a declaration alone does not entitle a repo to the pipeline. The mixed
+repo — the marker plus a stray tooling language — is deferred to #1193.
+
+**#1152 landed the first half**: the
 topic marker and `gather-kubernetes-findings.zsh` exist, so `kubernetes` now
 enters the detected+supported set and such a declaration **selects this
 plugin** rather than being treated as stale. **#1153 landed the second half**:
 the five agents ship, so the dispatcher now **routes** each finding group to a
 `subagent_type` that exists rather than escalating it to a human.
-The **gates themselves** arrive with the check pipeline (#1154) — until then a
-routed group gets a real plan, but no CI check enforces the manifests on a PR.
+**#1154 landed the gates themselves**: the check pipeline ships, so a routed
+group is now backed by a CI check that enforces the manifests on a PR rather
+than by a plan alone.
 
 "Full pipeline" here means the **six checks** bootstrap's
-`templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit** (#1154) — render → schema →
-lint → policy → config-scan → argocd. Note where they will live: the workflow
+`templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **emits** (#1154) — render → schema →
+lint → policy → config-scan → argocd. Note where they live: the workflow
 is a *bootstrap* template owned by the generic `development` plugin, not
 something this plugin's skills run, which is the same boundary that keeps
 detection in `development`. A manifests repo has no test suite, so the language-app
-gates — the coverage floor above all — do not apply to it.
+gates — the coverage floor above all — do not apply to it, and bootstrap does not
+render them. Branch protection still runs: `branch-protection.sh --iac-only true`
+**requires those six contexts instead of** the language-app set (which no
+workflow on such a repo would ever report), leaving the protection rule and the
+repo merge settings auto-merge depends on unchanged.
 ```
 
 - [x] **Step 6: Commit**
@@ -324,7 +341,12 @@ k8s_hits="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
 > Claude Code caches plugins by version, so an omitted bump means installs never
 > see the change and the fix silently appears inert. `marketplace-sync.yml`
 > catches only *disagreement* between the two files, never an omitted bump, so
-> nothing will flag it. Stage both files.
+> nothing will flag it. Stage all THREE manifest files —
+> `development/.claude-plugin/plugin.json`,
+> `development-kubernetes/.claude-plugin/plugin.json` and the single root
+> `.claude-plugin/marketplace.json`, which carries both entries. (The only
+> other marketplace.json in the repo is the `tests/fixtures/clean/` one,
+> which must NOT be bumped.)
 
 - [x] **Step 3: Commit**
 
@@ -606,7 +628,12 @@ Expected: PASS — the whole suite (48 tests as shipped).
 > Claude Code caches plugins by version, so an omitted bump means installs never
 > see the change and the fix silently appears inert. `marketplace-sync.yml`
 > catches only *disagreement* between the two files, never an omitted bump, so
-> nothing will flag it. Stage both files.
+> nothing will flag it. Stage all THREE manifest files —
+> `development/.claude-plugin/plugin.json`,
+> `development-kubernetes/.claude-plugin/plugin.json` and the single root
+> `.claude-plugin/marketplace.json`, which carries both entries. (The only
+> other marketplace.json in the repo is the `tests/fixtures/clean/` one,
+> which must NOT be bumped.)
 
 - [x] **Step 5: Make the script executable and commit**
 
@@ -1996,473 +2023,104 @@ Child #1154. The child that produces requirable status checks.
   even once the section below lands; the two sites must state one rule.
 - Create: `development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl`
 - Modify: `development/skills/bootstrap/SKILL.md`
+- Create: `tests/bootstrap-iac-pipeline.bats` — **amended into this list as it
+  shipped.** Step 3 below only *parses* the template, which cannot see the
+  properties the story is actually about: that every check consumes the rendered
+  artifact, that the policy step stays green on an absent, empty or `.json`-only
+  `policies/kyverno/` but enforces a declared one, and that the render job
+  survives the canonical base + two-overlays layout. Every `run:` step is
+  extracted by name and executed against real directory shapes with recording
+  stubs; structure alone cannot distinguish a passing check from a vacuous one.
+- Modify: `development/skills/bootstrap/scripts/branch-protection.sh` —
+  **amended in.** The task as planned left branch protection to a manual Step 5
+  item, which review showed drops far more than the contexts: the script is also
+  the only site that PATCHes `allow_auto_merge` / `delete_branch_on_merge`, so
+  skipping it puts every IaC bootstrap into Step 4e's *arming failed* branch and
+  leaves the default branch unprotected. `--iac-only true` instead swaps the
+  language-app contexts for the six kubernetes-ci jobs and changes nothing else.
+- Modify: `.github/workflows/script-tests.yml`, `tests/Dockerfile` — `yamllint`
+  and `yq` become declared test dependencies (the new suite calls both
+  unguarded), and the path-filter comment records its second dependant.
+- Modify: `MAINTAINING.md` — the template downloads four CLIs by release URL
+  (`KUBECONFORM_VERSION`, `KUBE_LINTER_VERSION`, `KYVERNO_VERSION`,
+  `YQ_VERSION`). That pin class matches none of Step 1's recipes and no Renovate
+  manager, so it gets its own inventory line.
 
 **Interfaces:**
 
 - Consumes: the `policies/kyverno/` convention from Task 3.
 - Produces: six named checks — `render`, `schema`, `lint`, `policy`, `config-scan`, `argocd`.
 
-- [ ] **Step 1: Create the workflow template**
+- [x] **Step 1: Create the workflow template**
 
-Every `uses:` is pinned to a full commit SHA with a `# <tag>` comment, per
-MAINTAINING.md Step 2: the semgrep gate bootstrap itself installs **blocks
-mutable tags in downstream repos**, so a template floating on `@v4` would ship
-consumers a workflow their own quality gate flags. The path matters too — a
-`.tmpl` under a `.github/workflows/` segment is the only shape both Renovate
-managers see, so these pins stay refreshable. The SHAs below are the ones this
-repo already pins elsewhere; re-resolve them if a newer digest has landed.
+> **LANDED — read the file, not this section.** The workflow shipped as
+> `development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl`,
+> and the local review loop changed it in ways that matter, so the draft that
+> used to be reproduced here has been removed rather than left to be
+> regenerated from. What the review corrected, each with a behavioural test in
+> `tests/bootstrap-iac-pipeline.bats`:
+>
+> - **errexit**: the kustomize passes' `[ … ] && break` / `&& continue`
+>   AND-lists became if-statements. A `while` loop exits with its last body
+>   command's status, so the AND-list form killed the render job under `set -e`
+>   on the canonical base + two-overlays layout — and every downstream check
+>   `needs: render`.
+> - **quoted scalars**: the `type: library`, `kind: Component` and
+>   `kind: (Cluster)Policy` probes tolerate optional quotes and a trailing
+>   comment. `kind: "ClusterPolicy"` is ordinary house style, and an
+>   unquoted-only match dropped every policy file of such a repo.
+> - **the unevaluable-policy branch FAILS** (`::error::` + exit 1) rather than
+>   warning and skipping: the charter has exactly one skip condition — no file
+>   matching the glob — so a declared set the pinned CLI cannot run is a failure
+>   to report, never a green check over unenforced policies.
+> - **the sentinel** gates on object presence (`grep -rqE '^kind:'`), not on
+>   `ls -A`: a chart whose manifests are all value-gated off renders an
+>   object-free file that would suppress the sentinel while `kube-linter` still
+>   errors with "no valid objects found".
+> - **`lint` and `config-scan` check out the repo**, so the `.trivyignore` /
+>   `.kube-linter.yaml` tuning this template tells consumers they may own is
+>   actually visible to the tools.
+> - **the consumed-scan reads `kustomize-roots.txt`**, so a base consumed only
+>   through a Component is not built standalone.
+> - smaller: a root chart's slug normalises to `root`; the argocd sweep has one
+>   `find` start point; the repoURL normalisation strips the trailing slash
+>   before `.git`.
+>
+> Every `uses:` is pinned to a full commit SHA with a `# <tag>` comment, per
+> MAINTAINING.md Step 2 — the semgrep gate bootstrap installs **blocks mutable
+> tags in downstream repos**, so a template floating on `@v4` would ship
+> consumers a workflow their own quality gate flags. The path matters too: a
+> `.tmpl` under a `.github/workflows/` segment mirrors every other workflow
+> template's layout and keeps the pins where Renovate's `.tmpl` manager sees
+> them.
 
-```yaml
-name: kubernetes-ci
-on:
-  pull_request:
-permissions:
-  contents: read
-env:
-  # one non-hidden work directory. A DOT-prefixed path (`.rendered`) is fatal
-  # here: actions/upload-artifact@v4 excludes hidden files and folders by
-  # default (>= v4.4), so a hidden tree uploads NOTHING and every downstream
-  # job dies at download — or, worse, uploads partially and the checks go green
-  # having validated nothing.
-  RENDER_DIR: rendered-out
-jobs:
-  render:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: helm template every top-level chart
-        run: |
-          set -euo pipefail
-          mkdir -p "$RENDER_DIR"
-          find . -name Chart.yaml -not -path './.git/*' | while read -r c; do
-            d="$(dirname "$c")"
-            # Skip a VENDORED subchart — one whose charts/ parent is itself a
-            # chart. A blanket `-not -path '*/charts/*'` would also skip a
-            # TOP-LEVEL charts/ collection, which is the most common GitOps
-            # layout: helm would render nothing and every check would pass green
-            # with the charts entirely unvalidated.
-            owner="${d%/charts/*}"
-            if [ "$owner" != "$d" ] && [ -f "$owner/Chart.yaml" ]; then
-              continue
-            fi
-            # a library chart is a render-time INPUT to other charts, not
-            # renderable output — `helm template` refuses it outright ("library
-            # charts are not installable"), so a repo with a shared charts/common
-            # would red the render job, and every other job needs: render
-            grep -q '^type:[[:space:]]*library' "$c" && continue
-            rel="${d#./}"; rel="${rel:-root}"
-            # release name AND filename derive from the full path: basename alone
-            # makes `helm template . .` (invalid release name) for a root chart,
-            # and silently overwrites when two charts share a leaf directory name.
-            # `_` is escaped to `__` first so services/a_b and services/a/b cannot
-            # collapse onto the same filename.
-            slug="$(printf '%s' "$rel" | sed 's/_/__/g' | tr / _)"
-            name="$(printf '%s' "$rel" | tr 'A-Z' 'a-z' | tr '/_' '--' \
-                      | tr -cd 'a-z0-9-' | cut -c1-53)"
-            # strip ALL leading/trailing dashes — a `--` run survives a single
-            # ${name#-}, and a leading or trailing dash is an invalid release name
-            name="$(printf '%s' "$name" | sed 's/^-*//; s/-*$//')"
-            # a chart declaring dependencies: fails to render without them
-            # tolerate the status (dependency-free charts), but let stderr reach
-            # the log: otherwise the later `helm template` failure is undiagnosable
-            helm dependency build "$d" >/dev/null || true
-            helm template "${name:-root}" "$d" > "$RENDER_DIR/helm_$slug.yaml"
-          done
-      - name: kustomize build every overlay
-        run: |
-          set -euo pipefail
-          # all THREE marker filenames kustomize accepts — finding only
-          # kustomization.yaml leaves the others silently unrendered, and a
-          # kustomization.yml would then be scooped up as a "standalone manifest"
-          # and fed to kubeconform as if it were output rather than input
-          : > "$RUNNER_TEMP/kustomize-roots.txt"
-          : > "$RUNNER_TEMP/kustomize-buildable.txt"
-          find . \( -name kustomization.yaml -o -name kustomization.yml -o -name Kustomization \) \
-            -not -path './.git/*' | while read -r k; do
-              d="$(dirname "$k")"
-              # RECORD FIRST, then decide whether to build. A Component is
-              # correctly not built standalone (kustomize rejects it), but its
-              # directory still holds kustomize INPUTS — partial patches — so it
-              # must be excluded from the plain-manifest sweep below or those
-              # fragments get validated unrendered.
-              printf '%s\n' "$d" >> "$RUNNER_TEMP/kustomize-roots.txt"
-              grep -q '^kind:[[:space:]]*Component' "$k" && continue
-              printf '%s\n' "$d" >> "$RUNNER_TEMP/kustomize-buildable.txt"
-            done
-          # SECOND pass: build only roots that no OTHER root consumes. A base is
-          # `kind: Kustomization` too, so building every root would render the
-          # base standalone — and a base is deliberately partial (the overlay
-          # supplies image, resources, securityContext), so its output would red
-          # kube-linter on manifests that are kustomize INPUTS. That is the same
-          # "rendered output, not templates" violation the plain-manifest sweep
-          # excludes bases for; the roots file keeps them excluded there, and
-          # this pass keeps them from being built here.
-          while read -r d; do
-            consumed=""
-            while read -r other; do
-              [ "$other" = "$d" ] && continue
-              # does another root reference this one? compare resolved paths, so
-              # ../../base from an overlay matches the base's own entry
-              # strip the leading dash AND any surrounding quotes: `- "../../base"`
-              # is ordinary YAML house style (yamllint's quoted-strings: required
-              # mandates it), and an unstripped quote makes the cd fail, so the
-              # base would be treated as unconsumed and built standalone — the
-              # exact failure this pass exists to prevent
-              for ref in $(grep -hE '^[[:space:]]*-[[:space:]]' \
-                             "$other"/kustomization.y*ml "$other"/Kustomization 2>/dev/null \
-                             | sed -e 's/^[[:space:]]*-[[:space:]]*//' \
-                                   -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"); do
-                case "$ref" in /*|http*|'') continue ;; esac
-                if [ "$(cd "$other" && cd "$ref" 2>/dev/null && pwd)" = "$(cd "$d" && pwd)" ]; then
-                  consumed=1; break
-                fi
-              done
-              [ -n "$consumed" ] && break
-            done < "$RUNNER_TEMP/kustomize-buildable.txt"
-            [ -n "$consumed" ] && continue
-            rel="${d#./}"; rel="${rel:-root}"
-            slug="$(printf '%s' "$rel" | sed 's/_/__/g' | tr / _)"
-            kustomize build "$d" > "$RENDER_DIR/kustomize_$slug.yaml"
-          done < "$RUNNER_TEMP/kustomize-buildable.txt"
-      # A repo may legitimately hold Argo CD manifests and NO chart/overlay —
-      # the topic marker fires on an argoproj.io reference alone. Without this
-      # the render job would upload nothing and every downstream job would die
-      # at download-artifact, so bootstrap would ship CI red on every PR.
-      #
-      # Chart-owned trees are EXCLUDED: templates/*.yaml are Go templates, not
-      # YAML, and Chart.yaml/values.yaml are chart metadata. Copying them would
-      # feed raw templates to kubeconform/kube-linter and red every real chart
-      # repo — the opposite of "validate rendered output, not templates".
-      - name: copy standalone manifests so there is always something to validate
-        run: |
-          set -euo pipefail
-          # `|| true`: find propagates a non-zero status from an -exec ... {} +
-          # batch, and grep -l exits 1 when nothing in the batch matches — which
-          # is the legitimate "no standalone manifests" case, not an error
-          { find . \( -name '*.yaml' -o -name '*.yml' \) \
-              -not -path './.git/*' -not -path "./$RENDER_DIR/*" \
-              -not -path '*/templates/*' -not -name 'Chart.yaml' -not -name 'values.yaml' \
-              -not -name 'kustomization.yaml' -not -name 'kustomization.yml' -not -name 'Kustomization' \
-              -exec grep -lE '^kind:' {} + 2>/dev/null || true; } \
-            | while read -r m; do
-                # skip kustomize INPUTS: a base or patch fragment is deliberately
-                # partial (the overlay supplies image, resources, securityContext),
-                # so validating it unrendered reds a valid repo — the opposite of
-                # this step's own "rendered output, not templates" charter
-                skip=""
-                while read -r root; do
-                  case "$m" in "$root"/*) skip=1; break ;; esac
-                done < "$RUNNER_TEMP/kustomize-roots.txt"
-                [ -n "$skip" ] && continue
-                cp "$m" "$RENDER_DIR/plain_$(printf '%s' "${m#./}" | sed 's/_/__/g' | tr / _)"
-              done
-          # never upload an empty artifact — downstream jobs must have an input.
-          # NON-hidden, or upload-artifact drops it and we are back to the
-          # if-no-files-found: error failure this guard exists to prevent. And a
-          # VALID object, not a comment: `kube-linter lint` errors with "no valid
-          # objects found" on a tree containing none, so a comment-only sentinel
-          # would red the lint check in exactly the corner it exists to keep green.
-          if [ -z "$(ls -A "$RENDER_DIR")" ]; then
-            # printf, not an indented heredoc: inside a YAML block scalar the
-            # terminator would carry the block's indentation and never match
-            printf '%s\n' \
-              'apiVersion: v1' \
-              'kind: ConfigMap' \
-              'metadata:' \
-              '  name: render-sentinel' \
-              'data:' \
-              '  note: "nothing to render - placeholder so downstream checks have a valid input"' \
-              > "$RENDER_DIR/EMPTY.yaml"
-          fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: rendered
-          path: ${{ env.RENDER_DIR }}
-          if-no-files-found: error
+- [x] **Step 2: Teach bootstrap to emit it**
 
-  schema:
-    needs: render
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: rendered
-          path: ${{ env.RENDER_DIR }}
-      # ubuntu-latest ships helm and kustomize but NONE of kubeconform,
-      # kube-linter, kyverno or yq — without an install step the job exits 127
-      # and the check can never go green, so it can never become required
-      - name: install kubeconform
-        run: |
-          set -euo pipefail
-          url="https://github.com/yannh/kubeconform/releases/download"
-          curl -sSfL "$url/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-            | tar -xz -C /usr/local/bin kubeconform
-        env:
-          KUBECONFORM_VERSION: 0.6.7
-      - run: kubeconform -strict -summary -ignore-missing-schemas "$RENDER_DIR/"
+> **LANDED — read `development/skills/bootstrap/SKILL.md` §3l.** The draft
+> reproduced here keyed the path on *detection* output and said only "emit the
+> template, write `primary: kubernetes`". Review established four rules it did
+> not have, all of which the shipped section carries:
+>
+> - it keys on the **resolved** language set (after Q4), not on detection — a
+>   language the user names for a repo the detector missed makes it a language
+>   repo, and `{{PRIMARY}}` branch (2) states the same rule;
+> - it enumerates **exactly what is and is not emitted** (a table), because
+>   §3b/§3c select by visibility with no language condition and would otherwise
+>   render a `quality-*.yml` whose `sonarcloud` job needs a job the stripped
+>   `LINUX_TESTS` block never produced — a workflow GitHub refuses to run;
+> - **branch protection still runs**, via `branch-protection.sh --iac-only
+>   true`. The first draft skipped the script, which silently dropped the
+>   `allow_auto_merge` / `delete_branch_on_merge` PATCH that Step 4e's arming
+>   depends on and left the default branch unprotected;
+> - **Step 4.5 skips the per-path automation** on this path, because
+>   `automate-*.sh` re-invokes `branch-protection.sh` *without* the flag and its
+>   PUT would replace the rule with contexts nothing reports.
+>
+> Step 3.6 also gained a provenance row for the rendered workflow, and
+> `detect-stack.sh` holds the not-emitted set out of `missing_artifacts` so a
+> State-D re-bootstrap cannot render it blind.
 
-  lint:
-    needs: render
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: rendered
-          path: ${{ env.RENDER_DIR }}
-      - name: install kube-linter
-        run: |
-          set -euo pipefail
-          url="https://github.com/stackrox/kube-linter/releases/download"
-          curl -sSfL "$url/v${KUBE_LINTER_VERSION}/kube-linter-linux.tar.gz" \
-            | tar -xz -C /usr/local/bin kube-linter
-        env:
-          KUBE_LINTER_VERSION: 0.7.2
-      - run: kube-linter lint "$RENDER_DIR/"
-
-  policy:
-    needs: render
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # JOB-level, not step-level: the apply/test step names the version too, and a
-    # step-level env would leave it unset there — fatal under `set -u`
-    env:
-      KYVERNO_VERSION: 1.13.4
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: rendered
-          path: ${{ env.RENDER_DIR }}
-      - name: install kyverno CLI
-        run: |
-          set -euo pipefail
-          url="https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}"
-          curl -sSfL "$url/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz" \
-            | tar -xz -C /usr/local/bin kyverno
-      - name: kyverno apply + test
-        run: |
-          set -euo pipefail
-          # gate on a MATCHING FILE, not on the directory: an empty or
-          # .json-only policies/kyverno/ must skip exactly like an absent one,
-          # and a .yml-only repo must be ENFORCED, not silently ignored.
-          # `-print -quit` rather than `| head -n1`: head closes the pipe, find
-          # dies of SIGPIPE, and pipefail then fails the assignment.
-          # `|| true` is load-bearing: when policies/kyverno does not exist at
-          # all — the DEFAULT state this whole design centres on — find exits 1,
-          # the assignment inherits that status, and errexit would kill the step
-          # before the skip branch below could run. The never-fail guarantee has
-          # to survive its own most common case.
-          policies="$(find policies/kyverno -type f \( -name '*.yaml' -o -name '*.yml' \) \
-                        -print -quit 2>/dev/null || true)"
-          if [ -z "$policies" ]; then
-            echo "::notice::no policies declared at policies/kyverno/**/*.{yaml,yml} — policy step skipped"
-            exit 0
-          fi
-          # kyverno test fixtures live in the SAME directory by convention, and
-          # `kyverno apply` errors when handed a non-policy document — so select
-          # the policy documents explicitly rather than passing the directory
-          mkdir -p "$RUNNER_TEMP/policies"
-          # `|| true` for the same reason as the render step: grep -l exits 1
-          # when no file in the batch matches and find propagates it
-          { find policies/kyverno -type f \( -name '*.yaml' -o -name '*.yml' \) \
-              -exec grep -lE '^kind:[[:space:]]*(Cluster)?Policy[[:space:]]*$' {} + 2>/dev/null || true; } \
-            | while read -r pol; do
-                cp "$pol" "$RUNNER_TEMP/policies/$(printf '%s' "$pol" | sed 's/_/__/g' | tr / _)"
-              done
-          if [ -z "$(ls -A "$RUNNER_TEMP/policies")" ]; then
-            # YAML present but no policy documents (e.g. only fixtures survive a
-            # deletion). `kyverno apply` on an empty directory errors, so report
-            # and skip rather than red.
-            # WARNING, not notice: YAML is present but nothing matched the kinds
-            # the pinned CLI can evaluate. Kyverno 1.14 added ValidatingPolicy /
-            # ImageValidatingPolicy / CleanupPolicy, which 1.13.4 cannot run — a
-            # repo using only those would otherwise get a green check with its
-            # declared policies entirely unenforced.
-            echo "::warning::policies/kyverno holds YAML but no Policy/ClusterPolicy" \
-                 "document the pinned kyverno CLI can evaluate — policy step skipped"
-            exit 0
-          fi
-          kyverno apply "$RUNNER_TEMP/policies/" --resource "$RENDER_DIR/"
-          # A policy set with no fixtures is a HIGH MAINTENANCE FINDING
-          # (policy_tests -> kubernetes-policy-triage), not a build failure — the
-          # six-check design names no policy-tests check. Running `kyverno test`
-          # unconditionally would exit non-zero here and make that a hard red.
-          # EXACTLY the names `kyverno test <dir>` discovers — a broader glob
-          # (kyverno-test-registry.yaml) would pass this gate while the CLI finds
-          # nothing and errors, and the gather would simultaneously report
-          # fixtures present so no policy_tests finding is ever filed
-          if find policies/kyverno -type f \( -name 'kyverno-test.yaml' -o -name 'kyverno-test.yml' \) \
-               -print -quit 2>/dev/null | grep -q .; then
-            kyverno test policies/kyverno/
-          else
-            echo "::warning::policies declared but no kyverno test fixtures — maintenance reports this as policy_tests"
-          fi
-
-  config-scan:
-    needs: render
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: rendered
-          path: ${{ env.RENDER_DIR }}
-      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: config
-          scan-ref: ${{ env.RENDER_DIR }}/
-          exit-code: '1'
-          # threshold, or the check reds on a fresh repo's FIRST PR: trivy's
-          # default k8s checks fire LOW/MEDIUM on essentially every Deployment
-          # (seccompProfile, drop-capabilities, readOnlyRootFilesystem) — the
-          # plan's own "clean" fixture chart included. Start requirable, tighten
-          # deliberately; a repo that wants the lower bands owns a .trivyignore
-          # exactly as it owns policies/kyverno/.
-          severity: HIGH,CRITICAL
-
-  argocd:
-    needs: render
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      # the rendered tree too: a very common app-of-apps authors its Application
-      # documents AS a Helm chart (argo-apps/templates/*.yaml). Those are Go
-      # templates in the source tree — correctly pruned below — so scanning only
-      # the checkout would extract zero paths and exit 0, a green check that
-      # verified nothing on exactly the repos with the most paths to verify.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: rendered
-          path: ${{ env.RENDER_DIR }}
-      - name: install yq
-        run: |
-          set -euo pipefail
-          curl -sSfLo /usr/local/bin/yq \
-            "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
-          chmod +x /usr/local/bin/yq
-        env:
-          YQ_VERSION: 4.44.3
-      - name: every app path this repo owns exists
-        run: |
-          set -euo pipefail
-          # Read .spec.source.path from Argo CD Application/ApplicationSet docs
-          # ONLY. A bare `grep 'path:'` matches every path: key in the repo — a
-          # readinessProbe's `path: /healthz` included.
-          #
-          # Per-file yq, not one batched invocation: yq ABORTS on the first
-          # unparseable document, and Helm templates/*.yaml are Go templates, so
-          # a single batch would silently truncate the path list and the check
-          # would pass having extracted nothing. Templates are pruned as well.
-          # A parse failure is reported per file via ::warning below; yq's own
-          # stderr is deliberately suppressed there to keep the log readable
-          # (the PROBE, by contrast, lets it through — that is the one place a
-          # diagnostic is worth the noise, because it fails the whole step).
-          paths_file="$RUNNER_TEMP/argocd-paths.txt"
-          : > "$paths_file"
-
-          # ONE definition of the expression, shared by the probe and the loop —
-          # a probe that tested a different string would prove nothing.
-          #
-          # Evaluated with JQ over `yq -o=json`, not by yq directly: this is jq
-          # dialect. mikefarah yq implements neither `ascii_downcase` (its
-          # operator is `downcase`), nor `endswith`, and its `sub` takes
-          # comma-separated arguments — so handing this to `yq -N -r` would fail
-          # to parse for EVERY file. ubuntu-latest ships jq, and multi-document
-          # YAML converts to a JSON stream jq consumes natively. Note jq's env
-          # accessor is `env.VAR` — `strenv()` is itself one of the yq-isms this
-          # comment warns about, and would fail to compile here.
-          JQ_EXPR='
-            select(type == "object")
-            | select(.apiVersion == "argoproj.io/v1alpha1")
-            | select(.kind == "Application" or .kind == "ApplicationSet")
-            | [ .spec.source, .spec.template.spec.source,
-                (.spec.sources // [])[], (.spec.template.spec.sources // [])[] ]
-            | .[]
-            | select(. != null)
-            | select(
-                ((.repoURL // "") | sub("\\.git$"; "") | sub("/$"; "") | ascii_downcase) as $u
-                | (env.REPO_SLUG | ascii_downcase) as $s
-                | ($u | endswith("/" + $s)) or ($u | endswith(":" + $s)))
-            | (.path // empty)'
-          # BOTH source shapes above: Argo CD >= 2.6 multi-source Applications
-          # carry .spec.sources, and reading only the singular form extracts zero
-          # paths from them, so the check would pass vacuously on exactly the
-          # repos it should scrutinise. The repoURL filter is anchored on the
-          # PATH BOUNDARY with literal operators: test() would treat a "." in the
-          # repo name as match-any, and contains() would match the sibling repo
-          # `acme/k8s-apps` for slug `acme/k8s`, whose paths are correctly absent
-          # locally. Case folded, since GitHub slugs are case-insensitive.
-
-          # Probe the EXPRESSION against a known-good document first. yq exits
-          # non-zero both for "this file will not parse" and "this expression
-          # will not compile", and the per-file `|| echo` below cannot tell them
-          # apart — so a expression the pinned yq rejects would warn on every
-          # file, extract nothing, and exit 0: a required check permanently green
-          # while validating nothing. Fail loudly here instead.
-          printf '%s\n' \
-            'apiVersion: argoproj.io/v1alpha1' \
-            'kind: Application' \
-            'spec:' \
-            '  source:' \
-            "    repoURL: https://github.com/$REPO_SLUG.git" \
-            '    path: .' > "$RUNNER_TEMP/probe.yaml"
-          if [ "$(yq -o=json '.' "$RUNNER_TEMP/probe.yaml" | jq -r "$JQ_EXPR")" != "." ]; then
-            echo "::error::the Argo CD path expression does not compile or match — refusing to report a vacuous pass"
-            exit 1
-          fi
-          while read -r f; do
-            yq -o=json '.' "$f" 2>/dev/null | jq -r "$JQ_EXPR" >> "$paths_file" \
-              || echo "::warning::could not parse $f as YAML — skipped"
-          done < <(find . "$RENDER_DIR" \( -name '*.yaml' -o -name '*.yml' \) \
-                     -not -path './.git/*' -not -path '*/templates/*' 2>/dev/null | sort -u)
-
-          # report inline rather than accumulating into a word-split string: a
-          # path containing a space or a glob character would otherwise be
-          # re-split or expanded in the reporting loop
-          fail=0
-          while read -r p; do
-            [ -n "$p" ] || continue
-            # an ApplicationSet generator templates its path ('{{path}}'), which
-            # cannot exist on disk and is not statically verifiable
-            case "$p" in *'{{'*) echo "::notice::templated path not statically checkable: $p"; continue ;; esac
-            [ -e "$p" ] || { echo "::error::app-of-apps references missing path: $p"; fail=1; }
-          done < <(sort -u "$paths_file")
-          exit "$fail"
-        env:
-          REPO_SLUG: ${{ github.repository }}
-```
-
-- [ ] **Step 2: Teach bootstrap to emit it**
-
-Add to `development/skills/bootstrap/SKILL.md`:
-
-```markdown
-### Infrastructure-as-code repos (no application language)
-
-When detection finds the `kubernetes` topic and **no** language, the repo is
-a GitOps/IaC repo. Emit `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` as
-`.github/workflows/kubernetes-ci.yml` and write `primary: kubernetes` into
-`.maintenance.yml`.
-
-Do **not** require an application language before bootstrapping. A repo of
-charts and manifests has plenty to validate — rendering always produces
-something to check, which is why this works before the first service exists.
-
-When a language **is** also detected, bootstrap that language normally and do
-not emit this template or write `primary: kubernetes` — a mixed repo is a later
-slice, and the language's own CI already gates its build. This slice covers the
-no-language case only.
-
-Do not create `policies/kyverno/`. Policies are the consumer's; the workflow
-skips cleanly when no `policies/kyverno/**/*.{yaml,yml}` file matches — the
-glob is the contract, not the directory's existence.
-```
-
-- [ ] **Step 3: Verify the workflow is valid YAML**
+- [x] **Step 3: Verify the workflow is valid YAML**
 
 Run — one physical line, for the same reason:
 
@@ -2481,12 +2139,20 @@ Expected: `yamllint ok`
 > checks are what bootstrap's `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit
 > (#1154)** and "where they will live" — deliberately future-tense, because the
 > file does not exist yet. Landing it makes that tense wrong, so flip the
-> paragraph to the present tense here, and **bump both manifests in lockstep**
-> (minor) with the slice-status sentence updated. Also bump
-> `docs/reference/plugins.md`'s `**What's built (vX):**` label and rewrite its
-> narrative — whatever wording the earlier children left it at (#1152 rewrote it
-> to name the dispatcher, marker and gather; #1153 rewrites it again), it will
-> not mention the CI pipeline this task ships. `git add`
+> paragraph to the present tense here. **`development-kubernetes` moves by a
+> PATCH** (0.3.0 → 0.3.1) — corrected again from the earlier "do NOT bump"
+> instruction, which assumed nothing installable in that plugin changes here.
+> The pipeline itself is all `development/` content (the template, the SKILL
+> rules, `branch-protection.sh`), so the MINOR does not move; but this task also
+> edits `development-kubernetes/skills/review/SKILL.md`'s cross-reference to the
+> template, and MAINTAINING.md's rule admits no exception for content under
+> `<plugin>/` — Claude Code caches by version, so an unbumped edit ships inert.
+> Its `**What's built (vX):**` label therefore stays put; rewrite the narrative
+> around it instead, so the page attributes the pipeline to the `development`
+> bootstrap skill where it actually lives — whatever wording the earlier children
+> left it at (#1152 rewrote it to name the dispatcher, marker and gather; #1153
+> rewrites it again), it will not mention the CI pipeline this task ships.
+> `git add`
 > must stage `ARCHITECTURE.md`, `docs/reference/plugins.md`, `README.md`,
 > `docs/explanation/motivation.md`, **`tests/kubernetes-plugin-skeleton.bats`**,
 > `docs/superpowers/plans/2026-08-02-development-kubernetes.md` (re-sync Task 1's
@@ -2505,15 +2171,21 @@ Expected: `yamllint ok`
 > of which the skeleton suite pins, so a tense flip that breaks a needle would
 > otherwise ship red and surface only in CI.
 >
-> **Bump the `development` plugin.** This task modifies content under
-> `development/`, and every PR that does must bump `development/.claude-plugin/plugin.json`
-> **and** its `.claude-plugin/marketplace.json` entry in lockstep (minor) —
+> **Bump `development` (minor) and `development-kubernetes` (patch).** This task
+> modifies content under both, and every PR that does must bump that plugin's
+> `<plugin>/.claude-plugin/plugin.json`
+> **and** its `.claude-plugin/marketplace.json` entry in lockstep —
 > Claude Code caches plugins by version, so an omitted bump means installs never
 > see the change and the fix silently appears inert. `marketplace-sync.yml`
 > catches only *disagreement* between the two files, never an omitted bump, so
-> nothing will flag it. Stage both files.
+> nothing will flag it. Stage all THREE manifest files —
+> `development/.claude-plugin/plugin.json`,
+> `development-kubernetes/.claude-plugin/plugin.json` and the single root
+> `.claude-plugin/marketplace.json`, which carries both entries. (The only
+> other marketplace.json in the repo is the `tests/fixtures/clean/` one,
+> which must NOT be bumped.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl development/skills/bootstrap/SKILL.md

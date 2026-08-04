@@ -108,7 +108,14 @@ rstep() {
   # row says "agents and review panel in v0.3", plugins.md says "What's built
   # (v0.3)"), so the manifests must agree — otherwise a PR could land the agents
   # and prose while leaving both manifests at 0.2.0, staying green while installs
-  # never see the change
+  # never see the change.
+  # #1154's PIPELINE is all `development/` (a bootstrap template, the SKILL
+  # rules, branch-protection.sh), so the MINOR does not move — bumping a plugin
+  # whose own capability did not grow advertises what it did not gain. The patch
+  # digit does move: #1154 also edits this plugin's review SKILL.md, and
+  # MAINTAINING.md's rule admits no exception for content under `<plugin>/`
+  # (Claude Code caches by version, so an unbumped edit ships inert). The
+  # prefix assertion holds across both.
   starts_with "$from_plugin" "0.3."
 }
 
@@ -748,6 +755,12 @@ rstep() {
   # guard and the literal "six checks" all at once
   lacks "$flat" '→ render'
   contains "$flat" 'a *bootstrap* template owned by the generic `development` plugin'
+  # #1154 shipped the template, so the deliberately future-tense wording is now
+  # wrong. Pinned in BOTH directions: the retired tense asserted gone, the landed
+  # one asserted present, so a regenerate-from-an-older-draft edit cannot restore
+  # a "will emit" that describes a file which exists.
+  lacks "$flat" '**will emit**'
+  contains "$flat" '**emits**'
 }
 
 @test "ARCHITECTURE.md records the policy/policy_tests missing_tooling exemption (#1151)" {
@@ -824,9 +837,14 @@ rstep() {
   contains "$ARCH_SECTION" 'A repo declaring `primary: kubernetes`'
   lacks "$ARCH_SECTION" 'treats the declaration as stale'
   contains "$ARCH_SECTION" '**selects this'
-  # the honest remainder: the GATES are still outstanding, and dropping that
-  # clause would over-promise exactly as the old caveat's absence would have
-  contains "$ARCH_SECTION" 'The **gates themselves** arrive'
+  # #1154 shipped the pipeline, so the "gates are still outstanding" remainder is
+  # retired — flipped rather than deleted, and its replacement pinned just as
+  # tightly, or the section would understate a plugin whose findings a CI check
+  # now enforces. The retired wording is asserted gone so the flip cannot be
+  # silently reverted.
+  lacks "$ARCH_SECTION" 'The **gates themselves** arrive'
+  lacks "$ARCH_SECTION" 'no CI check enforces the manifests on a PR'
+  contains "$ARCH_SECTION" '**#1154 landed the gates themselves**'
   # the #1153 half, previously the ONE restatement of the routing claim with no
   # assertion: the other two sites (plugins.md, the dispatcher SKILL) are pinned,
   # so a coordinated revert to the escalates-to-a-human wording shipped green
@@ -904,7 +922,12 @@ rstep() {
   contains "${topic_row%%future:*}" '`development-kubernetes`'
   lacks "$topic_row" 'dispatch lands with #1152'
   lacks "$topic_row" 'agents land with #1153'
-  contains "$topic_row" 'CI pipeline lands with #1154'
+  # #1154 shipped the pipeline, so this row's caveat is retired like the two
+  # above it — asserted gone rather than merely unpinned, so a regenerate from
+  # an older draft cannot restore a row advertising a landed capability as
+  # forthcoming
+  lacks "$topic_row" 'CI pipeline lands with #1154'
+  contains "$topic_row" '`development-kubernetes`, future:'
   # the tree is column-aligned, so match the gap as whitespace rather than
   # pinning a literal run of spaces that reflows when a longer name is added
   matches "$(grep -F 'development-kubernetes ' "$ARCH" | head -n1)" \
@@ -987,6 +1010,10 @@ rstep() {
   lacks "$row" 'ownership boundary only in v0.1'
   lacks "$row" 'maintenance dispatch in v0.2'
   contains "$row" 'agents and review panel in v0.3'
+  # #1154's pipeline is named here too, but ATTRIBUTED: it ships as a
+  # `development` bootstrap template, so the row must not read as a
+  # development-kubernetes capability whose version never moved
+  contains "$row" 'CI pipeline ships as a `development` bootstrap template'
 }
 
 @test "every marketplace plugin has a section in the plugin overview (#1151)" {
@@ -1039,6 +1066,22 @@ rstep() {
   contains "$section" 'the dispatcher now routes every group to a shipped agent'
   contains "$section" 'creeps into Dockerfiles or application code contradicts'
   contains "$section" "**What's built (v0.3):**"
+  # #1154 shipped the pipeline, so the "rest of the epic follows" framing is
+  # retired — flipped, not deleted, and its replacement pinned as tightly, or the
+  # page users read would still describe the checks as forthcoming
+  lacks "$section" 'The rest of epic'
+  contains "$section" 'six separately requirable checks'
+  # ATTRIBUTION, pinned as tightly as the capability: #1154's PIPELINE landed in
+  # the `development` plugin — a page claiming it for this plugin would explain
+  # the unmoved minor as an omission rather than a boundary. The claim is now
+  # scoped to the pipeline, because #1154 DOES move this plugin's patch (it edits
+  # the review skill), so a flat "not here" would be the false half of the truth.
+  contains "$section" 'the **pipeline** is not here'
+  contains "$section" 'moves only by a patch'
+  # the boundary and the rendered-output property, restated here because this
+  # page is where a user decides what the plugin does
+  contains "$section" '**bootstrap** template owned by the generic `development` plugin'
+  contains "$section" 'consumes the **rendered** output'
   # the Agents tables every agent-shipping plugin section carries — nothing
   # mechanical catches their absence (reference-drift regenerates only
   # commands.md/agents.md), so they are pinned here. Split review vs

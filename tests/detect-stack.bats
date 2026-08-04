@@ -1584,3 +1584,261 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   [ "$(jq -r .is_claude_plugin <<<"$out")" = "true" ]
   [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
 }
+
+# --- #1154: the IaC candidate set (SKILL.md §3l) ------------------------------
+#
+# The branch under test is the ONLY thing that makes
+# `.github/workflows/kubernetes-ci.yml` a candidate path, and the only thing
+# that keeps the language-app artifacts OUT of missing_artifacts on a GitOps
+# repo. Both directions ship a regression: without the collect, a repo that lost
+# its one workflow is reported complete by what the script calls the only
+# completeness signal; without the hold-out, State-D gap-fill blind-renders the
+# set §3l forbids — and `codeql-noop.yml` cannot even render with no language
+# (its {{CODEQL_LANGUAGES}} placeholder never resolves), so that one hard-fails.
+#
+# VISIBILITY IS LOAD-BEARING here: collect_from only visits templates/public|
+# private under `case "$visibility"`, and with no remote the visibility is
+# "unknown" and neither is collected. A hold-out assertion written without the
+# stub below would pass with the whole `iac_only` block deleted, so each of
+# these stubs `gh` and asserts a positive control.
+
+k8s_chart() {
+  mkdir -p charts/app
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+}
+
+# `gh` answering as an authenticated CLI on a repo of the given visibility, so
+# the visibility-scoped templates are actually collected.
+stub_gh() {
+  local vis="$1"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat > "$BATS_TEST_TMPDIR/bin/gh" <<EOF
+#!/bin/sh
+case "\$*" in
+  # auth status FAILS on purpose (the tests/gather-spring.bats precedent):
+  # detect-stack's github_state block is gated on it, and it really curls
+  # api.github.com with no --max-time — the suite must not depend on host
+  # network reachability or GitHub's unauthenticated rate limit. Visibility is
+  # read from \`gh repo view\` independently, so it still resolves.
+  *"auth status"*) exit 1 ;;
+  *nameWithOwner*) echo "acme/gitops" ;;
+  *visibility*) printf '{"visibility":"$vis","defaultBranchRef":{"name":"main"}}\n' ;;
+  *) echo '{}' ;;
+esac
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/gh"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+  export PATH
+  git remote add origin https://github.com/acme/gitops.git 2>/dev/null || true
+}
+
+missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$1"; }
+
+@test "detect-stack #1154: a chart-only repo gets kubernetes-ci.yml as a gap" {
+  k8s_chart
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a present kubernetes-ci.yml is existing, not missing" {
+  k8s_chart
+  mkdir -p .github/workflows
+  printf 'name: kubernetes-ci\n' > .github/workflows/kubernetes-ci.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts[".github/workflows/kubernetes-ci.yml"]' <<<"$out")" = "true" ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+}
+
+@test "detect-stack #1154: a LANGUAGE repo that also ships a chart gets no IaC candidate" {
+  # the "and only there" half — §3l forbids the template on a mixed repo, and
+  # missing_artifacts is documented as safe to render blind
+  k8s_chart
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" != "null" ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  # POSITIVE CONTROL: candidates ARE collected, so the null above is a
+  # decision rather than an empty candidate set (this file's convention)
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a language-less NON-kubernetes repo gets no IaC candidate" {
+  # keyed on the MARKER, not merely on the absence of a language
+  printf 'hello\n' > README.md
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "false" ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  # POSITIVE CONTROL: candidates ARE collected, so the null above is a
+  # decision rather than an empty candidate set (this file's convention)
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a stray tooling language takes the repo OFF the IaC path" {
+  # the husky/commitlint package.json a GitOps repo commonly carries. A recorded
+  # `primary: kubernetes` does NOT override it: the MIXED repo is #1193, and
+  # admitting one here would make every detection-keyed section of the skill
+  # fire for a pipeline this path never generates.
+  k8s_chart
+  printf '{"name":"x","dependencies":{"husky":"^9"}}\n' > package.json
+  printf 'primary: kubernetes\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  # no IaC candidate — this is a language repo as far as this slice is concerned
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  # …and it KEEPS its per-language gaps: a regression that let the record force
+  # iac_only=true would strip these while leaving the candidate collect intact,
+  # and the kubernetes-ci needle alone could not see it
+  [ "$(missing_has "$out" ".nvmrc")" = "number" ]
+  [ "$(missing_has "$out" "tsconfig.json")" = "number" ]
+  # POSITIVE CONTROL: candidates ARE being collected, so the null above is a
+  # decision rather than an empty candidate set
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a RECORDED language primary wins over the marker heuristic" {
+  k8s_chart
+  printf 'primary: go\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  # POSITIVE CONTROL: candidates ARE collected, so the null above is a
+  # decision rather than an empty candidate set (this file's convention)
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: the PUBLIC language-app gates are held out on an IaC repo" {
+  k8s_chart
+  stub_gh PUBLIC
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .visibility <<<"$out")" = "public" ]
+  local p
+  for p in .github/workflows/quality-public.yml .github/workflows/quality-public-noop.yml \
+    .github/workflows/codeql.yml .github/workflows/codeql-noop.yml \
+    sonar-project.properties .snyk; do
+    [ "$(missing_has "$out" "$p")" = "null" ]
+  done
+  # scorecard.yml is language-agnostic and §3l keeps it — this is also the
+  # POSITIVE CONTROL proving the public templates were collected at all, without
+  # which every assertion above would pass on an empty candidate set
+  [ "$(missing_has "$out" ".github/workflows/scorecard.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: the PRIVATE Sonar/runner scaffolding is held out on an IaC repo" {
+  k8s_chart
+  stub_gh PRIVATE
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .visibility <<<"$out")" = "private" ]
+  local p
+  for p in .github/workflows/quality-private.yml .github/workflows/quality-private-noop.yml \
+    infra/sonarqube/docker-compose.yml infra/sonarqube/README.md \
+    infra/github-runner/README.md; do
+    [ "$(missing_has "$out" "$p")" = "null" ]
+  done
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a PRIVATE language repo still reports the private gates" {
+  # the control the private hold-out test needs: its five null needles ARE the
+  # whole templates/private tree, and its only positive assertion comes from
+  # templates/iac, which is collected irrespective of visibility — so without
+  # this, a break in private-scope collection would leave them all passing on an
+  # empty candidate set
+  k8s_chart
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  stub_gh PRIVATE
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/quality-private.yml")" = "number" ]
+  [ "$(missing_has "$out" "infra/sonarqube/docker-compose.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a .maintenance.yml with no resolvable primary keeps the heuristic" {
+  # the third arm of the precedence block: a file recording only topics, or a
+  # commented-out primary, must not be read as a recorded LANGUAGE primary — that
+  # would strip a genuine GitOps repo of its one workflow candidate
+  k8s_chart
+  printf 'topics:\n  - kubernetes\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a comment-only primary value keeps the heuristic too" {
+  k8s_chart
+  printf 'primary:  # TODO decide\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a zero-language IaC repo reports the workflow and holds the gates" {
+  # the per-language hold-out sweep is vacuous while iac_only implies an empty
+  # language set (the recorded primary vetoes, never grants) — so what is pinned
+  # here is the condition itself: no language, marker present, workflow reported,
+  # language-app gates held out.
+  k8s_chart
+  printf 'primary: kubernetes\n' > .maintenance.yml
+  stub_gh PUBLIC
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | length' <<<"$out")" -eq 0 ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/quality-public.yml")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/scorecard.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a quoted, CRLF-authored `kubernetes` still reaches its arm" {
+  # the quote-stripping arm of the parser, and the ordering that makes it work:
+  # comment/trailing whitespace are stripped END-ANCHORED first, so a CRLF file's
+  # trailing \r cannot defeat the closing-quote strip.
+  #
+  # The fixture must be `kubernetes`, not a language: under the narrowing EVERY
+  # value except `kubernetes` and the empty string falls to the same `*)` veto,
+  # so a `"python"\r` fixture yields the identical null whether the strips work,
+  # are deleted, or are reversed — it could not fail. Only a quoted CRLF
+  # `kubernetes` discriminates: a botched strip leaves `kubernetes"` (or
+  # `kubernetes"\r`), which the `*)` arm then VETOES, stripping a real GitOps
+  # repo of its one candidate — the regression detect-stack.sh's own comment warns of.
+  k8s_chart
+  printf 'primary: "kubernetes"\r\n' > .maintenance.yml
+  stub_gh PUBLIC
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | length' <<<"$out")" -eq 0 ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
+  # and it really is on the IaC path, not merely un-vetoed
+  [ "$(missing_has "$out" ".github/workflows/quality-public.yml")" = "null" ]
+}
+
+@test "detect-stack #1154: a primary that merely STARTS with kubernetes still vetoes" {
+  # detect-stack.sh states the property — "the comparison is exact, so a future
+  # `primary: kubernetes-operator` does not take the IaC path on a prefix match"
+  # — and nothing tested it. Loosening the arm to `kubernetes*)` would hand a
+  # kubernetes-operator repo the six required contexts.
+  k8s_chart
+  printf 'primary: kubernetes-operator\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1154: a javascript repo DOES report its per-language fragments" {
+  # the positive control the hold-out sweep needs: its own positive assertion
+  # comes from templates/iac, a different collect_from, so without this a break
+  # in per-language collection would leave those null needles vacuous. No test
+  # anywhere else asserts a per-language template IS a gap.
+  printf '{"name":"x","dependencies":{"husky":"^9"}}\n' > package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  [ "$(missing_has "$out" ".nvmrc")" = "number" ]
+  [ "$(missing_has "$out" "tsconfig.json")" = "number" ]
+}
+
+@test "detect-stack #1154: a LANGUAGE repo still reports the language-app gates" {
+  # the control that proves the hold-out — not the visibility stub — is what
+  # removes them above
+  k8s_chart
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  stub_gh PUBLIC
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/quality-public.yml")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/codeql.yml")" = "number" ]
+}

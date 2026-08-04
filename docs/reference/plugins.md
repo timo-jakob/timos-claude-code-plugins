@@ -403,18 +403,28 @@ script that feed it
 ([#1152](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1152)),
 and the five agents plus the review panel
 ([#1153](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1153)).
+The epic's check pipeline
+([#1154](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1154))
+has also landed, but the **pipeline** is not here — it is a bootstrap template,
+so it ships in the `development` plugin. This plugin moves only by a patch, for
+the review skill's cross-reference to that template.
 Getting the boundary wrong is the expensive mistake — a topic plugin that creeps
 into Dockerfiles or application code contradicts language-first and has to be
 unpicked across several plugins later — so it was settled before anything filled
-it. The rest of epic
+it. The remaining child of epic
 [#1150](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1150)
-follows: the bootstrap check pipeline
-([#1154](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1154)),
-and the self-contained test fixtures
+is the self-contained test fixtures
 ([#1155](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1155)).
 A repo declaring `primary: kubernetes` now selects this plugin rather than
-being treated as a stale declaration, and the dispatcher now routes every group
-to a shipped agent rather than escalating it to a human.
+being treated as a stale declaration, the dispatcher now routes every group
+to a shipped agent rather than escalating it to a human, and a GitOps repo now
+bootstraps into **six separately requirable checks** — `render`, `schema`,
+`lint`, `policy`, `config-scan`, `argocd` — so branch protection there can
+finally require that something *builds*, not just that someone reviewed. The
+workflow is a **bootstrap** template owned by the generic `development` plugin,
+not something this plugin's skills run: the same boundary that keeps detection
+in `development`. Every check after the first consumes the **rendered** output,
+so a chart that lints clean but renders an invalid manifest fails.
 
 **The review panel's `reliability` dimension is not the family's
 `resilience`.** They are near-homonyms sitting side by side in one dimension

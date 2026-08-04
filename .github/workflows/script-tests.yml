@@ -65,7 +65,10 @@ on:
       - '.claude-plugin/marketplace.json'
       # the third side of the same check: go-docs-parity.bats asserts the Go
       # approver-policy overlay does NOT exist yet, so the PR that finally lands
-      # it must red this suite at PR time rather than after merge
+      # it must red this suite at PR time rather than after merge — AND, since
+      # #1154, bootstrap-iac-pipeline.bats reads the kubernetes-ci workflow
+      # template here. Two suites now depend on this entry: retiring the Go
+      # assertion does not free it.
       - 'development/skills/bootstrap/templates/**'
       # same rule, extended for the Grafana hand-off suite (#1008): it asserts
       # the reference page's envelope table against the validator's own key
@@ -138,10 +141,28 @@ jobs:
           # .mjs with node — a declared test dependency, not incidental.
           # parallel: GNU parallel is bats' `--jobs` backend, which run-gate.zsh
           # uses to parallelise the suite (#980).
-          sudo apt-get install -y --no-install-recommends bats jq shellcheck zsh python3 nodejs parallel
+          # yamllint: tests/bootstrap-iac-pipeline.bats (#1154) lints the
+          # kubernetes-ci workflow template with the repo's own strict config.
+          # Called unguarded on purpose — a skip would silently drop the only
+          # structural coverage that template has — so it is a declared dependency.
+          sudo apt-get install -y --no-install-recommends \
+            bats jq shellcheck zsh python3 nodejs parallel yamllint
+          # yq deliberately NOT from apt: Debian/Ubuntu's `yq` package is
+          # kislyuk's python-yq, a different query language from mikefarah's Go
+          # yq that the suite (and the shipped kubernetes-ci template) are
+          # written against. Under python-yq, `-o=json` is rejected and PyYAML's
+          # YAML 1.1 parse resolves a workflow's `on:` key to the boolean true —
+          # so the same assertions would mean different things on the two legs.
+          # Pin the real one instead of relying on the runner image's PATH order.
+          sudo curl -sSfLo /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+        env:
+          YQ_VERSION: 4.44.3
       - name: Install test dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install bats-core jq shellcheck node parallel
+        # brew's `yq` IS mikefarah's, so the macOS leg needs no special case
+        run: brew install bats-core jq shellcheck node parallel yamllint yq
       - name: Run shell-script behavioral tests
         run: |
           # On macOS, force the bash scripts onto Apple's stock /bin/bash 3.2 —

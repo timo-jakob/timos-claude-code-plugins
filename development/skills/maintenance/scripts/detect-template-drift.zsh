@@ -59,6 +59,11 @@ current_plugin_version=$(jq -r '.version' < "$plugin_json")
 # customize those, drift is expected and meaningless to report.
 typeset -a tracked=(
   ".github/workflows/api-stability.yml"
+  # the §3l IaC path's one rendered workflow (#1154): stamped by bootstrap's
+  # Step 3.6, so it must be read here too — otherwise the marker is written and
+  # never consumed, and a consumer repo whose kubernetes-ci.yml has fallen
+  # behind the template is reported drift-free forever
+  ".github/workflows/kubernetes-ci.yml"
   ".github/workflows/codeql.yml"
   ".github/workflows/codeql-noop.yml"
   ".github/workflows/quality-public.yml"
