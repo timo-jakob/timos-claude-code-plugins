@@ -46,10 +46,13 @@ section() {
   contains "$FRONTMATTER" 'name: maintenance'
   contains "$FRONTMATTER" 'disable-model-invocation: false'
   contains "$FRONTMATTER" 'Ships NO approver'
-  # the slice label must track the manifests (0.2.0) and the other registries,
-  # which say v0.2 — and this string is reproduced into the generated
-  # docs/reference/commands.md, so a stale label is user-visible
-  contains "$FRONTMATTER" 'v0.2 REGISTERS the routing table'
+  # #1153 landed the agents, so the description's time-bounded slice label is
+  # retired and replaced by the unconditional routing claim. Flipped rather than
+  # deleted: this string is reproduced into the generated
+  # docs/reference/commands.md, so a description that drifted back to
+  # "registers but ships no agents" would be user-visible and wrong.
+  contains "$FRONTMATTER" 'It ROUTES each finding group'
+  lacks "$FRONTMATTER" 'v0.2 REGISTERS the routing table'
   lacks "$FRONTMATTER" 'v1 REGISTERS'
   # the pure-function charter: with this gone a model may re-run detection inside
   # the consumer's repo, which is the orchestrator's job and not this skill's
@@ -186,34 +189,44 @@ section() {
   contains "$s" 'an empty plan is the correct result'
 }
 
-@test "the until-#1153 escalation override is pinned, and self-expiring (#1152)" {
-  # this is the whole of v0.2's runtime behaviour: routing an agent that does not
-  # exist would have the orchestrator spawn an undefined subagent_type. The pin is
-  # deliberately self-expiring — #1153 must delete it, which reds this test and
-  # forces the deletion to be considered rather than inherited.
+@test "the until-#1153 escalation override is RETIRED, body and frontmatter together (#1153)" {
+  # the v0.2 override was deliberately self-expiring: routing an agent that did
+  # not exist would have had the orchestrator spawn an undefined subagent_type.
+  # #1153 ships both agents, so the override is gone — flipped rather than
+  # deleted, so a revert that reinstates it in EITHER site reds here. Both sites
+  # are asserted: the body paragraph and the frontmatter description restated the
+  # same rule, and retiring only one leaves a description licensing escalation
+  # against a body licensing routing.
   local s
   s="$(section Routing)"
   [ -n "$s" ]
-  contains "$s" 'Until #1153 lands, this table dispatches nothing'
-  contains "$s" 'return every group as a `human_action_required` entry'
-  contains "$s" 'Delete this paragraph in #1153'
-  # the frontmatter restates the same rule and is NOT covered by "this paragraph",
-  # so the deletion instruction must name it too — otherwise #1153 leaves a
-  # description licensing escalation against a body licensing routing
-  contains "$s" 'rewrite the "v0.2 REGISTERS ... NO agents" sentence'
-  contains "$FRONTMATTER" 'ships NO agents'
+  lacks "$s" 'Until #1153 lands, this table dispatches nothing'
+  lacks "$s" 'return every group as a `human_action_required` entry'
+  lacks "$s" 'Delete this paragraph in #1153'
+  lacks "$s" 'rewrite the "v0.2 REGISTERS ... NO agents" sentence'
+  lacks "$FRONTMATTER" 'ships NO agents'
+  # the positive half — the negatives above are all satisfied by an EMPTY or
+  # deleted Routing section, which is exactly what a botched retirement looks
+  # like. These pin what replaced the override.
+  contains "$s" '**This table is live**'
+  contains "$s" 'a routed group names a `subagent_type` that exists'
 }
 
-@test "the coverage analogue does not contradict the escalation override (#1152)" {
-  # 'the group is still dispatched ... Never drop the group' read alone yields a
-  # plan entry naming an agent this plugin does not ship — precisely what Routing
-  # forbids. The qualifier is what keeps the two sections stating one rule.
+@test "the coverage analogue now DISPATCHES, its qualifier retired (#1153)" {
+  # under v0.2 this section described a destination Routing overrode, so it
+  # carried a qualifier deferring to Routing. #1153 ships the agent, the override
+  # is gone, and the qualifier must go with it — otherwise this section keeps
+  # deferring to a paragraph that no longer exists. Flipped, not deleted.
   local s
   s="$(section 'No coverage gate, one analogue')"
   [ -n "$s" ]
-  contains "$s" 'once #1153 ships `kubernetes-policy-triage`'
-  contains "$s" '*Routing* wins until its paragraph is deleted'
-  # the destination itself must survive the qualifier
+  lacks "$s" 'once #1153 ships `kubernetes-policy-triage`'
+  lacks "$s" '*Routing* wins until its paragraph is deleted'
+  # the positive half: the group is now genuinely dispatched, and to the named
+  # agent — a `lacks`-only test passes on a deleted section
+  contains "$s" 'the group is dispatched to `kubernetes-policy-triage`'
+  # the destination itself, which survived the qualifier and must survive its
+  # retirement — these three predate #1153 and are unchanged
   contains "$s" 'ordering-blocking'
   contains "$s" 'Never drop the group'
   contains "$s" 'primary-mode only'
@@ -360,8 +373,23 @@ section() {
   contains "$s" 'echo the finding objects through **in full**'
 }
 
-@test "the plugin ships no agents directory for the table to route to yet (#1152)" {
-  # the FACT the Routing override depends on — asserted here so the override and
-  # its premise are retired together in #1153
-  [ ! -d "$REPO_ROOT/development-kubernetes/agents" ]
+@test "every agent the routing table names actually exists (#1153)" {
+  # the FACT the retired Routing override depended on, flipped: the override said
+  # "this table dispatches nothing" precisely because these files were absent.
+  # Derived from the TABLE rather than hardcoded, so adding a row that names an
+  # unshipped agent reds here instead of failing at dispatch time with an
+  # undefined subagent_type.
+  [ -d "$REPO_ROOT/development-kubernetes/agents" ]
+  local agents agent
+  agents="$(sed -n 's/^| `[a-z_]*` | `\([a-z-]*\)` |$/\1/p' "$SKILL" | sort -u)"
+  [ -n "$agents" ]
+  # the table has three rows naming two distinct agents
+  [ "$(printf '%s\n' "$agents" | wc -l | tr -d ' ')" -eq 2 ]
+  while read -r agent; do
+    [ -f "$REPO_ROOT/development-kubernetes/agents/$agent.md" ]
+    # the FRONTMATTER restates the routing table independently, and that string
+    # is reproduced verbatim into the generated docs/reference/commands.md — so
+    # a stale or typo'd name there ships to users with the table still correct
+    contains "$FRONTMATTER" "$agent"
+  done <<< "$agents"
 }

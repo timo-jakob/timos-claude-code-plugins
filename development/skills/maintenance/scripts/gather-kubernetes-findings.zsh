@@ -70,6 +70,7 @@ local manifest_hits
 # `Kustomization` is not a manifest, while a symlinked one still counts. Kept
 # identical to the SKILL.md marker recipe — tests/kubernetes-topic-marker.bats
 # derives the comparison, so the two cannot drift into detecting different repos.
+# gather-kubernetes-marker:begin
 manifest_hits="$(cd -- "$repo" && find . \
                    \( -name Chart.yaml -o -name kustomization.yaml \
                       -o -name kustomization.yml -o -name Kustomization \) \
@@ -88,6 +89,7 @@ elif ( cd -- "$repo" && grep -rqlF 'argoproj.io' \
   # and report it manifest-free with exit 0. `.` can never match a pattern.
   has_manifests="true"
 fi
+# gather-kubernetes-marker:end
 
 # --- policy: the repo's own rules, matched as a GLOB --------------------------
 # `-L` (not `-H`) on both finds below. `-H` follows only the COMMAND-LINE
@@ -100,12 +102,13 @@ fi
 # Note the asymmetry with the manifest half, which is deliberate and NOT parity:
 # the manifest finds stay at the default `-P`, so they count a symlinked manifest
 # FILE but do not descend a symlinked chart DIRECTORY. That is the boundary the
-# three manifest copies share (SKILL.md's marker recipe, SKILL.md's manifests
-# lister, and the manifest find ABOVE in this file — not the two policy finds
+# FOUR manifest copies share (SKILL.md's marker recipe, SKILL.md's manifests
+# lister, the manifest find ABOVE in this file, and detect-stack.sh's
+# `is-kubernetes-marker` block, #1153 — not the two policy finds
 # below, which are the `-L` ones this block declares), and the parity oracles in
 # tests/kubernetes-topic-marker.bats hold
 # them identical — so do not "fix" the policy side down to match, and do not
-# raise the manifest side to `-L` without changing all three copies together.
+# raise the manifest side to `-L` without changing all four copies together.
 local policy_dir="$repo/policies/kyverno"
 local has_policies="false"
 local policy_hits=""

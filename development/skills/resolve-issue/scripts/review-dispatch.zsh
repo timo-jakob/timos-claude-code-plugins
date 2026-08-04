@@ -19,12 +19,19 @@
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, round, base, findings_path, changed_files[] }
-#       repo_type ∈ {swift, python, java, go, claude-plugin}; review_skill is the
+#       repo_type ∈ {swift, python, java, go, claude-plugin, kubernetes};
+#       review_skill is the
 #       review skill the orchestrator invokes (development-<repo_type>:review),
-#       passing changed_files as the review scope. claude-plugin is a FALLBACK
-#       repo_type (#809): selected only when no supported language matched and
-#       detect-stack reports is_claude_plugin — a language always wins, and the
-#       fallback never participates in the ambiguity tiebreak.
+#       passing changed_files as the review scope. claude-plugin (#809) and
+#       kubernetes (#1153) are FALLBACK repo_types: selected only when no
+#       supported language matched and detect-stack reports is_claude_plugin /
+#       is_kubernetes — a language always wins, and neither fallback
+#       participates in the ambiguity tiebreak. They are ORDERED, claude-plugin
+#       first: both markers fire on a plugin repo that ALSO carries Kubernetes
+#       content, and plugin prose is what such a repo is actually made of.
+#       kubernetes additionally requires NO detected language at all (not merely
+#       no supported one), so a JS/TS service shipping a Helm chart keeps the
+#       typed escalation instead of being reviewed by the manifest panel.
 #       The panel writes its aggregate findings JSON (issue #558 schema) to
 #       findings_path. On an unsupported or ambiguous repo type, print a typed
 #       error object and exit 3 (see Exit codes).
@@ -39,7 +46,8 @@
 # Seams (for tests / non-PATH installs):
 #   DETECT_STACK_BIN  overrides the detect-stack.sh binary (must emit the same
 #                     JSON, at least the `.languages` array; `.is_claude_plugin`
-#                     is read with a false default when absent).
+#                     and `.is_kubernetes` are read with a false default when
+#                     absent).
 #   GIT_BIN           overrides the `git` binary.
 #
 # Exit codes:
@@ -140,6 +148,9 @@ cmd_plan() {
   # `// false` default: an older detect-stack without the key falls through to
   # the clean typed error below rather than crashing (#809).
   local is_plugin; is_plugin=$(print -r -- "$detect_json" | jq -r '.is_claude_plugin // false')
+  # same `// false` default, same reason (#1153): an older detect-stack without
+  # the key falls through to the typed error rather than crashing.
+  local is_k8s; is_k8s=$(print -r -- "$detect_json" | jq -r '.is_kubernetes // false')
 
   # supported review languages present, preserving nothing but membership
   local -a supported
@@ -152,12 +163,52 @@ cmd_plan() {
 
   local repo_type=""
   if (( ${#supported} == 0 )); then
-    # Fallback ONLY (#809): a claude-plugin repo detects no language — its
-    # content is prose, agent definitions, zsh scripts, and JSON manifests.
-    # A detected language always wins, and this never joins the ambiguity
-    # tiebreak above it.
+    # Fallbacks ONLY (#809, #1153): these repos detect no language — a plugin
+    # repo's content is prose, agent definitions, zsh scripts and JSON
+    # manifests; a GitOps repo's is charts, overlays and Argo CD resources.
+    # A detected language always wins, and neither joins the `.maintenance.yml`
+    # primary tiebreak (which lives in the multi-language `else` branch below).
+    #
+    # ORDER IS LOAD-BEARING: both markers fire on a plugin repo that ALSO
+    # carries Kubernetes content, and such a repo's content is plugin prose, so
+    # it must be reviewed by the plugin panel. This repo becomes exactly that
+    # case once #1155 lands its Kubernetes fixtures under tests/fixtures/ —
+    # reversing these two would then point its own review loop at a manifest
+    # panel. (Today is_kubernetes is false here, so only one marker fires.)
+    # The kubernetes fallback additionally requires NO detected language at all,
+    # not merely no SUPPORTED one. `supported` is the intersection with the four
+    # panel languages, so it is empty both for a language-less GitOps repo and
+    # for, say, a JavaScript service — and `is_kubernetes` is a topic marker that
+    # composes with any language, so a JS/TS service that ships its own Helm
+    # chart (a very ordinary shape) would otherwise be handed to the manifest
+    # panel for a story whose diff is JS. That panel has no competence there: it
+    # would converge finding-free and the loop would record a clean review that
+    # never happened. Such a repo keeps the typed `unsupported_repo_type`
+    # escalation, which names the languages so a human can route it.
+    #
+    # claude-plugin deliberately does NOT carry that extra condition (#809): a
+    # `.claude-plugin/plugin.json` is definitional for what the repo *is*, and
+    # a plugin repo carrying one unsupported-language file is still a plugin
+    # repo. A `Chart.yaml` is routinely incidental to an application repo.
+    # NOT `local -i`, and the status IS checked — both deliberate. zsh
+    # arithmetic-evaluates an empty string assigned to an integer-attributed
+    # parameter to **0**, and 0 is precisely the value that OPENS this gate. So
+    # an unchecked `-i` read would fail OPEN: a jq that died, or an empty
+    # `$langs_json` from a failed earlier read, would hand a language-bearing
+    # repo to the manifest panel — reproducing on the error path the exact
+    # misrouting this guard exists to prevent. Fail closed instead, with the
+    # exit-1 internal-error status the header contract promises.
+    local lang_count
+    lang_count=$(print -r -- "$langs_json" | jq 'length') || {
+      print -u2 -- "plan: could not compute the detected-language count"; exit 1
+    }
+    [[ "$lang_count" == <-> ]] || {
+      print -u2 -- "plan: non-numeric language count: ${lang_count:-<empty>}"; exit 1
+    }
     if [[ "$is_plugin" == "true" ]]; then
       repo_type="claude-plugin"
+    elif [[ "$is_k8s" == "true" ]] && (( lang_count == 0 )); then
+      repo_type="kubernetes"
     else
       jq -nc --argjson langs "$langs_json" \
         '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java","go"],

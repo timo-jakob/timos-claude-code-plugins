@@ -172,6 +172,175 @@ plan() {  # $1 = languages json ; rest = extra flags
   [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
 }
 
+# ---- kubernetes fallback repo_type (#1153): a GitOps repo detects no language
+# either — its content is charts, overlays and Argo CD resources. Same fallback
+# rules as claude-plugin, plus an ORDERING rule between the two.
+
+@test "plan: #1153 no language + is_kubernetes maps to the kubernetes panel" {
+  plan '{"languages":[],"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "kubernetes" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-kubernetes:review" ]
+}
+
+@test "plan: #1153 a language always wins over the kubernetes fallback" {
+  # the language-first principle: a Go service whose repo also carries a Helm
+  # chart is reviewed by the Go panel, not the manifest panel
+  plan '{"languages":["go"],"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+  # .review_skill too, not just .repo_type: it is the field the orchestrator
+  # actually invokes, and the #809 twin above asserts both
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-go:review" ]
+}
+
+@test "plan: #1153 an UNSUPPORTED language DOES block the kubernetes fallback" {
+  # the asymmetry that keeps the manifest panel from reviewing application code.
+  # `supported` is empty both for a language-less GitOps repo AND for a
+  # JavaScript service, and `is_kubernetes` composes with any language — so a
+  # JS/TS service shipping its own Helm chart (an ordinary shape) would be
+  # handed to the manifest panel for a story whose diff is JS. That panel has no
+  # competence there: it converges finding-free and the loop records a clean
+  # review that never happened. Such a repo must keep the typed escalation,
+  # which names the languages so a human can route it.
+  plan '{"languages":["javascript"],"is_kubernetes":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+  [ "$(echo "$output" | jq -e '.languages | index("javascript") != null')" = "true" ]
+}
+
+@test "plan: #1153 an UNSUPPORTED language does NOT block the claude-plugin fallback" {
+  # the deliberate asymmetry with the case above, pinned so the two cannot be
+  # "harmonised" by mistake: a `.claude-plugin/plugin.json` is definitional for
+  # what the repo IS, and a plugin repo carrying one unsupported-language file
+  # is still a plugin repo. A Chart.yaml is routinely incidental to an
+  # application repo, which is why kubernetes needs the stricter gate.
+  plan '{"languages":["rust"],"is_claude_plugin":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+}
+
+@test "plan: #1153 claude-plugin still wins when a language is detected AND both markers fire" {
+  # the ordering rule survives the stricter kubernetes gate: with a language
+  # present, kubernetes is excluded outright and claude-plugin still applies
+  plan '{"languages":["rust"],"is_claude_plugin":true,"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+}
+
+@test "plan: #1153 a fallback primary does NOT defuse language ambiguity" {
+  # both the script and ARCHITECTURE state "neither fallback ever joins the
+  # ambiguity tiebreak", but every other fallback test here runs with no
+  # .maintenance.yml — so the branch where _primary actually returns a value is
+  # exercised only for LANGUAGE primaries. The tempting "improvement" (teach
+  # _primary to accept the fallback tokens so a GitOps repo can declare its
+  # panel) passes every other test in this file while silently pointing an
+  # ambiguous polyglot repo at the manifest panel.
+  printf 'primary: kubernetes\n' > "$R/.maintenance.yml"
+  plan '{"languages":["python","java"],"is_kubernetes":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+  [ "$(echo "$output" | jq -r .primary)" = "kubernetes" ]
+}
+
+@test "plan: #1153 a claude-plugin primary does not defuse ambiguity either" {
+  # mirrored so the two fallbacks cannot drift apart — the precedent this file
+  # already sets for every other fallback rule
+  printf 'primary: claude-plugin\n' > "$R/.maintenance.yml"
+  plan '{"languages":["python","java"],"is_claude_plugin":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+}
+
+@test "plan: #1153 a single supported language wins before primary is consulted" {
+  # the single-supported-language branch precedes _primary entirely, so a
+  # declared kubernetes primary cannot override a detected Go service
+  printf 'primary: kubernetes\n' > "$R/.maintenance.yml"
+  plan '{"languages":["go"],"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+}
+
+@test "plan: #1153 the REAL detect-stack drives the kubernetes fallback end-to-end" {
+  # every other case here stubs detect-stack via DETECT_STACK_BIN, so the
+  # producer's key name and the consumer's jq path are pinned INDEPENDENTLY —
+  # rename `.is_kubernetes` in both the script and this file's stub fixtures and
+  # both suites stay green while every real GitOps repo escalates as
+  # unsupported_repo_type (silently: the `// false` default degrades, it does not
+  # crash). This one un-stubbed case is what joins the two halves.
+  mkdir -p "$R/charts/app"
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > "$R/charts/app/Chart.yaml"
+  run env -u DETECT_STACK_BIN zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "kubernetes" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-kubernetes:review" ]
+}
+
+@test "plan: #1153 every repo_type the dispatcher can emit names a shipped review skill" {
+  # review_skill is SYNTHESISED as development-${repo_type}:review, so a renamed
+  # or typo'd panel directory is caught by no assertion in either suite — every
+  # test here compares the synthesised string to another string.
+  #
+  # The language half is DERIVED from the script, so a seventh panel language
+  # added there is swept automatically rather than leaving this test's title
+  # false — the very failure mode it exists to prevent one level down. The two
+  # fallbacks stay literal: they are not in that loop, and naming them here is
+  # what documents them as the complete fallback set.
+  local langs t
+  langs="$(sed -n 's/^  for l in \(.*\); do$/\1/p' "$S")"
+  [ -n "$langs" ]
+  [ "$(printf '%s\n' "$langs" | wc -w | tr -d ' ')" -eq 4 ]
+  for t in $langs claude-plugin kubernetes; do
+    [ -f "$REPO_ROOT/development-$t/skills/review/SKILL.md" ]
+    # and each panel's skill really is named `review`, or the synthesised
+    # `development-<type>:review` resolves to nothing
+    grep -qx 'name: review' "$REPO_ROOT/development-$t/skills/review/SKILL.md"
+  done
+}
+
+@test "plan: #1153 the fallback branch never consults .maintenance.yml primary" {
+  # the branch the fallbacks actually live in — zero SUPPORTED languages. The
+  # tempting "let a GitOps repo declare its panel" change would teach _primary
+  # to be consulted here, and every other test in this file would stay green
+  # while `primary: python` on a repo with no Python routed review to
+  # development-python:review.
+  printf 'primary: python\n' > "$R/.maintenance.yml"
+  plan '{"languages":[],"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "kubernetes" ]
+}
+
+@test "plan: #1153 claude-plugin WINS when both fallback markers fire" {
+  # not hypothetical: a plugin repo that also carries Kubernetes content fires
+  # both markers, and THIS repo becomes exactly that once #1155 lands its
+  # fixtures under tests/fixtures/. Reversing the branch order would then point
+  # this repo's own review loop at a manifest panel.
+  plan '{"languages":[],"is_claude_plugin":true,"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-claude-plugin:review" ]
+}
+
+@test "plan: #1153 no language and is_kubernetes false stays a typed error" {
+  plan '{"languages":[],"is_claude_plugin":false,"is_kubernetes":false}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+}
+
+@test "plan: #1153 absent is_kubernetes key defaults to false, no crash" {
+  # an older detect-stack that omits the key must fall through cleanly, exactly
+  # as #809's absent-key case does
+  plan '{"languages":[],"is_claude_plugin":false}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+}
+
+@test "plan: #1153 the kubernetes fallback does not defuse language ambiguity" {
+  plan '{"languages":["python","java"],"is_kubernetes":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+}
+
 # ---- scope-findings: findings outside the story's diff do not appear
 
 @test "scope-findings: drops findings in untouched files, keeps in-diff ones" {
@@ -294,3 +463,42 @@ JSON
   echo "$output" | grep -q 'not a git repository'
   run ! grep -q 'does not resolve' <<< "$output"
 }
+
+@test "plan: #1153 an ABSENT .languages key still reaches the kubernetes fallback" {
+  # the new lang_count read must degrade through `.languages // []` exactly as
+  # the two marker reads degrade through `// false` — the same missing-key edge
+  # this file already covers for is_claude_plugin and is_kubernetes
+  plan '{"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "kubernetes" ]
+}
+
+@test "plan: #1153 an empty detect payload stays a typed escalation" {
+  plan '{}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+}
+
+@test "plan: #1153 a malformed .languages FAILS CLOSED with the internal-error exit" {
+  # the guard's own comment states the stakes: an unchecked `local -i` read would
+  # fail OPEN — jq dying (or emitting nothing) would coerce to 0, exactly the
+  # value that opens the kubernetes gate, handing a language-bearing repo to the
+  # manifest panel. Nothing exercised that branch, so replacing the guards with
+  # `local -i lang_count=$(...)` left every other test in this file green.
+  # A boolean has no `length`, so jq errors here.
+  plan '{"languages":true,"is_kubernetes":true}'
+  [ "$status" -eq 1 ]
+  # and emphatically NOT a successful kubernetes dispatch
+  [ "$(echo "$output" | jq -r '.repo_type // "none"' 2>/dev/null || echo none)" != "kubernetes" ]
+}
+
+# NOTE: no companion test for the `[[ "$lang_count" == <-> ]]` half. Every
+# SINGLE-DOCUMENT input reachable through this seam that jq accepts yields one
+# number (an object's length is 1, a string's is its length), so an assertion
+# built on one would behave identically with the guard removed — an inert test,
+# which is worse than no test. The guard IS reachable via a multi-document
+# payload (`{...} {...}` survives `jq -c .` and makes `jq 'length'` emit two
+# lines), but that requires a detect-stack emitting a JSON stream, which nothing
+# in the family does; the numeric check stands as defence-in-depth for it and
+# for a jq that succeeds while emitting nothing. The case above covers the
+# reachable failure.

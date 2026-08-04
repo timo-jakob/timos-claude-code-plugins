@@ -34,6 +34,15 @@
 #   language_meta         object   per-language detection metadata — see shape below
 #   is_claude_plugin      bool     repo carries a .claude-plugin marker (selects the
 #                                  Renovate dependency-bot path over Dependabot)
+#   is_kubernetes         bool     repo carries the kubernetes TOPIC marker — a Helm
+#                                  Chart.yaml, a Kustomize manifest (all three
+#                                  spellings), or a file containing `argoproj.io`
+#                                  (#1153). Language-agnostic, so it composes with
+#                                  any language or none; review-dispatch.zsh reads it
+#                                  as a no-language FALLBACK repo_type, after
+#                                  is_claude_plugin. Kept identical to the
+#                                  orchestrator's topic-marker recipe and to
+#                                  gather-kubernetes-findings.zsh.
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #   missing_artifacts     []string templates expected under THIS repo's conditions
 #                                  (visibility/languages/bot path) that are absent —
@@ -1338,6 +1347,51 @@ if [[ -e "$cwd/.claude-plugin/marketplace.json" ]] ||
 	[[ -n "$(find "$cwd" -path '*/.claude-plugin/plugin.json' -not -path '*/.git/*' 2>/dev/null | head -n1)" ]]; then
 	is_claude_plugin="true"
 fi
+# kubernetes topic marker (#1153) — the SAME recipe the maintenance orchestrator's
+# topic-marker block and gather-kubernetes-findings.zsh use, kept identical on
+# purpose: ARCHITECTURE's rule is that detection lives here, so a second
+# implementation probing the marker inside review-dispatch.zsh would give the
+# family two recipes for one signal that can silently diverge.
+# A Helm Chart.yaml, a Kustomize manifest (all three spellings kustomize
+# accepts), or the literal `argoproj.io`, which nothing else carries by accident
+# — deliberately NOT "any YAML with apiVersion", which matches a workflow file or
+# an OpenAPI document in half the repos in existence.
+# Capture BEFORE filtering: `find | grep -q` loses the match to SIGPIPE under
+# `set -o pipefail`. `! -type d` because a DIRECTORY named `Kustomization` is not
+# a manifest, while a symlinked one still counts. `cd` first so the prune
+# substrings test repo-RELATIVE paths — with an absolute prefix, a checkout
+# living under ~/templates/ would filter every hit and report itself
+# manifest-free.
+#
+# The `is-kubernetes-marker:begin`/`:end` sentinels are LOAD-BEARING, like the
+# orchestrator SKILL.md recipe's: tests/kubernetes-topic-marker.bats extracts
+# the text between them and derives the parity oracles from that bounded block
+# rather than from this whole 1600-line file. Unbounded, a `--exclude-dir=` or
+# `--include=` token added anywhere else in this script would mask its deletion
+# from THIS recipe — the union would be unchanged and the parity test green
+# while the argoproj grep quietly became "any file mentioning Argo". Keep the
+# whole recipe (both halves — the find AND the argoproj elif) between them, and
+# keep them a single unique pair.
+# is-kubernetes-marker:begin
+is_kubernetes="false"
+k8s_hits="$(cd "$cwd" && find . \( -name Chart.yaml -o -name kustomization.yaml \
+	-o -name kustomization.yml -o -name Kustomization \) \
+	! -type d 2>/dev/null |
+	grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
+if [[ -n "$k8s_hits" ]]; then
+	is_kubernetes="true"
+elif (cd "$cwd" && grep -rqlF 'argoproj.io' \
+	--include='*.yaml' --include='*.yml' \
+	--exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+	--exclude-dir=templates . 2>/dev/null); then
+	# grep the literal `.` after cd, not "$cwd": GNU grep documents
+	# --exclude-dir as skipping any COMMAND-LINE directory whose name matches, so
+	# passing "$cwd" would skip a repo literally named `templates`/`vendor`/
+	# `node_modules` in its ENTIRETY and report it manifest-free with exit 0.
+	is_kubernetes="true"
+fi
+# is-kubernetes-marker:end
+
 renovate_present="false"
 [[ -e "$cwd/renovate.json" || -e "$cwd/.github/renovate.json" ]] && renovate_present="true"
 # Renovate path when the repo is a plugin repo OR already on Renovate.
@@ -1581,6 +1635,7 @@ cat <<EOF
   "interfaces": $interfaces_json,
   "language_meta": $language_meta_json,
   "is_claude_plugin": $(json_bool "$is_claude_plugin"),
+  "is_kubernetes": $(json_bool "$is_kubernetes"),
   "existing_artifacts": $artifacts_json,
   "missing_artifacts": $missing_json,
   "github_state": $github_state

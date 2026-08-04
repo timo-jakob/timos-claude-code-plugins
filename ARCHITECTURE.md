@@ -33,7 +33,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes` (agents land with #1153), future: `development-container`, `development-opentofu` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes` (CI pipeline lands with #1154), future: `development-container`, `development-opentofu` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -674,10 +674,11 @@ the full pipeline; the primary/auxiliary model already permits a topic to be
 primary, so no new mechanism is needed. **#1152 landed the first half**: the
 topic marker and `gather-kubernetes-findings.zsh` exist, so `kubernetes` now
 enters the detected+supported set and such a declaration **selects this
-plugin** rather than being treated as stale. The **gates themselves** arrive
-later, with the agents (#1153) and the check pipeline (#1154) — until then the
-dispatcher validates the payload and escalates each group to a human rather
-than routing it to an agent that does not exist yet.
+plugin** rather than being treated as stale. **#1153 landed the second half**:
+the five agents ship, so the dispatcher now **routes** each finding group to a
+`subagent_type` that exists rather than escalating it to a human.
+The **gates themselves** arrive with the check pipeline (#1154) — until then a
+routed group gets a real plan, but no CI check enforces the manifests on a PR.
 
 "Full pipeline" here means the **six checks** bootstrap's
 `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit** (#1154) — render → schema →
@@ -1019,7 +1020,7 @@ allowed to demote everything else to `"auxiliary"`: every target
 dispatches as `"primary"` and the Phase 9 summary notes the stale
 declaration (`development/skills/maintenance/SKILL.md`). That is the case
 a repo hits when it declares a primary the orchestrator cannot yet
-dispatch, e.g. `primary: kubernetes` before #1152 registers the marker.
+dispatch, e.g. `primary: kubernetes` before #1152 registered the marker.
 
 In `"auxiliary"` mode a language plugin runs only its
 mechanical fixers and **skips its app-grade gates** (coverage
@@ -1290,6 +1291,34 @@ Swift adds one language-specific dimension, `swift6_compliance`
 extend the enum with its own dimension the same way; the core five never change
 meaning.
 
+`development-kubernetes` (#1153) extends it with two more, and ships **three**
+dimensions in total — the core one first, each written as
+dimension-then-agent so the pairing is machine-checkable:
+**`security`** (`kubernetes-security-reviewer`),
+**`reliability`** (`kubernetes-reliability-reviewer`), and
+**`argocd`** (`argocd-advisor`). It
+carries none of the other four core dimensions — there is no application code in
+a manifest tree to hunt bugs in, benchmark, or unit-test.
+
+**`reliability` is not `resilience`, and the difference is the artifact.** The
+two are near-homonyms sitting side by side in one dimension enum, and a reader
+meeting them in the same vocabulary may take them for duplicates. (A single
+review *round* never emits both: `plan` resolves exactly one `repo_type`, and
+`kubernetes` is a no-language fallback any supported language beats — so a Go
+repo that also ships charts is reviewed by the Go panel alone. Only a
+deliberately hand-invoked second panel produces both. The *maintenance*
+dispatch is the one that genuinely composes alongside a language plugin.) They
+never look at the same thing: `resilience` reviews **application code**'s
+outbound-dependency behaviour (breakers, timeouts, registered fallbacks);
+`reliability` reviews the **rendered manifest**'s availability posture (probes,
+PDBs, replicas, rollout strategy). A service with perfect breakers still goes
+down when its Deployment has one replica and no PodDisruptionBudget, and no
+`resilience` reviewer would ever see that.
+
+Like every non-core dimension, both inherit the known `build-dossier.zsh`
+`$core` gap (#1148) described below: a **clean** run emits no key at all, which
+is indistinguishable from "never ran".
+
 The **consolidator** needs no teaching about a new dimension: it keys findings
 on `[file, line, dimension, title]`, with no dimension allow-list. Two
 downstream surfaces are **not** so accommodating, and both gaps predate
@@ -1433,10 +1462,28 @@ of the worktree with two subcommands.
 
 - **Repo-type detection reuses the maintenance logic** — it runs
   `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
-  review types are `swift` | `python` | `java` | `go` | `claude-plugin` — the
-  last is the no-language FALLBACK, not a `.languages` value — each mapping to that type's
+  review types are `swift` | `python` | `java` | `go` | `claude-plugin` |
+  `kubernetes` — the last two are no-language FALLBACKS, not `.languages`
+  values — each mapping to that type's
   `:review` skill. When several apply, `.maintenance.yml`'s `primary`
   disambiguates.
+- **The two fallbacks are ordered, and a language beats both — but their
+  triggers differ.** Both are keyed on `detect-stack.sh`'s `is_claude_plugin` /
+  `is_kubernetes` markers (#1153). `claude-plugin` is reached when `.languages`
+  contains no **supported** review language; `kubernetes` additionally requires
+  **no detected language at all**. The asymmetry is deliberate: a
+  `.claude-plugin/plugin.json` is definitional for what the repo *is*, so a
+  plugin repo carrying one unsupported-language file is still a plugin repo —
+  whereas a `Chart.yaml` is routinely incidental to an application repo, and
+  handing a JS/TS service's diff to the manifest panel would converge
+  finding-free and record a review that never happened. Such a repo keeps the
+  typed `unsupported_repo_type` escalation, which names the languages so a human
+  can route it.
+  `claude-plugin` is tried first, because both markers fire on a plugin repo
+  that *also* carries Kubernetes content, and such a repo's content is plugin
+  prose — it must be reviewed by the plugin panel. This repo becomes exactly
+  that case once #1155 lands its Kubernetes fixtures. Neither fallback ever
+  joins the ambiguity tiebreak.
 - **The review scope is the story's diff, never the whole repo.** `changed_files`
   is everything that differs from `base` (committed + staged + unstaged) plus new
   untracked files. Pre-existing findings in untouched code belong to

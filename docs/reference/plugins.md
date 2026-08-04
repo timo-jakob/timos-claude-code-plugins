@@ -35,7 +35,7 @@ of this plugin):
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see [Requirements](requirements.md)). |
 | Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`, `development-javascript`) and any topic plugins (`development-spring`, `development-claude-plugin`, `development-docs`, `development-react`, `development-kubernetes`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
-| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Python / Java / Claude-plugin). |
+| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Swift / Python / Java / Go / Claude-plugin / Kubernetes). |
 | Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Spins out linked `test-case` issues for a surface-touching story's outside-in cases; takes a typed parked exit when a session can't converge; pointed at an **epic**, walks each `needs-refinement` child and posts an epic summary. |
 | Define Personas | `/development:define-personas` | **Interactive** — creates or updates a repo's `personas/v1` registry (`docs/personas.md`): who actually uses each surface and what they type into it. Loops the `persona-definer` agent with you (repo-grounded candidate personas + Socratic questions), then writes back the **human-approved** prose + machine block to the working tree (lands via the normal PR flow). The registry feeds `refine-issue`'s realistic test-data generation and the readiness gate's advisory persona-reference check. |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
@@ -382,32 +382,64 @@ two places to silence a false positive. Following `development-claude-plugin`,
 there is **no approver agent** — a cluster definition is the origin of
 everything running on it, so a human approves.
 
-**What's built (v0.2):** the ownership boundary and the marketplace
+**What's built (v0.3):** the ownership boundary and the marketplace
 registration
 ([#1151](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1151)),
-plus the maintenance dispatcher and the `kubernetes` topic marker and gather
+the maintenance dispatcher and the `kubernetes` topic marker and gather
 script that feed it
-([#1152](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1152)).
+([#1152](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1152)),
+and the five agents plus the review panel
+([#1153](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1153)).
 Getting the boundary wrong is the expensive mistake — a topic plugin that creeps
 into Dockerfiles or application code contradicts language-first and has to be
 unpicked across several plugins later — so it was settled before anything filled
 it. The rest of epic
 [#1150](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1150)
-follows: the five agents and the review skill
-([#1153](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1153)),
-the bootstrap check pipeline
+follows: the bootstrap check pipeline
 ([#1154](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1154)),
 and the self-contained test fixtures
 ([#1155](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1155)).
 A repo declaring `primary: kubernetes` now selects this plugin rather than
-being treated as a stale declaration — but until #1153 lands the dispatcher
-routes nothing, escalating each finding group to a human instead.
+being treated as a stale declaration, and the dispatcher now routes every group
+to a shipped agent rather than escalating it to a human.
+
+**The review panel's `reliability` dimension is not the family's
+`resilience`.** They are near-homonyms sitting side by side in one dimension
+enum, so a reader meeting both may take them for duplicates. (A single review
+round never emits both — review resolves exactly one panel, and `kubernetes` is
+reached only when **no** language is detected at all, so a repo whose only
+language merely lacks a panel of its own (a JS/TS service shipping a Helm chart)
+keeps the typed escalation rather than being reviewed by the manifest panel —
+unlike `claude-plugin`, which deliberately has no such condition because a
+plugin manifest is definitional for what the repo *is*; it is the *maintenance*
+dispatch that composes alongside a language plugin.) They never read
+the same artifact: `resilience` reviews **application code**'s
+outbound-dependency behaviour (breakers, timeouts, fallbacks); `reliability`
+reviews the **rendered manifest**'s availability posture (probes, PDBs,
+replicas, rollout strategy). A service with perfect breakers still goes down
+when its Deployment has one replica and no PodDisruptionBudget.
 
 **Skills:**
 
 | Skill | Command | Description |
 | --- | --- | --- |
-| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for infrastructure-as-code findings. Validates the v2 payload and returns a plan. Registers the routing table (`manifest_validation` → `kubernetes-manifest-fixer`; `policy` + `policy_tests` → `kubernetes-policy-triage`, one PR group) but ships no agents yet, so every group is escalated as `human_action_required` naming [#1153](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1153). No approver, and no `ci_fixer_agent`. |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for infrastructure-as-code findings. Validates the v2 payload and returns a plan routing each group by the live table (`manifest_validation` → `kubernetes-manifest-fixer`; `policy` + `policy_tests` → `kubernetes-policy-triage`, one PR group). No approver, and no `ci_fixer_agent` — on a red PR the orchestrator escalates to the user rather than substituting another plugin's fixer. |
+| Review panel | `/development-kubernetes:review [scope]` | Kubernetes/IaC review with 3 parallel read-only agents (security, reliability, Argo CD). Renders `helm template` / `kustomize build` into a temp tree and reviews the **rendered** output, not the templates — a chart that reads safely can render a privileged container. Emits #558-schema findings alongside the prose report. |
+
+**Agents (review panel):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `kubernetes-security-reviewer` | opus | Over-broad RBAC, missing or permissive security contexts, privileged/`hostPath`/`hostNetwork` containers, secrets as plain env vars, namespaces with no NetworkPolicy. Deliberately silent on exactly three `kube-linter` duplicates (missing probes, absent limits, `latest` tags) — security controls are reported even where the linter overlaps |
+| `kubernetes-reliability-reviewer` | opus | The failure modes that surface as outages rather than errors: probes that exist but are *wrong*, requests/limits that throttle or OOM-kill, no PodDisruptionBudget, single replicas on a serving path, anti-affinity that exists but does not work (wrong `topologyKey`, `preferred` where `required` is needed), capacity-dropping rollouts |
+| `argocd-advisor` | opus | `Application` / `ApplicationSet` / `AppProject` — app-of-apps integrity (a parent referencing a path that does not exist fails silently at sync time), sync policy, project source/destination restrictions, sync waves, and `targetRevision: HEAD` |
+
+**Agents (maintenance):**
+
+| Agent | Model | Focus |
+| --- | --- | --- |
+| `kubernetes-manifest-fixer` | opus | Mechanical `manifest_validation` fixes (schema errors, formatting drift), verified by re-running the failing check. Escalates anything that would change **what gets deployed** — image tags, replica counts, resource values, RBAC subjects, namespace targets |
+| `kubernetes-policy-triage` | opus | Kyverno results, three ways: fix the manifest when the policy is right, **escalate rather than edit** a policy that is wrong (it encodes an architectural decision the consuming repo owns), and write `kyverno test` fixtures for an untested policy. Never adds policies |
 
 ## development-go
 
