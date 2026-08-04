@@ -532,6 +532,74 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   diff actually touches — both bounds exist so the review loop converges
   instead of drowning in speculative hardening notes.
 
+### Messaging — NATS JetStream carrying CloudEvents 1.0 (#1060)
+
+Asynchronous messaging is a deployable-shaped decision like the ones above, and
+this family holds exactly one position on it. It is stated here in the family's
+own words, with its rationale, so a reader can disagree with it explicitly.
+
+**The default event backbone is NATS JetStream, and every event on it carries a
+CloudEvents 1.0 envelope.** That is the whole position: one broker, none held
+in reserve for scale, and no stated class of use that reaches for a different
+mechanism. A service that needs pub/sub, a work queue, or a durable replayable
+stream gets all three from the same server.
+
+**The wire contract is part of the position, not a per-service choice.** All
+five of these hold by default:
+
+- **A CloudEvents 1.0 envelope on every event** — `id`, `source`, `type`,
+  `specversion` and `time` are structural, so a consumer, a bridge, or a human
+  reading a dead-letter payload can interpret any event without knowing which
+  service wrote it.
+- **At-least-once delivery** — durable consumers acknowledge, and an
+  unacknowledged message is redelivered. Exactly-once is not promised at the
+  transport, so nothing downstream may assume it.
+- **Idempotent consumers** — the necessary consequence of the line above. A
+  handler is written so that processing the same envelope `id` twice is
+  indistinguishable from processing it once. That is a design obligation on the
+  consumer, not a feature to wait for from the broker.
+- **Transactional-outbox publishing** — a producer commits the event to its own
+  database in the same transaction as the state change it describes, and a relay
+  publishes from there. Without it, a crash between commit and publish drops an
+  event silently, and no amount of broker durability recovers it. The obligation
+  binds a producer publishing events **about its own state**; a producer that
+  holds no transactional state of its own — a bridge turning an external signal
+  into an event — has no commit to be atomic with, publishes directly, and
+  inherits whatever guarantee its source gives it. Making the stream itself the
+  system of record is a **different** architecture, not a variant of this one,
+  and this section does not admit it: a service owns its state in its own store.
+- **Replayable streams** — a stream retains its events, so a new or rebuilt
+  consumer can start from the beginning rather than only from now. Replay is
+  what makes rebuilding a projection an ordinary operation instead of an
+  incident.
+
+**Rationale.** One lightweight backbone — a single small server — covers
+pub/sub, work queues, and persistent replayable streams, so there is no
+second-broker fork to maintain and no per-repo argument about which one this
+service uses. That is "one blessed path with one good default" applied to
+messaging: a second admitted broker is a permanent maintenance and expertise
+cost, paid in every repo and every review, bought against a scale story most
+systems never reach — and a system that genuinely outgrows this one has earned
+a deliberate re-decision, which is not the same as a standing escape hatch.
+CloudEvents 1.0 then makes the envelope contract-first, the same stance this
+document already takes on APIs: the envelope is a published contract, not a
+shape each service reinvents. And it composes with the gRPC-internal
+direction — small polyglot clients across Go, Java, Python and Swift, rather
+than a broker whose comfortable ecosystem is Java-shaped and whose other
+clients are an afterthought.
+
+**The trade-off, stated honestly.** The Java realization gives up the
+first-class `jakarta.jms` ecosystem and its Spring Boot starter —
+auto-configured connection factories, `@JmsListener`, container-managed
+transaction integration — and uses the NATS Java client plus the CloudEvents
+SDK instead. That is real work the family is choosing to take on, in exchange
+for one backbone across four languages instead of one comfortable language and
+three awkward ones.
+
+Building any of this — an advisor, bootstrap scaffolding, a Java realization —
+is a separate and currently unscheduled concern. This section states the
+position that machinery would be built *to*.
+
 ### Browser UI — SPA shell, micro-frontends, React default (#1059)
 
 The polyrepo rule above is a rule about *deployables*, and a browser UI is a
@@ -3718,7 +3786,7 @@ C4Container
         Container(web_app, "Web Application", "Java, Spring MVC", "Serves the SPA and the JSON API")
         Container(spa, "Single-Page Application", "JavaScript, Angular")
         ContainerDb(database, "Database", "SQL Database")
-        ContainerQueue(events, "Event Bus", "ActiveMQ Artemis")
+        ContainerQueue(events, "Event Bus", "NATS JetStream")
         Container_Ext(backend_api, "Mainframe Banking System API", "Java, Docker")
     }
 
@@ -3739,7 +3807,7 @@ containers — `backend_api` (`_Ext`), `email_system` (`System_Ext`), and
   {"alias": "web_app", "label": "Web Application", "technology": "Java, Spring MVC", "description": "Serves the SPA and the JSON API"},
   {"alias": "spa", "label": "Single-Page Application", "technology": "JavaScript, Angular", "description": null},
   {"alias": "database", "label": "Database", "technology": "SQL Database", "description": null},
-  {"alias": "events", "label": "Event Bus", "technology": "ActiveMQ Artemis", "description": null}
+  {"alias": "events", "label": "Event Bus", "technology": "NATS JetStream", "description": null}
 ]
 ```
 <!-- c4/v1:example-output:end -->

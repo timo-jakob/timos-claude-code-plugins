@@ -73,8 +73,25 @@ readiness) and "stay up and degrade" (resilience):
   reconnects in the background, and the dependency shows `down`/`degraded` in
   `/health` — but the pod **stays ready**.
 
-The aggregate `status` is a function of the components: `down` if any *hard*
-component is down, else `degraded` if any *soft* component is down, else `up`.
+The components put a **floor** under the aggregate `status`, not an equality:
+`down` if any *hard* component is **down**; else at least `degraded` if **any**
+component, hard or soft, is down **or degraded**; else `ok`. The middle branch is
+deliberately **kind-agnostic** — a hard dependency that is merely `degraded`
+(breaker half-open, re-probing) floors the aggregate at `degraded`, not `down`;
+only a hard dependency fully down forces `down`.
+
+**Over-reporting is legal** — a service may be `degraded` for an internal reason
+no dependency models — so conformance rejects *under*-reporting. It separately
+fails a `down` aggregate **outright**, because the check asserts a *serving*
+service: `down` is a legitimate runtime state, not one a conformance job can
+pass in.
+
+**On the wire the AGGREGATE's healthy value is `ok`, not `up`** — renaming it
+would break every v1.0 ops-api consumer. Component `status` values are a
+different vocabulary and follow the breaker mapping directly: closed = `up`,
+half-open = `degraded`, open = `down`. ARCHITECTURE.md's "Resilience policy +
+dependency health" section (its ops-api v1 → v1.1 bullet) is authoritative on
+both; see §4.
 
 ## 3. The resilience policy — the six mandates
 
@@ -107,7 +124,14 @@ through the existing `contracts-semver` gate — never a breaking change:
 
 - `/health` gains an optional `components` object (per-dependency `status`,
   `kind: hard|soft`, `breaker`, `since`) and the aggregate `status` widens to
-  `up|degraded|down` (adding enum values is additive).
+  `ok|degraded|down`. **Two encoding constraints are load-bearing, and this
+  document's original wording got both wrong** (corrected in place, #1060): the
+  healthy value stays **`ok`** (not `up`), and the widening ships as
+  **`x-extensible-enum`**, not a plain `enum` — oasdiff classifies
+  `response-property-enum-value-added` as breaking, so a plain widening would
+  force an ops **major** for a semantically additive change. ARCHITECTURE.md's
+  "Resilience policy + dependency health" section (its ops-api v1 → v1.1
+  bullet) carries the authoritative statement of both.
 - The `/health/ready` semantics are **formalized** (fails only on a hard dep
   down) — a documentation/behaviour tightening, not a schema break.
 - `check-ops-conformance.zsh` gains optional validation of the `components`
@@ -165,10 +189,21 @@ children).
   this epic is the app-side resilience it exercises. They meet at the assertion
   "a soft dependency killed under load leaves the service `degraded` but `ready`,
   and it recovers when the dependency returns."
-- **Messaging (Artemis default, Kafka for scale)** — a broker is a dependency
-  like any other: its client gets a breaker, and its loss is hard or soft per the
-  service (an event-sourced write path is often hard; a best-effort notification
-  is soft).
+- **Messaging (NATS JetStream + CloudEvents 1.0, #1060)** — a broker is a
+  dependency like any other: its client gets a breaker, and its loss is hard or
+  soft per the service. Note which way the messaging position pushes that
+  classification: under transactional-outbox publishing the broker is **off**
+  the synchronous write path, so a producer's broker loss is characteristically
+  **soft** — the write commits, the relay lags, the service is degraded but
+  ready. Declaring it hard there would shed traffic on a path that still works,
+  which is the naive-readiness anti-pattern §2 retires. Hard is for a service
+  whose core function is driven by what it **consumes**, and for the other
+  producer shape the position carves out: a producer holding no transactional
+  state of its own publishes **directly**, so the broker *is* its synchronous
+  path — and when that direct publish IS the service's core function (the
+  bridge case), its broker is **hard**. Only a genuinely ancillary direct
+  publish may be declared soft. The breaker policy itself is broker-agnostic
+  and unchanged by the messaging position.
 
 ## 7. Considered and rejected
 
