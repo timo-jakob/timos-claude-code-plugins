@@ -416,13 +416,14 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   *serving* service: `down` is a legitimate runtime state, not one the
   conformance job can pass in. `/health` itself always answers **200** while the
   process can respond (the verdict is in the body); 503 is the two probes'
-  vocabulary, not the human-facing aggregate's. **The blessed Python and Java
-  ops-api templates do not yet implement this**: both still alias `/health` to
-  the readiness handler and answer 503 when readiness fails, which the v1.0
-  checker already rejected (it has always required HTTP 200 on `/health`) — a
-  healthy service conforms either way, so the divergence only surfaces during an
-  outage. v1.1 states the rule; fixing the two templates is #1139, and populating
-  `components` from breaker state is the per-language slice (#967).
+  vocabulary, not the human-facing aggregate's. **The blessed Python ops-api
+  template does not yet implement this**: it still aliases `/health` to the
+  readiness handler and answers 503 when readiness fails, which the v1.0 checker
+  already rejected (it has always required HTTP 200 on `/health`) — a healthy
+  service conforms either way, so the divergence only surfaces during an outage.
+  **The Java template was fixed by #1142** (below), which had to rework the same
+  handler to report `components`; #1139 stays open for the Python half.
+  Populating `components` from breaker state is the per-language slice (#967).
   Two encoding constraints are load-bearing, both empirically pinned by the
   repo's own gate: the healthy aggregate stays **`ok`** (renaming it to `up`
   would break every v1.0 consumer), and the widened states are declared
@@ -432,10 +433,11 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
 - **Realized per language, enforced two ways.** The policy and contract are
   central and language-agnostic (#965). The **review dimension** (#966) is
   shipped and catches violations on new diffs. The per-language scaffolding is
-  #967's six children, of which **Spring has landed** (#1141 — see below); java,
-  python, go, javascript and swift are #1142-#1146. A **maintenance advisor**
-  will catch the same defect classes on the back catalogue (#968) and is **not
-  yet built** — until it lands, the pattern is enforced on new diffs only.
+  #967's six children, of which **Spring (#1141) and non-Spring Java (#1142)
+  have landed** — see below; python, go, javascript and swift are #1143-#1146. A
+  **maintenance advisor** will catch the same defect classes on the back
+  catalogue (#968) and is **not yet built** — until it lands, the pattern is
+  enforced on new diffs only.
 - **The Spring realization is resilience4j (#1141).** One blessed library per
   language, and for Spring Boot it is
   `io.github.resilience4j:resilience4j-spring-boot4`, pinned directly rather than
@@ -475,6 +477,48 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   sees it and the call is never retried), and `CallNotPermittedException` must be
   in the retry's `ignore-exceptions` (else an open breaker's fast-fail is itself
   retried through the full backoff schedule).
+- **The non-Spring Java realization is also resilience4j (#1142)** — the same
+  blessed library, applied differently. Without Spring there is no AOP to weave
+  `@CircuitBreaker`/`@Retry`, so the payload
+  (`templates/languages/java/resilience/`) decorates **programmatically**:
+  `DependencyCatalog` owns the declared dependencies, one breaker and one retry
+  each, and a `call(name, call, fallback)` wrapper composing
+  `fallback(retry(breaker(call)))` — the same nesting Spring's aspect order
+  produces, spelled out rather than configured, with `CallNotPermittedException`
+  in the retry's `ignoreExceptions` for the same reason. Versions come **from
+  `resilience4j-bom`**, the opposite of the Spring payload's direct pin and for
+  the same underlying fact: the BOM manages every core module but not the Boot 4
+  starter. `resilience4j-all` is rejected — it adds ratelimiter/bulkhead/cache/
+  micrometer for one `Decorators` builder the two static `decorateSupplier`
+  calls replace more legibly. The hard/soft declaration is a
+  `resilience-dependencies.properties` file (`<name>=hard|soft`, overridable by
+  `$OPS_DEPENDENCIES_FILE` for a mounted ConfigMap) rather than Spring's
+  `resilience.dependencies` YAML, since a plain-Java service has no
+  configuration framework to bind. **Under-reporting is a startup failure from
+  both sides**, which is the only way the pair is useful: `requireDeclared` (from
+  a client's constructor) refuses a dependency guarded in code but undeclared,
+  and `requireAllDeclaredGuarded()` (from startup, after the clients are built)
+  refuses one declared but guarded by nobody — whose eagerly-created breaker
+  could never leave `CLOSED`, so `/health` would swear it was `up` through a
+  total outage. **Not every exception is a dependency failure**: a
+  `NotADependencyFailure` type carries caller errors (4xx) and local
+  cancellations (an interrupt during a drain) and sits in *both* the retry's and
+  the breaker's `ignoreExceptions`, so user-driven 404s cannot open a breaker on
+  a healthy dependency and an interrupt is never retried (the backoff's
+  `Thread.sleep` would throw at once **and clear** the interrupt flag); an
+  `of(deps, CircuitBreakerConfig, RetryConfig)` overload is the seam for a
+  third-party client's own such type. The breaker also carries the Spring
+  sibling's **slow-call thresholds** (2s/100%), without which a brownout — a
+  dependency answering in 2.9s and never erroring — yields a 0% failure rate, so
+  the breaker never opens, the fallback never fires and `/health` reports `up`
+  for the whole event. **It extends
+  the #935 ops-api payload rather than replacing it**: `OpsApi` gained a
+  `DependencyHealthSource` interface over plain records — so it still needs no
+  breaker library on its classpath — plus the aggregate floor, the
+  `withInternalStatus` over-reporting hook, and the hard-dependency half of
+  readiness. That rework also **fixes the Java half of #1139**: `/health` now
+  answers 200 with the verdict in the body, as the contract requires, instead of
+  503 (the Python half is untouched and #1139 stays open for it).
 - **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
   agent in each **service** language plugin (Go, Java, Python, Swift), wired
   into that language's review panel alongside bugs/security/performance. It

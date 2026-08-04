@@ -1639,7 +1639,9 @@ dropping a second root `requirements.txt`:
 **Java canonical implementation (#935).** For a **non-Spring** Java service repo,
 install the blessed realization — a self-contained OTel-SDK + Prometheus-exporter
 class serving `/info`, `/health`, `/metrics` (it passes `check-ops-conformance.zsh`
-unchanged).
+unchanged). Whenever this block installs, the **Java resilience payload below**
+(#1142) installs with it: it supplies the ops-api v1.1 `components` map and the
+hard/soft readiness hinge that `OpsApi` reports.
 
 *Applicability — gate before you install.* Evaluate these conditions **in order,
 first match wins** — a *skip* always beats an *install*, so the Spring and Maven
@@ -1654,10 +1656,23 @@ must skip, not install):
    Spring *Framework* without Boot/Actuator is the ambiguous middle — treat it as
    non-Spring (fall through) and note the Actuator-absence assumption in the
    Step-5 checklist.
-2. **Maven repo → skip this block entirely** — the Step-3 Java gate already
+2. **A Java LIBRARY rather than a service → skip this block**, and say so in the
+   Step-5 checklist: a library has no ops surface to expose and no dependency
+   clients to circuit-break, so a management port and a health endpoint in one are
+   noise at best. Judge it from **runnable-service evidence**, not from
+   `interfaces` (interface detection is Python-only in v1, so on a Java repo
+   `interfaces` is `[]` unless the user overrode it, and a `["library"]` test would
+   never fire): a **service** applies the `application` (or shadow) Gradle plugin,
+   has a `main` the Dockerfile entrypoint runs, or is the artifact a
+   `bootJar`/container build produces; a published JAR with no runnable artifact is
+   a library. When `interfaces` **is** populated, treat it as confirmation — it is
+   a **set**, so `["rest", "library"]` is a service that also publishes a library
+   and does **not** skip. If the evidence is genuinely ambiguous, surface the
+   install-or-skip choice in the Step-2 plan rather than defaulting either way.
+3. **Maven repo → skip this block entirely** — the Step-3 Java gate already
    rejected Java-specific generation (no `OpsApi.java`, no Gradle fragment; an
    orphan `build.gradle.kts` snippet in a Maven repo is worse than nothing).
-3. **Groovy-DSL Gradle (Kotlin conversion declined in Step 4c)** → there is no
+4. **Groovy-DSL Gradle (Kotlin conversion declined in Step 4c)** → there is no
    `build.gradle.kts` to fold into, so pick **one** of:
    - **fold-and-install** — fold the dependencies into the existing
      `build.gradle` (Groovy syntax) **and** place `OpsApi.java` + `README.md`; or
@@ -1669,11 +1684,11 @@ must skip, not install):
    `io.opentelemetry.*` imports won't resolve and the repo stops compiling), and
    never create a `build.gradle.kts` beside a `build.gradle` (a broken dual-DSL
    build).
-4. **Kotlin-DSL Gradle, non-Spring** → the standard path: install per the render
-   command below.
+5. **Kotlin-DSL Gradle, non-Spring service** → the standard path: install per the
+   render command below.
 
-The **render command below applies only to cases 3 (fold-and-install) and 4** —
-in the skip/defer cases (1, 2, and 3-defer) do **not** run it.
+The **render command below applies only to cases 4 (fold-and-install) and 5** —
+in the skip/defer cases (1, 2, 3, and 4-defer) do **not** run it.
 
 Like the Python payload these need an explicit destination, plus a Java-specific
 `package` fix-up (Java couples a file's package to its directory):
@@ -1690,8 +1705,8 @@ Like the Python payload these need an explicit destination, plus a Java-specific
   match** — the shipped `package com.example.ops;` is a flagged placeholder,
   never keep it.
 - **Deps** — **fold `build.gradle.kts`'s dependency block into the module's own
-  build script** — `build.gradle.kts` in case 4, or the existing Groovy
-  `build.gradle` in case 3-fold-and-install (the shipped file is a fragment, not
+  build script** — `build.gradle.kts` in case 5, or the existing Groovy
+  `build.gradle` in case 4-fold-and-install (the shipped file is a fragment, not
   a standalone build file) — rather than dropping a second build script.
 - Put the shipped `README.md` alongside `OpsApi.java`.
 
@@ -1705,6 +1720,106 @@ Like the Python payload these need an explicit destination, plus a Java-specific
 
 The remaining languages' canonical implementations are tracked follow-ups under
 epic #682: development-javascript/Node (#936) and development-swift (#937).
+
+**Java (non-Spring) resilience + dependency health (#1142).** Whenever the Java
+ops-api block above **installed** (its cases 4-fold-and-install and 5), also
+install the blessed resilience payload — resilience4j wired around dependency
+clients per the six-mandate policy, plus the ops-api v1.1 `components` map on
+`/health` and the hard/soft readiness hinge, both read passively from breaker
+state. It **extends** the ops-api payload rather than standing alone:
+`DependencyHealth` implements `OpsApi.DependencyHealthSource`, so the two are
+placed together or not at all.
+
+*Applicability — gate before you install.* The gate is **the ops-api block's own
+outcome and nothing else**, which is what makes "placed together or not at all"
+true rather than aspirational — every condition that could skip this payload
+(Spring, library, Maven, Groovy-defer) is tested *there*, so there is no second
+gate to disagree with:
+
+1. **The Java ops-api block skipped or deferred** (its cases 1 Spring, 2 library,
+   3 Maven, 4-defer) → **skip this too**, for the same reason it skipped. A Spring
+   repo is covered by the Spring payload below; a library has nothing to
+   circuit-break; a Maven repo gets no Kotlin-DSL fragment; a deferred Groovy repo
+   defers both halves behind the one checklist TODO.
+2. **The Java ops-api block installed** → **install** per the render command below.
+
+If you ever need a condition that skips *this* payload but not the ops-api one,
+add it to the ops-api gate instead — a fresh condition here would silently
+re-introduce the split this gate exists to prevent (an `OpsApi` wired to report
+`components` with no `DependencyHealth` to supply them).
+
+**Deps — `build.gradle.kts` is a FRAGMENT**, and a *second* one: fold its
+dependencies block into the **same** module's build script you folded the ops-api
+fragment into. Never create a `build.gradle.kts` beside an existing
+`build.gradle`, and never leave `DependencyCatalog.java` in a source set whose
+build lacks these dependencies — its `io.github.resilience4j.*` imports won't
+resolve and the repo stops compiling.
+
+Placement follows the ops-api block's rules, with three payload-specific ones:
+
+- **`DependencyHealth.java` goes in the SAME package as `OpsApi.java`**
+  (`<base>.ops`) — it implements `OpsApi.DependencyHealthSource` and returns
+  `OpsApi.Dependency` records. `DependencyCatalog.java` normally sits there too.
+  All three `.java` files ship the flagged placeholder `package com.example.ops;`
+  and **each one's `package` line must be re-set to match the directory it lands
+  in** — which is not the same package for all three if you place the client
+  beside its domain code.
+- **`resilience-dependencies.properties` goes to `src/main/resources/`** (the
+  module's resource root), not beside the sources — `DependencyCatalog.load()`
+  reads it off the classpath.
+- **The shipped `README.md` must NOT take the ops-api block's README rule.** That
+  rule ("alongside `OpsApi.java`") would put this payload's README at the exact
+  path the ops-api payload's README already occupies, and whichever is staged
+  second silently clobbers the other. Place this one beside it as
+  **`RESILIENCE.md`** instead, and keep both.
+- **Replace the two worked-example dependencies during placement.** `orders-db`
+  and `pricing-api` are illustrations. Left verbatim they now **fail startup** on
+  `requireAllDeclaredGuarded()` (below), because no client guards them — and if
+  that call is skipped, `/health` instead reports two dependencies the service
+  does not have as `up`: a conformant-shaped health surface that lies, which is
+  the exact failure this payload exists to prevent. Substitute the
+  service's real direct dependencies (ask, or derive them from the detected
+  stack), classifying each `hard` or `soft`. If they genuinely cannot be
+  determined during the run, carry an explicit Step-5 checklist item — and state
+  THIS payload's symptom, not the Spring block's: startup will **fail** on
+  `requireAllDeclaredGuarded()` until the placeholders are replaced with guarded
+  real dependencies, and skipping that guard instead yields a `/health` that reports
+  dependencies the service does not have. Never leave them verbatim and unrecorded.
+- **Record — do not perform — the `requireAllDeclaredGuarded()` wiring.** Bootstrap
+  does not edit the service entrypoint, and at staging time no dependency clients
+  are routed through the catalog yet, so calling it here would only guarantee a
+  startup failure in the adopter's deployable. Carry a Step-5 checklist item
+  instead: startup must call `DependencyCatalog.requireAllDeclaredGuarded()` once
+  the dependency clients are constructed (the placed `RESILIENCE.md` shows the
+  four-line wiring). A declared dependency that no client guards keeps a breaker
+  that can never leave `CLOSED`, so `/health` would swear it is `up` straight
+  through an outage — the mirror of the undeclared-in-code case, and the reason
+  the two guards are only useful as a pair.
+
+**`PricingApiClient.java` is rendered by its own command** so the omit path can
+drop it. Unlike its Spring counterpart it cannot break application startup
+(nothing scans it, and it takes its base URL as a constructor argument), so
+placing it unadapted leaves dead code rather than a red build — but it still names
+a dependency the service does not have. **Adapt** it to the real dependency, or
+**omit** it and point the Step-5 checklist at the placed `RESILIENCE.md` for the
+reference shape.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/java/resilience/build.gradle.kts \
+  languages/java/resilience/resilience-dependencies.properties \
+  languages/java/resilience/DependencyCatalog.java \
+  languages/java/resilience/DependencyHealth.java \
+  languages/java/resilience/README.md
+```
+
+```bash
+# only on the ADAPT path -- see above
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/java/resilience/PricingApiClient.java
+```
 
 **Spring resilience + dependency health (#1141).** For a **Spring Boot** service
 repo, install the blessed resilience payload — resilience4j wired around
@@ -1827,8 +1942,9 @@ on `@Retry`, `CallNotPermittedException` in the retry's `ignore-exceptions`), an
 why the health surface is an Actuator `@Endpoint` rather than a `@RestController`
 (the management child context has no `RequestMappingHandlerMapping`, so a
 controller there is never mapped — and one in the main context lands on the public
-app port). The other five service languages are epic #967's remaining
-children (#1142 java, #1143 python, #1144 go, #1145 javascript, #1146 swift).
+app port). Non-Spring Java has landed too (#1142, the block above); the other four
+service languages are epic #967's remaining children (#1143 python, #1144 go,
+javascript #1145 and swift #1146).
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the
