@@ -1,5 +1,15 @@
 # development-javascript slice 2 — contract-consumer machinery design (2026-07-11)
 
+> **Angular references superseded (#1059).** This document was written when the
+> family planned two framework topics and names an Angular `HttpClient` binding
+> owned by a `development-angular` topic (#685). Both are reversed: React +
+> TypeScript is the single browser-UI default, Angular is not scaffolded, and
+> there is no second binding to own. Read every `#685` / Angular-binding mention
+> below as historical. The contract-consumer machinery itself is unaffected — it
+> was always framework-agnostic; only the count of bindings downstream changed.
+> Positions: `ARCHITECTURE.md`; design:
+> [`2026-07-27-mfe-app-family-design.md`](2026-07-27-mfe-app-family-design.md).
+
 Tracking issue: **#727**. Slice 2 of epic **#683**; part of **#682**. The
 front-loaded, critical-path slice — **#685, #717, #719 depend on it.**
 

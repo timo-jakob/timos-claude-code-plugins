@@ -532,6 +532,70 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   diff actually touches — both bounds exist so the review loop converges
   instead of drowning in speculative hardening notes.
 
+### Browser UI — SPA shell, micro-frontends, React default (#1059)
+
+The polyrepo rule above is a rule about *deployables*, and a browser UI is a
+deployable. Three positions follow from taking that seriously. They are this
+family's own opinions, stated with their rationale so a reader can disagree
+with them explicitly. Design:
+[`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md`](docs/superpowers/specs/2026-07-27-mfe-app-family-design.md).
+
+- **Every browser UI is a SPA shell; substantial UI splits into
+  micro-frontends.** The shell owns the outer route table, the application
+  chrome, and session/auth acquisition. The **default** remote shape is a
+  **route-owned page** — it owns a route subtree end-to-end and runs its own
+  nested router beneath it — because that is the shape with the smallest
+  host↔remote surface. A **canvas widget** (a slot on a host-owned canvas the
+  user arranges, carrying per-instance configuration and a user-changeable
+  size) is the one other admitted shape; the design doc §2.1 records why a
+  dashboard is a real product shape route ownership cannot express, and why a
+  third shape would not get the same welcome. *Rationale:* it makes the UI obey
+  the same rule as the backend — one deployable per bounded context,
+  independently releasable, held together by a contract rather than by a
+  coordinated release. This document already names "micro-UI" as a first-class
+  deployable artifact; this is what makes that real rather than aspirational.
+- **React + TypeScript is the default for any browser UI.** Angular is **not**
+  scaffolded. An existing Angular asset may participate by exporting the same
+  contract, but the family builds no Angular-specific tooling until such an
+  asset actually exists. *Rationale:* one framework, one blessed path — the
+  standing preference for a single good default over a menu. A second
+  framework's tooling (templates, review panel, upgrade agent) is speculative
+  cost until something real needs it, and the contract below is
+  framework-agnostic at the boundary, so admitting Angular later costs a
+  plugin rather than a redesign.
+- **The MFE contract is an exported `mount(el, ctx)` / `unmount(el)` pair over
+  an import-map-resolved ES module.** A remote's entry module exports the pair;
+  the shell resolves the module through an import map and calls it. **Module
+  Federation is rejected.** *Rationale:* what federation adds is a build
+  plugin, a runtime container protocol, and a shared-scope negotiation that
+  fails at runtime rather than at build; what it buys is deduplication of
+  shared dependencies. Under route ownership that buys very little — one remote
+  is mounted at a time, so duplication costs roughly one framework runtime per
+  route transition from an immutable, indefinitely-cacheable bundle. Under the
+  canvas shape it would buy a great deal, since a dashboard mounts many widgets
+  concurrently — but **import maps already solve it natively**: widgets build
+  with the framework as an external and the import map pins exactly one
+  framework URL, which is the same trade federation makes, made declaratively
+  in one inspectable file instead of negotiated at runtime. So we reject
+  federation as unearned complexity for **both shapes**, **not** as forced
+  coupling:
+  modern federation can be configured to share nothing, so a blanket coupling
+  claim would be wrong — but a mechanism we would deliberately configure into
+  inertness is one we should not adopt at all.
+
+**Rejected alternatives are recorded, not folklore.** Besides Module
+Federation, **custom elements** were the other serious contender for the
+contract. The decisive objection is that `customElements.define` is a
+process-global registration that throws on a duplicate tag name, so two live
+versions of a remote are a hard failure rather than a version skew the shell
+can tolerate; the context-passing ergonomics are a secondary cost (attributes
+are strings, so structured data needs property assignment or a `CustomEvent`).
+The design doc's rejected-alternatives section carries the full reasoning, so
+either decision can be re-evaluated on its merits rather than rediscovered.
+
+Building any of this is the MFE composition epic's job, not this section's:
+these are the positions the machinery is built *to*.
+
 ### Cross-repo Claude: the big-picture problem
 
 A Claude session in one repo cannot see siblings by default, and in a
