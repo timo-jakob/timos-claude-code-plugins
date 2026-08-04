@@ -1,0 +1,37 @@
+// Canonical Go ops-api module requirements (#1192).
+//
+// This is a go.mod FRAGMENT, not a module file: fold the require block into your
+// service's own go.mod (or run the `go get` line from README.md and let the
+// toolchain write these lines itself), then `go mod tidy`. It is the Go analogue
+// of the Python payload's requirements.txt and the Java payload's
+// build.gradle.kts dependency block.
+//
+// THE MODULE YOU FOLD THIS INTO MUST DECLARE `go 1.22` OR NEWER. Below that, the
+// payload's http.ServeMux method patterns match nothing and every ops endpoint
+// answers 404 -- with no build error and no warning. See README.md; this file is
+// named here because folding by hand is the one path that never passes it.
+//
+// OpenTelemetry-only instrumentation, per ARCHITECTURE.md: the OTel SDK is the
+// single metrics source. The Prometheus exporter serves the /metrics pull-compat
+// surface; the two OTLP exporters are the PRIMARY push pipeline, wired only when
+// OTEL_EXPORTER_OTLP_ENDPOINT (or OTEL_EXPORTER_OTLP_METRICS_ENDPOINT) is set.
+// BOTH exporters are required because OTEL_EXPORTER_OTLP_PROTOCOL (or its
+// _METRICS_ twin) selects grpc or http/protobuf at RUNTIME -- dropping one turns a
+// config value into a build error.
+//
+// client_golang is not a second metrics system: it is the registry + exposition
+// handler the OTel Prometheus exporter writes into.
+//
+// Versions are a floor, not a pin -- Renovate/Dependabot move them, and the
+// go.opentelemetry.io/otel/* modules must move TOGETHER (they are one release
+// train; a mixed set fails to compile). The exporters/prometheus module is
+// deliberately on its own v0.x line: that is upstream's versioning, not a mistake.
+
+require (
+	github.com/prometheus/client_golang v1.24.1
+	go.opentelemetry.io/otel v1.45.0
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.45.0
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.45.0
+	go.opentelemetry.io/otel/exporters/prometheus v0.67.0
+	go.opentelemetry.io/otel/sdk/metric v1.45.0
+)

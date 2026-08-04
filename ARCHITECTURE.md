@@ -365,8 +365,18 @@ accordingly — it never flags a repo that ships no ops fragment. Design:
   principle, Spring gets the surface via Actuator/Micrometer (Micrometer maps to
   OTel semantic conventions) — `spring-config-advisor` gains a conforms-to-ops-api
   check — and every other language plugin owns its canonical implementation of
-  the same fragment (Python and Java-non-Spring are the blessed non-Spring
-  references; #936/#937 track Node/Swift).
+  the same fragment (Python, Java-non-Spring and **Go (#1192)** are the blessed
+  non-Spring references; #936/#937 track Node/Swift). **Go's shipped at the v1.1
+  shape from the start** — the `components` seam and the hard/soft readiness hinge
+  behind an interface, with no breaker library on its import path — rather than
+  reworking the handler later as #1142 and #1143 each had to. Two Go-specific
+  facts are load-bearing there: the surface is a **single mux** (unlike Java,
+  whose Prometheus exporter runs its own server and forces a `/metrics`
+  reverse-proxy hop), and the routes are **`http.ServeMux` method patterns**,
+  whose grammar the standard library gates on the module's **`go` directive** — a
+  service still declaring `go 1.21` compiles the payload cleanly and then 404s
+  every ops endpoint, so bootstrap raises the directive rather than installing a
+  surface that answers 404.
 
 ### Resilience policy + dependency health (#964, #965)
 
@@ -416,11 +426,13 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   *serving* service: `down` is a legitimate runtime state, not one the
   conformance job can pass in. `/health` itself always answers **200** while the
   process can respond (the verdict is in the body); 503 is the two probes'
-  vocabulary, not the human-facing aggregate's. **Both blessed non-Spring ops-api
-  templates now implement this**, each fixed by the slice that had to rework the
-  same handler to report `components` — Java by #1142, Python by #1143 — which
-  together closed #1139, where both had aliased `/health` to the readiness
-  handler and answered 503 when readiness failed. The v1.0 checker had always
+  vocabulary, not the human-facing aggregate's. **All three blessed non-Spring
+  ops-api templates implement this**, by two different routes: Java (#1142) and
+  Python (#1143) were each *reworked* by the slice that had to teach the same
+  handler to report `components` — together closing #1139, where both had aliased
+  `/health` to the readiness handler and answered 503 when readiness failed —
+  while Go (#1192) shipped at the v1.1 shape from the start and so never had the
+  defect to fix. The v1.0 checker had always
   rejected that (it has always required HTTP 200 on `/health`), but a healthy
   service conforms either way, so the divergence only surfaced during an outage.
   Populating `components` from breaker state is the per-language slice (#967).

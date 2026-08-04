@@ -188,6 +188,48 @@ pull-compat surface served by the SDK's Prometheus exporter.
   `PricingApiClient.java` is a worked example, not service code: adapt it to a
   real dependency or leave it out. The payload's own `RESILIENCE.md` is the
   reference for the shape.
+- **Go** — use the blessed reference implementation bootstrap installs
+  (`opsapi.go` + a `go.mod.deps` require fragment): copy it to
+  `internal/ops/opsapi.go`, fold in the requires (or run the `go get` line from
+  its `README.md`), and call `ops.Serve(ctx, ops.DefaultAddr(), cfg)` from your
+  startup. Give it its own directory: a Go file declares its package rather than
+  deriving it from the directory, so `package ops` needs no fix-up there — but
+  dropping it beside files declaring a different package is a compile error. It
+  serves the full surface on the management port and passes the conformance
+  checker unchanged.
+
+  Two things are yours to do, and the first fails **silently**:
+
+  - **make sure your `go.mod` says `go 1.22` or newer.** The payload routes with
+    `http.ServeMux` method patterns (`GET /health`), and the standard library
+    gates that grammar on the module's `go` directive rather than the installed
+    toolchain — so a module still declaring `go 1.21` builds without a warning
+    and then answers **404 on every ops endpoint**. Bootstrap raises the
+    directive for you, or defers the whole payload if you decline the bump —
+    a surface that 404s is worse than an absent one. If you are adopting by
+    hand, this is the step to check first. Raising it is not a pure routing fix:
+    `go 1.22` also switches the module to per-iteration `for`-loop variable
+    scoping, which applies to all of your existing code — run your tests after.
+    In a multi-module repo the directive that counts is the one in the `go.mod`
+    of the module you place `opsapi.go` into, not the root's;
+  - declare your API majors via `Config.ServedMajors` so `/info` carries the
+    lifecycle table the deprecation machinery (#684) reads. A deprecated major
+    must carry a sunset date and an active one must not, and `Config.Validate`
+    rejects both at startup, so neither reaches production. What differs is what
+    would catch it if that guard were ever dropped: the conformance job fails a
+    deprecated major with no sunset, but nothing downstream checks the other
+    direction — for that half `Validate` is the only enforcement anywhere.
+    Leaving `ServedMajors` unset is not a no-op either: it defaults to a single
+    **active major 1**, which conformance accepts, so an undeclared table is as
+    wrong-but-green as the shipped illustration copied verbatim.
+
+  All three non-Spring payloads expose the same v1.1 seam; what differs is that
+  Go's ships **unfilled**. `Config.Dependencies` takes a `DependencyHealthSource`,
+  but the Go resilience payload that will supply one — and pick the blessed
+  breaker library — is #1144, which has not landed. Where Python and Java arrive
+  with seam *and* source together, Go's stays unset for now, and the surface is a
+  conforming ops-api **v1.0** until it is filled. Nothing about the handler
+  changes when you do wire it.
 - **Other languages** — canonical implementations are tracked per language
   (Node, Swift).
 
