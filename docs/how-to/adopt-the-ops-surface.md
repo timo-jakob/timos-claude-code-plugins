@@ -126,6 +126,33 @@ pull-compat surface served by the SDK's Prometheus exporter.
   fold in the OTel dependencies, and call `OpsApi.serve(...)` from your startup
   with your `OpsConfig`. It serves the full surface on the management port and
   passes the conformance checker unchanged. See its `README.md`.
+
+  Bootstrap installs the **resilience payload** alongside it (the two are placed
+  together or not at all), which is what fills in the v1.1 half — per-dependency
+  `components` on `/health` and the hard/soft readiness hinge, both read from
+  circuit-breaker state. Four things are yours to do, and three of them fail
+  quietly if you skip them:
+
+  - declare your direct dependencies in `resilience-dependencies.properties`
+    (`<name>=hard|soft`, one per line, **full-line `#` comments only**) and
+    **replace the shipped `orders-db`/`pricing-api` examples** — left verbatim
+    they fail startup on `requireAllDeclaredGuarded()` (nothing guards them), and
+    if you skip that call `/health` reports two dependencies you do not have as
+    `up`;
+  - route every outbound call through `catalog.call(name, call, fallback)`, and
+    give the call its own connect **and** request timeout — the one mandate the
+    catalog cannot impose, because it does not own your socket;
+  - wire `.withDependencies(new DependencyHealth(catalog))` into your
+    `OpsConfig`, and set its `package` line as for `OpsApi.java` (it must live in
+    the same package);
+  - call `catalog.requireAllDeclaredGuarded()` once at startup, after your
+    clients are built. It is the only thing that catches a dependency you
+    declared but never wired — whose breaker can never leave `CLOSED`, so
+    `/health` would report it `up` throughout an outage.
+
+  `PricingApiClient.java` is a worked example, not service code: adapt it to a
+  real dependency or leave it out. The payload's own `RESILIENCE.md` is the
+  reference for the shape.
 - **Other languages** — canonical implementations are tracked per language
   (Node, Swift).
 

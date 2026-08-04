@@ -30,6 +30,10 @@ three steps (unlike the Python module, which has no package-line coupling):
    check (liveness stays dependency-free):
 
    ```java
+   DependencyCatalog dependencies = DependencyCatalog.load();
+   // ... construct your dependency clients over `dependencies` here ...
+   dependencies.requireAllDeclaredGuarded();   // <- do not skip; see below
+
    OpsApi.serve(
        "0.0.0.0",
        9090,
@@ -37,12 +41,47 @@ three steps (unlike the Python module, which has no package-line coupling):
            .withServedMajors(
                OpsApi.ApiMajor.deprecated(1, "2027-01-31"),
                OpsApi.ApiMajor.active(2))
-           .withReadiness(dbPool::isHealthy)); // /health/ready + /health; liveness never checks deps
+           // Readiness has TWO halves. This supplier is the NON-dependency one:
+           // still starting up, draining, an internal resource exhausted.
+           .withReadiness(() -> !draining)
+           // Dependencies are the other half — declared hard/soft and read from
+           // breaker state, then ANDed with the supplier above. Do NOT probe a
+           // datastore in withReadiness: declare it `hard` instead, or it never
+           // appears in /health's components.
+           .withDependencies(new DependencyHealth(dependencies)));
    ```
+
+   **`requireAllDeclaredGuarded()` is not optional whenever you wire
+   `withDependencies(...)`.** A dependency you declared but never routed through
+   `dependencies.call(...)` still gets a breaker — which nothing can ever open — so
+   `/health` would report it `up` straight through an outage. The guard turns that
+   into a boot failure naming the offender. The resilience payload's
+   `RESILIENCE.md` has the full wiring and both startup guards.
 
 `OpsApi.main` exists only as a **template smoke-run** of the shipped defaults (a
 single active major) — it proves nothing about your service, so wire `serve(...)`
 into your real entrypoint rather than shipping the bare `main`.
+
+**Dependency health (ops-api v1.1, #1142).** `/health` can also report one entry
+per **direct** dependency under `components`, read passively from that
+dependency's circuit-breaker state, with a `hard` dependency's loss failing
+`/health/ready` and a `soft` one leaving readiness untouched. Wire it with
+`.withDependencies(...)`; the blessed source is `DependencyHealth` from the
+**resilience payload** beside this one
+(`templates/languages/java/resilience/`, its own `README.md`). The binding is an
+interface over plain records, so this class needs no breaker library on the
+classpath and behaves exactly as before when you do not use it — no `components`
+field, readiness from your `BooleanSupplier` alone.
+
+Two contract points this implies, worth knowing before you change either:
+
+- **`/health` answers 200 even when the aggregate is `down`** — the verdict is in
+  the body. Only the two *probes* (`/health/live`, `/health/ready`) speak in
+  status codes, because an operator reading `/health` during an outage needs the
+  diagnosis rather than a bare 503.
+- **`withReadiness` is now the non-dependency half of readiness** (still starting
+  up, draining, an internal resource exhausted). Declared hard dependencies are
+  the other half and are ANDed with it.
 
 The run commands below assume your service starts as a **runnable jar with the
 OTel dependencies on the runtime classpath** — an application/shadow jar, or
