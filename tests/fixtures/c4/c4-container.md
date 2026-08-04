@@ -8,7 +8,7 @@ C4Container
         Container(web_app, "Web Application", "Java, Spring MVC", "Serves the SPA and the JSON API")
         Container(spa, "Single-Page Application", "JavaScript, Angular")
         ContainerDb(database, "Database", "SQL Database")
-        ContainerQueue(events, "Event Bus", "ActiveMQ Artemis")
+        ContainerQueue(events, "Event Bus", "NATS JetStream")
         Container_Ext(backend_api, "Mainframe Banking System API", "Java, Docker")
     }
 

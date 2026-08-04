@@ -73,6 +73,23 @@ on:
       # pages are registered — so docs/reference, the MOC and the nav are all
       # prose this suite gates
       - 'docs/reference/**'
+      # ...and finally, the catch-all — which is what actually makes this filter
+      # CORRECT, and why no line above may be read as the boundary of what this
+      # suite gates (#1060). tests/messaging-position.bats sweeps EVERY tracked
+      # file for a reintroduced superseded broker name, so the suite's assertion
+      # surface is now the whole repository. An enumerated filter cannot be a
+      # superset of "every tracked file": the first attempt at this missed
+      # docs/adding-a-language-plugin.md, development/.claude-plugin/plugin.json,
+      # the other eight workflows and every repo-root config file — and any tree
+      # added later would silently join them. A per-path list cannot be kept
+      # complete by review, so it is not asked to be.
+      #
+      # The lines above are therefore KEPT AS DOCUMENTATION, not as the trigger:
+      # each records why one tree specifically matters to one suite, which is
+      # knowledge '**' does not carry. The cost of the catch-all is that this
+      # suite now runs on every PR; that is the deliberate trade for never again
+      # discovering an ungated tree as a red main after a bot-armed auto-merge.
+      - '**'
       # tests/telemetry-rollup.bats asserts docs/how-to/read-pipeline-telemetry.md
       # exists and is registered in the how-to index (#1007) — same rule
       - 'docs/how-to/**'

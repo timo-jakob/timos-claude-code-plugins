@@ -14,12 +14,16 @@ fix my project" prompt cannot carry:
    here Gradle with the Kotlin DSL is the only build system (Maven is
    rejected, Groovy DSL must be converted), that Spring Boot 4+ is the
    minimum, that gRPC is for internal service-to-service calls while public
-   endpoints are REST/OpenAPI contract-first, that async messaging defaults
-   to ActiveMQ Artemis (Kafka only at genuine scale), that every linter is
+   endpoints are REST/OpenAPI contract-first, that async messaging runs on
+   NATS JetStream carrying CloudEvents 1.0 envelopes (a stated position no
+   plugin scaffolds yet — see ARCHITECTURE.md), that every linter is
    set to 120 columns, or that new shell scripts are zsh. Each of those is a
    decision, not knowledge — one blessed path with one good default, because
    every extra option is a permanent maintenance and expertise cost. The
-   per-language plugin is where those decisions live.
+   per-language plugin is where those decisions live once they are mechanized;
+   until then they are stated in
+   [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md),
+   which is where the messaging one currently sits.
 
 2. **Tool semantics, not just tool names.** Running JaCoCo vs `coverage.py`
    vs `xccov` is a one-line script difference; *interpreting* their output is
