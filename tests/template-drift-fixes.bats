@@ -79,3 +79,22 @@ JSON
   run jq empty "$REPO_ROOT/development/skills/maintenance/reference/template-changelog.json"
   [ "$status" -eq 0 ]
 }
+
+@test "the §3l IaC workflow is TRACKED, so its drift is reported (#1154)" {
+  # detect-template-drift.zsh's `tracked` array is the detector's whole input —
+  # the loop iterates it exclusively. Bootstrap's Step 3.6 stamps
+  # kubernetes-ci.yml with a provenance marker, so if the entry is dropped or
+  # misspelled here the marker is written and never consumed, and a consumer
+  # repo whose workflow has fallen behind the template is reported drift-free
+  # FOREVER — silently. Nothing exercised the entry until now.
+  local iac_tpl="iac/.github/workflows/kubernetes-ci.yml.tmpl"
+  printf '# claude-bootstrap: rendered from %s @ v0.1.0 sha256:deadbeefdeadbeef\nname: kubernetes-ci\n' \
+    "$iac_tpl" > "$REPO/.github/workflows/kubernetes-ci.yml"
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  # the file must appear in the findings AT ALL — that is what the tracked entry buys
+  local f
+  f="$(printf '%s' "$output" | jq -c '.[] | select(.file == ".github/workflows/kubernetes-ci.yml")')"
+  [ -n "$f" ]
+  [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
+}

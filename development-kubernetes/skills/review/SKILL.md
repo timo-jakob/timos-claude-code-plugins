@@ -28,7 +28,7 @@ resource that was never exposed.
 
 Run `helm template` and `kustomize build` into a temp tree,
 then **copy standalone manifests in alongside them** — same exclusions as the CI
-render job the #1154 template will ship (chart-owned trees, kustomize inputs).
+render job the #1154 template ships (chart-owned trees, kustomize inputs).
 Without that copy the scope is
 chart and overlay output only, so a repo whose Argo CD resources are plain YAML
 — the common GitOps layout, and the shape this plugin's own fixture will take
@@ -61,8 +61,11 @@ charts, vendored subcharts (a `charts/` parent that is itself a chart),
 `kind: Component` kustomizations, **and any kustomization root another root
 consumes** via `resources:` / `components:` / `bases:` — the same three keys the
 in-scope gate below tests, so both statements of "consumes" in this file
-describe one relation — build only unconsumed roots, exactly as the CI job's
-second pass does. The first three FAIL by design when rendered standalone, so
+describe one relation — build only unconsumed roots, the same rule the CI job's
+second pass applies. **Same rule, wider net there**: the CI pass reads every
+list entry in a consumer's kustomization rather than these three keys, so a base
+referenced only from `patches:` counts as consumed in CI and not here. Do not
+restate the two as identical. The first three FAIL by design when rendered standalone, so
 enumerating them would fail the round on a repo the plugin's own CI renders
 green. The fourth is subtler and matters more: a consumed base renders
 *successfully* but **partially**, so it evades the failure rule entirely and

@@ -175,6 +175,17 @@ grep -rhn -E "(python|node|go|java)-version:" development/skills/bootstrap/templ
 
 # brew formula names referenced in preflight.sh
 grep -E '"[a-z-]+"' development/skills/bootstrap/scripts/preflight.sh | grep -v "^\s*#" | sort -u
+
+# CLI tool versions a workflow template downloads itself (#1154's kubernetes-ci
+# installs kubeconform, kube-linter, kyverno and yq by release URL — these are
+# NOT `uses:` pins, so Renovate never sees them and Step 2 never covers them)
+grep -rhn -E "^\s*[A-Z_]+_VERSION:\s+" development/skills/bootstrap/templates/ | sort -u
+
+# …and the two sites that MIRROR the template's yq pin. Both exist so the bats
+# suite exercises the same mikefarah yq the shipped workflow uses (their own
+# comments say so), and neither lives under templates/, so the sweep above
+# cannot see them. Bump all three together or the suite stops testing what ships.
+grep -rn -E "YQ_VERSION[:=]" tests/Dockerfile .github/workflows/script-tests.yml
 ```
 
 Capture the output in a scratch file. You'll compare it to upstream below.
@@ -190,8 +201,17 @@ alike. Your job is to **review and merge** those PRs; for a major bump, read
 the release notes first.
 
 Renovate only covers GitHub Action `uses:` pins — the remaining steps below
-(pre-commit revs, Docker tags, runtime strings, brew formulas) it doesn't see,
-so those stay manual.
+(pre-commit revs, Docker tags, runtime strings, brew formulas, and the
+`*_VERSION:` CLI pins a template downloads by release URL) it doesn't see, so
+those stay manual. The `*_VERSION:` class is worth a deliberate look each pass:
+`YQ_VERSION` is a **three-site lockstep** — the template, `tests/Dockerfile` and
+`.github/workflows/script-tests.yml` — because the bats suite asserts the
+template's `yq -o=json` behaviour; move all three or the suite validates the
+shipped workflow under a different yq than it ships with. And
+`kubernetes-ci.yml.tmpl` pins `KYVERNO_VERSION`, where a Kyverno minor can add
+policy *kinds* the pinned CLI cannot evaluate — which that workflow reports as a
+failure rather than silently passing, so a stale pin surfaces as a red check in
+a consumer repo.
 
 Actions to pay particular attention to when reviewing a major bump (most likely
 to ship breaking changes between majors):

@@ -33,7 +33,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes` (CI pipeline lands with #1154), future: `development-container`, `development-opentofu` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, future: `development-container`, `development-opentofu` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -902,7 +902,11 @@ When nothing matches, the policy step **skips and reports "no policies
 declared"**. *That absence* is never an error — a public plugin has to
 work in a repo that has no opinions yet. The guarantee scopes to the
 absence and nothing else: when policies **are** declared, violations
-**fail** the step, or the mechanism would be decorative.
+**fail** the step, or the mechanism would be decorative. So does a declared set
+the pinned Kyverno CLI **cannot evaluate** — policies written only in kinds it
+does not know (Kyverno 1.14's `ValidatingPolicy` and friends) fail rather than
+skipping, because that absence of a *matching file* is the one and only skip
+condition; anything else would be a green check over unenforced policies.
 
 The plugin ships **no policies of its own**: generic hygiene (probes,
 resource limits, non-root, `latest` tags) is `kube-linter`'s job, and two
@@ -933,24 +937,37 @@ arrive, that is a payload-contract break the dispatcher **escalates** via
 `human_action_required`, never a `missing_tooling` entry recommending
 kubeconform to a repo that has no manifests.
 
-A repo declaring `primary: kubernetes` in `.maintenance.yml` is entitled to
-the full pipeline; the primary/auxiliary model already permits a topic to be
-primary, so no new mechanism is needed. **#1152 landed the first half**: the
+A repo declaring `primary: kubernetes` in `.maintenance.yml` **selects this
+plugin for maintenance dispatch**; the primary/auxiliary model already permits a
+topic to be primary, so no new mechanism is needed. The *bootstrap* half is
+narrower, and the two must not be conflated: bootstrap renders the six-check
+workflow and calls `branch-protection.sh --iac-only true` for the kubernetes
+marker with an **empty resolved language set**. There a recorded `primary:` can
+**veto** the path (any other value takes the repo off it) but never **grant**
+it, so a declaration alone does not entitle a repo to the pipeline. The mixed
+repo — the marker plus a stray tooling language — is deferred to #1193.
+
+**#1152 landed the first half**: the
 topic marker and `gather-kubernetes-findings.zsh` exist, so `kubernetes` now
 enters the detected+supported set and such a declaration **selects this
 plugin** rather than being treated as stale. **#1153 landed the second half**:
 the five agents ship, so the dispatcher now **routes** each finding group to a
 `subagent_type` that exists rather than escalating it to a human.
-The **gates themselves** arrive with the check pipeline (#1154) — until then a
-routed group gets a real plan, but no CI check enforces the manifests on a PR.
+**#1154 landed the gates themselves**: the check pipeline ships, so a routed
+group is now backed by a CI check that enforces the manifests on a PR rather
+than by a plan alone.
 
 "Full pipeline" here means the **six checks** bootstrap's
-`templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit** (#1154) — render → schema →
-lint → policy → config-scan → argocd. Note where they will live: the workflow
+`templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **emits** (#1154) — render → schema →
+lint → policy → config-scan → argocd. Note where they live: the workflow
 is a *bootstrap* template owned by the generic `development` plugin, not
 something this plugin's skills run, which is the same boundary that keeps
 detection in `development`. A manifests repo has no test suite, so the language-app
-gates — the coverage floor above all — do not apply to it.
+gates — the coverage floor above all — do not apply to it, and bootstrap does not
+render them. Branch protection still runs: `branch-protection.sh --iac-only true`
+**requires those six contexts instead of** the language-app set (which no
+workflow on such a repo would ever report), leaving the protection rule and the
+repo merge settings auto-merge depends on unchanged.
 
 ## Build policy — Gradle + Kotlin DSL only (Java/Spring)
 

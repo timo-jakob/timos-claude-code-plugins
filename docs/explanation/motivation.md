@@ -192,8 +192,11 @@ this section when it lands.
    its topic marker, gather script and maintenance dispatcher
    ([#1152](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1152)),
    and its five agents and review panel
-   ([#1153](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1153));
-   its CI pipeline and test fixtures are the remaining children of
+   ([#1153](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1153)),
+   and the bootstrap check pipeline that finally gives a GitOps repo checks it
+   can require
+   ([#1154](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1154));
+   its self-contained test fixtures are the remaining child of
    [#1150](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1150).
    Security-by-default really wants the container plugin
    (Trivy, SBOM, distroless) shipped. Tracked:

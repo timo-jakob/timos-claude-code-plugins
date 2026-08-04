@@ -360,7 +360,12 @@ spec2_section() {
   local section
   section="$(extract "$BOOTSTRAP_SKILL" '^### 3k\.' '^### ')"
   [ -n "$section" ]
-  ends_with "$section" '### Idempotency rules (apply for every file write)'
+  # the range's terminating heading, asserted so an unterminated `extract` (which
+  # would run to EOF and let any needle below match from anywhere in the file)
+  # is distinguishable from a correctly scoped one. It tracks whichever `###`
+  # follows §3k — #1154 inserted §3l between it and the idempotency rules — so
+  # the guard is about TERMINATION, never about §3k being the last subsection.
+  ends_with "$section" '### 3l. Infrastructure-as-code repos (no application language) — #1154'
   contains "$section" 'single browser-UI default (#1059)'
   contains "$section" 'no second binding to own'
   # §3k is the executable-skill restatement: an Angular `HttpClient` binding

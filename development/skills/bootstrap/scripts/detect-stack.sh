@@ -42,7 +42,24 @@
 #                                  as a no-language FALLBACK repo_type, after
 #                                  is_claude_plugin. Kept identical to the
 #                                  orchestrator's topic-marker recipe and to
-#                                  gather-kubernetes-findings.zsh.
+#                                  gather-kubernetes-findings.zsh. It also selects
+#                                  the IaC candidate set: the marker WITH NO
+#                                  DETECTED LANGUAGE. A recorded `primary:` in
+#                                  .maintenance.yml can only VETO that (any value
+#                                  other than `kubernetes` -> no), never grant it.
+#                                  An absent key, a blank value or a comment-only
+#                                  one (`primary:  # TODO`) is NOT a recorded
+#                                  primary and leaves the heuristic standing;
+#                                  the mixed repo — marker plus a stray tooling
+#                                  language — is #1193, not this slice. When it
+#                                  resolves yes, templates/iac is collected and
+#                                  the language-app artifacts (quality-*, codeql*,
+#                                  sonar-project.properties, .snyk, infra/**) are
+#                                  HELD OUT of missing_artifacts, per SKILL.md
+#                                  §3l's not-emitted table (#1154). The
+#                                  per-language fragments are swept too, though
+#                                  that sweep is vacuous while the language set
+#                                  is necessarily empty.
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #   missing_artifacts     []string templates expected under THIS repo's conditions
 #                                  (visibility/languages/bot path) that are absent —
@@ -1391,6 +1408,83 @@ elif (cd "$cwd" && grep -rqlF 'argoproj.io' \
 	is_kubernetes="true"
 fi
 # is-kubernetes-marker:end
+# The infrastructure-as-code tree (SKILL.md §3l, #1154): the kubernetes topic
+# marker with no application language. `.github/workflows/kubernetes-ci.yml`
+# becomes a candidate there — and only there. Without it the one workflow that
+# path renders appears in neither existing_artifacts nor missing_artifacts, so a
+# repo that lost it is reported complete by the signal SKILL.md calls "the only
+# completeness signal"; with it on the wrong repo, State-D gap-fill would
+# blind-render a six-check workflow into a language repo.
+#
+# The condition is the marker AND no detected language — the MIXED repo (a
+# kubernetes marker plus a stray tooling language) is deliberately NOT this
+# slice's; see #1193. A recorded `primary: kubernetes` therefore does not
+# OVERRIDE a detected language here: admitting a stray language makes every
+# detection-keyed section of the skill (the Approver's {{APPROVER_LANG}}, the
+# interface-derived acceptance/docs sets, the per-language edit steps) fire for
+# a pipeline this path never generates, which is one coherent slice of work
+# rather than a qualifier.
+#
+# A recorded primary is still read, but only in the NEGATIVE direction: any
+# other recorded primary (a language, claude-plugin) vetoes the heuristic, so a
+# language repo whose language the detector happens to miss cannot gain a
+# six-check workflow candidate it would then be gap-filled with.
+iac_only="false"
+if [[ "$is_kubernetes" == "true" && ${#langs[@]} -eq 0 ]]; then
+	iac_only="true"
+fi
+if [[ -f "$cwd/.maintenance.yml" ]]; then
+	# Read the VALUE once and normalise it, rather than pattern-matching the line
+	# twice: `primary:  # TODO decide` is valid YAML with an empty value, and a
+	# "any non-space follows" test would read the `#` as a recorded language
+	# primary — stripping a genuine GitOps repo of its candidate. Quotes are
+	# stripped for the same reason the render probes tolerate them, and the
+	# comparison is exact, so a future `primary: kubernetes-operator` does not
+	# take the IaC path on a prefix match.
+	# comment + trailing whitespace stripped END-ANCHORED FIRST, quotes after —
+	# the order the family's two sibling `primary:` parsers use (the maintenance
+	# SKILL recipe and review-dispatch.zsh). Reversed, a CRLF-authored file's
+	# `primary: "kubernetes"` leaves a trailing \r that defeats the closing-quote
+	# strip, the value reads as `kubernetes"`, and the *) arm below would then
+	# OVERRIDE a correct heuristic and strip a real GitOps repo of its candidate.
+	# `|| true` like every other parse in this file: `[[ -f ]]` is true for a
+	# file we can stat but not READ (a 0600 .maintenance.yml from another user),
+	# where sed exits 2, pipefail propagates it, and errexit would kill
+	# detect-stack.sh before any JSON is printed — the orchestrator would get an
+	# empty stdout and a bare non-zero status. An empty value is already handled:
+	# the `kubernetes | ""` arm leaves the heuristic standing.
+	recorded_primary="$(sed -n 's/^[[:space:]]*primary:[[:space:]]*//p' "$cwd/.maintenance.yml" 2>/dev/null |
+		head -n1 | sed -E -e 's/[[:space:]]*(#.*)?$//' -e 's/^["'"'"']//' -e 's/["'"'"']$//' || true)"
+	case "$recorded_primary" in
+	# `kubernetes` does NOT force true (#1193): on a zero-language repo the
+	# heuristic already said true, and on a repo WITH a detected language
+	# forcing it is exactly the mixed-repo case this slice excludes. Grouped
+	# with the empty value because both leave the heuristic standing.
+	kubernetes | "") : ;;
+	*) iac_only="false" ;;
+	esac
+fi
+if [[ "$iac_only" == "true" ]]; then
+	collect_from "$templates_dir/iac"
+	# re-run the normalisation passes this late append missed: the dedupe above
+	# and the deploy-path override both ran before templates/iac was collected,
+	# and the candidate list is documented as deriving dynamically from the
+	# templates tree, so the first iac template that shadows a common one (or
+	# renders to a different deploy path) must go through them like any other.
+	# override FIRST, then dedupe: the override can map two distinct tree paths
+	# onto one deploy path (core + overlay -> .claude/approver-policy.md), which
+	# is why the original sequence ends on a re-dedupe. Deduping first and
+	# overriding after would leave that duplicate in the list.
+	for i in "${!candidate_paths[@]}"; do
+		for ov in "${deploy_path_overrides[@]}"; do
+			from="${ov%%=*}"
+			to="${ov#*=}"
+			[[ "${candidate_paths[i]}" == "$from" ]] && candidate_paths[i]="$to" && break
+		done
+	done
+	# shellcheck disable=SC2207
+	candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
+fi
 
 renovate_present="false"
 [[ -e "$cwd/renovate.json" || -e "$cwd/.github/renovate.json" ]] && renovate_present="true"
@@ -1466,6 +1560,59 @@ done
 # desync the stub set from mkdocs.yml's surface-conditional nav, failing the
 # strict docs build on an omitted-from-nav page).
 [[ "$cli_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-cli.md")
+# The language-app gates are NOT gaps on the §3l IaC path — they are deliberately
+# never rendered there (SKILL.md §3l's not-emitted table). missing_artifacts is
+# documented as safe to render blind, so leaving them in would have State-D
+# gap-fill re-create exactly what §3l excludes; and `codeql-noop.yml` is worse
+# than wrong, because its {{CODEQL_LANGUAGES}} placeholder cannot resolve with no
+# language and render.zsh's leftover check would hard-fail the render.
+if [[ "$iac_only" == "true" ]]; then
+	# Every candidate the per-language trees contributed goes too. Today this
+	# loop is VACUOUS by construction — `iac_only` can only be true when the
+	# detected language set is empty (the recorded primary vetoes, it never
+	# grants — see the precedence above), so the per-language trees contributed
+	# nothing to strip. It is kept, and stated to be vacuous rather than left to
+	# look load-bearing, because it is exactly the guard the mixed repo needs:
+	# once #1193 admits a stray tooling language, a GitOps repo would otherwise
+	# report .nvmrc, eslint.config.js, tsconfig.json and the rest as
+	# blind-renderable gaps — language config §3l's not-emitted table excludes.
+	for lang in ${langs[@]+"${langs[@]}"}; do
+		while IFS= read -r lang_path; do
+			[[ -n "$lang_path" ]] || continue
+			# through the SAME deploy-path rewrite the candidates went through, or
+			# the held-out identity would not match the candidate identity: a
+			# language template whose target is not independently held out (today
+			# both happen to be) would leak into missing_artifacts on this path.
+			for ov in "${deploy_path_overrides[@]}"; do
+				[[ "$lang_path" == "${ov%%=*}" ]] && lang_path="${ov#*=}" && break
+			done
+			held_out+=("$lang_path")
+			# The process substitution's subshell IS the isolation — resetting
+			# candidate_paths inside it cannot leak to the parent, so no save/restore
+			# is needed. Its body carries NO comments: macOS's stock bash 3.2 fails to
+			# find the closing paren of a `<( … )` whose first line is a comment
+			# ("bad substitution: no closing `)'"), and this script must run there.
+		done < <(
+			candidate_paths=()
+			collect_from "$templates_dir/languages/$lang"
+			printf '%s\n' ${candidate_paths[@]+"${candidate_paths[@]}"}
+		)
+	done
+	held_out+=(
+		".github/workflows/quality-public.yml" ".github/workflows/quality-public-noop.yml"
+		".github/workflows/quality-private.yml" ".github/workflows/quality-private-noop.yml"
+		".github/workflows/codeql.yml" ".github/workflows/codeql-noop.yml"
+		"sonar-project.properties" ".snyk"
+		"infra/sonarqube/docker-compose.yml" "infra/sonarqube/README.md"
+		"infra/github-runner/README.md"
+	)
+	# NOTE: the interface-gated common artifacts (acceptance.yml, the how-to
+	# stubs) need no entry here. `iac_only` implies a zero-language repo, so
+	# interface detection finds nothing and the `detected_ifaces` conditionals
+	# below hold them out already. That equivalence is exactly what the mixed
+	# repo would break — a stray Python tree detecting `cli` — which is why
+	# #1193 owns it rather than this slice.
+fi
 [[ "$rest_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-rest-api.md")
 [[ "$webui_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-web-ui.md")
 # The API contracts machinery (#692) is held out CONDITIONALLY on an OpenAPI

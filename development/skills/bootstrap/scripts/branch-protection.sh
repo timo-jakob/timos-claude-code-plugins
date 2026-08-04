@@ -8,8 +8,22 @@
 #                        [--has-ko true|false] \
 #                        --has-codeql true|false \
 #                        [--codeql-languages "python javascript ..."] \
+#                        [--iac-only true|false] \
 #                        --default-branch main \
 #                        [--require-signed-commits true|false]
+#
+# --iac-only true is the infrastructure-as-code path (the bootstrap skill's §3l):
+# the kubernetes topic marker with no application language AND no other
+# `primary:` recorded. A detected language, or a recorded language /
+# claude-plugin primary, settles it false whatever the marker says; the mixed
+# repo (marker plus a stray tooling language) is #1193. There, the language-app
+# quality workflow is not rendered at all, so its checks — test-and-coverage,
+# sonarcloud, semgrep, pre-commit, license-fs — would be required contexts that no
+# workflow ever reports, pinning every PR on the permanent `expected` state. The
+# repo's checks are the six kubernetes-ci.yml jobs instead. Everything else the
+# rule applies (PR required, linear history, no force-push/deletion, and the
+# repo-level merge settings auto-merge arming depends on) is unchanged: the
+# contexts differ, the protection does not.
 #
 # --codeql-languages is required when --has-codeql=true. CodeQL's analyze
 # job runs as a matrix per language and GitHub reports each one as
@@ -29,6 +43,7 @@ HAS_DOCKERFILE="false"
 HAS_KO="false"
 HAS_CODEQL="false"
 CODEQL_LANGUAGES=""
+IAC_ONLY="false"
 DEFAULT_BRANCH="main"
 REQUIRE_SIGNED_COMMITS="false"
 
@@ -54,6 +69,10 @@ while [[ $# -gt 0 ]]; do
 		CODEQL_LANGUAGES="$2"
 		shift 2
 		;;
+	--iac-only)
+		IAC_ONLY="$2"
+		shift 2
+		;;
 	--default-branch)
 		DEFAULT_BRANCH="$2"
 		shift 2
@@ -67,6 +86,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$VISIBILITY" =~ ^(public|private)$ ]] || die "--visibility must be public or private"
+# validated like --visibility, not merely compared: an unvalidated flag silently
+# falls through to the language-app context set on any value but the literal
+# "true" — `True`, `yes`, or a following flag swallowed as the value — and that
+# is exactly the permanent-`expected` state --iac-only exists to prevent
+[[ "$IAC_ONLY" =~ ^(true|false)$ ]] || die "--iac-only must be true or false"
 
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 [[ -n "$REPO" ]] || die "Could not determine current repo from gh"
@@ -75,71 +99,87 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 # These names must match the `jobs.<id>` keys in the generated workflow files.
 checks=("test-and-coverage" "semgrep" "pre-commit")
 
-# --- does any workflow actually PROVIDE the shared `image` check? -------------
-# Both the Docker lane (quality-*.yml's `image` job) and the ko lane
-# (ko-image.yml's `image` job) report a status check literally named `image`.
-# A repo has one provider or the other, never both — a Go repo uses ko OR, for
-# the documented cgo exception, a Dockerfile instead of ko. The Docker lane
-# ships in quality-*.yml whenever a Dockerfile exists (any language), so
-# HAS_DOCKERFILE alone is a sufficient provider signal. The ko lane, though, is
-# rendered only for Go repos, so a raw `.ko.yaml` is NOT proof its workflow
-# exists: a stray root .ko.yaml in a non-Go repo, or a Go repo whose ko-image
-# install was declined, would otherwise make `image` a required context that no
-# workflow ever reports — the permanent stuck-on-`expected` state the Snyk note
-# below exists to avoid. So gate the ko half on the workflow file actually
-# being present. branch-protection.sh always runs from the target repo root
-# (the automate-*.sh callers set REPO_ROOT=$(pwd) and never cd), so the path is
-# repo-relative.
-image_required="false"
-[[ "$HAS_DOCKERFILE" == "true" ]] && image_required="true"
-[[ "$HAS_KO" == "true" && -f .github/workflows/ko-image.yml ]] && image_required="true"
-# Surface the fail-open path rather than silently dropping the gate: a repo that
-# advertised .ko.yaml but has no ko-image workflow gets no `image` requirement,
-# and the operator should know why it's absent from the printed check list.
-if [[ "$HAS_KO" == "true" && ! -f .github/workflows/ko-image.yml ]]; then
-	warn ".ko.yaml was detected but .github/workflows/ko-image.yml is absent —"
-	warn "NOT requiring the \`image\` check (no workflow would ever report it)."
-fi
-if [[ "$HAS_DOCKERFILE" == "true" && "$HAS_KO" == "true" ]]; then
-	warn "Both a Dockerfile and a root .ko.yaml were detected. The Docker and ko"
-	warn "image lanes both report a check named \`image\`, so their two workflows"
-	warn "would collide — GitHub keeps only the most recent \`image\` result for a"
-	warn "required context, which can mask a red build. Use ko OR a Dockerfile,"
-	warn "not both."
+# --- the infrastructure-as-code path takes an entirely different check set ----
+# Not an addition to the language-app set but a REPLACEMENT: on this path
+# quality-*.yml is not rendered, so every context above would sit at `expected`
+# forever and block each PR. The visibility case below is skipped for the same
+# reason — its contexts come from that same unrendered workflow.
+if [[ "$IAC_ONLY" == "true" ]]; then
+	# the six jobs of templates/iac/.github/workflows/kubernetes-ci.yml.tmpl,
+	# in pipeline order
+	checks=("render" "schema" "lint" "policy" "config-scan" "argocd")
 fi
 
-case "$VISIBILITY" in
-public)
-	# Note: `snyk-code` and `snyk-open-source` are NOT workflow jobs in the
-	# current public template. Snyk runs via the GitHub integration, which
-	# reports a single `security/snyk` check on the PR rather than per-rule
-	# GitHub Actions status checks — see quality-public.yml.tmpl's `# ---
-	# Snyk source-code + open-source scans ---` comment block. Listing
-	# them here would produce a permanent stuck-on-expected state.
-	checks+=("sonarcloud" "license-fs")
-	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
-	if [[ "$HAS_CODEQL" == "true" ]]; then
-		# CodeQL's `analyze` job is a matrix over `language`, so GitHub
-		# reports one check per language as `analyze (<lang>)`. The bare
-		# `analyze` context never resolves to a real check — must be
-		# language-suffixed.
-		if [[ -n "$CODEQL_LANGUAGES" ]]; then
-			for lang in $CODEQL_LANGUAGES; do
-				checks+=("analyze ($lang)")
-			done
-		else
-			warn "--has-codeql=true but --codeql-languages was not provided."
-			warn "Skipping CodeQL contexts — without language list, the bare"
-			warn "'analyze' context would never resolve. Pass --codeql-languages"
-			warn "\"python javascript ...\" (space-separated) to enable them."
-		fi
+# Everything below builds the LANGUAGE-APP context set, so the IaC path skips it
+# whole: its `image`/CodeQL/Sonar contexts all come from workflows that path does
+# not render.
+if [[ "$IAC_ONLY" != "true" ]]; then
+	# --- does any workflow actually PROVIDE the shared `image` check? -------------
+	# Both the Docker lane (quality-*.yml's `image` job) and the ko lane
+	# (ko-image.yml's `image` job) report a status check literally named `image`.
+	# A repo has one provider or the other, never both — a Go repo uses ko OR, for
+	# the documented cgo exception, a Dockerfile instead of ko. The Docker lane
+	# ships in quality-*.yml whenever a Dockerfile exists (any language), so
+	# HAS_DOCKERFILE alone is a sufficient provider signal. The ko lane, though, is
+	# rendered only for Go repos, so a raw `.ko.yaml` is NOT proof its workflow
+	# exists: a stray root .ko.yaml in a non-Go repo, or a Go repo whose ko-image
+	# install was declined, would otherwise make `image` a required context that no
+	# workflow ever reports — the permanent stuck-on-`expected` state the Snyk note
+	# below exists to avoid. So gate the ko half on the workflow file actually
+	# being present. branch-protection.sh always runs from the target repo root
+	# (the automate-*.sh callers set REPO_ROOT=$(pwd) and never cd), so the path is
+	# repo-relative.
+	image_required="false"
+	[[ "$HAS_DOCKERFILE" == "true" ]] && image_required="true"
+	[[ "$HAS_KO" == "true" && -f .github/workflows/ko-image.yml ]] && image_required="true"
+	# Surface the fail-open path rather than silently dropping the gate: a repo that
+	# advertised .ko.yaml but has no ko-image workflow gets no `image` requirement,
+	# and the operator should know why it's absent from the printed check list.
+	if [[ "$HAS_KO" == "true" && ! -f .github/workflows/ko-image.yml ]]; then
+		warn ".ko.yaml was detected but .github/workflows/ko-image.yml is absent —"
+		warn "NOT requiring the \`image\` check (no workflow would ever report it)."
 	fi
-	;;
-private)
-	checks+=("sonarqube" "trivy-fs" "license-fs")
-	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
-	;;
-esac
+	if [[ "$HAS_DOCKERFILE" == "true" && "$HAS_KO" == "true" ]]; then
+		warn "Both a Dockerfile and a root .ko.yaml were detected. The Docker and ko"
+		warn "image lanes both report a check named \`image\`, so their two workflows"
+		warn "would collide — GitHub keeps only the most recent \`image\` result for a"
+		warn "required context, which can mask a red build. Use ko OR a Dockerfile,"
+		warn "not both."
+	fi
+
+	case "$VISIBILITY" in
+	public)
+		# Note: `snyk-code` and `snyk-open-source` are NOT workflow jobs in the
+		# current public template. Snyk runs via the GitHub integration, which
+		# reports a single `security/snyk` check on the PR rather than per-rule
+		# GitHub Actions status checks — see quality-public.yml.tmpl's `# ---
+		# Snyk source-code + open-source scans ---` comment block. Listing
+		# them here would produce a permanent stuck-on-expected state.
+		checks+=("sonarcloud" "license-fs")
+		[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
+		if [[ "$HAS_CODEQL" == "true" ]]; then
+			# CodeQL's `analyze` job is a matrix over `language`, so GitHub
+			# reports one check per language as `analyze (<lang>)`. The bare
+			# `analyze` context never resolves to a real check — must be
+			# language-suffixed.
+			if [[ -n "$CODEQL_LANGUAGES" ]]; then
+				for lang in $CODEQL_LANGUAGES; do
+					checks+=("analyze ($lang)")
+				done
+			else
+				warn "--has-codeql=true but --codeql-languages was not provided."
+				warn "Skipping CodeQL contexts — without language list, the bare"
+				warn "'analyze' context would never resolve. Pass --codeql-languages"
+				warn "\"python javascript ...\" (space-separated) to enable them."
+			fi
+		fi
+		;;
+	private)
+		checks+=("sonarqube" "trivy-fs" "license-fs")
+		[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
+		;;
+	esac
+fi
 
 # --- assemble JSON payload ----------------------------------------------------
 contexts_json=$(printf '%s\n' "${checks[@]}" | jq -R . | jq -s .)
