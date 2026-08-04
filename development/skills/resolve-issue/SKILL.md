@@ -9,8 +9,8 @@ description: >
   conflict-aware, resolve provably-disjoint ones in parallel worktrees and the
   rest sequentially off fresh main (each child independently tested), then run a
   holistic end-to-end test over the merged epic and explicitly close the epic
-  issue (nothing auto-closes it). Repo-type-agnostic (Python / Java /
-  Claude-plugin). Composes git-branch-naming, commit, and open-pr; never pushes
+  issue (nothing auto-closes it). Repo-type-agnostic (Swift / Python / Java /
+  Go / Claude-plugin / Kubernetes). Composes git-branch-naming, commit, and open-pr; never pushes
   to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
   non-converging review-loop exit becomes an interactive extension (offer more
   rounds, give guidance, ask questions) — see [The local review

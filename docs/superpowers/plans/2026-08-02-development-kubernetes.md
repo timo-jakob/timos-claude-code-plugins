@@ -95,7 +95,8 @@ Establishes the ownership boundary before anything fills it. Child #1151.
 **Interfaces:**
 
 - Produces: plugin name `development-kubernetes` — the identity every later
-  task references. Version `0.2.0` as of #1152 (Tasks 2-4). Every later task references this name.
+  task references. Version `0.3.0` as of #1153 (Task 5) — this line moves with
+  the manifest blocks below. Every later task references this name.
 
 - [x] **Step 1: Establish a green baseline**
 
@@ -112,8 +113,8 @@ root and is what actually gates this task.
 ```json
 {
   "name": "development-kubernetes",
-  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the maintenance dispatcher, backed by the kubernetes topic marker and gather-kubernetes-findings.zsh in the development plugin (#1152); the dispatcher registers the routing table but escalates every group to a human until the five agents and review skill land (#1153), followed by the bootstrap CI pipeline (#1154).",
-  "version": "0.2.0",
+  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. The bootstrap CI pipeline follows (#1154).",
+  "version": "0.3.0",
   "author": {
     "name": "Timo Jakob"
   },
@@ -140,8 +141,8 @@ exact equality. Edit one, edit both.
 ```json
 {
   "name": "development-kubernetes",
-  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the maintenance dispatcher, backed by the kubernetes topic marker and gather-kubernetes-findings.zsh in the development plugin (#1152); the dispatcher registers the routing table but escalates every group to a human until the five agents and review skill land (#1153), followed by the bootstrap CI pipeline (#1154).",
-  "version": "0.2.0",
+  "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. The bootstrap CI pipeline follows (#1154).",
+  "version": "0.3.0",
   "author": {
     "name": "Timo Jakob"
   },
@@ -216,10 +217,11 @@ the full pipeline; the primary/auxiliary model already permits a topic to be
 primary, so no new mechanism is needed. **#1152 landed the first half**: the
 topic marker and `gather-kubernetes-findings.zsh` exist, so `kubernetes` now
 enters the detected+supported set and such a declaration **selects this
-plugin** rather than being treated as stale. The **gates themselves** arrive
-later, with the agents (#1153) and the check pipeline (#1154) — until then the
-dispatcher validates the payload and escalates each group to a human rather
-than routing it to an agent that does not exist yet.
+plugin** rather than being treated as stale. **#1153 landed the second half**:
+the five agents ship, so the dispatcher now **routes** each finding group to a
+`subagent_type` that exists rather than escalating it to a human.
+The **gates themselves** arrive with the check pipeline (#1154) — until then a
+routed group gets a real plan, but no CI check enforces the manifests on a PR.
 
 "Full pipeline" here means the **six checks** bootstrap's
 `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **will emit** (#1154) — render → schema →
@@ -454,6 +456,7 @@ local manifest_hits
 # `Kustomization` is not a manifest, while a symlinked one still counts. Kept
 # identical to the SKILL.md marker recipe — tests/kubernetes-topic-marker.bats
 # derives the comparison, so the two cannot drift into detecting different repos.
+# gather-kubernetes-marker:begin
 manifest_hits="$(cd -- "$repo" && find . \
                    \( -name Chart.yaml -o -name kustomization.yaml \
                       -o -name kustomization.yml -o -name Kustomization \) \
@@ -472,6 +475,7 @@ elif ( cd -- "$repo" && grep -rqlF 'argoproj.io' \
   # and report it manifest-free with exit 0. `.` can never match a pattern.
   has_manifests="true"
 fi
+# gather-kubernetes-marker:end
 
 # --- policy: the repo's own rules, matched as a GLOB --------------------------
 # `-L` (not `-H`) on both finds below. `-H` follows only the COMMAND-LINE
@@ -484,12 +488,13 @@ fi
 # Note the asymmetry with the manifest half, which is deliberate and NOT parity:
 # the manifest finds stay at the default `-P`, so they count a symlinked manifest
 # FILE but do not descend a symlinked chart DIRECTORY. That is the boundary the
-# three manifest copies share (SKILL.md's marker recipe, SKILL.md's manifests
-# lister, and the manifest find ABOVE in this file — not the two policy finds
+# FOUR manifest copies share (SKILL.md's marker recipe, SKILL.md's manifests
+# lister, the manifest find ABOVE in this file, and detect-stack.sh's
+# `is-kubernetes-marker` block, #1153 — not the two policy finds
 # below, which are the `-L` ones this block declares), and the parity oracles in
 # tests/kubernetes-topic-marker.bats hold
 # them identical — so do not "fix" the policy side down to match, and do not
-# raise the manifest side to `-L` without changing all three copies together.
+# raise the manifest side to `-L` without changing all four copies together.
 local policy_dir="$repo/policies/kyverno"
 local has_policies="false"
 local policy_hits=""
@@ -649,10 +654,9 @@ description: >
   kubernetes topic gather (gather-kubernetes-findings.zsh), validates it, and
   returns a plan routing each finding group to an agent. A TOPIC plugin that can
   also be PRIMARY: a GitOps repo with no application language declares
-  `primary: kubernetes` and gets the full pipeline. v0.2 REGISTERS the routing table
-  (manifest_validation → kubernetes-manifest-fixer; policy + policy_tests →
-  kubernetes-policy-triage) but ships NO agents, so every group returns as a
-  human_action_required entry naming #1153, where those agents land.
+  `primary: kubernetes` and gets the full pipeline. It ROUTES each finding group
+  by the live routing table (manifest_validation → kubernetes-manifest-fixer;
+  policy + policy_tests → kubernetes-policy-triage, grouped into one PR).
   A single invocation returns the plan; the per-group work agents are the
   orchestrator's job. Pure function of its JSON input; runs no detection of its
   own. Ships NO approver — a cluster definition is approved by a human.
@@ -759,27 +763,10 @@ every payload, and **never** read by this dispatcher. Resolving a bare "policy"
 to that object would read a repo with no Kyverno files as having policies
 configured, inverting the charter's central skip.
 
-**Until #1153 lands, this table dispatches nothing** — its entries still define
-the known-key universe *Validation*'s unknown-key check tests against; it is the
-routing they authorise that is suspended. The agents below are created
-by #1153; #1152 ships the dispatcher alone. A `policy_tests` finding is
-reachable the moment the gather exists, so routing it now would have the
-orchestrator spawn a `subagent_type` with no definition and the group would
-fail. Until the agent files exist, return every group as a
-`human_action_required` entry naming #1153. Borrow the **mechanism** the
-language dispatchers use — escalate via `human_action_required` rather than
-`development-react`'s empty-plan-plus-`missing_tooling` summary, because an
-unroutable group must **halt**, and because this dispatcher forbids
-`missing_tooling` for the policy skip. Borrow only the mechanism:
-`development-java`'s and `development-go`'s halt objects both omit `plan` (and
-Java's additionally omits `ci_fixer_agent`), which the *Response* section below
-forbids here — keep both fields, per that section.
-
-**Delete this paragraph in #1153 — and rewrite the "v0.2 REGISTERS ... NO agents"
-sentence of this file's frontmatter `description` in the same PR.** The
-description restates the same override, and it is what a model reads *first* at
-invocation time; deleting only the paragraph leaves a description licensing
-escalation against a body licensing routing.
+**This table is live** — every row routes, and its entries also define the
+known-key universe *Validation*'s unknown-key check tests against. Both agents
+ship with this plugin (`development-kubernetes/agents/`), so a routed group
+names a `subagent_type` that exists.
 
 | Finding tool | Agent |
 |---|---|
@@ -790,7 +777,7 @@ escalation against a body licensing routing.
 **A group exists only for a ROUTED `findings_by_tool` key whose array is
 NON-EMPTY.** A routed key present with an **empty** array means "configured, and
 it found nothing" —
-it forms no group, no plan entry, and (until #1153) no `human_action_required`
+it forms no group, no plan entry, and no `human_action_required`
 entry either. This is not a corner case: `manifest_validation: []` is on *every*
 payload this dispatcher receives, because that tool is presence-detected and its
 checks run in CI, and `policy: []`/`policy_tests: []` is the shape of a clean
@@ -820,17 +807,11 @@ kubernetes tool ever did arrive, an empty plan is the correct result.
 A topic has no application test suite, so there is no line-coverage pre-flight.
 The analogue is `policy_tests`: a declared policy set with no `kyverno test`
 fixtures. Treat a `policy_tests` finding as **ordering-blocking** for the group —
-**once #1153 ships `kubernetes-policy-triage`**, the group is dispatched (that
+the group is dispatched to `kubernetes-policy-triage` (that
 agent is what WRITES the missing fixtures) and the plan must order
 fixture-writing before any policy-driven manifest fix in it. Never drop the
 group: that would permanently preserve the untested-policy state the gate exists
 to eliminate.
-
-**Until #1153, this section describes the destination, not today's behaviour.**
-*Routing* governs: the agent does not exist, so the group is **escalated** as
-`human_action_required`, not dispatched — which is not dropping it either. Where
-the two sections seem to disagree, *Routing* wins until its paragraph is deleted;
-delete this qualifier in the same PR.
 
 The ordering rule is also **primary-mode only** — in auxiliary mode the
 `policy_tests` group is omitted before it is ever formed (see *Dispatch mode*).
@@ -1028,6 +1009,29 @@ Refs #1152"
 
 Child #1153.
 
+> **LANDED (#1153).** The blocks below are **re-synced from the shipped files**,
+> not a source those files are generated from — exactly as Tasks 1 and 2 say of
+> their own. The review loop on that PR changed several things this plan
+> originally specified, so regenerating an agent from an older draft would
+> reintroduce defects the loop found: the reporting format moved into a fenced
+> `text` block (bare `<placeholder>` angle brackets are inline HTML, which
+> markdownlint rejects); every reviewer gained a **report against the CHANGED
+> SOURCE FILE** rule, because `scope-findings` keeps only findings whose `file`
+> matches the story's diff, so a rendered temp path — or an unchanged template
+> when the edit was to `values.yaml` — is silently discarded; the render step
+> gained a provenance contract (`--output-dir`, per-root kustomize output,
+> `render-map.json`) without which reviewers cannot obey that rule; the two
+> absence-checking reviewers gained a **consult the whole tree** rule; both
+> maintenance agents gained an `## Escalations` channel and an `## Unverified`
+> branch for a missing checker; `argocd-advisor` gained the repo-identity
+> procedure; the review skill's scope default became "the temp tree" (the draft's
+> "every file the render step produced" excludes the copied-in standalone
+> manifests, which is the failure the render paragraph exists to prevent), its
+> Step 2 gained a third retry condition, and its frontmatter carries
+> `disable-model-invocation: false`. **When the shipped files change, re-sync
+> these blocks in the same PR.** The *Before committing* box further down is a
+> record of work already executed, not an outstanding instruction.
+
 **Files:**
 
 - Create: `development-kubernetes/agents/kubernetes-security-reviewer.md`
@@ -1042,9 +1046,9 @@ Child #1153.
 - Consumes: agent names referenced by Task 4's routing table.
 - Produces: review dimensions `security`, `reliability`, `argocd`.
 
-- [ ] **Step 1: Create the security reviewer**
+- [x] **Step 1: Create the security reviewer**
 
-```markdown
+````markdown
 ---
 name: kubernetes-security-reviewer
 description: Kubernetes security specialist reviewing rendered manifests for over-broad RBAC, missing or permissive security contexts, privileged and hostPath containers, secrets handled as plain env vars, and namespaces without NetworkPolicy. The security dimension of /development-kubernetes:review.
@@ -1067,22 +1071,79 @@ not templated: a chart that reads safely can render a privileged container.
 - **NetworkPolicy** — a namespace with workloads and no policy defaults to
   allow-all, which is the opposite of what its author usually assumes.
 
+## Absence findings: consult the whole tree, not just your scope
+
+The NetworkPolicy check is an **absence** claim, and your scope is usually a
+subset — the rendered documents a *changed* source produced. A NetworkPolicy
+rendered from an unchanged source is outside that subset but very much present
+in the cluster. So before reporting a namespace as unprotected, search the
+**entire** rendered tree for a policy selecting it; your tools are unrestricted
+and the scope bounds what you *review*, not what you may *consult*. Absence of
+evidence inside a scope is not evidence of absence, and a false WARNING here
+blocks the round on a namespace that was never exposed.
+
 ## What NOT to report
 
-Generic hygiene `kube-linter` already covers — missing probes, absent
-resource limits, `latest` tags. Reporting them duplicates the pipeline and
-trains the reader to skim your findings.
+**Exactly three things: missing probes, absent resource limits, and `latest`
+image tags.** That is the whole list — it is a closed enumeration, not an
+example of a broader "whatever `kube-linter` covers" rule. Reporting those three
+duplicates the pipeline and trains the reader to skim your findings.
+
+**Do not widen it by reasoning about `kube-linter`'s check set.** Its defaults
+overlap several items in *What to look for* — `run-as-non-root`,
+`privileged-container`, `privilege-escalation-container`, the `host-*` checks,
+`env-var-secret`. Those stay **in scope for you anyway**: a lint warning and a
+blocking security finding are different instruments, and a reviewer that
+suppressed them as "the linter's job" would silently waive this dimension's core
+checks — the worst outcome available here. Where you overlap the linter on a
+security control, report it.
 
 ## Reporting Format
 
 Report each finding in this shape — the review skill's injected prompt extracts
 the severity tag from it, so the tag must be present and spelled exactly:
 
-### [CRITICAL|WARNING|SUGGESTION] <one-line title>
+```text
+### [CRITICAL|WARNING|SUGGESTION] One-line title
 
-**File:** <path>:<line>
-**Description:** what is wrong, and what it costs when it happens.
-**Suggested fix:** the concrete remediation.
+**File:** path/to/source.yaml:lineNumber
+**Description:** What is wrong, and what it costs when it happens.
+**Suggested fix:** The concrete remediation.
+```
+
+**Report against the CHANGED SOURCE FILE.** You read *rendered* manifests, but
+the `file` you report must be a repo-relative path **that appears in your
+scope's changed-file list**. Resolve the rendered document back through the
+rendered-to-source map your prompt names, then report the *changed* file whose
+edit produced the text you are flagging: the `values.yaml` when the field was
+substituted, the overlay patch when it was patched, the template only when the
+template itself changed. Use `line: null` when the rendered line has no line in
+that source file. Never report the rendered temp-tree path, and **never a
+directory** — the review loop keeps only findings whose `file` exactly matches a
+changed path, so either one is silently discarded and your finding is lost.
+Name the temp path in prose as context if it helps; never as `file`.
+
+**Unless your prompt's changed-file list reads `none — standalone run`.** Then
+there is no diff and no downstream filter to satisfy, and the list constraint
+does not apply: resolve via the render map and report the concrete repo-relative
+source **file** the flagged text came from — the patch, `kustomization.yaml`,
+`values.yaml`, template or standalone manifest — and **never the chart or
+overlay root** the map may name for a kustomize output, since a directory is
+still forbidden here. Never withhold a finding for want of a list — reading the
+rule as absolute in that mode loses every finding you have, by the opposite
+route. And if you cannot tie a finding to a source file at all, report it
+against the closest file you can identify with `line: null`, saying the
+attribution is approximate: reporting nothing is worse than reporting it
+approximately.
+
+**In LOOP mode the same danger has a different shape.** When a changed-file list
+*is* given and the flagged text lives in a file the story did not touch — a
+deleted child path breaking an unchanged app-of-apps parent, a removed
+NetworkPolicy exposing an unchanged namespace — you *can* name a source file, so
+the rule above never fires and you would report the unchanged path. The filter
+discards it, and the round records clean over a real blocker. Report such a
+finding against the **closest CHANGED file in scope** with `line: null`, and say
+in the prose which unchanged file the text is actually in.
 
 **Severity guide** — bounded so the review loop converges rather than drowning
 in nitpicks:
@@ -1092,15 +1153,14 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
 - **SUGGESTION** — hygiene and clarity. Never blocks a round.
+````
 
-```
+- [x] **Step 2: Create the reliability reviewer**
 
-- [ ] **Step 2: Create the reliability reviewer**
-
-```markdown
+````markdown
 ---
 name: kubernetes-reliability-reviewer
-description: Kubernetes reliability specialist reviewing rendered manifests for the failure modes that surface as outages rather than errors — MISCONFIGURED probes (an aggressive liveness probe that restart-loops a slow-starting pod), requests/limits that throttle or OOM-kill, no PodDisruptionBudget, single replicas for stateful paths, missing anti-affinity, and rollout strategies that drop capacity. Bare presence/absence checks (a probe missing entirely, no limits set, a latest tag) belong to kube-linter and are deliberately NOT reported here. The reliability dimension of /development-kubernetes:review.
+description: Kubernetes reliability specialist reviewing rendered manifests for the failure modes that surface as outages rather than errors — MISCONFIGURED probes (an aggressive liveness probe that restart-loops a slow-starting pod), requests/limits that throttle or OOM-kill, no PodDisruptionBudget, single replicas for stateful paths, anti-affinity that EXISTS but does not work (wrong topologyKey, preferred where required is needed), and rollout strategies that drop capacity. Bare presence/absence checks (a probe missing entirely, no limits set, a latest tag, no anti-affinity at all) belong to kube-linter and are deliberately NOT reported here. The reliability dimension of /development-kubernetes:review.
 model: opus
 tools: Read, Grep, Glob
 ---
@@ -1111,11 +1171,15 @@ an agent looking for bugs would look for the wrong thing.
 
 ## What to look for
 
-> **What NOT to report**, same carve-out as the security reviewer: the bare
-> presence/absence checks `kube-linter` already performs — a missing probe, a
-> missing `requests`/`limits`, a `latest` tag. Report the JUDGEMENT cases below,
-> where a probe or a limit exists but is wrong. Two tools enforcing one rule
-> means two places to silence one false positive.
+> **What NOT to report**, same closed enumeration as the security reviewer, plus
+> one of your own: a missing probe, a missing `requests`/`limits`, a `latest`
+> tag — and bare *absence* of anti-affinity, which `kube-linter`'s default
+> `no-anti-affinity` check already gates. Report the JUDGEMENT cases below,
+> where a probe, a limit or an anti-affinity rule **exists but is wrong**. Two
+> tools enforcing one rule means two places to silence one false positive.
+>
+> That list is closed. Do not extend it by reasoning about what else
+> `kube-linter` might cover — every other item below is yours, overlap or not.
 
 - **Probes** — a probe that EXISTS but is wrong: a readiness probe whose
   condition passes before the process can actually serve, so traffic reaches a
@@ -1129,11 +1193,26 @@ an agent looking for bugs would look for the wrong thing.
 - **Disruption** — no `PodDisruptionBudget`, so a node drain takes the service
   down. In scope here despite being an absence check: `kube-linter`'s default
   set does not gate on PDB presence, so this is not a duplicate.
-- **Placement** — in scope for the same reason (no `kube-linter` default check):
-  a single replica on a serving path; no anti-affinity, so
-  every replica lands on one node.
+- **Placement** — a single replica on a serving path, and **anti-affinity that
+  exists but does not work**: the wrong `topologyKey` (so "spread" spreads
+  across nothing), or `preferred` rather than `required` on a path that cannot
+  survive co-location. Bare *absence* of anti-affinity is **not** yours —
+  `kube-linter`'s default set does include `no-anti-affinity`, so reporting it
+  is exactly the duplicate the carve-out above forbids. The single-replica case
+  stays yours: it is a judgement about the path, not a presence check.
 - **Rollout** — `maxUnavailable` that drops below quorum for a stateful set,
   or `Recreate` on a service expected to stay up.
+
+## Absence findings: consult the whole tree, not just your scope
+
+Disruption and Placement are **absence** claims, and your scope is usually a
+subset — the rendered documents a *changed* source produced. A
+`PodDisruptionBudget` (or an anti-affinity rule) rendered from an unchanged
+source is outside that subset but very much present in the cluster. So before
+reporting one missing, search the **entire** rendered tree for it; your tools
+are unrestricted and the scope bounds what you *review*, not what you may
+*consult*. Absence of evidence inside a scope is not evidence of absence, and a
+false WARNING here blocks the round on a service that already survives a drain.
 
 ## Judgement
 
@@ -1145,11 +1224,47 @@ production overlay is a finding. Read the overlay before reporting.
 Report each finding in this shape — the review skill's injected prompt extracts
 the severity tag from it, so the tag must be present and spelled exactly:
 
-### [CRITICAL|WARNING|SUGGESTION] <one-line title>
+```text
+### [CRITICAL|WARNING|SUGGESTION] One-line title
 
-**File:** <path>:<line>
-**Description:** what is wrong, and what it costs when it happens.
-**Suggested fix:** the concrete remediation.
+**File:** path/to/source.yaml:lineNumber
+**Description:** What is wrong, and what it costs when it happens.
+**Suggested fix:** The concrete remediation.
+```
+
+**Report against the CHANGED SOURCE FILE.** You read *rendered* manifests, but
+the `file` you report must be a repo-relative path **that appears in your
+scope's changed-file list**. Resolve the rendered document back through the
+rendered-to-source map your prompt names, then report the *changed* file whose
+edit produced the text you are flagging: the `values.yaml` when the field was
+substituted, the overlay patch when it was patched, the template only when the
+template itself changed. Use `line: null` when the rendered line has no line in
+that source file. Never report the rendered temp-tree path, and **never a
+directory** — the review loop keeps only findings whose `file` exactly matches a
+changed path, so either one is silently discarded and your finding is lost.
+Name the temp path in prose as context if it helps; never as `file`.
+
+**Unless your prompt's changed-file list reads `none — standalone run`.** Then
+there is no diff and no downstream filter to satisfy, and the list constraint
+does not apply: resolve via the render map and report the concrete repo-relative
+source **file** the flagged text came from — the patch, `kustomization.yaml`,
+`values.yaml`, template or standalone manifest — and **never the chart or
+overlay root** the map may name for a kustomize output, since a directory is
+still forbidden here. Never withhold a finding for want of a list — reading the
+rule as absolute in that mode loses every finding you have, by the opposite
+route. And if you cannot tie a finding to a source file at all, report it
+against the closest file you can identify with `line: null`, saying the
+attribution is approximate: reporting nothing is worse than reporting it
+approximately.
+
+**In LOOP mode the same danger has a different shape.** When a changed-file list
+*is* given and the flagged text lives in a file the story did not touch — a
+deleted child path breaking an unchanged app-of-apps parent, a removed
+NetworkPolicy exposing an unchanged namespace — you *can* name a source file, so
+the rule above never fires and you would report the unchanged path. The filter
+discards it, and the round records clean over a real blocker. Report such a
+finding against the **closest CHANGED file in scope** with `line: null`, and say
+in the prose which unchanged file the text is actually in.
 
 **Severity guide** — bounded so the review loop converges rather than drowning
 in nitpicks:
@@ -1159,15 +1274,14 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
 - **SUGGESTION** — hygiene and clarity. Never blocks a round.
+````
 
-```
+- [x] **Step 3: Create the Argo CD advisor**
 
-- [ ] **Step 3: Create the Argo CD advisor**
-
-```markdown
+````markdown
 ---
 name: argocd-advisor
-description: Argo CD specialist reviewing Application, ApplicationSet and AppProject resources — app-of-apps structure, sync policy (automated, prune, selfHeal), AppProject restrictions on sources and destinations, sync waves and ordering, and drift between what an app declares and what exists. The argocd dimension of /development-kubernetes:review.
+description: Argo CD specialist reviewing Application, ApplicationSet and AppProject resources — app-of-apps structure, sync policy (automated, prune, selfHeal), AppProject restrictions on sources and destinations, sync waves and ordering, and declared paths or revisions that cannot resolve in the repository under review. The argocd dimension of /development-kubernetes:review.
 model: opus
 tools: Read, Grep, Glob
 ---
@@ -1178,7 +1292,28 @@ cluster, and therefore where a mistake has the widest blast radius.
 ## What to look for
 
 - **App-of-apps integrity** — a parent referencing a child path that does not
-  exist. This fails silently at sync time, not at review time.
+  exist. This fails silently at sync time, not at review time. **Resolve
+  `spec.source.path` against the SOURCE repository root, never the rendered
+  tree** — the render tree holds output documents, not the repo's directory
+  layout, so resolving there reports every healthy parent as broken.
+
+  Your prompt names that root (and its remote URL, when the repo has one); it is
+  how you tell this repository's own `Application`s from another repo's. If the
+  prompt gave you no remote URL, read `<repo root>/.git/config` — you have
+  `Read`, and its `[remote "origin"] url` is the comparison you need. Match
+  loosely: `repoURL` and the git remote routinely differ in scheme, a `.git`
+  suffix, or a trailing slash while naming the same repository.
+
+  Then, per `Application`:
+  - **`repoURL` is this repository** → resolve `spec.source.path` under the
+    source root and report a genuine miss.
+  - **`repoURL` is demonstrably some other repository** → skip the existence
+    check for that app and say so; you cannot see that repo's tree.
+  - **you could not establish this repository's identity at all** → report the
+    check as *skipped, reason: repo identity unknown*, for every app. Do **not**
+    silently pick a branch: guessing "some other repo" waives the check on this
+    repo's own apps — its primary target — and guessing the other way reports
+    every healthy parent as broken.
 - **Sync policy** — `automated` without `prune` leaves orphans forever;
   `prune` without care deletes resources a human created deliberately;
   `selfHeal` fights manual intervention during an incident, which is exactly
@@ -1195,11 +1330,47 @@ cluster, and therefore where a mistake has the widest blast radius.
 Report each finding in this shape — the review skill's injected prompt extracts
 the severity tag from it, so the tag must be present and spelled exactly:
 
-### [CRITICAL|WARNING|SUGGESTION] <one-line title>
+```text
+### [CRITICAL|WARNING|SUGGESTION] One-line title
 
-**File:** <path>:<line>
-**Description:** what is wrong, and what it costs when it happens.
-**Suggested fix:** the concrete remediation.
+**File:** path/to/source.yaml:lineNumber
+**Description:** What is wrong, and what it costs when it happens.
+**Suggested fix:** The concrete remediation.
+```
+
+**Report against the CHANGED SOURCE FILE.** You read *rendered* manifests, but
+the `file` you report must be a repo-relative path **that appears in your
+scope's changed-file list**. Resolve the rendered document back through the
+rendered-to-source map your prompt names, then report the *changed* file whose
+edit produced the text you are flagging: the `values.yaml` when the field was
+substituted, the overlay patch when it was patched, the template only when the
+template itself changed. Use `line: null` when the rendered line has no line in
+that source file. Never report the rendered temp-tree path, and **never a
+directory** — the review loop keeps only findings whose `file` exactly matches a
+changed path, so either one is silently discarded and your finding is lost.
+Name the temp path in prose as context if it helps; never as `file`.
+
+**Unless your prompt's changed-file list reads `none — standalone run`.** Then
+there is no diff and no downstream filter to satisfy, and the list constraint
+does not apply: resolve via the render map and report the concrete repo-relative
+source **file** the flagged text came from — the patch, `kustomization.yaml`,
+`values.yaml`, template or standalone manifest — and **never the chart or
+overlay root** the map may name for a kustomize output, since a directory is
+still forbidden here. Never withhold a finding for want of a list — reading the
+rule as absolute in that mode loses every finding you have, by the opposite
+route. And if you cannot tie a finding to a source file at all, report it
+against the closest file you can identify with `line: null`, saying the
+attribution is approximate: reporting nothing is worse than reporting it
+approximately.
+
+**In LOOP mode the same danger has a different shape.** When a changed-file list
+*is* given and the flagged text lives in a file the story did not touch — a
+deleted child path breaking an unchanged app-of-apps parent, a removed
+NetworkPolicy exposing an unchanged namespace — you *can* name a source file, so
+the rule above never fires and you would report the unchanged path. The filter
+discards it, and the round records clean over a real blocker. Report such a
+finding against the **closest CHANGED file in scope** with `line: null`, and say
+in the prose which unchanged file the text is actually in.
 
 **Severity guide** — bounded so the review loop converges rather than drowning
 in nitpicks:
@@ -1209,10 +1380,9 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
 - **SUGGESTION** — hygiene and clarity. Never blocks a round.
+````
 
-```
-
-- [ ] **Step 4: Create the manifest fixer**
+- [x] **Step 4: Create the manifest fixer**
 
 ```markdown
 ---
@@ -1237,13 +1407,35 @@ Anything altering image tags, replica counts, resource values, RBAC subjects,
 or namespace targets. A linter suggesting a *smaller* resource limit is
 suggesting a production change, not a lint fix.
 
+**Where an escalation goes.** You are a work agent, not the dispatcher, so
+`human_action_required` is not yours to emit. Put every escalation under a
+`## Escalations` heading in your final report, one entry per finding, naming the
+finding and why it is not mechanical — the orchestrator relays that section to
+the human. Never leave an escalated finding as an aside in running prose: an
+escalation nothing is contracted to read is a finding you dropped.
+
 ## Verify
 
 Re-run the failing check after each fix. A fix that silences a checker without
 being verified is indistinguishable from suppressing it.
+
+**If the checker is not installed, say so.** `kubeconform` and `kube-linter`
+run in the target repo's CI (#1154); the machine you run on may not have them.
+That is not a licence to skip verification silently — report the fix under a
+`## Unverified` heading naming the missing tool, so the PR reviewer knows the
+fix was reasoned rather than demonstrated. Never install a toolchain to get
+around this, and never claim a fix was verified when it was not.
+
+**If the re-run still fails, the fix did not work.** One failed re-verify is
+the end of the road for that finding: **revert your edit** and report the
+finding under `## Escalations`, naming the check that stayed red and what you
+tried. Do not iterate on it — a second and third attempt is how a mechanical
+fixer wanders into a redesign — and above all do not leave the edit in place
+while reporting the finding as fixed, which closes the group's PR over a check
+that is still failing.
 ```
 
-- [ ] **Step 5: Create the policy triage agent**
+- [x] **Step 5: Create the policy triage agent**
 
 ```markdown
 ---
@@ -1267,11 +1459,61 @@ outgrown. **Escalate — do not edit the policy.** A policy encodes an
 architectural decision the consuming repo owns; changing it silently
 relaxes an architectural commitment on their behalf.
 
+**Where an escalation goes.** You are a work agent, not the dispatcher, so
+`human_action_required` is not yours to emit. Put every escalation under a
+`## Escalations` heading in your final report, one entry per policy, naming the
+policy file and the decision the human has to make — the orchestrator relays
+that section. Never leave it as an aside in running prose: an escalation
+nothing is contracted to read is a finding you dropped, and the group's PR must
+not close over it silently.
+
 ## 3. The policy has no tests
 
 A `policy_tests` finding. Write `kyverno test` fixtures asserting both a
 passing and a failing case. This is not busywork: an untested policy usually
 matches nothing, so it passes everything and looks like it is working.
+
+**Expect that sentence to come true, and hand off when it does.** The most
+likely outcome of writing the failing-case fixture is discovering the policy
+does not catch the violation — which *is* case 2, a dead policy, and it
+escalates. **Never** adjust the fixture's expected result to `pass` to make the
+suite green: that enshrines a match-nothing policy as tested-and-correct, the
+exact illusion this case exists to dispel.
+
+## Verify
+
+**Re-run the check that PRODUCED the finding** — they are different commands
+and only one of them reads what you changed:
+
+- a **manifest** fix (case 1) is verified by `kyverno apply` of the declared
+  policies against the fixed manifests. That is what produced the `policy`
+  finding, and it is the only command that evaluates your edit;
+- a **fixture** you wrote or changed (case 3) is verified by `kyverno test`,
+  which evaluates the resources `kyverno-test.yaml` declares.
+
+Do not substitute one for the other. `kyverno test` after a manifest fix
+re-evaluates the *fixtures*, not the manifest — it comes back green without
+having read your edit, so you would report the fix verified when nothing checked
+it, and the revert-on-failure rule below could never fire because the re-run
+cannot fail on a manifest it never looked at. An unrun fixture proves nothing,
+and a manifest fix you did not re-check is indistinguishable from a claim.
+
+**If `kyverno` is not installed, say so.** Like `kubeconform` and `kube-linter`,
+it runs in the target repo's CI (#1154) and may be absent where you run. Report
+the work under an `## Unverified` heading naming the missing tool — never
+silently skip verification, never install a toolchain to get around it, and
+never claim verification that did not happen.
+
+**If the re-run still fails, the fix did not work** — the same rule
+`kubernetes-manifest-fixer` follows, for the same reason. One failed re-verify
+ends that finding: **revert whatever you edited for it — manifest *or*
+fixture** — and report it under
+`## Escalations`, naming the policy that stayed red and what you tried. The
+fixture half matters: you write fixtures too, and Verify re-runs after each one,
+so a branch that only mentions manifests would leave a failing `kyverno test`
+fixture in the tree while escalating. Do not
+iterate toward a redesign, and never leave the failing edit in place while
+reporting the finding fixed — that closes the group's PR over a red check.
 
 ## Never
 
@@ -1279,15 +1521,18 @@ Do not add policies. This plugin ships none, and generic hygiene belongs to
 `kube-linter`.
 ```
 
-- [ ] **Step 6: Create the review skill**
+- [x] **Step 6: Create the review skill**
 
 ```markdown
 ---
 name: review
 description: Perform a comprehensive Kubernetes/IaC review using three specialized parallel agents — security, reliability, and Argo CD. Reviews rendered manifests, not templates.
+disable-model-invocation: false
 ---
 
 # Kubernetes review
+
+## Step 1 — render and dispatch
 
 Dispatch three agents in parallel over the changed manifests:
 
@@ -1297,22 +1542,52 @@ Dispatch three agents in parallel over the changed manifests:
 | reliability | `kubernetes-reliability-reviewer` |
 | argocd | `argocd-advisor` |
 
-**Render first.** Run `helm template` and `kustomize build` into a temp tree,
+**Render first, and render the WHOLE repo** — every chart, every unconsumed
+kustomization root, every standalone manifest — **regardless of what
+`$ARGUMENTS` scopes**. Scope narrows what is *reviewed*, never what is
+*rendered*: both reviewers make **absence** claims (a namespace with no
+NetworkPolicy, a workload with no PodDisruptionBudget) and are told to confirm
+them against the entire rendered tree before reporting. Render only the scoped
+chart and that tree is a subset, so a policy or PDB rendered from an unchanged
+source is invisible and the reviewer files a false blocking finding against a
+resource that was never exposed.
+
+Run `helm template` and `kustomize build` into a temp tree,
 then **copy standalone manifests in alongside them** — same exclusions as the CI
-render job (chart-owned trees, kustomize inputs). Without that copy the scope is
+render job the #1154 template will ship (chart-owned trees, kustomize inputs).
+Without that copy the scope is
 chart and overlay output only, so a repo whose Argo CD resources are plain YAML
-— the common GitOps layout, and this plugin's own fixture — points
+— the common GitOps layout, and the shape this plugin's own fixture will take
+(#1155) — points
 `argocd-advisor` at a tree containing no `Application` document. It emits `[]`
 deterministically and the round records a clean review of resources no agent
 read. A repo with no charts at all would review an empty tree and report clean.
+
+**Render so that provenance survives**, or the reporting rule below cannot be
+obeyed: reviewers run in their own contexts with `Read`/`Grep`/`Glob` and no
+`Bash`, so whatever the render step does not record, they cannot recover.
+`kustomize build` in particular emits one undifferentiated stream carrying no
+source annotation at all. So:
+
+- `helm template --output-dir <tmp>/charts/<chart>` — it preserves the
+  per-template file structure and the `# Source:` comments;
+- write each kustomize root's output to a path **named for that root**
+  (`<tmp>/kustomize/<overlay-path>.yaml`), never a single merged file;
+- copy standalone manifests **under their repo-relative paths**
+  (`<tmp>/standalone/<repo/relative/path>.yaml`), not flattened into one
+  directory;
+- write `<tmp>/render-map.json` — `{"<rendered path>": "<source repo path>"}` —
+  and name that file in the agents' prompt as the mapping to consult.
 
 Point the agents at that tree. A chart that reads safely can render a privileged
 container, and the rendered form is what reaches a cluster.
 
 **Skip what the CI render job skips** before rendering — `type: library`
 charts, vendored subcharts (a `charts/` parent that is itself a chart),
-`kind: Component` kustomizations, **and any kustomization root another root's
-`resources:` consumes** — build only unconsumed roots, exactly as the CI job's
+`kind: Component` kustomizations, **and any kustomization root another root
+consumes** via `resources:` / `components:` / `bases:` — the same three keys the
+in-scope gate below tests, so both statements of "consumes" in this file
+describe one relation — build only unconsumed roots, exactly as the CI job's
 second pass does. The first three FAIL by design when rendered standalone, so
 enumerating them would fail the round on a repo the plugin's own CI renders
 green. The fourth is subtler and matters more: a consumed base renders
@@ -1327,24 +1602,176 @@ tree would report a
 complete three-dimension review over a silently truncated scope, and the chart
 that failed to render is the one most worth reviewing.
 
+**Then check the tree is worth reviewing, before dispatching anyone.** Two
+shapes must not become a clean round:
+
+- the temp tree is **empty** — nothing rendered and nothing copied;
+- **no rendered document belongs to a changed source** — the change produced
+  nothing this panel can see, which is what a values edit on an excluded library
+  chart looks like.
+
+  "Belongs to" is **membership plus consumption**, not map-value equality. A
+  rendered document is in scope when its `render-map.json` source — *or any file
+  in the same chart or kustomize root as that source, or in any root that root
+  transitively consumes* via `resources:` / `components:` / `bases:` — is in the
+  changed-file list.
+
+  **A DELETED path is always in scope.** A changed path that no longer exists
+  cannot render anything, share a root with anything, or be consumed by
+  anything, so every membership test above fails it — and the round would report
+  *not applicable* on a diff that deleted a manifest, a chart or a whole
+  kustomize root. That is a change which unambiguously alters what deploys, and
+  it is precisely the class this panel's own attribution rules legislate for (a
+  deleted child path dangling an app-of-apps parent, a removed NetworkPolicy
+  exposing a namespace). So: if any changed path no longer exists in the repo
+  and was a manifest, a chart root, or a kustomize root — or lived under one —
+  **dispatch**.
+
+  **Any such deletion in the diff makes the WHOLE temp tree the scope.** The
+  condition is the deletion itself, **not** whether it is what triggered
+  dispatch: whenever *any* changed path is a deletion no surviving rendered
+  document belongs to — even on a mixed diff where an ordinary edit
+  independently triggers dispatch and would bind a perfectly good scope of its
+  own — set `{SCOPE}` to the whole temp tree and list the deleted paths in
+  `{CHANGED FILES}`, marked as deletions.
+
+  Conditioning on "what triggered dispatch" instead would lose the deletion on
+  the commonest shape that carries one: edit chart A *and* delete a standalone
+  `Application` — any move-or-remove refactor. Dispatch is triggered by the
+  edit, ordinary scope binds to chart A's output, and the deleted manifest's
+  effects on *unchanged* documents fall outside every reviewer's scope, so the
+  round records clean over the dangling parent. The whole-tree scope is what
+  lets the reviewers' absence checks and `argocd-advisor`'s path resolution meet
+  those unchanged documents — the exposed namespace, the dangling parent — which
+  is the entire point of dispatching on a deletion. (A deleted unit also renders
+  nothing, so on a deletion-only diff the ordinary rule would bind `{SCOPE}` to
+  nothing and three agents would read nothing and correctly emit `[]` — the same
+  clean-round-over-nothing this gate exists to block, arriving one step later.)
+
+  A deleted path that was **not** any of those, and lived under none — a
+  repo-root script, a workflow file, a README — is treated exactly like an
+  existing path that belongs to no rendered document. Stating that explicitly
+  closes the enumeration: without it a deleted non-deploy path satisfies neither
+  the dispatch condition nor the reservation below, and a model resolving toward
+  "deletions dispatch" would run the panel over a scope containing nothing,
+  collect three correct `[]`s, and write a clean aggregate for a change no agent
+  reviewed. So: reserve *not applicable* for the case where **no** changed path —
+  existing or deleted — belongs to, or was, any rendered unit.
+
+  Both extensions are load-bearing. Equality alone would be wrong on the
+  commonest change there is: the map points a rendered document at its
+  *template*, so a story editing only `values.yaml` or an overlay patch would
+  map back to nothing. And same-root alone would be wrong on the shape this very
+  step creates — it builds only *unconsumed* roots, so a change confined to a
+  consumed base (`base/deployment.yaml`, consumed by `overlays/prod/`) renders
+  into the overlay's output under the *overlay's* root, a different root from
+  the changed files. Without the consumption step this gate would refuse to
+  dispatch on a change that genuinely alters what deploys.
+
+Either way the three agents would each read nothing, each correctly emit `[]`,
+and Step 3 would write a clean aggregate for a change no agent ever reviewed.
+So do not dispatch: report the round as **failed** (an empty tree after render
+errors) or explicitly **not applicable** (nothing to render at all, or nothing
+in scope rendered) to the caller, with the detail in
+`<findings-path>.failed.json` and **nothing** written to the findings path.
+
+**The second shape applies only when a changed-file list exists.** On a
+standalone run there is none, so "no document maps back to any changed file" is
+vacuously true — read literally it would report *every* standalone run as not
+applicable and dispatch nobody, a review command that never reviews. In that
+mode only the empty-tree shape gates: a non-empty tree always dispatches.
+
 **Scope.** `$ARGUMENTS` names the review scope; with no argument, review every
-file the render step produced. Note the mapping: reviewers read *rendered*
+file **in the temp tree** — rendered output *and* the standalone manifests
+copied in alongside it. Say "the temp tree", never "what the render step
+produced": the standalone manifests were *copied*, not produced, and a model
+reading the narrower phrase points `argocd-advisor` at chart output containing
+no `Application` — the exact failure the paragraph above exists to prevent.
+Note the mapping: reviewers read *rendered*
 output, but "changed" is a property of the *source* — one edited `values.yaml`
 can change many rendered documents, so scope by the rendered files a changed
-source produces, never by source paths alone.
+source produces, never by source paths alone. **The deletion branch above
+overrides this**: a deletion produces no rendered files, so it scopes to the
+whole temp tree instead — and so does any *other* change sharing a diff with
+such a deletion.
+
+**Report against the CHANGED SOURCE FILE — the findings are otherwise thrown
+away.** The `file` field of every finding object must be a **repo-relative
+path to a file that is in the review scope's changed-file list**. Not the
+rendered temp-tree path, and not just any source path: specifically the changed
+source whose edit produced the rendered text you are reporting on.
+
+- a field substituted from `values.yaml` → `file` is the **`values.yaml`**, not
+  the template that consumed it;
+- a field added or patched by an overlay → the **overlay patch** or its
+  `kustomization.yaml`;
+- a template's own line → the **template file** — but only when that template is
+  itself in the changed-file list;
+- a standalone manifest → its own repo path.
+
+Use `line: null` whenever the rendered line has no line in that source file.
+
+**Never report a directory as `file`** — not a chart directory, not an overlay
+root. The filter below matches file paths, so a directory matches nothing and
+the finding is discarded unconditionally.
+
+This is not a formatting preference. The resolve-issue loop filters the panel's
+aggregate through `review-dispatch.zsh scope-findings`, which keeps only
+findings whose `file` **exactly matches an entry in the story's diff**. So both
+of the obvious near-misses lose the finding outright: a temp-tree path
+(`/tmp/.../helm_app.yaml`) never matches, and neither does an *unchanged*
+template file when the actual edit was to `values.yaml` — which is precisely
+the case the *Scope* note above calls out as typical. Either way the filtered
+array is `[]`, and the loop converges recording a clean round over a blocker it
+was told about.
+
+If you genuinely cannot tie a finding to a changed source file, report it
+against the **closest changed file that is in scope**, with `line: null`, and
+say in the prose that the attribution is approximate. Reporting it against an
+out-of-scope path is equivalent to not reporting it at all.
+
+**A standalone run has no changed-file list, and the rule relaxes accordingly.**
+Everything above assumes the loop invoked this panel over a story's diff. Run
+directly (`/development-kubernetes:review` with no orchestrator), there is no
+diff, no changed-file list and **no `scope-findings` filter to satisfy** — so
+`file` is the repo-relative **source FILE** the flagged text came from: resolve
+via the render map, then name the concrete file — the patch,
+`kustomization.yaml`, `values.yaml`, template or standalone manifest — never a
+temp path, and never the chart or overlay **root** the map itself may name for a
+kustomize output. Say so explicitly when you pass
+`{CHANGED FILES}` as `none — standalone run`; a reviewer that reads the
+changed-file rule as absolute in that mode withholds every finding it has, which
+is the same silent loss by the opposite route.
 
 For each agent, use its name as the `subagent_type` and pass the prompt below,
-substituting **all four** placeholders: `{SCOPE}` (the scope above),
-`{DIMENSION}` and `{AGENT NAME}` from the table, and `{ROUND}` (the review
-round; `1` for a standalone run). Leaving `{AGENT NAME}` unbound corrupts the
+substituting **all seven** placeholders: `{SCOPE}` (the scope above),
+`{DIMENSION}` and `{AGENT NAME}` from the table, `{ROUND}` (the review
+round; `1` for a standalone run), `{RENDER MAP}` (the path to the
+`render-map.json` the render step wrote), `{REPO}` (the **source repository
+root**, plus its remote URL when one exists — `argocd-advisor` needs it to tell
+this repo's own `Application`s from another repo's, and it has no `Bash` to ask
+`git` itself), and `{CHANGED FILES}` (the story's changed **source** paths, or
+the literal `none — standalone run`).
+
+`{CHANGED FILES}` is not optional decoration: the reporting rule below requires
+each finding's `file` to be a member of that list, and a reviewer has no `Bash`
+and no git access to derive it. Leave it unbound and the rule is unfollowable,
+so the reviewer guesses — typically the unchanged template rather than the
+edited `values.yaml` — and the loop's filter discards the finding. Leaving
+`{AGENT NAME}` unbound corrupts the
 `reviewer` field the consolidator keys on. This is where the machine-readable JSON layer is
 wired in once, for every agent, so the reviewer definitions stay pure prose:
 
     Review scope: {SCOPE}
+    Source repository root: {REPO}
+    Rendered-to-source map: {RENDER MAP}
+    Changed source files in scope: {CHANGED FILES}
 
     Analyze the rendered manifests in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 
     Then, after the prose, emit those same findings once more as a single fenced `json` block — a JSON array of finding objects — per the Review finding schema in ARCHITECTURE.md. Each object has exactly: severity (the CRITICAL|WARNING|SUGGESTION tag from the prose), dimension ("{DIMENSION}"), file, line (integer, or null when file-level), title, description, suggested_fix (may be ""), reviewer ("{AGENT NAME}"), round ({ROUND}). Emit [] if you found nothing.
+
+    `file` MUST be one of the changed source files listed above — resolve the rendered document back to its source via the rendered-to-source map, then report the CHANGED file whose edit produced the text you are flagging (the values.yaml or overlay patch when the field was substituted or patched; the template only when the template itself is in that list). Never the rendered temp-tree path, and never a directory: a downstream filter keeps only findings whose file exactly matches a changed path, so anything else is silently discarded and your finding is lost. Use line: null when the rendered line has no line in that source file. When a changed-file list IS given and no changed file produced the flagged text — the text lives in a file this story did not touch, which is exactly how a deleted child path breaks an unchanged app-of-apps parent — do NOT report the unchanged file: the filter discards it on an exact match against the diff, and your finding is lost. Report it against the closest CHANGED file in scope with line: null, and say in the prose that the attribution is approximate and which unchanged file the text is actually in. When the changed-file list is `none — standalone run`, that filter does not exist: resolve via the render map and report the concrete repo-relative source FILE the flagged text came from (patch, kustomization.yaml, values.yaml, template or standalone manifest) — never the chart or overlay root the map may name — and never withhold a finding for want of a list. Either way, if you cannot tie a finding to any file at all, report it against the closest file in scope with line: null and say the attribution is approximate; reporting nothing is worse than reporting it approximately.
 
 Without this block the panel's findings cannot be consumed by
 `consolidate-findings.zsh` or the resolve-issue review loop — ARCHITECTURE.md
@@ -1356,18 +1783,28 @@ There is no approver dimension. A human approves infrastructure.
 ## Step 2 — collect
 
 Wait for all three agents. **An agent that fails is not an agent that found
-nothing.** If one errors, or returns no fenced `json` block, re-launch it once;
-if it fails again, report the round as **failed** and name the dimension.
+nothing.** If one errors, returns no fenced `json` block, **or returns a block
+that does not parse as a JSON array**, re-launch it once;
+if it fails again, report the round as **failed** and name the dimension. The
+third condition is not redundant: a block holding invalid JSON, or a single
+finding *object* rather than an array, satisfies neither of the first two, so
+without it the retry never fires and Step 3 concatenates the malformed content —
+which every consumer then rejects as "malformed input file", burying the
+dimension the signal was supposed to name.
 
-**Do not write the findings path.** It is array-only by contract, and all three
-consumers enforce that (`resolve-story-loop.zsh`, `consolidate-findings.zsh`,
-`review-dispatch.zsh` each exit 1 on a non-array), so a `{"round_failed": …}`
-object there would surface as "malformed input file" and bury the very
-dimension the signal names. This is the rule `development-go`'s panel states,
-and this panel follows it. Write the durable detail to a **sibling** path —
-`<findings-path>.failed.json` — where nothing parses it as findings. A missing
-dimension silently waived is a blocker shipped, so the failure must be reported
-to the caller, not inferred from an absent file.
+**Do not write the findings path.** It is array-only by contract — but do not
+rely on the consumers to catch a violation, because only one of them does.
+`resolve-story-loop.zsh` genuinely rejects a non-array and exits 1. The other
+two **accept it silently**: `review-dispatch.zsh scope-findings` iterates a
+`{"round_failed": …}` object's values, matches nothing and prints `[]` at exit
+0, and `consolidate-findings.zsh` has no array guard on `--findings` at all —
+it coerces the object into a single bogus `SUGGESTION` and exits 0. So writing
+a status object there does not surface as a loud parse error; it produces a
+clean or near-clean round over a dimension that failed. That is worse than the
+rejection, and it is the reason for the rule. Write the durable detail to a
+**sibling** path — `<findings-path>.failed.json` — where nothing parses it as
+findings. A missing dimension silently waived is a blocker shipped, so the
+failure must be reported to the caller, not inferred from an absent file.
 
 ## Step 3 — aggregate
 
@@ -1382,9 +1819,12 @@ the resolve-issue loop read; without it a caller that maps an absent file to
 **Register the two new dimensions — and say how `reliability` differs from
 `resilience`.** The family already ships a `resilience` dimension
 (`*-resilience-reviewer`, #966) for every service language, meaning the failure
-modes that surface as outages. Because this topic composes alongside a language
-plugin, one review round can emit both, and two near-homonyms in one dossier
-invite a reader to treat them as duplicates. State the split explicitly when
+modes that surface as outages. The two are near-homonyms sitting side by side in
+one dimension enum, and a reader meeting both invites treating them as
+duplicates. (A single review *round* never emits both: `plan` resolves exactly
+one `repo_type`, and `kubernetes` is a no-language fallback any **supported**
+language beats. It is the *maintenance* dispatch that composes alongside a
+language plugin.) State the split explicitly when
 registering: `resilience` reviews **application code**'s outbound-dependency
 behaviour (breakers, timeouts, fallbacks); `reliability` reviews the **rendered
 manifest**'s availability posture (probes, PDBs, replicas, rollout strategy).
@@ -1396,7 +1836,7 @@ and note that, like every non-core dimension, they inherit the known
 `build-dossier.zsh` `$core` gap (#1148): a **clean** run of a non-core dimension
 emits no key at all, which is indistinguishable from "never ran".
 
-- [ ] **Step 7: Verify all agent frontmatter parses**
+- [x] **Step 7: Verify all agent frontmatter parses**
 
 Run:
 
@@ -1511,7 +1951,7 @@ Expected: five `ok` lines.
 > `development/skills/bootstrap/scripts/detect-stack.sh` (item 4's topic key),
 > and both manifests.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add development-kubernetes/agents development-kubernetes/skills/review

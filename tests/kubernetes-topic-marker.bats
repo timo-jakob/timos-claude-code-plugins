@@ -70,12 +70,53 @@ setup() {
   # reason: an end address that stops matching prints to EOF, after which the
   # oracles would compare a runaway blob — and still pass, because the rest of
   # the script's `-name` tokens are quoted and invisible to names_of.
-  [ "$(grep -c '^manifest_hits=' "$GATHER")" -eq 1 ]
-  GATHER_BLOCK="$(sed -n '/^manifest_hits=/,/|| true)"$/p' "$GATHER")"
+  # SENTINEL-bounded and covering BOTH halves — the find AND the argoproj grep.
+  # The old `/^manifest_hits=/,/|| true)"$/` range stopped at the find half, so
+  # the --exclude-dir/--include oracles had to fall back to the whole file, and
+  # an unbounded union cannot tell "present in this recipe" from "present
+  # somewhere in the script". Same treatment, same reason, as DETECT_BLOCK.
+  [ "$(grep -c '^# gather-kubernetes-marker:begin$' "$GATHER")" -eq 1 ]
+  [ "$(grep -c '^# gather-kubernetes-marker:end$' "$GATHER")" -eq 1 ]
+  GATHER_BLOCK="$(sed -n '/^# gather-kubernetes-marker:begin$/,/^# gather-kubernetes-marker:end$/p' "$GATHER" \
+    | grep -v '^[[:space:]]*#')"
   [ -n "$GATHER_BLOCK" ]
-  [ "$(printf '%s\n' "$GATHER_BLOCK" | wc -l)" -le 10 ]
+  [ "$(printf '%s\n' "$GATHER_BLOCK" | wc -l)" -le 20 ]
   starts_with "$GATHER_BLOCK" 'manifest_hits='
-  ends_with "$GATHER_BLOCK" '|| true)"'
+  ends_with "$GATHER_BLOCK" 'fi'
+  contains "$GATHER_BLOCK" 'find .'
+  contains "$GATHER_BLOCK" 'argoproj.io'
+
+  # the FOURTH copy (#1153): detect-stack.sh's `is_kubernetes` key, which
+  # review-dispatch.zsh reads as a fallback repo_type. It gets the same shape
+  # guards and joins the same parity oracles — a detect-stack that fired where
+  # the orchestrator's marker does not would route a repo's review loop to a
+  # panel its maintenance dispatch never selects.
+  DETECT="$REPO_ROOT/development/skills/bootstrap/scripts/detect-stack.sh"
+  [ -f "$DETECT" ]
+  # SENTINEL-bounded, exactly like RECIPE and MANIFESTS above — and for a
+  # sharper reason. The oracles below compare sorted UNIONS of extracted
+  # tokens, so deriving detect-stack's operand from the WHOLE 1600-line file
+  # would let any other block in this actively-extended script supply a
+  # `--exclude-dir=templates` or `--include='*.yaml'` and mask its deletion
+  # from the kubernetes recipe: union unchanged, parity green, and the argoproj
+  # grep quietly widened to "any file mentioning Argo".
+  [ "$(grep -c '^# is-kubernetes-marker:begin$' "$DETECT")" -eq 1 ]
+  [ "$(grep -c '^# is-kubernetes-marker:end$' "$DETECT")" -eq 1 ]
+  # `[[:space:]]`, not `\s`: the latter is a GNU extension, and BSD grep (which
+  # is /usr/bin/grep on the macos-latest CI leg, where script-tests.yml puts
+  # /bin first on PATH) reads it as a literal `s` — the pattern would degrade to
+  # `^s*#` there, leaving the recipe's tab-indented comments in the block on one
+  # leg but not the other
+  DETECT_BLOCK="$(sed -n '/^# is-kubernetes-marker:begin$/,/^# is-kubernetes-marker:end$/p' "$DETECT" \
+    | grep -v '^[[:space:]]*#')"
+  [ -n "$DETECT_BLOCK" ]
+  [ "$(printf '%s\n' "$DETECT_BLOCK" | wc -l)" -le 20 ]
+  starts_with "$DETECT_BLOCK" 'is_kubernetes="false"'
+  ends_with "$DETECT_BLOCK" 'fi'
+  # the block must carry BOTH halves — the find and the argoproj grep — or the
+  # oracles silently stop covering the half that fell outside it
+  contains "$DETECT_BLOCK" 'find .'
+  contains "$DETECT_BLOCK" 'argoproj.io'
 }
 
 # The recipe is a PREDICATE — its exit status is the verdict — and it searches
@@ -412,6 +453,10 @@ chart() {
   # the THIRD copy — the manifests lister — must agree too, or a repo dispatches
   # as kubernetes with a manifests list that omits its charts
   [ "$recipe_names" = "$(names_of "$MANIFESTS")" ]
+  # and the FOURTH — detect-stack's is_kubernetes (#1153): a repo the review
+  # dispatcher calls kubernetes but the orchestrator does not gets a review panel
+  # its maintenance dispatch never selects, and vice versa
+  [ "$recipe_names" = "$(names_of "$DETECT_BLOCK")" ]
   # and the set is the documented one, so a matched pair of deletions still reds
   [ "$recipe_names" = "Chart.yaml Kustomization kustomization.yaml kustomization.yml " ]
 }
@@ -425,26 +470,35 @@ chart() {
   [ -n "$recipe_prunes" ]
   [ "$recipe_prunes" = "$gather_prunes" ]
   [ "$recipe_prunes" = "$(prunes_of "$MANIFESTS")" ]
+  [ "$recipe_prunes" = "$(prunes_of "$DETECT_BLOCK")" ]
   [ "$recipe_prunes" = "/\\.git/ /node_modules/ /templates/ /vendor/ " ]
 }
 
 @test "the marker and the gather exclude the SAME dirs from the argoproj grep (#1152)" {
-  local recipe_ex gather_ex manifests_ex
+  local recipe_ex gather_ex manifests_ex detect_ex
   recipe_ex="$(printf '%s\n' "$RECIPE" | grep -oE '\-\-exclude-dir=[a-z_.]+' | sort -u | tr '\n' ' ')"
-  gather_ex="$(grep -oE '\-\-exclude-dir=[a-z_.]+' "$GATHER" | sort -u | tr '\n' ' ')"
+  gather_ex="$(printf '%s\n' "$GATHER_BLOCK" | grep -oE '\-\-exclude-dir=[a-z_.]+' | sort -u | tr '\n' ' ')"
   manifests_ex="$(printf '%s\n' "$MANIFESTS" | grep -oE '\-\-exclude-dir=[a-z_.]+' | sort -u | tr '\n' ' ')"
+  # derived from the SENTINEL-BOUNDED block, not the whole file: an unbounded
+  # union cannot distinguish "present in this recipe" from "present somewhere
+  # in a 1600-line script", so a token deleted here but present elsewhere would
+  # leave the union — and this test — unchanged
+  detect_ex="$(printf '%s\n' "$DETECT_BLOCK" | grep -oE '\-\-exclude-dir=[a-z_.]+' | sort -u | tr '\n' ' ')"
   [ -n "$recipe_ex" ]
   [ "$recipe_ex" = "$gather_ex" ]
   [ "$recipe_ex" = "$manifests_ex" ]
-  # the --include NARROWING, held across the same three copies: without it the
+  [ "$recipe_ex" = "$detect_ex" ]
+  # the --include NARROWING, held across the same four copies: without it the
   # argoproj half becomes "any file mentioning Argo"
-  local recipe_in gather_in manifests_in
+  local recipe_in gather_in manifests_in detect_in
   recipe_in="$(includes_of "$RECIPE")"
-  gather_in="$(includes_of "$(cat "$GATHER")")"
+  gather_in="$(includes_of "$GATHER_BLOCK")"
   manifests_in="$(includes_of "$MANIFESTS")"
+  detect_in="$(includes_of "$DETECT_BLOCK")"
   [ "$recipe_in" = "--include='*.yaml' --include='*.yml' " ]
   [ "$recipe_in" = "$gather_in" ]
   [ "$recipe_in" = "$manifests_in" ]
+  [ "$recipe_in" = "$detect_in" ]
   [ "$recipe_ex" = "--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=templates --exclude-dir=vendor " ]
 }
 
@@ -507,10 +561,13 @@ chart() {
 #
 # tests/kubernetes-dispatcher.bats pins the producer — the dispatcher returning
 # plan:[] + missing_tooling:[] + human_action_required. These pin the orchestrator
-# rules that make that reach a human. Until #1153, EVERY kubernetes finding comes
-# back as a halt of exactly that shape, so deleting or reordering any of the rules
-# below renders every kubernetes run as "Clean — the topic's tools ran and found
-# nothing" with the whole suite green.
+# rules that make that reach a human. Since #1153 routes every recognised group to
+# a shipped agent, the halt shape is now reserved for a payload the dispatcher
+# CANNOT UNDERSTAND — an unrouted findings_by_tool key, a dispatch_mode outside
+# the enum, manifest_validation:false — which is precisely why the rules below
+# still matter: that escalation is the only way such a payload reaches a human,
+# and deleting or reordering any of them renders it as "Clean — the topic's tools
+# ran and found nothing" with the whole suite green.
 # ---------------------------------------------------------------------------
 
 @test "Phase 6 reads human_action_required BEFORE tooling_configured (#1152)" {

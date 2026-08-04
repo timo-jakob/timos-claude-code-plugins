@@ -90,6 +90,16 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 | `java-test-reviewer` | `opus` | Read, Grep, Glob | Java testing specialist that identifies coverage gaps, weak assertions, flaky tests, and test quality issues. The tests dimension of /development-java:review; also a risk-register lens for java-approver (#449). |
 | `java-versioning-advisor` | `opus` | Read, Edit, Bash, Grep | Audit a Java/Gradle project's versioning discipline — flag a hardcoded `version = "..."` (a Semantic-Versioning risk) and recommend build-driven versioning via nebula-release, where the version is derived from git tags and the release bump is derived from Conventional Commits. Used by development-java:maintenance. |
 
+## development-kubernetes
+
+| Agent | Model | Tools | Description |
+| --- | --- | --- | --- |
+| `argocd-advisor` | `opus` | Read, Grep, Glob | Argo CD specialist reviewing Application, ApplicationSet and AppProject resources — app-of-apps structure, sync policy (automated, prune, selfHeal), AppProject restrictions on sources and destinations, sync waves and ordering, and declared paths or revisions that cannot resolve in the repository under review. The argocd dimension of /development-kubernetes:review. |
+| `kubernetes-manifest-fixer` | `opus` | Read, Edit, Bash, Grep | For each manifest_validation finding (kubeconform schema errors, kube-linter warnings, formatting drift), apply the mechanical behaviour-preserving fix and verify by re-running the check; escalate anything that would change what gets deployed. Used by development-kubernetes:maintenance. |
+| `kubernetes-policy-triage` | `opus` | Read, Edit, Bash, Grep | For each policy or policy_tests finding, determine whether a Kyverno policy failure is a real violation in the manifests, a policy that is wrong, or a policy with no test fixtures; fix manifests when the policy is right, and escalate policy changes since a policy encodes an architectural decision the consumer owns. Used by development-kubernetes:maintenance. |
+| `kubernetes-reliability-reviewer` | `opus` | Read, Grep, Glob | Kubernetes reliability specialist reviewing rendered manifests for the failure modes that surface as outages rather than errors — MISCONFIGURED probes (an aggressive liveness probe that restart-loops a slow-starting pod), requests/limits that throttle or OOM-kill, no PodDisruptionBudget, single replicas for stateful paths, anti-affinity that EXISTS but does not work (wrong topologyKey, preferred where required is needed), and rollout strategies that drop capacity. Bare presence/absence checks (a probe missing entirely, no limits set, a latest tag, no anti-affinity at all) belong to kube-linter and are deliberately NOT reported here. The reliability dimension of /development-kubernetes:review. |
+| `kubernetes-security-reviewer` | `opus` | Read, Grep, Glob | Kubernetes security specialist reviewing rendered manifests for over-broad RBAC, missing or permissive security contexts, privileged and hostPath containers, secrets handled as plain env vars, and namespaces without NetworkPolicy. The security dimension of /development-kubernetes:review. |
+
 ## development-python
 
 | Agent | Model | Tools | Description |

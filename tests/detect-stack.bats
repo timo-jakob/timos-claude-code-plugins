@@ -789,7 +789,7 @@ setup() {
   out=$(bash "$DETECT" 2>/dev/null)
   echo "$out" | jq -e . >/dev/null
   for k in git_initialized has_github_remote languages has_dockerfile interfaces language_meta \
-           is_claude_plugin existing_artifacts missing_artifacts github_state containers \
+           is_claude_plugin is_kubernetes existing_artifacts missing_artifacts github_state containers \
            detection_confidence contracts; do
     [ "$(jq --arg k "$k" 'has($k)' <<<"$out")" = "true" ]
   done
@@ -1369,4 +1369,218 @@ setup() {
   [ "$(jq -r '.languages | index("swift")' <<<"$out")" != "null" ]
   [ "$(jq -r .language_meta.swift.version <<<"$out")" = "6.0" ]
   [ "$(jq -r .language_meta.swift.version_source <<<"$out")" = "parsed" ]
+}
+
+# --- #1153: the `kubernetes` topic marker (`is_kubernetes`) -------------------
+#
+# This key is the FALLBACK repo_type signal review-dispatch.zsh reads
+# (`jq -r '.is_kubernetes // false'`), so a regression here does not crash — it
+# degrades to `false`, and every GitOps repo escalates as `unsupported_repo_type`
+# instead of reaching its review panel. tests/kubernetes-topic-marker.bats holds
+# this recipe to its three siblings by comparing extracted TOKENS, and
+# tests/review-dispatch.bats stubs detect-stack out entirely, so neither of them
+# ever EXECUTES this block. These tests do — the producer half of that contract.
+
+k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
+
+@test "detect-stack #1153: a Helm Chart.yaml makes the repo kubernetes" {
+  mkdir -p charts/app
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  [ "$(k8s_detect)" = "true" ]
+}
+
+@test "detect-stack #1153: each of the three Kustomize spellings fires the marker" {
+  # kustomize accepts all three; recognising only kustomization.yaml would leave
+  # the other two shapes of repo undetected
+  local spelling
+  for spelling in kustomization.yaml kustomization.yml Kustomization; do
+    rm -rf "$WORK"/*; cd "$WORK"
+    printf 'resources:\n  - deployment.yaml\n' > "$spelling"
+    [ "$(k8s_detect)" = "true" ]
+  done
+}
+
+@test "detect-stack #1153: an argoproj.io resource fires the marker with no chart present" {
+  # the content half of the marker — a GitOps repo may hold only Argo CD
+  # Application manifests, with no chart and no kustomization anywhere
+  mkdir -p argocd
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: app\n' > argocd/app.yaml
+  [ "$(k8s_detect)" = "true" ]
+}
+
+@test "detect-stack #1153: an argoproj.io resource written as .yml also fires" {
+  # the grep carries --include for BOTH extensions; dropping .yml would report a
+  # .yml-only Argo repo as manifest-free
+  mkdir -p argocd
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: AppProject\n' > argocd/proj.yml
+  [ "$(k8s_detect)" = "true" ]
+}
+
+@test "detect-stack #1153: an empty repo is NOT kubernetes" {
+  [ "$(k8s_detect)" = "false" ]
+}
+
+@test "detect-stack #1153: an unrelated YAML-bearing repo is NOT kubernetes" {
+  # the marker is deliberately NOT "any YAML with apiVersion", which would match
+  # a workflow file or an OpenAPI document in half the repos in existence
+  mkdir -p .github/workflows
+  printf 'name: ci\non: [push]\njobs:\n  a:\n    runs-on: ubuntu-latest\n' > .github/workflows/ci.yml
+  printf 'openapi: 3.0.0\ninfo:\n  title: x\n  version: "1"\n' > openapi.yaml
+  [ "$(k8s_detect)" = "false" ]
+}
+
+@test "detect-stack #1153: argoproj.io mentioned in PROSE does not fire the marker" {
+  # the --include globs narrow the grep to YAML; without them any README
+  # discussing Argo CD would mark the repo kubernetes
+  printf '# Notes\n\nWe deploy with argoproj.io Applications elsewhere.\n' > README.md
+  printf 'argoproj.io is the Argo CD API group.\n' > notes.txt
+  [ "$(k8s_detect)" = "false" ]
+}
+
+@test "detect-stack #1153: charts under every pruned tree are ignored" {
+  # vendored/generated trees are not this repo's deployables; a chart inside
+  # node_modules or a template directory must not make the repo a GitOps repo
+  local pruned
+  for pruned in node_modules vendor templates .git; do
+    rm -rf "$WORK"/*; rm -rf "$WORK"/.git; cd "$WORK"; git init -q
+    mkdir -p "$pruned/pkg"
+    printf 'apiVersion: v2\nname: x\nversion: 0.1.0\n' > "$pruned/pkg/Chart.yaml"
+    [ "$(k8s_detect)" = "false" ]
+  done
+}
+
+@test "detect-stack #1153: argoproj.io under every pruned tree is ignored" {
+  # all four --exclude-dir values, not just one: testing a single directory
+  # leaves the other three pinned only TEXTUALLY (by the parity oracle in
+  # kubernetes-topic-marker.bats) and behaviourally dependent on the sibling
+  # suite's coverage of the SKILL recipe rather than on this copy
+  local pruned
+  for pruned in node_modules vendor templates .git; do
+    rm -rf "$WORK"/*; rm -rf "$WORK"/.git; cd "$WORK"; git init -q
+    mkdir -p "$pruned/dep"
+    printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$pruned/dep/app.yaml"
+    [ "$(k8s_detect)" = "false" ]
+  done
+}
+
+@test "detect-stack #1153: a DIRECTORY named like a manifest is not a manifest" {
+  # the `! -type d` guard: `Kustomization/` is a directory someone happened to
+  # name that way, not a kustomize manifest
+  mkdir -p Kustomization
+  [ "$(k8s_detect)" = "false" ]
+}
+
+@test "detect-stack #1153: a SYMLINKED manifest still counts" {
+  # the other half of `! -type d`: find does not follow symlinks, so the link is
+  # type `l` and `-type f` (the tempting simplification) would drop it.
+  # The link TARGET is deliberately not itself named Chart.yaml — otherwise
+  # `-name Chart.yaml` matches the real file too and the test passes under the
+  # very mutation it exists to catch.
+  mkdir -p shared charts/app
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > shared/chart-source.yaml
+  ln -s ../../shared/chart-source.yaml charts/app/Chart.yaml
+  [ -L charts/app/Chart.yaml ]
+  [ "$(k8s_detect)" = "true" ]
+}
+
+@test "detect-stack #1153: a repo whose own directory is named 'templates' still detects its chart" {
+  # the prune substrings must test REPO-RELATIVE paths. With an absolute prefix,
+  # a checkout living under a directory named templates/ (or vendor/, or
+  # node_modules/) would filter every hit and report itself manifest-free —
+  # the same hazard the #976 language tests pin for the -mindepth 1 guard.
+  tdir="$BATS_TEST_TMPDIR/templates"
+  mkdir -p "$tdir/charts/app"
+  cd "$tdir"
+  git init -q
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  [ "$(k8s_detect)" = "true" ]
+}
+
+@test "detect-stack #1153: a repo named like a pruned dir still detects an argoproj-only tree" {
+  # the grep half of the same hazard, and a sharper one: GNU grep's
+  # --exclude-dir skips any COMMAND-LINE directory whose name matches, so
+  # grepping "$cwd" rather than `.` would skip such a repo in its ENTIRETY.
+  # Looped over every --exclude-dir token, so the test name is true of each.
+  local base tdir
+  for base in templates vendor node_modules; do
+    tdir="$BATS_TEST_TMPDIR/argo-$base/$base"
+    mkdir -p "$tdir/argocd"
+    cd "$tdir"
+    git init -q
+    printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > argocd/app.yaml
+    [ "$(basename "$PWD")" = "$base" ]
+    [ "$(k8s_detect)" = "true" ]
+  done
+}
+
+@test "detect-stack #1153: is_kubernetes is a JSON boolean, not a string" {
+  # review-dispatch.zsh compares the jq -r output to the literal "true"; a
+  # quoted "true" would still read true there, but a consumer using `jq -e
+  # .is_kubernetes` on a string would silently accept "false" as truthy
+  mkdir -p charts/app
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.is_kubernetes | type' <<<"$out")" = "boolean" ]
+}
+
+@test "detect-stack #1153: the kubernetes marker does not disturb language detection" {
+  # the marker is language-agnostic and composes: a Go service that also ships a
+  # chart must still detect as go, or the topic would cannibalise the language
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  mkdir -p charts/app
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" != "null" ]
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #1153: the marker survives an unreadable subtree under errexit" {
+  # detect-stack.sh runs under `set -euo pipefail`, and this recipe depends on
+  # `2>/dev/null` on BOTH halves plus `|| true` on the capture to survive one
+  # unreadable directory. The parity oracles in kubernetes-topic-marker.bats
+  # compare only -name / prune / --exclude-dir / --include tokens, so they are
+  # blind to those guards — drop one and detect-stack aborts non-zero on any
+  # repo containing an unreadable subtree, review-dispatch's `plan` exits 1 and
+  # bootstrap breaks with it, all with the suite green. The sibling suite pins
+  # exactly this for the other three copies of the recipe.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every directory, so the guard cannot be exercised"
+  fi
+  mkdir -p charts/app locked
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  chmod 000 locked
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  chmod 755 locked   # restore BEFORE asserting, so a failure still cleans up
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #1153: an argoproj-only repo survives an unreadable subtree too" {
+  # the grep half of the same guard — its `2>/dev/null` is a separate token from
+  # the find half's, so a deletion of either must red somewhere
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every directory, so the guard cannot be exercised"
+  fi
+  mkdir -p argocd locked
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > argocd/app.yaml
+  chmod 000 locked
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  chmod 755 locked
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #1153: a plugin repo carrying charts sets BOTH markers" {
+  # the composition the review-dispatch ordering rule exists for, pinned on the
+  # PRODUCER side: review-dispatch.bats can only stub both keys true, so nothing
+  # otherwise proves detect-stack can actually emit that pair. This repo becomes
+  # exactly this shape once #1155 lands its Kubernetes fixtures.
+  mkdir -p .claude-plugin charts/app
+  printf '{"name":"x","version":"0.1.0"}\n' > .claude-plugin/plugin.json
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .is_claude_plugin <<<"$out")" = "true" ]
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
 }

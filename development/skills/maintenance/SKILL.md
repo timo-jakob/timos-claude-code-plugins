@@ -340,8 +340,10 @@ k8s_hits="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
 react's are: `tests/kubernetes-topic-marker.bats` extracts the text between them
 and executes it, so the suite tests *this* recipe rather than a copy of it, and a
 second test derives the recipe's marker names and prune set from
-`gather-kubernetes-findings.zsh` and requires the two to agree. Keep the whole
-recipe between them, and keep them a single unique pair.
+`gather-kubernetes-findings.zsh` — and, since #1153, from
+`development/skills/bootstrap/scripts/detect-stack.sh`'s `is-kubernetes-marker`
+block, a FOURTH copy of this recipe — and requires all of them to agree. Keep
+the whole recipe between them, and keep them a single unique pair.
 
 **The `react-marker:begin`/`:end` sentinels are load-bearing**, not decoration:
 `tests/react-topic-marker.bats` extracts exactly the text between them and executes
@@ -444,9 +446,11 @@ would make that repo undispatchable. Two things about its marker are deliberate:
   output outruns the pipe buffer, which is the worst possible failure mode.
   Capture, then test the variable.
 
-Both the marker and `gather-kubernetes-findings.zsh` prune `node_modules`,
-`.git`, `vendor` and `templates` — the last one matters here, since this very repo
-ships chart *templates* under bootstrap's `templates/` tree.
+All four copies — the marker, `gather-kubernetes-findings.zsh`, the manifests
+lister below, and detect-stack.sh's `is-kubernetes-marker` block (#1153) — prune
+`node_modules`, `.git`, `vendor` and `templates`; the last one matters here,
+since this very repo ships chart *templates* under bootstrap's `templates/`
+tree.
 
 **`gather-docs-findings.zsh` landed in #793**, so `docs` is a **supported** topic
 whenever its marker fires: #801 stood up the `development-docs` dispatcher and this
@@ -1070,7 +1074,8 @@ differences:
   **The `kubernetes-manifests:begin`/`:end` sentinels are load-bearing too**, like
   the verdict recipe's: `tests/kubernetes-topic-marker.bats` extracts this block by
   them, executes it, and holds its marker names and prune set to the *same* derived
-  oracle as the verdict recipe and `gather-kubernetes-findings.zsh` — all three must
+  oracle as the verdict recipe, `gather-kubernetes-findings.zsh` and
+  detect-stack.sh's `is-kubernetes-marker` block (#1153) — all four must
   stay identical. Keep them a single unique pair, keep the whole recipe between
   them, and keep the block at its current two-space indent inside this list item
   (the extractor de-indents by exactly that much).
@@ -1279,8 +1284,12 @@ topic `plan` depends first on `human_action_required`, then on
   which is not language-only) and **never render a clean verdict for that
   topic**. This is a real shape, not a hypothetical: `development-kubernetes`
   returns exactly it — empty `plan`, empty `missing_tooling` (both its policy
-  keys are exempt from that list), and one entry per unroutable group — for
-  every finding it gathers until #1153 lands its agents.
+  keys are exempt from that list), and one `human_action_required` entry —
+  whenever it cannot understand the payload: a `findings_by_tool` key its
+  routing table has no row for, a `dispatch_mode` outside the two-value enum,
+  or `manifest_validation: false` (presence detection, so `false` means the
+  payload was not built by the orchestrator). Its **routable** groups return a
+  real `plan` — the escalate-everything override retired with #1153.
 - else `tooling_configured` **non-empty** → "this topic is clean — its tools ran
   and found nothing";
 - else (**empty**) → "no tools are registered for this topic yet — nothing was
@@ -1301,8 +1310,8 @@ target still proceeds.
 
 **This is not language-only.** For a *language* plugin the halt means coverage
 was below floor. A **topic** dispatcher halts for its own reasons — a finding
-whose routing table has no entry, or an agent that has not shipped yet
-(`development-kubernetes` until #1153) — and the same handling applies: the
+whose routing table has no entry, a payload field outside its documented enum,
+or an agent a routing row names that has not shipped yet — and the same handling applies: the
 reasons reach the summary, and Phase 9 renders the topic as **halted**, never as
 clean.
 
@@ -2432,8 +2441,9 @@ pushed fixes for — detected, never dispatched:>
    dispatcher deliberately halted. This case comes BEFORE the two below: the
    halt shape is an empty plan with an empty missing_tooling, which would
    otherwise fall through to "Clean" and report an escalation as a clean bill of
-   health. `development-kubernetes` returns exactly this shape for every group
-   it gathers until #1153:>
+   health. `development-kubernetes` returns exactly this shape for a payload it
+   cannot understand — an unrouted `findings_by_tool` key, a `dispatch_mode`
+   outside its enum, or `manifest_validation: false`:>
   Halted — <N> group(s) need a human decision.
     <one line per entry: <reason> → <recommendation>>
   <Else if tooling_configured is EMPTY (no tools registered for this topic yet):>

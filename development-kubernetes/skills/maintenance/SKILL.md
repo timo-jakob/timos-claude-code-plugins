@@ -6,10 +6,9 @@ description: >
   kubernetes topic gather (gather-kubernetes-findings.zsh), validates it, and
   returns a plan routing each finding group to an agent. A TOPIC plugin that can
   also be PRIMARY: a GitOps repo with no application language declares
-  `primary: kubernetes` and gets the full pipeline. v0.2 REGISTERS the routing table
-  (manifest_validation → kubernetes-manifest-fixer; policy + policy_tests →
-  kubernetes-policy-triage) but ships NO agents, so every group returns as a
-  human_action_required entry naming #1153, where those agents land.
+  `primary: kubernetes` and gets the full pipeline. It ROUTES each finding group
+  by the live routing table (manifest_validation → kubernetes-manifest-fixer;
+  policy + policy_tests → kubernetes-policy-triage, grouped into one PR).
   A single invocation returns the plan; the per-group work agents are the
   orchestrator's job. Pure function of its JSON input; runs no detection of its
   own. Ships NO approver — a cluster definition is approved by a human.
@@ -116,27 +115,10 @@ every payload, and **never** read by this dispatcher. Resolving a bare "policy"
 to that object would read a repo with no Kyverno files as having policies
 configured, inverting the charter's central skip.
 
-**Until #1153 lands, this table dispatches nothing** — its entries still define
-the known-key universe *Validation*'s unknown-key check tests against; it is the
-routing they authorise that is suspended. The agents below are created
-by #1153; #1152 ships the dispatcher alone. A `policy_tests` finding is
-reachable the moment the gather exists, so routing it now would have the
-orchestrator spawn a `subagent_type` with no definition and the group would
-fail. Until the agent files exist, return every group as a
-`human_action_required` entry naming #1153. Borrow the **mechanism** the
-language dispatchers use — escalate via `human_action_required` rather than
-`development-react`'s empty-plan-plus-`missing_tooling` summary, because an
-unroutable group must **halt**, and because this dispatcher forbids
-`missing_tooling` for the policy skip. Borrow only the mechanism:
-`development-java`'s and `development-go`'s halt objects both omit `plan` (and
-Java's additionally omits `ci_fixer_agent`), which the *Response* section below
-forbids here — keep both fields, per that section.
-
-**Delete this paragraph in #1153 — and rewrite the "v0.2 REGISTERS ... NO agents"
-sentence of this file's frontmatter `description` in the same PR.** The
-description restates the same override, and it is what a model reads *first* at
-invocation time; deleting only the paragraph leaves a description licensing
-escalation against a body licensing routing.
+**This table is live** — every row routes, and its entries also define the
+known-key universe *Validation*'s unknown-key check tests against. Both agents
+ship with this plugin (`development-kubernetes/agents/`), so a routed group
+names a `subagent_type` that exists.
 
 | Finding tool | Agent |
 |---|---|
@@ -147,7 +129,7 @@ escalation against a body licensing routing.
 **A group exists only for a ROUTED `findings_by_tool` key whose array is
 NON-EMPTY.** A routed key present with an **empty** array means "configured, and
 it found nothing" —
-it forms no group, no plan entry, and (until #1153) no `human_action_required`
+it forms no group, no plan entry, and no `human_action_required`
 entry either. This is not a corner case: `manifest_validation: []` is on *every*
 payload this dispatcher receives, because that tool is presence-detected and its
 checks run in CI, and `policy: []`/`policy_tests: []` is the shape of a clean
@@ -177,17 +159,11 @@ kubernetes tool ever did arrive, an empty plan is the correct result.
 A topic has no application test suite, so there is no line-coverage pre-flight.
 The analogue is `policy_tests`: a declared policy set with no `kyverno test`
 fixtures. Treat a `policy_tests` finding as **ordering-blocking** for the group —
-**once #1153 ships `kubernetes-policy-triage`**, the group is dispatched (that
+the group is dispatched to `kubernetes-policy-triage` (that
 agent is what WRITES the missing fixtures) and the plan must order
 fixture-writing before any policy-driven manifest fix in it. Never drop the
 group: that would permanently preserve the untested-policy state the gate exists
 to eliminate.
-
-**Until #1153, this section describes the destination, not today's behaviour.**
-*Routing* governs: the agent does not exist, so the group is **escalated** as
-`human_action_required`, not dispatched — which is not dropping it either. Where
-the two sections seem to disagree, *Routing* wins until its paragraph is deleted;
-delete this qualifier in the same PR.
 
 The ordering rule is also **primary-mode only** — in auxiliary mode the
 `policy_tests` group is omitted before it is ever formed (see *Dispatch mode*).
