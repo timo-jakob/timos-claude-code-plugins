@@ -1,0 +1,44 @@
+# Derived mechanically from the clean variant's charts/app/templates/deployment.yaml
+# with exactly ONE guarantee removed: the resource requests and limits.
+#
+# Expected: `unset-cpu-requirements` AND `unset-memory-requirements` (lint).
+# Deliberately NOT split into two files — one removed guarantee, two check ids.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: no-limits
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: no-limits
+  template:
+    metadata:
+      labels:
+        app: no-limits
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: no-limits
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: app
+          image: registry.example.com/app:1.0.0
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

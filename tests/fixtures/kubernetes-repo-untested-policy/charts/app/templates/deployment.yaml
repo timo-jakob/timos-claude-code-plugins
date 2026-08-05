@@ -1,0 +1,64 @@
+# The same clean-by-construction Deployment the clean variant ships.
+#
+# It is here for two reasons, neither cosmetic:
+#
+# 1. **The topic marker.** `Chart.yaml` is what makes this tree detectable as a
+#    Kubernetes repo at all. The marker fires on Chart.yaml / kustomization.yaml
+#    / kustomization.yml / Kustomization, or on an `argoproj.io` reference —
+#    NONE of which a bare `policies/kyverno/` directory carries. Without the
+#    chart, neither `/development:maintenance` nor bootstrap would ever see this
+#    variant as Kubernetes, and the untested-policy path it exists to exercise
+#    would be unreachable through the normal entry points.
+#
+# 2. **A real resource to evaluate.** The policy step runs `kyverno apply`
+#    against the rendered output BEFORE it reaches the no-test-fixtures warning.
+#    With no workload anywhere, that apply would run over a resource set holding
+#    only the policy document itself, and the lint job would have no valid object
+#    — so three jobs would pass vacuously and the warning would sit behind an
+#    unevaluated policy set.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: app
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: app
+          image: registry.example.com/app:1.0.0
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

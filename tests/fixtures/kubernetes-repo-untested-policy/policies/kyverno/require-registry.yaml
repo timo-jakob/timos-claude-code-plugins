@@ -1,0 +1,22 @@
+# The same policy the other two variants carry — but this variant ships NO
+# kyverno-test.yaml beside it. That absence is the whole fixture: it exercises
+# the untested-policy path (a `policy_tests` maintenance finding, and the
+# pipeline's `policies declared but no kyverno test fixtures` warning).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-registry
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: images-from-allowed-registry
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "images must come from registry.example.com"
+        pattern:
+          spec:
+            containers:
+              - image: "registry.example.com/*"

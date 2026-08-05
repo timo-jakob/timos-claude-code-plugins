@@ -1,0 +1,29 @@
+# The one GENUINELY TEMPLATED manifest in the fixture, and the reason it exists:
+# without it nothing in any variant depends on `helm template` having actually
+# run. templates/deployment.yaml is plain YAML by necessity (the clean
+# kyverno-test.yaml consumes it as a resource, and a Go template is not a
+# resource), so a regression in the render job's chart discovery — the vendored
+# subchart skip, the library-chart skip, the release-name/slug normalisation, or
+# helm emitting an empty file — would leave every check green with the chart
+# entirely unvalidated. That is the exact failure the pipeline's own comments
+# warn about.
+#
+# Substituting this ConfigMap's `note` proves helm ran: the rendered output must
+# read `rendered-by-helm`, never the literal template expression.
+#
+# The expression is QUOTED because the repo's `yamllint --strict` gate lints this
+# tree, and an unquoted template action is a YAML flow mapping that trips the
+# braces rule. That is a real limit worth naming: because the unrendered form is
+# still valid YAML, this file does NOT also catch a regression in the
+# plain-manifest sweep's chart-template exclusion. It catches an absent or empty
+# render.
+#
+# (Note for anyone editing this header: helm parses the WHOLE file as a Go
+# template, comments included, so a literal template action written out in a
+# comment here is a render error, not documentation.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  note: "{{ .Values.note }}"

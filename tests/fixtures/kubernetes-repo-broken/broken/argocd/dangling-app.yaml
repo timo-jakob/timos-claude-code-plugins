@@ -1,0 +1,25 @@
+# Derived from the clean variant's argocd/app-of-apps.yaml with exactly ONE
+# guarantee removed: the referenced path exists.
+#
+# `charts/does-not-exist` is absent from this variant, so the argocd job reports
+# `app-of-apps references missing path: charts/does-not-exist`. The repoURL
+# carries THIS variant's slug, and the job pins `REPO_SLUG: ${{ github.repository }}`
+# at STEP level — a step-level env: beats an exported shell variable, so merely
+# exporting REPO_SLUG around an unmodified workflow run does nothing. A harness
+# must EXECUTE the job's `run:` block with REPO_SLUG=fixture-org/kubernetes-repo-broken
+# (or override github.repository); otherwise the filter selects nothing and the
+# job passes vacuously with the dangling path unchecked.
+# See ../../README.md, "The fixture contract".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dangling-app
+spec:
+  project: default
+  source:
+    repoURL: https://example.com/fixture-org/kubernetes-repo-broken.git
+    targetRevision: v1.0.0
+    path: charts/does-not-exist
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fixture

@@ -1,0 +1,33 @@
+# A NEGATIVE CONTROL for the argocd job's repoURL filter, and the only reason
+# this variant's argocd green is conditional rather than automatic.
+#
+# The job checks `.spec.source.path` exists, but only for Applications whose
+# repoURL names THIS repository — an Application pointing at another repo has
+# its paths verified over there, and they are correctly absent here. Every other
+# Application in the fixture set carries its own variant's slug, so they only
+# ever exercise the filter's INCLUSION half.
+#
+# This one is deliberately foreign: the slug `kubernetes-repo-extra` has this
+# variant's own slug (`kubernetes-repo`) as a strict prefix, so a filter that
+# regressed from a path-boundary `endswith` to a `contains` — the precise hazard
+# the pipeline's own comment names — would select it, find `charts/does-not-exist`
+# missing, and RED the fully-green variant.
+#
+# So: green while the exclusion works, red the moment it stops. The path is
+# deliberately absent; the clean variant's own app-of-apps.yaml is the one whose
+# path must resolve.
+#
+# See ../README.md, "The fixture contract".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: foreign-app
+spec:
+  project: default
+  source:
+    repoURL: https://example.com/fixture-org/kubernetes-repo-extra.git
+    targetRevision: v1.0.0
+    path: charts/does-not-exist
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fixture

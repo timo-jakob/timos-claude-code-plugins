@@ -55,7 +55,9 @@ helm, kustomize, trivy, GitHub Actions.
 | `tests/gather-kubernetes.bats` | Gather behaviour |
 | `tests/kubernetes-topic-marker.bats` | Extracts + EXECUTES the SKILL.md marker and manifests recipes; derives marker/prune parity against the gather |
 | `tests/kubernetes-dispatcher.bats` | The dispatcher's prose contract, clause by clause |
-| `tests/fixtures/kubernetes-repo/` | Self-contained end-to-end fixture (chart + **kustomize overlay** + Argo CD + policies + broken/) |
+| `tests/fixtures/kubernetes-repo/` | Self-contained fixture, clean variant (chart + **kustomize overlay** + Argo CD + policies) — expected fully green |
+| `tests/fixtures/kubernetes-repo-broken/` | Sibling variant holding every deliberate defect, one removed guarantee per file |
+| `tests/fixtures/kubernetes-repo-untested-policy/` | Sibling variant: a policy set with no `kyverno-test.yaml` |
 
 ---
 
@@ -2212,8 +2214,30 @@ Refs #1154"
 
 Child #1155.
 
+**THREE sibling whole-repo variants**, not one. Each is a repository shape in its
+own right, so a tool (or the pipeline) is pointed at exactly one variant at a
+time — the same way it would meet a real repo. A single variant holding both
+clean and broken manifests is impossible: each of the pipeline's `lint`, `policy` and
+`argocd` jobs fails the whole job when any finding is present, so a repo
+containing the broken subset could never simultaneously demonstrate the green
+case.
+
+This task's acceptance is **tool-level** — the fixture is proven by running
+`helm`, `kustomize`, `kube-linter` and `kyverno` directly against the tree. The
+pipeline-level claim (that `kubernetes-ci.yml` greens on the clean variant and
+reds on the broken one) belongs to **#1199**, the real-tool harness, which owns
+the bats file and the `tests/Dockerfile` / `script-tests.yml` tool installs that
+executing the workflow requires.
+
 **Files:**
 
+Variant 1 — `tests/fixtures/kubernetes-repo/` (clean, expected fully green):
+
+- Create: `tests/fixtures/kubernetes-repo/charts/app/Chart.yaml`
+- Create: `tests/fixtures/kubernetes-repo/charts/app/templates/deployment.yaml`
+- Create: `tests/fixtures/kubernetes-repo/charts/app/templates/configmap.yaml` (the one
+  genuinely TEMPLATED manifest, so an absent or empty helm render is observable)
+- Create: `tests/fixtures/kubernetes-repo/charts/app/values.yaml`
 - Create: `tests/fixtures/kubernetes-repo/kustomize/base/kustomization.yaml`
 - Create: `tests/fixtures/kubernetes-repo/kustomize/base/deployment.yaml` (the
   resource the base's `resources:` names)
@@ -2221,20 +2245,53 @@ Child #1155.
   the spec requires a Kustomize overlay, and without one the kustomize half of
   the machinery (the marker's `kustomization.yaml` branch, the gather's sweep,
   and Task 6's kustomize-roots recording / Component exclusion / input
-  sweep-exclusion) is never exercised by the one end-to-end fixture
-- Create: `tests/fixtures/kubernetes-repo/charts/app/Chart.yaml`
-- Create: `tests/fixtures/kubernetes-repo/charts/app/templates/deployment.yaml`
+  sweep-exclusion) is never exercised
 - Create: `tests/fixtures/kubernetes-repo/argocd/app-of-apps.yaml`
+- Create: `tests/fixtures/kubernetes-repo/argocd/foreign-app.yaml` (a NEGATIVE
+  control: a foreign-slug Application whose absent path must stay unchecked, so a
+  filter widened to `contains` reds the clean variant)
 - Create: `tests/fixtures/kubernetes-repo/policies/kyverno/require-registry.yaml`
-- Create: `tests/fixtures/kubernetes-repo/policies/kyverno/kyverno-test.yaml`
-- Create: `tests/fixtures/kubernetes-repo/broken/no-probe.yaml`
+- Create: `tests/fixtures/kubernetes-repo/policies/kyverno/kyverno-test.yaml` (PASS-ONLY)
+- Create: `tests/fixtures/kubernetes-repo/.kube-linter.yaml`
 - Create: `tests/fixtures/kubernetes-repo/README.md`
+
+Variant 2 — `tests/fixtures/kubernetes-repo-broken/` (every deliberate defect):
+
+- Create: `tests/fixtures/kubernetes-repo-broken/broken/no-probe.yaml`
+- Create: `tests/fixtures/kubernetes-repo-broken/broken/no-limits.yaml`
+- Create: `tests/fixtures/kubernetes-repo-broken/broken/latest-tag.yaml`
+- Create: `tests/fixtures/kubernetes-repo-broken/broken/bad-registry.yaml`
+- Create: `tests/fixtures/kubernetes-repo-broken/broken/argocd/dangling-app.yaml`
+- Create: `tests/fixtures/kubernetes-repo-broken/broken/argocd/dangling-multisource.yaml`
+  (the same defect via `.spec.sources[]`, so the multi-source leg is load-bearing)
+- Create: `tests/fixtures/kubernetes-repo-broken/policies/kyverno/require-registry.yaml`
+- Create: `tests/fixtures/kubernetes-repo-broken/policies/kyverno/kyverno-test.yaml` (expected-FAIL)
+- Create: `tests/fixtures/kubernetes-repo-broken/.kube-linter.yaml`
+- Create: `tests/fixtures/kubernetes-repo-broken/README.md`
+
+Variant 3 — `tests/fixtures/kubernetes-repo-untested-policy/` (policy, no tests):
+
+- Create: `tests/fixtures/kubernetes-repo-untested-policy/policies/kyverno/require-registry.yaml`
+- Create: `tests/fixtures/kubernetes-repo-untested-policy/charts/app/Chart.yaml` — NOT
+  decoration: the topic marker fires on Chart.yaml / kustomization* / an `argoproj.io`
+  reference, none of which a bare `policies/kyverno/` carries, so without it the variant
+  is undetectable as a Kubernetes repo and unreachable by the machinery it exercises
+- Create: `tests/fixtures/kubernetes-repo-untested-policy/charts/app/templates/deployment.yaml` —
+  a real workload, so `kyverno apply` evaluates something and `lint` has a valid object
+  rather than three jobs passing vacuously
+- Create: `tests/fixtures/kubernetes-repo-untested-policy/charts/app/templates/configmap.yaml`
+- Create: `tests/fixtures/kubernetes-repo-untested-policy/charts/app/values.yaml` — with the
+  configmap above, the same observable-render construction as the clean variant, so an
+  absent or empty helm render is red here too
+- Create: `tests/fixtures/kubernetes-repo-untested-policy/.kube-linter.yaml` — identical to
+  its siblings', so all three variants are linted under ONE check set
+- Create: `tests/fixtures/kubernetes-repo-untested-policy/README.md`
 
 **Interfaces:**
 
 - Consumes: nothing. Deliberately self-contained — no network, no private content, no reference to any real deployment.
 
-- [ ] **Step 1: Create the clean chart**
+- [x] **Step 1: Create the clean chart**
 
 `charts/app/Chart.yaml`:
 
@@ -2244,7 +2301,13 @@ name: app
 version: 0.1.0
 ```
 
-`charts/app/templates/deployment.yaml`:
+`charts/app/templates/deployment.yaml` — clean **by construction** against
+kube-linter's default set plus the one non-default check `.kube-linter.yaml`
+enables, never clean by exclusion. Note `ports:`, which the default
+`readiness-port` check requires once a probe names a port; the `capabilities.drop`
+that `drop-net-raw-capability` requires; the `readOnlyRootFilesystem` that
+`no-read-only-root-fs` requires; and the pod anti-affinity that `no-anti-affinity`
+requires at `replicas: 2`:
 
 ```yaml
 apiVersion: apps/v1
@@ -2261,11 +2324,21 @@ spec:
       labels:
         app: app
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: app
+              topologyKey: kubernetes.io/hostname
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1000
       containers:
         - name: app
           image: registry.example.com/app:1.0.0
+          ports:
+            - containerPort: 8080
           readinessProbe:
             httpGet:
               path: /healthz
@@ -2277,16 +2350,38 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
 ```
 
-- [ ] **Step 2: Create the Kustomize base and prod overlay**
+`.kube-linter.yaml` — the default set plus exactly one non-default check, and
+**no exclusions**. Without it `broken/no-probe.yaml` would map to no check at all,
+since neither `no-readiness-probe` nor `no-liveness-probe` is a default:
+
+```yaml
+checks:
+  include:
+    - no-readiness-probe
+```
+
+The identical file is copied into BOTH sibling variants, so all three are linted
+under one check set.
+
+- [x] **Step 2: Create the Kustomize base and prod overlay**
 
 Without these the kustomize half of the machinery — the topic marker's
 `kustomization.yaml` branch, the gather's marker sweep, and Task 6's
-kustomize-roots recording, `kind: Component` exclusion and kustomize-input
-sweep-exclusion — is never exercised by the one end-to-end fixture. The base
-carries a real resource so the input-exclusion is genuinely tested: that
-Deployment must NOT reach the validators unrendered.
+kustomize-roots recording and kustomize-input sweep-exclusion — is never
+exercised. Two neighbouring branches stay UNCOVERED by this tree and are
+deliberately left to #1199: `kind: Component` exclusion (no Component directory
+is shipped) and the alternate marker spellings `kustomization.yml` /
+`Kustomization`. The base carries a real resource so the
+input-exclusion is genuinely tested: that Deployment must NOT reach the
+validators unrendered.
 
 `tests/fixtures/kubernetes-repo/kustomize/base/kustomization.yaml`:
 
@@ -2326,8 +2421,11 @@ spec:
 ```
 
 `tests/fixtures/kubernetes-repo/kustomize/overlays/prod/kustomization.yaml` —
-the overlay genuinely **completes** the base, so the rendered output is clean
-and every finding stays attributable to a file under `broken/`:
+the overlay genuinely **completes** the base, so the rendered output is clean.
+It bumps to 3 replicas and therefore **must supply a pod anti-affinity**: at
+`count: 3` the default `no-anti-affinity` check genuinely applies, so an overlay
+that raised the replica count without one would red the clean variant. A
+strategic-merge patch keeps the completion readable:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -2342,68 +2440,93 @@ images:
   - name: registry.example.com/worker
     newTag: "1.0.0"
 patches:
-  - target:
+  - patch: |
+      apiVersion: apps/v1
       kind: Deployment
-      name: worker
-    patch: |
-      - op: add
-        path: /spec/template/spec/securityContext
-        value:
-          runAsNonRoot: true
-      - op: add
-        path: /spec/template/spec/containers/0/resources
-        value:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
-      - op: add
-        path: /spec/template/spec/containers/0/readinessProbe
-        value:
-          httpGet:
-            path: /healthz
-            port: 8080
+      metadata:
+        name: worker
+      spec:
+        template:
+          spec:
+            affinity:
+              podAntiAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  - labelSelector:
+                      matchLabels:
+                        app: worker
+                    topologyKey: kubernetes.io/hostname
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+            containers:
+              - name: worker
+                ports:
+                  - containerPort: 8080
+                readinessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                  limits:
+                    cpu: 500m
+                    memory: 256Mi
+                securityContext:
+                  readOnlyRootFilesystem: true
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
 ```
 
 Verify: `kustomize build tests/fixtures/kubernetes-repo/kustomize/overlays/prod`
 exits 0 and renders a 3-replica Deployment in namespace `prod` whose image is
 `registry.example.com/worker:1.0.0` (tagged, and on the registry the Kyverno
-policy allows) with resources, a readiness probe and `runAsNonRoot` — i.e. the
+policy allows) with resources, a readiness probe, `runAsNonRoot`,
+`readOnlyRootFilesystem`, dropped capabilities and an anti-affinity — i.e. the
 rendered output is clean even though the base is not.
 
-- [ ] **Step 3: Create the deliberately broken manifest**
+- [x] **Step 3: Create the deliberately broken manifests (variant 2)**
 
-`broken/no-probe.yaml` — one defect PER FINDING, so a regression is
-attributable (this file carries four, each mapping to exactly one finding):
+**One defect per FILE**, not four in one manifest: each file is the clean chart's
+deployment with exactly **one guarantee removed** and everything else retained,
+so no default check fires incidentally and a regression reads as
+"`no-limits.yaml` stopped firing `unset-cpu-requirements`" rather than "the
+fixture went red".
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: broken
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: broken
-  template:
-    metadata:
-      labels:
-        app: broken
-    spec:
-      containers:
-        - name: broken
-          image: docker.io/library/nginx:latest
-```
+| file | removed guarantee | owning job | check id(s) |
+| --- | --- | --- | --- |
+| `broken/no-probe.yaml` | readiness probe | `lint` | `no-readiness-probe` |
+| `broken/no-limits.yaml` | resource requests/limits | `lint` | `unset-cpu-requirements`, `unset-memory-requirements` |
+| `broken/latest-tag.yaml` | pinned image tag | `lint` | `latest-tag` |
+| `broken/bad-registry.yaml` | allowed registry | `policy` | kyverno `require-registry` / `autogen-images-from-allowed-registry` |
+| `broken/argocd/dangling-app.yaml` | app path exists | `argocd` | `app-of-apps references missing path: charts/does-not-exist` |
+| `broken/argocd/dangling-multisource.yaml` | app path exists, via `.spec.sources[]` | `argocd` | `app-of-apps references missing path: charts/also-missing` |
 
-Expected findings: no readiness probe, no resource requests or limits,
-`latest` tag, image not from the allowed registry.
+`no-limits.yaml` stays **one file carrying two check ids** — one removed
+guarantee, two ways kube-linter names it — and is deliberately not split.
 
-- [ ] **Step 4: Create the policy and its tests**
+Two separations keep every row one-to-one: `latest-tag.yaml` stays on the
+**allowed** registry (`registry.example.com/app:latest`), so only `latest-tag`
+fires and the Kyverno rule keeps passing; and `bad-registry.yaml` is **pinned**
+(`other-registry.example.com/nginx:1.27.0`), so `latest-tag` does not also fire
+and the only finding is the policy one. The off-registry host is an
+`example.com` placeholder rather than a real registry, because the fixture's
+self-containedness rule admits no hostname outside `example.com` and
+`kubernetes.default.svc`.
 
-`policies/kyverno/require-registry.yaml`:
+The broken variant's `README.md` carries that table plus, in prose: which jobs
+own nothing (`render`, `schema` and `config-scan` are green even here —
+`config-scan` is thresholded at `HIGH,CRITICAL`, which none of these defects
+reaches, so a red there is a regression); that `kyverno test` is never reached
+under the pipeline in this variant; the temp-dir-copy caveat; and the
+`REPO_SLUG` contract.
+
+- [x] **Step 4: Create the policy and its two test fixtures**
+
+`policies/kyverno/require-registry.yaml` — identical in all three variants:
 
 ```yaml
 apiVersion: kyverno.io/v1
@@ -2426,29 +2549,80 @@ spec:
               - image: "registry.example.com/*"
 ```
 
-`policies/kyverno/kyverno-test.yaml`:
+The single fixture is **split across the two variants** — a variant whose whole
+point is that nothing fails must not park an expected-fail resource in it.
+
+The rule named in `results:` is the **autogen** one: the policy matches
+`kinds: [Pod]`, and Kyverno generates a Deployment/DaemonSet/StatefulSet variant
+of the rule automatically, so a fixture naming the bare rule name matches nothing.
+
+Clean variant — `tests/fixtures/kubernetes-repo/policies/kyverno/kyverno-test.yaml`,
+**pass-only**, whose resource is a plain-YAML chart template that the render
+sweep's `-not -path '*/templates/*'` already excludes (a test input, never a
+validated manifest):
 
 ```yaml
-name: require-registry-test
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: require-registry-test
 policies:
   - require-registry.yaml
 resources:
-  - ../../broken/no-probe.yaml
   - ../../charts/app/templates/deployment.yaml
 results:
   - policy: require-registry
-    rule: images-from-allowed-registry
-    resource: broken
-    result: fail
-  - policy: require-registry
-    rule: images-from-allowed-registry
-    resource: app
+    rule: autogen-images-from-allowed-registry
+    resources:
+      - app
+    kind: Deployment
     result: pass
 ```
 
-- [ ] **Step 5: Create the app-of-apps and the README**
+Broken variant — `tests/fixtures/kubernetes-repo-broken/policies/kyverno/kyverno-test.yaml`,
+the **expected-fail** half:
 
-`argocd/app-of-apps.yaml`:
+```yaml
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: require-registry-test
+policies:
+  - require-registry.yaml
+resources:
+  - ../../broken/bad-registry.yaml
+results:
+  - policy: require-registry
+    rule: autogen-images-from-allowed-registry
+    resources:
+      - bad-registry
+    kind: Deployment
+    result: fail
+```
+
+Note the ordering consequence: the pipeline's policy step runs `kyverno apply`
+**before** `kyverno test`, and under `set -euo pipefail` the non-zero exit of
+`kyverno apply` over `bad-registry.yaml` ends the step. The expected-fail fixture
+is therefore verified by running `kyverno test` **directly** against the broken
+variant, not through the pipeline.
+
+Variant 3 — `tests/fixtures/kubernetes-repo-untested-policy/` holds the same
+policy and **no** `kyverno-test.yaml`, so the untested-policy path (a
+`policy_tests` maintenance finding, and the pipeline's
+`policies declared but no kyverno test fixtures` warning) is exercised.
+
+- [x] **Step 5: Create the app-of-apps and the READMEs**
+
+Each Argo-CD-bearing variant declares **at least one** repoURL naming **its own
+directory**, because the `argocd` job filters Application paths by a repoURL
+ending in the runner's `github.repository`. The clean variant deliberately also
+ships one that does NOT — `argocd/foreign-app.yaml`, slug
+`fixture-org/kubernetes-repo-extra`, path `charts/does-not-exist` — as a NEGATIVE
+control: its slug has the variant's own slug as a strict prefix, so a filter
+regressed from a path-boundary `endswith` to a `contains` match would select it,
+find the absent path and red the clean variant.
+
+`tests/fixtures/kubernetes-repo/argocd/app-of-apps.yaml` — `path` resolves:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -2458,7 +2632,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://example.com/fixture.git
+    repoURL: https://example.com/fixture-org/kubernetes-repo.git
     targetRevision: v1.0.0
     path: charts/app
   destination:
@@ -2466,47 +2640,149 @@ spec:
     namespace: fixture
 ```
 
-`README.md`:
+`tests/fixtures/kubernetes-repo-broken/broken/argocd/dangling-app.yaml` — same
+shape, with `repoURL: https://example.com/fixture-org/kubernetes-repo-broken.git`
+and `path: charts/does-not-exist`.
 
-```markdown
-# kubernetes-repo fixture
+**The fixture contract.** Any harness exercising the `argocd` job against an
+Argo-CD-bearing variant must present the slug `fixture-org/<variant-dir>` to it.
+Note *how*: the workflow pins `REPO_SLUG: ${{ github.repository }}` at step
+level, and a step-level `env:` beats an exported shell variable — so exporting
+`REPO_SLUG` around an unmodified workflow run does nothing. The contract is met
+by a harness that **executes the job's `run:` block** with `REPO_SLUG` set, or by
+overriding `github.repository`. Without it the repoURL filter selects nothing and
+the job passes **vacuously** with the dangling path unchecked. Variant 3 ships no Application, so it pins no
+particular slug — but `REPO_SLUG` must still be set to some **non-empty** value
+there, and the two failure modes differ. **Unset**, the job dies on an unbound
+variable: the compile probe dereferences `$REPO_SLUG` under `set -euo pipefail`
+before any Application is read. **Empty** is worse — the probe URL collapses to a
+bare host with a trailing slash, the filter's `endswith("/" + $s)` guard
+degenerates to `endswith("/")` which is TRUE, so the probe *passes* and the job
+greens having selected nothing: a vacuous pass the probe does not catch. Closing
+that blind spot in the workflow belongs to #1199, not to this fixture. Naming that contract in each README and in an acceptance
+criterion is this task's whole obligation; wiring a harness that sets it belongs
+to #1199.
 
-A self-contained repository shape for exercising `development-kubernetes`:
-a clean Helm chart, a Kustomize base + prod overlay, an Argo CD `Application`, a Kyverno policy with test
-fixtures, and one deliberately broken manifest.
+Each variant's `README.md` states its expectation (fully green / red with every
+finding attributable to one file / green with the untested-policy warning), names
+its required `REPO_SLUG` where it has one, and carries the **run against a copy, never the working
+tree** caveat: the policy job dereferences `policies/kyverno` in place
+(`rm -rf` then `mv`), so pointing a local pipeline run at a fixture directory
+would rewrite it.
 
-Each defect in `broken/` maps to exactly one expected finding, so a
-regression is attributable to a specific check.
+- [x] **Step 6: Verify the fixture with the real toolchain and the YAML gate**
 
-No network access, no private content, and no reference to any real
-deployment — this fixture must stay usable by anyone who clones the
-repository.
-```
+Run the pinned toolchain the pipeline itself installs — kube-linter 0.7.2,
+kyverno 1.13.4, kubeconform 0.6.7 — directly against the tree:
 
-- [ ] **Step 6: Verify the fixture passes the repo's YAML gate**
+Invoke `kube-linter` **without `--config`**, exactly as the pipeline invokes it:
+it auto-discovers `./.kube-linter.yaml` from the working directory, and that
+discovery is what makes the non-default `no-readiness-probe` check apply at all.
+Verifying with an explicit `--config` would stay green in precisely the case
+where the pipeline's own form silently drops the check.
 
-Run `yamllint --strict tests/fixtures/kubernetes-repo` — it subsumes the parse
-check and is what CI enforces. `tests/fixtures/` is excluded from the
-whitespace and markdownlint hooks, **not** from yamllint.
+Each variant's own `README.md` carries the **authoritative** recipe, with the
+full assertions; the block below is a summary — run the READMEs' recipes before
+recording the fixture verified. Three properties they have that a narrower recipe
+would miss, and which differ per variant:
 
-Run:
+- variants 1 and 2 rebuild the pipeline's **whole** `RENDER_DIR` (the render job
+  also sweeps the standalone Argo CD and `policies/kyverno` manifests, so
+  validating only the renders leaves those unchecked);
+- variants 1 and 3 assert kyverno's **`pass:` counter**, because `kyverno apply`
+  exits 0 both when the rule passed and when it matched nothing; variant 2's
+  expected result is instead a counted **`fail: 1`**, which also distinguishes a
+  real violation from a tool error;
+- variant 2's commands are **expected to fail**, so each is wrapped in an `if`
+  that fails when the command *succeeds* — a plain `set -e` block would abort on
+  its first row and prove nothing about the rest — and each asserts its **check
+  id**, not merely a non-zero exit.
+
+Pinned toolchain: **kube-linter 0.7.2, kyverno 1.13.4, kubeconform 0.6.7,
+yq 4.44.3** plus `jq`. `config-scan` is deliberately absent — it runs a
+third-party `trivy-action` this step cannot execute, and whether to exercise it
+is #1199's call.
 
 ```bash
-find tests/fixtures/kubernetes-repo -name '*.yaml' -exec python3 -c "
-import yaml,sys
-for f in sys.argv[1:]:
-    list(yaml.safe_load_all(open(f)))
-print('all fixture yaml ok')" {} +
+set -euo pipefail   # so a failing subshell aborts the block rather than being discarded
+
+# 1. clean variant — expected fully green
+( cd tests/fixtures/kubernetes-repo
+  set -euo pipefail
+  rm -rf /tmp/rendered && mkdir -p /tmp/rendered
+  helm template app charts/app            > /tmp/rendered/helm_charts_app.yaml
+  kustomize build kustomize/overlays/prod > /tmp/rendered/kustomize_prod.yaml
+  grep -q 'rendered-by-helm' /tmp/rendered/helm_charts_app.yaml || exit 1
+  for m in argocd/*.yaml policies/kyverno/*.yaml; do
+    cp "$m" "/tmp/rendered/plain_$(printf '%s' "$m" | tr / _)"
+  done
+  kube-linter lint /tmp/rendered/                                      # zero findings
+  kubeconform -strict -summary -ignore-missing-schemas /tmp/rendered/  # 0 invalid
+  kyverno test policies/kyverno/
+  kyverno apply policies/kyverno/require-registry.yaml \
+    --resource /tmp/rendered/ | tee /tmp/apply.txt                    # pass: 2, fail: 0
+  grep -qE 'pass: [1-9]' /tmp/apply.txt || exit 1 )                   # not a zero-match green
+
+# 2. broken variant — one attributable finding per file
+( cd tests/fixtures/kubernetes-repo-broken
+  set -euo pipefail
+  # the THREE lint-owned rows. bad-registry's defect is the policy's to catch
+  # (kube-linter reports nothing on it BY DESIGN), and the two broken/argocd/*.yaml
+  # rows are checked by the yq+jq block below instead.
+  # Each MUST fail — kube-linter exits non-zero on a finding. Use `if`, NOT a
+  # bare `!`: a `!`-negated command is EXEMPT from errexit (#829), so `! cmd`
+  # would silently pass even when the fixture stopped firing its check — an inert
+  # assertion against exactly the regression it targets.
+  if kube-linter lint broken/no-probe.yaml;   then echo 'FAIL: no-probe'; exit 1; fi
+  if kube-linter lint broken/no-limits.yaml;  then echo 'FAIL: no-limits'; exit 1; fi
+  if kube-linter lint broken/latest-tag.yaml; then echo 'FAIL: latest-tag'; exit 1; fi
+  kube-linter lint broken/bad-registry.yaml   # exits 0: its defect is the policy's to catch
+  kyverno test policies/kyverno/              # passes: the failure is EXPECTED
+  if kyverno apply policies/kyverno/require-registry.yaml \
+       --resource broken/bad-registry.yaml; then
+    echo 'FAIL: the policy did not reject bad-registry.yaml'; exit 1
+  fi )   # the README additionally asserts the check ids, `found 4 lint errors` and `fail: 1`
+
+# 3. untested-policy variant — green, plus the untested-policy warning
+( cd tests/fixtures/kubernetes-repo-untested-policy
+  set -euo pipefail
+  rm -rf /tmp/untested-rendered && mkdir -p /tmp/untested-rendered
+  helm template app charts/app > /tmp/untested-rendered/helm_charts_app.yaml
+  grep -q 'rendered-by-helm' /tmp/untested-rendered/helm_charts_app.yaml || exit 1
+  kube-linter lint /tmp/untested-rendered/
+  # tee to a FILE, never `| grep -q`: grep exits at the first match, the still
+  # writing producer takes SIGPIPE, and pipefail turns a MATCH into a failure
+  kyverno apply policies/kyverno/require-registry.yaml \
+    --resource /tmp/untested-rendered/ | tee /tmp/untested-apply.txt   # pass: 1, fail: 0
+  grep -qE 'pass: [1-9]' /tmp/untested-apply.txt || exit 1
+  test ! -e policies/kyverno/kyverno-test.yaml )   # its ABSENCE is the fixture
+
+# 4. the argocd filter — the one job using yq+jq rather than the tools above.
+#    Each README's "Checking the argocd filter" section carries the JQ_EXPR.
+#    clean  + REPO_SLUG=fixture-org/kubernetes-repo        -> exactly charts/app
+#    broken + REPO_SLUG=fixture-org/kubernetes-repo-broken -> charts/does-not-exist
+#                                                             AND charts/also-missing
 ```
 
-Expected: `all fixture yaml ok`
+Never lint a variant's tree directly: that reaches
+`kustomize/base/deployment.yaml`, a deliberately partial kustomize *input* that
+fires several checks by design. Validate rendered output, not inputs.
 
-- [ ] **Step 7: Commit**
+Then `yamllint --strict tests/fixtures/kubernetes-repo*` — it subsumes the parse
+check and is what CI enforces. `tests/fixtures/` is excluded from the whitespace
+and markdownlint hooks, **not** from yamllint.
+
+- [x] **Step 7: Commit**
 
 ```bash
-git add tests/fixtures/kubernetes-repo
-# Task 7 has NO box: stage the fixture tree and nothing else. In particular do
-# NOT bump any plugin version — fixtures under tests/ are not plugin content.
+git add tests/fixtures/kubernetes-repo tests/fixtures/kubernetes-repo-broken \
+        tests/fixtures/kubernetes-repo-untested-policy \
+        docs/superpowers/plans/2026-08-02-development-kubernetes.md
+# Task 7 has NO box: stage the fixture tree (plus this plan amendment) and
+# nothing else. In particular do NOT bump any plugin version — fixtures under
+# tests/ are not plugin content — and add no bats file, no tests/Dockerfile tool
+# installs and no script-tests.yml wiring: executing the pipeline against these
+# fixtures is #1199.
 # `git status` must be clean afterwards
 git commit -m "test(development-kubernetes): self-contained fixture repo
 

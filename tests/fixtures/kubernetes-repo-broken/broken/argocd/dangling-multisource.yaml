@@ -1,0 +1,25 @@
+# Derived from dangling-app.yaml with exactly ONE thing changed: the source is
+# declared in the MULTI-SOURCE shape (`.spec.sources[]`, Argo CD >= 2.6) rather
+# than the singular `.spec.source`.
+#
+# The argocd job reads four source shapes, and every other Application in the
+# fixture set uses the singular one. A regression that dropped the `sources[]`
+# leg would therefore change nothing observable — the pipeline's own comment
+# names that outcome exactly: "the check would pass vacuously on exactly the
+# repos it should scrutinise". This file makes that leg load-bearing: its
+# `charts/also-missing` is only ever reported if `sources[]` is read.
+#
+# See ../../README.md, "The fixture contract".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dangling-multisource
+spec:
+  project: default
+  sources:
+    - repoURL: https://example.com/fixture-org/kubernetes-repo-broken.git
+      targetRevision: v1.0.0
+      path: charts/also-missing
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fixture

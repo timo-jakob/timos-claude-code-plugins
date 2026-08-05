@@ -1,0 +1,15 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: require-registry-test
+policies:
+  - require-registry.yaml
+resources:
+  - ../../broken/bad-registry.yaml
+results:
+  - policy: require-registry
+    rule: autogen-images-from-allowed-registry
+    resources:
+      - bad-registry
+    kind: Deployment
+    result: fail

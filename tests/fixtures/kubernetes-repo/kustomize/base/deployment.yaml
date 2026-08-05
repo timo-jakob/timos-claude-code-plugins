@@ -1,0 +1,27 @@
+# Genuinely PARTIAL by design: no image tag, no probe, no resources, no
+# securityContext. A base like this is invalid on its own — kube-linter would
+# fire latest-tag, unset-cpu-requirements, unset-memory-requirements,
+# run-as-non-root and more on it.
+#
+# That is the point. This manifest is a kustomize INPUT, and the pipeline's
+# plain-manifest sweep excludes every path under a recorded kustomize root. If
+# that exclusion ever regressed, this file would reach the validators unrendered
+# and the CLEAN variant would go red — which is exactly the regression the
+# exclusion exists to prevent, made observable.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: registry.example.com/worker
