@@ -1,0 +1,25 @@
+# PASS-ONLY by design: nothing in this variant is expected to fail, so no
+# expected-fail resource is parked here. The expected-fail case lives in the
+# kubernetes-repo-broken variant.
+#
+# The resource is a plain-YAML chart template — the render sweep's
+# `-not -path '*/templates/*'` already excludes it, so it is a test INPUT here
+# and never a validated manifest.
+#
+# The rule is the AUTOGEN one: the policy matches `kinds: [Pod]`, and Kyverno
+# generates a Deployment/DaemonSet/StatefulSet variant of it automatically.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: require-registry-test
+policies:
+  - require-registry.yaml
+resources:
+  - ../../charts/app/templates/deployment.yaml
+results:
+  - policy: require-registry
+    rule: autogen-images-from-allowed-registry
+    resources:
+      - app
+    kind: Deployment
+    result: pass

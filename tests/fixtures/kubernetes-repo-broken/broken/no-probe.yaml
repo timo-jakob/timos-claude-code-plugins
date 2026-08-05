@@ -1,0 +1,46 @@
+# Derived mechanically from the clean variant's charts/app/templates/deployment.yaml
+# with exactly ONE guarantee removed: the readiness probe.
+#
+# Expected: `no-readiness-probe` (lint), and nothing else.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: no-probe
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: no-probe
+  template:
+    metadata:
+      labels:
+        app: no-probe
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: no-probe
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: app
+          image: registry.example.com/app:1.0.0
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

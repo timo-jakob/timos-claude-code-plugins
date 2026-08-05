@@ -1,0 +1,54 @@
+# The clean chart template. Clean BY CONSTRUCTION against kube-linter's default
+# check set plus the one non-default check .kube-linter.yaml enables
+# (no-readiness-probe) — never clean by exclusion, so nothing here is silenced.
+#
+# Every guarantee below is removed, one at a time, by a sibling manifest in the
+# kubernetes-repo-broken variant, so each finding there stays attributable.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: app
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: app
+          image: registry.example.com/app:1.0.0
+          ports:
+            # declared so the default readiness-port check is satisfied: it
+            # fires when a probe targets a port the container does not expose
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

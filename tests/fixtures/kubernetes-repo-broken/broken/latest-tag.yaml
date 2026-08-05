@@ -1,0 +1,51 @@
+# Derived mechanically from the clean variant's charts/app/templates/deployment.yaml
+# with exactly ONE guarantee removed: the pinned image tag.
+#
+# Still on the ALLOWED registry, so the Kyverno registry rule keeps passing and
+# `latest-tag` (lint) is the only finding.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: latest-tag
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: latest-tag
+  template:
+    metadata:
+      labels:
+        app: latest-tag
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: latest-tag
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: app
+          image: registry.example.com/app:latest
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

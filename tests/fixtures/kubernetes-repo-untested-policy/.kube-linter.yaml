@@ -1,0 +1,12 @@
+# kube-linter's DEFAULT check set, plus exactly one non-default check.
+#
+# no-readiness-probe is not a default check (neither is no-liveness-probe), so
+# without this file the broken variant's `broken/no-probe.yaml` would map to no
+# check at all and its README row would name a check that never fires.
+#
+# Nothing is silenced here — this file only ever ADDS. The clean manifests
+# satisfy the default set genuinely, so a green run proves something; suppressing
+# any default check would make it prove nothing.
+checks:
+  include:
+    - no-readiness-probe

@@ -1,0 +1,18 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-registry
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: images-from-allowed-registry
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "images must come from registry.example.com"
+        pattern:
+          spec:
+            containers:
+              - image: "registry.example.com/*"

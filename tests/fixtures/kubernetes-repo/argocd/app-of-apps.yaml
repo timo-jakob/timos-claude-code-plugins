@@ -1,0 +1,23 @@
+# The argocd job filters Application paths by a repoURL ending in the runner's
+# own slug, and it pins `REPO_SLUG: ${{ github.repository }}` at STEP level — a
+# step-level env: beats an exported shell variable, so merely exporting
+# REPO_SLUG around an unmodified workflow run does nothing. A harness must
+# EXECUTE the job's `run:` block with REPO_SLUG=fixture-org/kubernetes-repo (or
+# override github.repository); otherwise the filter selects nothing and the job
+# passes VACUOUSLY. See ../README.md, "The fixture contract".
+#
+# `path: charts/app` resolves against this variant's root, so the check finds it
+# and the job is green. The broken variant's sibling deliberately does not.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-of-apps
+spec:
+  project: default
+  source:
+    repoURL: https://example.com/fixture-org/kubernetes-repo.git
+    targetRevision: v1.0.0
+    path: charts/app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fixture

@@ -1,0 +1,57 @@
+# The overlay genuinely COMPLETES the partial base, so the rendered output is
+# clean to the same standard as the chart and every finding in this repository
+# shape stays attributable to the broken variant rather than to a half-built
+# overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - ../../base
+replicas:
+  - name: worker
+    count: 3
+images:
+  - name: registry.example.com/worker
+    newTag: "1.0.0"
+patches:
+  # A pod anti-affinity, not a drop to one replica: with count 3 the default
+  # no-anti-affinity check genuinely applies, so satisfying it proves something.
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: worker
+      spec:
+        template:
+          spec:
+            affinity:
+              podAntiAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  - labelSelector:
+                      matchLabels:
+                        app: worker
+                    topologyKey: kubernetes.io/hostname
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+            containers:
+              - name: worker
+                ports:
+                  - containerPort: 8080
+                readinessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                  limits:
+                    cpu: 500m
+                    memory: 256Mi
+                securityContext:
+                  readOnlyRootFilesystem: true
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
