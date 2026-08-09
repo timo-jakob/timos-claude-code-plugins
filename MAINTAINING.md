@@ -186,6 +186,29 @@ grep -rhn -E "^\s*[A-Z_]+_VERSION:\s+" development/skills/bootstrap/templates/ |
 # comments say so), and neither lives under templates/, so the sweep above
 # cannot see them. Bump all three together or the suite stops testing what ships.
 grep -rn -E "YQ_VERSION[:=]" tests/Dockerfile .github/workflows/script-tests.yml
+
+# …and the two IaC toolchain pins with no `*_VERSION:` upstream (#1199). The
+# kubernetes-ci real-tool harness renders with helm and kustomize, which the
+# template does NOT install (ubuntu-latest ships both), so there is nothing for
+# the sweep above to find. They are pinned in the harness instead, to the
+# versions of the `ubuntu-latest` runner image the workflow targets — the one
+# class of pin whose upstream is a runner image rather than a release tag, so
+# Renovate cannot see it and neither can any grep over templates/.
+grep -n -E "^local (helm|kustomize)_v=" tests/iac-tools.zsh
+
+# …and a GUARD, not a to-do list: the IaC docs must name NO version literal.
+# They used to, and it was a standing drift hazard — bumping a template pin left
+# four documents telling the next reader to reproduce at the old version and to
+# treat a red there as a regression, with nothing asserting them. They now point
+# at `tests/iac-tools.zsh --print-pins` instead, which cannot drift. This grep
+# must print NOTHING; a hit means a literal has crept back in and should be
+# replaced by the command, not updated. tests/iac-tools.bats enforces the same
+# rule, so a reappearance reds the suite rather than waiting for this sweep.
+# The pattern tolerates a backtick/quote around the tool name and a `v` prefix
+# on the version, because those are the two shapes a reintroduction most likely
+# takes in prose that writes tool names as `code`.
+grep -rn -E "(helm|kustomize|kubeconform|kube-linter|kyverno|yq)[\`'\"]?[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+" \
+  tests/README.md tests/fixtures/kubernetes-repo*/README.md
 ```
 
 Capture the output in a scratch file. You'll compare it to upstream below.
@@ -212,6 +235,33 @@ shipped workflow under a different yq than it ships with. And
 policy *kinds* the pinned CLI cannot evaluate — which that workflow reports as a
 failure rather than silently passing, so a stale pin surfaces as a red check in
 a consumer repo.
+
+`tests/iac-tools.zsh`'s `helm_v` / `kustomize_v` are the odd pair out (#1199):
+their upstream is the **`ubuntu-latest` runner image**, not a release tag, so
+"current" means whatever that image ships today.
+
+**Confirm which image that label resolves to before reading anything** — it
+moves on GitHub's schedule, not this repo's, and `kubernetes-ci.yml.tmpl` pins
+`runs-on: ubuntu-latest`. Reading a stale manifest is worse than not reading one:
+you would bump the constants to the *previous* image's versions and stamp a
+provenance line claiming they came from `ubuntu-latest`.
+
+```sh
+# 1. which image does the ubuntu-latest LABEL resolve to today? The label
+#    mapping lives in the runner-images root README — NOT in the images/ubuntu
+#    listing, whose highest-numbered manifest is usually a newer image that
+#    ships under its own label first and is not yet ubuntu-latest.
+gh api repos/actions/runner-images/contents/README.md \
+  --jq .content | base64 -d | grep -iE 'ubuntu-latest|ubuntu-2[0-9]'
+# 2. then read THAT manifest — substitute the version step 1 confirmed
+gh api repos/actions/runner-images/contents/images/ubuntu/Ubuntu2404-Readme.md \
+  --jq .content | base64 -d | grep -iE '^- (Helm|Kustomize) '
+```
+
+Bump the two constants to match, and update the date in that script's
+`PROVENANCE` comment. A drift here is quiet rather than red: the harness keeps
+passing, it just stops rendering the fixtures with the helm the consumer's CI
+actually uses.
 
 Actions to pay particular attention to when reviewing a major bump (most likely
 to ship breaking changes between majors):

@@ -4,19 +4,23 @@ A self-contained repository shape for exercising `development-kubernetes`: a
 Helm chart, a Kustomize base + prod overlay, two Argo CD `Application`s, and a
 Kyverno policy with a pass-only test fixture.
 
-**This variant is expected fully green.** Every job of the bootstrapped
-`kubernetes-ci` pipeline — `render`, `schema`, `lint`, `policy`, `config-scan`,
-`argocd` — is expected to pass over it. Five of those six are backed by the
-tool-level checks below; **`config-scan` is the exception** — it runs a
-third-party `trivy-action`, which no command here executes, so its green is
-expected rather than measured. Deciding how (or whether) to exercise it is
-explicitly #1199's call. That whole-pipeline verdict is an
-**expectation this fixture is built to be measured against, not an observation**:
-executing the workflow is #1199's job. What has actually been run here is the
-tool-level verification below.
+**This variant is fully green.** Five of the bootstrapped `kubernetes-ci`
+pipeline's six jobs — `render`, `schema`, `lint`, `policy`, `argocd` — pass over
+it, and each of those five is **measured**, both by the tool-level checks below
+and, end-to-end, by
+[`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
+(#1199), which executes the workflow's own `run:` blocks over a temp copy of this
+variant with the pinned toolchain.
 
-Once #1199 does run it, a red is a **regression**, never the fixture doing its
-job; the deliberate defects all live in
+**`config-scan` is the sixth job, and deliberately excluded.** It runs a third-party
+`trivy-action` rather than a `run:` block, so step extraction has nothing to
+execute and trivy's severity assignments move between releases anyway. #1199
+made that call: the job is **unasserted** — neither green nor red is claimed —
+and the decision is pinned by a test that fails the moment `config-scan` grows a
+`run:` step, so the exemption cannot go quietly stale.
+
+A red in any of those **five** jobs is therefore a **regression**, never the
+fixture doing its job; the deliberate defects all live in
 [`../kubernetes-repo-broken/`](../kubernetes-repo-broken/) — with one designed
 exception, `argocd/foreign-app.yaml`, described under the fixture contract.
 
@@ -62,10 +66,13 @@ so a harness must present the slug **`fixture-org/kubernetes-repo`** to that job
 Note *how*: the workflow pins `REPO_SLUG: ${{ github.repository }}` at step
 level, and a step-level `env:` beats an exported shell variable — so exporting
 `REPO_SLUG` around an unmodified workflow run does nothing. The contract is met
-by a harness that **executes the job's `run:` block** with `REPO_SLUG` set (what
-#1199 will do), or by overriding `github.repository`. Get it wrong and the
-filter selects nothing, the job exits 0 having verified no path at all, and the
-green is **vacuous**.
+by a harness that **executes the job's `run:` block** with `REPO_SLUG` set (which
+is what [`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
+does), or by overriding `github.repository`. Get it wrong *with a non-empty but
+wrong slug* and the filter selects nothing, the job exits 0 having verified no
+path at all, and the green is **vacuous**. An **empty** slug is no longer one of
+the ways to get it wrong: since #1199 the step refuses it outright with
+`::error::REPO_SLUG is empty …`.
 
 `foreign-app.yaml` is the negative control that makes the green non-vacuous in
 the other direction: it is deliberately foreign, and its slug has this variant's
@@ -81,8 +88,46 @@ are meant to run from this directory.
 
 ## Verifying it directly
 
-Run from this directory, with the versions the pipeline pins — **kube-linter
-0.7.2, kyverno 1.13.4, kubeconform 0.6.7, yq 4.44.3**. Note `kube-linter` is
+Run from this directory, with the **pinned toolchain** in front of your PATH
+(plus `jq`, which the toolchain does **not** ship — the argocd block below pipes
+`yq` into it, and without it that block prints its own `FAIL: expected exactly
+charts/app` and reads as a filter regression):
+
+```bash
+REPO_ROOT=/path/to/timos-claude-code-plugins          # <- replace with your checkout
+IAC_BIN="$(zsh "$REPO_ROOT/tests/iac-tools.zsh")"
+[ -n "$IAC_BIN" ] \
+  && export PATH="$IAC_BIN:$PATH" \
+  || echo 'FAIL: toolchain not resolved — no verdict below is trustworthy'
+zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative six versions
+```
+
+(No `exit` in that block on purpose: it is the one snippet here you must run in
+your **current** shell, since the `export` is the whole point — an `exit` on the
+failure path would close the terminal and take the diagnostic with it.)
+
+**Every block below must be run in a subshell, and the one above must not.**
+They open with `set -euo pipefail` and report failures with `exit 1`, so pasting
+one into the shell you just exported `PATH` into would leave errexit set in it
+and close it on the first FAIL. Run them as a unit — `bash <<'EOF' … EOF`, or
+wrap in `( … )`. The exported `PATH` is inherited by the subshell, so the
+pinning still applies.
+
+The script **prints** its bin directory; it cannot modify your shell's PATH, so
+the `export` is what actually puts the pinned tools in front of whatever
+`brew`/`apt` installed. The emptiness check is not decoration: if the resolver
+fails (offline, no mikefarah `yq`, an unsupported arch) it exits non-zero and
+prints nothing, and a bare `export PATH="$(…):$PATH"` would still succeed — with
+an **empty leading entry**, i.e. the current directory, and not one pinned tool
+on it. Every verdict below would then be measured with an unpinned binary while
+still looking like a result.
+
+The versions are deliberately **not restated here** — `--print-pins` is the one
+authoritative list (four read from the workflow template, plus helm and
+kustomize pinned in `iac-tools.zsh`, since the template installs neither).
+All six matter: the recipe below starts with `helm template` and
+`kustomize build`, whose output feeds every verdict it asserts. Note
+`kube-linter` is
 invoked *without* `--config`, exactly as the pipeline invokes it: it
 auto-discovers `./.kube-linter.yaml` from the working directory, and that
 discovery is what makes the non-default `no-readiness-probe` check apply at all.
@@ -151,12 +196,10 @@ Expected: **exactly `charts/app`**, which exists — so the job is green. If
 `contains`-style match and would have selected `foreign-app.yaml`; the assertion
 above turns that into a loud failure instead of an eyeball comparison.
 
-
-
-At those pinned versions a red is a regression. On any other version, re-run
-pinned before concluding anything — kube-linter promotes checks into its default
-set between releases, so a newer binary can report findings on a genuinely clean
-fixture.
+**At the versions `--print-pins` reports, a red is a regression.** On any other
+version, re-run pinned before concluding anything — kube-linter's default check
+set moves between releases (checks are added, renamed and retired), so a newer
+binary can report findings on a genuinely clean fixture.
 
 ## Sibling variants
 

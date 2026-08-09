@@ -34,12 +34,14 @@ jobs:
             # a library chart is a render-time INPUT to other charts, not
             # renderable output — `helm template` refuses it outright ("library
             # charts are not installable"), so a repo with a shared charts/common
-            # would red the render job, and every other job needs: render
-            # optional quotes and an optional trailing comment: `type: "library"`
-            # is ordinary house style (yamllint's quoted-strings: required), and an
-            # unquoted-only match would hand a library chart to `helm template`,
-            # which refuses it — reddening render on a legitimate repo. The same
-            # tolerance is applied to every `kind:`/`type:` probe in this file.
+            # would red the render job that every other job `needs:`.
+            #
+            # The probe tolerates optional quotes and an optional trailing
+            # comment: `type: "library"` is ordinary house style (yamllint's
+            # quoted-strings: required), and an unquoted-only match would hand a
+            # library chart to `helm template`, which refuses it — reddening
+            # render on a legitimate repo. The same tolerance is applied to every
+            # `kind:`/`type:` probe in this file.
             if grep -qE '^type:[[:space:]]*["'"'"']?library["'"'"']?[[:space:]]*(#.*)?$' "$c"; then
               continue
             fi
@@ -442,6 +444,16 @@ jobs:
                  "refusing to report a green check on unenforced policies"
             exit 1
           fi
+          # ...and the one green this step DOES allow, stated so the refusals
+          # above read as a closed list rather than an open promise: `kyverno
+          # apply` exits 0 when the rules matched NOTHING, and that is
+          # deliberate. A policy selecting a kind the repo does not currently
+          # declare (a StatefulSet rule in a Deployment-only repo) is
+          # legitimate, and failing it would make adding a forward-looking
+          # policy a red check. So "policies are declared and evaluable" is what
+          # this step guarantees — not "every declared policy matched something".
+          # A repo that wants the stronger guarantee asserts the counter itself,
+          # the way this plugin's own fixtures do.
           kyverno apply "$RUNNER_TEMP/policies/" --resource "$RENDER_DIR/"
           # A policy set with no fixtures is a HIGH MAINTENANCE FINDING
           # (policy_tests -> kubernetes-policy-triage), not a build failure — the
@@ -451,8 +463,16 @@ jobs:
           # (kyverno-test-registry.yaml) would pass this gate while the CLI finds
           # nothing and errors, and the gather would simultaneously report
           # fixtures present so no policy_tests finding is ever filed
-          if find "$POLICY_SRC" -type f \( -name 'kyverno-test.yaml' -o -name 'kyverno-test.yml' \) \
-               -print -quit 2>/dev/null | grep -q .; then
+          # the same capture-then-test shape the two probes above use, NOT
+          # `… | grep -q .`: `grep -q` closes the pipe on its first match, which
+          # is precisely the SIGPIPE-under-pipefail hazard this step already
+          # rejects for `| head -n1`. Harmless today only because `-quit` makes
+          # find exit before a second write, so nothing is left to receive the
+          # signal — but as an `if` condition the failure would be silent, taking
+          # the else arm and warning "no kyverno test fixtures" for a repo that
+          # ships them.
+          if [ -n "$(find "$POLICY_SRC" -type f \( -name 'kyverno-test.yaml' -o -name 'kyverno-test.yml' \) \
+                       -print -quit 2>/dev/null || true)" ]; then
             # the tree at its ORIGINAL path, now dereferenced: the CLI's
             # lstat-based walker can descend what the probe above matched, and
             # every fixture's relative `policies:`/`resources:` entry still
@@ -514,6 +534,21 @@ jobs:
       - name: every app path this repo owns exists
         run: |
           set -euo pipefail
+          # An EMPTY $REPO_SLUG is not merely unhandled, it is SILENTLY VACUOUS,
+          # and neither `set -u` nor the expression probe below catches it: the
+          # variable is set (so -u stays quiet), the probe URL collapses to
+          # `https://github.com/`, and the filter's `endswith("/" + $s)` guard
+          # degenerates to `endswith("/")` — TRUE — so the probe passes, every
+          # real Application is then filtered OUT, and the job exits 0 having
+          # verified no path at all. github.repository is never empty on a real
+          # runner, but a harness executing this block (tests/, or a consumer's
+          # own re-use) can supply one, and a green that means nothing is the
+          # exact outcome the probe exists to make impossible.
+          if [ -z "${REPO_SLUG:-}" ]; then
+            echo "::error::REPO_SLUG is empty — the repoURL filter would select" \
+                 "nothing and this check would pass vacuously"
+            exit 1
+          fi
           # Read .spec.source.path from Argo CD Application/ApplicationSet docs
           # ONLY. A bare `grep 'path:'` matches every path: key in the repo — a
           # readinessProbe's `path: /healthz` included.

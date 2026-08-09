@@ -13,16 +13,29 @@ and passes everything silently, so the machinery must notice it:
   no kyverno test fixtures` from its `policy` job and stay **green** — an
   untested policy set is a finding to file, not a build failure.
 
-Verifying that pipeline-level expectation end-to-end is #1199's job, not this
-fixture's; what is verified here is tool-level (see below).
+**`config-scan` is the sixth job, and deliberately excluded** — same carve-out
+as the two sibling variants. It runs a third-party `trivy-action` rather than a
+`run:` block, so step extraction has nothing to execute, and trivy's severity
+assignments move between releases. The job is **unasserted**: neither green nor
+red is claimed, and a red there is *not* a fixture regression — do not chase it
+by editing this variant's chart. Every "green" claim on this page means the five
+executable jobs.
+
+That pipeline-level expectation **is** verified end-to-end, by
+[`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
+(#1199), which executes the workflow's own `run:` blocks over a temp copy of
+this variant with the pinned toolchain. What is verified *here* is tool-level
+(see below).
 
 ## Why there is a chart
 
 The variant also ships a minimal `charts/app`, carrying the same
 clean-by-construction Deployment as [`../kubernetes-repo/`](../kubernetes-repo/).
-It carries the same `.kube-linter.yaml` and the same genuinely templated
-`configmap.yaml` as its siblings, so all three variants are linted under one
-check set and an absent or empty helm render is observable here too. The chart is
+It carries the same `.kube-linter.yaml` as both siblings — so all three variants
+are linted under one check set — and the same genuinely templated
+`configmap.yaml` as [`../kubernetes-repo/`](../kubernetes-repo/), so an absent or
+empty helm render is observable here too. (The broken variant ships no chart at
+all, which is why its rendered set carries no `helm_*` file.) The chart is
 not decoration — a bare `policies/kyverno/` directory would make this fixture
 unreachable by the very machinery it exists to exercise:
 
@@ -33,9 +46,13 @@ unreachable by the very machinery it exists to exercise:
   Kubernetes repo.
 - **The policy job evaluates something real.** `kyverno apply` runs over the
   rendered output *before* the no-test-fixtures warning is reached. With no
-  workload anywhere, that apply would see only the policy document itself and
-  the `lint` job would have no valid object — three jobs would pass vacuously
-  and the warning would sit behind a policy set nothing had exercised.
+  workload anywhere, that apply would match nothing and still exit 0, so
+  `schema`, `policy` and `argocd` would all pass **vacuously** — and the warning
+  would sit behind a policy set nothing had exercised. `lint` would not even do
+  that: `kube-linter` errors with "no valid objects found" on an object-free
+  tree, so it would red outright, and the render job's sentinel would not save
+  it (the policy document carries a top-level `kind:`, so the sentinel never
+  fires).
 
 The chart is clean, so this variant's expectation is **green plus the
 untested-policy warning**.
@@ -51,8 +68,38 @@ untested policy directory in reality.
 
 ## Verifying it directly
 
-Run from this directory, with the versions the pipeline pins — **kube-linter
-0.7.2, kyverno 1.13.4**:
+Run from this directory, with the **pinned toolchain** in front of your PATH:
+
+```bash
+REPO_ROOT=/path/to/timos-claude-code-plugins          # <- replace with your checkout
+IAC_BIN="$(zsh "$REPO_ROOT/tests/iac-tools.zsh")"
+[ -n "$IAC_BIN" ] \
+  && export PATH="$IAC_BIN:$PATH" \
+  || echo 'FAIL: toolchain not resolved — no verdict below is trustworthy'
+zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative six versions
+```
+
+(No `exit` in that block on purpose: it is the one snippet here you must run in
+your **current** shell, since the `export` is the whole point.)
+
+**The block below is a subshell recipe**, and this one is not: it opens with
+`set -euo pipefail`, reports failures with `exit 1`, and `cd`s into a `mktemp -d`
+it never leaves. Pasting it into the shell you just exported `PATH` into would
+leave errexit set there, close it on the first FAIL, and otherwise strand you in
+a temp directory. Run it as a unit — `bash <<'EOF' … EOF`, or wrap in `( … )`.
+The exported `PATH` is inherited by the subshell.
+
+The script **prints** its bin directory; it cannot modify your shell's PATH, so
+the `export` is what actually pins the run — and the emptiness check is what
+stops a failed resolve from silently leaving an empty leading PATH entry (the
+cwd) with no pinned tool on it. The versions are deliberately **not restated
+here** — `--print-pins` is the one authoritative list.
+
+**At those versions a red is a regression.** On any other version, re-run pinned
+before concluding anything. This recipe
+exercises kube-linter and kyverno (read from the workflow template) plus helm
+(pinned in `iac-tools.zsh`, since the template installs neither helm nor
+kustomize) — the `helm template` below produces everything the other two judge:
 
 ```bash
 set -euo pipefail
@@ -65,7 +112,7 @@ grep -q 'rendered-by-helm' /tmp/untested-rendered/helm_charts_app.yaml \
 cp policies/kyverno/require-registry.yaml \
    /tmp/untested-rendered/plain_policies_kyverno_require-registry.yaml   # the standalone sweep
 
-kube-linter lint /tmp/untested-rendered/               # kube-linter 0.7.2 — zero findings
+kube-linter lint /tmp/untested-rendered/               # zero findings, at the pin
 kyverno apply policies/kyverno/require-registry.yaml \
   --resource /tmp/untested-rendered/ | tee /tmp/untested-apply.txt       # pass: 1, fail: 0
 grep -qE 'pass: [1-9]' /tmp/untested-apply.txt \
@@ -85,17 +132,25 @@ to prevent.
 ## The argocd job still needs REPO_SLUG set
 
 This variant ships no Argo CD `Application`, so it pins **no particular slug**.
-It is not free of the variable, though: the `argocd` job runs on every variant
-and its compile probe dereferences `$REPO_SLUG` under `set -euo pipefail`
-*before* any Application is read. Unset, the step dies on an unbound variable.
+It is not free of the variable, though: the `argocd` job runs on every variant,
+and since #1199 its very first statement is a `[ -z "${REPO_SLUG:-}" ]` guard.
+The `:-` is what makes **unset and empty behave identically** — both stop there
+with `::error::REPO_SLUG is empty …` and exit 1, before any Application is read.
+(Before that guard, unset died on `set -u`'s unbound-variable error and empty
+passed silently; only the guard collapses the two into one legible failure.)
 
-**Empty is worse than it looks.** The probe URL collapses to a bare
-host with a trailing slash, the filter's `endswith("/" + $s)` guard degenerates to
-`endswith("/")` — which is TRUE — so the probe passes, no typed error is raised,
-and the job then greens having selected nothing: a vacuous pass the probe does
-*not* catch. (Verified against the shipped template.) So a harness must set
-`REPO_SLUG` to some non-empty value here; any value will do. Closing that blind
-spot in the workflow itself belongs to #1199, not to this fixture.
+**Why the empty case needed its own guard.** It was the worse of the two: the
+probe URL collapses to a bare host with a trailing slash, the filter's
+`endswith("/" + $s)` guard degenerates to `endswith("/")` — which is TRUE — so
+the probe *passed*, no typed error was raised, and the job greened having
+selected nothing. A vacuous pass the probe itself could not catch, and one
+`set -u` never caught and never could, because the variable is *set*, just
+empty. That is the blind spot #1199 closed.
+
+A harness must therefore still set `REPO_SLUG` to some non-empty value here —
+any value will do, since this variant ships no Argo CD `Application` — but the
+consequence of forgetting is now a loud failure that names the variable, whether
+you left it empty or never set it at all.
 
 ## Sibling variants
 

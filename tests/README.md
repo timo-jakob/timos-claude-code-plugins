@@ -10,12 +10,77 @@ PR #259) showed they need.
 ## Run them
 
 ```sh
-# Isolated in Docker (default) — won't touch your machine:
+# Isolated in Docker (default) — won't touch your machine, except the shared
+# IaC toolchain cache described below:
 tests/run-script-tests.zsh
 
-# Directly on the host (needs bats on PATH — host bats, the mode CI runs in):
+# Directly on the host — host bats, the mode CI runs in. The toolchain it needs
+# is exactly what tests/Dockerfile installs (plus GNU parallel, which CI adds for
+# the gate helper); that file is the roster, and it is deliberately NOT restated
+# here — an enumerated copy drifts, and this one already did, three times.
+# Everything in it is called unguarded on purpose, so an absent tool reds the
+# suite rather than silently skipping its coverage. The easiest to miss is `jq`:
+# the kubernetes-ci harness executes the argocd step, which pipes `yq -o=json`
+# into `jq`, so without it that step fails with the template's own "expression
+# does not compile" message — which points at correct shipped content, not at
+# your PATH:
 tests/run-script-tests.zsh --local
 ```
+
+**One exception to that isolation, in both modes.** The `kubernetes-ci`
+real-tool harness needs a **pinned** IaC toolchain, and `tests/iac-tools.zsh`
+fetches roughly 100 MB of it from the network into
+`${IAC_TOOLS_CACHE:-${XDG_CACHE_HOME:-~/.cache}/timos-claude-code-plugins/iac-tools}/<os>-<arch>/`
+the first time the suite runs — so if you have `XDG_CACHE_HOME` set, it is not
+under `~/.cache`, and `IAC_TOOLS_CACHE` overrides both (it is also how the
+Docker mode points the container at the mounted host cache). The Docker mode creates that directory on the **host** and
+bind-mounts it into the container — the `os-arch` leaf is what lets one cache
+root serve both — so the container downloads once per platform rather than once
+per run. Nothing else leaves the container.
+
+Four of the six pins (`kubeconform`, `kube-linter`, `kyverno`, `yq`) are read
+**from the workflow template**, so bumping the template moves the harness with
+it. `helm` and `kustomize` are the exception: the template installs neither
+(`ubuntu-latest` ships both), so there is no upstream pin to read and they are
+pinned inside `iac-tools.zsh` to the runner image the workflow targets — bump
+them there. Never from `brew` or `apt` in either case: kube-linter's default
+check set moves between releases — checks are added, renamed and retired — so a
+newer binary does not reproduce the fixtures' counts. Measured, not
+hypothesised: one minor ahead of the pin reports **three** findings on the
+broken fixture where the pin reports **four**.
+
+**It fails rather than skips.** The harness calls the resolver unguarded, so a
+machine that cannot fetch the toolchain reds the whole suite — deliberately,
+since a silently skipped harness is the failure mode this epic exists to
+prevent.
+
+```sh
+zsh tests/iac-tools.zsh              # resolve + cache the pinned toolchain
+zsh tests/iac-tools.zsh --print-pins # just show what it would pin, offline-safe
+```
+
+Two things that caching does **not** buy you, both worth knowing before you
+diagnose a red as a harness bug:
+
+- **The cache is per-platform, so warming it once is not enough for both modes.**
+  `tests/iac-tools.zsh` on a macOS host fills `darwin-arm64`, which is what
+  `--local` uses; the default Docker mode runs the suite inside the debian
+  container and needs the `linux-*` leaf, which is filled only by running
+  `tests/run-script-tests.zsh` once while online. Each platform you run on needs
+  its own online run.
+- **The `schema` job needs the network once per cache root, not once per run.**
+  The shipped pipeline step is `kubeconform -strict -summary
+  -ignore-missing-schemas` with **no** `-cache`, so in a consumer's CI it
+  re-downloads the Kubernetes JSON schemas from `raw.githubusercontent.com`
+  every time. The harness does not: `kubernetes-ci-fixtures.bats` puts a shim
+  ahead of the real binary that prepends `-cache <cache-root>/kubeconform-cache`,
+  which lives inside the same cache root as the binaries — so it is
+  bind-mounted in Docker mode and restored by `actions/cache` in CI. After one
+  online run the schema assertions are offline-safe too. On a **cold** schema
+  cache and no network they still fail, with `Errors: N` and a schema-download
+  message that names nothing in this repo. (Adding `-cache` to the shipped
+  template would help consumers identically, and is deliberately out of this
+  story's scope.)
 
 CI runs them on every PR via `.github/workflows/script-tests.yml` (natively — the
 runner is already disposable; Docker is only for local isolation). Its entry
@@ -27,12 +92,17 @@ runs the whole suite once in parallel and exits with bats' real status.
 
 | Path | What |
 | --- | --- |
-| `Dockerfile` | Disposable image (zsh, bats, jq, shellcheck, python3, git) |
+| `Dockerfile` | Disposable image — the declared test dependencies; see the file's own header rather than a list that drifts |
 | `run-script-tests.zsh` | Runner — Docker by default, `--local` for host bats |
+| `run-script-tests.bats` | Tests the runner's Docker wiring — the IaC toolchain cache mount, its precedence and its guards (#1199) |
 | `assertions.bash` | Shared assertion helpers (`load assertions`) — the sanctioned way to assert (#1011) |
 | `roster.bash` | Derives the helper roster from `assertions.bash` (`load roster`) — the single source both guards use (#1067) |
 | `find-inert-bracket-assertions.zsh` | Detector behind the inert-assertion suite lint — `bracket` (#1011) and `and-tail` (#1067) rules |
+| `iac-tools.zsh` | Resolves the **pinned** helm/kustomize/kubeconform/kube-linter/kyverno/yq the `kubernetes-ci` harness runs on (#1199) |
+| `iac-tools.bats` | Tests `iac-tools.zsh` — pin extraction, the usage taxonomy, the anchored version probe and the cache layout, fully offline (#1199) |
 | `fixtures/clean/` | A self-contained, finding-free mini plugin repo (a `development-fixture` plugin) |
+| `fixtures/kubernetes-repo*/` | Three GitOps repository shapes — clean, broken, untested-policy (#1155) |
+| `kubernetes-ci-fixtures.bats` | Executes the bootstrapped `kubernetes-ci` workflow with **real tools** over those fixtures (#1199) |
 | `gather-claude-plugin.bats` | Tests `gather-claude-plugin-findings.zsh` — one mutation of `clean` per validator, asserting the matching finding |
 | `check-marketplace-sync.bats` | Tests `check-marketplace-sync.zsh` — in-sync, version mismatch, missing entry, missing plugin.json |
 

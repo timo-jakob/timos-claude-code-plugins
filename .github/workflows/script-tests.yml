@@ -67,8 +67,11 @@ on:
       # approver-policy overlay does NOT exist yet, so the PR that finally lands
       # it must red this suite at PR time rather than after merge — AND, since
       # #1154, bootstrap-iac-pipeline.bats reads the kubernetes-ci workflow
-      # template here. Two suites now depend on this entry: retiring the Go
-      # assertion does not free it.
+      # template here, joined since #1199 by kubernetes-ci-fixtures.bats (which
+      # extracts every `run:` step from it) and iac-tools.bats / iac-tools.zsh
+      # (which read all four version pins from it), and run-script-tests.bats
+      # (which asserts the cache key names the template). SEVERAL suites now
+      # depend on this entry: retiring the Go assertion does not free it.
       - 'development/skills/bootstrap/templates/**'
       # same rule, extended for the Grafana hand-off suite (#1008): it asserts
       # the reference page's envelope table against the validator's own key
@@ -163,6 +166,50 @@ jobs:
         if: runner.os == 'macOS'
         # brew's `yq` IS mikefarah's, so the macOS leg needs no special case
         run: brew install bats-core jq shellcheck node parallel yamllint yq
+      # The pinned IaC toolchain the kubernetes-ci real-tool harness executes the
+      # workflow with (tests/kubernetes-ci-fixtures.bats, #1199): helm,
+      # kustomize, kubeconform, kube-linter, kyverno and yq.
+      #
+      # FOUR of those six — kubeconform, kube-linter, kyverno, yq — are read FROM
+      # the workflow template, which installs them, so a bump there moves the
+      # harness with it. helm and kustomize are the exception: the template
+      # installs neither (ubuntu-latest ships both), so there is no upstream pin
+      # to read and they are pinned in tests/iac-tools.zsh instead. That is the
+      # same split the cache key below encodes.
+      #
+      # Deliberately NOT apt/brew: those track latest, and kube-linter's default
+      # check set moves between releases, so a newer binary reports three
+      # findings on the fixture that pins four.
+      #
+      # A named step rather than letting the harness fetch them mid-suite: a
+      # network failure then reads as "the toolchain could not be downloaded",
+      # not as a mysterious bats red. The harness calls the same script and finds
+      # the cache warm. It is OS-agnostic (it resolves darwin/linux itself), so
+      # one step serves both legs.
+      #
+      # Cached, because this workflow's path filter is a `**` catch-all: without
+      # it every PR in the repo — including ones touching nothing IaC-related —
+      # re-fetches ~100 MB from the two release hosts on BOTH matrix legs, and a
+      # single transient 5xx reds a check that has nothing to do with the change
+      # under review. The key hashes the two files a pin can live in, so the
+      # cache invalidates whenever one could have moved and never otherwise —
+      # and it is keyed on arch as well as OS, because the cache root holds a
+      # per-`os-arch` leaf.
+      - name: Cache the pinned IaC toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/timos-claude-code-plugins/iac-tools
+          # both inputs that can move a pin: the script (helm/kustomize) and the
+          # workflow template (the other four)
+          key: >-
+            iac-tools-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('tests/iac-tools.zsh',
+            'development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl') }}
+      - name: Install the pinned IaC toolchain
+        # idempotent: a cache hit makes this a no-op, a miss fetches what is
+        # missing. The step stays even on a hit so a partial cache still resolves.
+        run: zsh tests/iac-tools.zsh
+
       - name: Run shell-script behavioral tests
         run: |
           # On macOS, force the bash scripts onto Apple's stock /bin/bash 3.2 —

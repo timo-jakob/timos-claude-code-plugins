@@ -4019,6 +4019,22 @@ is no Linux support claim in `marketplace.json` and none is planned.
 setopt err_exit nounset pipefail
 ```
 
+**`emulate -L zsh`, when used, must come BEFORE `setopt` (#1199).** `emulate`
+resets every option in its emulation set — `err_exit` and `nounset` among them,
+even without `-R` — so a script that sets its options on line 2 and calls
+`emulate` further down is running with **none of them**. It fails silently and
+looks correct:
+
+```zsh
+zsh -c 'setopt errexit nounset; emulate -L zsh; setopt' | grep -c errexit  # 0
+```
+
+Four scripts predate this rule and still have the ordering inverted; they are
+tracked in [#1223](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1223).
+Reordering is not the whole job — turning `err_exit` genuinely on for the first
+time can surface latent trailing-status hazards, so re-check each script's
+behaviour against its coverage rather than only swapping two lines.
+
 **Exception — hook scripts** (those registered in a plugin's `hooks.json`, e.g.
 `development/hooks/`): omit `err_exit`, keeping `nounset pipefail`. A hook that
 exits non-zero is user-visible, and a `PreToolUse` hook exiting 2 outright
