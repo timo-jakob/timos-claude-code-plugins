@@ -101,8 +101,16 @@ repos:
     rev: v0.44.0
     hooks:
       - id: markdownlint
-        # tests/fixtures/**/*.md are byte-exact GOLDENS of generated output
+        # MOST tests/fixtures/**/*.md are byte-exact GOLDENS of generated output
         # (escalation comments, progress.md blocks) — the whole point is that
         # they match a script's bytes exactly, so reformatting them to satisfy
         # a prose linter would destroy what they pin (#995).
+        #
+        # Since #1155 the tree ALSO holds authored contributor prose: the three
+        # tests/fixtures/kubernetes-repo*/README.md. Those are not goldens and
+        # nothing about them needs to be byte-exact — they are unlinted only
+        # because this one exclude covers the whole directory. Linting them
+        # (by narrowing this pattern, or by moving the goldens under a
+        # tests/fixtures/golden/ prefix) is tracked in #1224; recorded here so
+        # the rationale above is not read as covering them.
         exclude: ^tests/fixtures/.*\.md$

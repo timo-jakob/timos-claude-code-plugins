@@ -28,8 +28,12 @@ The Kyverno rule id is the **autogen** one. The policy matches `kinds: [Pod]`
 and these resources are Deployments, so Kyverno generates
 `autogen-images-from-allowed-registry` from the authored
 `images-from-allowed-registry` — and that generated name is what tool output
-actually carries, as this variant's own `kyverno-test.yaml` asserts. A harness
-grepping for the authored name alone would never match.
+actually carries, as this variant's own `kyverno-test.yaml` asserts.
+
+**Assert the `autogen-` prefixed name.** The authored name is a literal
+*substring* of the generated one, so a harness grepping for it matches by
+accident and proves nothing about autogen — the assertion would still pass if
+the rule had never been generated at all.
 
 Two separations keep every row one-to-one: `latest-tag.yaml` stays on the
 **allowed** registry (`registry.example.com/app:latest`), so only `latest-tag`
@@ -48,17 +52,25 @@ nothing observable.
 
 ## Which jobs own nothing
 
-`render`, `schema` and `config-scan` are expected **green even here**.
-`config-scan` is thresholded at `HIGH,CRITICAL`, and none of these defects
-reaches that band. A red in one of those three jobs is a **regression**, not the
-fixture doing its job.
+`render` and `schema` are expected **green even here**, and a red in either is a
+**regression**, not the fixture doing its job.
 
-`render` and `schema` are backed by the whole-`RENDER_DIR` block below.
+`config-scan` is a third case, and deliberately not part of that rule. It is
+thresholded at `HIGH,CRITICAL` and none of these defects reaches that band, so it
+*should* be green — but the job is **unasserted** (see below), so a red there is
+not a fixture regression and must not be "fixed" by editing these manifests.
+
+`render` and `schema` are backed by the whole-`RENDER_DIR` block below, and by
+[`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
+(#1199), which executes the workflow's own `run:` blocks over a temp copy of this
+variant with the pinned toolchain — including the per-file assertions that keep
+the table above one-to-one.
+
 **`config-scan` is not**: it runs a third-party `trivy-action` that no command
-here executes, so its green is expected rather than measured — and trivy's
-severity assignments move between releases, so a promoted check could red it on
-a fixture nothing else objects to. Deciding how (or whether) to exercise it is
-explicitly #1199's call.
+here executes, and trivy's severity assignments move between releases, so a
+promoted check could red it on a fixture nothing else objects to. #1199 made the
+call — the job is **unasserted**, neither green nor red is claimed — and pinned
+it with a test that fails the moment `config-scan` grows a `run:` step.
 
 ## `kyverno test` is never reached in this variant under the pipeline
 
@@ -95,14 +107,50 @@ that job. Note *how*: the workflow pins `REPO_SLUG: ${{ github.repository }}` at
 step level, and a step-level `env:` beats an exported shell variable — so
 exporting `REPO_SLUG` around an unmodified workflow run does nothing. The
 contract is met by a harness that **executes the job's `run:` block** with
-`REPO_SLUG` set (what #1199 will do), or by overriding `github.repository`.
-Get it wrong and the filter selects nothing, the job passes **vacuously**, and
-this fixture's most important reds silently do not happen.
+`REPO_SLUG` set (which is what
+[`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats) does),
+or by overriding `github.repository`. Get it wrong *with a non-empty but wrong
+slug* and the filter selects nothing, the job passes **vacuously**, and this
+fixture's most important reds silently do not happen. An **empty** slug is no
+longer one of the ways to get it wrong: since #1199 the step refuses it outright
+with `::error::REPO_SLUG is empty …`.
 
 ## Verifying it directly
 
-Run from this directory, with the versions the pipeline pins — **kube-linter
-0.7.2, kyverno 1.13.4, kubeconform 0.6.7, yq 4.44.3** plus `jq`. `kube-linter`
+Run from this directory, with the **pinned toolchain** in front of your PATH
+(plus `jq`):
+
+```bash
+REPO_ROOT=/path/to/timos-claude-code-plugins          # <- replace with your checkout
+IAC_BIN="$(zsh "$REPO_ROOT/tests/iac-tools.zsh")"
+[ -n "$IAC_BIN" ] \
+  && export PATH="$IAC_BIN:$PATH" \
+  || echo 'FAIL: toolchain not resolved — no verdict below is trustworthy'
+zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative six versions
+```
+
+(No `exit` in that block on purpose: it is the one snippet here you must run in
+your **current** shell, since the `export` is the whole point.)
+
+**Every block below must be run in a subshell, and the one above must not.**
+They open with `set -euo pipefail` and report failures with `exit 1`, so pasting
+one into the shell you just exported `PATH` into would leave errexit set in it
+and close it on the first FAIL — and this variant's blocks are *expected* to hit
+those arms. Run them as a unit — `bash <<'EOF' … EOF`, or wrap in `( … )`. The
+exported `PATH` is inherited by the subshell.
+
+The script **prints** its bin directory; it cannot modify your shell's PATH, so
+the `export` is what actually pins the run — and the emptiness check is what
+stops a failed resolve from silently leaving an empty leading PATH entry (the
+cwd) with no pinned tool on it. The versions are deliberately **not restated
+here** — `--print-pins` is the one authoritative list.
+
+**At those versions a red is a regression.** On any other version, re-run pinned
+before concluding anything: kube-linter's default check set moves between
+releases, so a newer binary reports a different count on this very fixture — the
+`found 4 lint errors` assertion below is the first thing that will disagree.
+
+`kube-linter`
 takes no `--config`, exactly as the pipeline invokes it: it auto-discovers
 `./.kube-linter.yaml` from the working directory, and that discovery is what
 makes the non-default `no-readiness-probe` check apply at all.
@@ -160,6 +208,12 @@ documents and both policy files land in it too:
 
 ```bash
 set -euo pipefail
+# /tmp/b too, not just the render dir: this block writes its lint output there
+# and is meant to stand alone. Without it a standalone run fails the redirect,
+# skips the "produced no finding" branch, and then greps a file that does not
+# exist — printing "FAIL: no-readiness-probe stopped firing", a false regression
+# verdict whose real cause is a missing scratch directory.
+rm -rf /tmp/b && mkdir -p /tmp/b
 rm -rf /tmp/broken-rendered && mkdir -p /tmp/broken-rendered
 for m in broken/*.yaml broken/argocd/*.yaml policies/kyverno/*.yaml; do
   cp "$m" "/tmp/broken-rendered/plain_$(printf '%s' "$m" | tr / _)"

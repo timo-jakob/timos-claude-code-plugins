@@ -983,9 +983,13 @@ env_sweep() {
 }
 
 @test "policy: the strip never reaches outside the policy tree (#1154)" {
-  # -xtype l, not -L … -type l: -L DESCENDS a valid symlinked subdirectory, so
-  # the deletion would remove files at their real location outside
-  # policies/kyverno — `all -> ../..` would sweep the whole checkout.
+  # `-type l ! -exec test -e {} \;`, not `-L … -type l`: -L DESCENDS a valid
+  # symlinked subdirectory, so the deletion would remove files at their real
+  # location outside policies/kyverno — `all -> ../..` would sweep the whole
+  # checkout. And deliberately NOT `-xtype l` either: that is a GNU extension
+  # the BSD find on a macOS box rejects outright, and the step's `2>/dev/null`
+  # would turn the rejection into a SILENT no-op — on this suite's own macOS
+  # leg, which is exactly why the template rules it out.
   mkdir -p "$W/policies/kyverno" "$W/common-policies"
   printf 'apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: p\n' \
     > "$W/policies/kyverno/p.yaml"
@@ -1122,7 +1126,11 @@ argocd_step() {
   [ -n "$script" ] && [ "$script" != "null" ] || return 1
   (
     cd "$W" || exit 1
-    PATH="$STUB_BIN:$PATH" RENDER_DIR="$RDIR" REPO_SLUG="${REPO_SLUG:-acme/k8s}" \
+    # `${REPO_SLUG-…}`, NOT `${REPO_SLUG:-…}`: the colon form treats an
+    # explicitly EMPTY value as absent and substitutes the default, so the
+    # empty-slug test below could never reach the guard it exists to pin — it
+    # would silently run against acme/k8s and pass for the wrong reason.
+    PATH="$STUB_BIN:$PATH" RENDER_DIR="$RDIR" REPO_SLUG="${REPO_SLUG-acme/k8s}" \
       bash -c "$script"
   )
 }
@@ -1237,6 +1245,22 @@ EOF
   run argocd_step
   [ "$status" -ne 0 ]
   contains "$output" 'refusing to report a vacuous pass'
+}
+
+@test "argocd: an EMPTY REPO_SLUG is refused rather than passing vacuously (#1199)" {
+  # the sibling of the non-compiling-expression guard above, for the one input
+  # that defeats the probe itself: with $s empty the probe's own URL collapses to
+  # `https://github.com/` and `endswith("/" + $s)` degenerates to `endswith("/")`
+  # — true — so the probe passes, every real Application is filtered out, and the
+  # job greens having checked nothing. `set -u` cannot see it: the variable is
+  # set, just empty.
+  app dangling charts/gone
+  REPO_SLUG="" run argocd_step
+  [ "$status" -ne 0 ]
+  contains "$output" 'REPO_SLUG is empty'
+  # and it refuses BEFORE reading anything, so the vacuous green can never be
+  # reached by a repo whose paths would have failed
+  lacks "$output" 'app-of-apps references missing path'
 }
 
 @test "argocd: an Application in the RENDERED tree is checked, its chart template pruned (#1154)" {
@@ -1861,5 +1885,10 @@ EOF
   # is not its flag), with nothing saying why
   run yq --version
   [ "$status" -eq 0 ]
-  contains "$output" 'mikefarah'
+  # BOTH accepted spellings, matching tests/iac-tools.zsh's probe exactly. The
+  # `mikefarah` URL only appears in ~v4.24 and later; older 4.x prints a bare
+  # `yq version 4.20.2` and speaks the same dialect. Keying on the URL alone
+  # would red this suite on a binary the resolver deliberately accepts — telling
+  # the developer to replace something that works.
+  matches "$output" '([Mm]ikefarah|^yq version 4\.)'
 }

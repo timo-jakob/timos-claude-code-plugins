@@ -16,6 +16,25 @@ ARG YQ_VERSION=4.44.3
 RUN curl -sSfLo /usr/local/bin/yq \
       "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
  && chmod +x /usr/local/bin/yq
+# The kubernetes-ci real-tool harness (tests/kubernetes-ci-fixtures.bats, #1199)
+# needs helm, kustomize, kubeconform, kube-linter, kyverno and yq — and they are
+# deliberately NOT installed here. Two reasons, both about correctness rather
+# than image size:
+#   * the versions are PINNED, and four of the six (kubeconform, kube-linter,
+#     kyverno, yq) are read from the workflow template
+#     (development/skills/bootstrap/templates/iac/...), which is outside this
+#     build context. An apt/brew build of kube-linter one minor ahead reports
+#     three findings on the fixture that pins four, so "whatever the distro
+#     ships" is not an option. (helm and kustomize are pinned in
+#     tests/iac-tools.zsh — the template installs neither — so this reason does
+#     not apply to them; the next one does.);
+#   * baking them in would re-download ~100 MB on every image rebuild.
+# tests/iac-tools.zsh fetches them into a cache keyed by os-arch, and
+# run-script-tests.zsh mounts the host's cache root at /iac-tools
+# (IAC_TOOLS_CACHE), so the container downloads once per platform, ever. What
+# this image owes that path is the fetch toolchain — curl, tar (base), zsh,
+# ca-certificates and yq — all installed above.
+#
 # nodejs: the development-javascript contract-consumer ships a pure-JS orval
 # transformer (orval-deprecation-transformer.mjs, #707); its behavioral bats test
 # executes it with node, so node is a declared test dependency, not incidental.
