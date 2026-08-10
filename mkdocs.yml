@@ -100,6 +100,7 @@ nav:
       - Grafana hand-off contract: reference/telemetry-grafana-handoff.md
       - Repo scripts: reference/repo-scripts.md
       - Requirements: reference/requirements.md
+      - Personas: personas.md
   - Explanation:
       - explanation/index.md
       - Motivation & current gaps: explanation/motivation.md
