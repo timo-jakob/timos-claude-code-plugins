@@ -121,8 +121,15 @@ file_has() {
 
 ARCH_END='### Browser UI — SPA shell, micro-frontends, React default (#1059)'
 
+# The end ADDRESS is the generic `^### `, not the specific heading named by
+# ARCH_END. A specific address catches a renamed or deleted anchor but NOT an
+# inserted one: a section slipped in between is swallowed into the range while
+# the haystack still ends with the pinned heading, so every assertion below
+# would silently widen to cover two sections. The `ends_with` pin then names the
+# heading that follows TODAY. Same idiom as tests/deployment-position.bats and
+# tests/webui-positions.bats, so all three position suites behave identically.
 arch_section() {
-  extract "$ARCH" '^### Messaging' '^### Browser UI'
+  extract "$ARCH" '^### Messaging' '^### '
 }
 
 @test "ARCHITECTURE states ONE messaging default — NATS JetStream + CloudEvents 1.0, no reserve broker (#1060)" {
