@@ -3295,9 +3295,17 @@ staleness detectable. The `persona-definer` agent (#666) generates it and the
 `/development:define-personas` skill (#667) writes it back; `story-readiness`
 (advisory check) and `refine-issue` (data-trait mining) consume it (#668).
 
-The artifact lives at **`docs/personas.md` in the target repo** — not in this
-plugin repo, which has no product surface of its own. Seeding a starter registry
-into new repos is an explicit follow-up, out of scope here.
+The artifact lives at **`docs/personas.md`, in every repo that has a surface —
+including this one**. A surface need not be a *runtime* surface: this repo
+declares three, and its own registry is
+[`docs/personas.md`](docs/personas.md) (#1261). They are `cli` (the
+user-invoked skills), `ci-approver` (the Approver and the bot-authored PR
+pipeline), and `plugin-contracts` (the published JSON contracts a language or
+topic plugin is written against). What belongs in a repo's registry is the
+people who use *that* repo's surfaces — so the users of a product built with
+this family belong to that product repo's registry, never to this one. Seeding a
+starter registry into new repos at bootstrap time remains an explicit follow-up,
+out of scope here.
 
 ### The registry file (`docs/personas.md`)
 
