@@ -786,6 +786,225 @@ either decision can be re-evaluated on its merits rather than rediscovered.
 Building any of this is the MFE composition epic's job, not this section's:
 these are the positions the machinery is built *to*.
 
+### Deployment — GitOps promotion and immutable references (#1189)
+
+A deployable reaching a cluster is the last link in the polyrepo chain above,
+and this family holds positions on it rather than leaving each repo's CI to
+invent one. They are stated here in the family's own words, with their
+rationale, so a reader can disagree with them explicitly.
+
+**Argo CD, with Helm charts and Kustomize overlays, is the GitOps mechanism —
+and it is recorded here as audited-aligned.** The `Application`,
+`ApplicationSet` and `AppProject` resources, the charts and the overlays are
+`development-kubernetes`'s to own; this section adds no new mechanism to them.
+It says so explicitly because an unexamined agreement and an examined one look
+identical from the outside: recording it as *checked* is what lets the next
+position audit skip it instead of re-deriving it. **The marker is scoped, not
+open-ended:** it records that the #1061 position audit (2026-08) compared that
+resource surface, as `development-kubernetes` ships it today, against this
+family's position and found them aligned. An audit result is evidence about the
+thing it examined, and stops being evidence when the thing changes — so the
+marker carries an explicit invalidation rule rather than an implied one: **a
+change to those resources must strike this marker in the same pull request.**
+Re-dating it instead is allowed only where that same pull request actually
+re-compares the changed surface against this position, and the new date must
+name the audit that did so — otherwise re-dating is the cheaper edit and would
+quietly convert an unexamined agreement back into an examined one, which is the
+precise failure this marker exists to prevent. **Once those resources have
+changed**, the marker stops being evidence until it is struck or honestly
+re-dated, and the next position audit re-derives alignment instead of
+inheriting it; while they are unchanged the marker stands and the audit may
+skip it. A marker whose expiry nobody is responsible for noticing is worse than no
+marker, because it licenses exactly the skipping it can no longer justify.
+
+**The infrastructure repo is the only path to the cluster.** An application
+repo builds and publishes an immutable, versioned image, and never writes to a
+cluster itself; a version change reaches the cluster as a **pull request
+against the infrastructure repo**. *Rationale:* that single rule is what turns
+"we use GitOps" from a tooling preference into an auditable property — every
+change running in a cluster has a review, an author, and a revert, and the
+question "why is this running?" is answered by `git log` rather than by
+reconstructing who ran what from a CI transcript. *Its cost, stated plainly:* a
+version bump becomes a second pull request in a second repository, which is
+slower than pushing from the application repo that just built the image — and
+that slowness is the point. A promotion that cannot be reviewed is not cheaper,
+it is only faster to get wrong.
+
+**An infrastructure-repo manifest references a service image by an immutable
+`<image>:<semver>` tag.** In the polyrepo default this document assumes,
+`<image>` is the single image a bootstrapped repo mints —
+`ghcr.io/<owner>/<repo>`, one per repo — and this family states no per-service
+naming rule. A repo with **more than one deployable** (the monorepo shape this
+document tolerates elsewhere) is outside that assumption: it needs a
+per-deployable naming rule before its images can be promoted, because pinning
+two services to one reference is precisely the "several images sharing one
+name" failure this section warns about below. This family does not yet state
+that rule, and **until it does, the honest outcome is an explicit stop rather
+than an invented convention**: such a repo is outside the **image-naming half**
+of this position and nothing more — every other clause here still binds it, the
+promotion contract and the mutable-tag ban included. Only what its images are
+*called* is unanswered, the family neither scaffolds nor gates that, and a
+human settles it before those images are promoted. No follow-up is filed, and
+that is deliberate: the family will not invent a naming rule before a real
+multi-deployable repo forces the question.
+Nothing here contradicts this document's monorepo tolerance — a monorepo still
+*bootstraps and maintains* identically; it is only image **promotion**, which
+needs one name per deployable, that the polyrepo default does not answer for
+it.
+
+**A deployable version is minted on a release, not on every default-branch
+merge.** Merging to the default branch produces a build; a *release* produces a
+version. That is what makes the next clause a rule about naming rather than a
+demand for an automatic version scheme on every merge.
+
+**Mutable tags — `latest`, branch tags, `sha-…` — are build conveniences and
+are never a deployable reference.** *Rationale:* a manifest pinned to a mutable
+tag describes nothing reproducible, and two clusters syncing the same commit
+can end up running different code, which defeats the audit trail the promotion
+contract exists to create. What makes `<semver>` immutable is not the registry
+— any tag is re-pushable — but the promotion contract itself: a released
+version is built once and never re-pushed, and re-pushing one is a violation of
+this position rather than an ordinary operation.
+
+**The digest of a released image — `<image>@sha256:…` — is equally admitted,
+and is strictly more precise.** The enumeration above is closed by this
+sentence rather than left open: a release's semver tag and a release's digest
+are the two admitted forms, and anything else is not a deployable reference.
+Both are scoped to a *release* for the same reason the minting rule is: a
+default-branch build also has a digest, and pinning one would promote something
+no release review ever passed. The semver tag is the human-readable promotion
+unit — it is what a reviewer reads in the pull request that promotes it — while
+the digest is what the registry ultimately resolves to, and what `cosign`
+signs. Naming both is not a hedge: the tag says *which release*, the digest
+says *which bytes*.
+
+**A release publishes its `<semver>` tag.** This is the one obligation the
+position places on a *publisher* rather than on a manifest, and it is stated
+because the rest of the section cannot be derived without it: a release that
+publishes only a digest has minted no promotion unit, so there is nothing for
+the promoting pull request to name in human-readable form. That is the clause
+the ko path currently fails, below.
+
+This rule and the digest-pinned **base** image are not in tension either: they
+pin **different objects for the same reason** — a base-image digest pins what a
+build consumed, a service reference pins what a cluster runs — so that "what is
+running" has exactly one answer.
+
+**Status: the two shipped publish paths fall short in different ways, and only
+one of them breaks a rule.** The Go/ko path publishes no `<semver>` on a
+release, so it fails the publishing clause above; the Docker path publishes the
+right name but leaves it indistinguishable from four conveniences, which breaks
+no rule and is a documentation gap. Both are recorded here rather than implied
+closed, and **#1208** is the follow-up that closes them:
+
+- The **Go/ko path publishes an admitted reference but no promotion unit.**
+  Precisely: its publish step captures the digest that `cosign` then signs, and
+  a digest *is* one of the two admitted forms above — so the ko path is not
+  simply off-position. What it never publishes is a **`<semver>` tag**, because
+  the step passes no `--tags` alongside `--bare`
+  (`development/skills/bootstrap/templates/languages/go/.github/workflows/ko-image.yml.tmpl`,
+  the step running `ko build --sbom=spdx --platform=linux/amd64,linux/arm64 --bare ./...`).
+  Passing no `--tags` is not the same as publishing no tag: ko applies its own
+  default of `latest`, so what a release actually carries today is a signed
+  digest plus a mutable `latest` — an admitted reference and a build
+  convenience, and no promotion unit between them. That is a failure of the
+  publishing clause above — *a release publishes its `<semver>` tag* — and it
+  is the only rule either shipped path actually breaks. **The defect is on the
+  release leg**: on a default-branch merge, publishing no version-shaped tag is
+  exactly what the minting rule requires, so #1208 adds the release's
+  `<semver>` on the release leg **only** — minting a version on every merge
+  would violate the very rule this status note is measured against. One
+  consequence to decide rather than discover: ko's `--tags` **replaces** the
+  default rather than adding to it, so passing `<semver>` alone withdraws the
+  `latest` that ko releases carry today. #1208 records that withdrawal as
+  intended for the ko path. It is a real difference from the Docker path below,
+  where the equivalent names are kept — the asymmetry is deliberate, and it is
+  stated here so it does not read as an oversight.
+- The **Docker path mints only mutable references on a default-branch merge** —
+  `type=ref,event=branch`, `type=sha,format=short,prefix=sha-` and
+  `type=raw,value=latest,enable={{is_default_branch}}`, with the `type=semver`
+  patterns firing only on a release tag. That half is consistent with the
+  minting rule above; what it means in practice is that a default-branch merge
+  publishes **no name a manifest may use** — it does produce a digest, but not
+  a *release's* digest, and the admitted forms are scoped to a release. That is
+  a fact worth stating rather than a defect to repair. The tag lists live in
+  `development/skills/bootstrap/templates/public/.github/workflows/quality-public.yml.tmpl`
+  and
+  `development/skills/bootstrap/templates/private/.github/workflows/quality-private.yml.tmpl`.
+- The **Docker release leg publishes the right name among several unlabelled
+  ones.** It does mint the immutable `<semver>`, so unlike the ko path it is
+  not missing a promotion unit — but it publishes floating `latest`, `<major>`
+  and `<major>.<minor>` beside it, and `sha-<short>` as well (`type=sha`
+  carries no event restriction, so it fires on a release too). Reading the
+  registry, nothing distinguishes the one name a manifest may use from the
+  four that are conveniences.
+
+  **This is a labelling gap, not a rule violation, and the distinction decides
+  what #1208 does.** Publishing a mutable tag breaks nothing above: the
+  position constrains what a *manifest may name*, and explicitly calls mutable
+  tags legitimate build conveniences. So the fix is not to withdraw
+  them — already-bootstrapped repos pull those names, and removing them would
+  break consumers for a clarity the documentation can deliver instead. #1208
+  therefore **labels** the published names wherever a consumer reads them, and
+  changes no Docker tag on either leg.
+
+  The names are described for consumers in
+  `development/skills/bootstrap/templates/common/SETUP.md.tmpl`, whose release
+  row reads `` `1.2.3`, `1.2`, `1`, `latest` (if not prerelease) ``. That row
+  is a derived document rather than the mechanism; the tags themselves come
+  from the `type=semver,pattern={{major}}` and
+  `type=semver,pattern={{major}}.{{minor}}` entries in the two workflow
+  templates, plus `docker/metadata-action`'s default `latest=auto` — neither
+  template sets a `flavor:` key — which is what mints `latest` on a
+  non-prerelease release and what the row's "(if not prerelease)" qualifier is
+  reporting. So "which of these may a manifest name?" is a real question, and
+  the answer above is the full `<semver>` (or the digest) and nothing else.
+
+**Each plane gets its own namespace, and traffic direction is enforced by
+NetworkPolicy** — an application service reaches a control-plane service only
+through that service's published API. *Rationale:* the polyrepo rule already
+says a deployable is held together by a contract rather than by proximity; an
+enforced namespace boundary is what makes that true at runtime instead of on
+paper, and it turns "don't reach into the control plane" from a review comment
+into a packet that does not arrive.
+
+**Configuration arrives as environment variables; secrets are never baked into
+an image and never committed to Git**, reaching the workload through an
+operator that syncs them from the secrets store. *Rationale:* it is what makes
+the immutable-image rule hold — an image carrying environment-specific
+configuration is not one artifact promoted across environments, it is several
+images sharing one name. And a secret committed to Git is unrevocable by the
+mechanism that put it there, because the promotion contract's own audit trail
+preserves it forever.
+
+**The direct-to-cluster gate is deliberately not part of this section.**
+Whether bootstrap fails an application repo that carries a direct-to-cluster
+deploy step is settled — it **will**, but that gate is unbuilt and ships as
+**#1206**, where it gets room for its own detection heuristic and its own
+coverage. This section states the
+positions that gate is built *to*; the missing gate is a sequencing choice, not
+an oversight.
+
+**What enforces the rest, stated plainly, because "a gate exists" is easy to
+over-read.** No gate in this family enforces the promotion contract today —
+the only coverage that exists anywhere is manifest-side and partial. #1206,
+once it ships, **will** cover the promotion contract's *app-repo* half only.
+On the manifest side, `kube-linter` already flags a `latest` tag (see the
+`development-kubernetes` responsibilities below), which is that partial
+coverage of the mutable-tag rule; a branch tag or a `sha-…` pin in an
+infrastructure manifest has **no** automated enforcer, and neither does the
+plane-per-namespace or configuration/secrets position. Those are stated
+positions awaiting mechanism, not shipped guarantees.
+
+Building any of that — a bootstrap scaffold, an advisor, a review dimension —
+is a separate and currently unscheduled concern, exactly as it is for the
+Messaging and Browser UI positions above. This section states the positions
+that machinery would be built *to*. **Two** gaps are called out by name here
+because each already has a follow-up filed — the publish-path gap (#1208) and
+the direct-to-cluster gate (#1206). The rest are unbuilt rather than
+in-flight, and none of them should be read as realized merely because the
+status note above happens to discuss the publish paths.
+
 ### Cross-repo Claude: the big-picture problem
 
 A Claude session in one repo cannot see siblings by default, and in a

@@ -97,10 +97,25 @@ extract() {
 
 # --- the authoritative record ------------------------------------------------
 
-ARCH_END='### Cross-repo Claude: the big-picture problem'
+# The Browser UI section's end anchor is the section that FOLLOWS it, which is
+# the Deployment position (#1189) rather than the Cross-repo Claude section it
+# used to abut.
+#
+# The end ADDRESS is the generic `^### `, not that specific heading. A specific
+# address catches a renamed or deleted anchor but NOT an inserted one: a section
+# slipped in between is swallowed into the range while the haystack still ends
+# with the pinned heading, so every assertion below would silently start scanning
+# two sections' worth of prose — including the `lacks … 'development-angular'`
+# pin, which would then be scoped to text it was never meant to cover. That is
+# exactly what happened here when #1189 inserted the Deployment section, and it
+# required this hand repoint. With the generic address the range always ends at
+# whatever `###` actually follows, and the `ends_with` pin below names the
+# heading that follows TODAY — so the next insertion reds loudly instead of
+# widening quietly. Same idiom as tests/deployment-position.bats.
+ARCH_END='### Deployment — GitOps promotion and immutable references (#1189)'
 
 arch_section() {
-  extract "$ARCH" '^### Browser UI' '^### Cross-repo Claude'
+  extract "$ARCH" '^### Browser UI' '^### '
 }
 
 @test "ARCHITECTURE records position 1 — SPA shell + micro-frontends — with its rationale (#1059)" {
