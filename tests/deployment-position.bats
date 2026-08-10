@@ -23,8 +23,13 @@
 # do not.
 #
 # ON THE NEGATIVE PIN (the `latest` escape hatch): tests/messaging-position.bats
-# can use single robust TOKENS (`artemis`, `kafka`, `activemq`) as its negatives
-# because those words have no legitimate use. That trick is unavailable here — this
+# can use single robust product-name TOKENS as its negatives because those words
+# have no legitimate use anywhere in the repo. (They are deliberately NOT spelled
+# out here: that file sweeps every TRACKED file for them and allows exactly three
+# paths, one being itself, since it necessarily transcribes what it searches for.
+# This file has no such need, and widening that allowlist to accommodate a mere
+# example would weaken a guard to pay for a comment.) That trick is unavailable
+# here in any case — this
 # section must discuss `latest` at length in order to forbid it, so the bare token
 # appears many times legitimately. Instead the guard greps the section for the
 # VOCABULARY a softening would introduce (carve-outs, preview/non-production
