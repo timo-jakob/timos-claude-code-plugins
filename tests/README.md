@@ -97,6 +97,7 @@ runs the whole suite once in parallel and exits with bats' real status.
 | `run-script-tests.bats` | Tests the runner's Docker wiring — the IaC toolchain cache mount, its precedence and its guards (#1199) |
 | `assertions.bash` | Shared assertion helpers (`load assertions`) — the sanctioned way to assert (#1011) |
 | `roster.bash` | Derives the helper roster from `assertions.bash` (`load roster`) — the single source both guards use (#1067) |
+| `acceptance/` | Outside-in cases against a **running** service built from a bootstrap template — deliberately NOT in the default gate (`bats` does not recurse); see [`acceptance/README.md`](acceptance/README.md) and #243 |
 | `find-inert-bracket-assertions.zsh` | Detector behind the inert-assertion suite lint — `bracket` (#1011) and `and-tail` (#1067) rules |
 | `iac-tools.zsh` | Resolves the **pinned** helm/kustomize/kubeconform/kube-linter/kyverno/yq the `kubernetes-ci` harness runs on (#1199) |
 | `iac-tools.bats` | Tests `iac-tools.zsh` — pin extraction, the usage taxonomy, the anchored version probe and the cache layout, fully offline (#1199) |

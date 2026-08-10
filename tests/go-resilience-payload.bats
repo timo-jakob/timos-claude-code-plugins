@@ -605,8 +605,8 @@ client_flat() { local b; b="$(go_func "$GO/pricing_api_client.go" "$1")" || retu
   # followable. Folded into the main command, bootstrap would place a client for a
   # `pricing-api` the repo does not have into every Go service.
   local block main example
-  block="$(sed -n '/^\*\*Go resilience + dependency health (#1144)\.\*\*/,/^The remaining languages/p' "$SKILL")"
-  contains "$block" 'The remaining languages'          # proves the range closed
+  block="$(sed -n '/^\*\*Go resilience + dependency health (#1144)\.\*\*/,/^\*\*Node canonical implementation (#936)\.\*\*/p' "$SKILL")"
+  contains "$block" '**Node canonical implementation (#936).**'          # proves the range closed
   main="$(printf '%s\n' "$block" | sed -n '/render.zsh" \\/,/^```$/p' | sed -n '1,/^```$/p')"
   ends_with "$main" '```'                              # proves the FIRST fence closed
   contains "$main" 'languages/go/resilience/dependency_catalog.go'
@@ -625,8 +625,8 @@ client_flat() { local b; b="$(go_func "$GO/pricing_api_client.go" "$1")" || retu
   # tested in the ops-api gate. A second gate here would silently re-introduce the
   # split — a Config.Dependencies wired with no source to supply it.
   local block
-  block="$(sed -n '/^\*\*Go resilience + dependency health (#1144)\.\*\*/,/^The remaining languages/p' "$SKILL")"
-  contains "$block" 'The remaining languages'
+  block="$(sed -n '/^\*\*Go resilience + dependency health (#1144)\.\*\*/,/^\*\*Node canonical implementation (#936)\.\*\*/p' "$SKILL")"
+  contains "$block" '**Node canonical implementation (#936).**'
   contains "$block" 'the Go ops-api block'
   contains "$block" 'skipped or deferred'
   contains "$block" 'installed** → **install**'
