@@ -33,7 +33,7 @@
 //
 // NOTE that /health answers 200 even when the aggregate is "down" -- the verdict is
 // in the body. Only the two PROBES (/health/live, /health/ready) speak in status
-// codes. Both non-Spring siblings shipped this wrong and had to be fixed (#1139);
+// codes. The Java and Python payloads shipped this wrong and had to be fixed (#1139);
 // the conformance checker has always rejected it, but a healthy service conforms
 // either way, so the divergence only surfaces during an outage.
 //

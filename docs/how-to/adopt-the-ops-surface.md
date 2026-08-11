@@ -263,8 +263,73 @@ pull-compat surface served by the SDK's Prometheus exporter.
   `pricing_api_client.go` is a worked example, not service code: adapt it to a real
   dependency or leave it out. The payload's own `README.md` is the reference for
   the shape, including why `gobreaker` was chosen and what its two silent gaps are.
-- **Other languages** — canonical implementations are tracked per language
-  (Node, Swift).
+- **Node (TypeScript)** — use the blessed reference implementation bootstrap
+  installs (`opsApi.ts` + a `package.json.deps` dependency fragment): copy it to
+  `src/ops/opsApi.ts`, merge the fragment's `dependencies` **and
+  `devDependencies`** into your `package.json` — the payload imports `node:fs`,
+  `node:http`, `node:path` and `node:url`, so `@types/node` is not optional —
+  `npm install`, and `await serve(config)` from your startup. It serves the full
+  surface on the management port and passes the conformance checker unchanged.
+  See its `README.md`.
+
+  Its HTTP layer is **`node:http` and nothing else** — no Express, no Fastify —
+  so it drops into a framework-ful and a framework-less service alike, and all
+  five endpoints share **one listener**: the OTel Prometheus exporter is
+  constructed with `preventServerStart` and mounted on the management server, so
+  nothing binds the exporter's own port behind your back.
+
+  All of this assumes the package can **build TypeScript at all** — a
+  `typescript` devDependency and a build step that emits the tree your entrypoint
+  imports, since the wiring below imports the compiled `./ops/opsApi.js`. If you
+  emit from the shipped `tsconfig.json`, add `"rootDir": "src"` to it: that
+  config's own bar is `tsc --noEmit`, and TypeScript 7 refuses to emit without a
+  `rootDir` (TS5011).
+
+  Beyond that, three things are yours to do, and the first two fail at different
+  moments:
+
+  - **your `package.json` must say `"type": "module"`.** The payload is NodeNext
+    ESM and reads `import.meta.url` to find your `package.json` for the `/info`
+    version fallback; under CommonJS that is a compile error. It fails loudly —
+    which is the good outcome — but nothing else names why, so check it first if
+    you are adopting by hand. Bootstrap surfaces the switch as its own plan line,
+    because it changes how every existing `require` in the package resolves, and
+    defers the whole payload if you decline it;
+  - **plumb `$GIT_SHA` in at build time.** `/info`'s `build.git_sha` has **no
+    fallback** in Node — there is **no truthful fallback** to reach for, because
+    Node stamps no VCS revision into a build the way the Go toolchain does, so an
+    unset `$GIT_SHA` **fails the service at startup** naming the variable rather
+    than serving a placeholder. A confidently-wrong commit in the ops surface
+    sends an operator to the wrong diff during an incident. An `ARG GIT_SHA` /
+    `ENV GIT_SHA` pair fed from CI is the usual shape — **and do it before you
+    rely on the `ops-conformance` job**, which builds and runs your image without
+    supplying `GIT_SHA` of its own, so the service refuses to start there and the
+    job reports "service did not become ready" (the refusal naming the variable
+    is in the container logs the same step dumps). Teaching the shared workflow to
+    pass it is #1281. `build.version` is the opposite case and needs nothing: it
+    falls back to `$BUILD_VERSION`, then to your own `package.json` version, which
+    *is* truthful;
+  - declare your API majors via `servedMajors` so `/info` carries the lifecycle
+    table the deprecation machinery (#684) reads. A deprecated major must carry a
+    sunset date and an active one must not, and `validateConfig` rejects both at
+    startup, so neither reaches production. What differs is what would catch it if
+    that guard were ever dropped: the conformance job fails a deprecated major
+    with no sunset, but nothing downstream checks the other direction — nor the
+    duplicate-major case, for which `validateConfig` is the only enforcement
+    anywhere. Leaving `servedMajors` unset is not a no-op either: it
+    defaults to a single **active major 1**, which conformance accepts, so an
+    undeclared table is as wrong-but-green as the shipped illustration copied
+    verbatim.
+
+  The v1.1 half — per-dependency `components` on `/health` and the hard/soft
+  readiness hinge — arrives with the **Node resilience payload** (#1145), which
+  will bind `opossum` breaker state to this surface's seam. Until it lands the
+  seam ships **unwired**, and an unwired surface is a conforming ops-api **v1.0**
+  body: no `components` field, readiness from your own `readiness` function alone.
+  You can implement `DependencyHealthSource` by hand in the meantime — return a
+  freshly built object every call — but that is the escape hatch, not the default.
+- **Other languages** — Swift's canonical implementation is tracked separately
+  (#937).
 
 ## Who enforces the boundary — you, or the platform?
 

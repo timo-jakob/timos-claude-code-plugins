@@ -2308,8 +2308,336 @@ one requires the OTel and Prometheus modules, this one requires `gobreaker`. Fol
 **both** into the module's `go.mod`; taking only the second leaves the ops surface
 without its exporters, and only the first leaves the catalog without its breaker.
 
-The remaining languages' canonical implementations are tracked follow-ups under
-epic #682: development-javascript/Node (#936) and development-swift (#937).
+**Node canonical implementation (#936).** For a Node **service** repo, also install
+the blessed Node realization — a self-contained OTel-SDK + Prometheus-exporter
+module serving all five endpoints on the management port from a single `node:http`
+listener (it passes `check-ops-conformance.zsh` unchanged). Copied verbatim (no
+placeholders). It is **TypeScript, NodeNext ESM**, type-checks clean under the
+strict `tsconfig.json` this skill also installs (with `tsc --noEmit`, which is
+that config's own bar — **emitting** from it additionally needs a
+`"rootDir": "src"`, without which TypeScript 7 refuses with TS5011), and imports
+**no web framework** — so it drops into an Express service, a Fastify service and
+a service with no framework alike.
+
+*Applicability — gate before you install.* Evaluate in order, first match wins.
+Any outcome that leaves the repo **without** an ops surface — one of the five
+skip shapes, or a case-6 ambiguity the user resolves as *skip* — gets a Step-5
+checklist line naming which one fired (and, for case 6, that the user chose it),
+because "no ops surface" is a decision a reader will otherwise read as an
+omission, and the one the user personally made is the one most worth recording.
+
+**Evaluate the gate against the candidate service PACKAGE, not the repo tree.**
+In a single-package repo those are the same thing; in a workspace repo, *The
+monorepo question* below identifies the package first, and cases 1-5 then
+describe **that package**. This matters because the common workspace shape is an
+SPA package beside a service package: judged per package it is an ordinary
+case 7 install into the service, while judged tree-wide the same repo reads as
+all three of case 1, case 6 and case 7 at once.
+
+**Two escapes apply to the skip cases below, and they are load-bearing**: the
+skips are evaluated *before* case 6, so without them the ambiguous shapes case 6
+names would be unreachable and would silently skip a package the author means
+you to ask about.
+
+- **A user-override `interfaces` that contradicts the skip evidence is case 6,
+  not a skip** — do not skip; fall through. Applies to all five, but what
+  *contradicts* differs per case, so it is stated at each one; case 4 is the trap
+  (a serverless HTTP handler is legitimately `rest`, so no interface value
+  contradicts it — only the listener escape applies there). A
+  **detector**-populated `interfaces` triggers nothing — see case 6.
+- **A long-lived listener beats an absence-of-listener skip**, and it is judged
+  by what the package **starts**, never by filenames. Cases 1, 3, 4 and 5 each
+  presume no server entrypoint; a package that *also* has one is case 6, not a
+  skip. Fall through. The evidence is a `start` script or image `CMD` that runs a
+  long-lived HTTP server — `node dist/server.js`, but equally a framework server
+  (`next start`, `nuxt start`, Angular SSR), which is exactly the shape a
+  filename test misses. (Case 2 needs no such escape: it already requires "no
+  server entrypoint" as its own evidence.)
+
+1. **A frontend-only / SPA package (#683) → skip this block.** There is no server
+   entrypoint to bind a management port to. Judge it from the absence of a
+   long-lived listener together with the presence of a bundler/framework build
+   (`vite`, `next`, `@angular/cli` and friends) — not from `interfaces`, whose
+   detector is Python-only in v1 (on a JS repo it is `[]` unless the user
+   overrode it, so a `["web-ui"]` test would never fire). *Both escapes apply.
+   A `next`/`nuxt` package whose `start` script runs the framework's SSR server
+   HAS a long-lived listener and is case 6, not a skip — only a static-export or
+   bundle-only build skips. `web-ui` and `library` agree with this case; any
+   other value — `rest`, `cli` — contradicts it.*
+2. **A library-only package → skip this block.** A published package with no
+   runnable service has no ops surface to expose and no dependency clients to
+   circuit-break. The evidence is a `package.json` with `main`/`exports` and no
+   long-lived listener — no `bin` that starts one, no `start` script that runs
+   one, **no image `CMD` that runs one**, no `src/server.ts` / `src/main.ts` /
+   `src/index.ts` that calls `listen`. (The `CMD` matters: a containerized service
+   whose entrypoint is started only by its Dockerfile, with `main`/`exports`
+   declared and no `start` script, otherwise satisfies every other negative here.)
+   *`library` and `cli` agree with this case; any other value — `rest`, `web-ui`
+   — contradicts it, and a contradiction is case 6, not a skip: do not skip here;
+   fall through. (`cli` agrees because a package can publish a library and ship a
+   command without ever starting a listener; case 5 covers the CLI half.)*
+3. **A contract-consumer-only package (the §3k orval client) → skip this block.**
+   It is a *caller* of an API, not a service that serves one. The evidence is an
+   `orval` config and its generated client (§3k seeds it at `src/api/`) with no
+   long-lived listener. *Both escapes apply: a package that consumes a contract
+   **and** serves one is case 6, not a skip. `library`, `web-ui` and `cli` agree
+   with this case; `rest` (or any other server-interface value) contradicts it.*
+4. **A serverless / edge handler → skip this block.** It has no long-lived
+   listener, so a management port is meaningless: the platform, not the process,
+   owns liveness and readiness. The evidence is an exported handler plus a
+   platform manifest (`serverless.yml`, `wrangler.toml`, `vercel.json`,
+   `netlify.toml`, a `functions/` tree). *Only the listener escape applies here:
+   skip only when there is no long-lived listener at all, and a package that also
+   starts one is case 6 — fall through. **No `interfaces` value contradicts this
+   case**, because an edge HTTP handler is legitimately `rest`; treating `rest` as
+   a contradiction would send every serverless repo to case 6 and, on a "yes",
+   install a management port into a function that cannot serve one.*
+5. **A CLI-only package → skip this block.** A management port is meaningless in
+   a process that runs and exits: there is nothing for a probe to reach between
+   invocations. The evidence is a `bin` entry whose command completes and no
+   long-lived listener. **This case is why the install arm is not a catch-all**: a
+   `bin`-only CLI matches none of the four skips above (case 2's evidence is
+   `main`/`exports`, which it need not have), so without it the gate would install
+   a management listener and five OTel runtime dependencies into a process that
+   exits. *Both escapes apply: a package that also starts a server is case 6, not
+   a skip. `cli` and `library` agree with this case; any other value — `rest`,
+   `web-ui` — contradicts it, and a contradiction is case 6, not a skip: do not
+   skip here; fall through. (Case 4 is the only case no `interfaces` value
+   contradicts, and it says so itself.)*
+6. **Genuinely ambiguous** → **surface the install-or-skip choice in the Step-2
+   plan** for the user to confirm, rather than defaulting either way. **Any shape
+   an escape above routed here qualifies** — that list is open, not closed, or
+   the escapes would dead-end at case 7 and install silently, which is the exact
+   outcome they exist to prevent. The named shapes are the mirror-image pairs the
+   sibling blocks warn about: a library that also ships a demo server; a
+   frontend/SPA package that also runs a long-lived listener; a contract consumer
+   that also serves an API; a package that is a service *and* ships an
+   edge handler; a CLI that also starts a server; and a **user-override**
+   `interfaces` that CONTRADICTS the evidence, in either direction. A
+   user-override `interfaces` that AGREES is confirmation and does not reach here
+   — it is a **set**, so `["rest", "library"]` is a service that also publishes a
+   library and does **not** skip. A detector-populated `interfaces` is neither
+   confirmation nor contradiction: judge from the runnable-service evidence alone.
+7. **Otherwise (a runnable Node service)** → **install** per the render command
+   below.
+
+**The monorepo question — which package gets the payload.** Answer this FIRST in
+a workspace repo: it names the package the gate above then judges. A workspace
+repo has several `package.json`s, and only the one producing the **runnable
+service** should receive the ops surface. Target the package that starts a
+long-lived listener (the one the image's `CMD` runs, or that owns
+`src/server.ts`). An SPA package sitting beside it is simply not the candidate —
+that is an ordinary case 7 install into the service, not a case-6 ambiguity.
+
+- **Several qualify** → **surface the choice in the Step-2 plan rather than
+  guessing.**
+- **Zero qualify** → **do not ask.** A workspace of an SPA package and a shared
+  library has no candidate by construction, and it is a repo cases 1 and 2 mean
+  to *skip*: asking which package should receive the ops surface invites an
+  answer that installs a management port into one of them. Judge each package
+  against cases 1-5 instead, and when every package skips, skip the block with
+  the Step-5 checklist line the skip case owes. Ask only when no package starts a
+  listener **and** at least one is a shape cases 1-5 do not cover — and then ask
+  **the case-6 install-or-skip question for that package**, never "which package
+  should receive the surface", which presumes an installation nothing here
+  established.
+
+Installing into the wrong workspace package puts the surface in a
+process nothing deploys, and the `ops-conformance` job then reports a *missing*
+surface on a repo that has one.
+
+Like the Python, Java and Go payloads these need an explicit destination:
+
+- **Precondition — the target package must be able to compile TypeScript.** The
+  payload is a `.ts` module the service imports as compiled output
+  (`./ops/opsApi.js`), and the shipped fragment carries **no compiler**: it
+  declares only what the service needs at *runtime* plus `@types/node`. A repo
+  `detect-stack.sh` classified `javascript` may well be plain JS (it classifies on
+  `package.json` alone), and none of the five skips excludes one. So before
+  placing anything, confirm `typescript` is **resolvable for** that package —
+  its own `devDependencies`, **or the workspace root's** in a workspaces repo,
+  where hoisting it to the root is the convention — **and** that the package has
+  a build step that emits the tree the entrypoint imports. **If EITHER is
+  missing**, treat it exactly like the `"type": "module"` case below: **surface it
+  as its own line in the Step-2 plan**, naming the half that is absent — a package
+  that type-checks in CI but has no `build` script is the common shape, and it
+  fails this precondition just as squarely as one with no compiler at all. **On
+  approval, add what was missing**: `typescript` to that package's
+  `devDependencies`, and/or a `build` script running `tsc` — and if the build
+  emits from the shipped `tsconfig.json`, add `"rootDir": "src"` to it, since that
+  config is written for `--noEmit` and TypeScript 7 refuses to emit without one
+  (TS5011). If the user declines, **defer the ENTIRE payload** behind a Step-5
+  TODO. Placing a `.ts` file nothing compiles ships a surface that can never run.
+- **Record — do not perform — the startup wiring.** Placing the module does not
+  expose the surface: nothing imports it until the service's entrypoint calls
+  `await serve(config)` (or mounts `createOpsHandler` with `installMetrics`'
+  handler) and routes SIGTERM to the returned `close()`. Bootstrap does not edit
+  entrypoints — the same rule the Go and Python resilience blocks state — so
+  **carry it as a Step-5 checklist item**. Without it the adopter has a placed
+  file and no ops surface, while every other artifact this run installs says they
+  have one, and the `ops-conformance` job reports a *missing* surface rather than
+  a broken one. **On a repo with a Dockerfile** that job is red on the bootstrap
+  PR itself until this wiring and `$GIT_SHA` (below) both land — say so in the
+  same checklist item, and see Step 4f, which treats that red as expected.
+  **Without one** no `ops-conformance` job is installed at all, so say nothing
+  about it: the item names only the wiring.
+- **Placement** — `opsApi.ts` → `<target package>/src/ops/opsApi.ts`
+  (`src/ops/opsApi.ts` in a single-package repo — the path is relative to the
+  package root the monorepo question identified, not the repo root). **`src/` is
+  the convention, not the rule: place it under the package's actual compiled
+  source root** — whatever its `tsconfig.json`'s `include`/`rootDir` covers — as
+  `<source root>/ops/opsApi.ts`. A package building from `lib/` or `app/` would
+  otherwise never compile the placed file, so no `dist/ops/opsApi.js` is emitted
+  and the wiring item points at an import that cannot resolve. When that root is
+  not `src/`, say so in the Step-5 wiring item so the entrypoint's import path
+  matches. Put
+  the shipped `README.md` **and `package.json.deps`** beside it; the README is
+  the reference for the seam #1145 implements, the `servedMajors` warning and the
+  `$GIT_SHA` build plumbing, and it points at `package.json.deps` "beside this
+  file", so discarding the fragment after folding leaves that reference dangling.
+- **Deps** — merge `package.json.deps`' `dependencies` and `devDependencies`
+  blocks into that package's own `package.json`, then run `npm install` — **from
+  the workspace ROOT in a workspaces repo, and from the package's own directory
+  otherwise**. npm resolves and locks workspace packages at the root, so a nested
+  install writes a second `package-lock.json` and a second `node_modules` beside
+  the hoisted tree, diverging from what CI installs while appearing to work
+  locally. The shipped file is a fragment, not a package file;
+  its prose rides in a `//` key, npm's own convention, so it stays valid JSON.
+  **Never place `opsApi.ts` without its dependencies** — its `@opentelemetry/*`
+  imports won't resolve and the build stops. **If `npm install` fails** (no
+  registry access in a sandboxed run, a lockfile conflict, a private-registry
+  `.npmrc`), keep the merged `dependencies`/`devDependencies` and record a Step-5
+  checklist line naming the command to re-run and the directory to run it from.
+  Never remove entries to make the command succeed, and never leave `opsApi.ts`
+  placed without them. **Two entries are not a verbatim merge.**
+
+  **`@opentelemetry/*` the package already declares — but only when its range
+  admits NO version at or above the fragment's floor.** (Stated that way round,
+  not as "does not admit the floor": a range *above* the floor, `sdk-metrics:
+  "^2.11.0"` or the exporters coherently at `^0.230.0`, does not contain the floor
+  version and yet satisfies the payload at every version it admits. Treating that
+  as a conflict raises a plan line whose "raise them" is incoherent — the required
+  range is *lower* — and whose decline defers a payload that would have built.) A
+  service that is already instrumented is
+  the likely adopter, and it may pin `@opentelemetry/sdk-metrics` on the 1.x line
+  or the exporters on an older 0.x. That conflict must not be resolved silently in
+  either direction: raising it moves the adopter's existing instrumentation across
+  the SDK 2.x boundary, and keeping their 1.x floor leaves `opsApi.ts`'s
+  `new MeterProvider({ readers })` — a 2.x constructor — unable to compile.
+  Surface it as its own Step-2 plan line naming the declared and required ranges;
+  on approval raise them, and if the user declines, **defer the ENTIRE payload**
+  behind a Step-5 TODO rather than placing a module the package's own OTel major
+  cannot build. **A range that admits versions on BOTH sides of the floor** —
+  `">=1.0.0"`, `"1.x || 2.x"`, `"*"` — is settled by the version actually
+  RESOLVED (the lockfile entry, or what is installed), not by the range: a
+  `>=1.0.0` locked at 1.8.x satisfies the range test above while leaving the
+  package on the 1.x line the payload cannot compile against, so a range-only
+  reading would let exactly this conflict through unflagged. Resolved below the
+  floor is the conflict case; resolved at or above it is the compatible one.
+  **A declared range whose every admitted version is at or above the
+  fragment's floor is not
+  a conflict**: leave the adopter's range exactly as it is, merge nothing for that
+  entry, and raise no plan line — asking about a compatible pin only invites a
+  "no" that would defer a payload which would have built cleanly.
+
+  **`@types/node`.** Its MAJOR types the Node release you RUN. Read the repo's
+  **pre-existing** runtime pin — never the `.nvmrc` this run may have just staged,
+  which would make the check circular and always read 24 — in this order:
+  `engines.node`, an existing `.nvmrc`, the Dockerfile's `FROM node:<major>`, the
+  CI `setup-node` version. For a containerized service the base image wins a
+  disagreement. **Only an EXACT major counts as a pin.** A range —
+  `engines.node: ">=20"`, `"^22 || ^24"` — is a *floor*, not the runtime, so fall
+  through to the next source; taking its lower bound as the runtime is how a repo
+  that actually runs 24 ends up typed against 20. **When none of the four yields
+  an exact major** — every one is a range, or there is no source at all — fall
+  back in this order, and say which rule you used in the Step-5 line: the shipped
+  `.nvmrc` (24) if the ranges admit it; failing that, the highest major they
+  admit; and with no source at all, the shipped 24. Then match the types to that
+  runtime, in whichever direction it differs:
+  - **Target major LOWER than the fragment's** (e.g. Node 22): **lower
+    `@types/node` to the target's major.** That is the default because it is
+    local and reversible, and for any target **at or above the payload's floor**
+    (below) it is the whole answer: no Node-pin raise is offered, so there is no
+    decline to handle, and this is never a reason to defer the payload. **Below
+    the floor is a different question** — there the raise is not a preference but
+    the payload's precondition, so the floor rule below governs it, decline arm
+    included. Either way, never merge a `@types/node` major above the runtime.
+  - **Target major HIGHER** (e.g. Node 26): **raise `@types/node` to match it**,
+    so `tsc` does not reject APIs the service legitimately uses.
+
+  Types ahead of the runtime is the silent direction — `tsc` accepts APIs that
+  are absent at run time, so the failure lands in production rather than in the
+  build.
+
+  **The payload's own Node floor is `^18.19.0 || >=20.6.0`** — not a house rule
+  but the `engines.node` the shipped `@opentelemetry/sdk-metrics` and
+  `exporter-*` packages declare. Check the target's runtime against it **before
+  placing anything**: below the floor, the OTel dependencies will not install and
+  the surface can never run.
+
+  **The floor is minor-granular and the resolution above yields a major, so say
+  which majors decide it and which need a minor.** Majors **21 and up** are above
+  the floor; major **19** is below it outright (it satisfies neither clause —
+  easy to miss if you read the floor as a single range from 18.19 to 20.6).
+  Majors **18 and 20 straddle a clause**, so for those two read the minor off the
+  concrete source (the image tag, `.nvmrc`, an exact `engines.node`); when no
+  source states one, treat it as **below** the floor rather than guessing, since
+  guessing high is the direction that ships a payload which cannot install.
+
+  Below the floor, surface the Node-pin raise as its own Step-2 plan line, and if
+  the user declines, **defer the ENTIRE payload** behind a Step-5 TODO. At or
+  above it (every current Node), there is nothing to do.
+- **`"type": "module"` is required, and it is the easily-missed one.** The payload
+  is NodeNext ESM and reads `import.meta.url` to find the service's `package.json`
+  for the `/info` version fallback; under CommonJS that is a compile error. The
+  fragment declares `"type": "module"` for exactly this reason — but the merge
+  above folds only the two dependency blocks, so it does **not** carry that key
+  across. If the target `package.json` does not already declare
+  `"type": "module"` — **an absent `type` key is CommonJS and counts** — **surface
+  the switch as its own line in the Step-2 plan**: it is not inert (it changes how
+  every existing `require` in the package resolves), and it is the only place the
+  user can say no. **On approval, set `"type": "module"` in that package's
+  `package.json` as part of the merge.** If they decline, **defer the ENTIRE
+  payload** behind a Step-5 TODO rather than placing a module that cannot compile.
+- **`$GIT_SHA` is build plumbing the adopter owes.** `/info`'s `build.git_sha`
+  has **no fallback** in Node — an unset `$GIT_SHA` fails the service at startup
+  rather than serving a placeholder. Node is the only payload in the family that
+  fails closed here (the Python, Java and Go ones fall back to `"unknown"`), so
+  record a Step-5 checklist line naming the variable. **Where the refusal lands
+  first depends on whether the repo has a Dockerfile**, and so does the fix:
+  - **With one** → the `ops-conformance` job this skill installs builds and runs
+    the container **without** passing `GIT_SHA`, so *that job*, not the first
+    deploy, is where the service refuses to start. Its headline failure is
+    "service did not become ready"; the variable is named further down, in the
+    `docker logs` dump the same step emits. Record the line as: wire an
+    `ARG GIT_SHA` / `ENV GIT_SHA` pair into the Dockerfile with a CI-supplied
+    value. Teaching the shared workflow template to pass it is **#1281** — one
+    job for every language, and this block does not own it.
+  - **Without one** → no `ops-conformance` job is installed at all, so the first
+    *deploy* is where it lands. Record the line as: `GIT_SHA` must be supplied by
+    whatever runs the service — the deployment environment, the process manager,
+    or the image build once a Dockerfile exists. Do **not** write a checklist
+    line pointing at a Dockerfile the repo does not have.
+
+  (`build.version` does have a truthful fallback: `$BUILD_VERSION`, then the
+  service's own `package.json` version.)
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/javascript/ops-api/opsApi.ts \
+  languages/javascript/ops-api/package.json.deps \
+  languages/javascript/ops-api/README.md
+```
+
+Whenever this block installs, the **Node resilience payload** (#1145) installs
+with it once that lands — it supplies the ops-api v1.1 `components` map and the
+hard/soft readiness hinge that `opsApi.ts` reports. Until then the surface is a
+conforming ops-api **v1.0** body: no `components` field, readiness from the
+caller's own check alone.
+
+The last remaining language's canonical implementation is a tracked follow-up
+under epic #682: development-swift (#937).
 
 **Java (non-Spring) resilience + dependency health (#1142).** Whenever the Java
 ops-api block above **installed** (its cases 4-fold-and-install and 5), also
@@ -3609,7 +3937,20 @@ error.
   token-gated checks still awaiting secrets (full initial bootstrap), this is the
   *defer* case: report "waiting on secrets — the drive resumes after Step
   4.5/Step 5 and the re-trigger," and **continue the bootstrap** (do not end the
-  session). Otherwise (a genuine failure) report the failing check as the blocker.
+  session). If the red is **`ops-conformance` on a repo where this run installed a
+  canonical ops-api payload**, it is likewise *expected, not a blocker*: the
+  payload's startup wiring is a Step-5 item bootstrap deliberately does not
+  perform (it never edits entrypoints), so the surface is not serving yet — and
+  the check is **not** a required context, so it does not gate the merge. **When
+  that expected red is the ONLY thing in the fail bucket, treat the settle as
+  GREEN for this drive and go to step 2** — run the approve. That is what makes
+  the armed auto-merge fire on the contexts that do gate it; "report and carry on"
+  alone would strand the PR open, because this red never clears in-session (the
+  startup wiring is deliberately a post-merge Step-5 item, so there is no "return
+  to step 1 once CI is green" to wait for). Note it beside the Step-5 wiring item.
+  **Never** "fix" it by wiring the entrypoint yourself or by deleting the workflow
+  this run installed. The do-not-approve-a-red-PR rule stands for every other red.
+  Otherwise (a genuine failure) report the failing check as the blocker.
 - **timeout (3) / gh error (1)** → report it and stop the drive (not the
   session); the resume command is **re-running this step** — `await-pr-checks.zsh
   <pr-number>`, then the approve in step 2. Do not loop.
