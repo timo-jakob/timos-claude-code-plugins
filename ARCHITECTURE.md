@@ -1709,7 +1709,7 @@ The orchestrator processes the plan **sequentially in priority order**:
 **The approval gate (#224, Phase 2 of #476):** a maintenance merge requires an
 approving review from `claude-approver[bot]` or a human — the pipeline never
 posts approvals with the operator's identity. The Approver is **user-invoked
-locally** via `/development-<lang>:approve` skills (Python, Java, Swift)
+locally** via `/development-<lang>:approve` skills (Python, Java, Swift, Go)
 rather than CI-driven. When the user runs the skill, it mints an Approver
 token locally from system Keychain, posts the verdict as `claude-approver-bot`,
 and requires no Claude platform account.
@@ -1854,9 +1854,9 @@ Like every non-core dimension, both inherit the known `build-dossier.zsh`
 is indistinguishable from "never ran".
 
 The **consolidator** needs no teaching about a new dimension: it keys findings
-on `[file, line, dimension, title]`, with no dimension allow-list. Two
-downstream surfaces are **not** so accommodating, and both gaps predate
-`resilience` — Swift's `swift6_compliance` has had them since #447:
+on `[file, line, dimension, title]`, with no dimension allow-list. One
+downstream surface is **not** so accommodating, and the gap predates
+`resilience` — Swift's `swift6_compliance` has had it since #447:
 
 - **`build-dossier.zsh` carries a new dimension only when it reports
   findings.** `$core` is the hardcoded #449 five; `$dims` is that set unioned
@@ -1867,23 +1867,19 @@ downstream surfaces are **not** so accommodating, and both gaps predate
   a lens's residual-risk weight). Making `$core` panel-aware is tracked in
   **#1148**; it has to be `repo_type`-aware, since a `development-claude-plugin`
   review legitimately never runs `resilience`.
-- **The Approver neither labels nor looks through the `resilience` lens.** Every
-  `*-approver` **agent** pins `"dimension"` to a closed
-  `bugs | security | performance | code_quality | tests | null` enum *and*
-  instructs a risk-register walk of "the five lenses the panel uses" — so a
-  resilience risk has neither a legal enum value nor a lens to be found through.
-  The bootstrap `approver-policy-core.md.tmpl` pins the same enum but has no
-  lens walk of its own (its register comes from the per-type risk factors); what
-  it does carry is a **dossier lens list**, and that list already names **both**
-  `resilience` and `swift6_compliance` alongside the core five; only the
-  template's finding-emission **enum** is still un-widened. Finally,
-  each language ships an operator-facing mirror
-  (`development-<lang>/docs/<lang>-approver.md`) that restates the lens walk —
-  and, on Go/Java/Python, the enum too (Swift's is a delta-doc and carries only
-  the walk). Those restatements go stale with them. So the surfaces to
-  widen are the agents' enum, the agents' lens walk, the template's enum (its
-  dossier list is widened, though a clean non-core lens carries no signal until
-  **#1148**), and the four operator mirrors; all are tracked in **#1147**.
+
+The **Approver** does now label and look through every dimension its panel
+ships (#1147). Each `*-approver` agent's risk-register walk (step 10) tracks its
+panel's dimension table rather than a fixed set — six lenses on Go/Java/Python,
+seven lenses on Swift — and its `"dimension"` enum lists them all, with the panel's
+table named as the authority so the next dimension is a lens on arrival rather
+than a defect. The bootstrap `approver-policy-core.md.tmpl` has no lens walk of
+its own (its register comes from the per-type risk factors); it states outright
+that `dimension` is not a closed enum and that the `/development-<lang>:review`
+panel's dimension table decides — not the overlay, which carries only the
+`suggested_agent` vocabulary. The
+operator-facing mirrors (`development-<lang>/docs/<lang>-approver.md`) restate
+the walk — and, on Go/Java/Python, the enum too — and are kept in step.
 
 The claude-plugin panel (`development-claude-plugin:review`, the fallback
 `repo_type` for repos that detect no language — epic #810) extends the enum the
@@ -3065,7 +3061,7 @@ the PR body by `open-pr`:
    way.
 
 The Approver re-ingests the hidden block **the same way maintenance re-ingests
-Approver findings** — via the shared `approver-policy-core` (#555), so all three
+Approver findings** — via the shared `approver-policy-core` (#555), so all four
 language Approvers get it without per-agent edits. A `clean` dimension lowers
 that lens's residual-risk weight (the panel already looked and found nothing); a
 non-clean dimension is where to look hardest; `waived_low` is context, never a

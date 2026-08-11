@@ -91,7 +91,7 @@ registry is empty, per [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-c
 | swift6-compliance | fable | Strict concurrency, typed throws, modern syntax — review mode; also the v6 language-mode migration agent (migrate mode, #447) |
 | swift-maintenance-planner | opus | Ranks + groups findings, routes each to its agent |
 | swift-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (build/test, format, coverage) |
-| swift-approver | fable | Synthesis-layer PR reviewer once CI is green; risk register fed by the five review dimensions the Approver walks (#448; resilience and swift6_compliance are not lenses yet — #1147) |
+| swift-approver | fable | Synthesis-layer PR reviewer once CI is green; risk register fed by the seven review dimensions the Approver walks (#448; the panel's own dimension table, swift6_compliance and resilience included — #1147) |
 | swift-lint-format | haiku | Runs SwiftFormat and SwiftLint, fixes issues in-place |
 | bug-hunter | fable | Logic errors, nil crashes, race conditions, stability |
 | security-reviewer | fable | Secrets, injection, insecure storage, ATS, keychain |
@@ -203,7 +203,7 @@ gather-script + dispatch contract).
 | java-openapi-advisor | opus | Audits **non-Spring** contract-first OpenAPI — openapi-generator's `jaxrs-spec` (Jakarta REST) generator from a committed spec, so code/spec drift fails the build (the Spring case is `development-spring`'s `spring-api-advisor`) |
 | java-maintenance-planner | opus | Ranks + groups findings, routes each to its agent (defers `org.springframework.boot` bumps to `development-spring`) |
 | java-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (Gradle build/test, Spotless, JaCoCo) |
-| java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`); risk register fed by the five review dimensions the Approver walks (#449; resilience is not a lens yet — #1147) |
+| java-approver | fable | Synthesis-layer PR reviewer once CI is green (mirrors `python-approver`); risk register fed by the six review dimensions the Approver walks (#449; the panel's own dimension table, resilience included — #1147) |
 | java-bug-hunter | fable | Logic errors, NPEs, `==` vs `equals`, resource leaks, race conditions (#449) |
 | java-security-reviewer | fable | Secrets, injection, unsafe deserialization, TLS validation, data exposure (#449) |
 | java-performance-reviewer | opus | Accidental O(n²), allocation pressure, N+1 I/O, lock contention, unbounded caches (#449) |
@@ -471,9 +471,12 @@ Go maintenance — a **full-maintenance tier**, mirroring `development-python` /
 [#868](https://github.com/timo-jakob/timos-claude-code-plugins/issues/868) epic
 that brings Go into the family (the platform's backend stack) is **complete** —
 all nine slices (A–I) have merged, so the surface below is what ships today, not
-a roadmap. One wiring gap outlived the epic: bootstrap renders no Go
-Approver-policy overlay, so `/development-go:approve` needs a hand-authored
-`.claude/approver-policy.md` — see the Skills table. The **maintenance
+a roadmap. Two wiring gaps outlived the epic, both because bootstrap resolves no
+Approver-capable language on a Go repo: it renders no Go Approver-policy
+overlay **and** its Step 4.5 App-install path skips, so `/development-go:approve`
+needs both a hand-authored `.claude/approver-policy.md` and a manual App install
+— see the Skills table and
+[How-to: adopt the Approver](../how-to/adopt-the-approver.md). The **maintenance
 dispatcher** is a pure function of
 its JSON input — dispatched by `/development:maintenance`; it runs no detection
 of its own (`review` and `approve` are invoked by you directly).
@@ -490,10 +493,12 @@ the CI fixer, and the mechanical `format_lint` fixer, i.e. a runnable
 lint/format → CI-fix → PR loop. Slice C
 ([#872](https://github.com/timo-jakob/timos-claude-code-plugins/issues/872)) —
 the **review panel**: `/development-go:review` running six specialists in
-parallel (bugs, security, performance, code quality, tests, resilience); the
-first five double as risk-register lenses for the Slice H approver (the
+parallel (bugs, security, performance, code quality, tests, resilience);
+all six double as risk-register lenses for the Slice H approver (the
 [#449](https://github.com/timo-jakob/timos-claude-code-plugins/issues/449)
-pattern). Slice D
+pattern, widened to the whole dimension table by
+[#1147](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1147)).
+Slice D
 ([#873](https://github.com/timo-jakob/timos-claude-code-plugins/issues/873)) —
 **static-analysis triage**: `go-sonar-triage`, `go-code-scanning-triage`, and
 `go-semgrep-triage`. All three scanners ship — the support-depth gate found
@@ -547,7 +552,7 @@ alternative.
 | Skill | Command | Description |
 | --- | --- | --- |
 | Maintenance dispatcher | `/development-go:maintenance <json>` | Validates the v2 payload, runs the per-package coverage pre-flight, plans the per-tool groups via `go-maintenance-planner`, returns the plan + `ci_fixer_agent`. Two-phase, keyed on whether the improver produced a diff: only when `go-coverage-improver` **commits tests** does Phase A return `improver_result` and no `plan` (the orchestrator merges that PR, then re-invokes for Phase B, which reconciles against it). When no improver is needed — **or it commits nothing**, leaving no diff to push — the phases collapse into one invocation returning `plan` and no `improver_result`. Either way, a region the improver could not clear is recorded in `human_action_required` and its findings are excluded from the plan. |
-| Approve | `/development-go:approve [<pr>] [--dry-run]` | Runs `go-approver` against an open PR and posts the verdict as the Claude Approver identity; `--dry-run` (Go-only, any position) prints the rendered verdict and posts nothing. **The agent ships, its bootstrap wiring does not yet:** `/development:bootstrap` doesn't resolve `go` as an Approver-capable language and renders no Go policy overlay, and the agent hard-fails without `.claude/approver-policy.md` — so that file must be hand-authored on a Go repo today. |
+| Approve | `/development-go:approve [<pr>] [--dry-run]` | Runs `go-approver` against an open PR and posts the verdict as the Claude Approver identity; `--dry-run` (Go-only, any position) prints the rendered verdict and posts nothing. **The agent ships, its bootstrap wiring does not yet:** `/development:bootstrap` doesn't resolve `go` as an Approver-capable language, so it renders no Go policy overlay **and** skips the Step 4.5 App install. Both must therefore be done by hand on a Go repo today: install the Apps with `development/skills/bootstrap/scripts/install-claude-apps.zsh`, or the token mint fails, and supply a hand-authored `.claude/approver-policy.md`, without which the agent hard-fails at its Step 1. |
 | Review panel | `/development-go:review [scope]` | Comprehensive Go review with 6 parallel read-only agents (bugs, security, performance, code quality, tests, resilience). Emits #558-schema findings alongside the prose report. Generated `*.pb.go` / `*.pb.gw.go` are excluded — the fix for those belongs in the proto or the codegen config. |
 
 **Agents (core loop, Slice B):**
@@ -595,7 +600,7 @@ alternative.
 
 | Agent | Model | Focus |
 | --- | --- | --- |
-| `go-approver` | fable | Synthesis-layer PR reviewer once every other CI gate is green — reads `.claude/approver-policy.md`, builds a risk register from the five review dimensions the Approver walks (resilience is not a lens yet — #1147), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT as the Approver identity |
+| `go-approver` | fable | Synthesis-layer PR reviewer once every other CI gate is green — reads `.claude/approver-policy.md`, builds a risk register from the six review dimensions the Approver walks (the panel's own dimension table, resilience included — #1147), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT as the Approver identity |
 
 **Agents (proto-first platform advisors, Slice I):**
 

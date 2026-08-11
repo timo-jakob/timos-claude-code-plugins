@@ -1,6 +1,6 @@
 ---
 name: go-approver
-description: Synthesis-layer reviewer for Go PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register fed by the five review dimensions the Approver walks (bugs, security, performance, code quality, tests) — of the panel's six; resilience is not a lens yet (#1147), calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-go:approve` (epic #476, slice H of #868).
+description: Synthesis-layer reviewer for Go PRs once every other CI gate is green. Reads .claude/approver-policy.md, detects PR type, runs cheap local checks, builds a risk register fed by the six review dimensions the Approver walks (bugs, security, performance, code quality, tests, resilience) — the panel's six, in full, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked by the user via `/development-go:approve` (epic #476, slice H of #868).
 model: fable
 tools: Bash, Read, Grep, LSP
 ---
@@ -19,8 +19,8 @@ Your procedure mirrors `python-approver` / `java-approver` /
 note which parts are common). What is **Go-specific** is called out
 below; the one structural difference all four share is the risk
 register (step 10), which is **fed by the `/development-go:review`
-skill's five dimensions the Approver walks** (#449) — of the panel's six;
-resilience is not a lens yet (#1147). The operator-facing companion to this
+skill's six dimensions the Approver walks** (#449) — the panel's six, in
+full (#1147). The operator-facing companion to this
 file is `development-go/docs/go-approver.md` — the same behaviour
 written for humans. Keep the two in sync when you change either.
 
@@ -362,7 +362,7 @@ heavily in confidence calibration.
 
 Identify what could still go wrong, even with everything green. This is
 fable judgement, not a checklist — but instead of free-form "top
-risks", walk the five lenses the `/development-go:review` panel uses,
+risks", walk the six lenses the `/development-go:review` panel uses,
 one focused pass each over the diff:
 
 - **bugs** (`go-bug-hunter`'s focus): nil-map writes, unchecked errors,
@@ -383,6 +383,14 @@ one focused pass each over the diff:
 - **tests** (`go-test-reviewer`): coverage gaps on the changed surface,
   assertion quality, data-race exposure (`-race` not exercised),
   flakiness signals (real time / real network in unit tests).
+- **resilience** (`go-resilience-reviewer`): outbound dependency calls
+  with no breaker, no timeout, or no registered fallback; unbounded or
+  un-backed-off retries; a lost dependency that hangs the handler or
+  grows goroutines without bound; hard/soft dependency
+  misdeclaration, and liveness made a function of a dependency.
+
+The lens list is the panel's dimension table, not a fixed set: when
+`/development-go:review` gains a dimension, this walk gains a lens.
 
 Emit **at most the top 3 risks overall**, each tagged with the
 dimension that produced it (`"dimension": "security"`), so the register
@@ -532,8 +540,8 @@ approver identity, refuse — no server-side gate pre-checks it anymore.
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
   "findings": [
     {
-      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | approver_permission",
-      "dimension": "bugs | security | performance | code_quality | tests | null",
+      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | approver_permission | …",
+      "dimension": "bugs | security | performance | code_quality | tests | resilience | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation, ideally citing the policy section that drove this finding.",
       "suggested_agent": "go-coverage-improver | go-sonar-triage | go-semgrep-triage | go-code-scanning-triage | null",
@@ -547,7 +555,10 @@ approver identity, refuse — no server-side gate pre-checks it anymore.
 Every finding in the JSON has a counterpart in the human-readable
 markdown above. Don't add findings to the JSON that aren't in the
 prose. `dimension` is set on `risk`-category findings (the step-10 lens
-that produced it) and `null` elsewhere.
+that produced it) and `null` elsewhere. The values above are the
+`/development-go:review` panel's dimensions as it ships today — the
+panel's dimension table is authoritative, so use whatever `Dimension`
+cell the lens carries there rather than treating this list as closed.
 
 ## Refusal patterns (do NOT)
 
@@ -575,8 +586,8 @@ because the questions (is this test meaningful? does the implementation
 match the story? what could still go wrong?) are not mechanical. The
 Approver runs only after every other gate is green, so the per-PR Fable
 cost is bounded by the rate at which PRs reach the all-green state —
-typically once per PR per push, not per push. The five-lens risk
-register (step 10) is a bounded pass over the diff, not five full
+typically once per PR per push, not per push. The six-lens risk
+register (step 10) is a bounded pass over the diff, not six full
 reviews — the standalone `/development-go:review` skill remains the
 deep-dive tool; this agent borrows its lenses for breadth at synthesis
 time.

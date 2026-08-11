@@ -121,12 +121,13 @@ operator's summary.
    FIXME without issue link, no new secrets, no unattested dep.
 
 10. **Risk register — fed by the review dimensions (#449).** Walks
-    the five lenses of the `/development-java:review` panel — bugs,
-    security, performance, code quality, tests — one focused pass
-    each over the diff, and emits at most the top 3 risks overall,
-    each tagged with the `dimension` that produced it. Fable
+    the six lenses of the `/development-java:review` panel — bugs,
+    security, performance, code quality, tests, resilience — one
+    focused pass each over the diff, and emits at most the top 3 risks
+    overall, each tagged with the `dimension` that produced it. Fable
     judgement; three is a cap, not a floor — an empty lens
-    contributes nothing.
+    contributes nothing. The panel's dimension table is what the lens
+    list tracks, so a new dimension becomes a new lens (#1147).
 
 11. **Confidence calibration** — start `HIGH`, apply policy
     adjustments. Verdict mapping:
@@ -257,8 +258,8 @@ Don't strip it; don't reformat it; don't substitute prose for it.
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
   "findings": [
     {
-      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy",
-      "dimension": "bugs | security | performance | code_quality | tests | null",
+      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | approver_permission | …",
+      "dimension": "bugs | security | performance | code_quality | tests | resilience | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation citing the policy clause that drove this finding.",
       "suggested_agent": "java-coverage-improver | java-semgrep-triage | java-sonar-triage | java-code-scanning-triage | null",
@@ -268,6 +269,11 @@ Don't strip it; don't reformat it; don't substitute prose for it.
   ]
 }
 ```
+
+`dimension` is not a closed enum: the values above are the
+`/development-java:review` panel's dimensions as it ships today, and
+the panel's dimension table is authoritative — a lens added there is
+legal here on arrival (#1147).
 
 Every JSON finding has a counterpart in the prose; the prose may not
 add findings the JSON omits. The JSON is the contract; the prose is
@@ -290,6 +296,7 @@ when re-ingesting findings in Phase 4 of #89:
 | `type_ambiguity` | `null` | Author needs to rename the PR |
 | `risk` | `null` | Judgement-only |
 | `type_policy` (e.g. hotfix) | `null` | Human review required |
+| `approver_permission` | `null` | Operator re-accepts the App grant |
 
 ## Hard-fail conditions (refuses to run)
 
@@ -340,7 +347,7 @@ push.
 Everything the Java Approver needs is shipped: the `java-approver`
 agent ([`agents/java-approver.md`](../agents/java-approver.md)), the
 `/development-java:approve` skill (user-triggered, posts the verdict
-as `claude-approver-<owner>[bot]`; `--dry-run` prints instead), and
+as `claude-approver-<owner>[bot]`), and
 the Java `approver-policy.md` template rendered by
 `/development:bootstrap --claude-approver true`. The CI-wiring
 question that #307's Slice C used to track (per-language agent
@@ -355,8 +362,9 @@ language.
   under `suggested_agent`. The JSON schema above is the contract.
 - `/development-java:approve` is the invocation path (epic #476):
   user-triggered, token minted locally, verdict posted as the Approver
-  App. Pass `--dry-run` for a non-binding evaluation that prints
-  instead of posting.
+  App. It takes an optional PR number and nothing else — the
+  `--dry-run` flag is **Go-only** today (`/development-go:approve`), so
+  every Java invocation posts.
 - The operator-facing adoption guide, troubleshooting, and worked
   examples live in
   `development/skills/bootstrap/docs/APPROVER.md`.

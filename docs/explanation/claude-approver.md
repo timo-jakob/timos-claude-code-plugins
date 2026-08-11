@@ -6,10 +6,20 @@
 > is the design summary that explains *why* the Approver works the way it does.
 > To adopt it, see [How-to: adopt the Approver](../how-to/adopt-the-approver.md).
 >
+> **Read this page as history up to #476.** Phases 0–6 below describe the
+> original **CI-driven** Approver. Since epic #476 the Approver is
+> **user-invoked locally** via `/development-<lang>:approve`: bootstrap renders
+> **no workflow** (`claude-approver.yml.tmpl` was removed in #479), there is no
+> automatic re-trigger, the author allowlist is retired (pointing the skill at a
+> PR *is* the trigger filter), and App credentials live in the local Keychain
+> rather than in repo secrets/variables. Every mention of a workflow, a trigger,
+> an allowlist or a repo variable below belongs to that retired design; the
+> *reasoning* it records is why the Approver still works the way it does.
+>
 > **Status — Phases 0–5 + #174 shipped; Phase 6 (live validation) in
 > progress.** The two GitHub App identities can be registered
 > (`Phase 0`, #179), bootstrap installs them on a repo with the secrets +
-> variables they need (`Phase 1`, #180), the workflow + Python policy +
+> variables they need (`Phase 1`, #180), the policy +
 > PR description template render at bootstrap time (`Phase 2`, #181),
 > the `python-approver` fable agent the workflow invokes is in
 > [`development-python/agents/python-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/agents/python-approver.md)
@@ -17,8 +27,10 @@
 > [`development-python/docs/python-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/python-approver.md)
 > (`Phase 3`, #183), `/development:maintenance` re-ingests the
 > Approver's hidden-JSON findings on the next run (`Phase 4`, #185),
-> and `/development-python:approve` runs the same agent locally for a
-> dry-run verdict (`Phase 5`, #186). The
+> and `/development-python:approve` runs the same agent locally
+> (`Phase 5`, #186) — it posts the verdict; the print-only path is
+> spawning the agent with `DRY_RUN=true`, and the `--dry-run` flag is
+> Go-only. The
 > [`api-stability`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/api-stability.md)
 > gate (`griffe` + version-bump bypass, from
 > [#174](https://github.com/timo-jakob/timos-claude-code-plugins/issues/174))
@@ -57,6 +69,13 @@ Verdict is one of:
 
 ## How it runs (gating)
 
+> **Pre-#476 history.** The gating below describes the retired CI-driven
+> Approver. Since epic #476 the Approver is **user-invoked locally** and
+> bootstrap renders **no workflow** (`claude-approver.yml.tmpl` was removed in
+> #479), so the workflow triggers, the neutral-exit behaviour and the `/approve`
+> PR-comment path are no longer live. The gates themselves still describe what
+> the agent checks.
+
 The Approver only spends a token once every other signal is clean:
 
 - All required GitHub Actions status checks = SUCCESS
@@ -66,9 +85,9 @@ The Approver only spends a token once every other signal is clean:
 - PR not in draft; no pending review requests
 - HEAD SHA matches the SHA that produced the green checks (no race)
 
-If any gate fails → workflow exits neutral and waits for the next event.
-Optional `/approve` PR comment manually re-triggers; `/approve --dry-run`
-runs as a non-binding COMMENT.
+If any gate failed the workflow exited neutral and waited for the next event,
+and an `/approve` PR comment re-triggered it. Both belong to the retired
+CI path above — today you invoke `/development-<lang>:approve` yourself.
 
 ## Identity (two distinct GitHub Apps)
 
@@ -95,8 +114,9 @@ Override per-repo via the `CLAUDE_APPROVER_AUTHOR_ALLOWLIST` repo variable
 It is the approving half of `python-dependabot-snyk-triage`'s merge flow
 for safe patch + minor Dependabot PRs — triage never approves, so its
 merges (immediate or via armed auto-merge) wait on the Approver's or a
-human's review; when triage defers a PR or CI is red, the Approver picks
-it up once everything turns green.
+human's review; when triage defers a PR or CI is red, **you** run
+`/development-<lang>:approve` on it once everything turns green —
+nothing picks it up on its own.
 
 ## PR type taxonomy
 
@@ -165,19 +185,28 @@ structure the Approver expects:
 The Approver's findings include a hidden machine-readable JSON block —
 **this is shipped** (Phase 3); the schema lives in
 [`development-python/docs/python-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-python/docs/python-approver.md).
-**v1** *(Phase 4, pending)*: the user re-runs `/development:maintenance`,
-which reads the JSON block from the most recent Approver review,
-dispatches the relevant triage agents (ruff, semgrep, snyk, sonar, etc.),
-pushes fixes, and the Approver re-runs on workflow synchronize.
-**v2** closes the loop in CI via a `pull_request_review`-triggered
-workflow. v1's JSON bridge is the load-bearing primitive; v2 is just a
-different trigger on top of it.
+**v1** *(Phase 4, shipped — #185)*: the user re-runs
+`/development:maintenance`, which reads the JSON block from the most recent
+Approver review, dispatches the relevant triage agents (ruff, semgrep, snyk,
+sonar, etc.) and pushes fixes; you then re-run
+`/development-<lang>:approve <PR>` once CI is green again — there is **no
+automatic re-trigger**. (A **v2** that closed the loop in CI via a
+`pull_request_review`-triggered workflow was designed but never shipped; #476
+retired the workflow path entirely.) v1's JSON bridge is the load-bearing
+primitive.
 
 ## Languages
 
 Python, Java, and Swift ship `<lang>-approver` agents (fable) + policy
 templates today (`python-approver`, `java-approver`, `swift-approver`); the
-bootstrap wires the per-language approver via `{{APPROVER_LANG}}`. Future
-plugins (`development-node`, `development-go`, etc.) follow the same pattern.
-Bootstrap with `--claude-approver true` on a language with no approver warns
-and skips.
+bootstrap wires the per-language approver via `{{APPROVER_LANG}}`, which
+resolves **only** to those three. **Go** ships `go-approver` and
+`/development-go:approve` too, but `{{APPROVER_LANG}}` does not resolve for it,
+so bootstrap skips the **whole** Approver path on a Go repo — App install
+included. Using it there means installing the Apps and authoring
+`.claude/approver-policy.md` by hand (see the
+[how-to](../how-to/adopt-the-approver.md)). Future plugins
+(`development-node`, etc.) follow the same pattern.
+Bootstrap with `--claude-approver true` on any language `{{APPROVER_LANG}}`
+cannot resolve — currently anything but Python, Java and Swift — warns and
+skips.

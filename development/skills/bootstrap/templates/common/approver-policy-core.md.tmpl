@@ -533,7 +533,7 @@ for this language — is listed in the overlay):
   "findings": [
     {
       "category": "test_quality | api_stability | coverage | risk | type_ambiguity | baseline | …",
-      "dimension": "bugs | security | performance | code_quality | tests | null",
+      "dimension": "bugs | security | performance | code_quality | tests | resilience | swift6_compliance | … | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation",
       "suggested_agent": "<an agent from the overlay's vocabulary> | null",
@@ -543,6 +543,16 @@ for this language — is listed in the overlay):
   ]
 }
 ```
+
+`dimension` is **not** a closed enum. The five core dimensions —
+`bugs`, `security`, `performance`, `code_quality`, `tests` — are what
+every language panel ships, but a panel may carry more: `resilience` on the
+service languages, `swift6_compliance` on Swift. The
+`/development-{{APPROVER_LANG}}:review` panel's own dimension table is the
+authority on which (the overlay carries the `suggested_agent` vocabulary, not
+the dimension set). Tag a risk with whatever dimension its lens actually
+carries; never drop or mislabel a finding because its dimension is absent
+from this list.
 
 The block is wrapped in an HTML comment so it doesn't render in the
 GitHub UI:
@@ -555,5 +565,7 @@ GitHub UI:
 
 `/development:maintenance` parses the most recent Approver review's
 hidden block, maps each finding's `suggested_agent` to the right triage
-agent, dispatches them on the PR branch, pushes the fixes, and the
-Approver re-runs on the next `check_suite: completed`.
+agent, dispatches them on the PR branch, pushes the fixes, and then you
+re-run `/development-{{APPROVER_LANG}}:approve <PR>` once CI is green
+again. There is **no automatic re-trigger** — the Approver is
+user-invoked locally, not driven by a workflow.
