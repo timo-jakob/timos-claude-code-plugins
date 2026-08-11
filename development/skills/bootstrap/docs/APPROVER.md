@@ -508,32 +508,40 @@ that's a process signal, not a policy problem.
 
 ## Multi-language status
 
-**Today: Python only.**
+**Today: Python, Java and Swift are fully wired; Go ships the agent
+only.**
 
-The Approver framework (App identities, workflow, policy template
-structure, dispatch contract, JSON block schema) is
-language-agnostic. The **agent that does the evaluation** is
-Python-specific (`python-approver` in the `development-python`
-plugin).
+The Approver framework (App identities, policy template structure,
+dispatch contract, JSON block schema) is language-agnostic. The **agent
+that does the evaluation** is per-language: `python-approver`,
+`java-approver`, `swift-approver` and `go-approver` all ship.
 
-For other languages (`development-javascript`, `development-go`,
-`development-swift`, etc.), the pattern is:
+Wiring a language takes two pieces:
 
-1. Ship the language plugin's `<lang>-approver` agent
+1. The language plugin's `<lang>-approver` agent
    (`development-<lang>/agents/<lang>-approver.md`).
-2. Ship a language **fluency overlay**
+2. A language **fluency overlay**
    (`templates/languages/<lang>/approver-policy-overlay.md.tmpl`) —
    paths, tools, idioms, agent vocabulary only. The judgment criteria
    live once in `templates/common/approver-policy-core.md.tmpl` and are
    never re-written per language (#241).
-3. Bootstrap's `--claude-approver true` detects which language
-   plugins have an Approver agent and renders core + overlay into the
-   repo's single `.claude/approver-policy.md`.
 
-Until any non-Python plugin ships its Approver agent, bootstrap
-**warns-and-skips** on non-Python projects when `--claude-approver
-true` is set. The warning explains which language's Approver is
-missing and points at the issue for that language plugin's roadmap.
+Python, Java and Swift have both. **Go has only the first**: there is no
+`templates/languages/go/approver-policy-overlay.md.tmpl`.
+
+Bootstrap does **not** discover this by scanning for agents — §3e
+resolves `{{APPROVER_LANG}}` against a hardcoded `python` / `java` /
+`swift`. So on a Go repo (or any other language) `--claude-approver
+true` **warns and skips**: no policy is rendered, and because no
+Approver-capable language resolves, the Step 4.5 App-install path skips
+too. Using `/development-go:approve` there means installing the Apps by
+hand (`scripts/install-claude-apps.zsh`) **and** hand-authoring
+`.claude/approver-policy.md` — see
+[`development-go/docs/go-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-go/docs/go-approver.md).
+
+Bootstrap also skips when the primary language is not Approver-capable
+and zero — or more than one — Approver-capable language is detected, and
+on a plugin repo, where the Approver is always skipped.
 
 ## Customisation
 

@@ -28,17 +28,21 @@ This file records only the **Swift deltas**:
   (`XCTAssertTrue(true)` filler, stubbed-unit tests, `@Disabled`-less
   equivalents) rather than pytest ones.
 - **The risk register is fed by the review dimensions (#448).** Step
-  10 walks the five lenses of the standalone
+  10 walks the seven lenses of the standalone
   `/development-swift:review` panel — bugs, security, performance,
-  code quality, tests — one bounded pass each, and emits at most the
-  top 3 risks overall, each tagged `"dimension": "<lens>"` in the
-  hidden JSON block. The review skill itself stays a standalone
+  code quality, tests, swift6_compliance, resilience — one bounded
+  pass each, and emits at most the top 3 risks overall, each tagged
+  `"dimension": "<lens>"` in the hidden JSON block. `dimension` is
+  **not a closed enum**: the lens list tracks the panel's dimension
+  table, so a new dimension becomes a new lens — and a legal value —
+  on arrival (#1147). The review skill itself stays a standalone
   deep-dive capability (owner decision on #448); the Approver borrows
   its lenses for breadth at synthesis time, not its depth.
 - **`suggested_agent` mapping** targets the Swift agents:
   `test_quality`/`coverage` → `swift-coverage-improver`, Sonar
-  baseline findings → `swift-sonar-triage`; semgrep has no Swift rows
-  (deferred, #443).
+  baseline findings → `swift-sonar-triage`, CodeQL / Code Scanning
+  baseline alerts → `swift-code-scanning-triage`; semgrep has no Swift
+  rows (deferred, #443).
 - **Security guard (#457)** applies as everywhere: a PR closing a
   security BLOCKER/CRITICAL by suppression is never approved.
 
@@ -46,7 +50,8 @@ This file records only the **Swift deltas**:
 
 Everything the Swift Approver needs ships with epic #297: this agent,
 the `/development-swift:approve` skill (user-triggered, posts the
-verdict; `--dry-run` prints instead), and the Swift
+verdict — it takes an optional PR number and nothing else, since the
+`--dry-run` flag is Go-only today), and the Swift
 `approver-policy.md` template rendered by
 `/development:bootstrap --claude-approver true` (Swift is an
 Approver-capable language as of #448). There is no CI wiring to do —

@@ -129,14 +129,17 @@ summary.
    issue link, no new secrets, no unattested dep.
 
 10. **Risk register — fed by the review dimensions (#449).** Walks the
-    five lenses of the `/development-go:review` panel — bugs, security,
-    performance, code quality, tests — one focused pass each over the
-    diff, and emits at most the top 3 risks overall, each tagged with
-    the `dimension` that produced it. Fable judgement; three is a cap,
-    not a floor — an empty lens contributes nothing. Go-specific
+    six lenses of the `/development-go:review` panel — bugs, security,
+    performance, code quality, tests, resilience — one focused pass
+    each over the diff, and emits at most the top 3 risks overall, each
+    tagged with the `dimension` that produced it. Fable judgement;
+    three is a cap, not a floor — an empty lens contributes nothing.
+    The panel's dimension table is what the lens list tracks, so a new
+    dimension becomes a new lens (#1147). Go-specific
     concerns include per-iteration loop-variable capture (judged by the
     module's `go` directive), nil-map writes, unchecked errors,
-    goroutine leaks, `InsecureSkipVerify`, and data-race exposure.
+    goroutine leaks, `InsecureSkipVerify`, data-race exposure, and
+    outbound calls with no breaker, timeout, or registered fallback.
 
 11. **Confidence calibration** — start `HIGH`, apply policy adjustments.
     Verdict mapping:
@@ -257,8 +260,8 @@ Don't strip it; don't reformat it; don't substitute prose for it.
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
   "findings": [
     {
-      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | approver_permission",
-      "dimension": "bugs | security | performance | code_quality | tests | null",
+      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | approver_permission | …",
+      "dimension": "bugs | security | performance | code_quality | tests | resilience | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation citing the policy clause that drove this finding.",
       "suggested_agent": "go-coverage-improver | go-sonar-triage | go-semgrep-triage | go-code-scanning-triage | null",
@@ -268,6 +271,11 @@ Don't strip it; don't reformat it; don't substitute prose for it.
   ]
 }
 ```
+
+`dimension` is not a closed enum: the values above are the
+`/development-go:review` panel's dimensions as it ships today, and the
+panel's dimension table is authoritative — a lens added there is legal
+here on arrival (#1147).
 
 Every JSON finding has a counterpart in the prose; the prose may not add
 findings the JSON omits. The JSON is the contract; the prose is the
@@ -349,7 +357,16 @@ Python / Java / Swift that file is rendered by
 yet resolve `go` as an approver language (its `{{APPROVER_LANG}}` is
 `python` / `java` / `swift`, and there is no
 `templates/languages/go/approver-policy-overlay.md.tmpl`) — that lands
-in the epic's **bootstrap slice**. Until then, on a Go repo you must
+in the epic's **bootstrap slice**. Because no Approver-capable language
+resolves on a Go repo, bootstrap's **Step 4.5 App-install path skips
+too** — so `--claude-approver true` there leaves the Apps *uninstalled
+on the repo*, not merely the policy unrendered. (Credential
+registration is language-independent, so the Keychain half still
+happens; the missing per-repo install is what makes the token
+unmintable.) Until the
+slice lands you must therefore do **both** by hand: install the Apps
+(`development/skills/bootstrap/scripts/install-claude-apps.zsh`), or the
+token mint fails, **and**
 **hand-author `.claude/approver-policy.md`** before the first
 `/development-go:approve` run: a sibling's rendered policy (a Java or
 Swift repo's `.claude/approver-policy.md`) is a fine starting base —

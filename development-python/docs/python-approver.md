@@ -117,12 +117,13 @@ operator's summary.
    FIXME without issue link, no new secrets, no unattested dep.
 
 10. **Risk register — fed by the review dimensions (#449).** Walks
-    the five lenses of the `/development-python:review` panel — bugs,
-    security, performance, code quality, tests — one focused pass
-    each over the diff, and emits at most the top 3 risks overall,
-    each tagged with the `dimension` that produced it. Fable
+    the six lenses of the `/development-python:review` panel — bugs,
+    security, performance, code quality, tests, resilience — one
+    focused pass each over the diff, and emits at most the top 3 risks
+    overall, each tagged with the `dimension` that produced it. Fable
     judgement; three is a cap, not a floor — an empty lens
-    contributes nothing.
+    contributes nothing. The panel's dimension table is what the lens
+    list tracks, so a new dimension becomes a new lens (#1147).
 
 11. **Confidence calibration** — start `HIGH`, apply policy
     adjustments. Verdict mapping:
@@ -246,17 +247,22 @@ Don't strip it; don't reformat it; don't substitute prose for it.
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
   "findings": [
     {
-      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy",
-      "dimension": "bugs | security | performance | code_quality | tests | null",
+      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | approver_permission | …",
+      "dimension": "bugs | security | performance | code_quality | tests | resilience | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation citing the policy clause that drove this finding.",
-      "suggested_agent": "python-coverage-improver | python-semgrep-triage | python-sonar-triage | null",
+      "suggested_agent": "python-coverage-improver | python-semgrep-triage | python-sonar-triage | python-code-scanning-triage | null",
       "file": "path/to/file.py",
       "line": 42
     }
   ]
 }
 ```
+
+`dimension` is not a closed enum: the values above are the
+`/development-python:review` panel's dimensions as it ships today, and
+the panel's dimension table is authoritative — a lens added there is
+legal here on arrival (#1147).
 
 Every JSON finding has a counterpart in the prose; the prose may not
 add findings the JSON omits. The JSON is the contract; the prose is
@@ -273,12 +279,13 @@ when re-ingesting findings in Phase 4 of #89:
 | `coverage` | `python-coverage-improver` | Direct match |
 | `baseline` (Sonar findings) | `python-sonar-triage` | Category matches scanner |
 | `baseline` (semgrep findings) | `python-semgrep-triage` | Category matches scanner |
-| `baseline` (CodeQL alerts) | `null` for now (#163 not shipped) | No triage agent yet |
+| `baseline` (CodeQL / Code Scanning alerts) | `python-code-scanning-triage` | Category matches scanner |
 | `api_stability` | `null` | Author must decide on intent — no auto-fix |
 | `feat_no_linked_issue` | `null` | Author needs to link the issue |
 | `type_ambiguity` | `null` | Author needs to rename the PR |
 | `risk` | `null` | Judgement-only |
 | `type_policy` (e.g. hotfix) | `null` | Human review required |
+| `approver_permission` | `null` | Operator re-accepts the App grant |
 
 ## Hard-fail conditions (refuses to run)
 
@@ -331,8 +338,9 @@ push.
   under `suggested_agent`. The JSON schema above is the contract.
 - `/development-python:approve` is the invocation path (epic #476):
   user-triggered, token minted locally, verdict posted as the Approver
-  App. Pass `--dry-run` for a non-binding evaluation that prints
-  instead of posting.
+  App. It takes an optional PR number and nothing else — the
+  `--dry-run` flag is **Go-only** today (`/development-go:approve`), so
+  every Python invocation posts.
 - The end-to-end validation of the local flow ran against
   `ai-doc-organizer` (#487): COMMENT-with-reservations and APPROVE
   paths both exercised for real, merge completed on the locally posted

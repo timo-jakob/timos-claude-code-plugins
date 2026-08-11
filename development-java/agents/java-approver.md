@@ -350,7 +350,7 @@ heavily in confidence calibration.
 
 Identify what could still go wrong, even with everything green. This
 is fable judgement, not a checklist — but instead of free-form "top
-risks", walk the five lenses the `/development-java:review` panel
+risks", walk the six lenses the `/development-java:review` panel
 uses, one focused pass each over the diff:
 
 - **bugs** (`java-bug-hunter`'s focus): `==` vs `equals`, null
@@ -364,6 +364,14 @@ uses, one focused pass each over the diff:
   dead code, naming that will mislead maintainers.
 - **tests** (`java-test-reviewer`): coverage gaps on the changed
   surface, assertion quality, flakiness signals.
+- **resilience** (`java-resilience-reviewer`): outbound dependency
+  calls with no breaker, no timeout, or no registered fallback;
+  unbounded or un-backed-off retries; a lost dependency that exhausts
+  the thread pool or hangs the request; hard/soft dependency
+  misdeclaration, and liveness made a function of a dependency.
+
+The lens list is the panel's dimension table, not a fixed set: when
+`/development-java:review` gains a dimension, this walk gains a lens.
 
 Emit **at most the top 3 risks overall**, each tagged with the
 dimension that produced it, so the register is traceable to its lens.
@@ -446,6 +454,8 @@ the finding category:
 | `baseline` (no new findings, no conflicts, etc.) | varies — match the scanner: `java-semgrep-triage`, `java-sonar-triage`, or `java-code-scanning-triage` |
 | `type_ambiguity` | `null` |
 | `risk` | `null` (judgement-only; no auto-fix) |
+| `type_policy` (e.g. hotfix) | `null` (human review required) |
+| `approver_permission` | `null` (the operator re-accepts the App grant) |
 
 ### Step 13 — Post or dry-run
 
@@ -518,8 +528,8 @@ anymore.
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
   "findings": [
     {
-      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | ...",
-      "dimension": "bugs | security | performance | code_quality | tests | null",
+      "category": "test_quality | api_stability | coverage | baseline | type_ambiguity | feat_no_linked_issue | risk | type_policy | approver_permission | ...",
+      "dimension": "bugs | security | performance | code_quality | tests | resilience | null",
       "title": "Short headline",
       "detail": "Multi-line markdown explanation, ideally citing the policy section that drove this finding.",
       "suggested_agent": "java-coverage-improver | java-semgrep-triage | java-sonar-triage | java-code-scanning-triage | null",
@@ -533,7 +543,10 @@ anymore.
 Every finding in the JSON has a counterpart in the human-readable
 markdown above. Don't add findings to the JSON that aren't in the
 prose. `dimension` is set on `risk`-category findings (the step-10
-lens that produced it) and `null` elsewhere.
+lens that produced it) and `null` elsewhere. The values above are the
+`/development-java:review` panel's dimensions as it ships today — the
+panel's dimension table is authoritative, so use whatever `Dimension`
+cell the lens carries there rather than treating this list as closed.
 
 ## Refusal patterns (do NOT)
 
