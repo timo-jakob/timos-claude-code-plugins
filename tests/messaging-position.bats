@@ -127,7 +127,8 @@ ARCH_END='### Browser UI — SPA shell, micro-frontends, React default (#1059)'
 # the haystack still ends with the pinned heading, so every assertion below
 # would silently widen to cover two sections. The `ends_with` pin then names the
 # heading that follows TODAY. Same idiom as tests/deployment-position.bats and
-# tests/webui-positions.bats, so all three position suites behave identically.
+# tests/webui-positions.bats and tests/identity-position.bats, so all four
+# position suites behave identically.
 arch_section() {
   extract "$ARCH" '^### Messaging' '^### '
 }

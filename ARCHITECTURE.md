@@ -1046,6 +1046,295 @@ the direct-to-cluster gate (#1206). The rest are unbuilt rather than
 in-flight, and none of them should be read as realized merely because the
 status note above happens to discuss the publish paths.
 
+### Identity and authorization — OIDC at the edge, claims as the only input (#1186)
+
+Every position above assumes a service that knows who is calling it. Until now
+this document never said so, which made identity the assumption underneath the
+resilience, ops and contract positions that nobody wrote down — and an unwritten
+assumption is most expensive exactly here, because each adopter fills it in
+privately and inconsistently, and the gap is invisible until something is
+already exposed. This section states the family's position in its own words,
+with its rationale, so a reader can disagree with it explicitly.
+
+**OIDC at the edge, with Keycloak as the provider and PKCE for browser flows.**
+*Rationale:* one blessed path with one good default, applied to identity. A
+second admitted provider is a permanent maintenance and expertise cost paid in
+every repo and every review, and identity is the last place this family wants
+two half-understood integrations instead of one understood well. PKCE rather
+than an implicit or secret-bearing flow because the clients this family
+scaffolds — browsers and native apps — cannot keep a secret, so a flow that
+assumes they can is a flow whose security story is fiction.
+
+**Tenancy is modelled as Keycloak Organizations in a single realm; a per-tenant
+realm is the deliberate exception, not the default.** *Rationale:* realm-wide
+settings — token lifetimes, password and session policy, client registrations —
+are then configured once and hold for every tenant, instead of drifting into N
+slightly different realms that nobody can diff. A tenant that genuinely needs
+its own issuer still gets one, but as a decision someone makes and records,
+rather than as the shape the system falls into by default.
+
+**The access token is a JWT carrying the tenant identifier and roles as claims,
+and those claims are the authorization input.** A service never derives tenant
+or role from client input, a path parameter, or a header it did not validate.
+Where a request *also* names a tenant — a path segment, a query parameter, a
+header — it is **compared against the claim, and a mismatch is rejected**, never
+silently overridden. **And where the token carries no tenant claim at all** — the
+background-work case the service-to-service clause below admits — **a request
+naming a tenant is rejected too**; a caller that must act for a tenant obtains a
+token that asserts it, rather than naming one the token does not carry. Without
+that second branch the comparison has nothing to compare against, and the only
+remaining behaviour is to trust what the caller typed. **A token asserts exactly
+one active tenant**, so the comparison is equality and never set membership: a
+caller who belongs to several organizations obtains a token per tenant rather
+than one naming all of them. *Rationale:* anything the caller can type, the caller can
+change. A tenant identifier taken from a path segment is a request for data, not
+a statement of identity, and treating one as the other is the shortest path from
+a working system to a cross-tenant read. Signed claims are the only inputs whose
+value survives an adversarial caller. The rejection half matters separately:
+quietly serving the claim's tenant when the caller asked for another one answers
+a different question than the one asked, which is a wrong answer wearing the
+clothes of a right one. This clause is about *caller-supplied* input only —
+resource-level checks a service makes against its own state (does this order
+belong to this customer?) are untouched by it.
+
+**The service validates and authorizes; a gateway may validate first, but never
+instead.** Validation is **issuer-aware** and happens **inside the scaffolded
+service** — the issuer is resolved per request rather than bound once at
+startup, so a tenant served from a dedicated issuer stays supportable without a
+code change. **Per-request resolution selects from a configured allowlist of
+issuers; the token's own `iss` claim chooses among them and never introduces
+one.** *This bound is the whole safety of the clause:* an implementation that
+fetches signing keys from whatever issuer the token names accepts any token from
+any issuer that serves a valid JWKS document, which is not weaker validation but
+none at all. **Validating** means, at minimum: the signature against that
+issuer's published keys, using an expected algorithm rather than the one the
+token asks for, plus `iss`, `aud` and expiry. There is **no trusted-header
+mode**: not in local development, not on service-to-service calls. *Rationale:*
+the earlier framing — validation at
+the gateway, authorization in the service — put the security-critical step
+outside everything this family scaffolds, which meant the family shipped
+nothing that enforced it and had nothing to review. A gateway check is defence
+in depth, and defence in depth is worth having; it is not a substitute for the
+service knowing who is calling it. Two consequences follow, stated out loud
+rather than left to be discovered:
+
+- **Local development runs against a dev issuer or a signed dev token, never a
+  bypass switch.** A flag that turns validation off is a code path that exists
+  in the shipped binary, and the difference between "off in development" and
+  "off" is one misread environment variable. **The issuer allowlist above is
+  environment-scoped configuration, and a dev issuer belongs only in a *local*
+  development allowlist** — every deployed environment, a shared development or
+  test cluster included, admits only that environment's own provider — an issuer
+  operated on the same footing as the workloads it serves, never a locally-run
+  or statically-keyed stub. An allowlist
+  admitting a dev issuer anywhere deployed is this same bypass in another form,
+  and a more dangerous one, because a reviewer looking for a switch will not
+  find it anywhere in the code.
+- **A service-to-service call carries either the propagated caller token or a
+  client-credentials service-account token** — the former when the work is
+  being done on behalf of a user, the latter for background and system work,
+  and the service-account token carries a tenant identifier only when it is
+  genuinely acting for one tenant. A background job that claims a tenant it is
+  not acting for is indistinguishable, downstream, from a compromised one.
+
+**The ops surface is outside the token rule — but only on the management port.**
+`/info`, `/health`, `/health/live`, `/health/ready` and `/metrics` are exempt
+**when, and only when, they are served on the separate management port** of the
+ops surface (#688). **The port is the condition, not a description of where
+those paths happen to live:** the same five paths mounted on the public
+application port are subject to the token rule like any other endpoint, and a
+carve-out read as a path allowlist would exempt exactly the case that is
+actually exposed. The boundary around the management port is drawn by the
+deployment layer's `NetworkPolicy` — the port restricted to the kubelet and the
+monitoring namespace — as the ops-surface position (#688) states, and
+consistently with the plane-per-namespace position above, which draws boundaries
+the same way without speaking about this port. *That boundary is a position, not
+a shipped guarantee:* nothing in this family verifies that the policy **scopes
+the management port** to the kubelet and the monitoring namespace —
+`kubernetes-security-reviewer` flags a namespace carrying no policy at all, not
+a policy that admits everything — so a management port reachable beyond those
+two is an unbounded hole this carve-out does not license. *And the carve-out is stated
+because it is load-bearing for enforcement, not as an aside:* without it, a
+deepened security reviewer reads every kubelet probe as an endpoint missing
+authorization, and the dimension drowns in false positives on its first run.
+
+**A client that runs on a user's device is a public client.** Any such client —
+whether it is the repo's only artifact (a CLI, a SwiftUI app with no server) or
+one of several shipped alongside a service — uses **PKCE**, ships **no client
+secret in the binary**, keeps the token in the **platform keystore**, and
+**never uses a claim as a local authorization decision**. The obligations follow
+the artifact, not the repo shape: a service repo that also ships a CLI *that
+acquires a token* owes them for that CLI, which is the same rule the enforcement
+subsection below applies when it points the client checks at the Go and Python
+reviewers. A CLI that never authenticates — a formatter, a codegen or build
+tool — is not a client at all, and owes none of them. **In a browser, where
+there is no platform keystore, the shell holds the token in memory only — never
+in `localStorage` or `sessionStorage`** — and re-acquires it from the provider
+rather than persisting it; that is the storage rule #1326 implements, not one it
+gets to choose. **The confidential-client case is the service's, and only the
+service's:** the client-credentials service-account token required by the
+*service validates and authorizes* clause needs a confidential client, whose
+secret reaches the workload through the
+secrets operator per the Deployment position above and is never baked into an
+image. The distinction is the device, not the language: a secret is
+confidential only where nobody can read it off the machine it runs on.
+*Rationale:* a secret shipped to a user's device is a published secret, and a
+keystore is the one place an operating system will defend on the application's
+behalf; browser storage that survives a tab close is readable by any script that
+ever gets injected into the page, which is why in-memory is the only admitted
+form there. The claim rule is the one most often gotten
+wrong: claims are the server's input, and a client that gates its own UI on one
+is enforcing nothing — hiding a control the server would refuse anyway is fine
+as presentation, and is not a security boundary. This is deliberately not a
+services-only position, because the family's own adopter path includes repos
+with no server at all, and silently excluding them would hand those adopters
+the worst outcome this family can produce: a practice it intends to deliver,
+omitted with no error, no warning, and nothing to search for later.
+
+**Realization and enforcement — what ships where.** The criterion that decided
+this is recorded here because the family should own it as a reusable rule: *a
+position gets a reviewer when a violation is visible in a diff, and a template
+when a service cannot comply without boilerplate.* Both are true of this one — a
+missing validator or a tenant read from a path parameter is visible in a diff,
+and no service does issuer-aware validation without scaffolding — so this
+position gets both. Neither is built here. Six realization children and one
+enforcement child are filed under epic #1058:
+
+- **#1321** (Go), **#1322** (Java), **#1323** (Spring) and **#1324** (Python) —
+  the service realizations: in-process issuer-aware validation, claim
+  extraction, and the authorization seam.
+- **#1325** (Swift) — the client half: PKCE, the platform keystore, and no
+  claim-based local authorization decision.
+- **#1326** — the SPA shell owns session and auth acquisition for the whole
+  page, so a remote never runs its own login flow; the shell↔remote context
+  object's own shape stays the MFE contract's concern, defined in
+  `docs/superpowers/specs/2026-07-27-mfe-app-family-design.md` and built by
+  #1123, not here.
+- **#1327** — the single enforcement child, which deepens the existing
+  **`security`** dimension in four reviewers:
+  `development-go/agents/go-security-reviewer.md`,
+  `development-java/agents/java-security-reviewer.md`,
+  `development-python/agents/python-security-reviewer.md`, and Swift's
+  unprefixed `development-swift/agents/security-reviewer.md`. **The four do not
+  all get the same checks, and the split is keyed to the artifact under review,
+  not to the language:** a repo that ships a server gets the *service*
+  behaviour — issuer-aware in-process validation, the issuer-allowlist bound,
+  the claim-source and mismatch-rejection rules, no trusted header — and a repo
+  that ships a device client gets the *client* behaviour — PKCE, no client
+  secret in the binary, the platform keystore, and no claim-based local
+  decision, all four. A repo that ships **both** gets both halves; a repo that
+  ships **neither** — a library, a build plugin, anything that never acquires a
+  token — gets neither, and the absence of a validator in it is not a finding.
+  *A CLI is not automatically in that bucket:* a CLI that acquires a token is a
+  device client and owes the client half, while one that never does — a
+  formatter, a codegen or build tool — sits in the neither bucket like a
+  library — **token acquisition is the key, not the artifact's name**. That
+  artifact keying matters in both directions: a Go or Python CLI *that
+  authenticates* is a public client this position covers
+  explicitly, so its reviewer owes the client checks too; and Swift gets **only**
+  the client half here, **because this position files no Swift service
+  realization for service checks to point at** — not because a Swift artifact
+  cannot be a server. Swift is a service language elsewhere in this document,
+  and when a Swift service realization is filed the artifact rule applies to it
+  unchanged. The review work is nonetheless deliberately
+  **one** issue rather than four, because it is one pair of behaviours written
+  four times and four issues would produce four divergent readings of the same
+  clause.
+
+**Node is a named gap, not an exclusion.** This document treats Node as a
+blessed service language and ships an ops-api reference for it, so the position
+applies to a Node service exactly as it does to a Go one — but no Node
+realization child is filed here. That is a stated gap rather than a decision
+that Node is out of scope, and the honest outcome is to say so rather than to
+leave a reader inferring either coverage or exemption from silence.
+
+`kubernetes-security-reviewer` and `bootstrap-security-reviewer` are
+**excluded**, for reasons about their artifacts rather than their importance —
+and the second exclusion is **narrower than it first looks**. The first reviews
+cluster manifests, which carry no token validation or claim extraction. The
+second reviews CI and bootstrap configuration, most of which likewise carries
+none — but *not all*: the shipped `apim/apiproxy.yaml` declares an auth policy,
+which is an identity decision in a bootstrap artifact. The exclusion therefore
+covers workflow and scanner configuration only, and that file's auth policy is
+deliberately left unreviewed **for now** because #1328 is repairing it; a
+reviewer pointed at a file that is known-wrong and already being fixed reports a
+finding nobody can act on. **That deferral ends only when the template repair
+and the reviewer check both ship, and
+that is an obligation on #1328, not a prediction about it:** #1328 must carry,
+as an acceptance criterion, the addition of an apim auth-policy check to
+`bootstrap-security-reviewer` — if it does not carry that today, it is added
+before the template repair merges. Stated as an obligation because "#1328
+lands" is satisfied equally by the intended outcome and by a template-only
+repair, after which the reviewer never gains the check and this paragraph would
+read as though the gap had closed itself. Until the template repair ships,
+bootstrap keeps emitting the contradicting file into new repos; until the
+reviewer check ships too, nothing catches an adopter reintroducing it.
+`development-javascript` and `development-react` ship
+no security reviewer, so no reviewer deepening is filed for them either — which
+means **#1326's browser in-memory storage rule ships with no reviewer at all**,
+and the SPA half of this position has no review dimension until one of those
+plugins grows a security panel. And
+`development-spring` ships no review panel of its own — a Spring repo is
+reviewed by the Java panel, so #1323's realization is enforced by
+`java-security-reviewer` rather than by a Spring reviewer that does not exist.
+**The dimension enum under the *Review finding schema* section is unchanged** —
+the existing `security` dimension is deepened, not extended — and that is said
+explicitly here because the enum is a cross-language contract shared by every
+review panel and the consolidator, so leaving it unsaid would invite a later
+pull request to extend it in passing.
+
+**Status: one shipped artifact contradicts this position today.**
+`development/skills/bootstrap/templates/common/apim/apiproxy.yaml.tmpl` carries
+an `auth:` policy of `type: apikey` under the comment `The gateway validates the
+caller; the service trusts the gateway.` — and it is *shipped*, emitted into
+every bootstrapped repo that gets an `apim/` directory. **Both halves contradict
+this position, and #1328 must repair both.** The comment is precisely the
+framing the gateway clause above replaces; the policy is worse than a comment,
+because selecting API-key auth at the edge means no OIDC token reaches the
+service at all, which defeats *OIDC at the edge* and *claims as the only input*
+independently of what any comment says. It is a **rule violation, not a wording
+gap**: an adopter following it builds the trusted-header mode this position
+forbids. **#1328** is the follow-up that repairs it. Recording it here rather than leaving it implied
+is the same discipline the Deployment position applies to its own publish paths:
+a position that does not name what already contradicts it reads as a clean bill
+for everything the family ships.
+
+Identity-provider operations, credential and recovery policy, and tenant
+onboarding are outside this position: none of them is something a plugin
+scaffolds. Multi-tenancy data scoping — how a validated tenant claim constrains
+what a query returns — is #1187, which this section unblocks rather than
+answers. As with the Messaging, Browser UI and Deployment positions above, this
+section states the position that machinery would be built *to*. Three coverages
+exist today, and each is narrower than it looks:
+
+- The **Go, Java and Python** `security` reviewers carry a missing-authorization
+  check **scoped to state-changing handlers** — Swift's carries none at all. So
+  an unauthenticated *read* is largely uncovered even where the check exists,
+  which is the case this section headlines as the shortest route to a
+  cross-tenant read: #1327 both deepens that check and widens it. **Java's is
+  the partial exception** — it also flags an unprotected actuator-style
+  diagnostics or debug endpoint, which is a read-side finding — and that line
+  needs **reconciling against the ops carve-out above**, since the management
+  port's `/info`, `/health*` and `/metrics` are exactly actuator-style
+  diagnostics that the carve-out exempts. That reconciliation is #1327's work
+  too, not something the deepening starts from a clean slate on.
+- The **Go, Java, Python and Swift** reviewers all flag a hardcoded credential,
+  which is the **no client secret in the binary** obligation — Swift's naming
+  the OAuth case explicitly, the other three generically. #1327 deepens that
+  bullet rather than adding a second check beside it.
+- **Swift's alone** flags a token kept in `UserDefaults` rather than the
+  Keychain — the **platform keystore** obligation, covered for Swift and nowhere
+  else.
+
+Everything else is unenforced: issuer-aware validation, the issuer-allowlist
+bound and its environment scoping, the claim-source rule, the mismatch-rejection
+rule in either branch, the no-trusted-header rule, the **PKCE** and
+**no-claim-as-a-local-decision** obligations everywhere, the platform-keystore
+obligation outside Swift, and #1326's browser in-memory storage rule — which, as
+noted above, has no reviewer to deepen at all. **Nothing in this section is
+enforced beyond the three coverages just named.** Read the rest as a stated
+position awaiting mechanism rather than a shipped guarantee.
+
 ### Cross-repo Claude: the big-picture problem
 
 A Claude session in one repo cannot see siblings by default, and in a

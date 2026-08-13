@@ -65,7 +65,8 @@ setup() {
 
 # Collapse a document region to one line: strip blockquote markers, collapse
 # whitespace, trim the trailing space `tr` leaves behind. Same helper shape as
-# tests/messaging-position.bats and tests/webui-positions.bats, and the trim is
+# tests/messaging-position.bats, tests/webui-positions.bats and
+# tests/identity-position.bats, and the trim is
 # what makes `ends_with` usable as the end-anchor pin.
 collapse() {
   sed 's/^>[[:space:]]\{0,1\}//' | tr -s '[:space:]' ' ' | sed 's/[[:space:]]*$//'
@@ -182,7 +183,16 @@ escape_hatch_mentions() {
 
 # --- the authoritative record ------------------------------------------------
 
-ARCH_END='### Cross-repo Claude: the big-picture problem'
+# The heading that follows the Deployment section TODAY. It moved when #1186
+# inserted the Identity and authorization position between this section and
+# `### Cross-repo Claude: the big-picture problem`. Repointing this constant is
+# the EXPECTED outcome of such an insertion, not a symptom of a broken
+# extractor — `deployment_section()`'s end address is the generic `^### ` and
+# needs no change. Same convention as tests/webui-positions.bats, which records
+# its own repoint for the same reason. (tests/identity-position.bats follows the
+# generic-end-address idiom too, but has never been repointed — it is the suite
+# whose insertion moved THIS anchor.)
+ARCH_END='### Identity and authorization — OIDC at the edge, claims as the only input (#1186)'
 
 deployment_section() {
   extract "$ARCH" '^### Deployment' '^### '
