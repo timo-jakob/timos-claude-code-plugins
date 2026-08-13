@@ -106,6 +106,8 @@ runs the whole suite once in parallel and exits with bats' real status.
 | `kubernetes-ci-fixtures.bats` | Executes the bootstrapped `kubernetes-ci` workflow with **real tools** over those fixtures (#1199) |
 | `gather-claude-plugin.bats` | Tests `gather-claude-plugin-findings.zsh` — one mutation of `clean` per validator, asserting the matching finding |
 | `check-marketplace-sync.bats` | Tests `check-marketplace-sync.zsh` — in-sync, version mismatch, missing entry, missing plugin.json |
+| `api-styleguide-ruleset.bats` | Structural half of the org API styleguide ruleset (#689) — rule ids, severities, scoping, fix hints and doc anchors, parsed with `yq`; the behavioural half is `acceptance/cli/api-styleguide.bats` |
+| `fixtures/api-styleguide/` | Six OpenAPI specs the styleguide suites lint — conforming, non-conforming, plus clause-isolating fixtures for error bodies and resource naming |
 
 ## Adding a test
 

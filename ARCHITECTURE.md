@@ -299,6 +299,25 @@ model, and the children of #684 that deliver each piece:
   channel alone. Bootstrap installs the layout, the publish workflow, and a
   replaceable Spectral starter ruleset when it detects an OpenAPI surface (#692);
   the org styleguide epic (#689) swaps the ruleset content only.
+- **The org styleguide ruleset is a PUBLISHED ARTIFACT, versioned on its own
+  line (#689).** `styleguide/spectral/ruleset.yaml` lives at the repo root, not
+  under `development/skills/bootstrap/templates/`, because it is *fetched by* a
+  bootstrapped repo at lint time rather than *rendered into* one. It is
+  published by cutting a **`styleguide-vX.Y.Z`** git tag (slash-free: jsDelivr
+  reads the segment after `@` as the version) and served over the jsDelivr `gh`
+  path; a consumer's `.spectral.yaml` is a thin shim that `extends` one **exact**
+  pinned URL. Three rules that are easy to get wrong:
+  **(1)** the `styleguide-v*` namespace is deliberately independent of
+  `development/plugin.json` / `.claude-plugin/marketplace.json` — the two version
+  lines never track each other, so a ruleset change is not a plugin bump and vice
+  versa; **(2)** a published tag is **never** re-pointed or deleted, only
+  superseded, because jsDelivr caches by tag and re-pointing would hand different
+  repos different rules under one version string with no PR anywhere to notice;
+  **(3)** an unfetchable pin fails `contracts-lint` **loudly** — there is no
+  offline fallback, vendored copy or opt-out flag, since a lint that degraded to
+  "no rules loaded, 0 problems" would report success while enforcing nothing.
+  `contracts-lint` applies the ruleset to `contracts/ops/vN/openapi.yaml` as well
+  as `contracts/vN/`, so an org rule must be true of the shared ops fragment.
 - **Strict semver, the version triangle (#693).** `info.version`, the npm
   package version, and the URL major in `servers:` (`/v2/`) must agree; `oasdiff`
   classifies every spec diff (breaking / additive / editorial) and the build

@@ -1,0 +1,67 @@
+# Corner fixture (#689, tc-corner-deprecated-schema-not-flagged).
+#
+# A deprecated SCHEMA PROPERTY, outside any operation. The #692 starter's
+# `deprecation-has-sunset` matched this (its given walked the whole document
+# with `$..`), which is why it could only ever be a warning. The org rule is
+# anchored at $.paths[*], so this file must produce NO
+# org-deprecated-operation-has-sunset finding — and no operation here is
+# deprecated, so a finding of any kind from that rule is a scoping regression.
+openapi: 3.1.0
+info:
+  title: User Directory API
+  version: 1.0.0
+  description: A directory whose User schema carries one deprecated property.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: users
+    description: User records.
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      summary: List users.
+      description: Returns every user in the directory.
+      tags: ["users"]
+      parameters:
+        # A deprecated PARAMETER — the second shape the starter's document-wide
+        # given wrongly matched. The operation itself is not deprecated, so the
+        # org rule must stay silent.
+        - name: legacyFilter
+          in: query
+          deprecated: true
+          description: Superseded by `filter`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The user collection.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+              # The third shape: `deprecated: true` appearing inside EXAMPLE
+              # DATA, where it is a data value rather than an OpenAPI keyword.
+              example:
+                - id: "u-1024"
+                  displayName: "Ada Lovelace"
+                  deprecated: true
+components:
+  schemas:
+    User:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque user id.
+        legacyName:
+          type: string
+          description: Superseded by `displayName`.
+          deprecated: true
+        displayName:
+          type: string
+          description: Display name.

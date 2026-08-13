@@ -1,0 +1,207 @@
+# Conforming fixture for the org API styleguide (#689).
+#
+# Lints CLEAN under the org ruleset at --fail-severity error. Every normative
+# rule has something here that could have violated it and does not, so a rule
+# that starts over-firing reddens this file rather than passing unnoticed.
+openapi: 3.1.0
+info:
+  title: Tenant Management API
+  version: 1.0.0
+  description: >
+    Manages tenants and their orders. The conforming half of the styleguide
+    fixture pair — plural kebab-case paths, RFC 9457 error bodies, and a
+    deprecated operation that declares its sunset date.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: tenants
+    description: Tenant records.
+paths:
+  /tenants:
+    get:
+      operationId: listTenants
+      summary: List tenants.
+      description: Returns the tenant collection.
+      tags: ["tenants"]
+      responses:
+        "200":
+          description: The tenant collection.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tenant"
+        "404":
+          description: No such tenant collection.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    post:
+      operationId: createTenant
+      summary: Create a tenant.
+      description: Creates a tenant and returns it.
+      tags: ["tenants"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Tenant"
+      responses:
+        "201":
+          description: The created tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "422":
+          description: The tenant payload was rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /tenants/{tenantId}/billing-accounts:
+    get:
+      operationId: listTenantBillingAccounts
+      summary: List a tenant's billing accounts.
+      description: >
+        Kebab-case multi-word segment plus a path parameter — both legal, and
+        the reason org-resource-naming exempts {param} segments.
+      tags: ["tenants"]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The billing accounts of the tenant.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BillingAccount"
+        "503":
+          description: The billing subsystem is unavailable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /addresses:
+    get:
+      operationId: listAddresses
+      summary: List addresses.
+      description: >
+        Begins with the verb `add`, and must stay clean — the verb guard is
+        scoped by trailing context, so a noun that merely starts with those
+        letters is not a verb path. Same for /searches and /deleted-items below.
+      tags: ["tenants"]
+      responses:
+        "200":
+          description: The addresses.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /searches:
+    get:
+      operationId: listSearches
+      summary: List saved searches.
+      description: Begins with the verb `search`, and must stay clean.
+      tags: ["tenants"]
+      responses:
+        "200":
+          description: The saved searches.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /deleted-items:
+    get:
+      operationId: listDeletedItems
+      summary: List deleted items.
+      description: Begins with the verb `delete`, and must stay clean.
+      tags: ["tenants"]
+      responses:
+        "200":
+          description: The deleted items.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /tenants/{tenantId}:
+    get:
+      operationId: getTenant
+      summary: Fetch one tenant.
+      description: >
+        Deprecated, and declares its sunset date — the shape
+        org-deprecated-operation-has-sunset demands.
+      tags: ["tenants"]
+      deprecated: true
+      x-sunset: "2026-12-31"
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: No tenant with that id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    Tenant:
+      type: object
+      required: ["id", "name"]
+      properties:
+        id:
+          type: string
+          description: Opaque tenant id.
+        name:
+          type: string
+          description: Display name.
+    BillingAccount:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque billing-account id.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.

@@ -1,0 +1,75 @@
+# Corner fixture (#689, tc-corner-path-params-exempt).
+#
+# Two path parameters in one path. `{userId}` and `{orderId}` are camelCase and
+# would fail the kebab-case half of org-resource-naming if the rule did not
+# exempt parameter segments — so this file must produce NO org-resource-naming
+# finding. It is also the nested-collection shape (/users/{userId}/orders),
+# which the rule must leave alone.
+openapi: 3.1.0
+info:
+  title: Order History API
+  version: 1.0.0
+  description: A user's orders, addressed by two path parameters.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: orders
+    description: Order records.
+paths:
+  /users/{userId}/orders/{orderId}:
+    get:
+      operationId: getUserOrder
+      summary: Fetch one order of one user.
+      description: Returns a single order belonging to the named user.
+      tags: ["orders"]
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: No such order for that user.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    Order:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque order id.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.

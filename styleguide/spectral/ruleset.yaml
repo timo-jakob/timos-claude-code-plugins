@@ -1,0 +1,147 @@
+# Org API styleguide — Spectral ruleset, v1 (issue #689).
+#
+# This file is a PUBLISHED ARTIFACT, not a bootstrap template. It is served over
+# jsDelivr from an immutable git tag (styleguide-vX.Y.Z) and every bootstrapped
+# repo's .spectral.yaml `extends` it at an EXACT pinned version:
+#
+#   https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v1.0.0/styleguide/spectral/ruleset.yaml
+#
+# That is why it lives at the repo root rather than under
+# development/skills/bootstrap/templates/ — a template is rendered INTO a repo,
+# this is fetched BY one at lint time.
+#
+# TAGS ARE IMMUTABLE. A styleguide-v* tag, once cut, is never moved or deleted;
+# a mistake is superseded by the next version. jsDelivr caches by tag, so
+# re-pointing one would hand different repos different rules under the same
+# version string, with no PR anywhere to notice it.
+#
+# Versioning policy:
+#   MAJOR — a new or stricter error-severity rule, or a rule-id rename: anything
+#           that can redden a downstream repo that was green on the previous pin.
+#   MINOR — a new rule shipped at warn, or additive message/documentationUrl
+#           coverage that cannot fail a previously-passing spec.
+#   PATCH — fix-hint wording, doc-URL and typo fixes, with no change to severity
+#           or to what a rule matches.
+#
+# The prose styleguide these rules link to is the authoritative convention text:
+# https://timo-jakob.github.io/timos-claude-code-plugins/reference/api-styleguide/
+extends: ["spectral:oas"]
+rules:
+  # --- Codified from the #692 starter -------------------------------------
+  # Already conventions; severity promoted where noted. These are spectral:oas
+  # rules referenced by id, so they carry their own messages.
+
+  # A stable operationId is what the consumer's client generator and the
+  # deprecation -> @deprecated mapping (#707) key off.
+  operation-operationId: error
+  operation-operationId-unique: error
+  # Descriptions ARE the governance-portal docs (the APIM channel, #706), so a
+  # missing one is a hard failure in the org ruleset (starter: warn).
+  info-description: error
+  operation-description: error
+  # Tags give the portal and the generated client a stable grouping.
+  operation-tags: error
+
+  # --- Re-scoped from the starter -----------------------------------------
+
+  # The starter's `deprecation-has-sunset`, scoped to OPERATIONS only and raised
+  # warn -> error. The starter's given (`$..[?(@ && @.deprecated === true)]`)
+  # also matched deprecated parameters, schema properties and any `deprecated:
+  # true` inside example data, which is why it could only ever be a warning.
+  # Anchoring at `$.paths[*]` and filtering its direct children selects exactly
+  # the operation objects: a deprecated schema property lives under
+  # `components`, so it is out of reach by construction.
+  org-deprecated-operation-has-sunset:
+    description: A deprecated operation must declare an x-sunset date (RFC 8594).
+    message: >-
+      deprecated operation declares no x-sunset: add `x-sunset: <YYYY-MM-DD>`
+      (RFC 8594) so clients know when it dies
+    documentationUrl: https://timo-jakob.github.io/timos-claude-code-plugins/reference/api-styleguide/#deprecation
+    severity: error
+    given: "$.paths[*][?(@.deprecated === true)]"
+    then:
+      field: x-sunset
+      function: truthy
+
+  # --- Newly minted --------------------------------------------------------
+
+  # Path segments are lowercase kebab-case nouns, and never verbs — the HTTP
+  # method is the verb. Path parameters (`{userId}`) are exempt.
+  #
+  # DELIBERATE LIMIT: plurality is a CONVENTION this rule does not mechanically
+  # enforce. English pluralization cannot be checked by regex without flagging
+  # legitimate singulars (/status, /health, /inventory), so the linter enforces
+  # the half it can prove and the styleguide states the other half out loud. The
+  # message still asks for the full convention, because a fix hint should
+  # describe the target, not the subset the checker can see.
+  org-resource-naming:
+    description: Path segments are plural kebab-case nouns, never verbs.
+    message: >-
+      {{property}} is not a plural kebab-case noun path: use lowercase plural
+      kebab-case segments and put the verb in the HTTP method
+      (POST /getUser -> POST /users)
+    documentationUrl: https://timo-jakob.github.io/timos-claude-code-plugins/reference/api-styleguide/#resource-naming
+    severity: error
+    given: "$.paths"
+    then:
+      - field: "@key"
+        function: pattern
+        functionOptions:
+          # Each segment is either a lowercase kebab-case literal or a {param}.
+          match: "^/$|^(/([a-z0-9]+(-[a-z0-9]+)*|\\{[A-Za-z0-9_]+\\}))+$"
+      - field: "@key"
+        function: pattern
+        functionOptions:
+          # A segment that STARTS with a verb and then ends, hyphenates or
+          # camel-cases is a verb-in-path. The trailing-context guard is what
+          # keeps nouns that merely begin with those letters clean:
+          # /addresses, /listings, /searches, /deleted-items all pass.
+          notMatch: "(^|/)(get|create|update|delete|remove|list|fetch|retrieve|add|search|\
+            find|submit|execute|do|make)([A-Z_-]|$|/)"
+
+  # Error responses carry RFC 9457 problem details, bare — a 4xx/5xx must offer
+  # application/problem+json and must NOT also offer application/json, so a
+  # client never has to negotiate between two error shapes.
+  org-problem-json-errors:
+    description: 4xx/5xx responses return RFC 9457 application/problem+json.
+    message: "4xx/5xx must return bare application/problem+json (RFC 9457) with type, title, status and detail required"
+    documentationUrl: https://timo-jakob.github.io/timos-claude-code-plugins/reference/api-styleguide/#error-bodies
+    severity: error
+    # Numeric status keys AND the OpenAPI range keys. `@property >= 400` alone
+    # never matches "4XX"/"5XX" — they coerce to NaN — so a spec that declares
+    # its errors only as ranges would sail through untouched. `default` is
+    # deliberately NOT matched: it is the catch-all, not necessarily an error,
+    # and the styleguide says so out loud rather than over-firing.
+    given: "$.paths[*][*].responses[?(@property >= 400 && @property < 600 ||
+      @property === '4XX' || @property === '5XX')]"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          required: ["content"]
+          properties:
+            content:
+              type: object
+              required: ["application/problem+json"]
+              # BARE means bare — problem+json and nothing else. `not: required:
+              # [application/json]` would have forbidden only the one alternative
+              # anyone actually writes, leaving text/plain and application/xml to
+              # reintroduce the second error shape this rule exists to prevent.
+              maxProperties: 1
+              properties:
+                application/problem+json:
+                  type: object
+                  required: ["schema"]
+                  properties:
+                    schema:
+                      type: object
+                      required: ["required"]
+                      properties:
+                        required:
+                          type: array
+                          allOf:
+                            - contains: {const: "type"}
+                            - contains: {const: "title"}
+                            - contains: {const: "status"}
+                            - contains: {const: "detail"}
