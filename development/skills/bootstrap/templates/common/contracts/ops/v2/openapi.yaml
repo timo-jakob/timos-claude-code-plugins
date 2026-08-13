@@ -1,0 +1,493 @@
+# Ops API — the org-standard operations surface, major v2. SHARED FRAGMENT.
+#
+# WHAT CHANGED FROM v1, AND WHY IT IS A MAJOR (#1330). The two probe 503s now
+# return RFC 9457 problem details on `application/problem+json` instead of the
+# `{"status": "down"}` Health envelope on `application/json`. Replacing a
+# response body is breaking, and this fragment's own rule (below) is that a
+# breaking change is a new major, never an in-place edit — so v1 stays frozen
+# and v2 is published beside it.
+#
+# The change exists because the org API styleguide (#689) ships
+# `org-problem-json-errors` at ERROR severity, and contracts-lint globs
+# contracts/ops/vN into the same Spectral invocation as the business contract.
+# Under v1 that reddens every bootstrapped repo on a file it did not write.
+#
+# RFC 9457's `status` is the HTTP status code as an INTEGER, which collides
+# head-on with the Health envelope's `status: "ok" | "down"` string. The health
+# string is DROPPED from the 503 — 503 already says "down" — and the diagnosis
+# rides in the `components` EXTENSION MEMBER instead, byte-identical to the map
+# /health already serves (v1.1, #965). One shape, one serializer, one assertion.
+#
+# The 200 responses are UNCHANGED: /health/live and /health/ready still answer
+# `{"status":"ok"}` on application/json, and /health still answers 200 with
+# AggregateHealth. v2 changes the two 503s and nothing else.
+#
+# DO NOT "DRY" Problem AND ReadinessProblem WITH `allOf`. Both declare the four
+# RFC 9457 members inline on purpose. Measured against the org ruleset: an
+# `allOf: [$ref Problem, {...}]` composition still FAILS org-problem-json-errors,
+# because the rule inspects the resolved response schema's own top-level
+# `required` array and a composition has none. The duplication is the price of a
+# rule that can see the contract.
+#
+# Unlike contracts/v1/openapi.yaml (the per-project business API), this file is
+# an ORG-WIDE STANDARD: every backend service exposes exactly this surface, so
+# "standardised" is testable rather than aspirational (epic #682, design §5).
+# Bootstrap installs it verbatim at contracts/ops/v1/openapi.yaml; it carries no
+# {{PLACEHOLDERS}} because the ops contract is identical across every repo.
+#
+# It is versioned exactly like the business contract — the same per-major
+# layout (contracts/ops/vN/openapi.yaml), the same version triangle
+# (info.version major == vN directory == servers /vN), and the same CI gates
+# (contracts-lint Spectral + contracts-semver oasdiff) discover it (#688). A
+# breaking change to the ops surface is a new ops major, never an in-place edit.
+#
+# Ops endpoints stay INTERNAL — never published as APIM products. The runtime
+# base URL a service mounts them at is passed to check-ops-conformance.zsh; the
+# /vN server segment here is the artifact's version declaration for the triangle.
+openapi: 3.1.0
+info:
+  title: Ops API
+  version: "2.0.0"
+  description: >
+    The org-standard operations surface every backend service exposes:
+    /info (build + served API majors with lifecycle and sunset),
+    /health (human-facing aggregate + per-dependency health), /health/live
+    (K8s liveness — process only, dependency-free), /health/ready (K8s
+    readiness — dependencies), and /metrics (Prometheus/OpenMetrics
+    exposition). Instrumentation is OpenTelemetry-only; /metrics is the
+    mandatory pull-compat surface served by the OTel SDK's Prometheus exporter.
+
+
+    DEPENDENCY HEALTH (v1.1, #965) — /health may carry an optional `components`
+    map: one entry per DIRECT dependency, whose health is read PASSIVELY from
+    that dependency's circuit-breaker state. A service never transitively calls
+    a downstream's /health (the cascading health-check-storm anti-pattern); it
+    reports one hop and the observability layer assembles the graph. Each
+    dependency is declared `hard` (nothing works without it — its loss fails
+    /health/ready) or `soft` (degraded operation is possible — its loss keeps
+    the pod ready). A service with no declared dependencies simply omits
+    `components`.
+
+
+    TRUST MODEL — this is an INTERNAL management surface. It MUST be served on a
+    separate management port (never the public app port), so /info's build data
+    is unreachable from outside without any per-endpoint auth. Network
+    enforcement (a NetworkPolicy restricting the management port to the kubelet +
+    the monitoring namespace, and a Service/Ingress that exposes only the app
+    port) is the deployment layer's job (the composition repo, #687/#719/#720),
+    not this contract's. /info is minimal BY CONTRACT — build version, git SHA,
+    and the API-major lifecycle table only; it MUST NOT expose framework, server,
+    OS, or dependency versions.
+servers:
+  - url: /v2
+    description: >
+      Ops API major v2, served on the internal MANAGEMENT PORT (not the public
+      app port). The URL major segment MUST match info.version's major (2). The
+      surface is never fronted by the APIM gateway.
+
+
+      This is the artifact's VERSION DECLARATION for the triangle, not a runtime
+      path prefix. Services mount the operations unprefixed (/info, /health,
+      /health/live, /health/ready, /metrics); the runtime base URL is passed to
+      check-ops-conformance.zsh, which builds "$BASE/<path>". A repo that wants
+      a prefix gets one by passing it as the base URL.
+tags:
+  - name: ops
+    description: The standardized operations surface (/info, /health, /metrics).
+paths:
+  /info:
+    get:
+      operationId: getInfo
+      summary: Build metadata and served API lifecycle.
+      description: >
+        Returns the build version and git SHA plus, for each API major the
+        service serves, its lifecycle state and (once deprecated) its sunset
+        date — making the epic #684 deprecation machinery observable.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: Build metadata and the served-major lifecycle table.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Info"
+  /health:
+    get:
+      operationId: getHealth
+      summary: Aggregate health (human/dashboard-facing).
+      description: >
+        Overall service health for humans and dashboards — always 200 while the
+        process can respond; the verdict is in the body (see STATUS CODE
+        below). NOT a Kubernetes probe target: liveness and readiness are
+        distinct (see /health/live and /health/ready), because a single health
+        endpoint cannot drive both without the liveness-checks-dependencies
+        anti-pattern (a transient dependency blip restarting every pod).
+
+
+        This is the only endpoint that carries `components` — per-direct-
+        dependency health read from breaker state (#965). /health/live is
+        dependency-free BY CONTRACT and so can never carry it.
+
+
+        STATUS CODE — /health answers **200 whenever the process can respond at
+        all**, including when the aggregate is "down". The health verdict rides
+        in the BODY, not in the HTTP status: this endpoint is for humans and
+        dashboards, so an operator reading it during an outage needs the
+        diagnosis, not a bare 503. HTTP status codes are the two PROBES'
+        vocabulary (/health/live, /health/ready), which is why those two —
+        and only those two — document a 503.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: >
+            The service responded. The aggregate ("ok", "degraded" or "down")
+            and any `components` are in the body — a "down" aggregate is still
+            a 200 here. NOTE that ops CONFORMANCE (check-ops-conformance.zsh)
+            additionally requires the aggregate to be "ok" or "degraded": it
+            asserts a SERVING service, so "down" is a legitimate runtime state
+            that the conformance job cannot pass in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregateHealth"
+  /health/live:
+    get:
+      operationId: getLiveness
+      summary: Kubernetes liveness probe.
+      description: >
+        Is the process wedged and in need of a restart? MUST be cheap and
+        DEPENDENCY-FREE — it reflects only the process itself. A failing
+        liveness makes the kubelet restart the pod, so it must never check a
+        database or downstream service (that would turn a transient outage into
+        a restart storm). Wire it to the container's livenessProbe.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: >
+            The process is not alive and should be restarted. Liveness is
+            dependency-free BY CONTRACT, so this problem document carries NO
+            extension members — a `components` map here would be a lie.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /health/ready:
+    get:
+      operationId: getReadiness
+      summary: Kubernetes readiness probe.
+      description: >
+        Can the service accept traffic right now? This is where dependency
+        checks (datastore, downstream services) belong. A failing readiness
+        removes the pod from the Service endpoints (no traffic) WITHOUT
+        restarting it. Wire it to the container's readinessProbe.
+
+
+        FORMALIZED (v1.1, #965) — AMONG DEPENDENCIES, readiness fails ONLY for
+        one declared `hard` that is down. A `soft` dependency being down
+        MUST NOT fail readiness: its breaker opens, the service serves degraded
+        responses and reconnects in the background, and the pod stays ready
+        while /health reports it as degraded. Non-dependency reasons to be
+        unready are unaffected by this rule and remain correct — a service
+        still starting up, or draining during a graceful shutdown, MUST fail
+        readiness even though no hard dependency is down. This is a tightening
+        of the stated semantics, not a schema change: the response shape is
+        unchanged.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: The service is ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: >
+            The service is not ready to accept traffic. Carries the `components`
+            extension member — ALL declared dependencies, not only the failing
+            ones — so an operator reading a shed pod sees the same picture the
+            /health dashboard shows.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ReadinessProblem"
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus/OpenMetrics exposition.
+      description: >
+        Metrics in Prometheus exposition format, served by the OTel SDK's
+        Prometheus exporter. A mandatory compatibility surface — curl-able with
+        no collector, so conformance and smoke checks need no infrastructure.
+      tags: ["ops"]
+      responses:
+        "200":
+          description: Metrics in Prometheus/OpenMetrics exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Prometheus text exposition (version 0.0.4).
+            application/openmetrics-text:
+              schema:
+                type: string
+                description: OpenMetrics text exposition.
+components:
+  schemas:
+    Info:
+      type: object
+      description: Build metadata and the served-major lifecycle table.
+      required: ["build", "api"]
+      properties:
+        build:
+          $ref: "#/components/schemas/Build"
+        api:
+          type: array
+          description: Every API major the service currently serves.
+          items:
+            $ref: "#/components/schemas/ApiMajor"
+    Build:
+      type: object
+      description: Build provenance.
+      required: ["version", "git_sha"]
+      properties:
+        version:
+          type: string
+          description: The service build/release version (e.g. 1.4.2).
+        git_sha:
+          type: string
+          description: The git commit the build was cut from.
+    ApiMajor:
+      type: object
+      description: >
+        One served API major and its lifecycle. A deprecated major MUST carry a
+        sunset date (RFC 8594); an active major MUST NOT need one.
+      required: ["major", "lifecycle"]
+      properties:
+        major:
+          type: integer
+          minimum: 1
+          description: The API major version number.
+        lifecycle:
+          type: string
+          description: The major's lifecycle state.
+          enum: ["active", "deprecated"]
+        sunset:
+          type: string
+          format: date
+          description: >
+            The retirement date (RFC 8594). Required when lifecycle is
+            deprecated; absent while active.
+      # A deprecated major MUST declare a sunset date; an active one carries
+      # none. JSON Schema (OpenAPI 3.1) expresses the conditional requirement.
+      if:
+        properties:
+          lifecycle:
+            const: deprecated
+      then:
+        required: ["sunset"]
+    Health:
+      type: object
+      description: >
+        The 200 envelope for the two Kubernetes probes, /health/live and
+        /health/ready. In ops-api v2 this shape is served ONLY on a 200 — the
+        503s carry RFC 9457 problem details instead (Problem /
+        ReadinessProblem), because RFC 9457's integer `status` and this string
+        `status` cannot share one key. The tri-state aggregate lives on /health
+        (AggregateHealth).
+      required: ["status"]
+      properties:
+        status:
+          type: string
+          description: >
+            Health indicator. Only "ok" is reachable in v2: a probe that would
+            have answered "down" now answers 503 with a problem document. The
+            "down" value is retained so a v1 body still validates against the v2
+            schema, which is what lets the conformance checker recognise a
+            legacy service and say so precisely.
+          enum: ["ok", "down"]
+    Problem:
+      type: object
+      description: >
+        RFC 9457 problem details — the liveness 503 body, and the base shape.
+
+        DELIBERATELY FLAT: ReadinessProblem repeats these four members rather
+        than composing with `allOf`, because org-problem-json-errors reads the
+        resolved schema's own top-level `required` and sees nothing through a
+        composition. Do not refactor the duplication away.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: >
+            A stable, host-free URN identifying the problem type —
+            `urn:problem-type:ops:not-alive` for liveness. A URN rather than a
+            docs URL on purpose: a shipped payload must not carry a link that
+            rots when the documentation site moves.
+          examples: ["urn:problem-type:ops:not-alive"]
+        title:
+          type: string
+          description: Short, stable human-readable summary of the problem type.
+          examples: ["Service Not Alive"]
+        status:
+          type: integer
+          description: >
+            The HTTP status code, as an integer (RFC 9457). NOT the health
+            envelope's "ok"/"down" string — that collision is why v2 exists.
+          examples: [503]
+        detail:
+          type: string
+          description: >
+            A canonical sentence, not free prose: the conformance checker and
+            the acceptance lane both assert it. For liveness,
+            "the process is not alive and should be restarted".
+          examples: ["the process is not alive and should be restarted"]
+    ReadinessProblem:
+      type: object
+      description: >
+        RFC 9457 problem details for the readiness 503, extended with the
+        `components` map. Flat by construction — see Problem.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: The problem type URN — `urn:problem-type:ops:not-ready`.
+          examples: ["urn:problem-type:ops:not-ready"]
+        title:
+          type: string
+          description: Short, stable human-readable summary of the problem type.
+          examples: ["Service Not Ready"]
+        status:
+          type: integer
+          description: The HTTP status code, as an integer (RFC 9457).
+          examples: [503]
+        detail:
+          type: string
+          description: >
+            A canonical sentence, not free prose. One hard dependency down:
+            "hard dependency 'orders-db' is down". Several: names sorted
+            LEXICOGRAPHICALLY and comma-joined, "hard dependencies 'orders-db',
+            'pricing-api' are down" — sorted so the string is deterministic
+            regardless of the order the breakers tripped in. The
+            non-dependency unready reasons the fragment already names are
+            "the service is starting up" and "the service is draining".
+          examples: ["hard dependency 'orders-db' is down"]
+        components:
+          type: object
+          description: >
+            The RFC 9457 extension member carrying the diagnosis: one entry per
+            DIRECT dependency, keyed by stable name, byte-identical to the map
+            /health serves (v1.1, #965). It carries ALL declared dependencies,
+            not only the failing ones, so the shed pod and the dashboard agree.
+            A service with no declared dependencies omits it — which is also the
+            shape of a 503 raised for a non-dependency reason such as start-up
+            or drain.
+          additionalProperties:
+            $ref: "#/components/schemas/DependencyHealth"
+    AggregateHealth:
+      type: object
+      description: >
+        The human/dashboard-facing aggregate served by /health (v1.1, #965).
+        Extends the binary probe envelope with a "degraded" aggregate and the
+        optional per-dependency `components` map.
+
+
+        The components set a FLOOR on the aggregate, they do not fix it
+        exactly: "down" if any HARD component is down, else "degraded" if ANY
+        component (hard or soft) is down or degraded, else "ok". A service MAY
+        report a MORE severe aggregate than its components imply — it may be
+        "degraded" for an internal reason no dependency models (a backed-up
+        work queue) — but it MUST NEVER report a less severe one. A service
+        that declares no dependencies omits `components`, and its aggregate is
+        then bounded only by its own internal state. Over-reporting reaches
+        "down" as well as "degraded": a service that cannot serve MUST say so
+        even when every dependency is up.
+
+
+        COMPLETENESS — `components` is optional in the SCHEMA (so an ops-api
+        v1.0 service stays valid), but a service that HAS direct dependencies
+        is expected to report ALL of them. Omitting the map, or hiding one
+        dependency in it, is a policy violation that this schema cannot
+        express and the conformance checker cannot detect: it has no
+        independent knowledge of what you depend on. That gap is the review
+        dimension's and the maintenance advisor's to close.
+
+
+        NOTE the hard/degraded case: a HARD dependency whose breaker is
+        half-open is `degraded`, not down, so it floors the aggregate at
+        "degraded" — not "down". Only a hard dependency that is fully DOWN
+        forces "down" (and fails readiness).
+      required: ["status"]
+      properties:
+        status:
+          type: string
+          description: >
+            Aggregate health, named by MEANING rather than by cause — "ok"
+            (nothing is known to be wrong), "degraded" (still serving, but
+            impaired: a dependency is down or degraded, or the service is
+            internally degraded), or "down" (NOT serving: a hard dependency is
+            down, or the service has otherwise declared itself unable to
+            serve). Because the components are only a floor, a service with no
+            declared dependencies — or with all of them up — can still
+            legitimately report "degraded" or "down" from its own internal
+            state. The healthy value stays "ok" (never "up") so the aggregate
+            keeps the exact spelling ops-api v1.0 shipped — widening this
+            field is additive, never a rename.
+          # Declared as an OPEN enum: adding a value to a RESPONSE enum is a
+          # breaking change to consumers that exhaustively match on it (oasdiff
+          # flags response-property-enum-value-added), which would force an ops
+          # major for what is semantically an additive widening. x-extensible-enum
+          # states the closed-today set while keeping the field growable — the
+          # remedy oasdiff itself recommends. check-ops-conformance.zsh enforces
+          # the concrete values at runtime.
+          x-extensible-enum: ["ok", "degraded", "down"]
+        components:
+          type: object
+          description: >
+            One entry per DIRECT dependency, keyed by the dependency's stable
+            name (e.g. "orders-db", "pricing-api"). Optional: a service with no
+            declared dependencies omits it entirely. Never transitive — a
+            service reports only the dependencies it calls itself.
+          additionalProperties:
+            $ref: "#/components/schemas/DependencyHealth"
+    DependencyHealth:
+      type: object
+      description: >
+        One direct dependency's health, derived PASSIVELY from its circuit
+        breaker (v1.1, #965) — an open breaker IS a down dependency. No extra
+        health-check traffic is generated: real request traffic (or the
+        breaker's own background probe) already drives the state.
+      required: ["status", "kind"]
+      properties:
+        status:
+          type: string
+          description: >
+            The dependency's health as read from its breaker: "up" (closed),
+            "degraded" (half-open — being re-probed), "down" (open).
+          x-extensible-enum: ["up", "degraded", "down"]
+        kind:
+          type: string
+          description: >
+            The readiness hinge. "hard" — nothing works without it, so its loss
+            FAILS /health/ready and Kubernetes sheds traffic. "soft" — degraded
+            operation is possible, so its loss never fails readiness; the pod
+            stays ready and serves degraded responses.
+          enum: ["hard", "soft"]
+        breaker:
+          type: string
+          description: >
+            The circuit-breaker state this status was read from. "closed" =
+            passing through, "open" = fast-failing to the registered fallback,
+            "half_open" = probing recovery in the background.
+          x-extensible-enum: ["closed", "open", "half_open"]
+        since:
+          type: string
+          format: date-time
+          description: >
+            When the dependency entered its current state (RFC 3339), so a
+            dashboard can distinguish a blip from a sustained outage.
