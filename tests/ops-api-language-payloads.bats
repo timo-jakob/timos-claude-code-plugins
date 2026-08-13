@@ -215,8 +215,62 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
   # shape from the start).
   local h; h="$(go_handler_flat 'mux.HandleFunc("GET /health/ready", func(')"
   contains "$h" 'if ready { writeJSON(w, http.StatusOK, statusBody{Status: StatusOK}) return }'
-  contains "$h" 'writeJSON(w, http.StatusServiceUnavailable, statusBody{Status: StatusDown})'
-  contains "$h" 'ready = c.ready(c.components())'
+  # ops-api v2 (#1330): the 503 is an RFC 9457 problem document on
+  # application/problem+json, NOT {"status":"down"} — the health string collides
+  # with RFC 9457's integer `status`, which is why v2 exists.
+  contains "$h" 'writeProblemJSON(w, http.StatusServiceUnavailable, readinessProblemBody{'
+  contains "$h" 'Type: ProblemTypeNotReady,'
+  contains "$h" 'Detail: readinessDetail(components),'
+  contains "$h" 'Components: components,'
+  lacks "$h" 'statusBody{Status: StatusDown}'
+  # The snapshot is read ONCE and reused for verdict and body: re-entering the
+  # service's source would let the 503 name a dependency the verdict was not
+  # taken on.
+  contains "$h" 'components = c.components()'
+  contains "$h" 'ready = c.ready(components)'
+  lacks "$h" 'ready = c.ready(c.components())'
+}
+
+@test "go opsapi's readiness 503 is BARE problem+json, and only the problem writer sets it" {
+  # org-problem-json-errors requires the 4xx/5xx body to be bare
+  # application/problem+json, so a correctly-shaped body on application/json is
+  # still a conformance failure. Pin the writer that owns the media type, and
+  # that the ordinary JSON writer never emits it.
+  # Asserted by grep rather than through go_handler_flat: the fallback body is a
+  # string literal containing braces, which defeats the helper's brace matching.
+  grep -qF 'w.Header().Set("Content-Type", "application/problem+json")' "$GO/opsapi.go"
+  grep -qF 'w.Header().Set("Content-Type", "application/json")' "$GO/opsapi.go"
+  # Exactly ONE writer sets problem+json, so the ordinary JSON writer cannot start
+  # emitting it for the 200 paths.
+  local n
+  n="$(grep -c 'Set("Content-Type", "application/problem+json")' "$GO/opsapi.go")"
+  [ "$n" -eq 1 ]
+  # The serialization fallback must stay a VALID problem document — borrowing
+  # writeJSON's health-shaped one would answer problem+json with {"status":"down"}.
+  grep -qF 'the readiness problem document could not be serialized' "$GO/opsapi.go"
+}
+
+@test "go opsapi's readiness detail is canonical and lexicographically sorted" {
+  # The wording is asserted by the conformance checker and the acceptance lane, so
+  # it is a contract string, not prose. The sort is what makes it deterministic:
+  # without it the same outage yields different bodies on different pods.
+  local d; d="$(go_handler_flat 'func readinessDetail(')"
+  contains "$d" 'sort.Strings(down)'
+  contains "$d" 'return "hard dependency " + quoted[0] + " is down"'
+  contains "$d" 'return "hard dependencies " + strings.Join(quoted, ", ") + " are down"'
+  # No hard dependency down means readiness failed for a non-dependency reason.
+  contains "$d" 'return DetailStartingUp'
+  grep -qE '^[[:space:]]*DetailStartingUp[[:space:]]+= "the service is starting up"$' "$GO/opsapi.go"
+  grep -qE '^[[:space:]]*DetailDraining[[:space:]]+= "the service is draining"$' "$GO/opsapi.go"
+}
+
+@test "go opsapi pins the host-free problem-type URNs" {
+  # A docs URL here would ship a link into every service that rots when the site
+  # moves; the URN is stable and host-free.
+  grep -qE '^[[:space:]]*ProblemTypeNotReady[[:space:]]+= "urn:problem-type:ops:not-ready"$' "$GO/opsapi.go"
+  grep -qE '^[[:space:]]*ProblemTypeNotAlive[[:space:]]+= "urn:problem-type:ops:not-alive"$' "$GO/opsapi.go"
+  run grep -cE 'https?://[^"]*api-styleguide' "$GO/opsapi.go"
+  [ "$output" -eq 0 ]
 }
 
 @test "go opsapi answers /health with 200 and confines 503 to the readiness probe" {
@@ -228,8 +282,12 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
   contains "$h" 'body = healthBody{Status: c.aggregate(components), Components: components}'
   lacks "$h" 'StatusServiceUnavailable'
   local n
+  # TWO occurrences since ops-api v2 (#1330), both inside the readiness handler:
+  # the HTTP status passed to the writer, and the same code repeated as RFC 9457's
+  # integer `status` member in the body. The count still pins "no 503 anywhere
+  # else" — which is the #1139 regression this guards.
   n="$(grep -c 'http.StatusServiceUnavailable' "$GO/opsapi.go")"
-  [ "$n" -eq 1 ]
+  [ "$n" -eq 2 ]
 }
 
 @test "go opsapi's catch-all names the offending path instead of a blank 404" {
@@ -486,7 +544,10 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
   # the exact inversion of this test's title). So the needle carries the closure,
   # the defer and the guarded call together.
   ready="$(go_handler_flat 'mux.HandleFunc("GET /health/ready", func(')"
-  contains "$ready" 'func() { defer func() { if r := recover(); r != nil { ready = false } }() ready = c.ready(c.components()) }()'
+  # ops-api v2 (#1330): the recovery ALSO clears the snapshot, so a half-read map
+  # can never reach the problem body — a 503 naming a dependency the verdict was
+  # not taken on would be worse than the generic non-dependency wording.
+  contains "$ready" 'func() { defer func() { if r := recover(); r != nil { ready = false components = nil } }() components = c.components() ready = c.ready(components) }()'
   health="$(go_handler_flat 'mux.HandleFunc("GET /health", func(')"
   contains "$health" 'func() { defer func() { if r := recover(); r != nil { body = healthBody{Status: StatusDown} } }() components := c.components() body = healthBody{Status: c.aggregate(components), Components: components} }()'
 }
@@ -886,11 +947,53 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   # and Python payloads shipped and had to be fixed for (Go and Node shipped the
   # v1.1 shape from the start).
   local h; h="$(ts_flat 'createOpsHandler(')"
-  contains "$h" 'if (ready) { writeJson(req, res, 200, { status: STATUS_OK }); return; } writeJson(req, res, 503, { status: STATUS_DOWN }); return;'
+  # ops-api v2 (#1330): the 503 is an RFC 9457 problem document on
+  # application/problem+json, NOT {"status":"down"} — the health string collides
+  # with RFC 9457's integer `status`, which is why v2 exists.
+  contains "$h" 'if (ready) { writeJson(req, res, 200, { status: STATUS_OK }); return; } writeProblemJson(req, res, 503, { type: PROBLEM_TYPE_NOT_READY, title: PROBLEM_TITLE_NOT_READY, status: 503, detail: readinessDetail(components), ...(components === undefined ? {} : { components }), }); return;'
   # The guarded call AND its fail-closed catch, as one needle: a catch rewritten to
   # `ready = true` fails OPEN and keeps a broken pod in rotation — the exact
   # inversion of this test's title — while leaving a bare `catch` needle green.
-  contains "$h" 'let ready = false; try { ready = isReady(cfg, componentsSnapshot(cfg)); } catch { ready = false; }'
+  # The catch also clears the snapshot, so a half-read map can never reach the
+  # problem body and name a dependency the verdict was not taken on.
+  contains "$h" 'let ready = false; let components: Record<string, Dependency> | undefined; try { components = componentsSnapshot(cfg); ready = isReady(cfg, components); } catch { ready = false; components = undefined; }'
+}
+
+@test "node opsApi's readiness 503 is BARE problem+json, and only the problem writer sets it" {
+  # org-problem-json-errors requires the 4xx/5xx body to be bare
+  # application/problem+json, so a correctly-shaped body on application/json is
+  # still a conformance failure. Pin the writer that owns the media type, and that
+  # the ordinary JSON writer never emits it.
+  local w; w="$(ts_flat 'writeProblemJson(')"
+  contains "$w" 'res.setHeader("Content-Type", "application/problem+json")'
+  # The serialization fallback must stay a VALID problem document — borrowing
+  # writeJson's health-shaped one would answer problem+json with {"status":"down"}.
+  lacks "$w" '{"status":"down"}'
+  local j; j="$(ts_flat 'writeJson(')"
+  contains "$j" 'res.setHeader("Content-Type", "application/json")'
+  lacks "$j" 'problem+json'
+}
+
+@test "node opsApi's readiness detail is canonical and lexicographically sorted" {
+  # The wording is asserted by the conformance checker and the acceptance lane, so
+  # it is a contract string, not prose. The sort is what makes it deterministic:
+  # without it the same outage yields different bodies on different pods.
+  local d; d="$(ts_flat 'readinessDetail(')"
+  contains "$d" '.sort()'
+  contains "$d" '`hard dependency ${quoted[0]} is down`'
+  contains "$d" '`hard dependencies ${quoted.join(", ")} are down`'
+  contains "$d" 'return DETAIL_STARTING_UP'
+  grep -qF 'export const DETAIL_STARTING_UP = "the service is starting up";' "$NODE/opsApi.ts"
+  grep -qF 'export const DETAIL_DRAINING = "the service is draining";' "$NODE/opsApi.ts"
+}
+
+@test "node opsApi pins the host-free problem-type URNs" {
+  # A docs URL here would ship a link into every service that rots when the site
+  # moves; the URN is stable and host-free.
+  grep -qF 'export const PROBLEM_TYPE_NOT_READY = "urn:problem-type:ops:not-ready";' "$NODE/opsApi.ts"
+  grep -qF 'export const PROBLEM_TYPE_NOT_ALIVE = "urn:problem-type:ops:not-alive";' "$NODE/opsApi.ts"
+  run grep -cE 'https?://[^"]*api-styleguide' "$NODE/opsApi.ts"
+  [ "$output" -eq 0 ]
 }
 
 @test "node opsApi answers /health with 200 and confines 503 to the readiness probe" {
@@ -899,14 +1002,17 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   # 503 in the whole file.
   local h; h="$(ts_flat 'createOpsHandler(')"
   contains "$h" 'let body: HealthBody = { status: STATUS_DOWN }; try { const components = componentsSnapshot(cfg); body = { status: aggregate(cfg, components), ...(components !== undefined ? { components } : {}) }; } catch { body = { status: STATUS_DOWN }; } writeJson(req, res, 200, body); return;'
-  # Exactly ONE 503 in the whole module — counted over the COMMENT-STRIPPED source
-  # (rule 1). The prose explains the probe/body split at length and mentions 503
-  # four more times, so a count over the raw file would be pinned to the
-  # documentation rather than to the code, and would drift on any edit to either.
+  # Counted over the COMMENT-STRIPPED source (rule 1). The prose explains the
+  # probe/body split at length and mentions 503 several more times, so a count over
+  # the raw file would be pinned to the documentation rather than to the code.
+  #
+  # TWO since ops-api v2 (#1330), both in the readiness case: the status passed to
+  # the writer, and the same code repeated as RFC 9457's integer `status` member.
+  # The count still pins "no 503 anywhere else" — the #1139 regression this guards.
   local stripped n
   stripped="$(ts_flatten "$(cat "$NODE/opsApi.ts")")"
   n="$(printf '%s' "$stripped" | grep -o '503' | wc -l | tr -d '[:space:]')"
-  [ "$n" -eq 1 ]
+  [ "$n" -eq 2 ]
 }
 
 @test "node opsApi omits components entirely when no dependency source is wired" {

@@ -4,7 +4,7 @@
  * belong to, not the JS-plugin foundation epic #729 that filed it).
  *
  * The blessed Node realization of the org-standard ops surface defined by
- * contracts/ops/v1/openapi.yaml -- /info, /health, /health/live, /health/ready,
+ * contracts/ops/v2/openapi.yaml -- /info, /health, /health/live, /health/ready,
  * /metrics -- so a Node service conforms to the same fragment Spring services get
  * via Actuator. It passes scripts/check-ops-conformance.zsh unchanged.
  *
@@ -92,7 +92,7 @@ import {
  */
 export const DEFAULT_PORT = 9090;
 
-/** Lifecycle values for a served API major (contracts/ops/v1/openapi.yaml). */
+/** Lifecycle values for a served API major (contracts/ops/v2/openapi.yaml). */
 export const LIFECYCLE_ACTIVE = "active";
 export const LIFECYCLE_DEPRECATED = "deprecated";
 
@@ -136,6 +136,49 @@ export type AggregateStatus = typeof STATUS_OK | typeof STATUS_DEGRADED | typeof
 export type ComponentStatus = typeof COMPONENT_UP | typeof COMPONENT_DEGRADED | typeof COMPONENT_DOWN;
 export type BreakerState = typeof BREAKER_CLOSED | typeof BREAKER_OPEN | typeof BREAKER_HALF_OPEN;
 export type DependencyKind = typeof KIND_HARD | typeof KIND_SOFT;
+
+/**
+ * RFC 9457 problem-type URNs (ops-api v2, #1330).
+ *
+ * Host-free on purpose: a shipped service must not carry a documentation URL
+ * that rots when the docs site moves.
+ */
+export const PROBLEM_TYPE_NOT_READY = "urn:problem-type:ops:not-ready";
+export const PROBLEM_TYPE_NOT_ALIVE = "urn:problem-type:ops:not-alive";
+
+const PROBLEM_TITLE_NOT_READY = "Service Not Ready";
+
+/**
+ * The two non-dependency unready reasons the contract names. A service that is
+ * unready for its own reasons cannot tell us which, so it gets the start-up
+ * wording -- the overwhelmingly common case, and the one an operator acts on the
+ * same way.
+ */
+export const DETAIL_STARTING_UP = "the service is starting up";
+export const DETAIL_DRAINING = "the service is draining";
+
+/**
+ * readinessDetail builds the canonical `detail` sentence.
+ *
+ * The wording is FIXED, not free prose: check-ops-conformance.zsh and the
+ * acceptance lane both assert it. Names are sorted LEXICOGRAPHICALLY so the
+ * string is deterministic regardless of the order the breakers tripped in --
+ * without the sort the same outage would produce different bodies on different
+ * pods and no assertion could pin it.
+ */
+function readinessDetail(components: Record<string, Dependency> | undefined): string {
+  const down = Object.entries(components ?? {})
+    .filter(([, d]) => d.kind === KIND_HARD && d.status === COMPONENT_DOWN)
+    .map(([name]) => name)
+    .sort();
+  if (down.length === 0) {
+    return DETAIL_STARTING_UP;
+  }
+  const quoted = down.map((name) => `'${name}'`);
+  return quoted.length === 1
+    ? `hard dependency ${quoted[0]} is down`
+    : `hard dependencies ${quoted.join(", ")} are down`;
+}
 
 /** statusRank orders the aggregate worst-last, so worseOf can compare two by rank. */
 const STATUS_RANK: Record<AggregateStatus, number> = {
@@ -532,16 +575,34 @@ export function createOpsHandler(config: OpsConfig, metricsHandler: OpsRequestHa
       // direction.
       case "/health/ready": {
         let ready = false;
+        // Snapshot ONCE and reuse it for both the verdict and the problem body.
+        // Calling componentsSnapshot again to build the body would re-enter the
+        // service's DependencyHealthSource, which can return a different map --
+        // the 503 would then name a dependency the verdict was not taken on.
+        let components: Record<string, Dependency> | undefined;
         try {
-          ready = isReady(cfg, componentsSnapshot(cfg));
+          components = componentsSnapshot(cfg);
+          ready = isReady(cfg, components);
         } catch {
           ready = false;
+          // Leave components undefined so the 503 falls back to the
+          // non-dependency wording rather than naming a half-read map.
+          components = undefined;
         }
         if (ready) {
           writeJson(req, res, 200, { status: STATUS_OK });
           return;
         }
-        writeJson(req, res, 503, { status: STATUS_DOWN });
+        // ops-api v2: RFC 9457 problem details, not {"status":"down"}. The health
+        // string is gone from the 503 -- 503 already says "down" -- and the
+        // diagnosis rides in `components` instead.
+        writeProblemJson(req, res, 503, {
+          type: PROBLEM_TYPE_NOT_READY,
+          title: PROBLEM_TITLE_NOT_READY,
+          status: 503,
+          detail: readinessDetail(components),
+          ...(components === undefined ? {} : { components }),
+        });
         return;
       }
 
@@ -631,6 +692,47 @@ function writeJson(req: IncomingMessage, res: ServerResponse, code: number, payl
   }
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Length", Buffer.byteLength(body));
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  res.end(body);
+}
+
+/**
+ * writeProblemJson writes an RFC 9457 document on application/problem+json.
+ *
+ * Separate from writeJson because the media type is part of the contract, not a
+ * detail: org-problem-json-errors requires the 4xx/5xx body to be BARE
+ * problem+json, so answering the readiness 503 on application/json would be a
+ * conformance failure even with a correctly shaped body. Same header-before-body
+ * ordering rule as writeJson, for the same reason.
+ */
+function writeProblemJson(
+  req: IncomingMessage,
+  res: ServerResponse,
+  code: number,
+  payload: unknown,
+): void {
+  let body: string;
+  let status = code;
+  try {
+    body = JSON.stringify(payload);
+  } catch {
+    // Unreachable, but the fallback stays a VALID problem document rather than
+    // borrowing writeJson's health-shaped one -- a 500 here would otherwise
+    // answer a problem+json content type with a {"status":"down"} body.
+    body = JSON.stringify({
+      type: PROBLEM_TYPE_NOT_READY,
+      title: PROBLEM_TITLE_NOT_READY,
+      status: 500,
+      detail: "the readiness problem document could not be serialized",
+    });
+    status = 500;
+  }
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/problem+json");
   res.setHeader("Content-Length", Buffer.byteLength(body));
   if (req.method === "HEAD") {
     res.end();
