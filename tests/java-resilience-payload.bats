@@ -497,13 +497,23 @@ code_only() {
 
 @test "the emitted /health JSON keys are the contract's" {
   # Renaming any of them compiles and breaks every consumer.
+  # Since ops-api v2 (#1330) the component serialization lives in appendComponents,
+  # shared by the /health aggregate and the readiness problem body — one serializer,
+  # so a shed pod and the dashboard cannot disagree about a dependency's shape.
+  local components_json
+  components_json="$(block_between 'private static void appendComponents(StringBuilder json, Map<String, Dependency> components)' '    }' "$OPSAPI")"
+  contains "$components_json" '",\"components\":{"'
+  contains "$components_json" '"\"status\":"'
+  contains "$components_json" '",\"kind\":"'
+  contains "$components_json" '",\"breaker\":"'
+  contains "$components_json" '",\"since\":"'
+  # …and both bodies really do go through it.
   local health_json
   health_json="$(block_between 'String healthJson(Map<String, Dependency> components)' '    }' "$OPSAPI")"
-  contains "$health_json" '",\"components\":{"'
-  contains "$health_json" '"\"status\":"'
-  contains "$health_json" '",\"kind\":"'
-  contains "$health_json" '",\"breaker\":"'
-  contains "$health_json" '",\"since\":"'
+  contains "$health_json" 'appendComponents(json, components);'
+  local problem_json
+  problem_json="$(block_between 'String readinessProblemJson(Map<String, Dependency> components)' '    }' "$OPSAPI")"
+  contains "$problem_json" 'appendComponents(json, components);'
 }
 
 @test "the since timestamp tracks state transitions rather than freezing at boot" {
@@ -568,20 +578,54 @@ code_only() {
   # dependency -- so pin both arms and the polarity together.
   local ready_h
   ready_h="$(block_between 'private static HttpHandler readinessHandler(OpsConfig config)' '  }' "$OPSAPI")"
-  contains "$ready_h" 'ready = config.ready(config.components());'
-  contains "$ready_h" 'ready ? 200 : 503,'
-  contains "$ready_h" 'ready ? "{\"status\":\"ok\"}" : "{\"status\":\"down\"}");'
-  # A throwing dependency probe must degrade to 503, never an aborted connection.
+  # The snapshot is read ONCE and reused for the verdict and the body: calling
+  # components() again would re-enter the source, and the 503 could then name a
+  # dependency the verdict was not taken on.
+  contains "$ready_h" 'components = config.components();'
+  contains "$ready_h" 'ready = config.ready(components);'
+  lacks "$ready_h" 'ready = config.ready(config.components());'
+  # ops-api v2 (#1330): 200 keeps the health envelope; the 503 is an RFC 9457
+  # problem document on application/problem+json. Bare-ness is part of the
+  # contract — a correctly shaped body on application/json is still an
+  # org-problem-json-errors failure.
+  contains "$ready_h" 'respond(exchange, 200, "application/json", "{\"status\":\"ok\"}");'
+  contains "$ready_h" 'body = config.readinessProblemJson(components);'
+  contains "$ready_h" 'respond(exchange, 503, "application/problem+json", body);'
+  lacks "$ready_h" '"{\"status\":\"down\"}"'
+  # A throwing dependency probe must degrade to 503, never an aborted connection —
+  # and must reset the snapshot so a half-read map cannot reach the problem body.
   contains "$ready_h" '} catch (RuntimeException e) {'
   contains "$ready_h" 'ready = false;'
+  contains "$ready_h" 'components = Map.of();'
+}
+
+@test "the java readiness detail is canonical and lexicographically sorted" {
+  # The wording is asserted by the conformance checker and the acceptance lane, so
+  # it is a contract string, not prose. The sort is what makes it deterministic:
+  # without it the same outage yields different bodies on different pods.
+  local detail
+  detail="$(block_between 'static String readinessDetail(Map<String, Dependency> components)' '  }' "$OPSAPI")"
+  contains "$detail" 'Collections.sort(down);'
+  contains "$detail" '"hard dependency " + joined + " is down"'
+  contains "$detail" '"hard dependencies " + joined + " are down"'
+  contains "$detail" 'return DETAIL_STARTING_UP;'
+  grep -qF 'static final String DETAIL_STARTING_UP = "the service is starting up";' "$OPSAPI"
+  grep -qF 'static final String DETAIL_DRAINING = "the service is draining";' "$OPSAPI"
+  # Host-free URNs: a docs URL here would ship a link that rots when the site moves.
+  grep -qF 'static final String PROBLEM_TYPE_NOT_READY = "urn:problem-type:ops:not-ready";' "$OPSAPI"
+  grep -qF 'static final String PROBLEM_TYPE_NOT_ALIVE = "urn:problem-type:ops:not-alive";' "$OPSAPI"
 }
 
 @test "components is omitted entirely when the service declares no dependencies" {
   # An ops-api v1.0 consumer must stay valid, and `"components":{}` is not the
   # same as an absent field.
-  local health_json
-  health_json="$(block_between 'String healthJson(Map<String, Dependency> components)' '    }' "$OPSAPI")"
-  contains "$health_json" 'if (!components.isEmpty()) {'
+  # The guard moved into appendComponents with the serialization (#1330), so it now
+  # protects the readiness problem body too: a 503 raised for a non-dependency
+  # reason carries no components member either.
+  local components_json
+  components_json="$(block_between 'private static void appendComponents(StringBuilder json, Map<String, Dependency> components)' '    }' "$OPSAPI")"
+  contains "$components_json" 'if (components.isEmpty()) {'
+  contains "$components_json" 'return;'
 }
 
 @test "OpsApi carries no breaker-library import, so it stands alone without this payload" {
