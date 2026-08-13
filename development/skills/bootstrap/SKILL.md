@@ -2601,8 +2601,9 @@ Like the Python, Java and Go payloads these need an explicit destination:
   payload** behind a Step-5 TODO rather than placing a module that cannot compile.
 - **`$GIT_SHA` is build plumbing the adopter owes.** `/info`'s `build.git_sha`
   has **no fallback** in Node — an unset `$GIT_SHA` fails the service at startup
-  rather than serving a placeholder. Node is the only payload in the family that
-  fails closed here (the Python, Java and Go ones fall back to `"unknown"`), so
+  rather than serving a placeholder. Node and Swift are the payloads that fail
+  closed here (the Python, Java and Go ones fall back to `"unknown"`) — Node on
+  `$GIT_SHA` alone, Swift on both build variables (#937), so
   record a Step-5 checklist line naming the variable. **Where the refusal lands
   first depends on whether the repo has a Dockerfile**, and so does the fix:
   - **With one** → the `ops-conformance` job this skill installs builds and runs
@@ -2636,8 +2637,220 @@ hard/soft readiness hinge that `opsApi.ts` reports. Until then the surface is a
 conforming ops-api **v1.0** body: no `components` field, readiness from the
 caller's own check alone.
 
-The last remaining language's canonical implementation is a tracked follow-up
-under epic #682: development-swift (#937).
+**Swift canonical implementation (#937).** For a Swift **service** repo, also install
+the blessed Swift realization — a self-contained swift-nio listener serving all five
+endpoints on the management port from ONE bound socket, with swift-prometheus and
+swift-otel multiplexed behind the single `MetricsSystem.bootstrap` a process is
+allowed (it passes `check-ops-conformance.zsh` unchanged). Copied verbatim (no
+placeholders). It imports **no web framework**, so it drops into a Vapor service, a
+Hummingbird service and a service with no framework alike.
+
+*Applicability — CLASSIFY the repo, then act.* Swift applications in this org come in
+two first-class shapes, and this gate's job is to say which one it found. Evaluate in
+order, first match wins. **Neither outcome is ever a bare skip**: a `client`
+classification is an answer, and it gets a Step-5 checklist line naming the
+classification, the evidence that decided it, and where the client's own machinery
+lives — because "no ops surface" read as an omission is exactly the confusion this
+block exists to prevent.
+
+**Platform connectivity is NEVER a gate input.** A standalone Swift app and one that
+talks to our platform are the *same* shape, differing only in whether a connection is
+configured. No case below branches on it, and a repo must never be reclassified
+because it does or does not reach our services.
+
+**Two escapes apply to the client cases below, and they are load-bearing** — they are
+stated *before* the cases because the cases are pure evidence tests evaluated
+first-match-wins, so without them every ambiguous shape case 5 names would be consumed
+by an earlier case and case 5 would be unreachable prose:
+
+- **A long-lived listener beats a client classification.** Cases 1-3 each presume the
+  package starts nothing; a package that *also* starts a server is **case 5, not a
+  client** — do not classify there, fall through. The evidence is what the package
+  **starts**, never a filename.
+- **A user-override `interfaces` that CONTRADICTS the evidence is case 5**, in either
+  direction (user says `rest`, evidence says library; user says `library`, evidence
+  says service) — do not classify on the evidence alone, fall through. One that
+  AGREES is confirmation and does not reach case 5; it is a **set**, so
+  `["rest", "library"]` is a service that also publishes a library. A
+  **detector**-populated `interfaces` is neither confirmation nor contradiction —
+  judge from the runnable-service evidence alone. (`interfaces` detection is
+  Python-owned, so on a Swift repo it is `[]` unless the user overrode it.)
+
+1. **An Xcode-backed app target** (an `.xcodeproj`/`.xcworkspace` producing an
+   iOS/macOS application) → **client**. There is no long-lived listener to bind a
+   management port to, and no orchestrator probing it. *Both escapes apply.*
+2. **A library-only SwiftPM package** → **client**. The evidence is a `Package.swift`
+   whose products are all `.library` and no executable target with a `@main`
+   entrypoint that starts a listener. *Both escapes apply — a library that also ships
+   a demo server is case 5.*
+3. **A CLI tool** → **client**. An executable that runs and exits has nothing for a
+   probe to reach between invocations. The evidence is an `.executable` product whose
+   `@main` completes rather than serving. *Both escapes apply — a CLI that also
+   starts a server is case 5.*
+4. **A runnable Swift server, and exactly one candidate target** → **service** →
+   **install** per the render command below. The evidence is an `.executable` product
+   whose `@main` starts a long-lived listener (a Vapor/Hummingbird `app.run()`, a bare
+   NIO `ServerBootstrap.bind`), or an image `CMD` that runs one. **If more than one
+   target could be the service, that is case 5** — never silently pick the first.
+5. **Genuinely ambiguous** → **surface the install-or-skip choice in the Step-2 plan**
+   rather than defaulting either way. **Any shape an escape above routed here
+   qualifies** — that list is open, not closed, or the escapes would dead-end at a
+   client classification and skip silently. The named shapes: a package that is
+   **both** shapes at once (a library that also ships a demo server, a CLI that also
+   serves); a **user-override `interfaces`** that CONTRADICTS the evidence in either
+   direction; and a **multi-target `Package.swift`** where more than one executable
+   could be the service — there, ask which target hosts the surface, never assume the
+   first.
+
+   **Close case 5 on BOTH answers, and split the skip arm by WHY case 5 was
+   reached** — the sub-cases are not the same repo. On **install** → treat it as
+   case 4. On **skip**:
+
+   - **Both-shapes-at-once, or a contradicting user override** → that IS a client
+     classification: record the CLIENT arm's Step-5 line below (classification, the
+     evidence, that the *user* resolved the ambiguity this way, the #1259 route and
+     the settled non-offer of client telemetry).
+   - **A multi-target server whose hosting target the user did not name** → this is
+     **not** a client. The evidence says runnable service; the only open question was
+     *which* target. Record "classification: **service**, install deferred — the user
+     did not name the hosting target", with the evidence and a Step-5 TODO to install
+     once a target is chosen. Do **not** emit the #1259 route or the client-telemetry
+     non-offer here: both are about clients, and this repo is not one.
+
+   Never write a bare "user declined; skipped" in either arm — a user-chosen skip is
+   the one outcome most worth recording, and it is still not an omission.
+
+**The CLIENT arm — what to record, and what NOT to promise.** A client repo gets no
+ops payload, and its Step-5 line says so positively rather than as an absence. Two
+facts belong in it, and they are different facts:
+
+- **contract-consumer machinery for clients is tracked in #1259** — the Swift analogue
+  of the JavaScript consumer work, and the one OPEN sibling a client repo should be
+  routed to. This is where a Swift client's real machinery is coming from.
+- **client-side telemetry is deliberately not offered by the family** — a settled
+  decision, not a gap awaiting a payload. The family ships no client-side
+  telemetry payload at all; #1245 was closed as descoped (2026-08-11) and is cited
+  only as that decision record. Never present it as a pending destination, and never
+  route a repo to it.
+
+Keep those two separate. Pairing them as two live siblings tells a client-repo author
+to wait for something that is never coming; naming the descoped decision as the route
+sends them to a closed issue.
+
+Like the Python, Java, Go and Node payloads these need an explicit destination:
+
+- **Precondition — the repo must have a `Package.swift`.** Case 4 admits a service
+  classified from an image `CMD` alone, and this skill elsewhere supports
+  Xcode-built Swift repos (`language_meta.swift.build_system == "xcode"`), so the
+  install arm is reachable with no SwiftPM manifest at all. **Without one, place
+  nothing**: the deps fragment and the `.swiftLanguageMode(.v6)` bar are SwiftPM-only.
+  Surface it in the Step-2 plan and record a Step-5 TODO. Never invent a
+  `Package.swift`, and never drop the payload into a `Sources/` tree nothing compiles.
+- **Precondition — the process must not already bootstrap a metrics system.**
+  `OpsMetrics.bootstrap()` calls `MetricsSystem.bootstrap`, and swift-metrics permits
+  exactly **one** per process — a second is a fatal error at startup, not a warning.
+  So the "drops into a Vapor or Hummingbird service alike" claim above is about
+  *imports*, not about an already-instrumented process. Before placing anything, search
+  for an existing `MetricsSystem.bootstrap(` or `OTel.bootstrap()` call **across every
+  module linked into the service executable** — the whole `Sources/` tree plus any
+  local `.package(path:)` dependencies, **not** just the target that will hold the
+  payload. The rule is per *process*, so a call in a sibling module trips it just the
+  same, and a target-scoped grep is exactly how that gets missed.
+
+  If one exists, **surface it as its own Step-2 plan line**: the supported resolution
+  is to **replace** that call with `OpsMetrics.bootstrap()`. (Keeping a third backend
+  alongside is *not* a bootstrap action — `OpsMetrics.bootstrap()` takes no factory
+  argument, so folding one in means an adopter-owned edit to the payload's
+  `MultiplexMetricsHandler(factories:)` list; the README's *single-bootstrap rule*
+  section explains why exactly one call is allowed, not how to merge yours.) Record the
+  resolution in the Step-5 wiring item. **If the user declines, defer the ENTIRE
+  payload** behind a Step-5 TODO naming the existing bootstrap call: on *that* arm the
+  payload would be placed into a process whose second bootstrap traps the moment the
+  wiring lands. **On the approval arm, placing is correct** even though the existing
+  call is still in the tree — the payload is inert until wired, and the same Step-5
+  item carries the replacement, so a second bootstrap never exists at runtime. (Read
+  the headline as the state the *wired* process must satisfy, not as a bar on placing
+  a file.)
+- **Placement.** `Sources/<ServiceTarget>/Ops/OpsApi.swift`, with the payload's
+  `README.md` **and** `Package.swift.deps` beside it at `Sources/<ServiceTarget>/Ops/`
+  — the same rule the Go and Node blocks use, and the README refers to the fragment as
+  sitting beside it, so discarding it after pasting leaves that reference dangling.
+  The file must land under the target's actual declared `path:` when it has one;
+  `Sources/<ServiceTarget>/` is the convention, not a guarantee. When the path is
+  occupied, ask in the Step-2 plan rather than overwriting.
+- **Dependencies only — never a `targets:` edit.** Paste `Package.swift.deps`' two
+  blocks into the manifest: the `.package(url:)` lines into the top-level
+  `dependencies:`, the `.product(name:)` lines into the target that now holds the
+  payload. **Do not restructure `targets:`** — whether the payload gets a dedicated
+  target is a structural decision about the adopter's package, and a bootstrap that
+  splits targets silently changes what every other target can import.
+- **Precondition — the manifest's tools version must be `6.1` or newer.** The payload
+  is verified under the Swift 6 language mode, and below tools-version 6.1 the
+  per-target `.swiftLanguageMode(.v6)` setting cannot be expressed, so the strict
+  concurrency checking it is written against silently does not happen. When the first
+  line of `Package.swift` declares less, **surface the raise as its own Step-2 plan
+  line** — it is not inert, since the language mode applies to the target's existing
+  code too. **On approval, perform the raise as part of the deps paste**: the first
+  line of `Package.swift` is a manifest edit, not a `targets:` edit, so it is
+  bootstrap's to make. Recording it as a Step-5 TODO *instead* would place a payload
+  that compiles outside the language mode it is verified under — the silent outcome
+  this precondition exists to prevent. If the user declines, **defer the ENTIRE
+  payload** behind a Step-5 TODO.
+- **Precondition — the manifest's Apple platform floor must be at least
+  `.macOS(.v13)` / `.iOS(.v16)`.** SwiftPM's `platforms:` covers Apple platforms only
+  (Linux, the deployment target, has no floor to declare), so this looks irrelevant to
+  a Linux service — but the Swift CI lane this skill installs runs on **macOS**, so a
+  lower or absent floor fails dependency resolution *there*, reddening the bootstrap
+  PR on a check Step 4f does not excuse. `platforms:` is a manifest edit, not a
+  `targets:` edit: **surface the raise as its own Step-2 plan line** and, on approval,
+  perform it with the deps paste. If the user declines, **defer the ENTIRE payload**
+  behind a Step-5 TODO. The fragment deliberately has no paste site for it, so nothing
+  else in the adoption path will catch this.
+- **Bootstrap does NOT add `swiftSettings:` — that is a `targets:` edit**, which the
+  rule above forbids. The tools-version raise is what makes the setting *expressible*;
+  adding it is the adopter's. Record `swiftSettings: [.swiftLanguageMode(.v6)]` on the
+  payload's target as a Step-5 checklist line beside the startup wiring, so the raise
+  is not applied while the bar it was justified by never arrives.
+- **Record — do not perform — the startup wiring.** Placing `OpsApi.swift` exposes
+  nothing on its own: until the entrypoint calls `OpsMetrics.bootstrap()` **once** and
+  then `await OpsApi.serve(config:metrics:)`, no port is bound and no endpoint answers.
+  The config also needs a real `servedMajors` table — it has **no default** and refuses
+  startup when empty. Record all three as a Step-5 checklist item; **with** a
+  Dockerfile the `ops-conformance` job is red on the bootstrap PR until **both** that
+  wiring and the `$BUILD_VERSION`/`$GIT_SHA` plumbing (next bullet) land — say so in
+  the same checklist item, because the job builds and runs the container *without*
+  passing either variable, so the wiring alone does not clear it (Step 4f covers
+  reporting that expected-red). **Without** a Dockerfile no such job is installed, so
+  the item names only the wiring. Reporting "ops surface installed" with no wiring
+  item is a success a no-op satisfies.
+- **`$BUILD_VERSION` and `$GIT_SHA` are build plumbing the adopter owes.** `/info` has
+  **no fallback** for either — an unset one refuses startup by name rather than serving
+  a placeholder. Swift fails closed on **both**, where Node fails closed on `$GIT_SHA`
+  alone and the Python, Java and Go payloads fall back to `"unknown"`. Record a Step-5
+  checklist line naming both variables, and follow the Node block's split: **with** a
+  Dockerfile the `ops-conformance` job is where the refusal lands (wire an `ARG`/`ENV`
+  pair with a CI-supplied value — teaching the shared workflow template to pass one is
+  **#1281**, one job for every language, and not this block's to fix, so do not present
+  the `ARG`/`ENV` line as a same-PR green); **without** one, the first deploy is, and
+  whatever runs the service owes them. Do not write a checklist line pointing at a
+  Dockerfile the repo does not have.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/swift/ops-api/OpsApi.swift \
+  languages/swift/ops-api/Package.swift.deps \
+  languages/swift/ops-api/README.md
+```
+
+Whenever this block installs, the **Swift resilience payload** (#1146) installs with
+it once that lands — it supplies the ops-api v1.1 `components` map and the hard/soft
+readiness hinge that `OpsApi.swift` reports. Until then the surface is a conforming
+ops-api **v1.0** body: no `components` field, readiness from the caller's own
+`readiness` closure alone.
+
+With Swift landed, every language the family scaffolds a service in now has a
+canonical ops-api implementation.
 
 **Java (non-Spring) resilience + dependency health (#1142).** Whenever the Java
 ops-api block above **installed** (its cases 4-fold-and-install and 5), also

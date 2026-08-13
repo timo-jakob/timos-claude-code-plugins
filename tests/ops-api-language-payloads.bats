@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
 # Structural tests for the per-language canonical ops-api payloads (#688 Python,
-# #935 Java, #1192 Go, #936 Node).
+# #935 Java, #1192 Go, #936 Node, #937 Swift).
 #
 # These payloads are bootstrap template files the SKILL's render.zsh steps copy
 # verbatim into a target service; their RUNTIME conformance is verified downstream
@@ -21,6 +21,7 @@ setup() {
   JAVA="$LANGS/java/ops-api"
   GO="$LANGS/go/ops-api"
   NODE="$LANGS/javascript/ops-api"
+  SWIFT="$LANGS/swift/ops-api"
   SKILL="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
 }
 
@@ -1531,8 +1532,8 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
 
 @test "bootstrap SKILL.md's Node gate carries all seven arms, install included" {
   local block
-  block="$(sed -n '/^\*\*Node canonical implementation (#936)\.\*\*/,/^The last remaining language/p' "$SKILL")"
-  contains "$block" 'The last remaining language'
+  block="$(sed -n '/^\*\*Node canonical implementation (#936)\.\*\*/,/^\*\*Swift canonical implementation (#937)\.\*\*/p' "$SKILL")"
+  contains "$block" '**Swift canonical implementation (#937).**'
   # All FIVE skip conditions. Each is a package shape with no ops surface to
   # expose; dropping one installs a management port into a package that cannot
   # use it. The CLI case is the one that keeps the install arm from being a
@@ -1567,8 +1568,8 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   # pinned as rules AND at the two cases whose evidence would otherwise swallow
   # them, because a model that matches case 4 may never read the preamble.
   local block
-  block="$(sed -n '/^\*\*Node canonical implementation (#936)\.\*\*/,/^The last remaining language/p' "$SKILL")"
-  contains "$block" 'The last remaining language'
+  block="$(sed -n '/^\*\*Node canonical implementation (#936)\.\*\*/,/^\*\*Swift canonical implementation (#937)\.\*\*/p' "$SKILL")"
+  contains "$block" '**Swift canonical implementation (#937).**'
   contains "$block" 'Two escapes apply to the skip cases below'
   contains "$block" 'A user-override `interfaces` that contradicts the skip evidence is case 6,'
   contains "$block" 'A long-lived listener beats an absence-of-listener skip**, and it is judged'
@@ -1597,8 +1598,8 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
 
 @test "bootstrap SKILL.md places the Node payload and renders all three files" {
   local block
-  block="$(sed -n '/^\*\*Node canonical implementation (#936)\.\*\*/,/^The last remaining language/p' "$SKILL")"
-  contains "$block" 'The last remaining language'
+  block="$(sed -n '/^\*\*Node canonical implementation (#936)\.\*\*/,/^\*\*Swift canonical implementation (#937)\.\*\*/p' "$SKILL")"
+  contains "$block" '**Swift canonical implementation (#937).**'
   # The monorepo question: several package.jsons, only one runnable service — and
   # it is answered FIRST, because it names the package the gate then judges.
   contains "$block" 'Answer this FIRST in'
@@ -1743,4 +1744,735 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   contains "$fence" 'languages/javascript/ops-api/opsApi.ts'
   contains "$fence" 'languages/javascript/ops-api/package.json.deps'
   contains "$fence" 'languages/javascript/ops-api/README.md'
+}
+
+# ---- Swift payload (#937) --------------------------------------------------
+#
+# Mirrors the Go section's three rules (anchor to code not prose; pin a guard
+# together with its body as ONE flattened needle; never let a needle span a source
+# line). The Swift toolchain is not in the test image, so these are grep-based —
+# but unlike its siblings this payload WAS compiled and run at authoring time
+# (Swift 6.3, `.swiftLanguageMode(.v6)`, zero diagnostics) and driven end-to-end
+# through the shipped check-ops-conformance.zsh. What is guarded here is the
+# contract shape a careless edit would break silently.
+
+# swift_member <signature-substring> — the body of one MEMBER declaration, from the
+# line carrying the signature to the first four-space-indented closing brace.
+#
+# Closure is proven by a SENTINEL, not by inspecting the result: a runaway
+# extraction that ran to EOF would also end in a brace and pass a shape check, while
+# silently handing back every following declaration as the haystack — which is
+# exactly what makes a `lacks` assertion vacuous.
+swift_member() {
+  # Misuse gets its own status, so a negative assertion can pin 1 (genuinely not
+  # found) and never swallow a dropped argument — the convention assertions.bash
+  # documents for its own helpers.
+  if [ "$#" -ne 1 ] || [ -z "$1" ]; then
+    echo 'swift_member: needs a non-empty signature substring' >&2; return 2
+  fi
+  local body
+  # The signature travels through the ENVIRONMENT, not `awk -v`, which
+  # escape-processes its value: OpsApi.swift is full of Swift interpolation
+  # (`\(path)`), so a backslash-bearing signature passed with -v is not the
+  # signature written in the test.
+  #
+  # Start matching is ANCHORED to the line's first non-blank column and latched
+  # once. Unanchored, a doc comment or call site mentioning the signature arms
+  # extraction far above the real declaration; the first following four-space `}`
+  # then closes it, the sentinel is still emitted, and the helper hands back a
+  # wrong-but-"proven-closed" haystack — under which every `lacks` goes vacuous,
+  # which is the exact defect the sentinel exists to prevent.
+  body="$(sig="$1" awk '
+    BEGIN { sig = ENVIRON["sig"] }
+    !inside && index(substr($0, match($0, /[^ \t]/)), sig) == 1 { inside = 1 }
+    inside { print }
+    inside && /^    \}$/ { print "//swift_member:closed"; exit }
+  ' "$SWIFT/OpsApi.swift")"
+  case "$body" in
+    *"//swift_member:closed") printf '%s' "${body%//swift_member:closed}" ;;
+    *) echo "swift_member: '$1' not found, or its block never closed" >&2; return 1 ;;
+  esac
+}
+
+swift_flat() { local b; b="$(swift_member "$1")" || return 1; flatten "$b"; }
+
+# The whole Swift SKILL block, terminated by the heading that follows it.
+#
+# Closure is proven HERE rather than left to each caller: caller discipline is a
+# convention nothing enforces, and one SKILL-scoped test that forgot the
+# terminator assertion would get the whole tail of SKILL.md as its haystack and
+# turn its `lacks` assertions vacuous with nothing going red. The two sibling
+# extractors prove closure inside themselves for the same reason.
+swift_skill_block() {
+  local block
+  block="$(sed -n '/^\*\*Swift canonical implementation (#937)\.\*\*/,/^\*\*Java (non-Spring) resilience + dependency health (#1142)\.\*\*/p' "$SKILL")"
+  case "$block" in
+    *'**Java (non-Spring) resilience + dependency health (#1142).**'*) printf '%s' "$block" ;;
+    *) echo 'swift_skill_block: range not found or never closed' >&2; return 1 ;;
+  esac
+}
+
+@test "swift ops-api payload files exist at the SKILL render paths" {
+  [ -f "$SWIFT/OpsApi.swift" ]
+  [ -f "$SWIFT/Package.swift.deps" ]
+  [ -f "$SWIFT/README.md" ]
+}
+
+@test "swift_member proves closure rather than inferring it (self-test)" {
+  # Pin the EXACT status: `-ne 0` cannot tell the intended not-found path from awk
+  # failing to open the file, or from the misuse status below.
+  run swift_member "func doesNotExistAnywhere("
+  [ "$status" -eq 1 ]
+  run swift_member ""
+  [ "$status" -eq 2 ]
+  run swift_member "func live() -> OpsResponse"
+  [ "$status" -eq 0 ]
+}
+
+@test "swift_skill_block refuses an unclosed range instead of returning the file tail" {
+  # The closure proof lives in the helper, so prove the helper actually refuses.
+  run swift_skill_block
+  [ "$status" -eq 0 ]
+  SKILL="$BATS_TEST_TMPDIR/no-terminator.md"
+  printf '%s\n' '**Swift canonical implementation (#937).**' 'body' > "$SKILL"
+  run swift_skill_block
+  [ "$status" -eq 1 ]
+}
+
+@test "swift OpsApi routes all five ops endpoints, each to its own handler" {
+  local body
+  body="$(swift_flat "func respond(method: HTTPMethod, uri: String)")"
+  contains "$body" 'case "/info": return await info()'
+  contains "$body" 'case "/health": return await health()'
+  contains "$body" 'case "/health/live": return live()'
+  contains "$body" 'case "/health/ready": return await ready()'
+  contains "$body" 'case "/metrics": return metrics()'
+  # The line that WIRES normalize into dispatch. Pinning normalize's own body
+  # perfectly still leaves it dead code if this call is dropped: `/health/` and
+  # every request carrying a query string (which the conformance checker sends)
+  # would then 404 against a conforming service, with every other needle green.
+  contains "$body" 'let path = Self.normalize(uri)'
+  # Both failure branches, each pinned WITH its consequence. Dropping HEAD breaks
+  # probes and scrapers; dropping the guard answers a POST with a bare 404.
+  contains "$body" 'guard method == .GET || method == .HEAD else { return errorResponse(.methodNotAllowed, "method \(method) is not allowed on \(path)") }'
+  contains "$body" 'default: return errorResponse(.notFound, "no ops endpoint at \(path)") }'
+}
+
+@test "swift OpsApi's /info serves the build block and the served-majors table" {
+  local body
+  body="$(swift_flat "func info() async -> OpsResponse")"
+  contains "$body" 'let body = InfoBody( build: .init(version: config.version, gitSHA: config.gitSHA), api: config.servedMajors )'
+  # …and that the constructed body is what is RETURNED. Pinning only the
+  # construction lets /info stop serving it while the local stays referenced.
+  ends_with "$body" 'return encode(body, status: .ok) } '
+}
+
+@test "swift OpsApi's response writer sets the code and the content type" {
+  # Every 200/503 needle elsewhere in this section is an ARGUMENT at a call site.
+  # This is the one place the code is actually applied: rewriting `.json(status,`
+  # to `.json(.ok,` makes every ops response 200 — readiness stops shedding
+  # traffic — with all three probe tests still green.
+  local fn flat
+  fn="$(swift_flat "func encode<T: Encodable>(")"
+  contains "$fn" 'return .json(status, Array(try encoder.encode(value)))'
+  contains "$fn" 'catch { return errorResponse(.internalServerError, "ops-api could not encode its own response") }'
+  flat="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$flat" 'static func json(_ status: HTTPResponseStatus, _ bytes: [UInt8]) -> OpsResponse { OpsResponse(status: status, contentType: "application/json; charset=utf-8", body: bytes) }'
+}
+
+@test "swift OpsApi's errorResponse passes its status through and escapes the message" {
+  # The message interpolates the request path, so a URI carrying a double quote
+  # would emit unparseable JSON; and a hard-coded status collapses 405 into 404,
+  # defeating the "not a bare 404" contract the routing test is named for.
+  local fn
+  fn="$(swift_flat "func errorResponse(")"
+  contains "$fn" 'let escaped = message.replacingOccurrences(of: "\"", with: "'"'"'")'
+  contains "$fn" 'return .json(status, Array('
+}
+
+@test "swift OpsApi suppresses the body on HEAD and never lets a probe be cached" {
+  local fn flat
+  fn="$(swift_flat "static func write(")"
+  contains "$fn" 'headers.add(name: "content-type", value: response.contentType)'
+  contains "$fn" 'headers.add(name: "content-length", value: String(response.body.count))'
+  # A cached /health/ready is a probe answering for a service it never asked.
+  contains "$fn" 'headers.add(name: "cache-control", value: "no-store")'
+  contains "$fn" 'if includeBody && !response.body.isEmpty {'
+  # …and the wiring that decides it. Flipping != to == ships a body on every HEAD.
+  flat="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$flat" 'includeBody: requestHead.method != .HEAD'
+}
+
+@test "swift OpsApi.serve validates before binding and honours the resolved port" {
+  local serve
+  serve="$(swift_flat "public static func serve(")"
+  # The fail-fast contract: a config that would serve a lying /info never reaches
+  # the listener. Constructing a ResolvedOpsConfig directly instead is
+  # compile-clean in-module and makes every validation test unreachable at runtime.
+  contains "$serve" 'let resolved = try config.validated()'
+  contains "$serve" 'let router = OpsRouter(config: resolved, registry: metrics.registry)'
+  # Hard-coding defaultPort here silently disables $OPS_PORT, which the
+  # ops-conformance job sets — with the resolvedPort test still green.
+  contains "$serve" 'let boundPort = port ?? resolvedPort()'
+  contains "$serve" 'group.addTask { try await runListener(router: router, host: host, port: boundPort) }'
+}
+
+@test "swift OpsApi's wire body structs keep the field names the checker reads" {
+  # These Encodable property names ARE the wire keys. Renaming one, or serving a
+  # literal [] for api, is compile-clean and fails conformance downstream.
+  local flat
+  flat="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$flat" 'struct InfoBody: Encodable { struct Build: Encodable { let version: String let gitSHA: String'
+  contains "$flat" 'let build: Build let api: [APIMajor]'
+  contains "$flat" 'struct HealthBody: Encodable { let status: AggregateStatus let components: [String: Dependency]? }'
+  contains "$flat" 'struct ProbeBody: Encodable { let status: AggregateStatus }'
+  # The two Codable structs the checker greps BY NAME: it reads .value.status,
+  # .value.kind, .value.breaker and .value.since, and major/lifecycle/sunset for
+  # the deprecated-needs-sunset rule. Making an optional non-optional starts
+  # emitting "sunset": null on every active major and "breaker" on a v1.0 body.
+  contains "$flat" 'public struct Dependency: Sendable, Codable { public var status: ComponentStatus public var kind: DependencyKind public var breaker: BreakerState? public var since: String?'
+  contains "$flat" 'public struct APIMajor: Sendable, Codable { public var major: Int public var lifecycle: APILifecycle public var sunset: String?'
+}
+
+@test "swift OpsApi answers /health with 200 and confines 503 to the readiness probe" {
+  # The #1139 rule: the /health verdict lives in the BODY. A 503 here is an
+  # unreadable page exactly when an operator needs the diagnosis.
+  local health ready
+  health="$(swift_flat "func health() async -> OpsResponse")"
+  # Pin the WHOLE write, not `status: .ok)` — that fragment is satisfied by
+  # encode()'s trailing HTTP-status argument, so it stays green even if the body
+  # were rewritten to HealthBody(status: .ok, …), which reports "ok" straight
+  # through a hard-down outage. That is the marquee under-reporting regression
+  # this payload exists to prevent, so it must be the thing the needle pins.
+  contains "$health" 'let aggregate = await aggregateStatus(components: components) return encode(HealthBody(status: aggregate, components: components), status: .ok)'
+  lacks "$health" 'serviceUnavailable'
+  ready="$(swift_flat "func ready() async -> OpsResponse")"
+  contains "$ready" 'status: .serviceUnavailable)'
+}
+
+@test "swift OpsApi's liveness probe is 200-and-dependency-free" {
+  # Liveness as a function of a dependency is the pod-restart-storm anti-pattern.
+  local body
+  body="$(swift_flat "func live() -> OpsResponse")"
+  contains "$body" 'encode(ProbeBody(status: .ok), status: .ok)'
+  lacks "$body" 'dependencies'
+  lacks "$body" 'components'
+}
+
+@test "swift OpsApi fails readiness ONLY on a hard dependency that is down" {
+  # Guard pinned together with its body as ONE needle: asserting the condition and
+  # the consequence separately cannot tell `&&` from `||`, and for this hinge that
+  # is the difference between shedding traffic on a soft outage and not.
+  local body
+  body="$(swift_flat "func ready() async -> OpsResponse")"
+  # Each guard carries its consequence. A predicate pinned alone survives an
+  # else-arm rewritten to 200 (which keeps a draining pod in rotation).
+  contains "$body" 'guard await config.readiness() else { return encode(ProbeBody(status: .down), status: .serviceUnavailable) }'
+  contains "$body" 'if let components, components.values.contains(where: { $0.kind == .hard && $0.status == .down }) { return encode(ProbeBody(status: .down), status: .serviceUnavailable) }'
+  # The terminal 200 arm. Flipped to .serviceUnavailable, every pod is permanently
+  # unready — and the `contains .serviceUnavailable` needle above still passes.
+  ends_with "$body" 'return encode(ProbeBody(status: .ok), status: .ok) } '
+  # A soft dependency must never reach the verdict at all.
+  lacks "$body" '.soft'
+}
+
+@test "swift OpsApi floors the /health aggregate the way the checker demands" {
+  local body
+  body="$(swift_flat "func aggregateStatus(components:")"
+  # BOTH arms in one ordered needle, each with its body. Neutering the degraded
+  # arm's assignment is compile-clean and silently discards the degraded floor, so
+  # a soft dependency down (or a hard one half-open) reports an "ok" aggregate —
+  # the one thing the payload's own comment calls never legitimate.
+  contains "$body" 'if dependency.kind == .hard && dependency.status == .down { floor = .down } else if dependency.status == .down || dependency.status == .degraded { floor = .worst(floor, .degraded) }'
+  # internalStatus can only RAISE the floor — under-reporting must be unreachable.
+  contains "$body" 'return .worst(floor, await config.internalStatus())'
+}
+
+@test "swift OpsApi's severity ordering is worst-wins" {
+  local body ranks
+  body="$(swift_flat "static func worst(")"
+  contains "$body" 'lhs.severity >= rhs.severity ? lhs : rhs'
+  # The comparator alone is not the ordering: `severity` is a computed property,
+  # and swapping its returns is compile-clean and inverts worst-wins into
+  # best-wins, so both the floor and internalStatus resolve to the LEAST severe
+  # value and /health reports "ok" through a hard-down outage.
+  ranks="$(swift_flat "var severity: Int")"
+  contains "$ranks" 'case .ok: return 0 case .degraded: return 1 case .down: return 2'
+}
+
+@test "swift OpsApi omits components entirely when no dependency source is wired" {
+  # An unwired seam must serve a byte-identical ops-api v1.0 body: no `components`
+  # key at all, not an empty object and not null. The optional is what does it.
+  contains "$(flatten "$(cat "$SWIFT/OpsApi.swift")")" 'let components: [String: Dependency]?'
+  local body
+  body="$(swift_flat "func health() async -> OpsResponse")"
+  contains "$body" 'await config.dependencies?.components()'
+}
+
+@test "swift OpsApi enforces both halves of the lifecycle-sunset invariant (RFC 8594)" {
+  # Only the deprecated-needs-sunset half is also caught downstream by the
+  # conformance checker; for the active-must-not-carry-one half this is the ONLY
+  # enforcement anywhere, so losing it would be silent.
+  local body
+  body="$(swift_flat "public func validated(")"
+  # Each throw pinned WITH the case and guard that fire it. As bare tokens, the
+  # two arms could be transposed — or `!= nil` flipped to `== nil` — and
+  # validated() would then reject exactly the tables it should accept, with every
+  # needle green and no other enforcement anywhere for the active half.
+  # The line that PRODUCES the local both guards test. `let sunset = entry.sunset`
+  # is compile-clean and inverts both halves for the empty-string case: a
+  # deprecated major declaring sunset "" would pass, and an active one carrying ""
+  # would be refused though it is legal.
+  contains "$body" 'let sunset = firstNonEmpty(entry.sunset) switch entry.lifecycle {'
+  contains "$body" 'case .deprecated: guard sunset != nil else { throw OpsConfigError.deprecatedMajorWithoutSunset(entry.major) }'
+  contains "$body" 'case .active: guard sunset == nil else { throw OpsConfigError.activeMajorWithSunset(entry.major) }'
+  contains "$body" 'guard seen.insert(entry.major).inserted else { throw OpsConfigError.duplicateMajor(entry.major) }'
+  contains "$body" 'guard entry.major >= 1 else { throw OpsConfigError.invalidMajor(entry.major) }'
+  # The terminal constructor — the one line every other assertion in this section
+  # depends on for REACHABILITY. `dependencies: nil` here severs the ops-api v1.1
+  # seam for every adopter (no components on /health, no hard-down readiness) while
+  # the health, readiness and aggregate tests keep asserting behaviour that has
+  # become unreachable; transposing version/gitSHA serves a lie /info's checker
+  # cannot see, since both are non-empty strings.
+  ends_with "$body" 'return ResolvedOpsConfig( version: version, gitSHA: gitSHA, servedMajors: servedMajors, readiness: readiness, internalStatus: internalStatus, dependencies: dependencies ) } '
+}
+
+@test "swift OpsConfig's defaults keep an unconfigured service conforming" {
+  # A freshly bootstrapped repo supplies neither closure. `= { false }` on
+  # readiness answers 503 on /health/ready for ever; `= { .down }` on
+  # internalStatus makes every /health report a down aggregate. Neither is
+  # reachable through any other needle in this section.
+  local flat
+  flat="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$flat" 'readiness: @escaping @Sendable () async -> Bool = { true },'
+  contains "$flat" 'internalStatus: @escaping @Sendable () async -> AggregateStatus = { .ok },'
+  contains "$flat" 'dependencies: (any DependencyHealthSource)? = nil,'
+  # …and the assignment block, where a transposition reproduces the CRITICAL above
+  # through a second door.
+  contains "$flat" 'self.servedMajors = servedMajors self.readiness = readiness self.internalStatus = internalStatus self.dependencies = dependencies self.version = version self.gitSHA = gitSHA'
+}
+
+@test "swift OpsApi binds the resolved management port on every interface" {
+  # Every port needle elsewhere is an ARGUMENT at a call site; this is where the
+  # bind actually happens. Hard-coding defaultPort here kills $OPS_PORT (which the
+  # ops-conformance job sets) with the resolvedPort test still green, and
+  # 127.0.0.1 makes the surface unreachable from outside the container while the
+  # process looks healthy to itself.
+  local fn flat
+  fn="$(swift_flat "static func runListener(")"
+  contains "$fn" '.bind(host: host, port: port) { channel in'
+  contains "$fn" 'try channel.pipeline.syncOperations.configureHTTPServerPipeline()'
+  # Accepting connections and dispatching none answers every probe with a hang.
+  contains "$fn" 'connections.addTask { await serve(connection: connection, router: router) }'
+  # The only backpressure bound the listener has.
+  contains "$fn" 'if running >= maxConcurrentConnections { _ = try? await connections.next() running -= 1 }'
+  flat="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$flat" 'static let maxConcurrentConnections = 32'
+  contains "$flat" 'host: String = "0.0.0.0"'
+}
+
+@test "swift OpsApi answers each request from the router it was built with" {
+  # The sole bridge from the socket to the pure router every other test exercises.
+  # Hard-coding `method: .GET` makes the 405 branch dead code; hard-coding `uri:`
+  # makes the normalize wiring dead; deleting the `.end` arm leaves every probe
+  # hanging with all thirty-odd router needles still green.
+  local fn
+  fn="$(swift_flat "static func serve(")"
+  contains "$fn" 'let response = await router.respond( method: requestHead.method, uri: requestHead.uri )'
+  contains "$fn" 'try await write( response, to: outbound, version: requestHead.version, includeBody: requestHead.method != .HEAD )'
+}
+
+@test "swift OpsApi fails fast on absent build metadata, with NO fallback" {
+  # Swift joins Node in failing closed here. A build stamp that lies is worse than
+  # one that is absent, because /info is what #684 and incident triage read first.
+  local body flat
+  body="$(swift_flat "public func validated(")"
+  # Guard + throw as one needle: a guard rewritten to read a different key keeps a
+  # bare `throw ...missingEnvironment("BUILD_VERSION")` needle green while
+  # $BUILD_VERSION is silently ignored.
+  contains "$body" 'guard let version = firstNonEmpty(version, environment["BUILD_VERSION"]) else { throw OpsConfigError.missingEnvironment("BUILD_VERSION") }'
+  contains "$body" 'guard let gitSHA = firstNonEmpty(gitSHA, environment["GIT_SHA"]) else { throw OpsConfigError.missingEnvironment("GIT_SHA") }'
+  # The one spelling that would defeat the whole rule — asserted over CODE only.
+  # The header comment names "unknown" while explaining that the payload never
+  # serves it, so an unflattened haystack would fail on the very prose that
+  # documents the rule (the Go section's rule 1, learned the same way). Paired
+  # with a positive needle over the SAME variable so a haystack that came back
+  # empty cannot satisfy the `lacks` vacuously.
+  flat="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$flat" 'public struct OpsConfig: Sendable {'
+  lacks "$flat" '"unknown"'
+}
+
+@test "swift OpsApi treats an empty or whitespace build variable as absent" {
+  # The empty-string half of the fail-fast contract lives entirely here. Dropping
+  # the trimmingCharacters clause makes BUILD_VERSION="" serve an empty
+  # build.version — which the conformance checker rejects — while every needle in
+  # the fail-fast test above stays green.
+  local body
+  body="$(swift_flat "private func firstNonEmpty(")"
+  contains "$body" 'if let candidate, !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return candidate }'
+  ends_with "$body" 'return nil } '
+}
+
+@test "swift OpsApi has no default served-majors table to advertise by accident" {
+  local body
+  body="$(swift_flat "public func validated(")"
+  contains "$body" 'guard !servedMajors.isEmpty else { throw OpsConfigError.emptyServedMajors }'
+}
+
+@test "swift OpsApi pins the wire spellings the conformance checker reads" {
+  # Every spelling here is derived from the CASE NAME, so pinning only the enum
+  # declarations would leave 11 of 13 unpinned: renaming `case ok` to `case up` —
+  # the one-letter confusion this payload's own comment and the README's
+  # vocabulary table both call fatal — is compile-clean across the whole file and
+  # breaks every ops-api v1.0 consumer. Each needle pins the `: String`
+  # conformance TOGETHER with the case list, so neither a rename nor a lost
+  # raw-value conformance can slip through.
+  local flat
+  flat="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  # The aggregate is spelled ok (v1.0), a component up (v1.1) — never interchanged.
+  contains "$flat" 'public enum AggregateStatus: String, Sendable, Codable { case ok case degraded case down'
+  contains "$flat" 'public enum ComponentStatus: String, Sendable, Codable { case up case degraded case down }'
+  contains "$flat" 'public enum DependencyKind: String, Sendable, Codable { case hard case soft }'
+  contains "$flat" 'public enum BreakerState: String, Sendable, Codable { case closed case open case halfOpen = "half_open" }'
+  contains "$flat" 'public enum APILifecycle: String, Sendable, Codable { case active case deprecated }'
+  # snake_case wire keys the checker greps by name.
+  contains "$flat" 'case gitSHA = "git_sha"'
+}
+
+@test "swift OpsApi imports no web framework and no circuit-breaker library" {
+  # The ops surface must never dictate the app's framework, and the v1.1 seam is a
+  # protocol over a plain struct precisely so this file needs no breaker library.
+  #
+  # FLATTENED, per rule 1: the payload's prose header names "a Vapor service, a
+  # Hummingbird service" and says it imports no breaker library, so an unflattened
+  # haystack would red these `lacks` for a comment rather than a regression — and
+  # would let the two `contains` below survive deletion of the real imports.
+  local source
+  source="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  lacks "$source" 'import Vapor'
+  lacks "$source" 'import Hummingbird'
+  lacks "$source" 'import CircuitBreaker'
+  contains "$source" 'import NIOCore'
+  contains "$source" 'import NIOHTTP1'
+}
+
+@test "swift OpsApi's dependency seam is async and Sendable so a snapshot is forced" {
+  local source
+  source="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$source" 'public protocol DependencyHealthSource: Sendable {'
+  contains "$source" 'func components() async -> [String: Dependency]'
+}
+
+@test "swift OpsApi renders /metrics from the registry on the SAME listener" {
+  local body
+  body="$(swift_flat "func metrics() -> OpsResponse")"
+  # The whole response: rewriting `body: buffer` to `body: []` is compile-clean
+  # (emit still writes the buffer), serves an empty exposition to every scraper,
+  # and passes the conformance checker, which inspects status and content-type
+  # rather than content.
+  contains "$body" 'registry.emit(into: &buffer)'
+  ends_with "$body" 'return OpsResponse( status: .ok, contentType: "text/plain; version=0.0.4; charset=utf-8", body: buffer ) } '
+}
+
+@test "swift OpsApi multiplexes both metrics backends under ONE bootstrap" {
+  # swift-metrics allows exactly one MetricsSystem.bootstrap per process, and
+  # swift-otel ships no Prometheus exporter — so OTel.bootstrap() would spend the one
+  # allowed call and leave /metrics empty. makeMetricsBackend is what avoids that.
+  local body endpoints serve
+  body="$(swift_flat "public static func bootstrap(")"
+  contains "$body" 'let otel = try OTel.makeMetricsBackend()'
+  # The guard WITH both arms. Pinned alone it survives inversion, which would make
+  # every unconfigured service dial a collector it does not have and every
+  # configured one lose OTLP entirely. The unconfigured arm is the state of every
+  # bootstrapped repo and every CI run, so it is the one that must be asserted.
+  contains "$body" 'guard hasOTLPEndpoint(in: environment) else { MetricsSystem.bootstrap(prometheusFactory) return OpsMetrics(registry: registry, otlpService: nil) }'
+  contains "$body" 'MetricsSystem.bootstrap( MultiplexMetricsHandler(factories: [prometheusFactory, otel.factory]) )'
+  lacks "$body" 'OTel.bootstrap()'
+  # The factory must be built over the SAME registry /metrics renders, or the
+  # exposition is empty while everything still conforms.
+  contains "$body" 'let prometheusFactory = PrometheusMetricsFactory(registry: registry)'
+  # …and the terminal return must actually hand back the exporter service.
+  # `otlpService: nil` there is compile-clean and exports nothing, for ever.
+  ends_with "$body" 'return OpsMetrics(registry: registry, otlpService: otel.service) } '
+  # The two variables the gate actually reads — a payload reading the wrong ones
+  # would pass every needle above — plus the guard that HONOURS them. Reading both
+  # keys and returning true unconditionally is compile-clean, and makes every
+  # unconfigured service dial a collector it does not have on every interval.
+  endpoints="$(swift_flat "static func hasOTLPEndpoint(")"
+  contains "$endpoints" 'for key in ["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"]'
+  contains "$endpoints" 'if let value = environment[key], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }'
+  ends_with "$endpoints" 'return false } '
+  # swift-otel's exporter service must be RUN or nothing is ever exported — a
+  # payload that builds it and drops it exports silence.
+  serve="$(swift_flat "public static func serve(")"
+  contains "$serve" 'if let otlpService = metrics.otlpService { group.addTask { try await otlpService.run() } }'
+}
+
+@test "swift OpsApi defaults to the management port, overridable by OPS_PORT" {
+  local source body
+  source="$(flatten "$(cat "$SWIFT/OpsApi.swift")")"
+  contains "$source" 'public static let defaultPort = 9090'
+  body="$(swift_flat "public static func resolvedPort(")"
+  # Guard and BOTH returns. As two detached fragments, a function that reads and
+  # validates OPS_PORT and then returns defaultPort regardless is compile-clean —
+  # silently disabling the override the ops-conformance job sets.
+  contains "$body" 'guard let raw = environment["OPS_PORT"], let port = Int(raw), (1...65535).contains(port) else { return defaultPort }'
+  ends_with "$body" 'return port } '
+}
+
+@test "swift OpsApi normalizes a trailing slash but leaves encoded paths alone" {
+  # /health%2Flive is a different path, not a sneaky /health/live.
+  local body
+  body="$(swift_flat "static func normalize(")"
+  # The query strip is load-bearing for conformance: a probe or checker request
+  # carrying `?` would otherwise miss every route.
+  contains "$body" 'if let queryStart = path.firstIndex(of: "?") { path = String(path[path.startIndex..<queryStart]) }'
+  contains "$body" 'while path.count > 1 && path.hasSuffix("/") { path.removeLast() }'
+  # The terminal return answers every request WITHOUT a trailing slash — i.e.
+  # every conforming probe. Deleting it 404s the whole surface.
+  ends_with "$body" 'return path.isEmpty ? "/" : path } '
+  lacks "$body" 'removingPercentEncoding'
+}
+
+@test "swift Package.swift.deps documents the tools version and platforms floor" {
+  # NOTE "documents", not "declares": the fragment is not a manifest, so these two
+  # live in its header COMMENTS. The needles are honest about that rather than
+  # implying a declaration is pinned.
+  local deps
+  deps="$(cat "$SWIFT/Package.swift.deps")"
+  contains "$deps" '// swift-tools-version:6.1'
+  contains "$deps" '.macOS(.v13), .iOS(.v16)'
+}
+
+@test "swift 6.1 tools-version floor is stated identically in all three arrival points" {
+  # The SKILL block, the fragment and the README each state the floor; without a
+  # cross-check the number can drift apart with the suite green.
+  local block
+  block="$(swift_skill_block)"
+  contains "$block" '**Java (non-Spring) resilience + dependency health (#1142).**'
+  contains "$block" 'tools version must be `6.1` or newer'
+  contains "$(cat "$SWIFT/Package.swift.deps")" '// swift-tools-version:6.1'
+  contains "$(cat "$SWIFT/README.md")" '`// swift-tools-version:6.1`'
+}
+
+@test "swift Package.swift.deps pins every package and product the payload imports" {
+  # The fragment is hand-maintained and is the ONE adoption path that passes
+  # through no other artifact — a manual paste. Dropping any line makes the
+  # payload fail to compile for every adopter, so assert the drift in BOTH
+  # directions rather than sampling.
+  local deps module
+  deps="$(cat "$SWIFT/Package.swift.deps")"
+  contains "$deps" '.package(url: "https://github.com/apple/swift-nio.git"'
+  contains "$deps" '.package(url: "https://github.com/apple/swift-metrics.git"'
+  contains "$deps" '.package(url: "https://github.com/swift-server/swift-prometheus.git", from: "2.3.0"),'
+  contains "$deps" '.package(url: "https://github.com/swift-server/swift-service-lifecycle.git"'
+  contains "$deps" '.package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.5.0"),'
+  # Direction 1: every module the payload imports (bar Foundation, which needs no
+  # package) must appear as a product, WITH its owning package — a typo'd package
+  # association fails to resolve for every adopter who pastes the fragment.
+  #
+  # The module list is captured and proven non-empty FIRST: fed straight into a
+  # while loop, a scan that ever returned nothing would run the body zero times
+  # and leave this test green having asserted only the package lines.
+  local modules count
+  modules="$(grep -E '^[[:space:]]*(@[a-zA-Z]+ )?import ' "$SWIFT/OpsApi.swift" | awk '{print $NF}' | grep -v '^Foundation$')"
+  [ -n "$modules" ]
+  count="$(printf '%s\n' "$modules" | wc -l | tr -d ' ')"
+  [ "$count" -eq 7 ]
+  while IFS= read -r module; do
+    case "$module" in
+      NIOCore|NIOPosix|NIOHTTP1) contains "$deps" ".product(name: \"$module\", package: \"swift-nio\")," ;;
+      Metrics)                   contains "$deps" '.product(name: "Metrics", package: "swift-metrics"),' ;;
+      Prometheus)                contains "$deps" '.product(name: "Prometheus", package: "swift-prometheus"),' ;;
+      ServiceLifecycle)          contains "$deps" '.product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),' ;;
+      OTel)                      contains "$deps" '.product(name: "OTel", package: "swift-otel"),' ;;
+      *) echo "unmapped import '$module' — add it to this case and to Package.swift.deps" >&2; return 1 ;;
+    esac
+  done < <(printf '%s\n' "$modules")
+  # Direction 2: no ORPHAN products. Every product the fragment declares must be
+  # imported by the payload and be backed by a declared package — a product left
+  # behind after an import is dropped is a manifest error for the adopter.
+  local product pkg
+  while IFS='|' read -r product pkg; do
+    [ -z "$product" ] && continue
+    printf '%s\n' "$modules" | grep -qx "$product"
+    contains "$deps" "/$pkg.git\""
+  done < <(grep -o '\.product(name: "[^"]*", package: "[^"]*")' "$SWIFT/Package.swift.deps" \
+             | sed 's/.*name: "\([^"]*\)", package: "\([^"]*\)".*/\1|\2/')
+}
+
+@test "swift Package.swift.deps presents TWO separate paste sites" {
+  # One block goes in the manifest's dependencies, the other in the target's — folding
+  # them together is the mistake this file exists to prevent.
+  local deps
+  deps="$(cat "$SWIFT/Package.swift.deps")"
+  contains "$deps" 'PASTE SITE 1'
+  contains "$deps" 'PASTE SITE 2'
+  contains "$deps" '.product(name: "Prometheus", package: "swift-prometheus"),'
+  contains "$deps" 'swiftSettings: [.swiftLanguageMode(.v6)]'
+}
+
+@test "swift Package.swift.deps says bootstrap performs no targets: edit" {
+  contains "$(cat "$SWIFT/Package.swift.deps")" 'Bootstrap adds DEPENDENCIES ONLY.'
+}
+
+@test "swift README records the swift-otel inventory that forces two packages" {
+  # The rejection of a swift-otel-only payload is an INVENTORY FACT, not taste: at
+  # 1.5.0 the single OTel product carries no Prometheus exporter.
+  local readme
+  readme="$(cat "$SWIFT/README.md")"
+  contains "$readme" 'swift-otel ships no Prometheus exporter'
+  contains "$readme" '`OTLPCore`, `OTLPCore+Extensions`, `OTLPGRPC`, `OTLPHTTP`, `OTelAPI`, `OTelCore`'
+  # …and what taking that one indivisible product costs.
+  contains "$readme" 'grpc-swift-2'
+  contains "$readme" 'swift-protobuf'
+}
+
+@test "swift README explains the single-bootstrap rule and the swift-metrics seam" {
+  local readme
+  readme="$(cat "$SWIFT/README.md")"
+  contains "$readme" 'permits **one** `MetricsSystem.bootstrap` per process'
+  contains "$readme" '`OTel.makeMetricsBackend()`'
+  contains "$readme" 'MultiplexMetricsHandler'
+  contains "$readme" 'two `MetricsFactory` backends behind one façade'
+}
+
+@test "swift payload documents its adoption traps in every arrival point" {
+  # A trap paragraph deleted from ONE arrival point is silent — the siblings each
+  # learned this. The three traps: build metadata fails closed, servedMajors has
+  # no default, and a hand-written health source must return a snapshot.
+  local howto readme source
+  howto="$(cat "$REPO_ROOT/docs/how-to/adopt-the-ops-surface.md")"
+  readme="$(cat "$SWIFT/README.md")"
+  source="$(cat "$SWIFT/OpsApi.swift")"
+  # One line each — the how-to wraps both sentences, and rule 3 forbids a needle
+  # that spans a line.
+  contains "$howto" 'both, where Node fails closed on `$GIT_SHA` alone and the Python, Java and Go'
+  contains "$howto" '**`servedMajors` is required**, with no default at all'
+  contains "$readme" '**neither has a fallback**'
+  contains "$readme" 'precisely so the compiler holds you to a snapshot'
+  contains "$source" 'return a freshly built dictionary every call'
+  # …and the client arm's two separated facts, which the how-to must not soften.
+  contains "$howto" 'machinery for clients is tracked in **#1259**'
+  # One line, per this section's rule 3 — the how-to wraps this sentence, so a
+  # needle carrying the closing "the family**" would span a line and silently
+  # unscan the rest of the file for the inert-assertion lint.
+  contains "$howto" 'client-side telemetry is deliberately not offered by'
+}
+
+@test "bootstrap SKILL.md renders all three swift ops-api files from the SWIFT block" {
+  local block fence
+  block="$(swift_skill_block)"
+  contains "$block" '**Java (non-Spring) resilience + dependency health (#1142).**'  # range closed
+  fence="$(printf '%s\n' "$block" | sed -n '/render.zsh" \\/,/^```$/p')"
+  ends_with "$fence" '```'                                                          # fence closed
+  contains "$fence" 'languages/swift/ops-api/OpsApi.swift'
+  contains "$fence" 'languages/swift/ops-api/Package.swift.deps'
+  contains "$fence" 'languages/swift/ops-api/README.md'
+}
+
+@test "bootstrap SKILL.md keeps BOTH arms of the swift service-vs-client gate" {
+  local block
+  block="$(swift_skill_block)"
+  contains "$block" '**Java (non-Spring) resilience + dependency health (#1142).**'
+  # The install arm.
+  contains "$block" 'A runnable Swift server, and exactly one candidate target** →'
+  # The escapes are what make case 5 reachable at all; without them every
+  # ambiguous shape is consumed by an earlier evidence test and installs silently.
+  contains "$block" '**Two escapes apply to the client cases below, and they are load-bearing**'
+  contains "$block" '**A long-lived listener beats a client classification.**'
+  contains "$block" 'that CONTRADICTS the evidence is case 5**, in either'
+  # …and case 5 must close on BOTH answers, or a user-chosen skip becomes the
+  # bare skip this block forbids.
+  contains "$block" '**Close case 5 on BOTH answers, and split the skip arm by WHY'
+  # The client arm — and that it is never recorded as a bare skip.
+  contains "$block" '**Neither outcome is ever a bare skip**'
+  contains "$block" 'An Xcode-backed app target**'
+  contains "$block" 'A library-only SwiftPM package** → **client**'
+  contains "$block" 'A CLI tool** → **client**'
+  contains "$block" 'surface the install-or-skip choice in the Step-2 plan'
+}
+
+@test "bootstrap SKILL.md's swift client arm tells the post-2026-08-11 truth" {
+  # The one OPEN client sibling is #1259. Client telemetry is a SETTLED non-offer,
+  # not a pending destination — presenting the two as live siblings tells a client
+  # author to wait for something that is never coming.
+  local block
+  block="$(swift_skill_block)"
+  contains "$block" '**Java (non-Spring) resilience + dependency health (#1142).**'
+  contains "$block" 'contract-consumer machinery for clients is tracked in #1259'
+  contains "$block" 'client-side telemetry is deliberately not offered by the family'
+  lacks "$block" '#1245 and #1259'
+  lacks "$block" 'tracked in #1245'
+}
+
+@test "bootstrap SKILL.md cites #1245 only as the descoped decision record" {
+  # Every mention must carry its status on the same line, or a later reader re-opens
+  # a closed decision. Asserted over EVERY occurrence, not by sampling one.
+  local block offenders
+  block="$(swift_skill_block)"
+  # The offender scan alone is satisfied by ZERO mentions, so deleting the
+  # decision record entirely would leave this green — the very thing the test
+  # exists to preserve. Assert it EXISTS first, then that every mention is
+  # qualified.
+  contains "$block" '#1245 was closed as descoped'
+  # The `||` absorbs only grep's legitimate "no match" (1); a real grep failure
+  # (2 — unreadable input, broken pipe) must not read as "no offenders".
+  offenders="$(printf '%s\n' "$block" | grep '#1245' | { grep -v 'descoped' || [ $? -eq 1 ]; })"
+  [ -z "$offenders" ]
+}
+
+@test "bootstrap SKILL.md's swift gate is never keyed on platform connectivity" {
+  # A standalone app and one talking to our platform are the SAME shape; branching
+  # on it would reclassify a repo for a reason that is not about its shape.
+  local block
+  block="$(swift_skill_block)"
+  contains "$block" '**Java (non-Spring) resilience + dependency health (#1142).**'
+  contains "$block" '**Platform connectivity is NEVER a gate input.**'
+}
+
+@test "bootstrap SKILL.md keeps the swift placement and tools-version preconditions" {
+  local block
+  block="$(swift_skill_block)"
+  contains "$block" '**Java (non-Spring) resilience + dependency health (#1142).**'
+  contains "$block" 'Sources/<ServiceTarget>/Ops/OpsApi.swift'
+  contains "$block" '**Dependencies only — never a `targets:` edit.**'
+  contains "$block" 'If the user declines, **defer the ENTIRE'
+  # The fail-closed build metadata is the adopter's plumbing, and it is recorded —
+  # including the arm that must NOT be written when the repo has no Dockerfile.
+  contains "$block" 'Do not write a checklist line pointing at a'
+  # Bootstrap raises the tools version itself but must NOT add swiftSettings —
+  # without this carve-out the raise lands while the bar it justified never does.
+  contains "$block" '**Bootstrap does NOT add `swiftSettings:` — that is a `targets:` edit**'
+}
+
+@test "bootstrap SKILL.md keeps both swift placement PRECONDITIONS" {
+  # Neither rule is stated anywhere else, and deleting either leaves the whole
+  # suite green while bootstrap drops a payload into a tree nothing compiles, or
+  # into a process that traps on the second MetricsSystem.bootstrap.
+  local block
+  block="$(swift_skill_block)"
+  contains "$block" 'Precondition — the repo must have a `Package.swift`'
+  contains "$block" '**Without one, place'
+  contains "$block" 'the process must not already bootstrap a metrics system'
+  contains "$block" 'a second is a fatal error at startup'
+  # The Apple platform floor: irrelevant to the Linux deployment target, but the
+  # Swift CI lane this skill installs runs on macOS, so a lower floor reddens the
+  # bootstrap PR on a check Step 4f does not excuse.
+  contains "$block" 'Apple platform floor must be at least'
+  contains "$block" 'no paste site for it'
+  # …and that the process-wide rule is searched process-wide, not target-scoped.
+  contains "$block" '**across every'
+  contains "$block" '**If the user declines, defer the ENTIRE'
+}
+
+@test "bootstrap SKILL.md records the swift startup wiring instead of performing it" {
+  # Without this item a run ends with a placed file, no bound port, and a
+  # checklist that never says so — a success criterion a no-op satisfies.
+  local block
+  block="$(swift_skill_block)"
+  contains "$block" '**Record — do not perform — the startup wiring.**'
+  contains "$block" 'await OpsApi.serve(config:metrics:)'
+  contains "$block" 'it has **no default** and refuses'
 }

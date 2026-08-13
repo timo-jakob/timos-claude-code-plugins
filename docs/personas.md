@@ -66,7 +66,8 @@ non-author lens on the schemas.
   family on itself and on the ai-doc-organizer / tick-client-snapper test beds. Deliberately primary for no surface —
   see the note above
 - **Data traits:** architecture positions in our own words (`gRPC internal, REST external — realized proto-first via
-  buf + grpc-gateway`); conventional-commit issue titles (`feat(bootstrap): canonical ops payload for Swift clients`);
+  buf + grpc-gateway`); conventional-commit issue titles (`feat(bootstrap): canonical ops-api implementation for Swift
+  services`);
   lockstep version bumps (`development 1.157.1 → 1.158.0`)
 - **Primary for:** — (by design)
 
@@ -108,9 +109,11 @@ non-author lens on the schemas.
   out: no error, no warning, no diff, nothing to search for later. Guidance is this family's declared purpose, so that
   is a broken promise, not a scope limit. The gap between position and delivery lands on her: I18n has no template,
   agent or issue; whitelabelling is one theme-token field in an unbuilt contract; MFE is stated at #1059 with the epic
-  unbuilt. Her no-server path gets least of all — the Swift templates are `swift-format` + SwiftLint only and interface
-  detection is Python-owned, so no acceptance stage renders. She also inherits the family's *posture* wholesale,
-  including what it does with untrusted upstream text, because a toolchain shipped as teaching teaches by what it does.
+  unbuilt. Her no-server path gets least of all — the Swift templates now carry the ops-api payload (#937), but it
+  installs only for a runnable *service*, so her client repo still gets `swift-format` + SwiftLint only (#1146 and
+  #1259 remain open) and interface detection is Python-owned, so no acceptance stage renders. She also inherits the
+  family's *posture* wholesale, including what it does with untrusted upstream text, because a toolchain shipped as
+  teaching teaches by what it does.
   Retrofitting any of it later is a rewrite of the surface
 - **Proficiency:** competent developer, novice at this toolchain; will not read ARCHITECTURE.md; learns only from what a
   command prints at her
@@ -235,8 +238,8 @@ non-author lens on the schemas.
   "schema": "personas/v1",
   "provenance": {
     "generated_by": "persona-definer via /development:define-personas",
-    "generated_at": "2026-08-10T19:04:23Z",
-    "prose_sha256": "22d09ac8fa6c642581b25bc91d51fe174eda4b96374674da2cc0602d3fd46994"
+    "generated_at": "2026-08-13T00:00:00Z",
+    "prose_sha256": "c69a760c354f6ae6ac5b362e6bb74abf85b1af13e07bd1bb6fb9297b994584c7"
   },
   "personas": [
     {
@@ -268,7 +271,7 @@ non-author lens on the schemas.
         {
           "field": "issue_title",
           "shape": "conventional-commit scope naming the plugin or contract it lands in",
-          "example": "feat(bootstrap): canonical ops payload for Swift clients (#1245)"
+          "example": "feat(bootstrap): canonical ops-api implementation for Swift services (#937)"
         },
         {
           "field": "version_bump",
@@ -339,7 +342,7 @@ non-author lens on the schemas.
       "failure_costs": [
         "silent omission — she ships without a practice the family intends to deliver (I18n, whitelabelling, MFE, resilience) and never finds out: no error, no warning, no diff, nothing to search for later. Guidance is the family's declared purpose, so this is a broken promise, not a scope limit",
         "the gap between position and delivery lands on her, not on its author: I18n has no template, no agent and no open issue; whitelabelling is one theme-token field in the unbuilt mfe-contract design; MFE is stated at ARCHITECTURE #1059 with the epic (#1122/#1123/#1126/#1128) unbuilt and development-react shipping a single maintenance SKILL.md",
-        "her no-server app gets least of all: the Swift bootstrap templates are swift-format + swiftlint only (ops-api #937, resilience #1146, contract-consumer #1259 all open) and interface detection in detect-stack.sh is Python-owned, so no acceptance stage renders for her at all",
+        "her no-server app gets least of all: the Swift bootstrap templates now carry the ops-api payload (#937 landed) but it installs only for a runnable SERVICE, so her client repo still gets swift-format + swiftlint only (resilience #1146 and contract-consumer #1259 both still open), and interface detection in detect-stack.sh is Python-owned, so no acceptance stage renders for her at all",
         "she inherits the family's posture wholesale — including what it does with untrusted upstream text — because a toolchain shipped as teaching teaches by what it does, not by what it says",
         "retrofitting any of these after launch is a rewrite of the surface, not an addition"
       ],

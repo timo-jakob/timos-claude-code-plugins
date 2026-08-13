@@ -328,8 +328,63 @@ pull-compat surface served by the SDK's Prometheus exporter.
   body: no `components` field, readiness from your own `readiness` function alone.
   You can implement `DependencyHealthSource` by hand in the meantime — return a
   freshly built object every call — but that is the escape hatch, not the default.
-- **Other languages** — Swift's canonical implementation is tracked separately
-  (#937).
+- **Swift** — bootstrap copies `OpsApi.swift` to
+  `Sources/<ServiceTarget>/Ops/OpsApi.swift`, with the payload's `README.md`
+  beside it, and pastes two blocks from `Package.swift.deps` into your
+  `Package.swift`: the `.package(url:)` lines into the top-level `dependencies:`,
+  the `.product(name:)` lines into the target that now holds the payload. It adds
+  **dependencies only** and never edits `targets:` — where the payload sits is a
+  structural decision about your package.
+
+  Your manifest must declare `// swift-tools-version:6.1` or newer, and the
+  payload's target should carry `swiftSettings: [.swiftLanguageMode(.v6)]`: the
+  surface is verified under the Swift 6 language mode, and below 6.1 that
+  per-target setting cannot be expressed, so the strict concurrency checking it is
+  written against silently does not happen.
+
+  Then bootstrap the metrics system once and serve:
+
+  ```swift
+  let metrics = try OpsMetrics.bootstrap()
+  try await OpsApi.serve(
+      config: OpsConfig(
+          servedMajors: [
+              APIMajor(major: 1, lifecycle: .deprecated, sunset: "2027-01-31"),
+              APIMajor(major: 2, lifecycle: .active),
+          ]
+      ),
+      metrics: metrics
+  )
+  ```
+
+  Two Swift-specific facts are worth knowing before you adopt it:
+
+  - **`$BUILD_VERSION` and `$GIT_SHA` have no fallback.** An unset one throws at
+    startup naming the variable, before the listener binds. Swift fails closed on
+    both, where Node fails closed on `$GIT_SHA` alone and the Python, Java and Go
+    payloads fall back to `"unknown"`. With a Dockerfile, the `ops-conformance` job
+    is where that lands — and it stays red until the startup wiring **and** this
+    plumbing both land; without one, your first deploy is.
+  - **`servedMajors` is required**, with no default at all. The Go payload's
+    default of a single active major 1 is wrong-but-green for a v2-only service;
+    Swift refuses to start instead.
+
+  The v1.1 half arrives with the **Swift resilience payload** (#1146), which is not
+  built yet. Until it lands the seam ships **unwired**, and an unwired surface is a
+  conforming ops-api **v1.0** body: no `components` field at all, readiness from
+  your own `readiness` closure alone. You can conform to `DependencyHealthSource`
+  by hand in the meantime — return a freshly built dictionary every call — but that
+  is the escape hatch, not the default.
+
+  This payload serves the **service** shape only. A Swift *client* — an iOS/macOS
+  app, a library-only package, a CLI tool — has no ops surface to expose, and
+  bootstrap classifies it as a client rather than installing anything. That
+  classification comes with two facts, and they are different facts: contract-consumer
+  machinery for clients is tracked in **#1259**, which is where a Swift client's real
+  machinery is coming from; and **client-side telemetry is deliberately not offered by
+  the family** — a settled decision rather than a gap awaiting a payload (#1245 was
+  closed as descoped on 2026-08-11 and is only the record of that decision, never a
+  destination to wait on).
 
 ## Who enforces the boundary — you, or the platform?
 
