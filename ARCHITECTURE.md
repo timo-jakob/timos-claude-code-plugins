@@ -365,12 +365,13 @@ accordingly — it never flags a repo that ships no ops fragment. Design:
   principle, Spring gets the surface via Actuator/Micrometer (Micrometer maps to
   OTel semantic conventions) — `spring-config-advisor` gains a conforms-to-ops-api
   check — and every other language plugin owns its canonical implementation of
-  the same fragment (Python, Java-non-Spring, **Go (#1192)** and **Node (#936)**
-  are the blessed non-Spring references; #937 tracks Swift). **Go and Node both
-  shipped at the v1.1 shape from the start** — the `components` seam and the
-  hard/soft readiness hinge behind an interface, with no breaker library on the
-  import path — rather than reworking the handler later as #1142 and #1143 each
-  had to. Two Go-specific facts are load-bearing there: the surface is a **single
+  the same fragment (Python, Java-non-Spring, **Go (#1192)**, **Node (#936)** and
+  **Swift (#937)** are the blessed non-Spring references — with Swift landed,
+  every language the family scaffolds a service in now has one). **Go, Node and
+  Swift all shipped at the v1.1 shape from the start** — the `components` seam and
+  the hard/soft readiness hinge behind an interface (a protocol, in Swift's case),
+  with no breaker library on the import path — rather than reworking the handler
+  later as #1142 and #1143 each had to. Two Go-specific facts are load-bearing there: the surface is a **single
   mux** (unlike Java, whose Prometheus exporter runs its own server and forces a
   `/metrics` reverse-proxy hop), and the routes are **`http.ServeMux` method
   patterns**, whose grammar the standard library gates on the module's **`go`
@@ -381,13 +382,16 @@ accordingly — it never flags a repo that ships no ops fragment. Design:
   `preventServerStart` and mounted on the management server, so one `node:http`
   server answers all five endpoints and no second port is bound. Its HTTP layer
   is `node:http` with **no web framework**, so the payload drops into an Express,
-  a Fastify or a framework-less service alike. The one place Node diverges from
-  every sibling is `/info`'s `build.git_sha`: Node stamps no VCS revision into a
-  build, so it has **no fallback at all** and an unset `$GIT_SHA` fails the
+  a Fastify or a framework-less service alike. **Two payloads fail closed on
+  `/info`'s build metadata rather than serving a placeholder**, and they differ in
+  how far they take it. Node stamps no VCS revision into a build, so
+  `build.git_sha` has **no fallback at all** and an unset `$GIT_SHA` fails the
   service at startup — a confidently-wrong commit in the ops surface is worse
-  than a service that refuses to boot (`build.version` still falls back, to
+  than a service that refuses to boot (Node's `build.version` still falls back, to
   `$BUILD_VERSION` then the service's own `package.json` version, because that
-  one *is* truthful).
+  one *is* truthful). **Swift (#937) fails closed on both**: neither
+  `$BUILD_VERSION` nor `$GIT_SHA` has a fallback, and an unset one throws before
+  the listener binds. Python, Java and Go fall back to `"unknown"`.
 
 ### Resilience policy + dependency health (#964, #965)
 
@@ -437,13 +441,13 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   *serving* service: `down` is a legitimate runtime state, not one the
   conformance job can pass in. `/health` itself always answers **200** while the
   process can respond (the verdict is in the body); 503 is the two probes'
-  vocabulary, not the human-facing aggregate's. **All four blessed non-Spring
+  vocabulary, not the human-facing aggregate's. **All five blessed non-Spring
   ops-api templates implement this**, by two different routes: Java (#1142) and
   Python (#1143) were each *reworked* by the slice that had to teach the same
   handler to report `components` — together closing #1139, where both had aliased
   `/health` to the readiness handler and answered 503 when readiness failed —
-  while Go (#1192) and Node (#936) shipped at the v1.1 shape from the start and so
-  never had the defect to fix. The v1.0 checker had always
+  while Go (#1192), Node (#936) and Swift (#937) shipped at the v1.1 shape from the
+  start and so never had the defect to fix. The v1.0 checker had always
   rejected that (it has always required HTTP 200 on `/health`), but a healthy
   service conforms either way, so the divergence only surfaced during an outage.
   Populating `components` from breaker state is the per-language slice (#967).
@@ -460,7 +464,10 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   Python (#1143) and Go (#1144) have landed** — see below; javascript and swift
   are #1145/#1146. #1145's prerequisite is now met — **#936 shipped the Node
   ops-api surface with its `components` seam unfilled**, which is the gap #1144
-  closed for Go — while #1146 still waits on Swift's (#937). **The Node
+  closed for Go. **#1146's prerequisite is now met too** — #937 shipped the Swift
+  ops-api surface with the same seam unfilled: an `async`, `Sendable`
+  `DependencyHealthSource` returning a snapshot, with no breaker library on the
+  import path. **The Node
   realization will be `opossum`** (#1145), the blessed breaker library for the
   language, named here because #936's shipped templates already promise it to
   adopters. #1146's Swift library is undecided. A

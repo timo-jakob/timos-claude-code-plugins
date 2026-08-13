@@ -1,7 +1,7 @@
 {
   "name": "development",
   "description": "General development workflow skills for committing, branch naming, and other git operations, plus the shared telemetry/v1 emit + validate contract, its stream-generic rollup, and a committed Grafana reference dashboard for the cross-repo hand-off; ships a PreToolUse(Agent) hook, inert unless switch_fable_to_opus is truthy, that then redirects dispatches whose effective model is fable to opus; bootstrap also ships the blessed Spring, non-Spring-Java, Python and Go resilience + dependency-health payloads (resilience4j for the JVM, circuitbreaker+tenacity for Python, sony/gobreaker for Go, wired to the ops-api /health surface). Gathers kubernetes/IaC findings (Helm/Kustomize/Argo CD manifest presence, Kyverno policy + policy-test detection) for the development-kubernetes topic dispatcher.",
-  "version": "1.158.0",
+  "version": "1.159.0",
   "author": {
     "name": "Timo Jakob"
   },
