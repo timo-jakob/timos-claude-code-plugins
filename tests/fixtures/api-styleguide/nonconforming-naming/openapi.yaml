@@ -1,0 +1,55 @@
+# Non-conforming fixture isolating org-resource-naming's TWO clauses (#689).
+#
+# The main non-conforming fixture's only bad path is /getUser, which violates
+# BOTH clauses at once (camelCase AND a verb prefix) — so either clause could be
+# deleted with every test still green. Each path here trips exactly one:
+#
+#   /list-orders   lowercase kebab-case, so the `match` clause is satisfied;
+#                  only the verb-prefix `notMatch` can catch it.
+#   /Tenant_List   no verb prefix, so `notMatch` is satisfied; only the
+#                  kebab-case `match` clause can catch it.
+#
+# Everything else conforms, so any finding from another org-* rule is a scoping
+# regression.
+openapi: 3.1.0
+info:
+  title: Tenant Admin API
+  version: 1.0.0
+  description: Two badly named paths, each isolating one resource-naming clause.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: admin
+    description: Administrative operations.
+paths:
+  /list-orders:
+    get:
+      operationId: listOrdersVerbPath
+      summary: A verb path that is nonetheless valid kebab-case.
+      description: Only the verb guard can catch this one.
+      tags: ["admin"]
+      responses:
+        "200":
+          description: The orders.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /Tenant_List:
+    get:
+      operationId: tenantListBadCase
+      summary: A non-verb path that is not kebab-case.
+      description: Only the kebab-case pattern can catch this one.
+      tags: ["admin"]
+      responses:
+        "200":
+          description: The tenants.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string

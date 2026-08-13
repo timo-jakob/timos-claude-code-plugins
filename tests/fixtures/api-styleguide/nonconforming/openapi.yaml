@@ -1,0 +1,90 @@
+# Deliberately NON-conforming fixture for the org API styleguide (#689).
+#
+# Every normative rule is violated exactly once, so the acceptance suite can
+# assert one rule id per planted defect. Do not "fix" anything here.
+#
+# Planted, in order:
+#   info-description                     — info has no description
+#   operation-operationId                — POST /getUser has no operationId
+#   operation-description                — POST /getUser has no description
+#   operation-tags                       — POST /getUser has no tags
+#   org-resource-naming                  — /getUser is a verb, and camelCase
+#   org-problem-json-errors              — the 404 returns application/json
+#   org-deprecated-operation-has-sunset  — GET /users/{userId} is deprecated
+#                                          with no x-sunset
+#   operation-operationId-unique         — DELETE /users/{userId} reuses
+#                                          getUserById
+openapi: 3.1.0
+info:
+  title: Tenant Management API
+  version: 1.0.0
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: users
+    description: User records.
+paths:
+  /getUser:
+    post:
+      summary: Fetch a user.
+      responses:
+        "200":
+          description: The user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: No such user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Free-form error string.
+  /users/{userId}:
+    get:
+      operationId: getUserById
+      summary: Fetch one user.
+      description: Deprecated, but declares no sunset date.
+      tags: ["users"]
+      deprecated: true
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    delete:
+      operationId: getUserById
+      summary: Delete one user.
+      description: Reuses the operationId above on purpose.
+      tags: ["users"]
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted.
+components:
+  schemas:
+    User:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque user id.

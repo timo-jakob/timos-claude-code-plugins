@@ -9,6 +9,8 @@ when you already know what you're looking for.
   frontmatter** (kept in sync with the code by CI).
 - [Agents](agents.md) — every agent with its model and tools, **generated from
   agent frontmatter**.
+- [API styleguide](api-styleguide.md) — the org API conventions and the eight
+  Spectral rules that enforce them, plus the ruleset's own versioning policy.
 - [`c4_drift` findings](c4-drift-findings.md) — the finding shape the docs topic
   plugin emits when the Container diagram and detection disagree.
 - [Grafana hand-off contract](telemetry-grafana-handoff.md) — what the separate

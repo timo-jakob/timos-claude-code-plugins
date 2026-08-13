@@ -1,0 +1,140 @@
+# Non-conforming fixture isolating the two org-problem-json-errors clauses that
+# the main non-conforming fixture cannot reach (#689).
+#
+# The main fixture's 404 offers ONLY application/json, so it fires on the
+# `required: ["application/problem+json"]` clause alone — which means the
+# bare-ness and RFC-9457-members clauses could both be deleted with every test
+# still green. Each path here violates exactly one of them:
+#
+#   /orders      404 offers problem+json AND application/json  -> maxProperties
+#   /invoices    404 offers problem+json whose schema omits `detail`
+#                                                     -> the required-members allOf
+#
+# Everything else about this file conforms, so any org-* finding other than
+# org-problem-json-errors is a scoping regression.
+openapi: 3.1.0
+info:
+  title: Billing API
+  version: 1.0.0
+  description: Two error responses, each violating one half of the error-body rule.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: billing
+    description: Billing records.
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders.
+      description: Its 404 offers two error shapes, which is what bare forbids.
+      tags: ["billing"]
+      responses:
+        "200":
+          description: The order collection.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+        "404":
+          description: No orders.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /invoices:
+    get:
+      operationId: listInvoices
+      summary: List invoices.
+      description: Its 404 problem document omits the required `detail` member.
+      tags: ["billing"]
+      responses:
+        "200":
+          description: The invoice collection.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+        "404":
+          description: No invoices.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/IncompleteProblem"
+  /receipts:
+    get:
+      operationId: listReceipts
+      summary: List receipts.
+      description: >
+        Declares its errors under the OpenAPI RANGE key "4XX" rather than a
+        numeric status. A `@property >= 400` filter alone never matches this —
+        "4XX" coerces to NaN — so this path is what proves the range half of
+        the rule's given.
+      tags: ["billing"]
+      responses:
+        "200":
+          description: The receipt collection.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+        "4XX":
+          description: Any client error.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Free-form error string.
+components:
+  schemas:
+    Order:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque order id.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+    IncompleteProblem:
+      type: object
+      description: Deliberately missing the required `detail` member.
+      required: ["type", "title", "status"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
