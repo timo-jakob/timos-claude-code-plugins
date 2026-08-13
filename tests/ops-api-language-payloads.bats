@@ -2053,7 +2053,12 @@ swift_skill_block() {
   contains "$health" 'let aggregate = await aggregateStatus(components: components) return encode(HealthBody(status: aggregate, components: components), status: .ok)'
   lacks "$health" 'serviceUnavailable'
   ready="$(swift_flat "func ready() async -> OpsResponse")"
-  contains "$ready" 'status: .serviceUnavailable)'
+  # ops-api v2 (#1330): the 503 is an RFC 9457 problem document, so the status now
+  # rides inside problem() rather than on an encode() call in this function.
+  contains "$ready" 'return problem(ReadinessProblem('
+  local writer
+  writer="$(swift_flat "func problem(_ value: ReadinessProblem) -> OpsResponse")"
+  contains "$writer" 'status: .serviceUnavailable,'
 }
 
 @test "swift OpsApi's liveness probe is 200-and-dependency-free" {
@@ -2073,13 +2078,47 @@ swift_skill_block() {
   body="$(swift_flat "func ready() async -> OpsResponse")"
   # Each guard carries its consequence. A predicate pinned alone survives an
   # else-arm rewritten to 200 (which keeps a draining pod in rotation).
-  contains "$body" 'guard await config.readiness() else { return encode(ProbeBody(status: .down), status: .serviceUnavailable) }'
-  contains "$body" 'if let components, components.values.contains(where: { $0.kind == .hard && $0.status == .down }) { return encode(ProbeBody(status: .down), status: .serviceUnavailable) }'
+  #
+  # ops-api v2 (#1330): both 503 arms now build an RFC 9457 problem document, and the
+  # components are snapshotted BEFORE the readiness gate — a 503 raised by the
+  # non-dependency half still carries the full map, because the contract says
+  # `components` reports every declared dependency whichever half shed the pod.
+  contains "$body" 'let components = await config.dependencies?.components() guard await config.readiness() else { return problem(ReadinessProblem(detail: detailStartingUp, components: components)) }'
+  contains "$body" 'if let components, components.values.contains(where: { $0.kind == .hard && $0.status == .down }) { return problem( ReadinessProblem(detail: readinessDetail(components), components: components)) }'
   # The terminal 200 arm. Flipped to .serviceUnavailable, every pod is permanently
-  # unready — and the `contains .serviceUnavailable` needle above still passes.
+  # unready — and a bare `contains` on the 503 path would still pass.
   ends_with "$body" 'return encode(ProbeBody(status: .ok), status: .ok) } '
   # A soft dependency must never reach the verdict at all.
   lacks "$body" '.soft'
+}
+
+@test "swift OpsApi's readiness 503 is BARE problem+json with a canonical, sorted detail" {
+  # org-problem-json-errors requires the 4xx/5xx body to be bare problem+json, so a
+  # correctly shaped body on application/json is still a conformance failure.
+  local writer
+  writer="$(swift_flat "func problem(_ value: ReadinessProblem) -> OpsResponse")"
+  contains "$writer" 'contentType: "application/problem+json; charset=utf-8"'
+  # The fallback stays a VALID problem document rather than borrowing errorResponse's
+  # {"error":...} or the health envelope's {"status":"down"}.
+  contains "$writer" 'could not be serialized'
+  lacks "$writer" '"status":"down"'
+  # The ordinary encoder keeps the ordinary type.
+  local enc
+  enc="$(swift_flat "static func json(_ status: HTTPResponseStatus, _ bytes: [UInt8]) -> OpsResponse")"
+  lacks "$enc" 'problem+json'
+  # The detail is a contract string, and the sort is what makes it deterministic:
+  # without it the same outage yields different bodies on different pods.
+  local detail
+  detail="$(swift_flat "func readinessDetail(_ components: [String: Dependency]) -> String")"
+  contains "$detail" '.keys.sorted()'
+  contains "$detail" '"hard dependency \(quoted[0]) is down"'
+  contains "$detail" '"hard dependencies \(quoted.joined(separator: ", ")) are down"'
+  contains "$detail" 'guard !down.isEmpty else { return detailStartingUp }'
+  # Host-free URNs: a docs URL here would ship a link that rots when the site moves.
+  grep -qF 'public let problemTypeNotReady = "urn:problem-type:ops:not-ready"' "$SWIFT/OpsApi.swift"
+  grep -qF 'public let problemTypeNotAlive = "urn:problem-type:ops:not-alive"' "$SWIFT/OpsApi.swift"
+  grep -qF 'public let detailStartingUp = "the service is starting up"' "$SWIFT/OpsApi.swift"
+  grep -qF 'public let detailDraining = "the service is draining"' "$SWIFT/OpsApi.swift"
 }
 
 @test "swift OpsApi floors the /health aggregate the way the checker demands" {

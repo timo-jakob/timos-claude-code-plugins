@@ -2,7 +2,7 @@
 //  (#937), the Swift sibling of the Python (#688), Java (#935), Go (#1192) and
 //  Node (#936) payloads.
 //
-//  Serves the five endpoints of `contracts/ops/v1/openapi.yaml` — /info, /health,
+//  Serves the five endpoints of `contracts/ops/v2/openapi.yaml` — /info, /health,
 //  /health/live, /health/ready, /metrics — from ONE swift-nio listener bound to a
 //  separate MANAGEMENT port (default 9090, override with $OPS_PORT), never the
 //  public app port. It passes `scripts/check-ops-conformance.zsh` unchanged.
@@ -394,8 +394,64 @@ struct HealthBody: Encodable {
 }
 
 /// The binary probe bodies (`/health/live`, `/health/ready`).
+///
+/// Since ops-api v2 this is a 200-only shape: a probe that would have answered
+/// `{"status":"down"}` now answers an RFC 9457 ``ReadinessProblem`` instead.
 struct ProbeBody: Encodable {
     let status: AggregateStatus
+}
+
+/// RFC 9457 problem-type URNs (ops-api v2, #1330).
+///
+/// Host-free on purpose: a shipped service must not carry a documentation URL that
+/// rots when the docs site moves.
+public let problemTypeNotReady = "urn:problem-type:ops:not-ready"
+public let problemTypeNotAlive = "urn:problem-type:ops:not-alive"
+
+/// The two non-dependency unready reasons the contract names. A service that is unready
+/// for its own reasons cannot tell us which, so it gets the start-up wording — the
+/// overwhelmingly common case, and the one an operator acts on the same way.
+public let detailStartingUp = "the service is starting up"
+public let detailDraining = "the service is draining"
+
+/// The readiness 503 body: RFC 9457 problem details plus the `components` extension
+/// member, byte-identical to the map `/health` serves.
+///
+/// The four members are declared INLINE rather than composed from a shared base, mirroring
+/// the contract's own flat `Problem` / `ReadinessProblem` schemas — see
+/// `contracts/ops/v2/openapi.yaml` for why composing them breaks the org lint rule.
+struct ReadinessProblem: Encodable {
+    let type: String
+    let title: String
+    let status: Int
+    let detail: String
+    let components: [String: Dependency]?
+
+    init(detail: String, components: [String: Dependency]?) {
+        self.type = problemTypeNotReady
+        self.title = "Service Not Ready"
+        self.status = 503
+        self.detail = detail
+        self.components = components
+    }
+}
+
+/// Builds the canonical `detail` sentence for a dependency-caused readiness 503.
+///
+/// The wording is FIXED, not free prose: `check-ops-conformance.zsh` and the acceptance
+/// lane both assert it. Names are sorted LEXICOGRAPHICALLY so the string is deterministic
+/// regardless of the order the breakers tripped in — without the sort the same outage
+/// would produce different bodies on different pods and no assertion could pin it.
+func readinessDetail(_ components: [String: Dependency]) -> String {
+    // The same hinge ``OpsRouter/ready()`` uses. The two must stay in step: a 503 whose
+    // detail named a different set than the verdict used would be worse than no detail.
+    let down = components.filter { $0.value.kind == .hard && $0.value.status == .down }
+        .keys.sorted()
+    guard !down.isEmpty else { return detailStartingUp }
+    let quoted = down.map { "'\($0)'" }
+    return quoted.count == 1
+        ? "hard dependency \(quoted[0]) is down"
+        : "hard dependencies \(quoted.joined(separator: ", ")) are down"
 }
 
 /// One rendered HTTP response.
@@ -482,13 +538,25 @@ public struct OpsRouter: Sendable {
 
     /// Readiness is a probe: the verdict is the STATUS CODE. 503 sheds traffic without
     /// a restart. A HARD dependency down fails it; a SOFT one never does.
+    ///
+    /// ops-api v2 (#1330): the 503 body is an RFC 9457 problem document on
+    /// `application/problem+json`, not `{"status":"down"}` — RFC 9457's `status` is the
+    /// HTTP code as an integer and collides with the health envelope's string.
+    ///
+    /// The components are snapshotted BEFORE the readiness gate, not after. The gate is
+    /// the non-dependency half (starting up, draining), and a 503 raised by it still
+    /// carries the full map: the contract says `components` reports every declared
+    /// dependency, and an operator looking at a shed pod should see the same picture
+    /// whichever half shed it. Reading it once also keeps the body describing the very
+    /// snapshot the verdict was taken on.
     func ready() async -> OpsResponse {
-        guard await config.readiness() else {
-            return encode(ProbeBody(status: .down), status: .serviceUnavailable)
-        }
         let components = await config.dependencies?.components()
+        guard await config.readiness() else {
+            return problem(ReadinessProblem(detail: detailStartingUp, components: components))
+        }
         if let components, components.values.contains(where: { $0.kind == .hard && $0.status == .down }) {
-            return encode(ProbeBody(status: .down), status: .serviceUnavailable)
+            return problem(
+                ReadinessProblem(detail: readinessDetail(components), components: components))
         }
         return encode(ProbeBody(status: .ok), status: .ok)
     }
@@ -544,6 +612,38 @@ public struct OpsRouter: Sendable {
             return .json(status, Array(try encoder.encode(value)))
         } catch {
             return errorResponse(.internalServerError, "ops-api could not encode its own response")
+        }
+    }
+
+    /// Encodes an RFC 9457 document on `application/problem+json`.
+    ///
+    /// Separate from ``encode(_:status:)`` because the media type is part of the contract,
+    /// not a detail: `org-problem-json-errors` requires the 4xx/5xx body to be BARE
+    /// problem+json, so answering the readiness 503 on `application/json` would be a
+    /// conformance failure even with a correctly shaped body.
+    func problem(_ value: ReadinessProblem) -> OpsResponse {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        do {
+            return OpsResponse(
+                status: .serviceUnavailable,
+                contentType: "application/problem+json; charset=utf-8",
+                body: Array(try encoder.encode(value)))
+        } catch {
+            // The fallback stays a VALID problem document: borrowing ``errorResponse``
+            // would answer a problem+json content type with an {"error":...} body, and
+            // borrowing the health envelope would answer it with {"status":"down"}.
+            //
+            // Built by concatenation rather than a raw multi-line literal: this file is
+            // copied verbatim into consumer services, so the least clever spelling that
+            // compiles everywhere is the right one.
+            let fallback = "{\"type\":\"" + problemTypeNotReady
+                + "\",\"title\":\"Service Not Ready\",\"status\":503,\"detail\":\""
+                + "the readiness problem document could not be serialized\"}"
+            return OpsResponse(
+                status: .serviceUnavailable,
+                contentType: "application/problem+json; charset=utf-8",
+                body: Array(fallback.utf8))
         }
     }
 
