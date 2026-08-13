@@ -340,7 +340,9 @@ block_between() {
 }
 
 @test "the two probes are served from one selector operation" {
-  grep -qE '^  public WebEndpointResponse<Health> probe\(@Selector String probe\) \{$' "$ENDPOINT"
+  # Wildcard since ops-api v2 (#1330): the 200 arm returns Health, the 503 arms return
+  # RFC 9457 problem records, so the operation can no longer be typed to Health.
+  grep -qE '^  public WebEndpointResponse<\?> probe\(@Selector String probe\) \{$' "$ENDPOINT"
   grep -q 'case "live" ->' "$ENDPOINT"
   grep -q 'case "ready" ->' "$ENDPOINT"
   # Anything else must 404 rather than silently answer as one of the two.
@@ -354,23 +356,85 @@ block_between() {
 }
 
 @test "the probes use the contract's binary vocabulary, with the polarity pinned" {
-  # ops-api's probe envelope is {"status":"ok"} with 200 and {"status":"down"} with
-  # 503. Both ARMS are asserted: pinning only the 503 arm would pass an inverted
-  # ternary that reports every healthy pod as down.
+  # ops-api v2 (#1330): the 200 arm keeps {"status":"ok"}; the 503 arms are RFC 9457
+  # problem documents, so the "down" envelope is gone. Both ARMS are still asserted:
+  # pinning only the 503 would pass an inverted condition that reports every healthy
+  # pod as down.
   grep -q 'private static final Health OK = new Health("ok");' "$ENDPOINT"
-  grep -q 'private static final Health DOWN = new Health("down");' "$ENDPOINT"
-  local respond
-  respond="$(sed -n '/private static WebEndpointResponse<Health> respond/,/^  }/p' "$ENDPOINT")"
-  [ -n "$respond" ]
-  contains "$respond" '? new WebEndpointResponse<>(OK, WebEndpointResponse.STATUS_OK)'
-  contains "$respond" ': new WebEndpointResponse<>(DOWN, WebEndpointResponse.STATUS_SERVICE_UNAVAILABLE)'
+  run grep -c 'new Health("down")' "$ENDPOINT"
+  [ "$output" -eq 0 ]
+  # Readiness: 200 with the envelope, 503 with the problem carrying `components`.
+  local ready_body
+  ready_body="$(sed -n '/private WebEndpointResponse<?> readyResponse()/,/^  }/p' "$ENDPOINT")"
+  [ -n "$ready_body" ]
+  contains "$ready_body" 'if (health.ready()) {'
+  contains "$ready_body" 'return new WebEndpointResponse<>(OK, WebEndpointResponse.STATUS_OK);'
+  contains "$ready_body" 'PROBLEM_TYPE_NOT_READY,'
+  contains "$ready_body" 'readinessDetail(components),'
+  contains "$ready_body" 'components.isEmpty() ? null : components));'
+}
+
+@test "the probe 503s carry application/problem+json WITHOUT widening the produced types" {
+  # THE load-bearing Spring detail (#1330). WebEndpointResponse takes a MimeType
+  # alongside the status, and Actuator's MVC adapter turns a non-null one into
+  # ResponseEntity.contentType(...) -- Spring MVC then short-circuits negotiation on a
+  # concrete preset type BEFORE consulting the producible types. So no servlet filter
+  # is needed, and the produced list must stay application/json only: widening it
+  # would change the negotiated type for /info and /health as a side effect.
+  local problem_fn
+  problem_fn="$(sed -n '/private static WebEndpointResponse<?> problem(Object body)/,/^  }/p' "$ENDPOINT")"
+  [ -n "$problem_fn" ]
+  contains "$problem_fn" 'WebEndpointResponse.STATUS_SERVICE_UNAVAILABLE, PROBLEM_JSON);'
+  grep -qF 'private static final MimeType PROBLEM_JSON = MimeType.valueOf("application/problem+json");' "$ENDPOINT"
+  # The produced/consumed list is UNCHANGED — this is the assertion that fails if
+  # someone "fixes" the media type by widening the bean instead.
+  grep -qF 'return new EndpointMediaTypes(List.of("application/json"), List.of("application/json"));' "$ENDPOINT"
+  run grep -c 'problem+json' "$ENDPOINT"
+  # Exactly two mentions of the media type: the MimeType constant and the javadoc that
+  # explains why it is not in the produced list.
+  [ "$output" -ge 1 ]
+  local media_bean
+  media_bean="$(sed -n '/EndpointMediaTypes opsApiEndpointMediaTypes()/,/^  }/p' "$ENDPOINT")"
+  lacks "$media_bean" 'problem+json'
+}
+
+@test "the spring readiness detail is canonical and lexicographically sorted" {
+  # The wording is asserted by the conformance checker and the acceptance lane, so it
+  # is a contract string, not prose. The sort is what makes it deterministic.
+  local detail
+  detail="$(sed -n '/static String readinessDetail(Map<String, DependencyHealth.Component> components)/,/^  }/p' "$ENDPOINT")"
+  [ -n "$detail" ]
+  contains "$detail" '.sorted()'
+  contains "$detail" '"hard dependency " + joined + " is down"'
+  contains "$detail" '"hard dependencies " + joined + " are down"'
+  contains "$detail" 'return DETAIL_STARTING_UP;'
+  # The SAME hinge DependencyHealth.ready() uses — the two must stay in step, or the
+  # detail names a different set than the verdict was taken on.
+  contains "$detail" '"hard".equals(e.getValue().kind()) && "down".equals(e.getValue().status())'
+  grep -qF 'static final String PROBLEM_TYPE_NOT_READY = "urn:problem-type:ops:not-ready";' "$ENDPOINT"
+  grep -qF 'static final String PROBLEM_TYPE_NOT_ALIVE = "urn:problem-type:ops:not-alive";' "$ENDPOINT"
+  grep -qF 'static final String DETAIL_STARTING_UP = "the service is starting up";' "$ENDPOINT"
+  grep -qF 'static final String DETAIL_DRAINING = "the service is draining";' "$ENDPOINT"
 }
 
 @test "liveness is dependency-free" {
   # A dependency check in liveness turns a transient outage into a restart storm.
-  grep -q 'case "live" -> respond(availability.getLivenessState() == LivenessState.CORRECT)' \
-    "$ENDPOINT"
-  grep -q 'case "ready" -> respond(health.ready())' "$ENDPOINT"
+  #
+  # Spring is the ONE payload that can actually answer a liveness 503: the other five
+  # are unconditionally 200 on /health/live (a process that can answer HTTP is alive),
+  # while LivenessState can be BROKEN independently of any dependency. Its 503 carries
+  # the not-alive URN and NO components — a map there would be a lie.
+  local probe_op
+  probe_op="$(sed -n '/public WebEndpointResponse<?> probe(@Selector String probe)/,/^  }/p' "$ENDPOINT")"
+  [ -n "$probe_op" ]
+  contains "$probe_op" 'availability.getLivenessState() == LivenessState.CORRECT'
+  contains "$probe_op" 'problem(new Problem(PROBLEM_TYPE_NOT_ALIVE, "Service Not Alive", 503, DETAIL_NOT_ALIVE))'
+  contains "$probe_op" 'case "ready" -> readyResponse();'
+  # The liveness arm must never reach the dependency source.
+  lacks "$probe_op" 'health.components()'
+  lacks "$probe_op" 'health.ready()'
+  # The liveness problem record has no components component at all.
+  grep -qF 'public record Problem(String type, String title, int status, String detail) {}' "$ENDPOINT"
 }
 
 @test "the ops-api JSON field names are pinned to the record signatures" {
