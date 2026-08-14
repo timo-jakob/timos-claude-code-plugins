@@ -129,7 +129,20 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 25, not 15 (#1206). The macos leg is the binding one and it had been
+    # running at 94% of the old budget: 14m05s against 15m on the last green
+    # main run before this bump, i.e. 55 seconds of headroom for a suite that
+    # grows every story. #1206's 226 new cases are ~7% of the suite — about
+    # 59s on that leg — so they consumed exactly the remaining slack and the
+    # leg began timing out at test ~2814 of 3318 with everything passing.
+    #
+    # A timeout that a GREEN suite trips is worse than no timeout: it reports
+    # `cancelled`, which is neutral rather than red, so branch protection never
+    # fires and the PR simply never merges with nothing obviously broken. The
+    # new value is ~1.7x the measured need, which absorbs runner variance while
+    # still bounding a genuine hang. Re-measure when it next gets close: the
+    # figure to watch is the macos leg's wall time on a green main run.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
         with:

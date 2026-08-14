@@ -547,6 +547,132 @@ without the flag.
 
 ---
 
+## 3h. No direct-to-cluster deploys (`no-cluster-deploy`) — application repositories only
+
+> **Infrastructure (GitOps) repositories: this section does not apply.** If
+> `.maintenance.yml` records `primary: kubernetes`, bootstrap installs neither
+> half of this gate and `branch-protection.sh --iac-only true` never requires
+> the context — your checks are `kubernetes-ci.yml`'s six (`render`, `schema`,
+> `lint`, `policy`, `config-scan`, `argocd`) instead. Writing to a cluster is
+> what an infrastructure repository is *for*.
+
+**Nothing for you to do — this is what the check means when it fires.**
+
+This repository is an **application repository**, and the family's promotion
+contract says an application repository never writes to a cluster itself. It
+publishes versioned, immutable images; a version change reaches a cluster as a
+**pull request against the infrastructure repository**. That single rule is what
+makes every cluster change reviewable and auditable after the fact — see
+[issue #1189](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1189)
+for the position and its rationale.
+
+`scripts/check-no-cluster-deploy.zsh` enforces the application-repo half, and
+the `no-cluster-deploy` workflow runs it on every pull request targeting
+`{{DEFAULT_BRANCH}}`. It scans
+`.github/workflows/**` and **fails** on a step whose `run:` body invokes a
+cluster-writing command, naming the workflow file, the job, the step (or its
+index when the step is unnamed) and the command.
+
+**The exact v1 command set** — closed, and stated in the checker's own header:
+
+| Fails the check | Passes the check |
+| --- | --- |
+| `kubectl apply`, `create`, `replace`, `patch`, `delete` | `kubectl get`, `describe`, `diff`, `logs`, `wait` |
+| `kubectl rollout restart`, `kubectl set image`, `kubectl scale` | — |
+| `helm install`, `helm upgrade` (with **or** without `--install`), `helm rollback`, `helm uninstall` (and its `delete` / `del` / `un` aliases) | `helm template`, `helm lint`, `helm diff` |
+| `argocd app sync`, `create`, `set` | `argocd app diff` |
+| `flux reconcile`, `flux bootstrap` | `kustomize build` on its own, `kubeconform`, `conftest` |
+
+`kustomize build | kubectl apply -f -` fails: the `kubectl apply` half matches.
+
+**Three exemptions — two scoped, one repo-wide:**
+
+- **An ephemeral cluster the job stands up itself** (job-scoped). A job that
+  runs `kind create cluster`, `k3d cluster create`, `minikube start` or `ctlptl
+  apply` exempts the cluster-writing steps *at or after* it in that same job —
+  including the rest of the creating step's own body, so a single `run: |` that
+  stands up kind and then applies to it is exempt. An integration test that
+  spins up kind and applies manifests to it is not a deploy. A creating step
+  carrying an **`if:` guard does not** confer the exemption — the
+  branch-per-environment shape is what the gate exists to catch, so that
+  direction fails closed. The exemption is **job-scoped**: the same step in a sibling job still
+  fails, because a sibling job writes to whatever cluster its own credentials
+  point at.
+- **A command carrying a real dry-run flag**, **command-scoped**: bare
+  `--dry-run`, `--dry-run=client`, `--dry-run=server`, `--dry-run=true`, or the
+  separate-argument `--dry-run client|server`. **`--dry-run=none` and
+  `--dry-run=false` do not exempt** — `none` is kubectl's default and both mean
+  "really do it". Note the scope: it exempts *that command*, not the whole step,
+  so a step that dry-runs and then really applies still fails on the second
+  command. A step-wide exemption would be a one-line switch for silencing the
+  check, which is the escape hatch the section below says does not exist.
+- **A repository recording `primary: kubernetes`** (repo-wide) — see
+  *Infrastructure repositories* below.
+
+**There is deliberately no escape hatch** — no `# allow` annotation, no
+allowlist file. The whole value of this rule is auditability, and an annotation
+that switches it off in the file that breaks it is exactly the audit trail the
+rule exists to protect. A repository with a genuine exception **changes the
+check**, in a reviewed pull request a human reads. Outgrowing a decision earns a
+deliberate re-decision, which is not the same as a standing escape hatch.
+
+**Infrastructure repositories are exempt as a whole.** The checker exits 0 when
+`.maintenance.yml` records `primary: kubernetes` — an infrastructure repository
+is the one place a cluster write belongs, and its own checks are
+`kubernetes-ci.yml`'s six jobs instead. A repository that carries Kubernetes
+manifests **and** records a language primary is an application repository, and
+is checked.
+
+**Known gaps (v1).** A pass means "no cluster-writing command appears literally
+in a workflow's own `run:` text" — it is not proof the repository never writes to
+a cluster:
+
+- Only `run:` script bodies are inspected. A deploy expressed as a marketplace
+  action (`uses: azure/k8s-deploy@v4` and friends) or as a reusable workflow is
+  not detected yet.
+- **Indirection is not followed** — `run: ./scripts/deploy.sh`, `run: make
+  deploy`, or a composite action under `.github/actions/**` reaches a cluster
+  with nothing here to see.
+- The ephemeral exemption reads `run:` bodies for the same reason, so a job that
+  stands its cluster up with `helm/kind-action` is **not** exempt and goes red.
+  That direction fails *closed* — a false alarm you can see, rather than a
+  silent pass. Your recourse is to stand the cluster up in a `run:` step
+  (`kind create cluster`), or to change the check in a reviewed pull request;
+  there is no annotation that will silence it.
+- Some cluster-mutating verbs are outside the closed v1 set **by decision, not
+  because they are harmless**: `kubectl run`, `edit`, `annotate`, `label`,
+  `expose`, `cordon`, `uncordon`, `drain`, `taint`, `exec`, and `helm plugin
+  install`. The rule still forbids them; the check simply does not catch them
+  yet. Widening the set is a deliberate re-decision in a reviewed pull request.
+- A trailing `# …` comment is dropped from the command it follows, so prose
+  after a real command neither triggers a match nor silences one.
+- **A command reached only through a shell variable or an alias** defined
+  earlier in the same body (`KUBECTL=kubectl; $KUBECTL apply -f k8s/`) is not
+  resolved — tool detection compares literal basenames.
+- A **nested** command substitution (`$( … $( … ) … )`) is lifted at the first
+  `)`, so the outer remainder is read as text rather than as a command.
+- A **heredoc body**, and a quoted string spanning several physical lines, are
+  scanned line by line as commands. A step that writes documentation or a
+  deploy script naming a banned command inside one **is reported**. That fails
+  *closed* — a false alarm you can see — and is stated here rather than left to
+  be discovered.
+- A tool invoked **inside a container** (`docker run … bitnami/kubectl apply`)
+  is not resolved: `docker` is the command, and the image argument is not
+  walked. Named separately from indirection because the banned command *is*
+  written literally on the line.
+- The command inside `sh -c "…"` is re-scanned but not re-split, so only its
+  first command is resolved (`sh -c "cd x && kubectl apply -f ."`).
+
+> ⚠️ **`SETUP.md` is a scaffold file, so it is deliberately not drift-tracked.**
+> A repository that adopts this check later — through `/development:bootstrap`'s
+> gap-fill, which delivers `scripts/check-no-cluster-deploy.zsh` and
+> `.github/workflows/no-cluster-deploy.yml` — will **not** receive this section
+> automatically, because bootstrap never overwrites a customized scaffold file.
+> Copy it across by hand, or read the checker's header, which carries the same
+> rules.
+
+---
+
 ## 4. GitHub branch protection on `{{DEFAULT_BRANCH}}`
 
 > 🤖 **Automated alternative**: `scripts/branch-protection.sh` applies the rules
@@ -559,8 +685,9 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
 - [x] Require a pull request before merging (1 approval, dismiss stale reviews)
 - [x] Require status checks to pass before merging — the **exact contexts**
   `branch-protection.sh` applies (it's the source of truth; this list mirrors it):
-  - **PUBLIC**: `test-and-coverage`, `sonarcloud`, `semgrep`, `license-fs`, `pre-commit`, `analyze (<language>)` (one per CodeQL language), `image` (only if a Dockerfile is present)
-  - **PRIVATE**: `test-and-coverage`, `sonarqube`, `trivy-fs`, `semgrep`, `license-fs`, `pre-commit`, `image` (only if a Dockerfile is present)
+  - **PUBLIC**: `test-and-coverage`, `sonarcloud`, `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, `analyze (<language>)` (one per CodeQL language), `image` (only if a Dockerfile is present)
+  - **PRIVATE**: `test-and-coverage`, `sonarqube`, `trivy-fs`, `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, `image` (only if a Dockerfile is present)
+  - **`no-cluster-deploy` (§3h)** is required on both application paths **when BOTH `.github/workflows/no-cluster-deploy.yml` and `scripts/check-no-cluster-deploy.zsh` are on disk** (absent, the script warns and omits the context, exactly as it does for `image`/`ko-image.yml`, so a repo predating the gate is never wedged at `expected`). Unlike `image`, it carries **no path filter at all** — a required check whose workflow a `paths:` filter skipped sits at `expected` forever and wedges every PR that misses those paths. It is a static scan of `.github/workflows/**`, so running it unconditionally costs seconds. It is **not** in the IaC set below: an infrastructure repo is the one place a cluster write belongs.
   - **IaC** (the kubernetes topic marker with no application language and no other `primary:` recorded in `.maintenance.yml` — `branch-protection.sh --iac-only true`): `render`, `schema`, `lint`, `policy`, `config-scan`, `argocd`. This set **replaces** the two above rather than adding to them: that path emits no `quality-*.yml`, so every language-app context would sit at `expected` forever and block each PR. The six come from `.github/workflows/kubernetes-ci.yml`, and each validates the **rendered** manifests rather than the templates.
   - **`image` is path-conditional (#386):** keep it required, but the job only runs the container build+scan when the PR touches container files (`Dockerfile*`, `.dockerignore`, compose files, the scanner policy `.snyk`/`trivy.yaml`). On an app/dependency PR that touches none of those, the `image` job ends green *without* scanning — so a pre-existing base-image CVE the change can't influence never blocks it ("working on the app → app checks, working on the image → container checks"). A PR that does touch container files gets the full scan gate. Non-PR events (push to the default branch, release, weekly schedule) always scan + publish.
   - **Not required:** `push-and-sign` (the GHCR publish job) runs only on push/release events — it never produces a PR check, so it is never in the required list. Snyk's `security/snyk` (Open Source) is an **advisory** PR check, not a workflow job — leave it unchecked here (matching `branch-protection.sh`, which never adds it). `code/snyk` (Snyk Code) is **disabled** per §2.5 (CodeQL covers SAST), so it isn't produced at all; if you leave it on, it's advisory too and the Approver excludes it from its green gate (#387). `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).

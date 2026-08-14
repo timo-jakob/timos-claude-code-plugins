@@ -98,3 +98,41 @@ JSON
   [ -n "$f" ]
   [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
 }
+
+@test "the #1206 direct-to-cluster gate workflow is TRACKED (#1206)" {
+  # same coupling, the other required check: `no-cluster-deploy` is a REQUIRED
+  # context in every bootstrapped application repo, so a consumer running a
+  # stale copy of the checker workflow keeps reporting green against an older
+  # command set — and without this entry the Step 3.6 marker is written and
+  # never consumed, so that staleness is invisible forever.
+  local tpl
+  tpl="common/.github/workflows/no-cluster-deploy.yml.tmpl"
+  printf '# claude-bootstrap: rendered from %s @ v0.1.0 sha256:deadbeefdeadbeef\nname: no-cluster-deploy\n' \
+    "$tpl" > "$REPO/.github/workflows/no-cluster-deploy.yml"
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  local f
+  f="$(printf '%s' "$output" | jq -c '.[] | select(.file == ".github/workflows/no-cluster-deploy.yml")')"
+  [ -n "$f" ]
+  [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
+}
+
+@test "the #1206 CHECKER SCRIPT is TRACKED too — the half that goes stale (#1206)" {
+  # detect-template-drift.zsh's own comment says the checker "holds the matched
+  # command set, so it is the half that actually goes stale", and that tracking
+  # only the workflow would leave exactly this drift invisible. It also exercises
+  # a marker layout no other tracked path has: line 2, after a shebang, which is
+  # where stamp-marker.zsh writes it (#783) and where the detector's
+  # `head -10 | grep` must still find it.
+  local tpl
+  tpl="common/scripts/check-no-cluster-deploy.zsh"
+  mkdir -p "$REPO/scripts"
+  printf '#!/usr/bin/env zsh\n# claude-bootstrap: rendered from %s @ v0.1.0 sha256:deadbeefdeadbeef\nemulate -L zsh\n' \
+    "$tpl" > "$REPO/scripts/check-no-cluster-deploy.zsh"
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  local f
+  f="$(printf '%s' "$output" | jq -c '.[] | select(.file == "scripts/check-no-cluster-deploy.zsh")')"
+  [ -n "$f" ]
+  [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
+}

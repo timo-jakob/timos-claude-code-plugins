@@ -1820,6 +1820,62 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
 }
 
+# --- #1206: the direct-to-cluster gate's adoption wiring ----------------------
+#
+# The pair (checker + workflow) is collected from templates/common like any
+# other artifact, so what actually needs pinning is (a) that both halves DO reach
+# missing_artifacts on an application repo — that is the only route by which an
+# already-bootstrapped repo adopts a required check, since detect-template-drift
+# reports drift only on files that already exist — and (b) that BOTH are held out
+# on the IaC path, where the gate would fail the repo for doing its job.
+
+@test "detect-stack #1206: an app repo reports BOTH halves of the gate as gaps" {
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" "scripts/check-no-cluster-deploy.zsh")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/no-cluster-deploy.yml")" = "number" ]
+}
+
+@test "detect-stack #1206: a PRESENT pair is existing, not missing" {
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  mkdir -p scripts .github/workflows
+  printf '#!/usr/bin/env zsh\n' > scripts/check-no-cluster-deploy.zsh
+  printf 'name: no-cluster-deploy\n' > .github/workflows/no-cluster-deploy.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts["scripts/check-no-cluster-deploy.zsh"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.existing_artifacts[".github/workflows/no-cluster-deploy.yml"]' <<<"$out")" = "true" ]
+  [ "$(missing_has "$out" "scripts/check-no-cluster-deploy.zsh")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/no-cluster-deploy.yml")" = "null" ]
+}
+
+@test "detect-stack #1206: BOTH halves are held out on the IaC path" {
+  # never one without the other — the workflow runs the script, so gap-filling
+  # either alone installs a required check that cannot pass. And an IaC repo is
+  # the one place a cluster write BELONGS, so neither belongs here at all.
+  k8s_chart
+  printf 'primary: kubernetes\n' > .maintenance.yml
+  stub_gh PUBLIC
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | length' <<<"$out")" -eq 0 ]
+  [ "$(missing_has "$out" "scripts/check-no-cluster-deploy.zsh")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/no-cluster-deploy.yml")" = "null" ]
+  # POSITIVE CONTROL: templates/common IS being collected on this path, so the
+  # two nulls above are a decision rather than an empty candidate set
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1206: a MIXED repo keeps the gate as a gap (#1193)" {
+  # a chart plus a stray tooling language is an application repo as far as this
+  # slice is concerned, so it must still be told it is missing the gate — the
+  # hold-out keys on the IaC path, never on the kubernetes marker
+  k8s_chart
+  printf '{"name":"x","dependencies":{"husky":"^9"}}\n' > package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  [ "$(missing_has "$out" "scripts/check-no-cluster-deploy.zsh")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/no-cluster-deploy.yml")" = "number" ]
+}
+
 @test "detect-stack #1154: a javascript repo DOES report its per-language fragments" {
   # the positive control the hold-out sweep needs: its own positive assertion
   # comes from templates/iac, a different collect_from, so without this a break
