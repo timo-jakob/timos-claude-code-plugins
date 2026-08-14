@@ -49,7 +49,20 @@ def load_config() -> dict:
 PIN_RE = re.compile(
     r"https://cdn\.jsdelivr\.net/gh/" + re.escape(DEP) + r"@[^ \"]*ruleset\.yaml"
 )
-SKIP_DIRS = {".git", "node_modules", "site", "worktrees", ".venv", "__pycache__"}
+SKIP_DIRS = {".git", "node_modules", "site", ".venv", "__pycache__"}
+# Anchored, mirroring the find(1) predicates in tests/api-styleguide-ruleset.bats's
+# sweep. A bare "worktrees" component would also skip a future docs/worktrees/,
+# which that sweep would still inspect — and a file visible to one but not the
+# other is exactly the split this helper exists to prevent.
+SKIP_PREFIX = (".claude", "worktrees")
+
+# The floor the walk must always find. Kept in step with the same three paths
+# MAINTAINING.md records as the pin lockstep and the bats sweep asserts by name.
+KNOWN_PIN_SITES = {
+    "development/skills/bootstrap/templates/common/.spectral.yaml",
+    "styleguide/spectral/ruleset.yaml",
+    "docs/how-to/adopt-the-api-styleguide.md",
+}
 
 
 def discover_pin_sites() -> list[str]:
@@ -69,7 +82,8 @@ def discover_pin_sites() -> list[str]:
         # itself contains "worktrees" and an absolute-parts test skipped EVERY
         # file — leaving the coverage assertion below vacuous while still
         # printing "ok". `[:-1]` so a FILE named e.g. "site" is not skipped.
-        if SKIP_DIRS & set(rel.parts[:-1]):
+        dirs = rel.parts[:-1]
+        if SKIP_DIRS & set(dirs) or dirs[:2] == SKIP_PREFIX:
             continue
         try:
             text = path.read_text(errors="ignore")
@@ -77,13 +91,15 @@ def discover_pin_sites() -> list[str]:
             continue
         if PIN_RE.search(text):
             sites.append(str(rel))
-    if not sites:
-        # The repo always carries at least three: the shim, the ruleset header
-        # and the how-to. Finding none means the walk is broken, not that the
-        # pin vanished — and a silent [] is precisely how this check went
-        # vacuous once already.
+    # IDENTITY, not merely non-empty. A non-empty canary still passes when the
+    # walk shrinks from three sites to one — a new SKIP_DIRS entry, a swallowed
+    # read error, a rename under a skipped directory — and the coverage check's
+    # strength is proportional to what the walk actually finds. Discovery stays
+    # open-ended (a fourth site is covered for free); this only pins the floor.
+    missing = KNOWN_PIN_SITES - set(sites)
+    if missing:
         sys.exit(
-            "pin-site discovery found nothing — the walk is broken "
+            f"pin-site discovery is broken — known sites not found: {sorted(missing)} "
             f"(searched under {REPO_ROOT})"
         )
     return sorted(sites)
@@ -113,7 +129,13 @@ def check_manager() -> None:
     # that silently stops matching produces no PR, and "no PR" is not an error
     # Renovate reports anywhere.
     shim = (REPO_ROOT / SHIM_PATH).read_text()
-    for i, pattern in enumerate(manager["matchStrings"]):
+    patterns = manager["matchStrings"]
+    # An empty list makes the loop below a no-op and the whole helper print "ok"
+    # while the manager extracts nothing — the same empty-producer vacuity the
+    # bats sweep and the discovery canary above guard against.
+    if not patterns:
+        sys.exit("matchStrings is empty — the manager extracts nothing")
+    for i, pattern in enumerate(patterns):
         match = re.search(js_to_py(pattern), shim)
         if not match:
             sys.exit(f"matchStrings[{i}] does not match the shipped shim")
@@ -176,16 +198,21 @@ def check_grouping() -> None:
              "groupSlug", "commitMessageTopic"}
 
     def applies(rule: dict) -> bool:
+        # The MODELLED exclusion runs first. Renovate ANDs its selectors, so a
+        # rule whose matchManagers lacks custom.regex cannot govern the pin no
+        # matter what else narrows it — bailing on its unknown keys first would
+        # turn every unrelated renovate.json change into a styleguide failure.
+        managers = rule.get("matchManagers")
+        if managers is not None and "custom.regex" not in managers:
+            return False
         unknown = set(rule) - known
         if unknown:
             sys.exit(f"unmodelled packageRule selector(s): {sorted(unknown)}")
-        managers = rule.get("matchManagers")
-        # A rule with NO matchManagers matches EVERY dependency in Renovate,
-        # including the pin — treating it as non-applying would let a
-        # `{"groupName": "github-actions"}` catch-all sweep the pin back in
-        # while this check still printed "api-styleguide".
-        if managers is not None and "custom.regex" not in managers:
-            return False
+        # NOTE the `is not None` above: a rule with NO matchManagers matches
+        # EVERY dependency in Renovate, the pin included, so it must fall
+        # through to APPLY here — otherwise a `{"groupName": "github-actions"}`
+        # catch-all would sweep the pin back into the batch while this check
+        # still printed "api-styleguide".
         names = rule.get("matchDepNames")
         return names is None or dep in names
 

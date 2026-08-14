@@ -495,20 +495,26 @@ CODIFIED_RULE_IDS=(
   # job-level knob is how a gate is actually made advisory, and "just set
   # continue-on-error" is the predictable response to the first CDN blip — which
   # this job's own header says it deliberately couples itself to.
-  run yq -r '[.jobs.check.steps[].continue-on-error] | map(select(. == true)) | length' "$wf"
+  # PRESENCE, not truthiness. `select(. == true)` compares against the YAML
+  # boolean, so `continue-on-error: ${{ … }}` and `continue-on-error: "true"`
+  # are strings that slip past it — and an expression is exactly how someone
+  # writes "advisory only when the CDN is flaky", the predictable response to
+  # the first blip on a job that deliberately couples itself to jsDelivr.
+  run yq -r '[.jobs.check.steps[] | select(has("continue-on-error"))] | length' "$wf"
   [ "$output" = "0" ]
-  run yq -r '.jobs.check.continue-on-error // "unset"' "$wf"
-  [ "$output" = "unset" ]
-  run yq -r '.jobs.check.if // "unset"' "$wf"
-  [ "$output" = "unset" ]
+  run yq -r '.jobs.check | has("continue-on-error")' "$wf"
+  [ "$output" = "false" ]
+  # `// "unset"` would also swallow `if: false` — the standard way to park a job
+  # without deleting it — because yq's // fires on false as well as null.
+  run yq -r '.jobs.check | has("if")' "$wf"
+  [ "$output" = "false" ]
 
-  # All five trigger paths, on BOTH halves: dropping the checker's own path means
-  # a PR editing the checker never runs it, and dropping the fixtures path means a
-  # PR mutating what it asserts against is unguarded.
+  # The EXACT path set, on both halves. Four `contains` needles left the fifth
+  # (the workflow's own path) unpinned, so dropping it from both halves — which
+  # stops the gate self-triggering on a PR that neuters it — stayed green.
   run yq -r '[.on.pull_request.paths[]] | sort | join(",")' "$wf"
   [ "$status" -eq 0 ]
-  contains "$output" 'scripts/check-styleguide-pin.zsh'
-  contains "$output" 'tests/fixtures/api-styleguide/**'
+  [ "$output" = ".github/workflows/styleguide-pin.yml,development/skills/bootstrap/templates/common/.spectral.yaml,scripts/check-styleguide-pin.zsh,styleguide/spectral/ruleset.yaml,tests/fixtures/api-styleguide/**" ]
   local pr_paths="$output"
   run yq -r '[.on.push.paths[]] | sort | join(",")' "$wf"
   [ "$output" = "$pr_paths" ]

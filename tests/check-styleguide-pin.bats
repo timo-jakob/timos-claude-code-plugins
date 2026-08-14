@@ -271,11 +271,22 @@ check() {
   # One stub call, not two: the earlier `stub_npx_all_eight` here was overwritten
   # by the next line, and deleting the wrong one would have silently turned this
   # case into a duplicate of the happy path.
-  stub_npx '[{"code":"operation-operationId","severity":0},{"code":"operation-operationId-unique","severity":0},{"code":"info-description","severity":0},{"code":"operation-description","severity":0},{"code":"operation-tags","severity":0},{"code":"org-deprecated-operation-has-sunset","severity":0},{"code":"org-resource-naming","severity":0},{"code":"org-problem-json-errors","severity":0}]' \
-    '[{"code":"org-resource-naming","severity":0}]'
+  stub_npx "$ALL_EIGHT" '[{"code":"org-resource-naming","severity":0}]'
   check
   [ "$status" -eq 1 ]
   contains "$output" "conforming fixture produced 1 error finding"
+}
+
+@test "a MISSING non-conforming fixture is exit 2, never a conformance verdict" {
+  # The script loops over BOTH fixtures; only the conforming half was covered.
+  # Narrowing that loop makes a deleted non-conforming fixture surface as "did
+  # not enforce 8 of 8" at exit 1 — blaming the pin for a missing file, the
+  # misdiagnosis the 1-vs-2 split exists to prevent.
+  rm "$W/tests/fixtures/api-styleguide/nonconforming/openapi.yaml"
+  check
+  [ "$status" -eq 2 ]
+  contains "$output" "fixture not found"
+  contains "$output" "/nonconforming/openapi.yaml"
 }
 
 @test "a MISSING conforming fixture is exit 2, never a silent green" {
@@ -316,7 +327,27 @@ check() {
   stub_npx_stderr 'npm ERR! 404 Not Found - @stoplight/spectral-cli'
   check
   [ "$status" -eq 2 ]
-  contains "$output" "npm ERR! 404 Not Found"
+  # The LABEL must be contiguous with the message. A bare `contains "npm ERR!"`
+  # is satisfied by the stub's stderr leaking straight through to the script's
+  # own stderr, which bats merges into $output — so it passes with the
+  # `2>"$SPECTRAL_ERR"` redirect DELETED and the whole mechanism dead. This
+  # needle is true only when the script itself surfaced the text.
+  contains "$output" "spectral stderr: npm ERR! 404 Not Found"
+}
+
+@test "only the LAST five stderr lines are surfaced" {
+  # Pins the `tail -n 5` half of the mechanism: without it the diagnostic would
+  # dump an entire npm log into the CI output.
+  stub_npx_stderr 'FIRST-LINE-MARKER
+two
+three
+four
+five
+LAST-LINE-MARKER'
+  check
+  [ "$status" -eq 2 ]
+  contains "$output" "LAST-LINE-MARKER"
+  lacks "$output" "FIRST-LINE-MARKER"
 }
 
 @test "unparseable spectral output is a TOOLING failure (exit 2), not a verdict" {
