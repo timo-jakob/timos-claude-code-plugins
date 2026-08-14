@@ -372,14 +372,17 @@ setup() {
 # never a hardcoded ban"). templates_dir resolves as $script_dir/../templates, so
 # copying the script beside a fake tree is enough to redirect it.
 
-_fake_tree() {  # $1.. = ops major dir names to create, each with an openapi.yaml
-  local root="$BATS_TEST_TMPDIR/fake" d
+_fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> openapi.yaml.tmpl
+  local root="$BATS_TEST_TMPDIR/fake" d name spec
   rm -rf "$root"
   mkdir -p "$root/scripts" "$root/templates/common"
   cp "$DETECT" "$root/scripts/detect-stack.sh"
   for d in "$@"; do
-    mkdir -p "$root/templates/common/contracts/ops/$d"
-    printf 'openapi: 3.1.0\n' > "$root/templates/common/contracts/ops/$d/openapi.yaml"
+    name="${d%%:*}"
+    spec="openapi.yaml"
+    if [ "$d" != "$name" ]; then spec="openapi.yaml.tmpl"; fi
+    mkdir -p "$root/templates/common/contracts/ops/$name"
+    printf 'openapi: 3.1.0\n' > "$root/templates/common/contracts/ops/$name/$spec"
   done
   printf '%s' "$root"
 }
@@ -394,6 +397,12 @@ _fake_tree() {  # $1.. = ops major dir names to create, each with an openapi.yam
   [ "$rc" -eq 0 ]
   [ "$(jq -r .has_dockerfile <<<"$out")" = "false" ]
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" = "null" ]
+  # The gate is WORKFLOW-ONLY: only the workflow needs a container to run, so the
+  # fragment and the checker stay gappable. Widening it to the trio — the
+  # "never one without the other" reflex this script applies to genuine pairs —
+  # would silently stop offering the ops surface to Dockerfile-less repos.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("scripts/check-ops-conformance.zsh")' <<<"$out")" != "null" ]
 }
 
 @test "detect-stack: #1330 ops-conformance.yml IS a gap once a Dockerfile exists" {
@@ -416,6 +425,47 @@ _fake_tree() {  # $1.. = ops major dir names to create, each with an openapi.yam
   # two live ops majors installed into one repo, neither deletable afterwards.
   [ "$(jq -r '.missing_artifacts | index("contracts/ops/v3/openapi.yaml")' <<<"$out")" != "null" ]
   [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 the derivation sees .tmpl-suffixed ops majors too" {
+  # collect_from strips `.tmpl`, so a major shipped as openapi.yaml.tmpl produces
+  # a contracts/ops/vN/openapi.yaml candidate. If the derivation globbed only the
+  # literal name it would not see that major: dropping the .tmpl glob from the
+  # NEWEST loop inverts the hold-out (the frozen major becomes the gap), and
+  # dropping it from the HOLD-OUT loop blind-installs a frozen major. Neither is
+  # visible without a .tmpl fixture — the shipped tree has only literal specs.
+  printf 'plugins { java }\n' > build.gradle.kts
+  local root; root="$(_fake_tree v2:tmpl v3:tmpl)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v3/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 literal and .tmpl ops majors compare against each other" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  local root; root="$(_fake_tree v2:tmpl v3)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v3/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 a NESTED-only Dockerfile does not unlock ops-conformance.yml" {
+  # The gate must key on the build context the workflow actually uses — a bare
+  # `docker build .` reads ./Dockerfile — NOT on has_dockerfile, which is also
+  # true for docker/Dockerfile and any Dockerfile at depth<=3. Gating on the
+  # coarse flag reproduces the guaranteed-red install the gate exists to prevent.
+  printf 'plugins { java }\n' > build.gradle.kts
+  mkdir -p services/api
+  printf 'FROM eclipse-temurin:21-jre\n' > services/api/Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # The loose flag IS true here — that is precisely the trap.
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" = "null" ]
+  # Positive control: the ops surface itself is still offered to this repo.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
 }
 
 @test "detect-stack: #1330 majors are compared arithmetically — v10 beats v9" {

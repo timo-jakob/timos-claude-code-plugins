@@ -1692,7 +1692,13 @@ done
 # installs it. The fragment and the checker are NOT gated here: the ops surface is
 # deliberately independent of a business OpenAPI contract (every backend serves
 # it), and only the workflow needs a container to run.
-[[ "$has_dockerfile" == "true" ]] || held_out+=(".github/workflows/ops-conformance.yml")
+#
+# Gated on a ROOT Dockerfile, NOT on has_dockerfile: that flag is also true for
+# docker/Dockerfile and for any Dockerfile at depth<=3, while the workflow runs a
+# bare `docker build .`, which reads ./Dockerfile only. Gating on the coarse flag
+# would leave exactly the guaranteed-red install this block exists to prevent for
+# every repo whose container lives outside the root.
+[[ -f "$cwd/Dockerfile" ]] || held_out+=(".github/workflows/ops-conformance.yml")
 if [[ "$openapi_surface" != "true" ]]; then
 	held_out+=(
 		".spectral.yaml" "CONTRACTS.md"

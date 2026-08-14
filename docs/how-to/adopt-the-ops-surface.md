@@ -121,8 +121,12 @@ pull-compat surface served by the SDK's Prometheus exporter.
   **Your own representation must also serve the v2 probe 503s as
   `application/problem+json`** — see
   [what actually changes on the wire](#what-actually-changes-on-the-wire).
-  Actuator's own 503 body is the v1 envelope the checker reports as *unmigrated*,
-  and this is the half a config-only route cannot reach: it needs code. Note the
+  Actuator's own 503 body is `{"status":"DOWN"}`, and this is the half a
+  config-only route cannot reach: it needs code. Do **not** expect the checker's
+  *unmigrated* migration pointer here — that branch matches the org v1 payload's
+  lowercase `{"status":"down"}` with no `type` member, so Actuator's uppercase
+  body falls through and is reported as a content-type/shape failure instead.
+  Both are the same underlying cause; only one of them says so. Note the
   trap that makes it easy to miss — a healthy service never answers 503, so a
   green conformance run does **not** tell you this is done.
 - **Python (non-Spring)** — use the blessed reference implementation bootstrap

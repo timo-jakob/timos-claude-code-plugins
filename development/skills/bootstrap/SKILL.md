@@ -1782,8 +1782,11 @@ The installed set:
   against the running service (independent of epic #704's rest harness; #704 may
   later fold it into the `acceptance (rest)` leg). Also **path-conditional**
   (`paths: contracts/ops/**` + its own wiring) — never a required context.
-  **Render it only when the repo has a Dockerfile** (`has_dockerfile == true`,
-  detected in Step 1 — the canonical container the job builds). When there is no
+  **Render it only when the repo has a Dockerfile at its ROOT** — the job runs a
+  bare `docker build .`, which reads `./Dockerfile` only. Do **not** key this on
+  `has_dockerfile`: that flag is also true for `docker/Dockerfile` and for any
+  Dockerfile at depth ≤ 3, so a repo whose container lives elsewhere would get a
+  workflow that reds on its first run. When there is no root
   Dockerfile, **omit this workflow** (still install the fragment + checker) and
   add a Step 5 checklist TODO — *"wire `ops-conformance.yml` once the service has
   a canonical container"* — because its first step is `docker build .`, so
@@ -1804,8 +1807,9 @@ The installed set:
   common/scripts/check-ops-conformance.zsh
 ```
 
-Then render the ops-conformance workflow **only when `has_dockerfile == true`**
-(see the bullet above — omit it, with a Step 5 TODO, on a Dockerfile-less repo):
+Then render the ops-conformance workflow **only when the repo has a ROOT
+`Dockerfile`** (see the bullet above — omit it, with a Step 5 TODO, otherwise;
+`has_dockerfile` is deliberately NOT the signal here):
 
 ```bash
 "<skill-base-dir>/scripts/render.zsh" \
