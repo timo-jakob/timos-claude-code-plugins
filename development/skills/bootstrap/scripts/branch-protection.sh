@@ -99,6 +99,37 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 # These names must match the `jobs.<id>` keys in the generated workflow files.
 checks=("test-and-coverage" "semgrep" "pre-commit")
 
+# --- the #1206 direct-to-cluster gate ----------------------------------------
+# `no-cluster-deploy` is the application-repo half of the promotion contract: an
+# app repo publishes images and never writes to a cluster itself. Required on
+# THIS path only — an infrastructure repo is supposed to write to a cluster, so
+# §3l renders no such workflow and requiring the context there would pin every
+# IaC PR on the permanent `expected` state. Its workflow carries no path filter
+# for the same reason, so when it exists it always reports.
+#
+# Gated on the workflow actually being ON DISK, exactly as the `image` context
+# is gated on ko-image.yml below, and for the same reason. Unlike
+# `test-and-coverage`, this workflow is NEW (#1206): every repo bootstrapped
+# before it lacks the file, and this script is documented as runnable standalone
+# and is re-run by the State-D gap-fill. Requiring a context no workflow reports
+# wedges every PR at `expected` forever — the failure this file warns about four
+# separate times. branch-protection.sh always runs from the target repo root, so
+# the path is repo-relative.
+if [[ "$IAC_ONLY" != "true" ]]; then
+	# BOTH halves, because the workflow runs the script: a present workflow with
+	# a missing checker makes every PR fail with `no such file or directory`
+	# instead of a verdict — the same wedge one level down.
+	if [[ -f .github/workflows/no-cluster-deploy.yml && -f scripts/check-no-cluster-deploy.zsh ]]; then
+		checks+=("no-cluster-deploy")
+	else
+		missing_half=".github/workflows/no-cluster-deploy.yml"
+		[[ -f "$missing_half" ]] && missing_half="scripts/check-no-cluster-deploy.zsh"
+		warn "\`$missing_half\` is absent — NOT requiring the \`no-cluster-deploy\`"
+		warn "check (it would never report a usable verdict). Re-run"
+		warn "/development:bootstrap to render the #1206 direct-to-cluster gate."
+	fi
+fi
+
 # --- the infrastructure-as-code path takes an entirely different check set ----
 # Not an addition to the language-app set but a REPLACEMENT: on this path
 # quality-*.yml is not rendered, so every context above would sit at `expected`

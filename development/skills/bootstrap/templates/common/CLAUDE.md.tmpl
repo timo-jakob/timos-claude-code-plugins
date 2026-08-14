@@ -41,6 +41,20 @@ complete.
 - Language-specific tests + coverage report.
 - Semgrep + secret scanning.
 - CodeQL (public repos only).
+- `no-cluster-deploy`: a static scan of `.github/workflows/**` that **fails the
+  PR** if a step's `run:` body writes to a cluster (`kubectl
+  apply|create|replace|patch|delete`, `kubectl rollout restart`, `kubectl set
+  image`, `kubectl scale`, `helm install|upgrade|rollback|uninstall`, `argocd
+  app sync|create|set`, `flux reconcile|bootstrap`). This repo publishes
+  versioned, immutable images and never deploys itself — a version change
+  reaches a cluster as a PR against the infrastructure repo. **Three
+  exemptions:** a job that stands up its own kind/k3d/minikube/ctlptl cluster
+  (covering the steps at or after it in that job); a single command carrying a
+  real dry-run value (bare `--dry-run`, `--dry-run=client|server|true`, or
+  `--dry-run client|server` — `--dry-run=none` and `--dry-run=false` do **not**
+  exempt); and, repo-wide, a `.maintenance.yml` recording `primary: kubernetes`.
+  There is **no escape-hatch annotation**; see `SETUP.md` §3h before adding any
+  cluster-writing step.
 
 ## Read `docs/architecture/` before structural changes
 

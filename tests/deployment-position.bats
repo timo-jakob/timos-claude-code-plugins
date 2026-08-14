@@ -8,7 +8,9 @@
 # rule (an immutable `<image>:<semver>` tag or a digest, mutable tags never), the
 # status note that the shipped ko and Docker paths do not satisfy that rule yet,
 # the plane-per-namespace and configuration/secrets positions, and the
-# deliberate deferral of the direct-to-cluster gate to #1206.
+# direct-to-cluster gate — recorded here as SHIPPED by #1206, and specified
+# with the gate itself rather than in this section (it was a deferral pin until
+# #1206 landed).
 #
 # WHY THIS FILE EXISTS: the defect #1189 repairs is an ABSENCE. The family used
 # GitOps tooling while stating no rule about how an image is allowed to reach a
@@ -441,14 +443,22 @@ raw_deployment_section() {
   contains "$section" 'unrevocable by the mechanism that put it there'
 }
 
-@test "ARCHITECTURE defers the direct-to-cluster gate to #1206 as a CHOICE, not an oversight (#1189)" {
+@test "ARCHITECTURE records the direct-to-cluster gate as SHIPPED, and where it is specified (#1189/#1206)" {
+  # Was a deferral pin until #1206 shipped the gate. The clause still has to be
+  # pinned individually — a section-level "mentions the gate" check would
+  # survive deleting it — but what it must now say is that the gate EXISTS and
+  # that its specification lives with the gate, not here.
   local section
   section="$(deployment_section)"
   [ -n "$section" ]
   ends_with "$section" "$ARCH_END"
-  contains "$section" '**The direct-to-cluster gate is deliberately not part of this section.**'
-  contains "$section" 'it **will**, but that gate is unbuilt and ships as'
-  contains "$section" 'a sequencing choice, not an oversight'
+  contains "$section" '**The direct-to-cluster gate is stated here but specified elsewhere.**'
+  contains "$section" 'it **does**, as of **#1206**'
+  contains "$section" 'scripts/check-no-cluster-deploy.zsh'
+  contains "$section" '`no-cluster-deploy` required status context'
+  # the retired deferral wording is asserted GONE, not merely replaced: both
+  # could otherwise coexist and the section would still claim the gate is unbuilt
+  lacks "$section" 'that gate is unbuilt and ships as'
 }
 
 @test "ARCHITECTURE does not let ONE named gap imply the other positions are realized (#1189)" {
@@ -462,14 +472,19 @@ raw_deployment_section() {
   contains "$section" 'is a separate and currently unscheduled concern'
   contains "$section" 'has **no** automated enforcer'
   contains "$section" 'stated positions awaiting mechanism, not shipped guarantees'
-  # #1206 is ALSO a filed follow-up, so claiming the publish-path gap is the
-  # only one contradicts the paragraph above it
-  contains "$section" '**Two** gaps are called out by name here'
-  contains "$section" 'the direct-to-cluster gate (#1206)'
-  # and an unshipped gate must not be described in the present tense inside the
-  # very paragraph warning that "a gate exists" is easy to over-read
-  contains "$section" 'No gate in this family enforces the promotion contract today'
-  contains "$section" '#1206, once it ships, **will**'
+  # #1206 has SHIPPED, so it is no longer a filed follow-up and the publish-path
+  # gap is the only one named. The count is pinned because getting it wrong in
+  # either direction misreports the family's state.
+  contains "$section" '**One** gap is called out by name here'
+  contains "$section" 'the publish-path gap (#1208)'
+  lacks "$section" '**Two** gaps are called out by name here'
+  # the paragraph warning that "a gate exists" is easy to over-read must now say
+  # what the shipped gate does NOT cover, or it reads as a clean bill of health
+  contains "$section" "***app-repo* half only** is enforced"
+  contains "$section" 'a pass means'
+  contains "$section" 'not that the repo'
+  lacks "$section" 'No gate in this family enforces the promotion contract today'
+  lacks "$section" '#1206, once it ships, **will**'
 }
 
 # --- the evidence pointers resolve -------------------------------------------

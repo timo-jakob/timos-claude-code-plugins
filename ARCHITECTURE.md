@@ -1038,18 +1038,22 @@ images sharing one name. And a secret committed to Git is unrevocable by the
 mechanism that put it there, because the promotion contract's own audit trail
 preserves it forever.
 
-**The direct-to-cluster gate is deliberately not part of this section.**
+**The direct-to-cluster gate is stated here but specified elsewhere.**
 Whether bootstrap fails an application repo that carries a direct-to-cluster
-deploy step is settled — it **will**, but that gate is unbuilt and ships as
-**#1206**, where it gets room for its own detection heuristic and its own
-coverage. This section states the
-positions that gate is built *to*; the missing gate is a sequencing choice, not
-an oversight.
+deploy step is settled — it **does**, as of **#1206**, which got room for its
+own detection heuristic and its own coverage rather than being folded in here.
+Bootstrap ships `scripts/check-no-cluster-deploy.zsh` plus the
+`no-cluster-deploy` required status context into every application repo; this
+section states the positions that gate is built *to*, and the gate's own header
+states its closed v1 command set, its three exemptions and its known gaps.
 
 **What enforces the rest, stated plainly, because "a gate exists" is easy to
-over-read.** No gate in this family enforces the promotion contract today —
-the only coverage that exists anywhere is manifest-side and partial. #1206,
-once it ships, **will** cover the promotion contract's *app-repo* half only.
+over-read.** The promotion contract's ***app-repo* half only** is enforced, by
+the gate #1206 shipped: it fails a pull request whose workflow `run:` body
+writes to a cluster. It reads workflow text, so a deploy reached through a marketplace
+action, a reusable workflow or a shell script is **not** caught — a pass means
+no cluster-writing command appears literally in a workflow, not that the repo
+never writes to a cluster.
 On the manifest side, `kube-linter` already flags a `latest` tag (see the
 `development-kubernetes` responsibilities below), which is that partial
 coverage of the mutable-tag rule; a branch tag or a `sha-…` pin in an
@@ -1060,11 +1064,11 @@ positions awaiting mechanism, not shipped guarantees.
 Building any of that — a bootstrap scaffold, an advisor, a review dimension —
 is a separate and currently unscheduled concern, exactly as it is for the
 Messaging and Browser UI positions above. This section states the positions
-that machinery would be built *to*. **Two** gaps are called out by name here
-because each already has a follow-up filed — the publish-path gap (#1208) and
-the direct-to-cluster gate (#1206). The rest are unbuilt rather than
-in-flight, and none of them should be read as realized merely because the
-status note above happens to discuss the publish paths.
+that machinery would be built *to*. **One** gap is called out by name here
+because it already has a follow-up filed — the publish-path gap (#1208). The
+rest are unbuilt rather than in-flight, and none of them should be read as
+realized merely because the status note above happens to discuss the publish
+paths.
 
 ### Identity and authorization — OIDC at the edge, claims as the only input (#1186)
 
