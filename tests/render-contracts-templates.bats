@@ -73,15 +73,23 @@ assert_valid_yaml() {
   grep -qi 'version triangle' "$md"
 }
 
-@test "#695 contracts: the Spectral deprecation-has-sunset rule is structurally sound" {
+@test "#689 contracts: the RENDERED .spectral.yaml is the pin shim, with no inline rules" {
+  # Replaces the #695 starter-rule structural test. That rule was the starter's
+  # `deprecation-has-sunset`; since PR-B the rendered file carries no rules of its
+  # own, and the convention now ships as the org ruleset's
+  # `org-deprecated-operation-has-sunset` — structurally covered, at error and
+  # scoped to operations, in tests/api-styleguide-ruleset.bats.
+  #
+  # This asserts against the RENDERED output, not the template, because that is
+  # what a bootstrapped repo receives — and render.zsh could in principle mangle
+  # a long unbroken URL.
   render_contracts
   local rs="$OUT/common/.spectral.yaml"
   assert_valid_yaml "$rs"
-  # parse the rule (not substring greps) so a neutered rule fails the test
-  [ "$(yq -r '.rules.deprecation-has-sunset.then.field' "$rs")" = "x-sunset" ]
-  [ "$(yq -r '.rules.deprecation-has-sunset.then.function' "$rs")" = "truthy" ]
-  [ "$(yq -r '.rules.deprecation-has-sunset.severity' "$rs")" = "warn" ]
-  yq -r '.rules.deprecation-has-sunset.given' "$rs" | grep -q '@.deprecated === true'
+  [ "$(yq -r '.rules // "none"' "$rs")" = "none" ]
+  [ "$(yq -r '.extends | length' "$rs")" = "1" ]
+  run yq -r '.extends[0]' "$rs"
+  matches "$output" '^https://cdn\.jsdelivr\.net/gh/[^ ]+@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/styleguide/spectral/ruleset\.yaml$'
 }
 
 # Executable Spectral check when the CLI is present (it is NOT in the plugin's
@@ -139,12 +147,29 @@ EOF
   grep -q 'Demo Project API' "$spec"
 }
 
-@test "#692 contracts: the Spectral ruleset is valid, extends spectral:oas, and is replaceable-by-path" {
+@test "#689 contracts: the rendered shim is replaceable-by-path and pins an IMMUTABLE tag" {
+  # The #692 form of this test asserted `spectral:oas` + an inline rule id. Both
+  # moved into the published org ruleset when PR-B retired the starter, so the
+  # rendered file now proves the two properties that survived: the workflow still
+  # reaches the ruleset BY PATH (so the pin can move without touching CI), and
+  # the pin is a version tag rather than anything that can shift underneath a
+  # downstream repo.
   render_contracts
   local rs="$OUT/common/.spectral.yaml"
   assert_valid_yaml "$rs"
-  grep -q 'spectral:oas' "$rs"
-  grep -q 'operation-operationId' "$rs"
+
+  run yq -r '.extends[0]' "$rs"
+  contains "$output" '@styleguide-v'
+  lacks "$output" '@latest'
+  lacks "$output" '@main'
+  lacks "$output" '@HEAD'
+
+  # Replaceable-by-path: the workflow names the file, never the URL — so bumping
+  # the pin is a one-line edit here and no pipeline change anywhere.
+  local wf="$OUT/common/.github/workflows/contracts-lint.yml"
+  grep -q -- '--ruleset .spectral.yaml' "$wf"
+  run cat "$wf"
+  lacks "$output" 'cdn.jsdelivr.net'
 }
 
 @test "#692 contracts: the lint workflow runs Spectral over contracts/ referencing .spectral.yaml by path" {

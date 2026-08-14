@@ -11,10 +11,12 @@
 # `org-problem-json-errors` at ERROR severity, and contracts-lint globs
 # contracts/ops/vN into the same Spectral invocation as the business contract.
 # Under v1 that reddens any repo whose .spectral.yaml extends that styleguide, on
-# a file it did not write. Repos still on the #692 starter ruleset
-# (extends: ["spectral:oas"]) do not carry the rule yet, so for them the collision
-# is pending rather than live — v2 fixes it before it lands, and independently
-# keeps the contract honest about what the payloads actually emit.
+# a file it did not write — which, since #689 shipped the exact-pin shim as the
+# ONE default, is every newly bootstrapped repo. A repo bootstrapped BEFORE that
+# shim still carries the #692 starter (extends: ["spectral:oas"]), which has no
+# such rule, so for it the collision is pending rather than live until it adopts
+# the pin. v2 fixes the collision either way, and independently keeps the
+# contract honest about what the payloads actually emit.
 #
 # RFC 9457's `status` is the HTTP status code as an INTEGER, which collides
 # head-on with the Health envelope's `status: "ok" | "down"` string. The health

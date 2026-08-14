@@ -1774,12 +1774,11 @@ The installed set:
   payloads this skill installs beside it serve RFC 9457 problem+json on the two
   probe 503s — the v2 shape. Installing v1 here would make a brand-new repo both
   self-contradictory (a contract declaring `{"status":"down"}` beside a payload
-  emitting problem details) and, as soon as the repo's `.spectral.yaml` extends
-  the org styleguide (#689), **born red** — `contracts-lint` lints the newest
-  major and `org-problem-json-errors` rejects v1's 503s. The starter
-  `.spectral.yaml` this skill installs today (#692) does not yet carry that rule,
-  so the redness is deferred, not avoided; the self-contradiction is reason
-  enough on its own. `contracts/ops/v1/openapi.yaml` still ships in the template tree for
+  emitting problem details) and **born red** — the `.spectral.yaml` this skill
+  installs is the exact-pin shim extending the org styleguide (#689), whose
+  `org-problem-json-errors` rejects v1's 503s, and `contracts-lint` lints the
+  newest major. Both halves of that now bite on the first PR.
+  `contracts/ops/v1/openapi.yaml` still ships in the template tree for
   repos migrating an existing installation (see the ops how-to), but bootstrap
   never installs it.
   Installed verbatim (no placeholders — the ops contract is identical org-wide).

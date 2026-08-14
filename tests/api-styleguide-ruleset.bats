@@ -205,13 +205,34 @@ CODIFIED_RULE_IDS=(
   [ -f "$REPO_ROOT/$path" ]
 }
 
-@test "the ruleset header and the how-to shim quote the SAME pinned URL" {
-  local from_ruleset from_howto
-  from_ruleset="$(grep -o 'https://cdn\.jsdelivr\.net[^ ]*ruleset\.yaml' "$RULESET" | head -1)"
-  from_howto="$(grep -o 'https://cdn\.jsdelivr\.net[^ ]*ruleset\.yaml' "$HOWTO" | head -1)"
-  [ -n "$from_ruleset" ]
-  [ -n "$from_howto" ]
-  [ "$from_ruleset" = "$from_howto" ]
+@test "EVERY file quoting a styleguide pin quotes the SAME one" {
+  # Swept repo-wide, not from a named file list. #689 shipped the pin in two
+  # places (ruleset header, how-to) and PR-B added a third that outranks both —
+  # the bootstrap shim, the only copy downstream repos actually consume. A closed
+  # list would have silently stopped covering the file that matters most, so the
+  # sweep enumerates tracked files instead and a fourth site is covered for free.
+  local f url first="" first_file="" n=0
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    url="$(grep -oh 'https://cdn\.jsdelivr\.net/gh/[^ "]*ruleset\.yaml' "$f" 2>/dev/null | head -1 || true)"
+    [ -n "$url" ] || continue
+    n=$((n + 1))
+    if [ -z "$first" ]; then
+      first="$url"
+      first_file="$f"
+    elif [ "$url" != "$first" ]; then
+      printf 'pin mismatch:\n  %s: %s\n  %s: %s\n' "$first_file" "$first" "$f" "$url" >&2
+      return 1
+    fi
+  done < <(cd "$REPO_ROOT" && git ls-files)
+
+  # Canary: the sweep must actually find the known sites. A broken glob or a
+  # renamed path would otherwise make this pass by inspecting nothing.
+  [ "$n" -ge 3 ]
+  # And the shipped shim must be one of them — it is the copy that ships.
+  run grep -c 'https://cdn\.jsdelivr\.net/gh/.*ruleset\.yaml' \
+    "$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
+  [ "$output" -ge 1 ]
 }
 
 @test "fixtures: the whole fixture set exists" {
@@ -302,16 +323,80 @@ CODIFIED_RULE_IDS=(
   [ "$output" -eq 4 ]
 }
 
-@test "bootstrap template: .spectral.yaml is untouched by PR-A (still the starter)" {
-  # The switch to the pinned shim is PR-B's, and it cannot land before a human
-  # cuts the styleguide tag. Asserting only `extends: ["spectral:oas"]` would
-  # stay green if PR-B ADDED the jsDelivr URL as a second extends member, so
-  # pin a starter-only marker and the absence of the CDN host.
+@test "bootstrap template: .spectral.yaml is the exact-pin shim, starter retired (PR-B)" {
+  # The inverse of PR-A's guard, which asserted this file was still untouched.
+  # PR-B is the switch, so the assertion flips: one extends member, the exact
+  # pin, and none of the starter's own content left behind.
   local tmpl="$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
-  run yq '.rules | has("deprecation-has-sunset")' "$tmpl"
-  [ "$output" = "true" ]
-  run yq '.rules."info-description"' "$tmpl"
-  [ "$output" = "warn" ]
+
+  # No inline rules at all — the whole point is ONE artifact, not a local copy
+  # that can drift from the published one.
+  run yq -r '.rules // "none"' "$tmpl"
+  [ "$output" = "none" ]
+
+  # Exactly one extends member. A second one would let local rules creep back
+  # in beside the pin without any other assertion here noticing.
+  run yq -r '.extends | length' "$tmpl"
+  [ "$output" = "1" ]
+
+  run yq -r '.extends[0]' "$tmpl"
+  matches "$output" \
+    '^https://cdn\.jsdelivr\.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/styleguide/spectral/ruleset\.yaml$'
+
+  # Never a floating ref — the failure the story names outright, because it would
+  # change what downstream CI enforces with no PR anywhere to review it.
+  lacks "$output" '@latest'
+  lacks "$output" '@main'
+
+  # The starter's content is RETIRED, not merely overridden.
   run cat "$tmpl"
-  lacks "$output" 'cdn.jsdelivr.net'
+  lacks "$output" 'spectral:oas'
+  lacks "$output" 'deprecation-has-sunset'
+}
+
+# --- PR-B: the pin must stay CURRENT, and bump on its own terms (#689 AC 7) ---
+#
+# The shim is exact by design, which means it is also stale by default. Renovate
+# is the only thing that moves it, so the manager that finds it is part of the
+# contract — an unmatched file pattern or a regex that stops matching would leave
+# every bootstrapped repo pinned to v1.0.0 forever, silently and green.
+
+@test "renovate: a customManager targets the shim and its regex MATCHES the real file" {
+  # Asserted by EXECUTING the shipped regex against the shipped shim, not by
+  # eyeballing both: they drift independently, and a manager that matches nothing
+  # fails open — "no PR" is not an error Renovate reports anywhere.
+  run python3 "$BATS_TEST_DIRNAME/helpers/check-renovate-styleguide.py" manager
+  [ "$status" -eq 0 ]
+  contains "$output" "ok"
+}
+
+@test "renovate: the pin bump is NOT swept into the batched github-actions PR" {
+  # The pre-existing rule groups matchManagers ["github-actions", "custom.regex"]
+  # — which covers EVERY custom manager, including this one. Without a later
+  # override the pin would ride along in the weekly GitHub Actions PR, changing
+  # what every bootstrapped repo enforces under a title about action bumps.
+  run python3 "$BATS_TEST_DIRNAME/helpers/check-renovate-styleguide.py" grouping
+  [ "$status" -eq 0 ]
+  contains "$output" "api-styleguide"
+}
+
+@test "the through-the-pin checker exists, is executable, and is wired into CI" {
+  local script="$REPO_ROOT/scripts/check-styleguide-pin.zsh"
+  [ -f "$script" ]
+  [ -x "$script" ]
+  run zsh -n "$script"
+  [ "$status" -eq 0 ]
+  # It must lint through the SHIM, not the local ruleset — that is the whole
+  # point of AC 8. Pointing it at styleguide/spectral/ruleset.yaml would make it
+  # a duplicate of the acceptance lane while proving nothing about the pin.
+  run cat "$script"
+  contains "$output" '--ruleset "$SHIM"'
+
+  local wf="$REPO_ROOT/.github/workflows/styleguide-pin.yml"
+  [ -f "$wf" ]
+  run cat "$wf"
+  contains "$output" 'check-styleguide-pin.zsh'
+  # Triggered by both files that can break the pin.
+  contains "$output" 'templates/common/.spectral.yaml'
+  contains "$output" 'styleguide/spectral/ruleset.yaml'
 }
