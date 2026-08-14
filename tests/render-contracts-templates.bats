@@ -215,7 +215,9 @@ EOF
   lacks "$output" 'contracts/v1/openapi.yaml'
   lacks "$output" 'contracts/ops/v1/openapi.yaml'
 
-  # v10 must beat v9 — the reason for sort -V rather than a plain sort.
+  # v10 must beat v9 — the reason the majors are compared ARITHMETICALLY rather
+  # than sorted at all. Do not "restore" a `sort -V` here: the assertion above
+  # forbids it, because BSD sort accepts -V and silently does not reorder.
   local vtree="$BATS_TEST_TMPDIR/vsort"
   mkdir -p "$vtree/contracts/v9" "$vtree/contracts/v10"
   touch "$vtree/contracts/v9/openapi.yaml" "$vtree/contracts/v10/openapi.yaml"

@@ -1748,8 +1748,9 @@ The installed set:
   (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s
   probes, `/metrics`) as a **shared, versioned contract fragment**, so
   "standardised" is testable. It rides the SAME machinery as the business
-  contract: `contracts-lint` lints it and `contracts-semver` gates it (both
-  templates' spec discovery covers `contracts/ops/v[0-9]*/openapi.yaml`), so a
+  contract: both templates' spec discovery covers
+  `contracts/ops/v[0-9]*/openapi.yaml`, with `contracts-semver` gating **every**
+  major and `contracts-lint` linting only the **newest** per family (#1330), so a
   breaking change to the ops surface is a new ops major, never an in-place edit.
   **Install v2, not v1.** A fresh repo has no live v1 to preserve, and the ops-api
   payloads this skill installs beside it serve RFC 9457 problem+json on the two
@@ -1768,9 +1769,14 @@ The installed set:
   app port); `/info` is minimal by contract; enforcing the network boundary is
   the composition repo's job (#687/#719/#720). Never published as APIM products.
 - `scripts/check-ops-conformance.zsh` (#688) — the **conformance checker**: curls
-  a running service's `/info`, `/health`, `/metrics` and validates them against
-  the fragment's shapes (incl. the deprecated-major-needs-sunset rule); exit 0 on
-  conformance, non-zero naming the failing path. Installed verbatim.
+  a running service's `/info`, `/health`, `/health/live`, `/health/ready` and
+  `/metrics` and validates them against the fragment's shapes (incl. the
+  deprecated-major-needs-sunset rule). Since #1330 a probe answering **503** is
+  validated as an RFC 9457 problem document, and a v1-envelope 503 is reported
+  with a migration message pointing at the ops how-to. Exit 0 on conformance,
+  non-zero naming the failing path. Installed verbatim. Note the checker only
+  inspects a 503 it actually receives — a healthy service never emits one, so a
+  green run does not prove the probe bodies were migrated.
 - `.github/workflows/ops-conformance.yml` (#688) — a **standalone** job that
   builds the canonical container, waits for `/health/ready`, and runs the checker
   against the running service (independent of epic #704's rest harness; #704 may
@@ -3001,8 +3007,9 @@ reference shape.
 
 **Spring resilience + dependency health (#1141).** For a **Spring Boot** service
 repo, install the blessed resilience payload — resilience4j wired around
-dependency clients per the six-mandate policy, plus the ops-api v1.1 `/health`,
-`/health/live` and `/health/ready` served from breaker state. This is the block
+dependency clients per the six-mandate policy, plus the ops-api v2 `/health`,
+`/health/live` and `/health/ready` (#1330 problem-details probe 503s) served from
+breaker state. This is the block
 the Java one above skips Spring *for*: Actuator gives Spring `/info` and
 `/metrics`, but its health JSON spells states `UP`/`DOWN` and nests custom fields
 under `details`, so it cannot express the ops-api `components` shape — the payload

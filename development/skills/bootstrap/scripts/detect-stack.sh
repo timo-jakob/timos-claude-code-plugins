@@ -1662,22 +1662,37 @@ held_out+=("contracts/v1/openapi.yaml")
 # agreed to, beside payloads that emit RFC 9457 problem details, and
 # contracts-semver's oasdiff leg then refuses to let it be deleted.
 # Derived from the tree, never a hardcoded ban, so the next ops major closes this
-# hole by existing instead of re-opening it.
+# hole by existing instead of re-opening it. The globs match BOTH the literal and
+# the .tmpl form because collect_from strips `.tmpl` when it builds candidates —
+# an ops major shipped as openapi.yaml.tmpl would otherwise be invisible here
+# while still producing a candidate, silently un-holding-out the major below it.
 ops_newest_n=-1
-for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml; do
+for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml \
+	"$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml.tmpl; do
 	[[ -f "$_ops_spec" ]] || continue
 	_n="${_ops_spec#"$templates_dir"/common/contracts/ops/v}"
 	_n="${_n%%/*}"
 	[[ "$_n" == *[!0-9]* ]] && continue
 	if [[ "$_n" -gt "$ops_newest_n" ]]; then ops_newest_n="$_n"; fi
 done
-for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml; do
+for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml \
+	"$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml.tmpl; do
 	[[ -f "$_ops_spec" ]] || continue
 	_n="${_ops_spec#"$templates_dir"/common/contracts/ops/v}"
 	_n="${_n%%/*}"
 	[[ "$_n" == *[!0-9]* ]] && continue
 	[[ "$_n" == "$ops_newest_n" ]] || held_out+=("contracts/ops/v$_n/openapi.yaml")
 done
+# ops-conformance.yml builds the canonical container as its FIRST step, so SKILL
+# §3i renders it only when the repo has a Dockerfile ("shipping it into a
+# Dockerfile-less repo is a guaranteed-red check on every PR"). The script said
+# so; nothing enforced it, and a State-D gap-fill renders missing_artifacts BLIND
+# — landing the workflow together with contracts/ops/vN, which matches its own
+# `paths: contracts/ops/**` trigger, so it fires and fails on the very PR that
+# installs it. The fragment and the checker are NOT gated here: the ops surface is
+# deliberately independent of a business OpenAPI contract (every backend serves
+# it), and only the workflow needs a container to run.
+[[ "$has_dockerfile" == "true" ]] || held_out+=(".github/workflows/ops-conformance.yml")
 if [[ "$openapi_surface" != "true" ]]; then
 	held_out+=(
 		".spectral.yaml" "CONTRACTS.md"

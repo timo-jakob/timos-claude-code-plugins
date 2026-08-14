@@ -57,7 +57,8 @@ TIMEOUT="${OPS_TIMEOUT:-10}"
 
 usage() {
   print -u2 -- "usage: check-ops-conformance.zsh <base-url> [--timeout <seconds>]"
-  print -u2 -- "  e.g. check-ops-conformance.zsh http://localhost:8080"
+  print -u2 -- "  e.g. check-ops-conformance.zsh http://localhost:9090"
+  print -u2 -- "  (the MANAGEMENT port — the ops surface is not on the app port)"
   exit 2
 }
 

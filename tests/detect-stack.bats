@@ -357,7 +357,76 @@ setup() {
   # Held out of the GAP list, but a repo migrating from v1 must still see it in
   # existing_artifacts — the hold-out suppresses installation, never detection.
   [ "$(jq -r '.existing_artifacts["contracts/ops/v1/openapi.yaml"]' <<<"$out")" = "true" ]
+  # The migration story this case is named for: a v1 repo is still told to adopt
+  # the newest major. (The v1 line above cannot fail on its own — the emit loop
+  # short-circuits on an existing file before it ever consults held_out — so this
+  # is the assertion that carries the case.)
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
   [ "$(jq -r '.missing_artifacts | index("contracts/ops/v1/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+# The two cases above run against TODAY's template tree (v1 + v2), so they pass
+# byte-identically against a hardcoded `held_out+=("contracts/ops/v1/…")` with the
+# derivation deleted. These two run detect-stack against a SYNTHETIC templates
+# tree, which is what actually pins the loop's own claim ("derived from the tree,
+# never a hardcoded ban"). templates_dir resolves as $script_dir/../templates, so
+# copying the script beside a fake tree is enough to redirect it.
+
+_fake_tree() {  # $1.. = ops major dir names to create, each with an openapi.yaml
+  local root="$BATS_TEST_TMPDIR/fake" d
+  rm -rf "$root"
+  mkdir -p "$root/scripts" "$root/templates/common"
+  cp "$DETECT" "$root/scripts/detect-stack.sh"
+  for d in "$@"; do
+    mkdir -p "$root/templates/common/contracts/ops/$d"
+    printf 'openapi: 3.1.0\n' > "$root/templates/common/contracts/ops/$d/openapi.yaml"
+  done
+  printf '%s' "$root"
+}
+
+@test "detect-stack: #1330 ops-conformance.yml is not a gap without a Dockerfile" {
+  # Its first step is `docker build .`, so SKILL §3i renders it only when the repo
+  # has a Dockerfile. State-D renders missing_artifacts BLIND, and the workflow's
+  # own `paths: contracts/ops/**` trigger matches the fragment landing beside it —
+  # so an ungated gap-fill fires a guaranteed-red check on the PR that installs it.
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "false" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 ops-conformance.yml IS a gap once a Dockerfile exists" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  printf 'FROM eclipse-temurin:21-jre\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "true" ]
+  # The positive control: without it the case above passes on a hold-out that
+  # suppressed the workflow unconditionally.
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #1330 the hold-out follows the TREE — a v3 tree gaps v3, not v2" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  local root; root="$(_fake_tree v2 v3)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # A hardcoded v1 ban would leave BOTH v2 and v3 as blind-renderable gaps —
+  # two live ops majors installed into one repo, neither deletable afterwards.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v3/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 majors are compared arithmetically — v10 beats v9" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  local root; root="$(_fake_tree v9 v10)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # Under a lexical comparison "v9" > "v10", so the live major would be held out
+  # and the frozen one installed — the hold-out inverted, silently.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v10/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v9/openapi.yaml")' <<<"$out")" = "null" ]
 }
 
 @test "detect-stack: #406 a present every-repo file is NOT flagged missing" {

@@ -134,8 +134,12 @@ auto-apply:
     list — the two would map onto the same path — while `opshealth` must be
     present. Check `info`, `prometheus` and `opshealth` here; if `health` **is**
     present, say so in the same entry as something to remove. Of the bullets
-    below, treat exactly two as already satisfied — *Represent health as
-    `{"status":"ok"}`* and *Split liveness and readiness*. **Still check** the
+    below, treat exactly three as already satisfied — *Represent health as
+    `{"status":"ok"}`*, *Serve the probe 503s as RFC 9457 problem documents*
+    (#1330 — the payload serves the v2 shape, and it is the only payload that can
+    also emit a **liveness** 503) and *Split liveness and readiness*. Never flag
+    the probe-503 bullet on an adopted repo: that is a false gap on a payload
+    that already does exactly what the bullet asks. **Still check** the
     remap, the management port, the micrometer dependency and the `/info` majors
     bullets: they govern `/info` and `/metrics`, which the payload does not serve.
 

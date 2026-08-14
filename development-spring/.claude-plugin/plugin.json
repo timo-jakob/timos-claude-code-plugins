@@ -1,7 +1,7 @@
 {
   "name": "development-spring",
-  "description": "Spring framework TOPIC plugin — composes alongside development-java (#296) for Java + Spring Boot 4+ repos (baseline Spring Framework 7 / Jakarta EE 11; older Boot lines out of scope). A maintenance dispatcher that audits Spring configuration via the spring-config-advisor agent (deprecated/relocated Spring Boot 4 property keys, actuator over-exposure, plus a conforms-to-ops-api check whose recommendations branch on whether the repo has adopted the Spring resilience payload (which owns /health via its opshealth endpoint)). Holds zero Java-foundation logic and reuses java-ci-fixer for CI. Incremental: config audit in v0.1; a Spring Boot version-upgrade agent, bootBuildImage container generation, and the contract-first API drift gate land in later slices of the #296 epic.",
-  "version": "0.11.1",
+  "description": "Spring framework TOPIC plugin — composes alongside development-java (#296) for Java + Spring Boot 4+ repos (baseline Spring Framework 7 / Jakarta EE 11; older Boot lines out of scope). A maintenance dispatcher that audits Spring configuration via the spring-config-advisor agent (deprecated/relocated Spring Boot 4 property keys, actuator over-exposure, plus a conforms-to-ops-api check whose recommendations branch on whether the repo has adopted the Spring resilience payload (which owns /health via its opshealth endpoint)). Holds zero Java-foundation logic and reuses java-ci-fixer for CI. Incremental: config audit in v0.1; a Spring Boot version-upgrade agent, bootBuildImage container generation, and the contract-first API drift gate land in later slices of the #296 epic. Since #1330 the ops-api check also requires the two probe 503s to be served as bare RFC 9457 problem+json documents (ops-api v2) — including on the bespoke non-payload route, which a green ops-conformance run does not verify.",
+  "version": "0.12.0",
   "author": {
     "name": "Timo Jakob"
   },

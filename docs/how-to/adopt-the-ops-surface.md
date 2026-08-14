@@ -26,9 +26,10 @@ Bootstrap installs the surface alongside the contracts machinery when your repo
 has an API surface. You get three things:
 
 - **`contracts/ops/v2/openapi.yaml`** — the fragment. It rides the same CI gates
-  as your business contract: `contracts-lint` (Spectral) and `contracts-semver`
-  (oasdiff) discover `contracts/ops/v[0-9]*/openapi.yaml`, so a breaking change
-  to the ops surface is a new ops major, never an in-place edit.
+  as your business contract: `contracts-semver` (oasdiff) gates **every**
+  `contracts/ops/v[0-9]*/openapi.yaml`, while `contracts-lint` (Spectral)
+  discovers them all and lints only the **newest** ops major (#1330) — so a
+  breaking change to the ops surface is a new ops major, never an in-place edit.
 - **`scripts/check-ops-conformance.zsh`** — the conformance checker.
 - **`.github/workflows/ops-conformance.yml`** — a standalone CI job that builds
   the canonical container, waits for `/health/ready`, and runs the checker.
@@ -410,8 +411,8 @@ You will notice it in one of two ways:
   **but only once your `.spectral.yaml` extends the org styleguide ruleset**
   (#689). A repo still on the bootstrap starter (`extends: ["spectral:oas"]`,
   #692) does not carry that rule, so it stays green on ops v1 indefinitely.
-  **Do not read that green as "migration not needed"** — migrate on the schedule
-  below rather than waiting for a check that cannot fire yet.
+  **Do not read that green as "migration not needed"** — migrate now, per the
+  steps below, rather than waiting for a check that cannot fire yet.
 - **`check-ops-conformance.zsh` fails** with a message naming the ops-api v1
   envelope and pointing back at this section — that is the checker telling you a
   probe answered 503 while the service is still on a v1 payload. Note the
