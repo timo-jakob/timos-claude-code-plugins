@@ -173,7 +173,12 @@ health_schema() {
 
 @test "contracts-lint discovery covers contracts/ops/v[0-9]* (#688)" {
   local tmpl="$COMMON/.github/workflows/contracts-lint.yml.tmpl"
-  grep -q 'contracts/ops/v\[0-9\]\*/openapi.yaml' "$tmpl"
+  # Since #1330 the per-major glob is parameterised by family and only the NEWEST
+  # major of each is linted, so the fully-qualified ops glob is no longer a literal.
+  # What must remain true — and is what this test is actually about — is that the
+  # ops family is discovered at all.
+  grep -q 'for family in contracts contracts/ops' "$tmpl"
+  grep -q 'v\[0-9\]\*/openapi.yaml' "$tmpl"
 }
 
 @test "contracts-semver discovery covers contracts/ops (#688)" {

@@ -166,10 +166,50 @@ check_status_endpoint() {
     fail "${ep}: unreachable at $url"; return
   fi
   if [[ "$HTTP_CODE" != "200" ]]; then
+    # A 503 stays a conformance FAILURE — conformance asserts a SERVING service,
+    # and there is deliberately no flag to tolerate one. But since ops-api v2
+    # (#1330) that 503 carries an RFC 9457 problem document, so the failure can
+    # say WHICH dependency shed the pod instead of just naming a status code.
+    if [[ "$HTTP_CODE" == "503" ]]; then
+      check_probe_problem "$ep"
+      return
+    fi
     fail "${ep}: expected HTTP 200, got $HTTP_CODE"; return
   fi
   jq -e '.status == "ok"' "$BODY_FILE" >/dev/null 2>&1 \
     || fail "${ep}: expected JSON status \"ok\""
+}
+
+# check_probe_problem <ep> — validate a probe's 503 body as RFC 9457 problem
+# details, and fail with the most useful message the body supports.
+#
+# THE LEGACY BRANCH IS THE POINT. A service still running an ops-api v1 payload
+# answers {"status":"down"} here. Reported as a generic shape error, that reads as
+# a broken service and sends an adopter debugging their own code; reported as what
+# it is, it is a one-line migration instruction. This is the single message that
+# turns the v1 -> v2 cutover from a mystery into a task.
+check_probe_problem() {
+  local ep="$1" detail missing
+  if jq -e '.status == "down" and (has("type") | not)' "$BODY_FILE" >/dev/null 2>&1; then
+    fail "${ep}: 503 body is the ops-api v1 envelope {\"status\":\"down\"}, not RFC 9457 problem details — this service is still on an ops-api v1 payload; see docs/how-to/adopt-the-ops-surface.md to migrate to contracts/ops/v2"
+    return
+  fi
+  case "$CONTENT_TYPE" in
+    application/problem+json*) ;;
+    *) fail "${ep}: 503 must be served as application/problem+json (RFC 9457), got '${CONTENT_TYPE}'"; return ;;
+  esac
+  # All four members are REQUIRED by the contract, and `status` is the HTTP code as
+  # an INTEGER — the collision with the health envelope's "ok"/"down" string is the
+  # whole reason ops-api v2 exists, so a string here is exactly the mistake to catch.
+  missing="$(jq -r '["type","title","status","detail"] - (. | keys) | join(", ")' "$BODY_FILE" 2>/dev/null)"
+  if [[ -n "$missing" ]]; then
+    fail "${ep}: 503 problem document is missing required member(s): ${missing}"; return
+  fi
+  if ! jq -e '.status == 503' "$BODY_FILE" >/dev/null 2>&1; then
+    fail "${ep}: 503 problem document's \"status\" must be the integer 503 (RFC 9457), not the health envelope's string"; return
+  fi
+  detail="$(jq -r '.detail' "$BODY_FILE" 2>/dev/null)"
+  fail "${ep}: not ready — ${detail} (503)"
 }
 
 # ---- /health (aggregate + optional dependency components, #965) ------------

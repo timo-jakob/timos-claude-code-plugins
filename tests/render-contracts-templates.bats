@@ -153,9 +153,73 @@ EOF
   assert_valid_yaml "$wf"
   grep -q 'spectral' "$wf"
   grep -q -- '--ruleset .spectral.yaml' "$wf"
-  grep -q 'contracts/v\[0-9\]\*/openapi.yaml' "$wf"
+  # The per-major glob is parameterised by family since #1330 (newest-major-only
+  # scoping), so the family name is no longer part of the literal — but the per-major
+  # shape still is, and both families are still selected.
+  grep -q 'v\[0-9\]\*/openapi.yaml' "$wf"
+  grep -q 'for family in contracts contracts/ops' "$wf"
   # PR trigger wired to the default branch (placeholder substituted).
   grep -q 'branches: \["main"\]' "$wf"
+}
+
+@test "#1330 contracts: the lint workflow lints only the NEWEST major per family" {
+  # A frozen older major is immutable by contract, so linting it against a ruleset
+  # cut after it froze can only produce red nobody may fix — which is exactly what
+  # org-problem-json-errors (#689) does to every ops/v1 fragment.
+  #
+  # Executed, not grepped: the selection is shell logic, and a `sort` that picks v9
+  # over v10 reads perfectly fine in a diff.
+  render_contracts
+  local wf="$OUT/common/.github/workflows/contracts-lint.yml"
+  assert_valid_yaml "$wf"
+  grep -q 'newest_major()' "$wf"
+  grep -q 'sort -V' "$wf"
+
+  # Extract the step's selection logic and run it over throwaway trees.
+  local probe="$BATS_TEST_TMPDIR/select.bash"
+  {
+    echo 'set -euo pipefail'
+    echo 'shopt -s nullglob'
+    sed -n '/newest_major() {/,/^          done$/p' "$wf" | sed 's/^          //'
+    echo 'if [[ ${#specs[@]} -eq 0 ]]; then echo NOTHING; else printf "%s\n" "${specs[@]}"; fi'
+  } > "$probe"
+
+  local tree="$BATS_TEST_TMPDIR/both"
+  mkdir -p "$tree/contracts/v1" "$tree/contracts/v2" "$tree/contracts/ops/v1" "$tree/contracts/ops/v2"
+  touch "$tree/contracts/v1/openapi.yaml" "$tree/contracts/v2/openapi.yaml" \
+    "$tree/contracts/ops/v1/openapi.yaml" "$tree/contracts/ops/v2/openapi.yaml"
+  run bash -c "cd '$tree' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'contracts/v2/openapi.yaml'
+  contains "$output" 'contracts/ops/v2/openapi.yaml'
+  lacks "$output" 'contracts/v1/openapi.yaml'
+  lacks "$output" 'contracts/ops/v1/openapi.yaml'
+
+  # v10 must beat v9 — the reason for sort -V rather than a plain sort.
+  local vtree="$BATS_TEST_TMPDIR/vsort"
+  mkdir -p "$vtree/contracts/v9" "$vtree/contracts/v10"
+  touch "$vtree/contracts/v9/openapi.yaml" "$vtree/contracts/v10/openapi.yaml"
+  run bash -c "cd '$vtree' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'contracts/v10/openapi.yaml'
+  lacks "$output" 'contracts/v9/openapi.yaml'
+
+  # THE DOCUMENTED TRAP: a repo that never adopts v2 keeps v1 as its newest, and it
+  # IS still linted. Migration is mandatory, not optional — this pins that the
+  # scoping is not a silent exemption for old majors.
+  local trap_tree="$BATS_TEST_TMPDIR/trap"
+  mkdir -p "$trap_tree/contracts/ops/v1"
+  touch "$trap_tree/contracts/ops/v1/openapi.yaml"
+  run bash -c "cd '$trap_tree' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'contracts/ops/v1/openapi.yaml'
+
+  # …and an empty tree still exits cleanly rather than linting nothing loudly.
+  local empty="$BATS_TEST_TMPDIR/empty"
+  mkdir -p "$empty"
+  run bash -c "cd '$empty' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'NOTHING'
 }
 
 @test "#692 contracts: the publish workflow publishes per live major (runtime discovery + matrix)" {

@@ -37,7 +37,36 @@ jobs:
           # The per-major business API (contracts/vN) AND the org-standard ops
           # surface (contracts/ops/vN, #688) are both versioned contract
           # artifacts, so both are linted against the same ruleset.
-          specs=(contracts/v[0-9]*/openapi.yaml contracts/ops/v[0-9]*/openapi.yaml)
+          #
+          # ONLY THE NEWEST MAJOR OF EACH FAMILY IS LINTED (#1330). A frozen older
+          # major is immutable by contract — a breaking change is a new major,
+          # never an in-place edit — so linting it against a ruleset cut AFTER it
+          # was frozen can only produce red that nobody is permitted to fix. That
+          # is not hypothetical: the org styleguide's org-problem-json-errors
+          # (#689) reddens every ops/v1 fragment, on a file the repo did not write.
+          #
+          # NOTE the consequence, because it is a real trap: a repo that never
+          # adopts a newer major keeps the old one as its newest, and it IS still
+          # linted. Migration is mandatory and documented, not optional — see
+          # docs/how-to/adopt-the-ops-surface.md.
+          # Explicit `if`s rather than `[[ … ]] && …` tails: under `set -e` a false
+          # tail makes the enclosing list non-zero, which is a footgun that reads
+          # as working code right up until the last family matches nothing.
+          newest_major() {
+            local candidates=("$1"/v[0-9]*/openapi.yaml)
+            if [[ ${#candidates[@]} -eq 0 ]]; then
+              return 0
+            fi
+            # sort -V so v10 beats v9; a plain sort picks v9 lexically.
+            printf '%s\n' "${candidates[@]}" | sort -V | tail -1
+          }
+          specs=()
+          for family in contracts contracts/ops; do
+            spec="$(newest_major "$family")"
+            if [[ -n "$spec" ]]; then
+              specs+=("$spec")
+            fi
+          done
           if [[ ${#specs[@]} -eq 0 ]]; then
             echo "No contracts/vN/openapi.yaml found — nothing to lint."
             exit 0

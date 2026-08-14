@@ -10,6 +10,12 @@
 # a real service are exercised by the Python canonical impl's acceptance run.
 
 bats_require_minimum_version 1.5.0
+# The shared helpers are the sanctioned way to assert here (tests/README.md); this
+# file predates them and its older cases still use `echo | grep -q`, which is fine
+# as a command of its own. New cases use contains/lacks — `lacks` in particular,
+# because a hand-rolled `! echo … | grep` is the inert-negation shape the suite
+# lint bans.
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -97,6 +103,63 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   run_check
   [ "$status" -ne 0 ]
   echo "$output" | grep -q '/health/ready'
+}
+
+# ---- ops-api v2: the RFC 9457 probe 503 (#1330) -----------------------------
+
+@test "tc-error-legacy-v1-503-body: a v1 {\"status\":\"down\"} 503 is named as a MIGRATION, not a shape error" {
+  # #1344. This is the single message that turns the v1 -> v2 cutover from a
+  # mystery into a task: reported generically, an adopter debugs their own code.
+  serve ready 503 'application/json' '{"status":"down"}'
+  run_check
+  [ "$status" -ne 0 ]
+  contains "$output" 'ops-api v1 envelope'
+  contains "$output" 'docs/how-to/adopt-the-ops-surface.md'
+  contains "$output" 'contracts/ops/v2'
+}
+
+@test "tc-error-readiness-503-fails-conformance: a valid v2 problem 503 still FAILS, and names the dependency" {
+  # #1343. A 503 stays a conformance failure — conformance asserts a SERVING
+  # service and there is deliberately no flag to tolerate one. What v2 buys is
+  # that the failure says WHICH dependency shed the pod.
+  serve ready 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down","components":{"orders-db":{"status":"down","kind":"hard","breaker":"open"}}}'
+  run_check
+  [ "$status" -ne 0 ]
+  contains "$output" '/health/ready'
+  contains "$output" "not ready — hard dependency 'orders-db' is down (503)"
+  # …and it must NOT be misreported as a legacy body.
+  lacks "$output" 'ops-api v1 envelope'
+}
+
+@test "corner: a v2 problem 503 on application/json is rejected for the MEDIA TYPE" {
+  # Bare problem+json is part of the contract: a correctly shaped body on the wrong
+  # media type is still an org-problem-json-errors failure, so the checker must not
+  # accept it just because the members are right.
+  serve ready 503 'application/json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down"}'
+  run_check
+  [ "$status" -ne 0 ]
+  contains "$output" 'must be served as application/problem+json'
+}
+
+@test "error: a problem 503 missing a required member names the member" {
+  serve ready 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503}'
+  run_check
+  [ "$status" -ne 0 ]
+  contains "$output" 'missing required member(s): detail'
+}
+
+@test "error: a problem 503 whose status is the health STRING is rejected" {
+  # The collision between RFC 9457's integer `status` and the health envelope's
+  # "ok"/"down" string is the whole reason ops-api v2 exists, so a string here is
+  # exactly the mistake worth catching.
+  serve ready 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":"down","detail":"hard dependency '"'"'orders-db'"'"' is down"}'
+  run_check
+  [ "$status" -ne 0 ]
+  contains "$output" 'must be the integer 503'
 }
 
 @test "corner: two majors, one deprecated with sunset -> exit 0" {
