@@ -386,6 +386,88 @@ pull-compat surface served by the SDK's Prometheus exporter.
   closed as descoped on 2026-08-11 and is only the record of that decision, never a
   destination to wait on).
 
+## Migrate an existing repo to ops v2
+
+**This step is mandatory, manual and documented — there is no advisor that does it
+for you.** If your repo carries `contracts/ops/v1/openapi.yaml` and nothing newer,
+v1 is still your newest ops major, so `contracts-lint` still lints it — and the org
+styleguide's `org-problem-json-errors` rule reddens it, on a file you did not
+write. Adopting v2 is what clears that, and nothing else does.
+
+You will notice it in one of two ways:
+
+- **`contracts-lint` goes red** on `contracts/ops/v1/openapi.yaml` with
+  `org-problem-json-errors` on the `/health/live` and `/health/ready` `503`s.
+- **`check-ops-conformance.zsh` fails** with a message naming the ops-api v1
+  envelope and pointing back at this section — that is the checker telling you the
+  running service is still on a v1 payload.
+
+Three steps, in this order:
+
+1. **Copy the v2 fragment in**, beside the old one:
+
+    ```sh
+    cp <bootstrap-templates>/common/contracts/ops/v2/openapi.yaml \
+       contracts/ops/v2/openapi.yaml
+    ```
+
+    **Leave `contracts/ops/v1/openapi.yaml` exactly where it is, byte for byte.**
+    Do not delete it. `contracts-semver` runs a second time with
+    `--contracts-dir contracts/ops` and rejects a major that was live at the base
+    ref and gone at `HEAD` — retiring a live major is its own flow, not a side
+    effect of adopting the next one. Once v2 exists, v1 is simply no longer linted.
+
+2. **Replace your ops payload** with the v2 one for your language
+    (`templates/languages/<lang>/ops-api/`, or `spring/resilience/` for Spring).
+    The payloads changed with the contract: the readiness `503` now returns
+    `application/problem+json`.
+
+3. **Re-run conformance** against the running service:
+
+    ```sh
+    zsh scripts/check-ops-conformance.zsh http://localhost:9090
+    ```
+
+### What actually changes on the wire
+
+Only the two probes' `503` bodies. The `200`s are untouched, `/health` still
+answers `200` with its aggregate, and **the runtime paths do not move** — `servers:
+/v2` in the fragment is the version declaration for the semver triangle, not a URL
+prefix. Your Kubernetes probe paths stay exactly as they are.
+
+Before (v1), on `application/json`:
+
+```json
+{ "status": "down" }
+```
+
+After (v2), on `application/problem+json`:
+
+```json
+{
+  "type": "urn:problem-type:ops:not-ready",
+  "title": "Service Not Ready",
+  "status": 503,
+  "detail": "hard dependency 'orders-db' is down",
+  "components": {
+    "orders-db":   { "status": "down", "kind": "hard", "breaker": "open",   "since": "2026-08-13T09:14:22Z" },
+    "pricing-api": { "status": "up",   "kind": "soft", "breaker": "closed", "since": "2026-08-13T08:02:10Z" }
+  }
+}
+```
+
+Note `status` is the **integer** HTTP code, not the health envelope's string —
+that collision is the whole reason v2 exists. The `components` map is
+byte-identical to the one `/health` serves and carries **all** declared
+dependencies, not only the failing ones, so a shed pod and the dashboard show the
+same picture. A `503` raised for a non-dependency reason (starting up, draining)
+carries no `components` at all and says so in `detail`.
+
+**If anything consumes that body, update it before you migrate.** In practice a
+kubelet reads only the status code, so most services have nothing to change — but
+a bespoke dashboard or alert that parses `.status == "down"` on a probe will stop
+matching.
+
 ## Who enforces the boundary — you, or the platform?
 
 The **service** provides the seam (the management port); the **platform /

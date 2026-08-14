@@ -359,6 +359,26 @@ accordingly — it never flags a repo that ships no ops fragment. Design:
   the business contract: `contracts-lint` (Spectral) and `contracts-semver`
   (oasdiff) discover `contracts/ops/v[0-9]*/openapi.yaml`, so a breaking change
   to the ops surface is a new ops major, never an in-place edit.
+- **Ops major v2 — RFC 9457 error bodies (#1330).** The two probes' `503`s return
+  `application/problem+json` (RFC 9457) instead of the v1 `{"status":"down"}`
+  envelope, because RFC 9457's `status` is the HTTP code as an **integer** and
+  collides head-on with the health envelope's `"ok"`/`"down"` string. The health
+  string is **dropped** from the 503 — 503 already says "down" — and the diagnosis
+  rides in a `components` extension member byte-identical to the map `/health`
+  serves. Readiness carries it; **liveness carries none**, being dependency-free
+  by contract. `v1` stays frozen and unedited beside `v2`, per the rule above.
+  Two consequences worth stating, because both are easy to get wrong:
+  **(1)** the `Problem` / `ReadinessProblem` schemas declare their four members
+  **inline** rather than composing with `allOf` — measured, an `allOf` composition
+  still fails `org-problem-json-errors`, because the rule reads the resolved
+  schema's own top-level `required` and a composition has none;
+  **(2)** `contracts-lint` lints only the **newest major per contract family**
+  (both `contracts/vN` and `contracts/ops/vN`). A frozen major is immutable, so
+  linting it against a ruleset cut after it froze can only produce red nobody is
+  permitted to fix. The corollary is a real trap: a repo that never adopts a newer
+  major keeps the old one as its newest and **is** still linted, so migrating is
+  mandatory and manual — see
+  [Adopt the ops surface](https://timo-jakob.github.io/timos-claude-code-plugins/how-to/adopt-the-ops-surface/).
 - **The surface is internal, on a management port.** It is served on a separate
   **management port** (not the public app port), and `/info` is minimal by
   contract (build + API lifecycle only — never framework/server/OS versions), so
