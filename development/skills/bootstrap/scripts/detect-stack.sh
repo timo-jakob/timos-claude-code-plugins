@@ -1689,9 +1689,7 @@ done
 # so; nothing enforced it, and a State-D gap-fill renders missing_artifacts BLIND
 # — landing the workflow together with contracts/ops/vN, which matches its own
 # `paths: contracts/ops/**` trigger, so it fires and fails on the very PR that
-# installs it. The fragment and the checker are NOT gated here: the ops surface is
-# deliberately independent of a business OpenAPI contract (every backend serves
-# it), and only the workflow needs a container to run.
+# installs it.
 #
 # Gated on a ROOT Dockerfile, NOT on has_dockerfile: that flag is also true for
 # docker/Dockerfile and for any Dockerfile at depth<=3, while the workflow runs a
@@ -1705,6 +1703,16 @@ if [[ "$openapi_surface" != "true" ]]; then
 		".github/workflows/contracts-lint.yml" ".github/workflows/spec-publish.yml"
 		".github/workflows/contracts-semver.yml" ".github/scripts/check-contracts-semver.sh"
 	)
+	# The ops surface rides WITH that machinery, never ahead of it. SKILL §3i is
+	# headed "when an OpenAPI surface is detected" and renders the fragment +
+	# checker inside that block; ARCHITECTURE.md and the ops how-to say the same.
+	# Installing them here without it would hand a repo an ops CONTRACT with no
+	# Spectral lint and no oasdiff semver gate — the six files above are exactly
+	# what enforces "a breaking change to the ops surface is a new ops major", so
+	# an ungated fragment makes that promise unkeepable. The newest major only:
+	# older ones are already held out above, unconditionally.
+	[[ "$ops_newest_n" -lt 0 ]] || held_out+=("contracts/ops/v${ops_newest_n}/openapi.yaml")
+	held_out+=("scripts/check-ops-conformance.zsh" ".github/workflows/ops-conformance.yml")
 fi
 artifacts_json="{"
 missing_json="["

@@ -340,6 +340,7 @@ setup() {
 
 @test "detect-stack: #1330 the frozen ops v1 major is never a gap-fill candidate" {
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   # The newest ops major IS an expected gap on a repo that has no ops surface...
@@ -350,6 +351,7 @@ setup() {
 
 @test "detect-stack: #1330 an EXISTING ops v1 is still reported present, not erased" {
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   mkdir -p contracts/ops/v1
   printf 'openapi: 3.1.0\n' > contracts/ops/v1/openapi.yaml
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
@@ -372,6 +374,24 @@ setup() {
 # never a hardcoded ban"). templates_dir resolves as $script_dir/../templates, so
 # copying the script beside a fake tree is enough to redirect it.
 
+_openapi_surface() {
+  # The business contract that unlocks the contracts machinery. Since #1330 the
+  # ops surface is gated on the SAME signal — it rides with contracts-lint and
+  # contracts-semver, never ahead of them — so every ops gap-fill case needs one.
+  # (contracts/v1/openapi.yaml is itself held out unconditionally, so adding it
+  # never shows up as a gap of its own.)
+  mkdir -p contracts/v1
+  cat > contracts/v1/openapi.yaml <<'EOS'
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+servers:
+  - url: /v1
+paths: {}
+EOS
+}
+
 _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> openapi.yaml.tmpl
   local root="$BATS_TEST_TMPDIR/fake" d name spec
   rm -rf "$root"
@@ -387,12 +407,36 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   printf '%s' "$root"
 }
 
+@test "detect-stack: #1330 NO OpenAPI surface -> the whole ops trio is held out" {
+  # The ops surface rides WITH the contracts machinery, never ahead of it: SKILL
+  # §3i is headed "when an OpenAPI surface is detected" and renders the fragment
+  # + checker inside that block, and ARCHITECTURE.md and the ops how-to agree.
+  # Installing the fragment without the six contracts files would hand a repo an
+  # ops CONTRACT with no Spectral lint and no oasdiff semver gate — making the
+  # "a breaking change to the ops surface is a new ops major" promise unkeepable.
+  # Deliberately NO _openapi_surface call here; a root Dockerfile is present so
+  # the workflow's own gate cannot be what withholds it.
+  printf 'plugins { java }\n' > build.gradle.kts
+  printf 'FROM eclipse-temurin:21-jre\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("scripts/check-ops-conformance.zsh")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" = "null" ]
+  # Positive control: the machinery it rides with is withheld for the same reason,
+  # so this case cannot pass merely because missing_artifacts is empty.
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-lint.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/template-drift-watch.yml")' <<<"$out")" != "null" ]
+}
+
 @test "detect-stack: #1330 ops-conformance.yml is not a gap without a Dockerfile" {
   # Its first step is `docker build .`, so SKILL §3i renders it only when the repo
   # has a Dockerfile. State-D renders missing_artifacts BLIND, and the workflow's
   # own `paths: contracts/ops/**` trigger matches the fragment landing beside it —
   # so an ungated gap-fill fires a guaranteed-red check on the PR that installs it.
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
   [ "$(jq -r .has_dockerfile <<<"$out")" = "false" ]
@@ -407,6 +451,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
 
 @test "detect-stack: #1330 ops-conformance.yml IS a gap once a Dockerfile exists" {
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   printf 'FROM eclipse-temurin:21-jre\n' > Dockerfile
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
@@ -418,6 +463,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
 
 @test "detect-stack: #1330 the hold-out follows the TREE — a v3 tree gaps v3, not v2" {
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   local root; root="$(_fake_tree v2 v3)"
   out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
@@ -435,6 +481,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   # dropping it from the HOLD-OUT loop blind-installs a frozen major. Neither is
   # visible without a .tmpl fixture — the shipped tree has only literal specs.
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   local root; root="$(_fake_tree v2:tmpl v3:tmpl)"
   out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
@@ -444,6 +491,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
 
 @test "detect-stack: #1330 literal and .tmpl ops majors compare against each other" {
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   local root; root="$(_fake_tree v2:tmpl v3)"
   out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
@@ -457,6 +505,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   # true for docker/Dockerfile and any Dockerfile at depth<=3. Gating on the
   # coarse flag reproduces the guaranteed-red install the gate exists to prevent.
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   mkdir -p services/api
   printf 'FROM eclipse-temurin:21-jre\n' > services/api/Dockerfile
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
@@ -470,6 +519,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
 
 @test "detect-stack: #1330 majors are compared arithmetically — v10 beats v9" {
   printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
   local root; root="$(_fake_tree v9 v10)"
   out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
