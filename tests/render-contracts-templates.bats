@@ -2,8 +2,9 @@
 #
 # Integration tests for the bootstrap API-contracts machinery templates (#692) —
 # render the REAL templates the way SKILL.md §3i instructs and prove the
-# installed set is coherent: the per-major layout starter, a replaceable Spectral
-# ruleset, and the lint + per-major npm publish workflows. The publish workflow's
+# installed set is coherent: the per-major layout starter, the exact-pin Spectral
+# shim (#689 — the #692 replaceable local ruleset is retired), and the lint +
+# per-major npm publish workflows. The publish workflow's
 # APIM governance step must be a clean, skip-when-absent extension point (#706).
 
 bats_require_minimum_version 1.5.0
@@ -101,33 +102,24 @@ assert_valid_yaml() {
   matches "$output" '^https://cdn\.jsdelivr\.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/styleguide/spectral/ruleset\.yaml$'
 }
 
-# Executable Spectral check when the CLI is present (it is NOT in the plugin's
-# macOS toolchain, so this skips locally — the rule's runtime behaviour is
-# validated by the target repo's contracts-lint CI, mirroring the oasdiff seam).
-@test "#695 contracts: a deprecated+x-sunset spec passes Spectral lint (when spectral is present)" {
-  command -v spectral >/dev/null 2>&1 || skip "spectral not installed (validated in the target repo's contracts-lint CI)"
-  render_contracts
-  local rs="$OUT/common/.spectral.yaml"
-  cat > "$OUT/ok.yaml" <<'EOF'
-openapi: 3.1.0
-info:
-  title: T
-  version: "1.0.0"
-servers:
-  - url: /v1
-paths:
-  /w:
-    get:
-      operationId: getW
-      deprecated: true
-      x-sunset: "2026-12-31"
-      responses:
-        "200":
-          description: ok
-EOF
-  run spectral lint --ruleset "$rs" --fail-severity error "$OUT/ok.yaml"
-  [ "$status" -eq 0 ]
-}
+# REMOVED by #689 PR-B: "#695 contracts: a deprecated+x-sunset spec passes
+# Spectral lint (when spectral is present)".
+#
+# It linted an inline spec through the RENDERED .spectral.yaml and asserted a
+# clean exit. Two things broke it, both invisible because a
+# `command -v spectral || skip` guard made it vacuous on every machine that runs
+# this suite:
+#   - the inline spec carried no info.description, no operation description and
+#     no tags. The #692 starter had those at `warn`; the org ruleset promotes all
+#     three to `error`, so the assertion became false, not stale;
+#   - since PR-B the rendered file is a shim resolving a jsDelivr URL, so the
+#     case would reach the network — which `bats tests` must not do.
+#
+# The coverage moved, it was not dropped: linting THROUGH the shim is
+# scripts/check-styleguide-pin.zsh (unit-tested offline in
+# tests/check-styleguide-pin.bats, run for real by .github/workflows/
+# styleguide-pin.yml), and the conforming/non-conforming fixtures are linted by
+# tests/acceptance/cli/api-styleguide.bats.
 
 @test "#693 contracts: the semver workflow gates via the wrapper, installs pinned oasdiff, and is path-conditional" {
   render_contracts

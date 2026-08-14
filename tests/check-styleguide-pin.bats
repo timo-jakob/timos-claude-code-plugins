@@ -26,6 +26,8 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   W="$BATS_TEST_TMPDIR/repo"
   STUB_BIN="$BATS_TEST_TMPDIR/stub-bin"
+  ARGV_LOG="$BATS_TEST_TMPDIR/argv.log"
+  : > "$ARGV_LOG"
   mkdir -p "$W/scripts" "$W/development/skills/bootstrap/templates/common" \
     "$W/tests/fixtures/api-styleguide/nonconforming" \
     "$W/tests/fixtures/api-styleguide/conforming" \
@@ -49,9 +51,22 @@ shim() {
   printf 'extends:\n  - %s\n' "$1" > "$W/development/skills/bootstrap/templates/common/.spectral.yaml"
 }
 
-# stub_curl <http-code> — the pin fetch reports this status.
+# stub_curl <http-code> [only-for-url] — the pin fetch reports this status.
+# Records its argv so a case can assert WHAT was probed: without that, a script
+# that ignored the shim and fetched a hardcoded URL would pass every case here,
+# defeating the "extracted from the shim, never hardcoded" claim the script makes.
 stub_curl() {
-  printf '#!/usr/bin/env bash\nprintf %%s %s\n' "$1" > "$STUB_BIN/curl"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'printf "%%s\\n" "$*" >> %s\n' "$ARGV_LOG"
+    if [ -n "${2:-}" ]; then
+      # Answer the given code ONLY for the expected URL; anything else 404s.
+      printf 'for a in "$@"; do [ "$a" = %s ] && { printf %%s %s; exit 0; }; done\n' "'$2'" "'$1'"
+      printf 'printf %%s 404\n'
+    else
+      printf 'printf %%s %s\n' "$1"
+    fi
+  } > "$STUB_BIN/curl"
   chmod +x "$STUB_BIN/curl"
 }
 
@@ -60,11 +75,18 @@ stub_curl() {
 # the stub keys off the path it is handed.
 stub_npx() {
   local nc="$1" c="${2:-[]}"
+  # Payloads go through FILES, never through the generated script's quoting: a
+  # payload containing an apostrophe would otherwise close the single-quote
+  # wrapper mid-script, and the resulting breakage would look like a defect in
+  # the checker rather than in this stub.
+  printf '%s' "$nc" > "$BATS_TEST_TMPDIR/nc.json"
+  printf '%s' "$c" > "$BATS_TEST_TMPDIR/c.json"
   {
     printf '#!/usr/bin/env bash\n'
+    printf 'printf "%%s\\n" "$*" >> %s\n' "$ARGV_LOG"
     printf 'for a in "$@"; do case "$a" in\n'
-    printf '  *nonconforming*) printf %%s %s; exit 1 ;;\n' "'$nc'"
-    printf '  */conforming/*) printf %%s %s; exit 0 ;;\n' "'$c'"
+    printf '  *nonconforming*) cat %s; exit 1 ;;\n' "$BATS_TEST_TMPDIR/nc.json"
+    printf '  */conforming/*) cat %s; exit 0 ;;\n' "$BATS_TEST_TMPDIR/c.json"
     printf 'esac; done\nprintf %%s "[]"\n'
   } > "$STUB_BIN/npx"
   chmod +x "$STUB_BIN/npx"
@@ -75,13 +97,66 @@ stub_npx_all_eight() {
   stub_npx '[{"code":"operation-operationId","severity":0},{"code":"operation-operationId-unique","severity":0},{"code":"info-description","severity":0},{"code":"operation-description","severity":0},{"code":"operation-tags","severity":0},{"code":"org-deprecated-operation-has-sunset","severity":0},{"code":"org-resource-naming","severity":0},{"code":"org-problem-json-errors","severity":0}]'
 }
 
-check() { run zsh "$W/scripts/check-styleguide-pin.zsh"; }
+# `zsh -f` with a neutral ZDOTDIR: zsh sources /etc/zshenv and ~/.zshenv even for
+# non-interactive scripts, and a maintainer whose zshenv prepends /opt/homebrew/bin
+# would put the REAL curl and npx ahead of $STUB_BIN — quietly pulling this
+# suite onto the network and making the 404 case pass for the wrong reason.
+check() { run env ZDOTDIR="$BATS_TEST_TMPDIR" zsh -f "$W/scripts/check-styleguide-pin.zsh"; }
 
 @test "happy path: a live pin enforcing all eight rules exits 0" {
   check
   [ "$status" -eq 0 ]
   contains "$output" "all 8 org rules at error severity"
   contains "$output" "conforming fixture: 0 error findings"
+}
+
+@test "the probe follows the SHIM, and is not a hardcoded URL" {
+  # The script's central claim is that the pin is "extracted from the shim rather
+  # than hardcoded, so this check can never pass against a version the shim does
+  # not actually ship". Without inspecting argv, a script that fetched a constant
+  # URL would satisfy every other case here.
+  local pin="https://cdn.jsdelivr.net/gh/example/styleguide-fixture@styleguide-v2.3.4/styleguide/spectral/ruleset.yaml"
+  shim "$pin"
+  stub_curl 200 "$pin"      # 200 for THIS url only; anything else 404s
+  check
+  [ "$status" -eq 0 ]
+  run cat "$ARGV_LOG"
+  contains "$output" "$pin"
+}
+
+@test "spectral is invoked through the shim, at the EXACT pinned CLI version" {
+  # A drift from @6.16.3 to a floating @6 is the thing the script's own header
+  # forbids — a spectral minor can retire an inherited spectral:oas rule and move
+  # this check's goalposts with no commit here.
+  check
+  [ "$status" -eq 0 ]
+  run cat "$ARGV_LOG"
+  contains "$output" "@stoplight/spectral-cli@6.16.3"
+  # Suffix, not "$W/…": the script resolves its own location with ${0:A}, which
+  # yields the PHYSICAL path (/private/var/… on macOS) while $W holds the
+  # symlinked form (/var/…), so a full-path needle never matches.
+  contains "$output" "--ruleset /"
+  contains "$output" "/repo/development/skills/bootstrap/templates/common/.spectral.yaml"
+}
+
+@test "a missing shim is a TOOLING failure (exit 2), not a conformance verdict" {
+  # Without its own guard the script falls through to the pin extraction and
+  # reports "expected exactly 1 jsDelivr pin … found 0" at exit 1 — a verdict
+  # about a file that does not exist.
+  rm "$W/development/skills/bootstrap/templates/common/.spectral.yaml"
+  check
+  [ "$status" -eq 2 ]
+  contains "$output" "shim not found"
+}
+
+@test "a missing required tool is exit 2, naming the tool" {
+  # PATH holds ONLY the stub dir, so jq/node are absent. zsh is invoked by
+  # ABSOLUTE path — it does not need to be on PATH itself, and putting its
+  # directory there would drag jq back in on a host where they share one.
+  local zsh_bin; zsh_bin="$(command -v zsh)"
+  run env ZDOTDIR="$BATS_TEST_TMPDIR" PATH="$STUB_BIN" "$zsh_bin" -f "$W/scripts/check-styleguide-pin.zsh"
+  [ "$status" -eq 2 ]
+  contains "$output" "is required but not on PATH"
 }
 
 @test "THE case this script exists for: pin resolves but loads NO rules -> exit 1" {
@@ -133,6 +208,9 @@ check() { run zsh "$W/scripts/check-styleguide-pin.zsh"; }
   check
   [ "$status" -eq 1 ]
   contains "$output" "expected exactly 1 jsDelivr pin"
+  # The COUNT is what distinguishes this from the two-pin case below; without it
+  # a miscounting regression keeps both green while misdiagnosing the cause.
+  contains "$output" "found 0"
 }
 
 @test "a FLOATING major tag is rejected — the one pin the story forbids" {
@@ -159,10 +237,13 @@ check() { run zsh "$W/scripts/check-styleguide-pin.zsh"; }
   check
   [ "$status" -eq 1 ]
   contains "$output" "expected exactly 1 jsDelivr pin"
+  contains "$output" "found 2"
 }
 
 @test "the over-fire guard fires: a conforming fixture with an error fails" {
-  stub_npx_all_eight
+  # One stub call, not two: the earlier `stub_npx_all_eight` here was overwritten
+  # by the next line, and deleting the wrong one would have silently turned this
+  # case into a duplicate of the happy path.
   stub_npx '[{"code":"operation-operationId","severity":0},{"code":"operation-operationId-unique","severity":0},{"code":"info-description","severity":0},{"code":"operation-description","severity":0},{"code":"operation-tags","severity":0},{"code":"org-deprecated-operation-has-sunset","severity":0},{"code":"org-resource-naming","severity":0},{"code":"org-problem-json-errors","severity":0}]' \
     '[{"code":"org-resource-naming","severity":0}]'
   check

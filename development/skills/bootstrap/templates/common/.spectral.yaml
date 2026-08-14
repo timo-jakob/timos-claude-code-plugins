@@ -8,8 +8,14 @@
 # "when configured", no vendored fallback copy.
 #
 # THE PIN IS EXACT, ALWAYS. Never a floating tag, never @latest, never a branch
-# ref. Your enforced rules change only when a Renovate PR bumps the version below
-# and a human merges it — never spontaneously, on someone else's release.
+# ref. Your enforced rules change only when a human edits the version below and
+# merges that PR — never spontaneously, on someone else's release.
+#
+# NOTHING BUMPS THIS FOR YOU. No dependency bot in this repo watches the pin:
+# the Renovate manager that moves it lives in the plugin repo and rewrites the
+# TEMPLATE, not your copy. Watch the styleguide-v* tags and bump by hand, and do
+# not read silence as currency — a pin nobody moves means this repo keeps
+# enforcing an older styleguide with a fully green build. Tracked as #1359.
 #
 # TAGS ARE IMMUTABLE. A styleguide-v* tag, once cut, is never moved or deleted; a
 # mistake is superseded by the next version. jsDelivr caches by tag, so re-pointing

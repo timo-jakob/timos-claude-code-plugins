@@ -232,8 +232,18 @@ CODIFIED_RULE_IDS=(
   # EVERY occurrence per file is collected (grep without head), because a
   # bump/upgrade guide is the natural home for a stale "before" snippet that a
   # first-match-only sweep would never see.
+  # `.claude/worktrees/` is excluded because this repo's whole workflow lives in
+  # sibling worktrees: `git ls-files` skipped them implicitly, `find` does not.
+  # Run from the main checkout, a sibling branch mid-bump to a newer pin would
+  # red this test in a tree that is perfectly consistent — and, worse, a sibling's
+  # three pin sites could satisfy the canary for a main tree that has none.
+  #
+  # ANCHORED to $REPO_ROOT, not '*/.claude/worktrees/*': the suite itself runs
+  # from inside a worktree, so the unanchored form matches every path in the tree
+  # and excludes the entire repo.
   find "$REPO_ROOT" -type f \
-    -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/site/*' > "$list"
+    -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/site/*' \
+    -not -path "$REPO_ROOT/.claude/worktrees/*" > "$list"
   local files
   files="$(wc -l < "$list" | tr -d ' ')"
 
@@ -256,9 +266,33 @@ CODIFIED_RULE_IDS=(
   local first
   first="$(sort -u "$hits" | head -1)"
 
+  # A MISTYPED owner/repo is not a "hit" at all, so the distinctness check above
+  # cannot see it — and it is the worst case, shipping a permanently-404 pin.
+  # Second pass, owner-AGNOSTIC: every jsDelivr ruleset URL in the tree must be
+  # either the real pin or the deliberate fixture sentinel.
+  local stray
+  stray="$(grep -rho 'https://cdn\.jsdelivr\.net/gh/[^ "]*ruleset\.yaml' \
+    --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=site --exclude-dir=worktrees \
+    "$REPO_ROOT" 2>/dev/null | sort -u \
+    | grep -v "/gh/$OWNER_REPO@" | grep -v '/gh/example/styleguide-fixture@' || true)"
+  if [ -n "$stray" ]; then
+    printf 'jsDelivr URL with an unexpected owner/repo (typo?):\n%s\n' "$stray" >&2
+    return 1
+  fi
+
   # Canaries. Without these the sweep passes by inspecting nothing.
   [ "$files" -gt 100 ]   # the walk actually walked
   [ "$n" -ge 3 ]         # and found the known pin sites
+
+  # Identity, not just a count three unrelated files could satisfy: each known
+  # site must itself carry the pin.
+  local site
+  for site in development/skills/bootstrap/templates/common/.spectral.yaml \
+    styleguide/spectral/ruleset.yaml \
+    docs/how-to/adopt-the-api-styleguide.md; do
+    grep -q "https://cdn\.jsdelivr\.net/gh/$OWNER_REPO@" "$REPO_ROOT/$site" \
+      || { printf 'known pin site no longer quotes the pin: %s\n' "$site" >&2; return 1; }
+  done
 
   # Bind the canary to IDENTITY, not just a count three unrelated files could
   # satisfy: the shipped shim is the copy downstream repos consume, so it must be

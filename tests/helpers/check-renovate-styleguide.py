@@ -46,6 +46,32 @@ def load_config() -> dict:
     return json.loads((REPO_ROOT / "renovate.json").read_text())
 
 
+PIN_RE = re.compile(
+    r"https://cdn\.jsdelivr\.net/gh/" + re.escape(DEP) + r"@[^ \"]*ruleset\.yaml"
+)
+SKIP_DIRS = {".git", "node_modules", "site", "worktrees", ".venv", "__pycache__"}
+
+
+def discover_pin_sites() -> list[str]:
+    """Every repo-relative file quoting the real styleguide pin.
+
+    Discovered rather than listed, so a new quoting site is covered the day it
+    appears — the same reason the repo-wide sweep in
+    tests/api-styleguide-ruleset.bats walks the tree instead of naming files.
+    """
+    sites = []
+    for path in REPO_ROOT.rglob("*"):
+        if not path.is_file() or SKIP_DIRS & set(path.parts):
+            continue
+        try:
+            text = path.read_text(errors="ignore")
+        except OSError:
+            continue
+        if PIN_RE.search(text):
+            sites.append(str(path.relative_to(REPO_ROOT)))
+    return sorted(sites)
+
+
 def styleguide_manager(cfg: dict) -> dict:
     """The single customManager covering the shipped shim."""
     managers = [
@@ -100,12 +126,21 @@ def check_manager() -> None:
 
     # The pin must be bumped everywhere it is quoted, or the repo-wide sweep in
     # tests/api-styleguide-ruleset.bats reds every bump PR on arrival.
-    for site in ("styleguide/spectral/ruleset.yaml", "docs/how-to/adopt-the-api-styleguide.md"):
-        text = (REPO_ROOT / site).read_text()
-        if "cdn.jsdelivr.net" not in text:
-            continue
-        if not any(re.search(fp.strip("/"), site) for fp in manager["managerFilePatterns"]):
-            sys.exit(f"{site} quotes the pin but no managerFilePatterns entry covers it")
+    #
+    # The site list is DISCOVERED, not hardcoded — the same reasoning that made
+    # that sweep repo-wide. A closed pair here would leave a fourth quoting site
+    # covered by the sweep (so the bump PR is born red) but invisible to this
+    # check, which exists precisely to prevent that.
+    uncovered = [
+        site
+        for site in discover_pin_sites()
+        if not any(re.search(fp.strip("/"), site) for fp in manager["managerFilePatterns"])
+    ]
+    if uncovered:
+        sys.exit(
+            "these files quote the pin but no managerFilePatterns entry covers them, "
+            f"so a Renovate bump would leave them behind: {uncovered}"
+        )
 
     print("ok")
 

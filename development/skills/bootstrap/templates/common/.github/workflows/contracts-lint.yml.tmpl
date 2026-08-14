@@ -3,9 +3,10 @@
 # The API contract is a published, versioned artifact, so it must stay clean.
 # Spectral lints the NEWEST major of each contract family (contracts/vN and
 # contracts/ops/vN) against the ruleset at .spectral.yaml (repo root) — see the
-# selection rationale in the run step (#1330). The ruleset CONTENT is replaceable (the org
-# styleguide epic #689 swaps it) — this workflow references it BY PATH, so a
-# ruleset change never touches this wiring.
+# selection rationale in the run step (#1330). Since #689 that file is the
+# exact-pin SHIM extending the published org styleguide — rule changes arrive as
+# pin bumps, never as local edits — and this workflow references it BY PATH, so
+# moving the pin never touches this wiring.
 name: Contracts Lint
 
 on:

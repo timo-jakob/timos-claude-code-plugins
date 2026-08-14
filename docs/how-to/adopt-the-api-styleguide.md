@@ -91,17 +91,10 @@ and edit the version in `.spectral.yaml` yourself. **Do not read silence as
 currency** — it is the same absence-of-signal trap the immutability rule is
 written against.
 
-When a bump does land, review it as a rules change: read the styleguide's
-[versioning policy](../reference/api-styleguide.md#versioning-policy) for what
-the MAJOR/MINOR/PATCH step tells you about whether a previously-green spec can
-go red.
-
-If the bump PR's lint cannot resolve the ruleset at all, see
-[When the pin cannot be fetched](#when-the-pin-cannot-be-fetched) below.
-
-When a bump PR does arrive, read it by the version part that moved —
-the [versioning policy](../reference/api-styleguide.md#versioning-policy) is
-what makes this a two-second triage:
+Review the bump PR you open by the version part that moved — the
+[versioning policy](../reference/api-styleguide.md#versioning-policy) is what
+makes this a two-second triage. (If its lint cannot resolve the ruleset at all,
+see [When the pin cannot be fetched](#when-the-pin-cannot-be-fetched) below.)
 
 - **PATCH** — wording and doc links only. Nothing that was green can go red.
   Merge on green.

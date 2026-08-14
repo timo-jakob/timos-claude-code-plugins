@@ -94,7 +94,12 @@ print "pin resolves: HTTP 200"
 # and is swallowed — but its STDERR is kept, because an npx/registry failure and
 # a genuinely-empty lint are indistinguishable from stdout alone, and the former
 # should not be reported as a conformance failure.
-SPECTRAL_ERR="$(mktemp -t styleguide-pin-err)"
+# `foo.XXXXXX`, never `-t foo`: the -t form without X's is BSD-only. GNU
+# coreutils rejects it ("too few X's"), busybox with "Invalid argument" — so the
+# BSD spelling exits 1 on Linux, which is the platform this script's own workflow
+# runs on. It would have redded every CI run while passing on macOS.
+SPECTRAL_ERR="$(mktemp "${TMPDIR:-/tmp}/styleguide-pin-err.XXXXXX")" \
+  || die "could not create a temp file for spectral's stderr"
 trap 'rm -f "$SPECTRAL_ERR"' EXIT INT TERM
 
 lint_json() {

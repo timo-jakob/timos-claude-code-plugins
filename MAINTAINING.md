@@ -225,10 +225,19 @@ opens a batched **github-actions** PR covering digest refreshes and tag bumps
 alike. Your job is to **review and merge** those PRs; for a major bump, read
 the release notes first.
 
-Renovate only covers GitHub Action `uses:` pins — the remaining steps below
-(pre-commit revs, Docker tags, runtime strings, brew formulas, and the
-`*_VERSION:` CLI pins a template downloads by release URL) it doesn't see, so
-those stay manual. The `*_VERSION:` class is worth a deliberate look each pass:
+Renovate covers **two** things here, in two separate PRs: the batched
+**github-actions** PR above, and its own **api-styleguide** PR bumping the org
+Spectral pin (#689). That second one is deliberately kept out of the batch — it
+changes what every bootstrapped repo's CI enforces, so it gets its own review —
+and it moves a **three-site lockstep**: `templates/common/.spectral.yaml`,
+`styleguide/spectral/ruleset.yaml` and `docs/how-to/adopt-the-api-styleguide.md`
+must all quote the SAME pin. A repo-wide sweep in
+`tests/api-styleguide-ruleset.bats` fails any partial bump, so if you ever move
+the pin by hand, move all three.
+
+The remaining steps below (pre-commit revs, Docker tags, runtime strings, brew
+formulas, and the `*_VERSION:` CLI pins a template downloads by release URL)
+Renovate doesn't see, so those stay manual. The `*_VERSION:` class is worth a deliberate look each pass:
 `YQ_VERSION` is a **four-site lockstep** — `kubernetes-ci.yml.tmpl`,
 `no-cluster-deploy.yml.tmpl` (#1206), `tests/Dockerfile` and
 `.github/workflows/script-tests.yml` — because the bats suite asserts both
