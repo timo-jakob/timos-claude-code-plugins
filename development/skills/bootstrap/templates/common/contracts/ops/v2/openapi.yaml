@@ -1,24 +1,53 @@
-# Ops API — the org-standard operations surface, major v1. SHARED FRAGMENT.
+# Ops API — the org-standard operations surface, major v2. SHARED FRAGMENT.
+#
+# WHAT CHANGED FROM v1, AND WHY IT IS A MAJOR (#1330). The two probe 503s now
+# return RFC 9457 problem details on `application/problem+json` instead of the
+# `{"status": "down"}` Health envelope on `application/json`. Replacing a
+# response body is breaking, and this fragment's own rule (below) is that a
+# breaking change is a new major, never an in-place edit — so v1 stays frozen
+# and v2 is published beside it.
+#
+# The change exists because the org API styleguide (#689) ships
+# `org-problem-json-errors` at ERROR severity, and contracts-lint globs
+# contracts/ops/vN into the same Spectral invocation as the business contract.
+# Under v1 that reddens any repo whose .spectral.yaml extends that styleguide, on
+# a file it did not write. Repos still on the #692 starter ruleset
+# (extends: ["spectral:oas"]) do not carry the rule yet, so for them the collision
+# is pending rather than live — v2 fixes it before it lands, and independently
+# keeps the contract honest about what the payloads actually emit.
+#
+# RFC 9457's `status` is the HTTP status code as an INTEGER, which collides
+# head-on with the Health envelope's `status: "ok" | "down"` string. The health
+# string is DROPPED from the 503 — 503 already says "down" — and the diagnosis
+# rides in the `components` EXTENSION MEMBER instead, byte-identical to the map
+# /health already serves (v1.1, #965). One shape, one serializer, one assertion.
+#
+# The 200 responses are UNCHANGED: /health/live and /health/ready still answer
+# `{"status":"ok"}` on application/json, and /health still answers 200 with
+# AggregateHealth. v2 changes the two 503s and nothing else.
+#
+# DO NOT "DRY" Problem AND ReadinessProblem WITH `allOf`. Both declare the four
+# RFC 9457 members inline on purpose. Measured against the org ruleset: an
+# `allOf: [$ref Problem, {...}]` composition still FAILS org-problem-json-errors,
+# because the rule inspects the resolved response schema's own top-level
+# `required` array and a composition has none. The duplication is the price of a
+# rule that can see the contract.
 #
 # Unlike contracts/v1/openapi.yaml (the per-project business API), this file is
 # an ORG-WIDE STANDARD: every backend service exposes exactly this surface, so
 # "standardised" is testable rather than aspirational (epic #682, design §5).
-# FROZEN HISTORICAL MAJOR — bootstrap no longer installs this file (#1330).
-# A fresh repo gets contracts/ops/v2/openapi.yaml; this copy ships only so a repo
-# migrating an EXISTING v1 installation can keep it byte-identical while it moves
-# (docs/how-to/adopt-the-ops-surface.md). detect-stack holds every non-newest ops
-# major out of the State-D gap-fill, so a re-bootstrap never installs it either.
-# It carries no {{PLACEHOLDERS}} because the ops contract is identical across
-# every repo.
+# Bootstrap installs it verbatim at contracts/ops/v2/openapi.yaml; it carries no
+# {{PLACEHOLDERS}} because the ops contract is identical across every repo.
+#
+# INSTALL IT AT v2. Copied into contracts/ops/v1/ this file breaks the version
+# triangle it declares below (info.version major == vN directory == servers /vN)
+# and overwrites a frozen v1 the migration flow requires to stay byte-identical.
 #
 # It is versioned exactly like the business contract — the same per-major
-# layout (contracts/ops/vN/openapi.yaml) and the same version triangle
-# (info.version major == vN directory == servers /vN) (#688). A breaking change
-# to the ops surface is a new ops major, never an in-place edit. The two CI gates
-# reach it differently since #1330: contracts-semver's oasdiff still protects
-# THIS file (a live major may not be broken or deleted), but contracts-lint now
-# lints only the NEWEST major per family — so once v2 exists this file is linted
-# only in a repo that has not yet adopted v2.
+# layout (contracts/ops/vN/openapi.yaml), the same version triangle
+# (info.version major == vN directory == servers /vN), and the same CI gates
+# (contracts-lint Spectral + contracts-semver oasdiff) discover it (#688). A
+# breaking change to the ops surface is a new ops major, never an in-place edit.
 #
 # Ops endpoints stay INTERNAL — never published as APIM products. The runtime
 # base URL a service mounts them at is passed to check-ops-conformance.zsh; the
@@ -26,7 +55,7 @@
 openapi: 3.1.0
 info:
   title: Ops API
-  version: "1.1.0"
+  version: "2.0.0"
   description: >
     The org-standard operations surface every backend service exposes:
     /info (build + served API majors with lifecycle and sunset),
@@ -58,11 +87,18 @@ info:
     and the API-major lifecycle table only; it MUST NOT expose framework, server,
     OS, or dependency versions.
 servers:
-  - url: /v1
+  - url: /v2
     description: >
-      Ops API major v1, served on the internal MANAGEMENT PORT (not the public
-      app port). The URL major segment MUST match info.version's major (1). The
+      Ops API major v2, served on the internal MANAGEMENT PORT (not the public
+      app port). The URL major segment MUST match info.version's major (2). The
       surface is never fronted by the APIM gateway.
+
+
+      This is the artifact's VERSION DECLARATION for the triangle, not a runtime
+      path prefix. Services mount the operations unprefixed (/info, /health,
+      /health/live, /health/ready, /metrics); the runtime base URL is passed to
+      check-ops-conformance.zsh, which builds "$BASE/<path>". A repo that wants
+      a prefix gets one by passing it as the base URL.
 tags:
   - name: ops
     description: The standardized operations surface (/info, /health, /metrics).
@@ -141,11 +177,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
         "503":
-          description: The process is not alive and should be restarted.
+          description: >
+            The process is not alive and should be restarted. Liveness is
+            dependency-free BY CONTRACT, so this problem document carries NO
+            extension members — a `components` map here would be a lie.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: "#/components/schemas/Problem"
   /health/ready:
     get:
       operationId: getReadiness
@@ -176,11 +215,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
         "503":
-          description: The service is not ready to accept traffic.
+          description: >
+            The service is not ready to accept traffic. Carries the `components`
+            extension member — ALL declared dependencies, not only the failing
+            ones — so an operator reading a shed pod sees the same picture the
+            /health dashboard shows.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: "#/components/schemas/ReadinessProblem"
   /metrics:
     get:
       operationId: getMetrics
@@ -259,17 +302,107 @@ components:
     Health:
       type: object
       description: >
-        Binary health envelope for the two Kubernetes probes, /health/live and
-        /health/ready. A 200 response carries status "ok"; a 503 carries "down".
-        The probes are deliberately binary — a probe answers one yes/no question
-        the kubelet acts on. The tri-state aggregate lives on /health
+        The 200 envelope for the two Kubernetes probes, /health/live and
+        /health/ready. In ops-api v2 this shape is served ONLY on a 200 — the
+        503s carry RFC 9457 problem details instead (Problem /
+        ReadinessProblem), because RFC 9457's integer `status` and this string
+        `status` cannot share one key. The tri-state aggregate lives on /health
         (AggregateHealth).
       required: ["status"]
       properties:
         status:
           type: string
-          description: Health indicator — "ok" on a 200, "down" on a 503.
+          description: >
+            Health indicator. Only "ok" is reachable in v2: a probe that would
+            have answered "down" now answers 503 with a problem document. The
+            "down" value is retained so this schema stays unchanged from v1.x and
+            the value's meaning remains documented — NOT as a detection
+            mechanism: the conformance checker recognises a legacy 503 body with a
+            direct test on the body itself, never by validating it against this
+            schema (and at the 503 position v2 declares Problem /
+            ReadinessProblem, so a v1 body would not validate there anyway).
           enum: ["ok", "down"]
+    Problem:
+      type: object
+      description: >
+        RFC 9457 problem details — the liveness 503 body, and the base shape.
+
+        DELIBERATELY FLAT: ReadinessProblem repeats these four members rather
+        than composing with `allOf`, because org-problem-json-errors reads the
+        resolved schema's own top-level `required` and sees nothing through a
+        composition. Do not refactor the duplication away.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: >
+            A stable, host-free URN identifying the problem type —
+            `urn:problem-type:ops:not-alive` for liveness. A URN rather than a
+            docs URL on purpose: a shipped payload must not carry a link that
+            rots when the documentation site moves.
+          examples: ["urn:problem-type:ops:not-alive"]
+        title:
+          type: string
+          description: Short, stable human-readable summary of the problem type.
+          examples: ["Service Not Alive"]
+        status:
+          type: integer
+          description: >
+            The HTTP status code, as an integer (RFC 9457). NOT the health
+            envelope's "ok"/"down" string — that collision is why v2 exists.
+          examples: [503]
+        detail:
+          type: string
+          description: >
+            A canonical sentence, not free prose: the conformance checker and
+            the acceptance lane both assert it. For liveness,
+            "the process is not alive and should be restarted".
+          examples: ["the process is not alive and should be restarted"]
+    ReadinessProblem:
+      type: object
+      description: >
+        RFC 9457 problem details for the readiness 503, extended with the
+        `components` map. Flat by construction — see Problem.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: The problem type URN — `urn:problem-type:ops:not-ready`.
+          examples: ["urn:problem-type:ops:not-ready"]
+        title:
+          type: string
+          description: Short, stable human-readable summary of the problem type.
+          examples: ["Service Not Ready"]
+        status:
+          type: integer
+          description: The HTTP status code, as an integer (RFC 9457).
+          examples: [503]
+        detail:
+          type: string
+          description: >
+            A canonical sentence, not free prose. One hard dependency down:
+            "hard dependency 'orders-db' is down". Several: names sorted
+            LEXICOGRAPHICALLY and comma-joined, "hard dependencies 'orders-db',
+            'pricing-api' are down" — sorted so the string is deterministic
+            regardless of the order the breakers tripped in. The
+            non-dependency unready reasons the fragment already names are
+            "the service is starting up" and "the service is draining".
+          examples: ["hard dependency 'orders-db' is down"]
+        components:
+          type: object
+          description: >
+            The RFC 9457 extension member carrying the diagnosis: one entry per
+            DIRECT dependency, keyed by stable name, byte-identical to the map
+            /health serves (v1.1, #965). It carries ALL declared dependencies,
+            not only the failing ones, so the shed pod and the dashboard agree.
+
+            OMITTED ONLY when the service declares no dependencies at all —
+            NEVER as a function of which half of readiness failed. A 503 raised
+            for a non-dependency reason (start-up, drain) still carries the full
+            map; that is what every shipped payload does, snapshotting the
+            components before the readiness gate precisely so this holds.
+          additionalProperties:
+            $ref: "#/components/schemas/DependencyHealth"
     AggregateHealth:
       type: object
       description: >

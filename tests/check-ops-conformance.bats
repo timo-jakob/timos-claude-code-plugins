@@ -2,7 +2,7 @@
 #
 # Behavioural tests for the ops-conformance checker (#688) —
 # templates/common/scripts/check-ops-conformance.zsh. The checker curls a live
-# service's /info, /health, /metrics and validates them against the ops-api/v1
+# service's /info, /health, /metrics and validates them against the ops-api v2
 # fragment's shapes. curl is not in the test toolchain (and no server runs), so a
 # STUB curl (via $OPS_CURL) serves canned per-endpoint responses from a fixture
 # dir — this exercises the checker's DECISION logic (status codes, /info schema
@@ -10,6 +10,12 @@
 # a real service are exercised by the Python canonical impl's acceptance run.
 
 bats_require_minimum_version 1.5.0
+# The shared helpers are the sanctioned way to assert here (tests/README.md); this
+# file predates them and its older cases still use `echo | grep -q`, which is fine
+# as a command of its own. New cases use contains/lacks — `lacks` in particular,
+# because a hand-rolled `! echo … | grep` is the inert-negation shape the suite
+# lint bans.
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -88,15 +94,160 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
 @test "error: /health/live 503 -> non-zero, names /health/live" {
   serve live 503 'application/json' '{"status":"down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/health/live'
 }
 
 @test "error: /health/ready 503 -> non-zero, names /health/ready" {
   serve ready 503 'application/json' '{"status":"down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/health/ready'
+}
+
+# ---- ops-api v2: the RFC 9457 probe 503 (#1330) -----------------------------
+
+@test "error: a probe answering 404 or 500 takes the generic branch, naming the code" {
+  # Round-2 finding. #1330 diverted every probe 503 into check_probe_problem, and
+  # the only two tests that previously reached the generic "expected HTTP 200, got
+  # N" fallthrough were 503s — so that branch became dead to this suite and could
+  # have been deleted, or had its message rewritten to name the wrong endpoint,
+  # with everything green. A probe answering 404 is the commonest symptom of a
+  # payload mounted on the wrong path (the Go `go 1.22` directive trap).
+  serve ready 404 'application/json' 'not found'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" '/health/ready: expected HTTP 200, got 404'
+  # It must NOT be routed through the problem-document branch. Needled on that
+  # branch's own vocabulary, not the bare word "problem" — the checker's summary
+  # line reads "N problem(s)" on every failing run.
+  lacks "$output" 'problem+json'
+  lacks "$output" 'problem document'
+  lacks "$output" 'ops-api v1 envelope'
+}
+
+@test "error: a probe answering 500 is reported against the endpoint that answered it" {
+  serve live 500 'application/json' '{}'
+  run_check
+  [ "$status" -eq 1 ]
+  # Endpoint-qualified, so a probe mislabelled as its sibling still reds.
+  contains "$output" '/health/live: expected HTTP 200, got 500'
+  lacks "$output" '/health/ready: expected HTTP 200, got 500'
+}
+
+@test "tc-error-legacy-v1-503-body: a v1 {\"status\":\"down\"} 503 is named as a MIGRATION, not a shape error" {
+  # #1344. This is the single message that turns the v1 -> v2 cutover from a
+  # mystery into a task: reported generically, an adopter debugs their own code.
+  serve ready 503 'application/json' '{"status":"down"}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" 'ops-api v1 envelope'
+  contains "$output" 'contracts/ops/v2'
+  # The PUBLISHED URL, not a repo-relative path: this script runs in the
+  # bootstrapped repo, which has no docs/how-to/ tree, so a relative pointer
+  # dead-ends exactly when the message needs to be actionable.
+  contains "$output" 'https://timo-jakob.github.io/timos-claude-code-plugins/how-to/adopt-the-ops-surface/'
+  lacks "$output" 'see docs/how-to/adopt-the-ops-surface.md'
+}
+
+@test "corner: a liveness 503 is labelled NOT ALIVE, not 'not ready'" {
+  # Round-1 review finding: check_probe_problem serves both probes, and the Spring
+  # payload really does emit a not-alive problem on /health/live. A fixed "not
+  # ready" label would mislabel a liveness failure — and the two have opposite
+  # remedies, restart versus shed traffic.
+  serve live 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-alive","title":"Service Not Alive","status":503,"detail":"the process is not alive and should be restarted"}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" '/health/live: not alive — the process is not alive and should be restarted (503)'
+  lacks "$output" '/health/live: not ready'
+}
+
+@test "tc-error-readiness-503-fails-conformance: a valid v2 problem 503 still FAILS, and names the dependency" {
+  # #1343. A 503 stays a conformance failure — conformance asserts a SERVING
+  # service and there is deliberately no flag to tolerate one. What v2 buys is
+  # that the failure says WHICH dependency shed the pod.
+  serve ready 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down","components":{"orders-db":{"status":"down","kind":"hard","breaker":"open"}}}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" '/health/ready'
+  contains "$output" "not ready — hard dependency 'orders-db' is down (503)"
+  # …and it must NOT be misreported as a legacy body.
+  lacks "$output" 'ops-api v1 envelope'
+}
+
+@test "corner: a v2 problem 503 on application/json is rejected for the MEDIA TYPE" {
+  # Bare problem+json is part of the contract: a correctly shaped body on the wrong
+  # media type is still an org-problem-json-errors failure, so the checker must not
+  # accept it just because the members are right.
+  serve ready 503 'application/json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down"}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" 'must be served as application/problem+json'
+}
+
+@test "error: a problem 503 missing a required member names the member" {
+  serve ready 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" 'missing required member(s): detail'
+}
+
+@test "error: an EMPTY 503 body is diagnosed as such, not as a status-type error" {
+  # Round-1 review finding. Without a parse guard, jq's failure on an empty body
+  # left `missing` empty, the branch concluded all four members were present, and
+  # the run reported "status must be the integer 503" — about a body with no status
+  # at all. Right exit code, lying diagnosis.
+  serve ready 503 'application/problem+json' ''
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" 'not a JSON object'
+  lacks "$output" 'must be the integer 503'
+}
+
+@test "error: a non-object 503 body (array, scalar) is diagnosed as such" {
+  serve ready 503 'application/problem+json' '["not","a","problem"]'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" 'not a JSON object'
+  # An array would otherwise make `keys` yield indices, so the subtraction leaves
+  # all four names and the message claims four missing members of a non-document.
+  lacks "$output" 'missing required member(s): type, title, status, detail'
+}
+
+@test "corner: an UPPERCASE problem+json media type is accepted (RFC 9110 case-insensitivity)" {
+  # Media types are case-insensitive, and the script's own /metrics check already
+  # lowercases. A conformant server using Application/Problem+JSON must still get
+  # the dependency detail, not a wrong-media-type complaint.
+  serve ready 503 'Application/Problem+JSON; charset=utf-8' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down"}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" "not ready — hard dependency 'orders-db' is down (503)"
+  lacks "$output" 'must be served as application/problem+json'
+}
+
+@test "error: a NULL detail is diagnosed, not read out as \"not ready — null\"" {
+  serve ready 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":null}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" '"detail" must be a string'
+  lacks "$output" 'not ready — null'
+}
+
+@test "error: a problem 503 whose status is the health STRING is rejected" {
+  # The collision between RFC 9457's integer `status` and the health envelope's
+  # "ok"/"down" string is the whole reason ops-api v2 exists, so a string here is
+  # exactly the mistake worth catching.
+  serve ready 503 'application/problem+json' \
+    '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":"down","detail":"hard dependency '"'"'orders-db'"'"' is down"}'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" 'must be the integer 503'
 }
 
 @test "corner: two majors, one deprecated with sunset -> exit 0" {
@@ -116,7 +267,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
 @test "error: /metrics 404 -> non-zero, names /metrics" {
   serve metrics 404 'text/plain' 'not found'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/metrics'
 }
 
@@ -126,7 +277,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   # regress to a no-op — every other test would still pass green).
   serve metrics 200 'application/json' '{}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/metrics'
   echo "$output" | grep -qi 'content-type'
 }
@@ -135,7 +286,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"deadbee"},"api":[{"major":1,"lifecycle":"deprecated"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q 'major 1'
   echo "$output" | grep -qi 'sunset'
 }
@@ -437,7 +588,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0"},"api":[{"major":1,"lifecycle":"active"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/info'
 }
 
@@ -447,7 +598,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"cafe123"},"api":[{"major":"1","lifecycle":"active"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/info'
 }
 
@@ -455,14 +606,14 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"cafe123"},"api":[{"major":0,"lifecycle":"active"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "error: deprecated major with non-string sunset -> non-zero" {
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"cafe123"},"api":[{"major":1,"lifecycle":"deprecated","sunset":true}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -qi 'sunset'
 }
 

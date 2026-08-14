@@ -9,8 +9,9 @@
 #   tc-corner-health-200-while-down            #1237
 #   tc-corner-soft-down-readiness-stays-200    #1238
 #   tc-corner-hard-down-readiness-503          #1239
-#   tc-corner-seam-unwired-is-v1.0             #1240
+#   tc-corner-seam-unwired-is-v2.0             #1240
 #   tc-error-ops-surface-not-on-app-port       #1244
+#   tc-error-readiness-503-is-bare-problem-json #1347
 #
 # Plus two cases with no tc-* id, each a claim only a RUNNING service can prove:
 # the SIGTERM graceful drain (which the teardown deliberately cannot make), and
@@ -109,19 +110,63 @@ teardown() { ops_stop; }
 }
 
 @test "tc-corner-hard-down-readiness-503: a hard dependency down sheds traffic but stays alive" {
+  # ops-api v2 (#1330): the 503 is an RFC 9457 problem document, so the health
+  # "down" string is GONE from this body — `status` is the integer 503, and the
+  # diagnosis rides in `components`.
   ops_start hard-down GIT_SHA=9e11997
   [ "$(http_code "$BASE/health/ready")" = "503" ]
-  [ "$(jq -r .status <<< "$(http_body "$BASE/health/ready")")" = "down" ]
+  local body; body="$(http_body "$BASE/health/ready")"
+  [ "$(jq -r .type <<< "$body")" = "urn:problem-type:ops:not-ready" ]
+  [ "$(jq -r .title <<< "$body")" = "Service Not Ready" ]
+  # -e so a STRING "503" fails: the integer/string collision is why v2 exists.
+  jq -e '.status == 503' <<< "$body" >/dev/null
+  [ "$(jq -r .detail <<< "$body")" = "hard dependency 'orders-db' is down" ]
+  # The map carries ALL declared dependencies, not only the failing one, and is
+  # byte-identical to what /health serves for the same call.
+  [ "$(jq -r '.components["orders-db"].status' <<< "$body")" = "down" ]
+  [ "$(jq -r '.components["orders-db"].kind' <<< "$body")" = "hard" ]
+  [ "$(jq -r '.components["orders-db"].breaker' <<< "$body")" = "open" ]
+  jq -e --argjson h "$(jq -c .components <<< "$(http_body "$BASE/health")")" \
+    '.components == $h' <<< "$body" >/dev/null
   # Liveness must be independent of every dependency: a failing liveness restarts
   # the pod, which turns a transient outage into a restart storm.
   [ "$(http_code "$BASE/health/live")" = "200" ]
   [ "$(jq -r .status <<< "$(http_body "$BASE/health/live")")" = "ok" ]
 }
 
-@test "tc-corner-seam-unwired-is-v1.0: an unwired seam serves a byte-valid v1.0 body" {
+@test "tc-error-readiness-503-is-bare-problem-json: the 503 media type is problem+json, whatever the client asks for" {
+  # #1347. Bare-ness is a RUNTIME property, not only a spec one: a correctly shaped
+  # body on application/json is still an org-problem-json-errors failure. Nothing
+  # asserted this end-to-end before v2.
+  ops_start hard-down GIT_SHA=9e11997
+  local ct; ct="$(http_ctype "$BASE/health/ready")"
+  case "$ct" in
+    application/problem+json*) ;;
+    *) printf 'expected application/problem+json, got %s\n' "$ct" >&2; return 1 ;;
+  esac
+  # …even when the client explicitly asks for plain JSON.
+  ct="$(curl -s -o /dev/null -w '%{content_type}' --max-time 5 \
+        -H 'Accept: application/json' "$BASE/health/ready")"
+  case "$ct" in
+    application/problem+json*) ;;
+    *) printf 'Accept: application/json changed the type to %s\n' "$ct" >&2; return 1 ;;
+  esac
+  # The 200 paths keep the ordinary type — v2 changed the 503 and nothing else.
+  case "$(http_ctype "$BASE/health/live")" in
+    application/json*) ;;
+    *) printf 'liveness 200 lost application/json\n' >&2; return 1 ;;
+  esac
+  case "$(http_ctype "$BASE/health")" in
+    application/json*) ;;
+    *) printf '/health 200 lost application/json\n' >&2; return 1 ;;
+  esac
+}
+
+@test "tc-corner-seam-unwired-is-v2.0: an unwired seam serves a byte-valid v2.0 body" {
   # The state of every repo that has not adopted the resilience payload (#1145).
   # `components` must be ABSENT — not `{}`, which would announce a v1.1 body that
-  # then reports nothing.
+  # then reports nothing. Renamed from -is-v1.0 with #1330: the id names the
+  # version it asserts, and leaving it would make the test title a lie.
   ops_start unwired GIT_SHA=9e11997
   local body; body="$(http_body "$BASE/health")"
   [ "$(jq -r .status <<< "$body")" = "ok" ]

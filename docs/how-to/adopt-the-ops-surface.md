@@ -25,10 +25,11 @@ version, git SHA, API-major lifecycle only) — never framework/server/OS versio
 Bootstrap installs the surface alongside the contracts machinery when your repo
 has an API surface. You get three things:
 
-- **`contracts/ops/v1/openapi.yaml`** — the fragment. It rides the same CI gates
-  as your business contract: `contracts-lint` (Spectral) and `contracts-semver`
-  (oasdiff) discover `contracts/ops/v[0-9]*/openapi.yaml`, so a breaking change
-  to the ops surface is a new ops major, never an in-place edit.
+- **`contracts/ops/v2/openapi.yaml`** — the fragment. It rides the same CI gates
+  as your business contract: `contracts-semver` (oasdiff) gates **every**
+  `contracts/ops/v[0-9]*/openapi.yaml`, while `contracts-lint` (Spectral)
+  discovers them all and lints only the **newest** ops major (#1330) — so a
+  breaking change to the ops surface is a new ops major, never an in-place edit.
 - **`scripts/check-ops-conformance.zsh`** — the conformance checker.
 - **`.github/workflows/ops-conformance.yml`** — a standalone CI job that builds
   the canonical container, waits for `/health/ready`, and runs the checker.
@@ -116,6 +117,18 @@ pull-compat surface served by the SDK's Prometheus exporter.
   `…group.ready.include: readinessState` — keeping the `live` group
   dependency-free. `spring-config-advisor` flags a non-conforming config with
   these specifics either way, and branches on whether the payload is present.
+
+  **Your own representation must also serve the v2 probe 503s as
+  `application/problem+json`** — see
+  [what actually changes on the wire](#what-actually-changes-on-the-wire).
+  Actuator's own 503 body is `{"status":"DOWN"}`, and this is the half a
+  config-only route cannot reach: it needs code. Do **not** expect the checker's
+  *unmigrated* migration pointer here — that branch matches the org v1 payload's
+  lowercase `{"status":"down"}` with no `type` member, so Actuator's uppercase
+  body falls through and is reported as a content-type/shape failure instead.
+  Both are the same underlying cause; only one of them says so. Note the
+  trap that makes it easy to miss — a healthy service never answers 503, so a
+  green conformance run does **not** tell you this is done.
 - **Python (non-Spring)** — use the blessed reference implementation bootstrap
   installs under your package (`ops_api.py` + `requirements.txt`); it serves the
   full surface on the management port and passes the conformance checker
@@ -385,6 +398,137 @@ pull-compat surface served by the SDK's Prometheus exporter.
   the family** — a settled decision rather than a gap awaiting a payload (#1245 was
   closed as descoped on 2026-08-11 and is only the record of that decision, never a
   destination to wait on).
+
+## Migrate an existing repo to ops v2
+
+**This step is mandatory, manual and documented — there is no advisor that does it
+for you.** If your repo carries `contracts/ops/v1/openapi.yaml` and nothing newer,
+v1 is still your newest ops major, so `contracts-lint` still lints it — and once
+your `.spectral.yaml` extends the org styleguide, its `org-problem-json-errors`
+rule reddens that file, which you did not write. Adopting v2 is what clears that,
+and nothing else does.
+
+You will notice it in one of two ways:
+
+- **`contracts-lint` goes red** on `contracts/ops/v1/openapi.yaml` with
+  `org-problem-json-errors` on the `/health/live` and `/health/ready` `503`s —
+  **but only once your `.spectral.yaml` extends the org styleguide ruleset**
+  (#689). A repo still on the bootstrap starter (`extends: ["spectral:oas"]`,
+  #692) does not carry that rule, so it stays green on ops v1 indefinitely.
+  **Do not read that green as "migration not needed"** — migrate now, per the
+  steps below, rather than waiting for a check that cannot fire yet.
+- **`check-ops-conformance.zsh` fails** with a message naming the ops-api v1
+  envelope and pointing back at this section — that is the checker telling you a
+  probe answered 503 while the service is still on a v1 payload. Note the
+  direction: it fires only when a probe actually 503s, so its *silence* is not
+  evidence that you have migrated.
+
+Four steps, in this order — and **step 0 is not optional**:
+
+0. **Refresh `.github/workflows/contracts-lint.yml` from the current template.**
+    Newest-major-only linting is what stops v1 being linted, and it shipped *with*
+    v2 (#1330). If your repo was bootstrapped before that, its workflow still lints
+    **every** `contracts/ops/vN`, so adding v2 alone leaves v1 red — and the next
+    step forbids the obvious way out (deleting it). Refresh the workflow first and
+    the rest of this section behaves as written.
+
+    **Do not copy this one verbatim.** Unlike the ops fragment (which carries no
+    placeholders, by design), `contracts-lint.yml.tmpl` contains
+    `branches: ["{{DEFAULT_BRANCH}}"]`. Copied unsubstituted, its `pull_request`
+    filter matches nothing and contract linting silently stops running on every PR
+    — and because the check is path-conditional and never required, nothing goes
+    red to tell you. The v1 redness would "clear" for entirely the wrong reason.
+    So either:
+
+    ```sh
+    # preferred — renders the placeholder and re-stamps the provenance marker
+    /development:bootstrap    # accept the contracts-lint.yml drift update
+    ```
+
+    or copy it by hand and substitute `{{DEFAULT_BRANCH}}` with your default
+    branch yourself.
+
+1. **Copy the v2 fragment in**, beside the old one:
+
+    ```sh
+    cp <bootstrap-templates>/common/contracts/ops/v2/openapi.yaml \
+       contracts/ops/v2/openapi.yaml
+    ```
+
+    **Leave `contracts/ops/v1/openapi.yaml` exactly where it is, byte for byte.**
+    Do not delete it. `contracts-semver` runs a second time with
+    `--contracts-dir contracts/ops` and rejects a major that was live at the base
+    ref and gone at `HEAD` — retiring a live major is its own flow, not a side
+    effect of adopting the next one. Once v2 exists **and step 0 is done**, v1 is
+    no longer linted.
+
+2. **Replace your ops payload** with the v2 one for your language
+    (`templates/languages/<lang>/ops-api/` — Node lives under `javascript/`, and
+    Spring uses `spring/resilience/`). The payloads changed with the contract:
+    **both probe `503`s** — liveness and readiness — now return
+    `application/problem+json`.
+
+3. **Re-run conformance** against the running service:
+
+    ```sh
+    zsh scripts/check-ops-conformance.zsh http://localhost:9090
+    ```
+
+    **A green run here does not verify step 2.** The checker can only inspect a 503
+    body when a probe actually answers 503, and a healthy service answers `200`
+    `{"status":"ok"}` on both probes — so an unmigrated-but-healthy service passes
+    this command. To verify the bodies, either read the payload diff, or observe one
+    503 for real: stop a hard dependency, or hit `/health/ready` during start-up.
+
+### What actually changes on the wire
+
+Only the two probes' `503` bodies. The `200`s are untouched, `/health` still
+answers `200` with its aggregate, and **the runtime paths do not move** — `servers:
+/v2` in the fragment is the version declaration for the semver triangle, not a URL
+prefix. Your Kubernetes probe paths stay exactly as they are.
+
+Before (v1), on `application/json`:
+
+```json
+{ "status": "down" }
+```
+
+After (v2), on `application/problem+json`:
+
+```json
+{
+  "type": "urn:problem-type:ops:not-ready",
+  "title": "Service Not Ready",
+  "status": 503,
+  "detail": "hard dependency 'orders-db' is down",
+  "components": {
+    "orders-db":   { "status": "down", "kind": "hard", "breaker": "open",   "since": "2026-08-13T09:14:22Z" },
+    "pricing-api": { "status": "up",   "kind": "soft", "breaker": "closed", "since": "2026-08-13T08:02:10Z" }
+  }
+}
+```
+
+Note `status` is the **integer** HTTP code, not the health envelope's string —
+that collision is the whole reason v2 exists. The `components` map is
+byte-identical to the one `/health` serves and carries **all** declared
+dependencies, not only the failing ones, so a shed pod and the dashboard show the
+same picture. It is omitted **only** when the service declares no dependencies at
+all — a `503` raised for a non-dependency reason still carries the full map.
+
+Two details about `detail` that are easy to assume wrongly:
+
+- A non-dependency 503 always reads **`the service is starting up`**, whether the
+  cause was start-up or a graceful drain. The payloads cannot tell the two apart:
+  your readiness hook returns a boolean, not a reason.
+- The payloads therefore **define** a draining constant (`DETAIL_DRAINING` and its
+  per-language spellings) but **never emit it**. It is a hook, with the wording
+  fixed by the contract, for a service that does distinguish the two in its own
+  readiness hook — so every service that bothers spells it identically.
+
+**If anything consumes that body, update it before you migrate.** In practice a
+kubelet reads only the status code, so most services have nothing to change — but
+a bespoke dashboard or alert that parses `.status == "down"` on a probe will stop
+matching.
 
 ## Who enforces the boundary — you, or the platform?
 

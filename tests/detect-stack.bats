@@ -330,6 +330,205 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/template-drift-watch.yml")' <<<"$out")" != "null" ]
 }
 
+# --- #1330 ops majors: gap-fill installs the NEWEST only ---------------------
+#
+# templates/common/ now carries TWO ops majors, and collect_from walks the whole
+# tree — so without the hold-out a State-D gap-fill would render the FROZEN v1
+# into a repo that never served it, beside payloads emitting RFC 9457 problem
+# details, and contracts-semver would then refuse to let it be deleted.
+# SKILL.md §3i states the rule ("Install v2, not v1"); this pins the mechanism.
+
+@test "detect-stack: #1330 the frozen ops v1 major is never a gap-fill candidate" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # The newest ops major IS an expected gap on a repo that has no ops surface...
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
+  # ...and every older major is held out, so blind rendering can't install it.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v1/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 an EXISTING ops v1 is still reported present, not erased" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  mkdir -p contracts/ops/v1
+  printf 'openapi: 3.1.0\n' > contracts/ops/v1/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # Held out of the GAP list, but a repo migrating from v1 must still see it in
+  # existing_artifacts — the hold-out suppresses installation, never detection.
+  [ "$(jq -r '.existing_artifacts["contracts/ops/v1/openapi.yaml"]' <<<"$out")" = "true" ]
+  # The migration story this case is named for: a v1 repo is still told to adopt
+  # the newest major. (The v1 line above cannot fail on its own — the emit loop
+  # short-circuits on an existing file before it ever consults held_out — so this
+  # is the assertion that carries the case.)
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v1/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+# The two cases above run against TODAY's template tree (v1 + v2), so they pass
+# byte-identically against a hardcoded `held_out+=("contracts/ops/v1/…")` with the
+# derivation deleted. These two run detect-stack against a SYNTHETIC templates
+# tree, which is what actually pins the loop's own claim ("derived from the tree,
+# never a hardcoded ban"). templates_dir resolves as $script_dir/../templates, so
+# copying the script beside a fake tree is enough to redirect it.
+
+_openapi_surface() {
+  # The business contract that unlocks the contracts machinery. Since #1330 the
+  # ops surface is gated on the SAME signal — it rides with contracts-lint and
+  # contracts-semver, never ahead of them — so every ops gap-fill case needs one.
+  # (contracts/v1/openapi.yaml is itself held out unconditionally, so adding it
+  # never shows up as a gap of its own.)
+  mkdir -p contracts/v1
+  cat > contracts/v1/openapi.yaml <<'EOS'
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+servers:
+  - url: /v1
+paths: {}
+EOS
+}
+
+_fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> openapi.yaml.tmpl
+  local root="$BATS_TEST_TMPDIR/fake" d name spec
+  rm -rf "$root"
+  mkdir -p "$root/scripts" "$root/templates/common"
+  cp "$DETECT" "$root/scripts/detect-stack.sh"
+  for d in "$@"; do
+    name="${d%%:*}"
+    spec="openapi.yaml"
+    if [ "$d" != "$name" ]; then spec="openapi.yaml.tmpl"; fi
+    mkdir -p "$root/templates/common/contracts/ops/$name"
+    printf 'openapi: 3.1.0\n' > "$root/templates/common/contracts/ops/$name/$spec"
+  done
+  printf '%s' "$root"
+}
+
+@test "detect-stack: #1330 NO OpenAPI surface -> the whole ops trio is held out" {
+  # The ops surface rides WITH the contracts machinery, never ahead of it: SKILL
+  # §3i is headed "when an OpenAPI surface is detected" and renders the fragment
+  # + checker inside that block, and ARCHITECTURE.md and the ops how-to agree.
+  # Installing the fragment without the six contracts files would hand a repo an
+  # ops CONTRACT with no Spectral lint and no oasdiff semver gate — making the
+  # "a breaking change to the ops surface is a new ops major" promise unkeepable.
+  # Deliberately NO _openapi_surface call here; a root Dockerfile is present so
+  # the workflow's own gate cannot be what withholds it.
+  printf 'plugins { java }\n' > build.gradle.kts
+  printf 'FROM eclipse-temurin:21-jre\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("scripts/check-ops-conformance.zsh")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" = "null" ]
+  # Positive control: the machinery it rides with is withheld for the same reason,
+  # so this case cannot pass merely because missing_artifacts is empty.
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/contracts-lint.yml")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/template-drift-watch.yml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #1330 ops-conformance.yml is not a gap without a Dockerfile" {
+  # Its first step is `docker build .`, so SKILL §3i renders it only when the repo
+  # has a Dockerfile. State-D renders missing_artifacts BLIND, and the workflow's
+  # own `paths: contracts/ops/**` trigger matches the fragment landing beside it —
+  # so an ungated gap-fill fires a guaranteed-red check on the PR that installs it.
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "false" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" = "null" ]
+  # The gate is WORKFLOW-ONLY: only the workflow needs a container to run, so the
+  # fragment and the checker stay gappable. Widening it to the trio — the
+  # "never one without the other" reflex this script applies to genuine pairs —
+  # would silently stop offering the ops surface to Dockerfile-less repos.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("scripts/check-ops-conformance.zsh")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #1330 ops-conformance.yml IS a gap once a Dockerfile exists" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  printf 'FROM eclipse-temurin:21-jre\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "true" ]
+  # The positive control: without it the case above passes on a hold-out that
+  # suppressed the workflow unconditionally.
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #1330 the hold-out follows the TREE — a v3 tree gaps v3, not v2" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  local root; root="$(_fake_tree v2 v3)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # A hardcoded v1 ban would leave BOTH v2 and v3 as blind-renderable gaps —
+  # two live ops majors installed into one repo, neither deletable afterwards.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v3/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 the derivation sees .tmpl-suffixed ops majors too" {
+  # collect_from strips `.tmpl`, so a major shipped as openapi.yaml.tmpl produces
+  # a contracts/ops/vN/openapi.yaml candidate. If the derivation globbed only the
+  # literal name it would not see that major: dropping the .tmpl glob from the
+  # NEWEST loop inverts the hold-out (the frozen major becomes the gap), and
+  # dropping it from the HOLD-OUT loop blind-installs a frozen major. Neither is
+  # visible without a .tmpl fixture — the shipped tree has only literal specs.
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  local root; root="$(_fake_tree v2:tmpl v3:tmpl)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v3/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 literal and .tmpl ops majors compare against each other" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  local root; root="$(_fake_tree v2:tmpl v3)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v3/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 a NESTED-only Dockerfile does not unlock ops-conformance.yml" {
+  # The gate must key on the build context the workflow actually uses — a bare
+  # `docker build .` reads ./Dockerfile — NOT on has_dockerfile, which is also
+  # true for docker/Dockerfile and any Dockerfile at depth<=3. Gating on the
+  # coarse flag reproduces the guaranteed-red install the gate exists to prevent.
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  mkdir -p services/api
+  printf 'FROM eclipse-temurin:21-jre\n' > services/api/Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # The loose flag IS true here — that is precisely the trap.
+  [ "$(jq -r .has_dockerfile <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index(".github/workflows/ops-conformance.yml")' <<<"$out")" = "null" ]
+  # Positive control: the ops surface itself is still offered to this repo.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
+}
+
+@test "detect-stack: #1330 majors are compared arithmetically — v10 beats v9" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  _openapi_surface
+  local root; root="$(_fake_tree v9 v10)"
+  out=$(bash "$root/scripts/detect-stack.sh" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # Under a lexical comparison "v9" > "v10", so the live major would be held out
+  # and the frozen one installed — the hold-out inverted, silently.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v10/openapi.yaml")' <<<"$out")" != "null" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v9/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
 @test "detect-stack: #406 a present every-repo file is NOT flagged missing" {
   printf 'plugins { java }\n' > build.gradle.kts
   mkdir -p .github/workflows

@@ -3,7 +3,7 @@
 // #688 payloads belong to, not the Go-plugin foundation epic #868 that filed it).
 //
 // The blessed Go realization of the org-standard ops surface defined by
-// contracts/ops/v1/openapi.yaml -- /info, /health, /health/live, /health/ready,
+// contracts/ops/v2/openapi.yaml -- /info, /health, /health/live, /health/ready,
 // /metrics -- so a Go service conforms to the same fragment Spring services get
 // via Actuator. It passes scripts/check-ops-conformance.zsh unchanged.
 //
@@ -67,6 +67,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -84,7 +85,7 @@ import (
 // from outside without per-endpoint auth.
 const DefaultPort = 9090
 
-// Lifecycle values for a served API major (contracts/ops/v1/openapi.yaml).
+// Lifecycle values for a served API major (contracts/ops/v2/openapi.yaml).
 const (
 	LifecycleActive     = "active"
 	LifecycleDeprecated = "deprecated"
@@ -427,6 +428,96 @@ type statusBody struct {
 	Status string `json:"status"`
 }
 
+// ---- RFC 9457 problem details (ops-api v2, #1330) ---------------------------
+
+// Problem-type URNs. Host-free on purpose: a shipped service must not carry a
+// documentation URL that rots when the docs site moves.
+const (
+	ProblemTypeNotReady = "urn:problem-type:ops:not-ready"
+	ProblemTypeNotAlive = "urn:problem-type:ops:not-alive"
+
+	problemTitleNotReady = "Service Not Ready"
+
+	// The two non-dependency unready reasons the contract names. A service that
+	// is unready for its own reasons (Config.Readiness returning false) cannot
+	// tell us which, so it gets the start-up wording -- the overwhelmingly
+	// common case, and the one an operator acts on the same way.
+	//
+	// DetailDraining is a HOOK, not something this package emits: a service that
+	// distinguishes draining from starting up in its own Readiness hook can use
+	// it, and the contract documents the wording so every service that does
+	// spells it the same way.
+	DetailStartingUp = "the service is starting up"
+	DetailDraining   = "the service is draining"
+
+	// The liveness problem's title and detail. EXPORTED even though this package
+	// never emits them: Go liveness is unconditionally 200 (a process answering
+	// HTTP is alive), so these exist for a service that adds its own liveness
+	// gate. Unexported they would be unused identifiers, and bootstrap's own
+	// .golangci.yml enables `unused` -- so a service copying this file verbatim,
+	// exactly as the header instructs, would go red on lint.
+	ProblemTitleNotAlive = "Service Not Alive"
+	DetailNotAlive       = "the process is not alive and should be restarted"
+)
+
+// problemBody is the liveness/base RFC 9457 document: the four required members
+// and nothing else.
+//
+// The struct is flat rather than embedded in readinessProblemBody for the same
+// reason the CONTRACT's schemas are flat -- see contracts/ops/v2/openapi.yaml.
+// Embedding would serialize identically here, but keeping the two shapes
+// visibly parallel to the schema is what lets a reader check one against the
+// other without holding Go's embedding rules in their head.
+type problemBody struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail"`
+}
+
+// readinessProblemBody is the readiness 503: the four members plus the
+// `components` extension member, byte-identical to the map /health serves.
+type readinessProblemBody struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail"`
+	// Omitted ONLY when the service declares no dependencies at all -- never as a
+	// function of which half of readiness failed. A 503 raised for a non-dependency
+	// reason still carries the full map: the snapshot is taken BEFORE the gate.
+	Components map[string]Dependency `json:"components,omitempty"`
+}
+
+// readinessDetail builds the canonical `detail` sentence.
+//
+// The wording is FIXED, not free prose: check-ops-conformance.zsh and the
+// acceptance lane both assert it. Names are sorted LEXICOGRAPHICALLY so the
+// string is deterministic regardless of the order the breakers tripped in --
+// without the sort, the same outage would produce different bodies on different
+// pods and no assertion could pin it.
+func readinessDetail(components map[string]Dependency) string {
+	var down []string
+	for name, d := range components {
+		if d.Kind == KindHard && d.Status == ComponentDown {
+			down = append(down, name)
+		}
+	}
+	if len(down) == 0 {
+		// No hard dependency is down, so readiness failed for a non-dependency
+		// reason: the service's own Readiness hook said no.
+		return DetailStartingUp
+	}
+	sort.Strings(down)
+	quoted := make([]string, len(down))
+	for i, name := range down {
+		quoted[i] = "'" + name + "'"
+	}
+	if len(quoted) == 1 {
+		return "hard dependency " + quoted[0] + " is down"
+	}
+	return "hard dependencies " + strings.Join(quoted, ", ") + " are down"
+}
+
 // ---- handler ---------------------------------------------------------------
 
 // NewHandler returns the five-endpoint ops surface.
@@ -467,22 +558,41 @@ func NewHandler(cfg Config, metricsHandler http.Handler) (http.Handler, error) {
 	// STATUS CODE; among dependencies only a declared HARD one being down fails it.
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, _ *http.Request) {
 		ready := false
+		// Read the components ONCE and reuse them for both the verdict and the
+		// problem body. Calling c.components() a second time to build the body
+		// would re-enter the service's DependencyHealthSource, which can return
+		// a different map -- the 503 would then name a dependency the verdict
+		// was not actually taken on.
+		var components map[string]Dependency
 		// See the /health branch for why the recover IS the contract. Readiness
 		// fails CLOSED: if we cannot read dependency health we cannot vouch for
-		// being able to serve, and shedding traffic is the safe direction.
+		// being able to serve, and shedding traffic is the safe direction. A
+		// panic leaves components nil, so the 503 falls back to the
+		// non-dependency wording rather than naming a half-read map.
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
 					ready = false
+					components = nil
 				}
 			}()
-			ready = c.ready(c.components())
+			components = c.components()
+			ready = c.ready(components)
 		}()
 		if ready {
 			writeJSON(w, http.StatusOK, statusBody{Status: StatusOK})
 			return
 		}
-		writeJSON(w, http.StatusServiceUnavailable, statusBody{Status: StatusDown})
+		// ops-api v2: RFC 9457 problem details, not {"status":"down"}. The
+		// health string is gone from the 503 -- 503 already says "down" -- and
+		// the diagnosis rides in `components` instead.
+		writeProblemJSON(w, http.StatusServiceUnavailable, readinessProblemBody{
+			Type:       ProblemTypeNotReady,
+			Title:      problemTitleNotReady,
+			Status:     http.StatusServiceUnavailable,
+			Detail:     readinessDetail(components),
+			Components: components,
+		})
 	})
 
 	// The human/dashboard-facing aggregate, plus per-direct-dependency components.
@@ -578,6 +688,29 @@ func writeJSON(w http.ResponseWriter, code int, payload any) {
 		code = http.StatusInternalServerError
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_, _ = w.Write(body)
+}
+
+// writeProblemJSON writes an RFC 9457 document on application/problem+json.
+//
+// Separate from writeJSON because the media type is part of the contract, not a
+// detail: org-problem-json-errors requires the 4xx/5xx body to be BARE
+// problem+json, so answering the readiness 503 on application/json would be a
+// conformance failure even with a correctly shaped body.
+func writeProblemJSON(w http.ResponseWriter, code int, payload any) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		// Unreachable (fixed structs of strings/ints and a map of the same), but
+		// the fallback stays a VALID problem document rather than borrowing
+		// writeJSON's health-shaped one -- a 500 here would otherwise answer a
+		// problem+json content type with a {"status":"down"} body.
+		body = []byte(`{"type":"` + ProblemTypeNotReady +
+			`","title":"` + problemTitleNotReady +
+			`","status":500,"detail":"the readiness problem document could not be serialized"}`)
+		code = http.StatusInternalServerError
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(code)
 	_, _ = w.Write(body)
 }

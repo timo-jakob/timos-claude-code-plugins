@@ -1,7 +1,7 @@
 """Canonical ops-api implementation for non-Spring Python services (issue #688).
 
 This is the blessed Python realization of the org-standard ops surface defined by
-``contracts/ops/v1/openapi.yaml`` — ``/info``, ``/health``, ``/metrics`` — so a
+``contracts/ops/v2/openapi.yaml`` — ``/info``, ``/health``, ``/metrics`` — so a
 Python service conforms to the same fragment Spring gets via Actuator. It passes
 ``scripts/check-ops-conformance.zsh`` unchanged.
 
@@ -227,6 +227,49 @@ class OpsConfig:
         return payload
 
 
+#: RFC 9457 problem-type URNs (ops-api v2, #1330). Host-free on purpose: a
+#: shipped service must not carry a documentation URL that rots when the docs
+#: site moves.
+PROBLEM_TYPE_NOT_READY = "urn:problem-type:ops:not-ready"
+PROBLEM_TYPE_NOT_ALIVE = "urn:problem-type:ops:not-alive"
+
+_PROBLEM_TITLE_NOT_READY = "Service Not Ready"
+
+#: The two non-dependency unready reasons the contract names. A service that is
+#: unready for its own reasons cannot tell us which, so it gets the start-up
+#: wording — the overwhelmingly common case, and the one an operator acts on the
+#: same way.
+DETAIL_STARTING_UP = "the service is starting up"
+DETAIL_DRAINING = "the service is draining"
+
+
+def _readiness_detail(components: Mapping[str, Dependency] | None) -> str:
+    """Build the canonical ``detail`` sentence for a readiness 503.
+
+    The wording is FIXED, not free prose: ``check-ops-conformance.zsh`` and the
+    acceptance lane both assert it. Names are sorted LEXICOGRAPHICALLY so the
+    string is deterministic regardless of the order the breakers tripped in —
+    without the sort the same outage would produce different bodies on different
+    pods and no assertion could pin it.
+    """
+    # Literals rather than named constants, matching this module's own idiom —
+    # see OpsConfig.ready, which spells the same hinge `d.kind == "hard" and
+    # d.status == "down"`. The two are the SAME predicate and must stay in step:
+    # a readiness 503 whose detail named a different set than the verdict used
+    # would be worse than no detail at all.
+    down = sorted(
+        name
+        for name, d in (components or {}).items()
+        if d.kind == "hard" and d.status == "down"
+    )
+    if not down:
+        return DETAIL_STARTING_UP
+    quoted = [f"'{name}'" for name in down]
+    if len(quoted) == 1:
+        return f"hard dependency {quoted[0]} is down"
+    return f"hard dependencies {', '.join(quoted)} are down"
+
+
 def _worse_of(a: str, b: str) -> str:
     """Worst-wins comparison over STATUS_ORDER (ok < degraded < down)."""
     return a if STATUS_ORDER.index(a) >= STATUS_ORDER.index(b) else b
@@ -283,6 +326,36 @@ class OpsHandler(BaseHTTPRequestHandler):
     def _json(self, code: int, payload: dict[str, object]) -> None:
         self._send(code, "application/json", json.dumps(payload).encode("utf-8"))
 
+    def _problem(self, code: int, payload: dict[str, object]) -> None:
+        """Write an RFC 9457 document on ``application/problem+json``.
+
+        Separate from ``_json`` because the media type is part of the contract,
+        not a detail: ``org-problem-json-errors`` requires the 4xx/5xx body to be
+        BARE problem+json, so answering the readiness 503 on ``application/json``
+        would be a conformance failure even with a correctly shaped body.
+
+        SERIALIZE INSIDE THE GUARD, for the same reason ``/health`` does: the
+        ``components`` member carries source-provided values, so a hand-written
+        source returning (say) a datetime for ``since`` raises in ``json.dumps``
+        one frame later, outside the caller's ``try`` — closing the connection
+        with no response, which the checker reports as "/health/ready:
+        unreachable" instead of a verdict. The fallback stays a VALID problem
+        document: borrowing the health-shaped ``{"status": "down"}`` would answer
+        a problem+json content type with a health body.
+        """
+        try:
+            body = json.dumps(payload)
+        except Exception:  # noqa: BLE001 - any source value can break serialization
+            body = json.dumps(
+                {
+                    "type": PROBLEM_TYPE_NOT_READY,
+                    "title": _PROBLEM_TITLE_NOT_READY,
+                    "status": code,
+                    "detail": "the readiness problem document could not be serialized",
+                }
+            )
+        self._send(code, "application/problem+json", body.encode("utf-8"))
+
     def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler contract)
         route = self.path.split("?", 1)[0].rstrip("/") or "/"
         if route == "/info":
@@ -295,11 +368,39 @@ class OpsHandler(BaseHTTPRequestHandler):
             # Readiness: can we serve traffic? A failing readiness sheds traffic without a
             # restart. 503 => not ready. This is a PROBE, so the verdict is in the status
             # code; among dependencies only a declared HARD one being down fails it.
+            # Snapshot ONCE and reuse it for both the verdict and the problem
+            # body. Calling components() again to build the body would re-enter
+            # the service's DependencyHealthSource, which can return a different
+            # map — the 503 would then name a dependency the verdict was not
+            # actually taken on.
+            components: dict[str, Dependency] | None
             try:
-                ready = self.config.ready(self.config.components())
+                components = self.config.components()
+                ready = self.config.ready(components)
             except Exception:  # noqa: BLE001 - see the /health branch below
                 ready = False
-            self._json(200 if ready else 503, {"status": "ok" if ready else "down"})
+                # Leave components unset so the 503 falls back to the
+                # non-dependency wording rather than naming a half-read map.
+                components = None
+            if ready:
+                self._json(200, {"status": "ok"})
+            else:
+                # ops-api v2: RFC 9457 problem details, not {"status": "down"}.
+                # The health string is gone from the 503 — 503 already says
+                # "down" — and the diagnosis rides in `components` instead.
+                problem: dict[str, object] = {
+                    "type": PROBLEM_TYPE_NOT_READY,
+                    "title": _PROBLEM_TITLE_NOT_READY,
+                    "status": 503,
+                    "detail": _readiness_detail(components),
+                }
+                if components:
+                    # to_component() is the SAME serializer /health uses, so the
+                    # shed pod and the dashboard cannot disagree.
+                    problem["components"] = {
+                        name: d.to_component() for name, d in components.items()
+                    }
+                self._problem(503, problem)
         elif route == "/health":
             # The human/dashboard-facing aggregate, plus per-direct-dependency `components`.
             # ALWAYS 200 while the process can answer, even when the aggregate is "down":

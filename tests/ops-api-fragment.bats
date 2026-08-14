@@ -1,8 +1,13 @@
 #!/usr/bin/env bats
 #
-# Structural tests for the ops-api/v1 fragment + its CI discovery (#688).
+# Structural tests for the ops-api fragments + their CI discovery (#688, #1330).
 #
-# The fragment (templates/common/contracts/ops/v1/openapi.yaml) is a versioned
+# TWO majors now ship: v2 is the current one bootstrap installs, and v1 is frozen
+# beside it for repos still migrating (so the tests below split into the v2 shape,
+# the v1 freeze guard, and the render fence that decides which one a new repo
+# gets). $FRAG is v1 throughout, $V2 the current major.
+#
+# The fragment (templates/common/contracts/ops/vN/openapi.yaml) is a versioned
 # contract artifact linted by Spectral in target-repo CI; its zero-error lint is
 # verified against .spectral.yaml at authoring time and by the contracts-lint job
 # the checker's discovery must cover. The test toolchain has no spectral (and
@@ -17,10 +22,159 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   COMMON="$REPO_ROOT/development/skills/bootstrap/templates/common"
   FRAG="$COMMON/contracts/ops/v1/openapi.yaml"
+  # The CURRENT major (#1330). v1 stays below as the freeze guard.
+  V2="$COMMON/contracts/ops/v2/openapi.yaml"
 }
 
 @test "fragment exists at the contracts/ops/v1 path" {
   [ -f "$FRAG" ]
+}
+
+# ---- ops-api v2: the RFC 9457 probe 503s (#1330) ----------------------------
+#
+# The v2 fragment is the change's central artifact and the thing every payload
+# and the conformance checker are written against — but the checker validates a
+# LIVE SERVICE and the payload suites grep source, so without these the fragment
+# itself is unpinned: a hand edit dropping `type: integer`, moving `components`
+# onto the liveness Problem, or reverting a 503 to application/json would ship
+# green.
+
+@test "v2: the version triangle holds (info.version 2.x == v2 dir == servers /v2)" {
+  [ -f "$V2" ]
+  run yq -r '.info.version' "$V2"
+  [ "$output" = "2.0.0" ]
+  run yq -r '.servers[0].url' "$V2"
+  [ "$output" = "/v2" ]
+}
+
+@test "v2: both probe 503s are BARE application/problem+json" {
+  # Exactly ONE content key: bare-ness is what org-problem-json-errors requires,
+  # so a body that also offers application/json is a conformance failure even
+  # with perfect members.
+  local p
+  for p in /health/live /health/ready; do
+    run yq -r ".paths.\"$p\".get.responses.\"503\".content | keys | join(\",\")" "$V2"
+    [ "$output" = "application/problem+json" ]
+  done
+  # …and each resolves to the right schema: readiness carries components,
+  # liveness must not.
+  run yq -r '.paths."/health/ready".get.responses."503".content."application/problem+json".schema."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/ReadinessProblem" ]
+  run yq -r '.paths."/health/live".get.responses."503".content."application/problem+json".schema."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/Problem" ]
+}
+
+@test "v2: both problem schemas are FLAT and require all four RFC 9457 members" {
+  # Flat by necessity, not style: an allOf composition still fails
+  # org-problem-json-errors, because the rule reads the resolved schema's own
+  # top-level `required` and a composition has none.
+  local s
+  for s in Problem ReadinessProblem; do
+    run yq -r ".components.schemas.$s.required | join(\",\")" "$V2"
+    [ "$output" = "type,title,status,detail" ]
+    run yq -r ".components.schemas.$s | has(\"allOf\")" "$V2"
+    [ "$output" = "false" ]
+    # `status` is the HTTP code as an INTEGER — the collision with the health
+    # envelope's "ok"/"down" string is the entire reason this major exists.
+    run yq -r ".components.schemas.$s.properties.status.type" "$V2"
+    [ "$output" = "integer" ]
+  done
+}
+
+@test "v2: components hangs off ReadinessProblem ONLY, and reuses DependencyHealth" {
+  # A components map on a dependency-free liveness 503 would be a lie.
+  run yq -r '.components.schemas.Problem.properties | has("components")' "$V2"
+  [ "$output" = "false" ]
+  run yq -r '.components.schemas.ReadinessProblem.properties.components.additionalProperties."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/DependencyHealth" ]
+}
+
+@test "v2: the 200s are UNCHANGED — v2 changes the two 503s and nothing else" {
+  local p
+  for p in /health/live /health/ready; do
+    run yq -r ".paths.\"$p\".get.responses.\"200\".content | keys | join(\",\")" "$V2"
+    [ "$output" = "application/json" ]
+    run yq -r ".paths.\"$p\".get.responses.\"200\".content.\"application/json\".schema.\"\$ref\"" "$V2"
+    [ "$output" = "#/components/schemas/Health" ]
+  done
+  # /health is not a probe: it has no 503 at all (#1139).
+  run yq -r '.paths."/health".get.responses | has("503")' "$V2"
+  [ "$output" = "false" ]
+  run yq -r '.paths."/health".get.responses."200".content."application/json".schema."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/AggregateHealth" ]
+}
+
+@test "v2: contracts/ops/v1 is FROZEN — its v1 shape is intact" {
+  # The migration flow requires it: contracts-semver rejects a major that was live
+  # at the base ref and gone at HEAD, so v1 must survive untouched.
+  #
+  # Asserted from CONTENT, not `git diff origin/main`. That earlier form needed
+  # git, a usable gitdir and an origin/main ref — and this repo is worked in
+  # .claude/worktrees/<name>, where .git is a FILE pointing at a host path outside
+  # the container mount, so the Docker leg would have redded on a correct tree.
+  # It also silently rebased its own meaning: origin/main moves, so "byte-identical
+  # to its committed state" really meant "identical to whatever main holds now".
+  run yq -r '.info.version' "$FRAG"
+  [ "$status" -eq 0 ]
+  case "$output" in 1.*) ;; *) return 1 ;; esac
+  run yq -r '.servers[0].url' "$FRAG"
+  [ "$output" = "/v1" ]
+  # The defining v1 property: the probe 503s carry the health envelope on plain
+  # application/json. If someone "helpfully" migrates v1 in place, this reds.
+  local p
+  for p in /health/live /health/ready; do
+    run yq -r ".paths.\"$p\".get.responses.\"503\".content | keys | join(\",\")" "$FRAG"
+    [ "$output" = "application/json" ]
+    run yq -r ".paths.\"$p\".get.responses.\"503\".content.\"application/json\".schema.\"\$ref\"" "$FRAG"
+    [ "$output" = "#/components/schemas/Health" ]
+  done
+  # …and none of v2's problem schemas leaked backwards into it.
+  run yq -r '.components.schemas | has("Problem")' "$FRAG"
+  [ "$output" = "false" ]
+  run yq -r '.components.schemas | has("ReadinessProblem")' "$FRAG"
+  [ "$output" = "false" ]
+}
+
+@test "v2: the SKILL.md render fence installs the NEWEST ops major, and only it" {
+  # The single line that decides which ops major a bootstrapped repo receives.
+  # SKILL.md §3i's prose states the rule ("Install v2, not v1"); nothing pinned
+  # the fence itself, so reverting it to v1 — or adding v1 beside v2 — shipped
+  # green while every new repo got a contract contradicting its own payloads.
+  #
+  # Scoped by CONTENT, not by line range: §3i holds 16 render.zsh fences, and the
+  # `common/`-prefixed form appears only in a render list (the prose spells the
+  # path without it), so this needle cannot match the surrounding explanation.
+  local skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
+  [ -f "$skill" ]
+
+  # The newest major is derived from the TEMPLATE TREE, so publishing a v3
+  # without repointing the fence reds here instead of drifting silently.
+  local newest=-1 d n
+  for d in "$COMMON"/contracts/ops/v[0-9]*/; do
+    n="${d%/}"; n="${n##*/v}"
+    case "$n" in '' | *[!0-9]*) continue ;; esac
+    # `if`, never `[ ] && …`: the glob sorts v1, v10, v2, so a trailing false
+    # test would be the loop's exit status and red the test under bats' set -e.
+    if [ "$n" -gt "$newest" ]; then newest="$n"; fi
+  done
+  [ "$newest" -ge 2 ]
+
+  run grep -c "common/contracts/ops/v[0-9]*/openapi\.yaml" "$skill"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]   # exactly one ops major is ever rendered
+
+  run grep -o "common/contracts/ops/v[0-9]*/openapi\.yaml" "$skill"
+  [ "$status" -eq 0 ]
+  [ "$output" = "common/contracts/ops/v$newest/openapi.yaml" ]
+}
+
+@test "v2: SKILL.md keeps the install-v2-not-v1 decision record" {
+  # The fence above is the mechanism; this is the reasoning behind it. Deleting
+  # the rationale is how the fence gets "cleaned up" back to v1 later.
+  local skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
+  run grep -c "Install v2, not v1" "$skill"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
 }
 
 @test "fragment declares /info, /health, /metrics" {
@@ -173,7 +327,16 @@ health_schema() {
 
 @test "contracts-lint discovery covers contracts/ops/v[0-9]* (#688)" {
   local tmpl="$COMMON/.github/workflows/contracts-lint.yml.tmpl"
-  grep -q 'contracts/ops/v\[0-9\]\*/openapi.yaml' "$tmpl"
+  # Since #1330 the per-major glob is parameterised by family and only the NEWEST
+  # major of each is linted, so the fully-qualified ops glob is no longer a literal.
+  # What must remain true — and is what this test is actually about — is that the
+  # ops family is discovered at all.
+  grep -q 'for family in contracts contracts/ops' "$tmpl"
+  # The per-major glob is now parameterised by FILENAME too (the selector reuses
+  # it to find the newest vN directory), so the literal no longer carries
+  # openapi.yaml — the per-major shape and the ops family are what matter here.
+  grep -q 'v\[0-9\]\*/' "$tmpl"
+  grep -q 'newest_major "\$family"' "$tmpl"
 }
 
 @test "contracts-semver discovery covers contracts/ops (#688)" {

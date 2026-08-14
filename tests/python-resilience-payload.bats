@@ -1043,8 +1043,24 @@ PY
 @test "the readiness PROBE still answers 200/503" {
   local handler
   handler="$(block_between '        elif route == "/health/ready":' '        elif route == "/health":' "$OPS")"
-  contains "$handler" 'self._json(200 if ready else 503, {"status": "ok" if ready else "down"})'
-  contains "$handler" 'ready = self.config.ready(self.config.components())'
+  # ops-api v2 (#1330): 200 keeps the health envelope, the 503 becomes an RFC 9457
+  # problem document on application/problem+json — the health "down" string
+  # collides with RFC 9457's integer `status`, which is why v2 exists. Both arms
+  # and the polarity are pinned together: one arm alone passes an inverted
+  # condition, which reports every unready pod as ready.
+  contains "$handler" 'if ready:'
+  contains "$handler" 'self._json(200, {"status": "ok"})'
+  contains "$handler" '"type": PROBLEM_TYPE_NOT_READY,'
+  contains "$handler" '"status": 503,'
+  contains "$handler" '"detail": _readiness_detail(components),'
+  contains "$handler" 'self._problem(503, problem)'
+  lacks "$handler" '{"status": "ok" if ready else "down"}'
+  # The snapshot is read ONCE and reused for the verdict and the body: calling
+  # components() again would re-enter the source, and the 503 could then name a
+  # dependency the verdict was not taken on.
+  contains "$handler" 'components = self.config.components()'
+  contains "$handler" 'ready = self.config.ready(components)'
+  lacks "$handler" 'ready = self.config.ready(self.config.components())'
 }
 
 @test "liveness stays dependency-free" {
@@ -1350,13 +1366,14 @@ base = f"http://127.0.0.1:{server.server_address[1]}"
 def get(path):
     try:
         with urllib.request.urlopen(base + path, timeout=5) as r:
-            return r.status, r.read().decode()
+            return r.status, r.headers.get("Content-Type", ""), r.read().decode()
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()
+        return e.code, e.headers.get("Content-Type", ""), e.read().decode()
 
 for path in ("/health", "/health/", "/health?verbose=1", "/health/ready", "/health/live", "/nope"):
-    code, body = get(path)
+    code, ctype, body = get(path)
     print(f"{path:20} -> {code} {body}")
+    print(f"CTYPE {path:20} -> {ctype}")
 server.shutdown()
 PY
   [ "$status" -eq 0 ]
@@ -1366,8 +1383,19 @@ PY
   # trailing slash and query string normalize to the same route
   matches "$output" '/health/ +-> 200 \{"status": "down"'
   matches "$output" '/health\?verbose=1 +-> 200 \{"status": "down"'
-  # the probe is where 503 belongs, and a hard dependency down fails it
-  matches "$output" '/health/ready +-> 503 \{"status": "down"\}'
+  # the probe is where 503 belongs, and a hard dependency down fails it.
+  # ops-api v2 (#1330): that 503 is an RFC 9457 problem document, and the
+  # dependency that caused it is NAMED in the canonical detail sentence.
+  matches "$output" '/health/ready +-> 503 \{"type": "urn:problem-type:ops:not-ready"'
+  contains "$output" "\"detail\": \"hard dependency 'orders-db' is down\""
+  contains "$output" '"components": {"orders-db": {"status": "down", "kind": "hard"'
+  # BARE problem+json is a runtime property, not only a spec one: a correctly
+  # shaped body on application/json is still an org-problem-json-errors failure.
+  # Nothing else asserted this end-to-end before v2.
+  matches "$output" 'CTYPE /health/ready +-> application/problem\+json'
+  # …and the 200 paths keep the ordinary JSON type.
+  matches "$output" 'CTYPE /health +-> application/json'
+  matches "$output" 'CTYPE /health/live +-> application/json'
   # liveness never consults a dependency
   matches "$output" '/health/live +-> 200 \{"status": "ok"\}'
   matches "$output" '/nope +-> 404'
@@ -1422,18 +1450,51 @@ try:
         print(f"unserializable -> {r.status} {r.read().decode()}")
 except Exception as e:
     print(f"unserializable -> NO RESPONSE ({type(e).__name__})")
+
+# ...and the same unencodable source on the READINESS path, which ops-api v2
+# routes through a second serializer. The source must be BOTH unencodable and
+# DOWN: a healthy one answers 200 with the bare health envelope, which serializes
+# no components at all and so never reaches the problem writer's json.dumps.
+class UnserializableDownSource:
+    def components(self):
+        from datetime import datetime
+
+        from ops_api import Dependency
+        return {"orders-db": Dependency(status="down", kind="hard", since=datetime(2026, 8, 4))}
+
+
+OpsHandler.config = OpsConfig(dependencies=UnserializableDownSource())
+try:
+    with urllib.request.urlopen(base + "/health/ready", timeout=5) as r:
+        print(f"unserializable-ready -> {r.status} {r.read().decode()}")
+except urllib.error.HTTPError as e:
+    print(f"unserializable-ready -> {e.code} {e.read().decode()}")
+except Exception as e:
+    print(f"unserializable-ready -> NO RESPONSE ({type(e).__name__})")
 server.shutdown()
 CASE
   [ "$status" -eq 0 ]
   # 200 with the worst verdict -- never a closed connection, never "ok"
   matches "$output" '/health +-> 200 \{"status": "down"\}'
-  # the probe fails closed
-  matches "$output" '/health/ready +-> 503 \{"status": "down"\}'
+  # the probe fails closed, as an RFC 9457 document (ops-api v2, #1330). The
+  # source RAISED, so the snapshot is cleared and the detail falls back to the
+  # non-dependency wording rather than naming a half-read map — a 503 that named
+  # a dependency the verdict was not taken on would be worse than a generic one.
+  matches "$output" '/health/ready +-> 503 \{"type": "urn:problem-type:ops:not-ready"'
+  contains "$output" '"detail": "the service is starting up"'
+  lacks "$output" '"components": {}'
   # ...and liveness is untouched: it consults no dependency, so it cannot be broken by one
   matches "$output" '/health/live +-> 200 \{"status": "ok"\}'
   # the serialization half: a returning-but-unencodable source must not close the
   # connection either -- json.dumps runs INSIDE the guard, not one frame outside it
   contains "$output" 'unserializable -> 200 {"status": "down"}'
+  # The SAME hazard on the readiness path, which v2 introduced: the problem body
+  # carries source-provided values too, so its json.dumps must be guarded as
+  # well. The fallback stays a VALID problem document rather than borrowing
+  # /health's {"status": "down"}, which would answer problem+json with a health
+  # body.
+  contains "$output" 'unserializable-ready -> 503 {"type": "urn:problem-type:ops:not-ready"'
+  contains "$output" 'could not be serialized'
 }
 
 @test "the placed RESILIENCE.md documents the wiring the SKILL defers to it" {

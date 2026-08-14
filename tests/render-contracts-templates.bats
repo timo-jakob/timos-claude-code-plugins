@@ -153,9 +153,120 @@ EOF
   assert_valid_yaml "$wf"
   grep -q 'spectral' "$wf"
   grep -q -- '--ruleset .spectral.yaml' "$wf"
-  grep -q 'contracts/v\[0-9\]\*/openapi.yaml' "$wf"
+  # The per-major glob is parameterised by family since #1330 (newest-major-only
+  # scoping), so the family name is no longer part of the literal — but the per-major
+  # shape still is, and both families are still selected.
+  grep -q 'v\[0-9\]\*/' "$wf"
+  grep -q 'for family in contracts contracts/ops' "$wf"
+  # The spec filename still reaches the selector — as newest_major's argument.
+  grep -q 'newest_major_num "\$1" openapi.yaml' "$wf"
   # PR trigger wired to the default branch (placeholder substituted).
   grep -q 'branches: \["main"\]' "$wf"
+}
+
+@test "#1330 contracts: the lint workflow lints only the NEWEST major per family" {
+  # A frozen older major is immutable by contract, so linting it against a ruleset
+  # cut after it froze can only produce red nobody may fix — which is exactly what
+  # org-problem-json-errors (#689) does to every ops/v1 fragment.
+  #
+  # Executed, not grepped: the selection is shell logic, and a `sort` that picks v9
+  # over v10 reads perfectly fine in a diff.
+  render_contracts
+  local wf="$OUT/common/.github/workflows/contracts-lint.yml"
+  assert_valid_yaml "$wf"
+  grep -q 'newest_major()' "$wf"
+  # NO sort -V: BSD sort (macOS) accepts the flag, exits 0 and does not reorder,
+  # so a maintainer verifying locally and the Ubuntu runner would disagree about
+  # v9 vs v10. The majors are integers and are compared arithmetically instead.
+  # Counted on the USAGE form (a pipe into sort), not the bare string: the comment
+  # above the selector names sort -V precisely to explain why it is not used.
+  run grep -c '| sort -V' "$wf"
+  [ "$output" -eq 0 ]
+
+  # Slice the selector between its own sentinels. An anchor like /done/ closes
+  # inside the first helper that happens to contain a loop — which is exactly how
+  # an earlier version of this test failed, silently truncating the slice and
+  # turning every case below into a shell error that read like a logic bug.
+  local probe="$BATS_TEST_TMPDIR/select.bash" slice="$BATS_TEST_TMPDIR/slice.bash"
+  sed -n '/# --- selector-start/,/# --- selector-end/p' "$wf" \
+    | sed 's/^[[:space:]]\{1,10\}//' > "$slice"
+  # Prove the slice really spans the whole selector before trusting it.
+  run cat "$slice"
+  contains "$output" 'newest_major_num()'
+  contains "$output" 'for family in contracts contracts/ops'
+  contains "$output" 'nothing to lint'
+  {
+    echo 'set -euo pipefail'
+    echo 'shopt -s nullglob'
+    cat "$slice"
+    # The slice carries the workflow's own zero-spec guard (which echoes and
+    # exits 0), so this only has to report a non-empty selection.
+    echo 'printf "%s\n" "${specs[@]}"'
+  } > "$probe"
+
+  local tree="$BATS_TEST_TMPDIR/both"
+  mkdir -p "$tree/contracts/v1" "$tree/contracts/v2" "$tree/contracts/ops/v1" "$tree/contracts/ops/v2"
+  touch "$tree/contracts/v1/openapi.yaml" "$tree/contracts/v2/openapi.yaml" \
+    "$tree/contracts/ops/v1/openapi.yaml" "$tree/contracts/ops/v2/openapi.yaml"
+  run bash -c "cd '$tree' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'contracts/v2/openapi.yaml'
+  contains "$output" 'contracts/ops/v2/openapi.yaml'
+  lacks "$output" 'contracts/v1/openapi.yaml'
+  lacks "$output" 'contracts/ops/v1/openapi.yaml'
+
+  # v10 must beat v9 — the reason the majors are compared ARITHMETICALLY rather
+  # than sorted at all. Do not "restore" a `sort -V` here: the assertion above
+  # forbids it, because BSD sort accepts -V and silently does not reorder.
+  local vtree="$BATS_TEST_TMPDIR/vsort"
+  mkdir -p "$vtree/contracts/v9" "$vtree/contracts/v10"
+  touch "$vtree/contracts/v9/openapi.yaml" "$vtree/contracts/v10/openapi.yaml"
+  run bash -c "cd '$vtree' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'contracts/v10/openapi.yaml'
+  lacks "$output" 'contracts/v9/openapi.yaml'
+
+  # THE DOCUMENTED TRAP: a repo that never adopts v2 keeps v1 as its newest, and it
+  # IS still linted. Migration is mandatory, not optional — this pins that the
+  # scoping is not a silent exemption for old majors.
+  local trap_tree="$BATS_TEST_TMPDIR/trap"
+  mkdir -p "$trap_tree/contracts/ops/v1"
+  touch "$trap_tree/contracts/ops/v1/openapi.yaml"
+  run bash -c "cd '$trap_tree' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'contracts/ops/v1/openapi.yaml'
+
+  # A NON-MAJOR directory must never shadow the real newest major: v[0-9]* also
+  # matches v3-draft, and under newest-only selection that is a silent
+  # substitution, not noise — the live spec would go unlinted, green.
+  local draft="$BATS_TEST_TMPDIR/draft"
+  mkdir -p "$draft/contracts/v2" "$draft/contracts/v3-draft" "$draft/contracts/v2.bak"
+  touch "$draft/contracts/v2/openapi.yaml" "$draft/contracts/v3-draft/openapi.yaml" \
+    "$draft/contracts/v2.bak/openapi.yaml"
+  run bash -c "cd '$draft' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'contracts/v2/openapi.yaml'
+  lacks "$output" 'v3-draft'
+  lacks "$output" 'v2.bak'
+
+  # A newest vN DIRECTORY whose spec is missing or misnamed must fail LOUDLY
+  # rather than regress to linting a frozen older major — the exact "red nobody
+  # may fix" file this scoping exists to stop linting.
+  local misnamed="$BATS_TEST_TMPDIR/misnamed"
+  mkdir -p "$misnamed/contracts/ops/v1" "$misnamed/contracts/ops/v2"
+  touch "$misnamed/contracts/ops/v1/openapi.yaml" "$misnamed/contracts/ops/v2/openapi.yml"
+  run bash -c "cd '$misnamed' && bash '$probe'"
+  [ "$status" -eq 1 ]
+  contains "$output" 'refusing to fall back to an older, frozen major'
+  lacks "$output" 'contracts/ops/v1/openapi.yaml'
+
+  # …and an empty tree exits cleanly with the WORKFLOW's own message — the slice
+  # includes that guard, so this is the shipped text, not a stand-in.
+  local empty="$BATS_TEST_TMPDIR/empty"
+  mkdir -p "$empty"
+  run bash -c "cd '$empty' && bash '$probe'"
+  [ "$status" -eq 0 ]
+  contains "$output" 'nothing to lint'
 }
 
 @test "#692 contracts: the publish workflow publishes per live major (runtime discovery + matrix)" {

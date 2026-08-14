@@ -102,7 +102,7 @@ auto-apply:
   (e.g. it now requires explicit Spring Security configuration): flag with
   migration guidance, don't invent a replacement key.
 - **ops-api conformance (#688)** — the org ops surface (the shared
-  `contracts/ops/v1/openapi.yaml` fragment) requires the service to expose
+  `contracts/ops/v2/openapi.yaml` fragment) requires the service to expose
   `/info`, `/health`, and a Prometheus `/metrics` **at the service root**, with
   `/health` returning `{"status":"ok"}`. **Evaluate this once per repo over the
   merged effective config** (base `application.yml` + the active-profile
@@ -134,8 +134,12 @@ auto-apply:
     list — the two would map onto the same path — while `opshealth` must be
     present. Check `info`, `prometheus` and `opshealth` here; if `health` **is**
     present, say so in the same entry as something to remove. Of the bullets
-    below, treat exactly two as already satisfied — *Represent health as
-    `{"status":"ok"}`* and *Split liveness and readiness*. **Still check** the
+    below, treat exactly three as already satisfied — *Represent health as
+    `{"status":"ok"}`*, *Serve the probe 503s as RFC 9457 problem documents*
+    (#1330 — the payload serves the v2 shape, and it is the only payload that can
+    also emit a **liveness** 503) and *Split liveness and readiness*. Never flag
+    the probe-503 bullet on an adopted repo: that is a false gap on a payload
+    that already does exactly what the bullet asks. **Still check** the
     remap, the management port, the micrometer dependency and the `/info` majors
     bullets: they govern `/info` and `/metrics`, which the payload does not serve.
 
@@ -157,9 +161,23 @@ auto-apply:
     code). Call this out as the hardest part, not a config rename. **Recommend
     the blessed payload rather than a bespoke one**: bootstrap ships it at
     `templates/languages/spring/resilience/` (#1141), which serves `/health`,
-    `/health/live` and `/health/ready` in the ops-api v1.1 shape — including the
+    `/health/live` and `/health/ready` in the ops-api v2 shape — the two probe
+    503s carrying RFC 9457 problem details on `application/problem+json` (#1330) —
+    including the
     per-dependency `components` map read from resilience4j breaker state — so a
     repo that adopts it satisfies this bullet and the *Split liveness and readiness* one below.
+  - **Serve the probe 503s as RFC 9457 problem documents** — this is a
+    requirement on the **bespoke** route, not a property of the payload you can
+    skip by declining it. Under ops-api v2 (#1330) a `/health/live` or
+    `/health/ready` answering 503 must return a bare `application/problem+json`
+    document (`type`, `title`, integer `status: 503`, string `detail`; readiness
+    adds the `components` map) — **never** Actuator's `{"status":"DOWN"}`
+    envelope on `application/json`. Like the health representation this is
+    **application code, not config**: no `management.*` key changes the error
+    body, so a config-only recommendation cannot reach it. Flag it whenever you
+    recommend the bespoke route, and note the trap: `check-ops-conformance.zsh`
+    only inspects a 503 it actually receives, and a healthy service never emits
+    one — so a **green ops-conformance run does not verify this bullet**.
   - **Split liveness and readiness** — the fragment requires distinct
     `/health/live` and `/health/ready` (a single `/health` cannot drive both K8s
     probes without the liveness-checks-dependencies anti-pattern). Enabling the
@@ -265,8 +283,8 @@ structure, or a relocation you can't verify is 1:1).
       "finding_id": "src/main/resources/application.yml",
       "type": "ops-api-conformance",
       "severity": "MAJOR",
-      "recommendation": "ops-api (#688) needs /info, /health, /health/live, /health/ready, /metrics at the root with health status 'ok', on a separate internal management port: set management.server.port (e.g. 9090); expose health,info,prometheus; set management.endpoints.web.base-path: / and path-mapping.prometheus: metrics; declare health groups named to match the contract (management.endpoint.health.group.live.include: livenessState and group.ready.include: readinessState, live kept dependency-free) -- probes.enabled alone serves /health/liveness and /health/readiness, which the checker never fetches; add micrometer-registry-prometheus; add an InfoContributor for the served API majors; and represent /health as a v1.1 aggregate — {\"status\":\"ok\"} when healthy, \"degraded\" also conforming (Actuator returns 'UP' — no pure-config fix; the blessed answer is the #1141 Spring resilience payload, whose opshealth endpoint also serves /health/live and /health/ready).",
-      "rationale": "NB this example is the NOT-adopted branch; on a repo carrying the #1141 payload the exposure list reads info,prometheus,opshealth (health dropped, opshealth path-mapped to /health). Conformance needs config remaps, a management port, a dependency, AND application code (health representation + InfoContributor) — Actuator does not conform out of the box; needs human confirmation"
+      "recommendation": "ops-api (#688) needs /info, /health, /health/live, /health/ready, /metrics at the root with health status 'ok', on a separate internal management port: set management.server.port (e.g. 9090); expose health,info,prometheus; set management.endpoints.web.base-path: / and path-mapping.prometheus: metrics; declare health groups named to match the contract (management.endpoint.health.group.live.include: livenessState and group.ready.include: readinessState, live kept dependency-free) -- probes.enabled alone serves /health/liveness and /health/readiness, which the checker never fetches; add micrometer-registry-prometheus; add an InfoContributor for the served API majors; represent /health as an ops-api v2 aggregate — {\"status\":\"ok\"} when healthy, \"degraded\" also conforming (Actuator returns 'UP' — no pure-config fix); and serve the /health/live and /health/ready 503s as bare application/problem+json RFC 9457 documents (integer status 503, canonical detail, components on readiness) instead of Actuator's {\"status\":\"DOWN\"} envelope — also application code, and NOT verified by a green ops-conformance run, which never sees a 503 from a healthy service. The blessed answer to both is the #1141 Spring resilience payload, whose opshealth endpoint serves /health, /health/live and /health/ready in the v2 shape.",
+      "rationale": "NB this example is the NOT-adopted branch; on a repo carrying the #1141 payload the exposure list reads info,prometheus,opshealth (health dropped, opshealth path-mapped to /health). Conformance needs config remaps, a management port, a dependency, AND application code (health representation + problem+json probe 503s + InfoContributor) — Actuator does not conform out of the box; needs human confirmation"
     }
   ],
   "unable_to_fix": []

@@ -342,7 +342,7 @@ for m in "${majors[@]}"; do
         if ((frozen)); then
             add_violation "${spec}: major ${m} is frozen (not newest) — a breaking change is not allowed; ship a new major"
         else
-            add_violation "${spec}: breaking change to major ${m} — a breaking change is never an in-place edit; ship a NEW major directory contracts/v$((n + 1))/ and revert this edit"
+            add_violation "${spec}: breaking change to major ${m} — a breaking change is never an in-place edit; ship a NEW major directory ${CONTRACTS_DIR}/v$((n + 1))/ and revert this edit"
         fi
         ;;
     additive)

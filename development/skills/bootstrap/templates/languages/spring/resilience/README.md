@@ -114,6 +114,41 @@ resilience:
 That single classification is what resolves the tension between naive readiness
 (shed traffic on any dependency loss) and resilience (stay up and degrade).
 
+### What the probe 503s carry (ops-api v2, #1330)
+
+This payload is the **Spring** replacement the ops how-to's migration step names,
+so what changed on the wire is here rather than in an `ops-api/` README: both
+probe 503s are **RFC 9457 problem documents** on **`application/problem+json`** —
+bare, so the response must not also offer `application/json`.
+
+```json
+{
+  "type": "urn:problem-type:ops:not-ready",
+  "title": "Service Not Ready",
+  "status": 503,
+  "detail": "hard dependency 'orders-db' is down",
+  "components": { "orders-db": { "status": "down", "kind": "hard", "breaker": "open" } }
+}
+```
+
+- `status` is the **integer** HTTP code (RFC 9457), not the health envelope's
+  `"ok"`/`"down"` string. That collision is why ops-api v2 exists.
+- `components` is the **same map `/health` serves**, carrying **all** declared
+  dependencies rather than only the failing ones; omitted only when the service
+  declares none.
+- `detail` is a fixed vocabulary: `hard dependency '<name>' is down` (several:
+  names sorted lexicographically, comma-joined), or `the service is starting up`.
+
+**Spring is the one payload that can also answer a liveness 503.** The other five
+serve `/health/live` unconditionally 200 — a process that can answer HTTP is
+alive — but here liveness reads `ApplicationAvailability.LivenessState`, which a
+service can set to `BROKEN` independently of any dependency. That 503 carries
+`urn:problem-type:ops:not-alive` / `Service Not Alive` / `the process is not alive
+and should be restarted`, and **no `components`**: liveness is dependency-free by
+contract, so a map there would be a lie.
+
+The `200` responses are unchanged.
+
 **Liveness is never a function of a dependency.** `/health/live` reflects only
 the process; wiring a dependency into it turns a transient outage into a restart
 storm.

@@ -1,8 +1,9 @@
 # Contracts Lint — Spectral over the versioned OpenAPI contracts (issue #692).
 #
 # The API contract is a published, versioned artifact, so it must stay clean.
-# Spectral lints every contracts/vN/openapi.yaml against the ruleset at
-# .spectral.yaml (repo root). The ruleset CONTENT is replaceable (the org
+# Spectral lints the NEWEST major of each contract family (contracts/vN and
+# contracts/ops/vN) against the ruleset at .spectral.yaml (repo root) — see the
+# selection rationale in the run step (#1330). The ruleset CONTENT is replaceable (the org
 # styleguide epic #689 swaps it) — this workflow references it BY PATH, so a
 # ruleset change never touches this wiring.
 name: Contracts Lint
@@ -37,11 +38,82 @@ jobs:
           # The per-major business API (contracts/vN) AND the org-standard ops
           # surface (contracts/ops/vN, #688) are both versioned contract
           # artifacts, so both are linted against the same ruleset.
-          specs=(contracts/v[0-9]*/openapi.yaml contracts/ops/v[0-9]*/openapi.yaml)
+          #
+          # ONLY THE NEWEST MAJOR OF EACH FAMILY IS LINTED (#1330). A frozen older
+          # major is immutable by contract — a breaking change is a new major,
+          # never an in-place edit — so linting it against a ruleset cut AFTER it
+          # was frozen can only produce red that nobody is permitted to fix. That
+          # is not hypothetical: the org styleguide's org-problem-json-errors
+          # (#689) reddens every ops/v1 fragment, on a file the repo did not
+          # write — once this repo's .spectral.yaml extends that styleguide. On
+          # the starter ruleset (#692) the collision is pending, not yet live.
+          #
+          # NOTE the consequence, because it is a real trap: a repo that never
+          # adopts a newer major keeps the old one as its newest, and it IS still
+          # linted. Migration is mandatory and documented, not optional — see
+          # https://timo-jakob.github.io/timos-claude-code-plugins/how-to/adopt-the-ops-surface/
+          # (the published URL, not a repo-relative path: this workflow runs in the
+          # bootstrapped repo, which has no docs/how-to/ tree of its own).
+          # Explicit `if`s rather than `[[ … ]] && …` tails: under `set -e` a false
+          # tail makes the enclosing list non-zero, which is a footgun that reads
+          # as working code right up until the last family matches nothing.
+          #
+          # NO `sort -V` ANYWHERE BELOW. GNU sort implements it; the BSD sort on
+          # macOS accepts the flag, exits 0 and does NOT reorder — so a maintainer
+          # verifying this logic locally would see v9 selected over v10 while the
+          # Ubuntu runner selected v10, or vice versa. The majors are integers, so
+          # comparing them arithmetically is both portable and exact.
+          #
+          # The `case` guard is what keeps the comparison honest: the glob v[0-9]*
+          # also matches v3-draft and v2.bak, and under newest-only selection a
+          # stray match is not harmless noise but a silent SUBSTITUTION — a
+          # work-in-progress copy of a future major would outrank the live one and
+          # the spec this job exists to lint would never be linted, green.
+          # --- selector-start (sliced verbatim by tests/render-contracts-templates.bats)
+          newest_major_num() {
+            # Echoes "<major> <path>" for the newest strict vN, or nothing.
+            local c n best="" best_n=-1
+            for c in "$1"/v[0-9]*/"$2"; do
+              n="${c#"$1"/v}"
+              n="${n%%/*}"
+              case "$n" in
+                ''|*[!0-9]*) continue ;;
+              esac
+              if [ "$n" -gt "$best_n" ]; then
+                best_n="$n"
+                best="$c"
+              fi
+            done
+            if [ -n "$best" ]; then
+              printf '%s' "$best"
+            fi
+          }
+          newest_major() { newest_major_num "$1" openapi.yaml; }
+          # A newest vN DIRECTORY whose spec is missing or misnamed (openapi.yml,
+          # spec.yaml, not yet committed) would otherwise make the selection fall
+          # back to an older, frozen major — linting exactly the "red nobody is
+          # permitted to fix" file this change exists to stop linting, while the
+          # real newest contract goes unchecked. Fail loudly instead.
+          newest_major_dir() { newest_major_num "$1" ""; }
+          specs=()
+          for family in contracts contracts/ops; do
+            spec="$(newest_major "$family")"
+            newest_dir="$(newest_major_dir "$family")"
+            if [[ -n "$newest_dir" && "$spec" != "${newest_dir}openapi.yaml" ]]; then
+              echo "::error::${newest_dir} is the newest major of ${family} but has" \
+                "no openapi.yaml — refusing to fall back to an older, frozen major." \
+                "Commit the spec, or remove the directory."
+              exit 1
+            fi
+            if [[ -n "$spec" ]]; then
+              specs+=("$spec")
+            fi
+          done
           if [[ ${#specs[@]} -eq 0 ]]; then
             echo "No contracts/vN/openapi.yaml found — nothing to lint."
             exit 0
           fi
+          # --- selector-end
           echo "Linting: ${specs[*]}"
           npx --yes @stoplight/spectral-cli@6 lint \
             --ruleset .spectral.yaml \

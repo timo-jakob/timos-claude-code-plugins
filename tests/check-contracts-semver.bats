@@ -87,6 +87,31 @@ run_gate() { run bash "$GATE" --base-ref HEAD --output "$WORK/findings.json"; }
   [ "$(jq -r '.violations[]' "$WORK/findings.json" | grep -c 'never an in-place edit')" -eq 1 ]
 }
 
+@test "#1330 gate: the ops leg names the OPS family in the ship-a-new-major message" {
+  # contracts-semver runs a SECOND time with --contracts-dir contracts/ops, so
+  # this message fires on exactly the edit #1330 forbids (an in-place breaking
+  # change to the newest ops major). It hardcoded `contracts/` — telling the
+  # author to create a business-API major the repo does not have, and leaving the
+  # real remedy (contracts/ops/v3/) unstated. The sibling removed-major message
+  # already interpolated $CONTRACTS_DIR, which is why this read as an oversight.
+  mkspec contracts/ops/v2 "2.0.0" 2
+  git add -A && git commit -qm base
+  mkspec contracts/ops/v2 "2.1.0" 2
+  OASDIFF_CLASS=breaking run bash "$GATE" --base-ref HEAD \
+    --contracts-dir contracts/ops --output "$WORK/findings.json"
+  [ "$status" -eq 1 ]
+  run jq -r '.violations[]' "$WORK/findings.json"
+  [ "$status" -eq 0 ]
+  case "$output" in
+    *"contracts/ops/v3/"*) ;;
+    *) printf 'expected contracts/ops/v3/ in: %s\n' "$output" >&2; return 1 ;;
+  esac
+  # …and never the business family, which is what the bug produced.
+  case "$output" in
+    *"directory contracts/v3/"*) printf 'named the WRONG family: %s\n' "$output" >&2; return 1 ;;
+  esac
+}
+
 @test "#693 gate: version triangle — info.version major must match the vN directory" {
   # a 2.0.0 spec sitting in contracts/v1/ (servers /v1) — the classic in-place
   # breaking edit that a major bump can't rescue, because the directory is v1

@@ -1,7 +1,7 @@
 # Canonical ops-api implementation (Node) — #936
 
 The blessed Node realization of the org-standard ops surface defined by
-`contracts/ops/v1/openapi.yaml`: `/info`, `/health`, `/health/live`,
+`contracts/ops/v2/openapi.yaml`: `/info`, `/health`, `/health/live`,
 `/health/ready`, `/metrics`. It conforms to the same fragment Spring services get
 via Actuator, and passes `scripts/check-ops-conformance.zsh` unchanged.
 
@@ -238,6 +238,35 @@ down forces `down` and fails readiness.
 | `/health` | always `200` | The verdict is in the **body**. An operator reading this during an outage needs the diagnosis, and a 503 here is an unreadable page exactly when it matters. |
 | `/health/live` | `200` | Liveness is process-only and never a function of a dependency — that is the pod-restart-storm anti-pattern. |
 | `/health/ready` | `200` / `503` | A probe: the verdict is in the **status code**. 503 sheds traffic without a restart. |
+
+### What the readiness `503` carries (ops-api v2, #1330)
+
+The 503 is not a bare status code: its body is an **RFC 9457 problem document**
+served as **`application/problem+json`** — bare, so the response must not also
+offer `application/json`.
+
+```json
+{
+  "type": "urn:problem-type:ops:not-ready",
+  "title": "Service Not Ready",
+  "status": 503,
+  "detail": "hard dependency 'orders-db' is down",
+  "components": { "orders-db": { "status": "down", "kind": "hard", "breaker": "open" } }
+}
+```
+
+Three things the shape is easy to get wrong:
+
+- `status` is the **integer** HTTP code (RFC 9457), not the health envelope's
+  `"ok"`/`"down"` string. That collision is why ops-api v2 exists.
+- `components` is the **same map `/health` serves**, carrying **all** declared
+  dependencies rather than only the failing ones — so a shed pod and the dashboard
+  agree. It is omitted only when the service declares no dependencies at all.
+- `detail` is a fixed vocabulary, not free prose: `hard dependency '<name>' is
+  down` (several: names sorted lexicographically, comma-joined), or `the service is
+  starting up` for a non-dependency reason.
+
+The `200` responses are unchanged.
 
 Every other path on the management port answers `404` naming the path, and a
 non-`GET`/`HEAD` method answers `405` with an `Allow` header — a management

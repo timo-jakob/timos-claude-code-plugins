@@ -1654,12 +1654,65 @@ if grep -q '^openapi|' <<<"$contract_pairs"; then
 	openapi_surface="true"
 fi
 held_out+=("contracts/v1/openapi.yaml")
+# Ops majors: bootstrap installs ONLY the newest (#1330, SKILL.md §3i "Install
+# v2, not v1"). Older ops majors stay in the template tree so a repo migrating an
+# EXISTING installation can keep its frozen major byte-identical (see
+# docs/how-to/adopt-the-ops-surface.md) — but a State-D gap-fill must never
+# INSTALL one: a repo that never served ops v1 would gain a live major it never
+# agreed to, beside payloads that emit RFC 9457 problem details, and
+# contracts-semver's oasdiff leg then refuses to let it be deleted.
+# Derived from the tree, never a hardcoded ban, so the next ops major closes this
+# hole by existing instead of re-opening it. The globs match BOTH the literal and
+# the .tmpl form because collect_from strips `.tmpl` when it builds candidates —
+# an ops major shipped as openapi.yaml.tmpl would otherwise be invisible here
+# while still producing a candidate, silently un-holding-out the major below it.
+ops_newest_n=-1
+for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml \
+	"$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml.tmpl; do
+	[[ -f "$_ops_spec" ]] || continue
+	_n="${_ops_spec#"$templates_dir"/common/contracts/ops/v}"
+	_n="${_n%%/*}"
+	[[ "$_n" == *[!0-9]* ]] && continue
+	if [[ "$_n" -gt "$ops_newest_n" ]]; then ops_newest_n="$_n"; fi
+done
+for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml \
+	"$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml.tmpl; do
+	[[ -f "$_ops_spec" ]] || continue
+	_n="${_ops_spec#"$templates_dir"/common/contracts/ops/v}"
+	_n="${_n%%/*}"
+	[[ "$_n" == *[!0-9]* ]] && continue
+	[[ "$_n" == "$ops_newest_n" ]] || held_out+=("contracts/ops/v$_n/openapi.yaml")
+done
+# ops-conformance.yml builds the canonical container as its FIRST step, so SKILL
+# §3i renders it only when the repo has a Dockerfile ("shipping it into a
+# Dockerfile-less repo is a guaranteed-red check on every PR"). The script said
+# so; nothing enforced it, and a State-D gap-fill renders missing_artifacts BLIND
+# — landing the workflow together with contracts/ops/vN, which matches its own
+# `paths: contracts/ops/**` trigger, so it fires and fails on the very PR that
+# installs it.
+#
+# Gated on a ROOT Dockerfile, NOT on has_dockerfile: that flag is also true for
+# docker/Dockerfile and for any Dockerfile at depth<=3, while the workflow runs a
+# bare `docker build .`, which reads ./Dockerfile only. Gating on the coarse flag
+# would leave exactly the guaranteed-red install this block exists to prevent for
+# every repo whose container lives outside the root.
+[[ -f "$cwd/Dockerfile" ]] || held_out+=(".github/workflows/ops-conformance.yml")
 if [[ "$openapi_surface" != "true" ]]; then
 	held_out+=(
 		".spectral.yaml" "CONTRACTS.md"
 		".github/workflows/contracts-lint.yml" ".github/workflows/spec-publish.yml"
 		".github/workflows/contracts-semver.yml" ".github/scripts/check-contracts-semver.sh"
 	)
+	# The ops surface rides WITH that machinery, never ahead of it. SKILL §3i is
+	# headed "when an OpenAPI surface is detected" and renders the fragment +
+	# checker inside that block; ARCHITECTURE.md and the ops how-to say the same.
+	# Installing them here without it would hand a repo an ops CONTRACT with no
+	# Spectral lint and no oasdiff semver gate — the six files above are exactly
+	# what enforces "a breaking change to the ops surface is a new ops major", so
+	# an ungated fragment makes that promise unkeepable. The newest major only:
+	# older ones are already held out above, unconditionally.
+	[[ "$ops_newest_n" -lt 0 ]] || held_out+=("contracts/ops/v${ops_newest_n}/openapi.yaml")
+	held_out+=("scripts/check-ops-conformance.zsh" ".github/workflows/ops-conformance.yml")
 fi
 artifacts_json="{"
 missing_json="["

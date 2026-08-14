@@ -1,7 +1,7 @@
 # Canonical ops-api implementation (Java, non-Spring) — #935
 
 The blessed Java realization of the org-standard ops surface defined by
-`contracts/ops/v1/openapi.yaml`: `/info`, `/health`, `/health/live`,
+`contracts/ops/v2/openapi.yaml`: `/info`, `/health`, `/health/live`,
 `/health/ready`, `/metrics`. It conforms to the same fragment Spring services get
 via Actuator, and passes `scripts/check-ops-conformance.zsh` unchanged. Spring
 services are covered by `spring-config-advisor`'s conforms-to-ops-api check — use
@@ -83,6 +83,34 @@ Two contract points this implies, worth knowing before you change either:
   up, draining, an internal resource exhausted). Declared hard dependencies are
   the other half and are ANDed with it.
 
+### What the readiness `503` carries (ops-api v2, #1330)
+
+The 503 is not a bare status code: its body is an **RFC 9457 problem document**
+served as **`application/problem+json`** — bare, so the response must not also
+offer `application/json`.
+
+```json
+{
+  "type": "urn:problem-type:ops:not-ready",
+  "title": "Service Not Ready",
+  "status": 503,
+  "detail": "hard dependency 'orders-db' is down",
+  "components": { "orders-db": { "status": "down", "kind": "hard", "breaker": "open" } }
+}
+```
+
+Three things the shape is easy to get wrong:
+
+- `status` is the **integer** HTTP code (RFC 9457), not the health envelope's
+  `"ok"`/`"down"` string. That collision is why ops-api v2 exists.
+- `components` is the **same map `/health` serves**, carrying **all** declared
+  dependencies rather than only the failing ones — so a shed pod and the dashboard
+  agree. It is omitted only when the service declares no dependencies at all.
+- `detail` is a fixed vocabulary, not free prose: `hard dependency '<name>' is
+  down` (several: names sorted lexicographically, comma-joined), or `the service is
+  starting up` for a non-dependency reason.
+
+The `200` responses are unchanged.
 The run commands below assume your service starts as a **runnable jar with the
 OTel dependencies on the runtime classpath** — an application/shadow jar, or
 `./gradlew run`. A plain Gradle `jar` task produces neither the `Main-Class`

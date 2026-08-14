@@ -1,7 +1,7 @@
 # Canonical ops-api implementation (Python, non-Spring) — #688
 
 The blessed Python realization of the org-standard ops surface defined by
-`contracts/ops/v1/openapi.yaml`: `/info`, `/health`, `/health/live`,
+`contracts/ops/v2/openapi.yaml`: `/info`, `/health`, `/health/live`,
 `/health/ready`, `/metrics`. It conforms to the same fragment Spring services get
 via Actuator, and passes `scripts/check-ops-conformance.zsh` unchanged.
 
@@ -66,6 +66,35 @@ in the body. 503 is the two probes' vocabulary (`/health/live`, `/health/ready`)
 not the human-facing aggregate's. An earlier revision of this template aliased
 `/health` to the readiness handler and answered 503, which the contract forbids
 and the checker rejects (#1139, Python half — fixed here).
+
+### What the readiness `503` carries (ops-api v2, #1330)
+
+The 503 is not a bare status code: its body is an **RFC 9457 problem document**
+served as **`application/problem+json`** — bare, so the response must not also
+offer `application/json`.
+
+```json
+{
+  "type": "urn:problem-type:ops:not-ready",
+  "title": "Service Not Ready",
+  "status": 503,
+  "detail": "hard dependency 'orders-db' is down",
+  "components": { "orders-db": { "status": "down", "kind": "hard", "breaker": "open" } }
+}
+```
+
+Three things the shape is easy to get wrong:
+
+- `status` is the **integer** HTTP code (RFC 9457), not the health envelope's
+  `"ok"`/`"down"` string. That collision is why ops-api v2 exists.
+- `components` is the **same map `/health` serves**, carrying **all** declared
+  dependencies rather than only the failing ones — so a shed pod and the dashboard
+  agree. It is omitted only when the service declares no dependencies at all.
+- `detail` is a fixed vocabulary, not free prose: `hard dependency '<name>' is
+  down` (several: names sorted lexicographically, comma-joined), or `the service is
+  starting up` for a non-dependency reason.
+
+The `200` responses are unchanged.
 
 ## Instrumentation is OpenTelemetry-only
 

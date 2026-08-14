@@ -2,7 +2,7 @@
  * Canonical ops-api implementation for non-Spring Java services (issue #935, epic #682).
  *
  * The blessed Java realization of the org-standard ops surface defined by
- * contracts/ops/v1/openapi.yaml -- /info, /health, /health/live, /health/ready,
+ * contracts/ops/v2/openapi.yaml -- /info, /health, /health/live, /health/ready,
  * /metrics -- so a plain (non-Spring) Java service conforms to the same fragment
  * Spring services get via Actuator. It passes scripts/check-ops-conformance.zsh
  * unchanged.
@@ -78,9 +78,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.StringJoiner;
 import java.util.concurrent.Executors;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -347,30 +350,111 @@ public final class OpsApi {
     String healthJson(Map<String, Dependency> components) {
       StringBuilder json =
           new StringBuilder("{\"status\":").append(jsonString(aggregate(components).wire()));
-      if (!components.isEmpty()) {
-        json.append(",\"components\":{");
-        boolean first = true;
-        for (Map.Entry<String, Dependency> entry : components.entrySet()) {
-          if (!first) {
-            json.append(',');
-          }
-          first = false;
-          Dependency d = entry.getValue();
-          json.append(jsonString(entry.getKey())).append(":{");
-          json.append("\"status\":").append(jsonString(d.status()));
-          json.append(",\"kind\":").append(jsonString(d.kind()));
-          if (d.breaker() != null) {
-            json.append(",\"breaker\":").append(jsonString(d.breaker()));
-          }
-          if (d.since() != null) {
-            json.append(",\"since\":").append(jsonString(d.since()));
-          }
-          json.append('}');
+      appendComponents(json, components);
+      return json.append('}').toString();
+    }
+
+    /**
+     * The readiness 503 body: RFC 9457 problem details plus the {@code components} extension
+     * member (ops-api v2, #1330).
+     *
+     * <p>RFC 9457's {@code status} is the HTTP code as an INTEGER, which collides head-on with the
+     * health envelope's {@code "ok"}/{@code "down"} string -- so the health string is gone from the
+     * 503 (503 already says "down") and the diagnosis rides in {@code components} instead.
+     */
+    String readinessProblemJson(Map<String, Dependency> components) {
+      StringBuilder json = new StringBuilder("{\"type\":").append(jsonString(PROBLEM_TYPE_NOT_READY));
+      json.append(",\"title\":").append(jsonString(PROBLEM_TITLE_NOT_READY));
+      json.append(",\"status\":503");
+      json.append(",\"detail\":").append(jsonString(readinessDetail(components)));
+      appendComponents(json, components);
+      return json.append('}').toString();
+    }
+
+    /**
+     * Appends {@code ,"components":{...}} when there are any -- the ONE serializer both the
+     * /health aggregate and the readiness problem use, so a shed pod and the dashboard cannot
+     * disagree about a dependency's shape.
+     */
+    private static void appendComponents(StringBuilder json, Map<String, Dependency> components) {
+      if (components.isEmpty()) {
+        return;
+      }
+      json.append(",\"components\":{");
+      boolean first = true;
+      for (Map.Entry<String, Dependency> entry : components.entrySet()) {
+        if (!first) {
+          json.append(',');
+        }
+        first = false;
+        Dependency d = entry.getValue();
+        json.append(jsonString(entry.getKey())).append(":{");
+        json.append("\"status\":").append(jsonString(d.status()));
+        json.append(",\"kind\":").append(jsonString(d.kind()));
+        if (d.breaker() != null) {
+          json.append(",\"breaker\":").append(jsonString(d.breaker()));
+        }
+        if (d.since() != null) {
+          json.append(",\"since\":").append(jsonString(d.since()));
         }
         json.append('}');
       }
-      return json.append('}').toString();
+      json.append('}');
     }
+  }
+
+  /**
+   * RFC 9457 problem-type URNs (ops-api v2, #1330).
+   *
+   * <p>Host-free on purpose: a shipped service must not carry a documentation URL that rots when
+   * the docs site moves.
+   */
+  static final String PROBLEM_TYPE_NOT_READY = "urn:problem-type:ops:not-ready";
+
+  static final String PROBLEM_TYPE_NOT_ALIVE = "urn:problem-type:ops:not-alive";
+
+  static final String PROBLEM_TITLE_NOT_READY = "Service Not Ready";
+
+  /**
+   * The two non-dependency unready reasons the contract names. A service that is unready for its
+   * own reasons cannot tell us which, so it gets the start-up wording -- the overwhelmingly common
+   * case, and the one an operator acts on the same way.
+   */
+  static final String DETAIL_STARTING_UP = "the service is starting up";
+
+  static final String DETAIL_DRAINING = "the service is draining";
+
+  /**
+   * Builds the canonical {@code detail} sentence for a readiness 503.
+   *
+   * <p>The wording is FIXED, not free prose: check-ops-conformance.zsh and the acceptance lane both
+   * assert it. Names are sorted LEXICOGRAPHICALLY so the string is deterministic regardless of the
+   * order the breakers tripped in -- without the sort the same outage would produce different
+   * bodies on different pods and no assertion could pin it.
+   */
+  static String readinessDetail(Map<String, Dependency> components) {
+    // Literals rather than named constants, matching OpsConfig.ready, which spells the same hinge
+    // `"hard".equals(d.kind()) && "down".equals(d.status())`. The two are the SAME predicate and
+    // must stay in step: a 503 whose detail named a different set than the verdict used would be
+    // worse than no detail at all.
+    List<String> down = new ArrayList<>();
+    for (Map.Entry<String, Dependency> entry : components.entrySet()) {
+      Dependency d = entry.getValue();
+      if ("hard".equals(d.kind()) && "down".equals(d.status())) {
+        down.add(entry.getKey());
+      }
+    }
+    if (down.isEmpty()) {
+      return DETAIL_STARTING_UP;
+    }
+    Collections.sort(down);
+    StringJoiner joined = new StringJoiner(", ");
+    for (String name : down) {
+      joined.add("'" + name + "'");
+    }
+    return down.size() == 1
+        ? "hard dependency " + joined + " is down"
+        : "hard dependencies " + joined + " are down";
   }
 
   private OpsApi() {}
@@ -511,7 +595,9 @@ public final class OpsApi {
   }
 
   // /health/ready: 200 {"status":"ok"} when the readiness check AND every declared HARD
-  // dependency pass, else 503 {"status":"down"}. Liveness never comes here -- it must stay
+  // dependency pass, else 503 with an RFC 9457 problem
+  // document on application/problem+json (type/title/integer status/detail, plus
+  // the components extension member). Liveness never comes here -- it must stay
   // dependency-free. The two PROBES are where 503 belongs; /health is not one (see healthHandler).
   private static HttpHandler readinessHandler(OpsConfig config) {
     return exchange -> {
@@ -520,18 +606,41 @@ public final class OpsApi {
         return;
       }
       boolean ready;
+      // Snapshot ONCE and reuse it for both the verdict and the problem body. Calling
+      // components() again to build the body would re-enter the service's dependency source,
+      // which can return a different map -- the 503 would then name a dependency the verdict
+      // was not actually taken on.
+      Map<String, Dependency> components = Map.of();
       try {
-        ready = config.ready(config.components());
+        components = config.components();
+        ready = config.ready(components);
       } catch (RuntimeException e) {
         // A throwing dependency probe (timeout, SQLException wrapper, ...) degrades to the
-        // contract's 503 {"status":"down"} -- never an aborted connection the checker misreads.
+        // contract's 503 -- never an aborted connection the checker misreads. The snapshot is
+        // reset so a half-read map cannot reach the problem body.
         ready = false;
+        components = Map.of();
       }
-      respond(
-          exchange,
-          ready ? 200 : 503,
-          "application/json",
-          ready ? "{\"status\":\"ok\"}" : "{\"status\":\"down\"}");
+      if (ready) {
+        respond(exchange, 200, "application/json", "{\"status\":\"ok\"}");
+        return;
+      }
+      // ops-api v2 (#1330): an RFC 9457 problem document on application/problem+json. The media
+      // type is part of the contract, not a detail -- org-problem-json-errors requires the 4xx/5xx
+      // body to be BARE problem+json, so a correctly shaped body on application/json would still
+      // be a conformance failure.
+      String body;
+      try {
+        body = config.readinessProblemJson(components);
+      } catch (RuntimeException e) {
+        // Serializing reads source-provided values, so it can fail after the verdict is taken.
+        // The fallback stays a VALID problem document rather than a health-shaped one.
+        body =
+            "{\"type\":\"" + PROBLEM_TYPE_NOT_READY + "\",\"title\":\"" + PROBLEM_TITLE_NOT_READY
+                + "\",\"status\":503,\"detail\":\""
+                + "the readiness problem document could not be serialized\"}";
+      }
+      respond(exchange, 503, "application/problem+json", body);
     };
   }
 

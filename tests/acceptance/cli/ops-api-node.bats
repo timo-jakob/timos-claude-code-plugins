@@ -17,6 +17,9 @@
 
 bats_require_minimum_version 1.5.0
 load ../lib/ops-acceptance
+# The shared assertion helpers (tests/README.md). `lacks` in particular, because a
+# hand-rolled `! printf … | grep` is the inert-negation shape the suite lint bans.
+load ../../assertions
 
 setup_file() {
   # Unguarded and allowed to fail the whole file — a missing toolchain must be
@@ -47,6 +50,45 @@ teardown() { ops_stop; }
   checker_passed "$output" "/health/live"
   checker_passed "$output" "/health/ready"
   checker_passed "$output" "/metrics"
+}
+
+@test "tc-error-readiness-503-fails-conformance: a shed pod fails conformance, and the failure NAMES the dependency" {
+  # #1343. A 503 stays a conformance FAILURE — conformance asserts a SERVING
+  # service, and there is deliberately no flag to tolerate one. What ops-api v2
+  # buys is that the failure says WHICH dependency shed the pod, read out of the
+  # RFC 9457 problem document rather than inferred from a bare status code.
+  #
+  # This is the checker's 503 branch exercised against a REAL service, not a
+  # stubbed curl: the stub cases live in tests/check-ops-conformance.bats.
+  ops_start hard-down GIT_SHA=9e11997
+  run zsh "$CHECKER" "$BASE"
+  [ "$status" -ne 0 ]
+  checker_failed "$output" "/health/ready"
+  contains "$output" "not ready — hard dependency 'orders-db' is down (503)"
+  # It must NOT be misreported as a legacy v1 body: that message is the migration
+  # instruction, and firing it at a correctly-migrated service would send an
+  # adopter to re-do work they have already done.
+  lacks "$output" 'ops-api v1 envelope'
+  # NOTE the checker prints its five PASS lines as one static block reached only
+  # AFTER the failure check, so a failing run emits no PASS lines at all. Asserting
+  # /info still passed here would be asserting output the checker never produces.
+}
+
+@test "tc-corner-checker-base-url-unprefixed: a trailing-slash base URL still probes UNPREFIXED paths" {
+  # #1346. The acceptance criterion this pins is "the checker's base-URL handling is
+  # untouched", and the thing that could have broken it is cutting `servers: /v2`
+  # in the contract: an implementer could reasonably conclude the runtime paths
+  # gained a /v2 prefix. They did not — the server URL is the triangle's version
+  # declaration, not a path prefix.
+  ops_start lifecycle GIT_SHA=9e11997 BUILD_VERSION=1.4.2
+  # A trailing slash must normalize, not produce //health/ready.
+  run zsh "$CHECKER" "$BASE/"
+  [ "$status" -eq 0 ]
+  checker_passed "$output" "/health/ready"
+  checker_passed "$output" "/health/live"
+  # The report names the UNPREFIXED paths — a /v2 prefix would show up here.
+  lacks "$output" '/v2/health'
+  lacks "$output" '//health'
 }
 
 @test "tc-error-missing-git-sha-fails-fast: an unset GIT_SHA refuses to boot" {

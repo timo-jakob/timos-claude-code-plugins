@@ -378,6 +378,24 @@ flow. Stop and ask for input wherever marked; do not guess.
    have called a language repo. Only the confirmed "none" answer settles it;
    a recorded `primary: kubernetes` does not settle it on its own (#1193).
 
+   **The ops-major migration (#1330) is the fourth not-blind set.** When
+   `contracts/ops/v1/openapi.yaml` **exists on disk** and `missing_artifacts`
+   contains `contracts/ops/v2/openapi.yaml`, rendering it is not a gap-fill —
+   it is **step 1 of the ops v2 migration**, and steps 0, 2 and 3 do not happen
+   by themselves. Rendering v2 alone leaves a repo whose *contract* declares
+   RFC 9457 problem+json probe 503s while its *runtime* still emits the v1
+   envelope, and reports the gap filled. So on that shape:
+   refresh `.github/workflows/contracts-lint.yml` in the same run (step 0 —
+   the how-to calls it not optional; the file is present, so it otherwise
+   rides the separately-skippable drift flow, and the newest-major selector is
+   what makes v2 the linted major); and carry **Step 5 checklist lines** for
+   replacing the v1 payload and for the trap that a green `ops-conformance` run
+   does **not** verify the 503 bodies (a healthy service never answers 503).
+   Point both at
+   [the ops how-to](https://timo-jakob.github.io/timos-claude-code-plugins/how-to/adopt-the-ops-surface/).
+   A repo with **no** `contracts/ops/v1` is a plain first install, not a
+   migration — render blind as usual.
+
    **Docs adoption must also reconcile pre-existing configs (#777, #781)** —
    the hook reconciler only appends missing providers, never edits hook args,
    so apply these edits directly (each idempotent — skip when already
@@ -1743,28 +1761,50 @@ The installed set:
   default 6 months). The `.spectral.yaml` ruleset also gains a
   `deprecation-has-sunset` rule (#695) enforcing that a `deprecated: true`
   element carries `x-sunset`. Documentation/policy — never provenance-stamped.
-- `contracts/ops/v1/openapi.yaml` (#688) — the **org-standard ops surface**
+- `contracts/ops/v2/openapi.yaml` (#688, v2 per #1330) — the **org-standard ops
+  surface**
   (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s
   probes, `/metrics`) as a **shared, versioned contract fragment**, so
   "standardised" is testable. It rides the SAME machinery as the business
-  contract: `contracts-lint` lints it and `contracts-semver` gates it (both
-  templates' spec discovery covers `contracts/ops/v[0-9]*/openapi.yaml`), so a
+  contract: both templates' spec discovery covers
+  `contracts/ops/v[0-9]*/openapi.yaml`, with `contracts-semver` gating **every**
+  major and `contracts-lint` linting only the **newest** per family (#1330), so a
   breaking change to the ops surface is a new ops major, never an in-place edit.
+  **Install v2, not v1.** A fresh repo has no live v1 to preserve, and the ops-api
+  payloads this skill installs beside it serve RFC 9457 problem+json on the two
+  probe 503s — the v2 shape. Installing v1 here would make a brand-new repo both
+  self-contradictory (a contract declaring `{"status":"down"}` beside a payload
+  emitting problem details) and, as soon as the repo's `.spectral.yaml` extends
+  the org styleguide (#689), **born red** — `contracts-lint` lints the newest
+  major and `org-problem-json-errors` rejects v1's 503s. The starter
+  `.spectral.yaml` this skill installs today (#692) does not yet carry that rule,
+  so the redness is deferred, not avoided; the self-contradiction is reason
+  enough on its own. `contracts/ops/v1/openapi.yaml` still ships in the template tree for
+  repos migrating an existing installation (see the ops how-to), but bootstrap
+  never installs it.
   Installed verbatim (no placeholders — the ops contract is identical org-wide).
   The surface is **internal, on a separate management port** (never the public
   app port); `/info` is minimal by contract; enforcing the network boundary is
   the composition repo's job (#687/#719/#720). Never published as APIM products.
 - `scripts/check-ops-conformance.zsh` (#688) — the **conformance checker**: curls
-  a running service's `/info`, `/health`, `/metrics` and validates them against
-  the fragment's shapes (incl. the deprecated-major-needs-sunset rule); exit 0 on
-  conformance, non-zero naming the failing path. Installed verbatim.
+  a running service's `/info`, `/health`, `/health/live`, `/health/ready` and
+  `/metrics` and validates them against the fragment's shapes (incl. the
+  deprecated-major-needs-sunset rule). Since #1330 a probe answering **503** is
+  validated as an RFC 9457 problem document, and a v1-envelope 503 is reported
+  with a migration message pointing at the ops how-to. Exit 0 on conformance,
+  non-zero naming the failing path. Installed verbatim. Note the checker only
+  inspects a 503 it actually receives — a healthy service never emits one, so a
+  green run does not prove the probe bodies were migrated.
 - `.github/workflows/ops-conformance.yml` (#688) — a **standalone** job that
   builds the canonical container, waits for `/health/ready`, and runs the checker
   against the running service (independent of epic #704's rest harness; #704 may
   later fold it into the `acceptance (rest)` leg). Also **path-conditional**
   (`paths: contracts/ops/**` + its own wiring) — never a required context.
-  **Render it only when the repo has a Dockerfile** (`has_dockerfile == true`,
-  detected in Step 1 — the canonical container the job builds). When there is no
+  **Render it only when the repo has a Dockerfile at its ROOT** — the job runs a
+  bare `docker build .`, which reads `./Dockerfile` only. Do **not** key this on
+  `has_dockerfile`: that flag is also true for `docker/Dockerfile` and for any
+  Dockerfile at depth ≤ 3, so a repo whose container lives elsewhere would get a
+  workflow that reds on its first run. When there is no root
   Dockerfile, **omit this workflow** (still install the fragment + checker) and
   add a Step 5 checklist TODO — *"wire `ops-conformance.yml` once the service has
   a canonical container"* — because its first step is `docker build .`, so
@@ -1781,12 +1821,13 @@ The installed set:
   common/.github/workflows/contracts-lint.yml.tmpl \
   common/.github/workflows/spec-publish.yml.tmpl \
   common/.github/workflows/contracts-semver.yml.tmpl \
-  common/contracts/ops/v1/openapi.yaml \
+  common/contracts/ops/v2/openapi.yaml \
   common/scripts/check-ops-conformance.zsh
 ```
 
-Then render the ops-conformance workflow **only when `has_dockerfile == true`**
-(see the bullet above — omit it, with a Step 5 TODO, on a Dockerfile-less repo):
+Then render the ops-conformance workflow **only when the repo has a ROOT
+`Dockerfile`** (see the bullet above — omit it, with a Step 5 TODO, otherwise;
+`has_dockerfile` is deliberately NOT the signal here):
 
 ```bash
 "<skill-base-dir>/scripts/render.zsh" \
@@ -2988,8 +3029,9 @@ reference shape.
 
 **Spring resilience + dependency health (#1141).** For a **Spring Boot** service
 repo, install the blessed resilience payload — resilience4j wired around
-dependency clients per the six-mandate policy, plus the ops-api v1.1 `/health`,
-`/health/live` and `/health/ready` served from breaker state. This is the block
+dependency clients per the six-mandate policy, plus the ops-api v2 `/health`,
+`/health/live` and `/health/ready` (#1330 problem-details probe 503s) served from
+breaker state. This is the block
 the Java one above skips Spring *for*: Actuator gives Spring `/info` and
 `/metrics`, but its health JSON spells states `UP`/`DOWN` and nests custom fields
 under `details`, so it cannot express the ops-api `components` shape — the payload
