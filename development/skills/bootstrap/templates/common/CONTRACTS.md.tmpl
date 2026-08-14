@@ -122,7 +122,24 @@ machinery as the business contract (same version triangle, same Spectral +
 oasdiff gates), so a breaking change to it is a new **ops** major, never an
 in-place edit.
 
-**Ops-api v1.1** adds dependency health to `/health`, additively.
+**Ops-api v1.1** added dependency health to `/health`, additively.
+
+**Ops-api v2** (#1330) changed the two probe 503 bodies — and only those. When
+`/health/live` or `/health/ready` answers `503`, the body is now a bare
+[RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem document on
+`application/problem+json`, not the `{"status": "down"}` envelope on
+`application/json`:
+
+- `type`, `title`, an **integer** `status` (503 — the HTTP code, *not* the
+  health string), and a `detail`;
+- readiness additionally carries `components`, byte-identical to the map
+  `/health` already serves;
+- every `200` response is **unchanged**, so `/health` and `/info` consumers are
+  unaffected.
+
+If anything you own consumes a probe's 503 body, update it before migrating.
+Note that a healthy service never answers 503, so a green ops-conformance run
+does **not** prove this migration is done.
 
 ### Reporting dependency health
 

@@ -378,6 +378,24 @@ flow. Stop and ask for input wherever marked; do not guess.
    have called a language repo. Only the confirmed "none" answer settles it;
    a recorded `primary: kubernetes` does not settle it on its own (#1193).
 
+   **The ops-major migration (#1330) is the fourth not-blind set.** When
+   `contracts/ops/v1/openapi.yaml` **exists on disk** and `missing_artifacts`
+   contains `contracts/ops/v2/openapi.yaml`, rendering it is not a gap-fill —
+   it is **step 1 of the ops v2 migration**, and steps 0, 2 and 3 do not happen
+   by themselves. Rendering v2 alone leaves a repo whose *contract* declares
+   RFC 9457 problem+json probe 503s while its *runtime* still emits the v1
+   envelope, and reports the gap filled. So on that shape:
+   refresh `.github/workflows/contracts-lint.yml` in the same run (step 0 —
+   the how-to calls it not optional; the file is present, so it otherwise
+   rides the separately-skippable drift flow, and the newest-major selector is
+   what makes v2 the linted major); and carry **Step 5 checklist lines** for
+   replacing the v1 payload and for the trap that a green `ops-conformance` run
+   does **not** verify the 503 bodies (a healthy service never answers 503).
+   Point both at
+   [the ops how-to](https://timo-jakob.github.io/timos-claude-code-plugins/how-to/adopt-the-ops-surface/).
+   A repo with **no** `contracts/ops/v1` is a plain first install, not a
+   migration — render blind as usual.
+
    **Docs adoption must also reconcile pre-existing configs (#777, #781)** —
    the hook reconciler only appends missing providers, never edits hook args,
    so apply these edits directly (each idempotent — skip when already
