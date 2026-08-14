@@ -65,7 +65,7 @@ three apart without matching on wording.)
 # the Node ops-api payload (#936) — 12 story cases + 2 harness cases
 bats tests/acceptance/rest tests/acceptance/cli
 
-# the org API styleguide ruleset (#689) — 9 story cases + 6 clause-isolating cases
+# the org API styleguide ruleset (#689) — 9 story + 6 clause-isolating + 2 #1330 premise
 bats tests/acceptance/cli/api-styleguide.bats
 ```
 

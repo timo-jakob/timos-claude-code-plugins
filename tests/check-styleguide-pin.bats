@@ -123,8 +123,13 @@ stub_npx_stderr() {
 # network and making the 404 case pass for the wrong reason.
 #
 # `-f` does NOT skip /etc/zshenv (nothing does), so PATH is re-pinned INSIDE the
-# child, after every startup file has had its say. A host whose /etc/zshenv
-# prepends paths (nix-darwin does) would otherwise still escape the stubs.
+# child. Be precise about what that buys: the `exec` below hands the script to
+# its own `#!/usr/bin/env zsh` shebang, which starts a THIRD shell that sources
+# /etc/zshenv again, after the re-pin. So this closes the ~/.zshenv hazard (the
+# observed one) but not a system-wide /etc/zshenv that prepends unconditionally.
+# Stock macOS ships no /etc/zshenv and the Docker lane has none, so there is no
+# reachable escape on a supported host — but the guarantee is narrower than
+# "after every startup file has had its say".
 check() {
   run env ZDOTDIR="$BATS_TEST_TMPDIR" zsh -f -c \
     'PATH="$1"; shift; exec "$@"' -- "$STUB_BIN:$PATH" "$W/scripts/check-styleguide-pin.zsh"

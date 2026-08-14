@@ -13,15 +13,23 @@
 #   tc-corner-deprecated-schema-not-flagged #952
 #   tc-corner-path-params-exempt            #953
 #
-# Plus five cases with no story-spec id of their own, each covering a clause the
+# Plus SIX cases with no story-spec id of their own, each covering a clause the
 # nine above leave undiscriminated — every one of them could be deleted from the
 # ruleset with the story cases still green:
 #
-#   tc-error-operationid-unique          the eighth rule id (#689 AC 4)
-#   tc-error-dual-error-body             `maxProperties: 1` (bare means bare)
-#   tc-error-incomplete-problem-schema   the RFC 9457 required-members allOf
-#   tc-error-range-status-key            the given's "4XX"/"5XX" half
-#   tc-error-naming-clauses-isolated     each org-resource-naming pattern alone
+#   tc-error-operationid-unique           the eighth rule id (#689 AC 4)
+#   tc-error-dual-error-body              `maxProperties: 1` (bare means bare)
+#   tc-error-incomplete-problem-schema    the RFC 9457 required-members allOf
+#   tc-error-range-status-key             the given's "4XX"/"5XX" half
+#   tc-error-naming-clauses-isolated      each org-resource-naming pattern alone
+#   tc-corner-verb-prefixed-nouns-pass    the verb guard's trailing context
+#
+# …and TWO #1330 premise cases, which belong to neither group: they assert the
+# ops fragment's relationship to org-problem-json-errors (v2 clears it, v1 still
+# fires it), i.e. the reason ops v2 had to land before the pin shipped.
+#
+# 9 + 6 + 2 = 17 @test blocks. Keep this roster and the count in
+# ../README.md in step with the file.
 #
 # The three through-the-pin cases (#1304-#1306) are NOT in this lane. PR-B
 # realised them as scripts/check-styleguide-pin.zsh, run by

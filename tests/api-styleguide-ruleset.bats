@@ -504,6 +504,18 @@ CODIFIED_RULE_IDS=(
   [ "$output" = "0" ]
   run yq -r '.jobs.check | has("continue-on-error")' "$wf"
   [ "$output" = "false" ]
+  # STEP-level `if` too, not just the job's: a skipped step does not fail its
+  # job, so `if: false` on the lint step reports success having run nothing —
+  # the same parking trick as the job-level knob, one level down.
+  run yq -r '[.jobs.check.steps[] | select(has("if"))] | length' "$wf"
+  [ "$output" = "0" ]
+  # …and the LINT step's run command is pinned exactly, because a `contains`
+  # needle is equally satisfied by `./scripts/check-styleguide-pin.zsh || true`,
+  # which neuters the gate inline without touching either knob. Selected by
+  # name: the job also has an apt-get step, so an unfiltered `.run` emits both.
+  run yq -r '.jobs.check.steps[] | select(.name == "Lint the non-conforming fixture THROUGH the pinned shim") | .run' "$wf"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./scripts/check-styleguide-pin.zsh" ]
   # `// "unset"` would also swallow `if: false` — the standard way to park a job
   # without deleting it — because yq's // fires on false as well as null.
   run yq -r '.jobs.check | has("if")' "$wf"

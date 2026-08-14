@@ -9,8 +9,8 @@ repo, and keep the pin current **by hand** — no bot bumps it for you
 a freshly bootstrapped repo already has it and there is nothing to do here. This
 page is for a repo bootstrapped **before** the shim existed — it still carries
 the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
-starter ruleset and enforces none of the org rules — and for the day a bump
-lands.
+starter ruleset, which enforces only two of the eight ids (the `operationId`
+pair) and none of the org-specific ones — and for the day a bump lands.
 
 ## Pin the ruleset
 
@@ -41,9 +41,18 @@ lints **every** major of both families, including frozen ones.
 **The test is a `newest_major` helper in the run step**, not the glob — both
 versions glob `v[0-9]*`; what #1330 added is the *selection* on top of it. So:
 `grep -q newest_major .github/workflows/contracts-lint.yml`. If that finds
-nothing, refresh the workflow's selection step from the current template before
-trusting the parity claim below — otherwise your local run and your CI disagree
-in both directions.
+nothing, refresh the workflow before trusting the parity claim below — otherwise
+your local run and your CI disagree in both directions.
+
+**Refresh it via `/development:bootstrap`, not by copying the template.** The
+template is `contracts-lint.yml.tmpl` and it carries
+`branches: ["{{DEFAULT_BRANCH}}"]`. Copied verbatim, that placeholder stays
+unsubstituted, the `pull_request` filter then matches nothing, and contract
+linting **silently stops running** — with nothing going red, because the check is
+path-conditional and never a required context. If you must copy by hand,
+substitute `{{DEFAULT_BRANCH}}` with your default branch. This is the same trap
+the [ops-surface how-to](adopt-the-ops-surface.md#migrate-an-existing-repo-to-ops-v2)
+spells out at its step 0.
 
 Then run what CI runs, and fix what it finds — naming the newest major of each
 family explicitly rather than globbing:
@@ -59,7 +68,7 @@ npx --yes @stoplight/spectral-cli@6 lint \
 mistake: you get a clean local run and then a red PR from a spec you did not
 write. Adding a *frozen older* major is the opposite mistake — it reports errors
 on a file `contracts-semver` forbids you to edit; a post-#1330 job will never
-show you those, and a job that still globs every major will (which is what the
+show you those, and a job without the `newest_major` selection will (which is what the
 refresh above is for). And a
 run that matched **no files** is not a pass: spectral exits 0 having linted
 nothing, so check it actually named your specs.
@@ -125,7 +134,7 @@ see [When the pin cannot be fetched](#when-the-pin-cannot-be-fetched) below.)
 
 **Before a MAJOR bump, check your `contracts-lint.yml` too.** On a repo whose
 copy predates [#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330)
-(it globs `contracts/v[0-9]*` rather than selecting the newest per family), the
+(its run step has no `newest_major` selection — the grep above), the
 bump reds on **frozen** older majors as well — and those you are not permitted to
 edit, because `contracts-semver` rejects an in-place change to a live major. Fix
 the workflow, not the frozen spec: see

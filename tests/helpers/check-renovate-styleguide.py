@@ -49,7 +49,10 @@ def load_config() -> dict:
 PIN_RE = re.compile(
     r"https://cdn\.jsdelivr\.net/gh/" + re.escape(DEP) + r"@[^ \"]*ruleset\.yaml"
 )
-SKIP_DIRS = {".git", "node_modules", "site", ".venv", "__pycache__"}
+# EXACTLY the set the bats sweep's find(1) predicates prune, so a pin-quoting
+# file cannot be visible to one and invisible to the other — which is the split
+# this helper exists to prevent. Keep the two in step.
+SKIP_DIRS = {".git", "node_modules", "site"}
 # Anchored, mirroring the find(1) predicates in tests/api-styleguide-ruleset.bats's
 # sweep. A bare "worktrees" component would also skip a future docs/worktrees/,
 # which that sweep would still inspect — and a file visible to one but not the
@@ -142,6 +145,20 @@ def check_manager() -> None:
         current = match.group("currentValue")
         if not re.fullmatch(r"styleguide-v\d+\.\d+\.\d+", current):
             sys.exit(f"matchStrings[{i}] currentValue is not an exact tag: {current}")
+
+    # COVERED is not EXTRACTED. managerFilePatterns listing a file only tells
+    # Renovate to open it; if no matchStrings entry matches its contents, that
+    # file is silently skipped — Renovate reports nothing, the bump rewrites the
+    # others, and the repo-wide sweep reds the PR on arrival. That born-red bump
+    # is exactly what the three-site manager exists to prevent, so every
+    # discovered site must yield a match, not just the shim.
+    for site in discover_pin_sites():
+        text = (REPO_ROOT / site).read_text()
+        if not any(re.search(js_to_py(p), text) for p in patterns):
+            sys.exit(
+                f"{site} quotes the pin and is covered by managerFilePatterns, "
+                "but no matchStrings entry extracts from it — a bump would skip it"
+            )
 
     if manager.get("datasourceTemplate") != "github-tags":
         sys.exit(f"unexpected datasource: {manager.get('datasourceTemplate')}")

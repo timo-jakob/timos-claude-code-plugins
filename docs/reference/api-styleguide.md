@@ -6,7 +6,8 @@ The org API conventions, and the Spectral rules that enforce them.
 `styleguide-vX.Y.Z` tag, and every bootstrapped repo's `contracts-lint` job runs
 it. A repo bootstrapped **before** the pin shim ([#689](https://github.com/timo-jakob/timos-claude-code-plugins/issues/689))
 still carries the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
-starter ruleset and enforces none of this until it adopts the pin — see
+starter ruleset: of the eight ids below it enforces only the two `operationId`
+rules, and none of the org-specific ones, until it adopts the pin — see
 [Adopt the API styleguide](../how-to/adopt-the-api-styleguide.md).
 
 `contracts-lint` runs it against **both** contract families — the business
@@ -70,7 +71,11 @@ operation ships as an undocumented one.
 errors. The two `operationId` rules were already errors and are carried over
 unchanged. Worth being precise about, because the
 [versioning policy](#versioning-policy) keys MAJOR off "a new or stricter
-error-severity rule": this ruleset promotes three, not five.
+error-severity rule": of these **five codified** ids the ruleset promotes three,
+not all five. Counting the re-scoped
+[`org-deprecated-operation-has-sunset`](#deprecation) below, the whole-ruleset
+total is **four** promotions plus two newly-minted errors — the breakdown the
+plugin's compatibility note quotes.
 
 ## Deprecation
 
@@ -186,18 +191,24 @@ in a `components` extension member. Bootstrap installs **ops v2**, and
 `contracts-lint` lints only the newest major per family, so a freshly bootstrapped
 repo never sees this rule fire on a fragment it did not write.
 
-The collision survives in exactly one place: a repo still carrying
-`contracts/ops/v1` and nothing newer, where v1 is still its newest ops major. If
-that is you:
+The collision survives in **two** shapes. Whichever you are in, the two
+prohibitions are the same:
 
 - **Do not** edit `contracts/ops/v1/openapi.yaml` to make the lint pass. It is an
   org-standard fragment installed verbatim, a frozen major that `contracts-semver`
   forbids editing in place, and its shape is pinned by `check-ops-conformance.zsh`.
 - **Do not** add an `overrides:` exclusion. Scoping is fixed by making the
   contract correct, never by silencing a rule.
-- **Do** migrate to ops v2 — the procedure is in
-  [Adopt the ops surface](../how-to/adopt-the-ops-surface.md#migrate-an-existing-repo-to-ops-v2),
-  and it is the only thing that clears this.
+
+**Shape 1 — your newest ops major is still v1.** Migrate to ops v2; the procedure
+is in [Adopt the ops surface](../how-to/adopt-the-ops-surface.md#migrate-an-existing-repo-to-ops-v2).
+
+**Shape 2 — you already have ops v2, but your `contracts-lint.yml` predates
+[#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330)**, so
+it lints *every* major and v1 still reddens. Migrating again is a no-op here — the
+fix is the **workflow**, not any spec. Check with
+`grep -q newest_major .github/workflows/contracts-lint.yml` and refresh it per
+[the ops how-to's step 0](../how-to/adopt-the-ops-surface.md#migrate-an-existing-repo-to-ops-v2).
 
 ## Versioning policy
 
