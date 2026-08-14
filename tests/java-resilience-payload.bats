@@ -514,6 +514,34 @@ code_only() {
   local problem_json
   problem_json="$(block_between 'String readinessProblemJson(Map<String, Dependency> components)' '    }' "$OPSAPI")"
   contains "$problem_json" 'appendComponents(json, components);'
+  # The four RFC 9457 members are hand-built with a StringBuilder, and none of them
+  # was pinned: `,"status":503` could become `,"status":"down"` — the precise
+  # collision this major exists to resolve — with every test still green. Java has
+  # no JVM in the test image and no acceptance lane, so these greps are the only
+  # guard. Whitespace-stripped so a reformat cannot redden them.
+  local flat
+  flat="$(printf '%s' "$problem_json" | tr -d '[:space:]')"
+  contains "$flat" 'newStringBuilder("{\"type\":").append(jsonString(PROBLEM_TYPE_NOT_READY))'
+  contains "$flat" 'append(",\"title\":").append(jsonString(PROBLEM_TITLE_NOT_READY))'
+  contains "$flat" 'append(",\"status\":503")'
+  contains "$flat" 'append(",\"detail\":").append(jsonString(readinessDetail(components)))'
+  grep -qF 'static final String PROBLEM_TITLE_NOT_READY = "Service Not Ready";' "$OPSAPI"
+}
+
+@test "the java writer applies the media type it is GIVEN, so problem+json really reaches the wire" {
+  # The call site passes "application/problem+json", but nothing asserted that
+  # respond() sets Content-Type FROM its parameter. Rewriting that line back to a
+  # hardcoded "application/json" — the value every pre-v2 caller used — compiles,
+  # keeps the call-site needle green, and answers the readiness 503 on the wrong
+  # media type, which is an org-problem-json-errors failure even with a perfect
+  # body. Every other payload pins its writer; Java is the one with neither a
+  # compile nor a runtime lane, so this is the only place it can be guarded.
+  local fn
+  fn="$(block_between 'private static void respond(HttpExchange exchange, int code, String contentType, String body)' '  }' "$OPSAPI")"
+  contains "$fn" 'exchange.getResponseHeaders().set("Content-Type", contentType);'
+  # A literal here would silently override the parameter for every caller.
+  lacks "$fn" '"application/json"'
+  lacks "$fn" '"application/problem+json"'
 }
 
 @test "the since timestamp tracks state transitions rather than freezing at boot" {

@@ -102,7 +102,7 @@ auto-apply:
   (e.g. it now requires explicit Spring Security configuration): flag with
   migration guidance, don't invent a replacement key.
 - **ops-api conformance (#688)** — the org ops surface (the shared
-  `contracts/ops/v1/openapi.yaml` fragment) requires the service to expose
+  `contracts/ops/v2/openapi.yaml` fragment) requires the service to expose
   `/info`, `/health`, and a Prometheus `/metrics` **at the service root**, with
   `/health` returning `{"status":"ok"}`. **Evaluate this once per repo over the
   merged effective config** (base `application.yml` + the active-profile

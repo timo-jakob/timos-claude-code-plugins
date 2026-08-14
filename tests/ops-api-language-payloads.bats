@@ -219,9 +219,10 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
   # application/problem+json, NOT {"status":"down"} — the health string collides
   # with RFC 9457's integer `status`, which is why v2 exists.
   contains "$h" 'writeProblemJSON(w, http.StatusServiceUnavailable, readinessProblemBody{'
-  contains "$h" 'Type: ProblemTypeNotReady,'
-  contains "$h" 'Detail: readinessDetail(components),'
-  contains "$h" 'Components: components,'
+  # The WHOLE literal, in order: Title and Status were unpinned, so dropping
+  # `Title:` (emitting "title":"") shipped green, and separate needles cannot
+  # tell a transposed Type from Detail.
+  contains "$h" 'Type: ProblemTypeNotReady, Title: problemTitleNotReady, Status: http.StatusServiceUnavailable, Detail: readinessDetail(components), Components: components,'
   lacks "$h" 'statusBody{Status: StatusDown}'
   # The snapshot is read ONCE and reused for verdict and body: re-entering the
   # service's source would let the 503 name a dependency the verdict was not
@@ -332,6 +333,26 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
   grep -qE '^[[:space:]]*LifecycleDeprecated[[:space:]]+= "deprecated"$' "$GO/opsapi.go"
 }
 
+@test "every ops-api README documents the v2 503 body, and cites the v2 fragment" {
+  # These READMEs are COPIED INTO the adopter's repo and are the primary contract
+  # documentation they read. Before #1330 they cited contracts/ops/v1 and described
+  # the readiness 503 as a bare status code, while the payload beside them emitted
+  # an RFC 9457 document — so the file an adopter trusts disagreed with the file
+  # that runs. Swept across all five rather than fixed one at a time.
+  local lang readme
+  for lang in go java javascript python swift; do
+    readme="$REPO_ROOT/development/skills/bootstrap/templates/languages/$lang/ops-api/README.md"
+    [ -f "$readme" ]
+    run cat "$readme"
+    contains "$output" 'contracts/ops/v2/openapi.yaml'
+    lacks "$output" 'contracts/ops/v1'
+    contains "$output" 'application/problem+json'
+    contains "$output" 'urn:problem-type:ops:not-ready'
+    # The integer/string collision is the one thing a reader must not get wrong.
+    contains "$output" 'integer'
+  done
+}
+
 @test "go opsapi's JSON tags are the wire keys the conformance checker reads" {
   # Every served field is a struct tag. Renaming one (git_sha -> gitSha) or
   # dropping `,omitempty` from components — so a v1.0 body starts emitting
@@ -350,6 +371,14 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
   # the checker rejects a present-but-empty breaker as a non-member of the enum
   # while an absent one is legal.
   contains "$f" 'Status string `json:"status"` Kind string `json:"kind"` Breaker string `json:"breaker,omitempty"` Since string `json:"since,omitempty"`'
+  # ops-api v2 (#1330): the problem bodies' tags ARE the RFC 9457 wire contract.
+  # `json:"detail"` -> `json:"details"` compiles; so does dropping `,omitempty`
+  # from Components, which then emits "components":{} on a start-up 503 and
+  # announces a diagnosis the body does not carry. No Go toolchain here, so these
+  # greps are the only guard. Ordered needles: `status` alone is carried by three
+  # other structs.
+  contains "$f" 'type problemBody struct { Type string `json:"type"` Title string `json:"title"` Status int `json:"status"` Detail string `json:"detail"` }'
+  contains "$f" 'Type string `json:"type"` Title string `json:"title"` Status int `json:"status"` Detail string `json:"detail"` Components map[string]Dependency `json:"components,omitempty"`'
   # healthBody: the aggregate's own status, and the components omission.
   contains "$f" 'Status string `json:"status"` Components map[string]Dependency `json:"components,omitempty"`'
   # statusBody: what both probes answer with.
@@ -2038,6 +2067,17 @@ swift_skill_block() {
   # emitting "sunset": null on every active major and "breaker" on a v1.0 body.
   contains "$flat" 'public struct Dependency: Sendable, Codable { public var status: ComponentStatus public var kind: DependencyKind public var breaker: BreakerState? public var since: String?'
   contains "$flat" 'public struct APIMajor: Sendable, Codable { public var major: Int public var lifecycle: APILifecycle public var sunset: String?'
+  # ops-api v2 (#1330): the readiness 503 body. Swift Encodable derives the wire
+  # keys from property names, so `detail` -> `message`, `status` as String, or
+  # dropping the `?` from components (which starts emitting "components": null on
+  # every non-dependency 503) all COMPILE — and there is no Swift toolchain in the
+  # test image and no Swift acceptance lane, so this grep is the only guard.
+  # Asserted as ONE ordered needle: the three String members are transposable, and
+  # separate needles could not tell type from title from detail.
+  contains "$flat" 'struct ReadinessProblem: Encodable { let type: String let title: String let status: Int let detail: String let components: [String: Dependency]?'
+  # The init is where the constants land, and a transposition here is invisible to
+  # the struct needle above.
+  contains "$flat" 'init(detail: String, components: [String: Dependency]?) { self.type = problemTypeNotReady self.title = "Service Not Ready" self.status = 503 self.detail = detail self.components = components }'
 }
 
 @test "swift OpsApi answers /health with 200 and confines 503 to the readiness probe" {

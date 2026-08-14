@@ -369,9 +369,31 @@ block_between() {
   [ -n "$ready_body" ]
   contains "$ready_body" 'if (health.ready()) {'
   contains "$ready_body" 'return new WebEndpointResponse<>(OK, WebEndpointResponse.STATUS_OK);'
-  contains "$ready_body" 'PROBLEM_TYPE_NOT_READY,'
-  contains "$ready_body" 'readinessDetail(components),'
-  contains "$ready_body" 'components.isEmpty() ? null : components));'
+  # ONE ordered needle over the whitespace-stripped body, not three independent
+  # ones: ReadinessProblem takes five POSITIONAL args, three of them String, so
+  # swapping title and detail compiles, ships a non-conforming body, and passes
+  # any set of separate needles. Spring has no compile check and no acceptance
+  # lane, so this text is the only guard.
+  local flat
+  flat="$(printf '%s' "$ready_body" | tr -d '[:space:]')"
+  contains "$flat" 'newReadinessProblem(PROBLEM_TYPE_NOT_READY,"ServiceNotReady",503,readinessDetail(components),components.isEmpty()?null:components)'
+}
+
+@test "the spring problem records are the wire contract Jackson derives keys from" {
+  # Jackson reads the wire keys off the record components, so the signature IS the
+  # contract — and the sibling records are already pinned this way.
+  grep -qF 'public record Problem(String type, String title, int status, String detail) {}' "$ENDPOINT"
+  grep -qF 'public record ReadinessProblem(' "$ENDPOINT"
+  local rec
+  rec="$(sed -n '/public record ReadinessProblem(/,/) {}/p' "$ENDPOINT" | tr -d '[:space:]')"
+  [ -n "$rec" ]
+  contains "$rec" 'Stringtype,Stringtitle,intstatus,Stringdetail,Map<String,DependencyHealth.Component>components'
+  # NON_NULL must be bound to THIS record: a file-wide grep is satisfied by
+  # Aggregate's annotation alone, so dropping it here would emit
+  # "components": null on every non-dependency 503 with the suite green.
+  local annotated
+  annotated="$(grep -B 2 'public record ReadinessProblem(' "$ENDPOINT")"
+  contains "$annotated" '@JsonInclude(JsonInclude.Include.NON_NULL)'
 }
 
 @test "the probe 503s carry application/problem+json WITHOUT widening the produced types" {
@@ -389,10 +411,15 @@ block_between() {
   # The produced/consumed list is UNCHANGED — this is the assertion that fails if
   # someone "fixes" the media type by widening the bean instead.
   grep -qF 'return new EndpointMediaTypes(List.of("application/json"), List.of("application/json"));' "$ENDPOINT"
-  run grep -c 'problem+json' "$ENDPOINT"
-  # Exactly two mentions of the media type: the MimeType constant and the javadoc that
-  # explains why it is not in the produced list.
-  [ "$output" -ge 1 ]
+  # The media type must appear in exactly ONE piece of code — the MimeType
+  # constant. Counted over comment-stripped source, because the javadoc mentions it
+  # several times to explain why it is NOT in the produced list, and a count over
+  # the raw file would be pinned to the prose. (The previous `-ge 1` here could
+  # never fail: the constant grep two lines above already implies it.)
+  local code_only
+  code_only="$(sed -e '/^[[:space:]]*\*/d' -e '/^[[:space:]]*\/\*/d' -e '/^[[:space:]]*\/\//d' "$ENDPOINT")"
+  run grep -c 'problem+json' <<<"$code_only"
+  [ "$output" -eq 1 ]
   local media_bean
   media_bean="$(sed -n '/EndpointMediaTypes opsApiEndpointMediaTypes()/,/^  }/p' "$ENDPOINT")"
   lacks "$media_bean" 'problem+json'

@@ -116,7 +116,7 @@ for it and the `sunset-passed` finding clears on the next maintenance run.
 ## The ops contract: dependency health + the resilience policy
 
 Alongside the business API, this repo serves the **org-standard ops surface**
-([`contracts/ops/v1/openapi.yaml`](contracts/ops/v1/openapi.yaml)) — `/info`,
+([`contracts/ops/v2/openapi.yaml`](contracts/ops/v2/openapi.yaml)) — `/info`,
 `/health`, `/health/live`, `/health/ready`, `/metrics`. It rides the same
 machinery as the business contract (same version triangle, same Spectral +
 oasdiff gates), so a breaking change to it is a new **ops** major, never an
