@@ -189,6 +189,30 @@ lint_fixture() {
   lacks "$output" "org-resource-naming"
 }
 
+@test "the ops v2 fragment CLEARS org-problem-json-errors — the premise of #1330" {
+  # #1330 exists because this rule reddens the ops/v1 fragment in every
+  # bootstrapped repo. Nothing else anywhere verifies that v2 actually fixes it:
+  # the conformance checker validates a live SERVICE, and the payload suites grep
+  # source. Without this case the whole major could ship still-red and the first
+  # person to find out would be an adopter.
+  local frag="$REPO_ROOT/development/skills/bootstrap/templates/common/contracts/ops/v2/openapi.yaml"
+  [ -f "$frag" ]
+  run npx --yes "$SPECTRAL" lint --ruleset "$RULESET" --format json "$frag"
+  run jq -e '[.[] | select(.severity == 0)] | length == 0' <<<"$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "the ops v1 fragment still FAILS org-problem-json-errors — the premise, in the negative" {
+  # The mirror image, and the half that keeps the case above honest: if the rule
+  # stopped firing altogether (a ruleset edit, a spectral change), the v2 test
+  # would go green for the wrong reason and the major would look unnecessary.
+  local frag="$REPO_ROOT/development/skills/bootstrap/templates/common/contracts/ops/v1/openapi.yaml"
+  [ -f "$frag" ]
+  run npx --yes "$SPECTRAL" lint --ruleset "$RULESET" --format json "$frag"
+  run jq -e '[.[] | select(.severity == 0 and .code == "org-problem-json-errors")] | length == 2' <<<"$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "tc-corner-verb-prefixed-nouns-pass: /addresses, /searches and /deleted-items stay clean" {
   # The verb guard is scoped by trailing context; a regression widening it to
   # bare prefixes would redden downstream repos on ordinary nouns.

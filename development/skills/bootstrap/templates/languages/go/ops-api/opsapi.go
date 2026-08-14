@@ -437,15 +437,27 @@ const (
 	ProblemTypeNotAlive = "urn:problem-type:ops:not-alive"
 
 	problemTitleNotReady = "Service Not Ready"
-	problemTitleNotAlive = "Service Not Alive"
 
 	// The two non-dependency unready reasons the contract names. A service that
 	// is unready for its own reasons (Config.Readiness returning false) cannot
 	// tell us which, so it gets the start-up wording -- the overwhelmingly
 	// common case, and the one an operator acts on the same way.
+	//
+	// DetailDraining is a HOOK, not something this package emits: a service that
+	// distinguishes draining from starting up in its own Readiness hook can use
+	// it, and the contract documents the wording so every service that does
+	// spells it the same way.
 	DetailStartingUp = "the service is starting up"
 	DetailDraining   = "the service is draining"
-	detailNotAlive   = "the process is not alive and should be restarted"
+
+	// The liveness problem's title and detail. EXPORTED even though this package
+	// never emits them: Go liveness is unconditionally 200 (a process answering
+	// HTTP is alive), so these exist for a service that adds its own liveness
+	// gate. Unexported they would be unused identifiers, and bootstrap's own
+	// .golangci.yml enables `unused` -- so a service copying this file verbatim,
+	// exactly as the header instructs, would go red on lint.
+	ProblemTitleNotAlive = "Service Not Alive"
+	DetailNotAlive       = "the process is not alive and should be restarted"
 )
 
 // problemBody is the liveness/base RFC 9457 document: the four required members

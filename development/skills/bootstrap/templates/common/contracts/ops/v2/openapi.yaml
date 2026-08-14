@@ -32,8 +32,12 @@
 # Unlike contracts/v1/openapi.yaml (the per-project business API), this file is
 # an ORG-WIDE STANDARD: every backend service exposes exactly this surface, so
 # "standardised" is testable rather than aspirational (epic #682, design §5).
-# Bootstrap installs it verbatim at contracts/ops/v1/openapi.yaml; it carries no
+# Bootstrap installs it verbatim at contracts/ops/v2/openapi.yaml; it carries no
 # {{PLACEHOLDERS}} because the ops contract is identical across every repo.
+#
+# INSTALL IT AT v2. Copied into contracts/ops/v1/ this file breaks the version
+# triangle it declares below (info.version major == vN directory == servers /vN)
+# and overwrites a frozen v1 the migration flow requires to stay byte-identical.
 #
 # It is versioned exactly like the business contract — the same per-major
 # layout (contracts/ops/vN/openapi.yaml), the same version triangle
@@ -307,9 +311,12 @@ components:
           description: >
             Health indicator. Only "ok" is reachable in v2: a probe that would
             have answered "down" now answers 503 with a problem document. The
-            "down" value is retained so a v1 body still validates against the v2
-            schema, which is what lets the conformance checker recognise a
-            legacy service and say so precisely.
+            "down" value is retained so this schema stays unchanged from v1.x and
+            the value's meaning remains documented — NOT as a detection
+            mechanism: the conformance checker recognises a legacy 503 body with a
+            direct test on the body itself, never by validating it against this
+            schema (and at the 503 position v2 declares Problem /
+            ReadinessProblem, so a v1 body would not validate there anyway).
           enum: ["ok", "down"]
     Problem:
       type: object
@@ -384,9 +391,12 @@ components:
             DIRECT dependency, keyed by stable name, byte-identical to the map
             /health serves (v1.1, #965). It carries ALL declared dependencies,
             not only the failing ones, so the shed pod and the dashboard agree.
-            A service with no declared dependencies omits it — which is also the
-            shape of a 503 raised for a non-dependency reason such as start-up
-            or drain.
+
+            OMITTED ONLY when the service declares no dependencies at all —
+            NEVER as a function of which half of readiness failed. A 503 raised
+            for a non-dependency reason (start-up, drain) still carries the full
+            map; that is what every shipped payload does, snapshotting the
+            components before the readiness gate precisely so this holds.
           additionalProperties:
             $ref: "#/components/schemas/DependencyHealth"
     AggregateHealth:

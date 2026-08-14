@@ -5,7 +5,8 @@
 # The BASE URL is the service's internal MANAGEMENT base (e.g.
 # http://localhost:9090) — the ops surface is served on a separate management
 # port, never the public app port. Curls the ops endpoints and validates them
-# against the ops-api/v1 fragment's shapes:
+# against the ops-api/v2 fragment's shapes (v2 per #1330 — the probe 503s are RFC
+# 9457 problem documents; see the /health/live and /health/ready entries below):
 #
 #   /info         — 200 + JSON: build.version, build.git_sha, and an api[] table
 #                   where every entry has an integer major and a lifecycle of
@@ -23,6 +24,19 @@
 #                   half-open counts here, not above) means at least "degraded".
 #   /health/live  — 200 + JSON status "ok" (K8s liveness — process only).
 #   /health/ready — 200 + JSON status "ok" (K8s readiness — dependencies).
+#                   EITHER probe answering 503 is a conformance FAILURE (this
+#                   command asserts a SERVING service, and there is no flag to
+#                   tolerate one) — but the 503 is still VALIDATED, because its
+#                   body is where the reason lives: it must be a bare
+#                   application/problem+json RFC 9457 document with type, title,
+#                   an INTEGER status and a string detail, and the failure then
+#                   names the dependency out of `detail`. A v1
+#                   `{"status":"down"}` 503 is reported as an UNMIGRATED payload,
+#                   pointing at the ops how-to — that message is a migration
+#                   instruction, not a shape complaint.
+#                   NOTE the limit: a HEALTHY service never answers 503, so a
+#                   green run does not prove the 503 bodies are v2-shaped. Only a
+#                   run that actually observes a 503 does.
 #   /metrics      — 200 + a Prometheus/OpenMetrics exposition content type
 #                   (text/plain or application/openmetrics-text — both accepted).
 #
@@ -191,13 +205,29 @@ check_status_endpoint() {
 check_probe_problem() {
   local ep="$1" detail missing
   if jq -e '.status == "down" and (has("type") | not)' "$BODY_FILE" >/dev/null 2>&1; then
-    fail "${ep}: 503 body is the ops-api v1 envelope {\"status\":\"down\"}, not RFC 9457 problem details — this service is still on an ops-api v1 payload; see docs/how-to/adopt-the-ops-surface.md to migrate to contracts/ops/v2"
+    # The URL, not a repo-relative path: this script runs in the BOOTSTRAPPED
+    # repo, which has no docs/how-to/ tree of its own, so a relative pointer
+    # dead-ends exactly when the message is meant to be actionable.
+    fail "${ep}: 503 body is the ops-api v1 envelope {\"status\":\"down\"}, not RFC 9457 problem details — this service is still on an ops-api v1 payload; migrate to contracts/ops/v2: https://timo-jakob.github.io/timos-claude-code-plugins/how-to/adopt-the-ops-surface/"
     return
   fi
-  case "$CONTENT_TYPE" in
+  # Lowercased, like check_metrics: media types are case-insensitive (RFC 9110), so
+  # `Application/Problem+JSON` is conformant and must not be reported as the wrong
+  # type — that would hide the dependency detail this branch exists to surface.
+  case "${CONTENT_TYPE:l}" in
     application/problem+json*) ;;
     *) fail "${ep}: 503 must be served as application/problem+json (RFC 9457), got '${CONTENT_TYPE}'"; return ;;
   esac
+  # PARSE BEFORE SHAPE-CHECKING, as check_info and check_health already do. Without
+  # this, an empty body (curl truncates $BODY_FILE on a bodyless 503), truncated
+  # JSON, or a scalar/array makes the `keys` subtraction below FAIL rather than
+  # return members — `missing` comes back empty, the branch concludes all four are
+  # present, and the run reports "status must be the integer 503" about a body that
+  # has no status at all. The exit code would be right and the diagnosis a lie,
+  # which defeats the whole point of this branch.
+  if ! jq -e 'type == "object"' "$BODY_FILE" >/dev/null 2>&1; then
+    fail "${ep}: 503 body is not a JSON object (RFC 9457 problem details required)"; return
+  fi
   # All four members are REQUIRED by the contract, and `status` is the HTTP code as
   # an INTEGER — the collision with the health envelope's "ok"/"down" string is the
   # whole reason ops-api v2 exists, so a string here is exactly the mistake to catch.
@@ -208,8 +238,22 @@ check_probe_problem() {
   if ! jq -e '.status == 503' "$BODY_FILE" >/dev/null 2>&1; then
     fail "${ep}: 503 problem document's \"status\" must be the integer 503 (RFC 9457), not the health envelope's string"; return
   fi
+  # Presence is not enough: a null or non-string detail passes the `keys` check and
+  # would be read out verbatim, so the failure line would read "not ready — null".
+  if ! jq -e '.detail | type == "string"' "$BODY_FILE" >/dev/null 2>&1; then
+    fail "${ep}: 503 problem document's \"detail\" must be a string (RFC 9457)"; return
+  fi
   detail="$(jq -r '.detail' "$BODY_FILE" 2>/dev/null)"
-  fail "${ep}: not ready — ${detail} (503)"
+  # The label follows the ENDPOINT, not the branch: this function serves both
+  # probes, and the Spring payload really does emit a not-alive problem on
+  # /health/live (its LivenessState can be BROKEN). A fixed "not ready" would
+  # mislabel a liveness failure as a readiness one — the two have opposite
+  # remedies, restart versus shed traffic.
+  local label="not ready"
+  if [[ "$ep" == "/health/live" ]]; then
+    label="not alive"
+  fi
+  fail "${ep}: ${label} — ${detail} (503)"
 }
 
 # ---- /health (aggregate + optional dependency components, #965) ------------

@@ -339,7 +339,7 @@ model, and the children of #684 that deliver each piece:
 
 Every backend service that exposes an **HTTP surface** carries one
 **org-standard ops surface** — `/info`, `/health`, `/metrics`, defined as a
-shared, versioned OpenAPI fragment (`contracts/ops/v1/openapi.yaml`) so
+shared, versioned OpenAPI fragment (`contracts/ops/vN/openapi.yaml`; v2 is current, #1330) so
 "standardised" is testable, not aspirational. Bootstrap installs it **alongside
 the contracts machinery** (the fragment + checker whenever an API surface is
 detected; the `ops-conformance` CI job additionally gated on a Dockerfile). A

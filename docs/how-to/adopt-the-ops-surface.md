@@ -25,7 +25,7 @@ version, git SHA, API-major lifecycle only) — never framework/server/OS versio
 Bootstrap installs the surface alongside the contracts machinery when your repo
 has an API surface. You get three things:
 
-- **`contracts/ops/v1/openapi.yaml`** — the fragment. It rides the same CI gates
+- **`contracts/ops/v2/openapi.yaml`** — the fragment. It rides the same CI gates
   as your business contract: `contracts-lint` (Spectral) and `contracts-semver`
   (oasdiff) discover `contracts/ops/v[0-9]*/openapi.yaml`, so a breaking change
   to the ops surface is a new ops major, never an in-place edit.
@@ -399,10 +399,19 @@ You will notice it in one of two ways:
 - **`contracts-lint` goes red** on `contracts/ops/v1/openapi.yaml` with
   `org-problem-json-errors` on the `/health/live` and `/health/ready` `503`s.
 - **`check-ops-conformance.zsh` fails** with a message naming the ops-api v1
-  envelope and pointing back at this section — that is the checker telling you the
-  running service is still on a v1 payload.
+  envelope and pointing back at this section — that is the checker telling you a
+  probe answered 503 while the service is still on a v1 payload. Note the
+  direction: it fires only when a probe actually 503s, so its *silence* is not
+  evidence that you have migrated.
 
-Three steps, in this order:
+Four steps, in this order — and **step 0 is not optional**:
+
+0. **Refresh `.github/workflows/contracts-lint.yml` from the current template.**
+    Newest-major-only linting is what stops v1 being linted, and it shipped *with*
+    v2 (#1330). If your repo was bootstrapped before that, its workflow still lints
+    **every** `contracts/ops/vN`, so adding v2 alone leaves v1 red — and the next
+    step forbids the obvious way out (deleting it). Refresh the workflow first and
+    the rest of this section behaves as written.
 
 1. **Copy the v2 fragment in**, beside the old one:
 
@@ -415,11 +424,13 @@ Three steps, in this order:
     Do not delete it. `contracts-semver` runs a second time with
     `--contracts-dir contracts/ops` and rejects a major that was live at the base
     ref and gone at `HEAD` — retiring a live major is its own flow, not a side
-    effect of adopting the next one. Once v2 exists, v1 is simply no longer linted.
+    effect of adopting the next one. Once v2 exists **and step 0 is done**, v1 is
+    no longer linted.
 
 2. **Replace your ops payload** with the v2 one for your language
-    (`templates/languages/<lang>/ops-api/`, or `spring/resilience/` for Spring).
-    The payloads changed with the contract: the readiness `503` now returns
+    (`templates/languages/<lang>/ops-api/` — Node lives under `javascript/`, and
+    Spring uses `spring/resilience/`). The payloads changed with the contract:
+    **both probe `503`s** — liveness and readiness — now return
     `application/problem+json`.
 
 3. **Re-run conformance** against the running service:
@@ -427,6 +438,12 @@ Three steps, in this order:
     ```sh
     zsh scripts/check-ops-conformance.zsh http://localhost:9090
     ```
+
+    **A green run here does not verify step 2.** The checker can only inspect a 503
+    body when a probe actually answers 503, and a healthy service answers `200`
+    `{"status":"ok"}` on both probes — so an unmigrated-but-healthy service passes
+    this command. To verify the bodies, either read the payload diff, or observe one
+    503 for real: stop a hard dependency, or hit `/health/ready` during start-up.
 
 ### What actually changes on the wire
 
@@ -460,8 +477,18 @@ Note `status` is the **integer** HTTP code, not the health envelope's string —
 that collision is the whole reason v2 exists. The `components` map is
 byte-identical to the one `/health` serves and carries **all** declared
 dependencies, not only the failing ones, so a shed pod and the dashboard show the
-same picture. A `503` raised for a non-dependency reason (starting up, draining)
-carries no `components` at all and says so in `detail`.
+same picture. It is omitted **only** when the service declares no dependencies at
+all — a `503` raised for a non-dependency reason still carries the full map.
+
+Two details about `detail` that are easy to assume wrongly:
+
+- A non-dependency 503 always reads **`the service is starting up`**, whether the
+  cause was start-up or a graceful drain. The payloads cannot tell the two apart:
+  your readiness hook returns a boolean, not a reason.
+- The payloads therefore **define** a draining constant (`DETAIL_DRAINING` and its
+  per-language spellings) but **never emit it**. It is a hook, with the wording
+  fixed by the contract, for a service that does distinguish the two in its own
+  readiness hook — so every service that bothers spells it identically.
 
 **If anything consumes that body, update it before you migrate.** In practice a
 kubelet reads only the status code, so most services have nothing to change — but

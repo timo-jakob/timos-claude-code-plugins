@@ -1709,13 +1709,23 @@ The installed set:
   default 6 months). The `.spectral.yaml` ruleset also gains a
   `deprecation-has-sunset` rule (#695) enforcing that a `deprecated: true`
   element carries `x-sunset`. Documentation/policy — never provenance-stamped.
-- `contracts/ops/v1/openapi.yaml` (#688) — the **org-standard ops surface**
+- `contracts/ops/v2/openapi.yaml` (#688, v2 per #1330) — the **org-standard ops
+  surface**
   (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s
   probes, `/metrics`) as a **shared, versioned contract fragment**, so
   "standardised" is testable. It rides the SAME machinery as the business
   contract: `contracts-lint` lints it and `contracts-semver` gates it (both
   templates' spec discovery covers `contracts/ops/v[0-9]*/openapi.yaml`), so a
   breaking change to the ops surface is a new ops major, never an in-place edit.
+  **Install v2, not v1.** A fresh repo has no live v1 to preserve, and the ops-api
+  payloads this skill installs beside it serve RFC 9457 problem+json on the two
+  probe 503s — the v2 shape. Installing v1 here would make a brand-new repo both
+  self-contradictory (a contract declaring `{"status":"down"}` beside a payload
+  emitting problem details) and **born red**, because `contracts-lint` lints the
+  newest major and the org styleguide's `org-problem-json-errors` rejects v1's
+  503s. `contracts/ops/v1/openapi.yaml` still ships in the template tree for
+  repos migrating an existing installation (see the ops how-to), but bootstrap
+  never installs it.
   Installed verbatim (no placeholders — the ops contract is identical org-wide).
   The surface is **internal, on a separate management port** (never the public
   app port); `/info` is minimal by contract; enforcing the network boundary is
@@ -1747,7 +1757,7 @@ The installed set:
   common/.github/workflows/contracts-lint.yml.tmpl \
   common/.github/workflows/spec-publish.yml.tmpl \
   common/.github/workflows/contracts-semver.yml.tmpl \
-  common/contracts/ops/v1/openapi.yaml \
+  common/contracts/ops/v2/openapi.yaml \
   common/scripts/check-ops-conformance.zsh
 ```
 

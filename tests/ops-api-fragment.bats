@@ -17,10 +17,94 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   COMMON="$REPO_ROOT/development/skills/bootstrap/templates/common"
   FRAG="$COMMON/contracts/ops/v1/openapi.yaml"
+  # The CURRENT major (#1330). v1 stays below as the freeze guard.
+  V2="$COMMON/contracts/ops/v2/openapi.yaml"
 }
 
 @test "fragment exists at the contracts/ops/v1 path" {
   [ -f "$FRAG" ]
+}
+
+# ---- ops-api v2: the RFC 9457 probe 503s (#1330) ----------------------------
+#
+# The v2 fragment is the change's central artifact and the thing every payload
+# and the conformance checker are written against — but the checker validates a
+# LIVE SERVICE and the payload suites grep source, so without these the fragment
+# itself is unpinned: a hand edit dropping `type: integer`, moving `components`
+# onto the liveness Problem, or reverting a 503 to application/json would ship
+# green.
+
+@test "v2: the version triangle holds (info.version 2.x == v2 dir == servers /v2)" {
+  [ -f "$V2" ]
+  run yq -r '.info.version' "$V2"
+  [ "$output" = "2.0.0" ]
+  run yq -r '.servers[0].url' "$V2"
+  [ "$output" = "/v2" ]
+}
+
+@test "v2: both probe 503s are BARE application/problem+json" {
+  # Exactly ONE content key: bare-ness is what org-problem-json-errors requires,
+  # so a body that also offers application/json is a conformance failure even
+  # with perfect members.
+  local p
+  for p in /health/live /health/ready; do
+    run yq -r ".paths.\"$p\".get.responses.\"503\".content | keys | join(\",\")" "$V2"
+    [ "$output" = "application/problem+json" ]
+  done
+  # …and each resolves to the right schema: readiness carries components,
+  # liveness must not.
+  run yq -r '.paths."/health/ready".get.responses."503".content."application/problem+json".schema."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/ReadinessProblem" ]
+  run yq -r '.paths."/health/live".get.responses."503".content."application/problem+json".schema."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/Problem" ]
+}
+
+@test "v2: both problem schemas are FLAT and require all four RFC 9457 members" {
+  # Flat by necessity, not style: an allOf composition still fails
+  # org-problem-json-errors, because the rule reads the resolved schema's own
+  # top-level `required` and a composition has none.
+  local s
+  for s in Problem ReadinessProblem; do
+    run yq -r ".components.schemas.$s.required | join(\",\")" "$V2"
+    [ "$output" = "type,title,status,detail" ]
+    run yq -r ".components.schemas.$s | has(\"allOf\")" "$V2"
+    [ "$output" = "false" ]
+    # `status` is the HTTP code as an INTEGER — the collision with the health
+    # envelope's "ok"/"down" string is the entire reason this major exists.
+    run yq -r ".components.schemas.$s.properties.status.type" "$V2"
+    [ "$output" = "integer" ]
+  done
+}
+
+@test "v2: components hangs off ReadinessProblem ONLY, and reuses DependencyHealth" {
+  # A components map on a dependency-free liveness 503 would be a lie.
+  run yq -r '.components.schemas.Problem.properties | has("components")' "$V2"
+  [ "$output" = "false" ]
+  run yq -r '.components.schemas.ReadinessProblem.properties.components.additionalProperties."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/DependencyHealth" ]
+}
+
+@test "v2: the 200s are UNCHANGED — v2 changes the two 503s and nothing else" {
+  local p
+  for p in /health/live /health/ready; do
+    run yq -r ".paths.\"$p\".get.responses.\"200\".content | keys | join(\",\")" "$V2"
+    [ "$output" = "application/json" ]
+    run yq -r ".paths.\"$p\".get.responses.\"200\".content.\"application/json\".schema.\"\$ref\"" "$V2"
+    [ "$output" = "#/components/schemas/Health" ]
+  done
+  # /health is not a probe: it has no 503 at all (#1139).
+  run yq -r '.paths."/health".get.responses | has("503")' "$V2"
+  [ "$output" = "false" ]
+  run yq -r '.paths."/health".get.responses."200".content."application/json".schema."$ref"' "$V2"
+  [ "$output" = "#/components/schemas/AggregateHealth" ]
+}
+
+@test "v2: contracts/ops/v1 is FROZEN — byte-identical to its committed state" {
+  # The migration flow requires it: contracts-semver rejects a major that was
+  # live at the base ref and gone at HEAD, so v1 must survive untouched.
+  run git -C "$REPO_ROOT" diff --exit-code origin/main -- \
+    development/skills/bootstrap/templates/common/contracts/ops/v1/openapi.yaml
+  [ "$status" -eq 0 ]
 }
 
 @test "fragment declares /info, /health, /metrics" {
@@ -178,7 +262,11 @@ health_schema() {
   # What must remain true — and is what this test is actually about — is that the
   # ops family is discovered at all.
   grep -q 'for family in contracts contracts/ops' "$tmpl"
-  grep -q 'v\[0-9\]\*/openapi.yaml' "$tmpl"
+  # The per-major glob is now parameterised by FILENAME too (the selector reuses
+  # it to find the newest vN directory), so the literal no longer carries
+  # openapi.yaml — the per-major shape and the ops family are what matter here.
+  grep -q 'v\[0-9\]\*/' "$tmpl"
+  grep -q 'newest_major "\$family"' "$tmpl"
 }
 
 @test "contracts-semver discovery covers contracts/ops (#688)" {

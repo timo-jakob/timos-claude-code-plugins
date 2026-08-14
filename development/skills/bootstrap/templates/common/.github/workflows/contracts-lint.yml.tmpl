@@ -48,21 +48,60 @@ jobs:
           # NOTE the consequence, because it is a real trap: a repo that never
           # adopts a newer major keeps the old one as its newest, and it IS still
           # linted. Migration is mandatory and documented, not optional — see
-          # docs/how-to/adopt-the-ops-surface.md.
+          # https://timo-jakob.github.io/timos-claude-code-plugins/how-to/adopt-the-ops-surface/
+          # (the published URL, not a repo-relative path: this workflow runs in the
+          # bootstrapped repo, which has no docs/how-to/ tree of its own).
           # Explicit `if`s rather than `[[ … ]] && …` tails: under `set -e` a false
           # tail makes the enclosing list non-zero, which is a footgun that reads
           # as working code right up until the last family matches nothing.
-          newest_major() {
-            local candidates=("$1"/v[0-9]*/openapi.yaml)
-            if [[ ${#candidates[@]} -eq 0 ]]; then
-              return 0
+          #
+          # NO `sort -V` ANYWHERE BELOW. GNU sort implements it; the BSD sort on
+          # macOS accepts the flag, exits 0 and does NOT reorder — so a maintainer
+          # verifying this logic locally would see v9 selected over v10 while the
+          # Ubuntu runner selected v10, or vice versa. The majors are integers, so
+          # comparing them arithmetically is both portable and exact.
+          #
+          # The `case` guard is what keeps the comparison honest: the glob v[0-9]*
+          # also matches v3-draft and v2.bak, and under newest-only selection a
+          # stray match is not harmless noise but a silent SUBSTITUTION — a
+          # work-in-progress copy of a future major would outrank the live one and
+          # the spec this job exists to lint would never be linted, green.
+          # --- selector-start (sliced verbatim by tests/render-contracts-templates.bats)
+          newest_major_num() {
+            # Echoes "<major> <path>" for the newest strict vN, or nothing.
+            local c n best="" best_n=-1
+            for c in "$1"/v[0-9]*/"$2"; do
+              n="${c#"$1"/v}"
+              n="${n%%/*}"
+              case "$n" in
+                ''|*[!0-9]*) continue ;;
+              esac
+              if [ "$n" -gt "$best_n" ]; then
+                best_n="$n"
+                best="$c"
+              fi
+            done
+            if [ -n "$best" ]; then
+              printf '%s' "$best"
             fi
-            # sort -V so v10 beats v9; a plain sort picks v9 lexically.
-            printf '%s\n' "${candidates[@]}" | sort -V | tail -1
           }
+          newest_major() { newest_major_num "$1" openapi.yaml; }
+          # A newest vN DIRECTORY whose spec is missing or misnamed (openapi.yml,
+          # spec.yaml, not yet committed) would otherwise make the selection fall
+          # back to an older, frozen major — linting exactly the "red nobody is
+          # permitted to fix" file this change exists to stop linting, while the
+          # real newest contract goes unchecked. Fail loudly instead.
+          newest_major_dir() { newest_major_num "$1" ""; }
           specs=()
           for family in contracts contracts/ops; do
             spec="$(newest_major "$family")"
+            newest_dir="$(newest_major_dir "$family")"
+            if [[ -n "$newest_dir" && "$spec" != "${newest_dir}openapi.yaml" ]]; then
+              echo "::error::${newest_dir} is the newest major of ${family} but has" \
+                "no openapi.yaml — refusing to fall back to an older, frozen major." \
+                "Commit the spec, or remove the directory."
+              exit 1
+            fi
             if [[ -n "$spec" ]]; then
               specs+=("$spec")
             fi
@@ -71,6 +110,7 @@ jobs:
             echo "No contracts/vN/openapi.yaml found — nothing to lint."
             exit 0
           fi
+          # --- selector-end
           echo "Linting: ${specs[*]}"
           npx --yes @stoplight/spectral-cli@6 lint \
             --ruleset .spectral.yaml \
