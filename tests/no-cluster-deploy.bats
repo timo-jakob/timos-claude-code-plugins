@@ -1121,11 +1121,23 @@ jobs:
 
 @test "a missing yq exits 2, never 1 (#1206)" {
   # the distinction a consumer acts on: "your CI image lost yq" is not "you
-  # deployed to a cluster". A PATH of the base system dirs only — yq lives in
-  # /opt/homebrew/bin (macOS leg) or /usr/local/bin (the container leg), neither
-  # of which is listed, while zsh/jq/sed are in /bin and /usr/bin on both.
+  # deployed to a cluster".
+  #
+  # A CONSTRUCTED PATH holding symlinks to everything the checker needs EXCEPT
+  # yq — never a real directory list. An earlier version restricted PATH to
+  # `/usr/bin:/bin` on the assumption yq lives elsewhere; that holds on macOS
+  # (/opt/homebrew/bin) and in tests/Dockerfile (/usr/local/bin) but NOT on the
+  # ubuntu-latest runner, which ships yq in /usr/bin — so yq was still found,
+  # the scan ran, and the test failed on that leg only. Naming what is present
+  # cannot drift with an image the way naming what is absent does.
+  local stub="$BATS_TEST_TMPDIR/no-yq"
+  mkdir -p "$stub"
+  local t
+  for t in zsh jq sed head mktemp cat rm; do
+    ln -sf "$(command -v "$t")" "$stub/$t"
+  done
   one_step 'kubectl apply -f k8s/'
-  run env PATH="/usr/bin:/bin" zsh "$CHECK" --repo "$W"
+  run env PATH="$stub" zsh "$CHECK" --repo "$W"
   [ "$status" -eq 2 ]
   contains "$output" "'yq' not found on PATH"
 }
