@@ -116,6 +116,14 @@ pull-compat surface served by the SDK's Prometheus exporter.
   `…group.ready.include: readinessState` — keeping the `live` group
   dependency-free. `spring-config-advisor` flags a non-conforming config with
   these specifics either way, and branches on whether the payload is present.
+
+  **Your own representation must also serve the v2 probe 503s as
+  `application/problem+json`** — see
+  [what actually changes on the wire](#what-actually-changes-on-the-wire).
+  Actuator's own 503 body is the v1 envelope the checker reports as *unmigrated*,
+  and this is the half a config-only route cannot reach: it needs code. Note the
+  trap that makes it easy to miss — a healthy service never answers 503, so a
+  green conformance run does **not** tell you this is done.
 - **Python (non-Spring)** — use the blessed reference implementation bootstrap
   installs under your package (`ops_api.py` + `requirements.txt`); it serves the
   full surface on the management port and passes the conformance checker
@@ -412,6 +420,22 @@ Four steps, in this order — and **step 0 is not optional**:
     **every** `contracts/ops/vN`, so adding v2 alone leaves v1 red — and the next
     step forbids the obvious way out (deleting it). Refresh the workflow first and
     the rest of this section behaves as written.
+
+    **Do not copy this one verbatim.** Unlike the ops fragment (which carries no
+    placeholders, by design), `contracts-lint.yml.tmpl` contains
+    `branches: ["{{DEFAULT_BRANCH}}"]`. Copied unsubstituted, its `pull_request`
+    filter matches nothing and contract linting silently stops running on every PR
+    — and because the check is path-conditional and never required, nothing goes
+    red to tell you. The v1 redness would "clear" for entirely the wrong reason.
+    So either:
+
+    ```sh
+    # preferred — renders the placeholder and re-stamps the provenance marker
+    /development:bootstrap    # accept the contracts-lint.yml drift update
+    ```
+
+    or copy it by hand and substitute `{{DEFAULT_BRANCH}}` with your default
+    branch yourself.
 
 1. **Copy the v2 fragment in**, beside the old one:
 

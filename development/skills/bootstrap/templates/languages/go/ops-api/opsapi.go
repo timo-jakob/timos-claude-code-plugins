@@ -482,8 +482,9 @@ type readinessProblemBody struct {
 	Title  string `json:"title"`
 	Status int    `json:"status"`
 	Detail string `json:"detail"`
-	// Omitted when the service declares no dependencies -- which is also the
-	// shape of a 503 raised for a non-dependency reason such as start-up.
+	// Omitted ONLY when the service declares no dependencies at all -- never as a
+	// function of which half of readiness failed. A 503 raised for a non-dependency
+	// reason still carries the full map: the snapshot is taken BEFORE the gate.
 	Components map[string]Dependency `json:"components,omitempty"`
 }
 

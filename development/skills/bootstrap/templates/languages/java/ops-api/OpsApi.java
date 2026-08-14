@@ -595,7 +595,9 @@ public final class OpsApi {
   }
 
   // /health/ready: 200 {"status":"ok"} when the readiness check AND every declared HARD
-  // dependency pass, else 503 {"status":"down"}. Liveness never comes here -- it must stay
+  // dependency pass, else 503 with an RFC 9457 problem
+  // document on application/problem+json (type/title/integer status/detail, plus
+  // the components extension member). Liveness never comes here -- it must stay
   // dependency-free. The two PROBES are where 503 belongs; /health is not one (see healthHandler).
   private static HttpHandler readinessHandler(OpsConfig config) {
     return exchange -> {

@@ -349,7 +349,11 @@ go_handler_flat() { local b; b="$(go_handler "$1")" || return 1; flatten "$b"; }
     contains "$output" 'application/problem+json'
     contains "$output" 'urn:problem-type:ops:not-ready'
     # The integer/string collision is the one thing a reader must not get wrong.
-    contains "$output" 'integer'
+    # Pinned on the WIRE FORM, not the bare word "integer": these READMEs already
+    # say "an integer >= 1" about the lifecycle major, so an `integer` needle was
+    # satisfied by prose that has nothing to do with RFC 9457 — the collision
+    # paragraph could have been deleted from all five with the sweep still green.
+    contains "$output" '"status": 503'
   done
 }
 

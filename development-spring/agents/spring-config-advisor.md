@@ -157,7 +157,9 @@ auto-apply:
     code). Call this out as the hardest part, not a config rename. **Recommend
     the blessed payload rather than a bespoke one**: bootstrap ships it at
     `templates/languages/spring/resilience/` (#1141), which serves `/health`,
-    `/health/live` and `/health/ready` in the ops-api v1.1 shape — including the
+    `/health/live` and `/health/ready` in the ops-api v2 shape — the two probe
+    503s carrying RFC 9457 problem details on `application/problem+json` (#1330) —
+    including the
     per-dependency `components` map read from resilience4j breaker state — so a
     repo that adopts it satisfies this bullet and the *Split liveness and readiness* one below.
   - **Split liveness and readiness** — the fragment requires distinct

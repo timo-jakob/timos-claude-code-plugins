@@ -52,7 +52,11 @@ import org.springframework.util.MimeType;
 @Endpoint(id = "opshealth")
 public class OpsHealthEndpoint {
 
-  /** The binary probe envelope: "ok" on a 200, "down" on a 503. */
+  /**
+   * The 200 envelope for the two probes. In ops-api v2 only "ok" is ever served —
+   * a probe that would have answered "down" answers 503 with an RFC 9457 problem
+   * document instead (see {@link Problem} / {@link ReadinessProblem}).
+   */
   public record Health(String status) {}
 
   /**

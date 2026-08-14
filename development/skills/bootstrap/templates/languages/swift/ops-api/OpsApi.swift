@@ -36,7 +36,8 @@ import ServiceLifecycle
 
 // MARK: - The /info lifecycle table
 
-/// The lifecycle of one served API major, per the ops-api/v1 fragment.
+/// The lifecycle of one served API major, per the ops-api v2 fragment
+/// (contracts/ops/v2/openapi.yaml).
 public enum APILifecycle: String, Sendable, Codable {
     case active
     case deprecated

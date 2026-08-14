@@ -2,7 +2,7 @@
 #
 # Behavioural tests for the ops-conformance checker (#688) —
 # templates/common/scripts/check-ops-conformance.zsh. The checker curls a live
-# service's /info, /health, /metrics and validates them against the ops-api/v1
+# service's /info, /health, /metrics and validates them against the ops-api v2
 # fragment's shapes. curl is not in the test toolchain (and no server runs), so a
 # STUB curl (via $OPS_CURL) serves canned per-endpoint responses from a fixture
 # dir — this exercises the checker's DECISION logic (status codes, /info schema
@@ -94,25 +94,53 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
 @test "error: /health/live 503 -> non-zero, names /health/live" {
   serve live 503 'application/json' '{"status":"down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/health/live'
 }
 
 @test "error: /health/ready 503 -> non-zero, names /health/ready" {
   serve ready 503 'application/json' '{"status":"down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/health/ready'
 }
 
 # ---- ops-api v2: the RFC 9457 probe 503 (#1330) -----------------------------
+
+@test "error: a probe answering 404 or 500 takes the generic branch, naming the code" {
+  # Round-2 finding. #1330 diverted every probe 503 into check_probe_problem, and
+  # the only two tests that previously reached the generic "expected HTTP 200, got
+  # N" fallthrough were 503s — so that branch became dead to this suite and could
+  # have been deleted, or had its message rewritten to name the wrong endpoint,
+  # with everything green. A probe answering 404 is the commonest symptom of a
+  # payload mounted on the wrong path (the Go `go 1.22` directive trap).
+  serve ready 404 'application/json' 'not found'
+  run_check
+  [ "$status" -eq 1 ]
+  contains "$output" '/health/ready: expected HTTP 200, got 404'
+  # It must NOT be routed through the problem-document branch. Needled on that
+  # branch's own vocabulary, not the bare word "problem" — the checker's summary
+  # line reads "N problem(s)" on every failing run.
+  lacks "$output" 'problem+json'
+  lacks "$output" 'problem document'
+  lacks "$output" 'ops-api v1 envelope'
+}
+
+@test "error: a probe answering 500 is reported against the endpoint that answered it" {
+  serve live 500 'application/json' '{}'
+  run_check
+  [ "$status" -eq 1 ]
+  # Endpoint-qualified, so a probe mislabelled as its sibling still reds.
+  contains "$output" '/health/live: expected HTTP 200, got 500'
+  lacks "$output" '/health/ready: expected HTTP 200, got 500'
+}
 
 @test "tc-error-legacy-v1-503-body: a v1 {\"status\":\"down\"} 503 is named as a MIGRATION, not a shape error" {
   # #1344. This is the single message that turns the v1 -> v2 cutover from a
   # mystery into a task: reported generically, an adopter debugs their own code.
   serve ready 503 'application/json' '{"status":"down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" 'ops-api v1 envelope'
   contains "$output" 'contracts/ops/v2'
   # The PUBLISHED URL, not a repo-relative path: this script runs in the
@@ -130,7 +158,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve live 503 'application/problem+json' \
     '{"type":"urn:problem-type:ops:not-alive","title":"Service Not Alive","status":503,"detail":"the process is not alive and should be restarted"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" '/health/live: not alive — the process is not alive and should be restarted (503)'
   lacks "$output" '/health/live: not ready'
 }
@@ -142,7 +170,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve ready 503 'application/problem+json' \
     '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down","components":{"orders-db":{"status":"down","kind":"hard","breaker":"open"}}}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" '/health/ready'
   contains "$output" "not ready — hard dependency 'orders-db' is down (503)"
   # …and it must NOT be misreported as a legacy body.
@@ -156,7 +184,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve ready 503 'application/json' \
     '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" 'must be served as application/problem+json'
 }
 
@@ -164,7 +192,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve ready 503 'application/problem+json' \
     '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" 'missing required member(s): detail'
 }
 
@@ -175,7 +203,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   # at all. Right exit code, lying diagnosis.
   serve ready 503 'application/problem+json' ''
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" 'not a JSON object'
   lacks "$output" 'must be the integer 503'
 }
@@ -183,7 +211,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
 @test "error: a non-object 503 body (array, scalar) is diagnosed as such" {
   serve ready 503 'application/problem+json' '["not","a","problem"]'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" 'not a JSON object'
   # An array would otherwise make `keys` yield indices, so the subtraction leaves
   # all four names and the message claims four missing members of a non-document.
@@ -197,7 +225,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve ready 503 'Application/Problem+JSON; charset=utf-8' \
     '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":"hard dependency '"'"'orders-db'"'"' is down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" "not ready — hard dependency 'orders-db' is down (503)"
   lacks "$output" 'must be served as application/problem+json'
 }
@@ -206,7 +234,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve ready 503 'application/problem+json' \
     '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":503,"detail":null}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" '"detail" must be a string'
   lacks "$output" 'not ready — null'
 }
@@ -218,7 +246,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve ready 503 'application/problem+json' \
     '{"type":"urn:problem-type:ops:not-ready","title":"Service Not Ready","status":"down","detail":"hard dependency '"'"'orders-db'"'"' is down"}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   contains "$output" 'must be the integer 503'
 }
 
@@ -239,7 +267,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
 @test "error: /metrics 404 -> non-zero, names /metrics" {
   serve metrics 404 'text/plain' 'not found'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/metrics'
 }
 
@@ -249,7 +277,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   # regress to a no-op — every other test would still pass green).
   serve metrics 200 'application/json' '{}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/metrics'
   echo "$output" | grep -qi 'content-type'
 }
@@ -258,7 +286,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"deadbee"},"api":[{"major":1,"lifecycle":"deprecated"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q 'major 1'
   echo "$output" | grep -qi 'sunset'
 }
@@ -560,7 +588,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0"},"api":[{"major":1,"lifecycle":"active"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/info'
 }
 
@@ -570,7 +598,7 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"cafe123"},"api":[{"major":"1","lifecycle":"active"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -q '/info'
 }
 
@@ -578,14 +606,14 @@ run_check() { run zsh "$SCRIPT" "http://svc:8080"; }
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"cafe123"},"api":[{"major":0,"lifecycle":"active"}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "error: deprecated major with non-string sunset -> non-zero" {
   serve info 200 'application/json' \
     '{"build":{"version":"1.0.0","git_sha":"cafe123"},"api":[{"major":1,"lifecycle":"deprecated","sunset":true}]}'
   run_check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   echo "$output" | grep -qi 'sunset'
 }
 

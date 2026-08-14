@@ -99,12 +99,35 @@ setup() {
   [ "$output" = "#/components/schemas/AggregateHealth" ]
 }
 
-@test "v2: contracts/ops/v1 is FROZEN — byte-identical to its committed state" {
-  # The migration flow requires it: contracts-semver rejects a major that was
-  # live at the base ref and gone at HEAD, so v1 must survive untouched.
-  run git -C "$REPO_ROOT" diff --exit-code origin/main -- \
-    development/skills/bootstrap/templates/common/contracts/ops/v1/openapi.yaml
+@test "v2: contracts/ops/v1 is FROZEN — its v1 shape is intact" {
+  # The migration flow requires it: contracts-semver rejects a major that was live
+  # at the base ref and gone at HEAD, so v1 must survive untouched.
+  #
+  # Asserted from CONTENT, not `git diff origin/main`. That earlier form needed
+  # git, a usable gitdir and an origin/main ref — and this repo is worked in
+  # .claude/worktrees/<name>, where .git is a FILE pointing at a host path outside
+  # the container mount, so the Docker leg would have redded on a correct tree.
+  # It also silently rebased its own meaning: origin/main moves, so "byte-identical
+  # to its committed state" really meant "identical to whatever main holds now".
+  run yq -r '.info.version' "$FRAG"
   [ "$status" -eq 0 ]
+  case "$output" in 1.*) ;; *) return 1 ;; esac
+  run yq -r '.servers[0].url' "$FRAG"
+  [ "$output" = "/v1" ]
+  # The defining v1 property: the probe 503s carry the health envelope on plain
+  # application/json. If someone "helpfully" migrates v1 in place, this reds.
+  local p
+  for p in /health/live /health/ready; do
+    run yq -r ".paths.\"$p\".get.responses.\"503\".content | keys | join(\",\")" "$FRAG"
+    [ "$output" = "application/json" ]
+    run yq -r ".paths.\"$p\".get.responses.\"503\".content.\"application/json\".schema.\"\$ref\"" "$FRAG"
+    [ "$output" = "#/components/schemas/Health" ]
+  done
+  # …and none of v2's problem schemas leaked backwards into it.
+  run yq -r '.components.schemas | has("Problem")' "$FRAG"
+  [ "$output" = "false" ]
+  run yq -r '.components.schemas | has("ReadinessProblem")' "$FRAG"
+  [ "$output" = "false" ]
 }
 
 @test "fragment declares /info, /health, /metrics" {

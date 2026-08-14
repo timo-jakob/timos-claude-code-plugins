@@ -1,7 +1,8 @@
 # Ops Conformance — prove the running service exposes the org-standard ops
 # surface (epic #682, design §5; issue #688).
 #
-# The ops-api/v1 fragment defines /info, /health, /metrics as a versioned
+# The ops-api v2 fragment (contracts/ops/v2/openapi.yaml, #1330) defines /info,
+# /health, the two probes and /metrics as a versioned
 # contract; contracts-lint/contracts-semver keep the SPEC honest, and THIS job
 # keeps the RUNNING SERVICE honest — it starts the canonical container, waits for
 # /health/ready, then runs scripts/check-ops-conformance.zsh against it. A drift
