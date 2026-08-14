@@ -66,8 +66,14 @@ assert_valid_yaml() {
   grep -q 'deprecated: true' "$md"
   grep -q 'x-sunset' "$md"
   # runtime headers with their RFCs
-  grep -q 'Deprecation' "$md" && grep -q 'RFC 9745' "$md"
-  grep -q 'Sunset' "$md" && grep -q 'RFC 8594' "$md"
+  # One assertion per line: `A && B` exempts A from errexit on every bash, so
+  # the joined form asserted only the RFC numbers — CONTRACTS.md could lose the
+  # header NAMES entirely and stay green. No lint rule catches that shape
+  # (tests/README.md: "the rule is about joining, not about helpers").
+  grep -q 'Deprecation' "$md"
+  grep -q 'RFC 9745' "$md"
+  grep -q 'Sunset' "$md"
+  grep -q 'RFC 8594' "$md"
   # the minimum-deprecation-window knob, default 6 months
   grep -qi '6 months' "$md"
   # versioning policy present

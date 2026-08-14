@@ -1729,23 +1729,37 @@ The installed set:
   carries **no rules of its own** and is **never edited locally** — the whole
   point is one org artifact instead of N drifting copies, so enforcement changes
   only when the pin moves. The #692 starter it replaced is retired and no longer
-  shipped. Still classified **scaffold — never stamped**, which is now worth
-  re-deciding (#1358): a stale pin is precisely the drift a re-bootstrap ought to
-  surface, and nothing downstream bumps it today (see the api-styleguide how-to),
-  so an unstamped shim makes a downstream pin effectively permanent.
+  shipped. **Drift-tracked and provenance-stamped** (#1358, decided here): as the
+  #692 starter this file was the user's to own, so scaffold was right; as a shim
+  it is OUR artifact. Unstamped it was also unreachable — present (so never a
+  gap), unstamped and untracked (so never a drift finding) — which let State D
+  report "toolchain is current" over a repo still running the retired starter,
+  while both manifests promise *"a re-run replaces a local ruleset with a remote
+  pin"*. Stamped and in `detect-template-drift.zsh`'s `tracked` array, a stale pin
+  is exactly the drift a re-bootstrap surfaces.
 
   **On a RE-bootstrap, an on-disk #692 starter is overwrite-default.** Recognise
   it by shape: `extends: ["spectral:oas"]`, its own `rules:` block, and no
   jsDelivr pin. That file is **retired-template-superseded**, not a user
   customization — the shim template's own header says the starter is retired —
-  so recommend **overwrite**, pointing at the api-styleguide how-to. Without this
-  rule the idempotency reviewer's nearest class is "user customization → skip"
-  (the on-disk file carries more than the one-line shim), so the replacement the
-  plugin's compatibility note promises — *"a re-run replaces a local ruleset with
-  a remote pin"* — would silently never happen, leaving the repo on last year's
-  enforcement while the run reports the toolchain current. Fall back to the
-  generic diff-and-ask only when the file is **neither** the starter nor the
-  shim, i.e. a genuinely hand-customized ruleset.
+  so recommend **overwrite**, pointing at the api-styleguide how-to.
+  `bootstrap-idempotency-reviewer` carries the matching carve-out — without it
+  its "never overwrite a file holding content the template doesn't replicate"
+  rule forces **`merge`** on the starter's `rules:` block, and merge is the
+  harmful answer here: it folds local rules back beside the pin, recreating the N
+  drifting copies the shim abolishes. The replacement the plugin's compatibility
+  note promises — *"a re-run replaces a local ruleset with a remote pin"* —
+  depends on both halves being in step.
+
+  **A file that IS the shim but pins a different tag is neither.** It is a
+  pin-version difference, not drift: **never overwrite in either direction.**
+  Keep the on-disk pin when it is NEWER — that is the hand bump the
+  api-styleguide how-to instructs, and overwriting it back to the template's
+  older tag is the silent enforcement rollback both that page and the shim's own
+  header forbid. When it is OLDER, surface an upgrade suggestion pointing at the
+  how-to rather than rewriting it. Fall back to the generic diff-and-ask only
+  when the file is neither the starter nor a shim of any pin — i.e. a genuinely
+  hand-customized ruleset.
 - `.github/workflows/contracts-lint.yml` — Spectral lints `contracts/` in CI,
   referencing `.spectral.yaml` **by path** so a ruleset swap never touches the
   wiring. Its check is **path-conditional** (`paths: contracts/**`) — like the
@@ -3745,6 +3759,7 @@ actually rendered in Step 3 — §3a through §3l):
 | `.github/workflows/contracts-semver.yml` | `common/.github/workflows/contracts-semver.yml.tmpl` (§3i) |
 | `.github/workflows/spec-publish.yml` | `common/.github/workflows/spec-publish.yml.tmpl` (§3i) |
 | `.github/workflows/ops-conformance.yml` | `common/.github/workflows/ops-conformance.yml.tmpl` (§3i, root-Dockerfile-gated) |
+| `.spectral.yaml` | `common/.spectral.yaml` (§3i — the exact-pin shim, #689/#1358) |
 | `trivy.yaml` | `common/trivy.yaml.tmpl` |
 
 The four §3i rows are what makes the **refresh** path both how-tos describe real:

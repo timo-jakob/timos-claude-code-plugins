@@ -129,6 +129,36 @@ CODIFIED_RULE_IDS=(
   [ "$output" = '$.paths[*][?(@.deprecated === true)]' ]
 }
 
+@test "ruleset: org-resource-naming keeps BOTH pattern clauses" {
+  # The id, severity, message, doc URL and `given` are all asserted elsewhere —
+  # but not `.then`, which is a TWO-clause array. Delete either and every other
+  # test here stays green: the count is still 8, the severity still error, the
+  # message still says "plural kebab-case". Nothing else covers it offline:
+  # check-styleguide-pin.zsh lints through the PUBLISHED pin, so a working-tree
+  # ruleset edit is invisible to it, and it only asserts the id FIRES — which the
+  # surviving clause would still do.
+  run yq -r '.rules."org-resource-naming".then | length' "$RULESET"
+  [ "$output" -eq 2 ]
+  run yq -r '[.rules."org-resource-naming".then[].functionOptions | keys | .[]] | sort | join(",")' "$RULESET"
+  [ "$output" = "match,notMatch" ]
+  # The trailing-context guard specifically: it is the whole reason /addresses,
+  # /searches and /deleted-items stay clean, so widening it to a bare prefix
+  # alternation is the regression that reddens every downstream repo.
+  run yq -r '.rules."org-resource-naming".then[1].functionOptions.notMatch' "$RULESET"
+  contains "$output" '([A-Z_-]|$|/)'
+}
+
+@test "ruleset: org-deprecated-operation-has-sunset asserts the FIELD, truthily" {
+  # `truthy` rather than `defined` is the load-bearing half — an empty
+  # `x-sunset: ""` must fail. Changing `field` makes the rule fire on every
+  # deprecated operation including the conforming fixture's correctly-sunset one.
+  # Neither is covered by the message needle, which matches the message STRING.
+  run yq -r '.rules."org-deprecated-operation-has-sunset".then.field' "$RULESET"
+  [ "$output" = "x-sunset" ]
+  run yq -r '.rules."org-deprecated-operation-has-sunset".then.function' "$RULESET"
+  [ "$output" = "truthy" ]
+}
+
 @test "ruleset: org-resource-naming is scoped to the paths object" {
   run yq '.rules."org-resource-naming".given' "$RULESET"
   [ "$status" -eq 0 ]
@@ -408,6 +438,21 @@ CODIFIED_RULE_IDS=(
   # …and no OPERATION is deprecated, so any finding at all is a regression.
   run yq '[.paths[][] | select(has("deprecated"))] | length' "$f"
   [ "$output" -eq 0 ]
+}
+
+@test "fixtures: the path-params corner keeps its camelCase {param} segments" {
+  # The only fixture that had no integrity test. Its entire value is that the
+  # path carries camelCase `{param}` segments which would trip the kebab `match`
+  # clause were parameter segments not exempt — so tidying it to
+  # `/users/{user-id}/...`, or flattening it to `/orders/{orderId}`, silently
+  # stops proving the exemption. The acceptance twin is vacuous under the same
+  # mutation (it asserts only that org-resource-naming does NOT fire, which a
+  # fixture with no params also satisfies).
+  local f="$FIXTURES/corner-path-params/openapi.yaml"
+  run yq -r '.paths | keys | .[0]' "$f"
+  [ "$output" = "/users/{userId}/orders/{orderId}" ]
+  run yq -r '[.paths | keys | .[] | select(test("\\{[a-z]+[A-Z]"))] | length' "$f"
+  [ "$output" -eq 1 ]
 }
 
 @test "fixtures: the conforming fixture pins the verb guard's trailing context" {
