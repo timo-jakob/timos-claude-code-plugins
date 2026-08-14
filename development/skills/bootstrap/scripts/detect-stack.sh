@@ -56,7 +56,14 @@
 #                                  the language-app artifacts (quality-*, codeql*,
 #                                  sonar-project.properties, .snyk, infra/**) are
 #                                  HELD OUT of missing_artifacts, per SKILL.md
-#                                  §3l's not-emitted table (#1154). The
+#                                  §3l's not-emitted table (#1154) — together
+#                                  with the #1206 direct-to-cluster gate
+#                                  (scripts/check-no-cluster-deploy.zsh and
+#                                  .github/workflows/no-cluster-deploy.yml),
+#                                  which are COMMON artifacts rather than
+#                                  language-app ones but are withheld on the same
+#                                  path, since an infrastructure repo is the one
+#                                  place a cluster write belongs. The
 #                                  per-language fragments are swept too, though
 #                                  that sweep is vacuous while the language set
 #                                  is necessarily empty.
@@ -1599,6 +1606,13 @@ if [[ "$iac_only" == "true" ]]; then
 		)
 	done
 	held_out+=(
+		# the #1206 direct-to-cluster gate: an infrastructure repo is the one
+		# place a cluster write BELONGS, so its checker is not rendered there and
+		# must not be reported as a gap either — State-D gap-fill would otherwise
+		# install a required check that fails the repo for doing its job. Both
+		# halves go together (the workflow runs the script), the same
+		# never-one-without-the-other rule api-stability.yml follows.
+		"scripts/check-no-cluster-deploy.zsh" ".github/workflows/no-cluster-deploy.yml"
 		".github/workflows/quality-public.yml" ".github/workflows/quality-public-noop.yml"
 		".github/workflows/quality-private.yml" ".github/workflows/quality-private-noop.yml"
 		".github/workflows/codeql.yml" ".github/workflows/codeql-noop.yml"

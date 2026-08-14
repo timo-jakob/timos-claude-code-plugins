@@ -71,6 +71,10 @@ Push your branch and open a PR. CI will run:
 - Language-specific tests + coverage
 - Semgrep + CodeQL (public only)
 - Secret scanning
+- `no-cluster-deploy` — a static scan of `.github/workflows/**` that fails the
+  PR if a step deploys straight to a cluster. This repo publishes images and
+  promotes them from the infrastructure repo; see `SETUP.md` §3h for the exact
+  command set and the three exemptions (two scoped, one repo-wide).
 
 A PR can only merge to `{{DEFAULT_BRANCH}}` when all required checks pass and a
 review is approved.

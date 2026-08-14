@@ -181,10 +181,12 @@ grep -E '"[a-z-]+"' development/skills/bootstrap/scripts/preflight.sh | grep -v 
 # NOT `uses:` pins, so Renovate never sees them and Step 2 never covers them)
 grep -rhn -E "^\s*[A-Z_]+_VERSION:\s+" development/skills/bootstrap/templates/ | sort -u
 
-# …and the two sites that MIRROR the template's yq pin. Both exist so the bats
-# suite exercises the same mikefarah yq the shipped workflow uses (their own
+# …and the two sites that MIRROR the templates' yq pin. Both exist so the bats
+# suite exercises the same mikefarah yq the shipped workflows use (their own
 # comments say so), and neither lives under templates/, so the sweep above
-# cannot see them. Bump all three together or the suite stops testing what ships.
+# cannot see them. YQ_VERSION is a FOUR-site lockstep — kubernetes-ci.yml.tmpl,
+# no-cluster-deploy.yml.tmpl (#1206) and these two. Bump all four together or
+# the suite stops testing what ships.
 grep -rn -E "YQ_VERSION[:=]" tests/Dockerfile .github/workflows/script-tests.yml
 
 # …and the two IaC toolchain pins with no `*_VERSION:` upstream (#1199). The
@@ -227,10 +229,41 @@ Renovate only covers GitHub Action `uses:` pins — the remaining steps below
 (pre-commit revs, Docker tags, runtime strings, brew formulas, and the
 `*_VERSION:` CLI pins a template downloads by release URL) it doesn't see, so
 those stay manual. The `*_VERSION:` class is worth a deliberate look each pass:
-`YQ_VERSION` is a **three-site lockstep** — the template, `tests/Dockerfile` and
-`.github/workflows/script-tests.yml` — because the bats suite asserts the
-template's `yq -o=json` behaviour; move all three or the suite validates the
-shipped workflow under a different yq than it ships with. And
+`YQ_VERSION` is a **four-site lockstep** — `kubernetes-ci.yml.tmpl`,
+`no-cluster-deploy.yml.tmpl` (#1206), `tests/Dockerfile` and
+`.github/workflows/script-tests.yml` — because the bats suite asserts both
+templates' `yq -o=json` behaviour; move all four or the suite validates the
+shipped workflows under a different yq than they ship with.
+
+**The #1206 gate has a prose lockstep of its own.** Its v1 command set and its
+three exemptions are restated in **seven** places — the checker's header
+(`templates/common/scripts/check-no-cluster-deploy.zsh`) is the authoritative
+one, and the other six must follow it:
+
+| Site | Carries |
+| --- | --- |
+| `templates/common/scripts/check-no-cluster-deploy.zsh` header | **authoritative** — full command set, three exemptions, known gaps |
+| `templates/common/.github/workflows/no-cluster-deploy.yml.tmpl` header | the three exemptions, in summary |
+| `templates/common/SETUP.md.tmpl` §3h | the consumer-facing table + all three exemptions + known gaps |
+| `templates/common/CLAUDE.md.tmpl` | the agent-facing CI bullet |
+| `templates/common/CONTRIBUTING.md.tmpl` | the contributor-facing CI bullet |
+| `development/skills/bootstrap/SKILL.md` §3a | the bootstrap instruction's own restatement |
+| `docs/how-to/keep-app-repos-out-of-the-cluster.md` | this repo's how-to |
+
+Widening the command set or changing an exemption's scope moves all seven; the
+checker's header says "anywhere this script's rules are restated, all three have
+to be", and this is the list of where. **Rebuild the list rather than trusting
+it** — a prose lockstep rots exactly as this one did (#1206's own round 3 found
+it naming four sites when there were seven, after a `--dry-run` rule change
+reached only two):
+
+```sh
+grep -rln 'no-cluster-deploy' development/skills/bootstrap docs MAINTAINING.md \
+  ARCHITECTURE.md | sort
+```
+
+`tests/no-cluster-deploy.bats` pins the substantive clauses across the
+restatements, so a rule change that misses one reds rather than drifting. And
 `kubernetes-ci.yml.tmpl` pins `KYVERNO_VERSION`, where a Kyverno minor can add
 policy *kinds* the pinned CLI cannot evaluate — which that workflow reports as a
 failure rather than silently passing, so a stale pin surfaces as a red check in

@@ -39,8 +39,10 @@ RUN curl -sSfLo /usr/local/bin/yq \
 # transformer (orval-deprecation-transformer.mjs, #707); its behavioral bats test
 # executes it with node, so node is a declared test dependency, not incidental.
 # yamllint: tests/bootstrap-iac-pipeline.bats (#1154) lints the kubernetes-ci
-# workflow template with the repo's strict yamllint config; it is called
-# unguarded, so the documented local run needs it present. yq is installed
+# workflow template with the repo's strict yamllint config, and
+# tests/no-cluster-deploy.bats (#1206) lints the no-cluster-deploy workflow
+# template the same way; both call it unguarded, so the documented local run
+# needs it present. yq is installed
 # above from upstream for the reason given there.
 
 WORKDIR /work

@@ -1125,6 +1125,40 @@ Copy from `templates/common/`:
   files against the latest plugin templates and opens a tracking issue naming the fixes a re-bootstrap would deliver
   (#402). Unlike the approver, it tracks the moving `main` tip — drift means "newer templates exist". Stamp a provenance
   marker (Step 3.6) so it is itself drift-tracked.)
+- `scripts/check-no-cluster-deploy.zsh` + `.github/workflows/no-cluster-deploy.yml` (#1206) — the **direct-to-cluster
+  gate**, the application-repo half of the promotion contract #1189 states: the infrastructure repo is the only path to
+  a cluster, so an application repo publishes versioned immutable images and never writes to a cluster itself. The
+  checker (static copy from `common/scripts/`, `chmod +x`) scans `.github/workflows/**` for a step whose `run:` body
+  invokes a cluster-writing command (`kubectl apply|create|replace|patch|delete`, `kubectl rollout restart`, `kubectl
+  set image`, `kubectl scale`, `helm install|upgrade|rollback|uninstall`, `argocd app sync|create|set`, `flux
+  reconcile|bootstrap`, and `helm delete|del|un` as documented aliases of `uninstall`) and exits 1 naming the file, job,
+  step and command. **Three exemptions**, all in the checker's header: a job that stands up its **own** ephemeral
+  cluster (`kind`/`k3d`/`minikube`/`ctlptl`), job-scoped — exempting the cluster-writing steps **at or after** the
+  creating step, including the rest of that step's own body; a **command** carrying a **real dry-run value**
+  (bare `--dry-run`, `--dry-run=client|server|true`, or the separate-argument `--dry-run client|server` — note that
+  `--dry-run=none` and `--dry-run=false` mean the OPPOSITE and do **not** exempt), command-scoped (not step-scoped — a
+  step-wide test would let one `--dry-run` silence every real deploy beside it, which is the standing escape hatch
+  the checker's header forbids); and, repo-wide, a `.maintenance.yml` recording `primary: kubernetes`. There is
+  deliberately **no escape hatch** — a repo with a genuine exception changes the check in a reviewed PR.
+  Render `common/.github/workflows/no-cluster-deploy.yml.tmpl` (substitute `{{DEFAULT_BRANCH}}`) and stamp a provenance
+  marker on **both halves** (Step 3.6) — the checker holds the command set, so it is the half that actually goes stale.
+  Its `no-cluster-deploy` job becomes a **required context** (Step 4b) **when BOTH halves are on disk** — the script
+  probes for the workflow *and* the checker, and warns-and-omits otherwise, so a repo predating this gate is never
+  wedged at `expected`. It therefore
+  carries **no `paths:` filter** either — a path-conditional required check sits at `expected` forever on every PR that
+  misses the paths. **Not emitted on the
+  §3l IaC path**: an infrastructure repo is the one place a cluster write belongs.
+  > **The repo-wide exemption reads `primary:` as a GRANT, which §3l's rule does not.** §3l and the `{{PRIMARY}}` table
+  > let a recorded primary only *veto* the IaC path, never *grant* it; the checker runs inside a consumer repo with no
+  > detector to consult, so it reads the human-approved record as a declaration. The consequence to watch for, judged
+  > against the **final** on-disk value rather than the one you found on entry — this same step rewrites
+  > `.maintenance.yml` from `{{PRIMARY}}`, whose branch (1) resolves a detected language *whatever the file recorded*.
+  > So **after Step 3 has
+  > written `.maintenance.yml`, re-read its `primary:`**. If it still reads `kubernetes` while this pair was rendered
+  > (the user declined the overwrite at idempotency rule 3, or the file was left untouched), the required context is
+  > installed but **permanently no-op**, because every run prints `EXEMPT` and scans nothing: say so in the Step 5
+  > report and name the fix — correct the record, or wait for #1193. If Step 3 wrote the detected language, the gate is
+  > live and no warning is due.
 - `.gitleaks.toml` (static copy — gitleaks config used by **both** the pre-commit hook and the CI workflow; allowlists
   documented false positives like `curl -u "$VAR"` examples in `SETUP.md`).
 - `scripts/update-claude-plugins.zsh` (static copy from `common/scripts/`, `chmod +x`). A one-command helper that
@@ -3503,7 +3537,8 @@ misfire, and closing them needs the rule stated once across every consumer
 rather than a note per site.
 
 **What this path emits, exactly** — an enumeration, not a rule to apply. The
-§3a common artifacts, plus `.github/workflows/kubernetes-ci.yml`, plus the §3h
+§3a common artifacts **minus the rows in the table below**, plus
+`.github/workflows/kubernetes-ci.yml`, plus the §3h
 end-user docs machinery (a GitOps repo has users and runbooks like any other,
 and §3h's set is language-neutral — its `surface: none` shape is exactly this
 case). From §3b/§3c it emits **only** the language-agnostic supply-chain pieces
@@ -3516,6 +3551,8 @@ case). From §3b/§3c it emits **only** the language-agnostic supply-chain piece
 | `sonar-project.properties`, `.snyk` | No Sonar analysis and no dependency manifest to scan |
 | `infra/sonarqube/**`, `infra/github-runner/README.md` (private path) | Scaffolding for a Sonar scan and a self-hosted runner this path never generates or uses |
 | the §3d per-language fragments (`.nvmrc`, `eslint.config.js`, `ruff.toml`, `release.yml`, the `gitignore` fragments …) and `.pre-commit-config.yaml`'s per-language hook blocks | There is no detected language to configure — both sets are keyed on one, so they are inert here rather than suppressed. `detect-stack.sh` holds the fragments out of `missing_artifacts` on the same condition, so a State-D gap-fill cannot re-create them |
+| `scripts/check-no-cluster-deploy.zsh` **and `.github/workflows/no-cluster-deploy.yml`** (#1206) | The gate exists to keep an APPLICATION repo out of the cluster; an infrastructure repo is the one place a cluster write belongs, so requiring it here would fail the repo for doing its job. `detect-stack.sh` holds **both** halves out of `missing_artifacts` on this path — never one without the other, since the workflow runs the script — and `branch-protection.sh --iac-only true` never adds the context |
+| `SETUP.md`'s §3h section, **and the `no-cluster-deploy` bullets in `CLAUDE.md` and `CONTRIBUTING.md`** (the direct-to-cluster rule) | All three scaffolds ARE emitted here, but each describes an installed, required gate this path does not install — and `CLAUDE.md`'s bullet actively tells the repo's agent never to write to a cluster, which is what a GitOps repo exists to do. Drop all three (`SETUP.md` §3h plus the `(§3h)` cross-reference in its §4 bullet; `CLAUDE.md`'s and `CONTRIBUTING.md`'s CI bullets), or replace each with a one-line pointer to `kubernetes-ci.yml`'s six checks. `SETUP.md` §3h opens with an IaC courtesy blockquote, but that is for an app repo's reader — it is not a substitute for removing the section here, and it does not exist in the other two |
 
 Say in the final report which were skipped and why — an explicit omission beats
 a silent one. Note the consequence: the `pre-commit` CI backstop lives in
@@ -3524,8 +3561,9 @@ hooks only.
 
 **Branch protection still runs — with the IaC context set.** Call Step 4b's
 `branch-protection.sh` with `--iac-only true`. That swaps the language-app
-contexts (`test-and-coverage`, `semgrep`, `pre-commit`, plus the
-visibility-specific Sonar/Trivy/CodeQL/image contexts) for the six above — required contexts no workflow reports would
+contexts (`test-and-coverage`, `semgrep`, `pre-commit`, `no-cluster-deploy`,
+plus the visibility-specific Sonar/Trivy/CodeQL/image contexts) for the six
+above — required contexts no workflow reports would
 pin every PR on a permanent `expected` state — while everything else the script
 applies is unchanged and still needed here: PR-required, linear history, no
 force-push or deletion, and the repo-level `allow_auto_merge` /
@@ -3629,6 +3667,8 @@ actually rendered in Step 3 — §3a through §3l):
 | --- | --- |
 | `.github/dependabot.yml` | `common/.github/dependabot.yml.tmpl` |
 | `.github/workflows/kubernetes-ci.yml` | `iac/.github/workflows/kubernetes-ci.yml.tmpl` |
+| `.github/workflows/no-cluster-deploy.yml` | `common/.github/workflows/no-cluster-deploy.yml.tmpl` (not on the §3l IaC path) |
+| `scripts/check-no-cluster-deploy.zsh` | `common/scripts/check-no-cluster-deploy.zsh` (not on the §3l IaC path) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
 | `.github/workflows/codeql.yml` | `public/.github/workflows/codeql.yml.tmpl` |
 | `.github/workflows/codeql-noop.yml` | `public/.github/workflows/codeql-noop.yml.tmpl` |
@@ -3804,6 +3844,17 @@ If the user does not yet have any commits with the workflows present, point out
 that the check names will not appear in the GitHub UI until at least one workflow
 run completes — branch protection rules referencing them are still valid, but
 GitHub displays them as "expected" until first run.
+
+**A second non-fatal fallback, also detected from the OUTPUT (#1206).** The
+script exits 0 after `WARN`ing that `.github/workflows/no-cluster-deploy.yml` is
+absent, having applied the rule **without** that context — the same
+provider-file guard `image`/`ko-image.yml` gets, so a repo predating the gate is
+never wedged at `expected`. Watch for that warning on a non-IaC path: it means
+the direct-to-cluster gate is **not enforced**. Render the pair (§3a) and re-run
+the script; if you cannot, list it as an outstanding Step 5 item rather than
+reporting the context as required. Never infer from exit 0 alone that every
+context in §3a's list was applied — two of them (`image`, `no-cluster-deploy`)
+are computed from on-disk probes, not from the flags.
 
 On a 403 (the user is not a repo admin) the script does **not** exit non-zero:
 it warns `403 — your account does not have admin permission`, prints the

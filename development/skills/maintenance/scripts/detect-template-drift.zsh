@@ -64,6 +64,16 @@ typeset -a tracked=(
   # never consumed, and a consumer repo whose kubernetes-ci.yml has fallen
   # behind the template is reported drift-free forever
   ".github/workflows/kubernetes-ci.yml"
+  # the application-repo direct-to-cluster gate (#1206) — BOTH halves. The
+  # workflow is the runner; the CHECKER holds the matched command set, so it is
+  # the half that actually goes stale: widen the IN set upstream and a consumer
+  # on the old checker keeps reporting green against it. Tracking only the
+  # workflow would leave exactly the drift this entry exists to name invisible,
+  # because the workflow (branch + pinned yq) almost never changes. Both are
+  # stamped at Step 3.6; stamp-marker.zsh inserts after a shebang and preserves
+  # the file mode (#783), so a zsh script is stampable.
+  ".github/workflows/no-cluster-deploy.yml"
+  "scripts/check-no-cluster-deploy.zsh"
   ".github/workflows/codeql.yml"
   ".github/workflows/codeql-noop.yml"
   ".github/workflows/quality-public.yml"
