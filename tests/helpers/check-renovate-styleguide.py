@@ -61,14 +61,31 @@ def discover_pin_sites() -> list[str]:
     """
     sites = []
     for path in REPO_ROOT.rglob("*"):
-        if not path.is_file() or SKIP_DIRS & set(path.parts):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(REPO_ROOT)
+        # Matched against REPO_ROOT-RELATIVE directory parts, never the absolute
+        # path: this repo is worked in .claude/worktrees/<name>, so REPO_ROOT
+        # itself contains "worktrees" and an absolute-parts test skipped EVERY
+        # file — leaving the coverage assertion below vacuous while still
+        # printing "ok". `[:-1]` so a FILE named e.g. "site" is not skipped.
+        if SKIP_DIRS & set(rel.parts[:-1]):
             continue
         try:
             text = path.read_text(errors="ignore")
         except OSError:
             continue
         if PIN_RE.search(text):
-            sites.append(str(path.relative_to(REPO_ROOT)))
+            sites.append(str(rel))
+    if not sites:
+        # The repo always carries at least three: the shim, the ruleset header
+        # and the how-to. Finding none means the walk is broken, not that the
+        # pin vanished — and a silent [] is precisely how this check went
+        # vacuous once already.
+        sys.exit(
+            "pin-site discovery found nothing — the walk is broken "
+            f"(searched under {REPO_ROOT})"
+        )
     return sorted(sites)
 
 

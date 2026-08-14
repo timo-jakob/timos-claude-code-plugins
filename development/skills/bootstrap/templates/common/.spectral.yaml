@@ -25,9 +25,15 @@
 # A CDN OUTAGE FAILS THIS LINT LOUDLY, by design. There is deliberately no offline
 # fallback: a lint that degraded to "no rules loaded, 0 problems" would report
 # success while enforcing nothing, which is strictly worse than a red build.
-# NEVER downgrade the pin to route around an unresolving fetch. An older version
-# that still resolves from cache silently rolls back the rules this repo enforces,
-# and the rollback looks like a fix. Re-run, and check jsDelivr/GitHub status.
+# FIRST confirm the version below names a PUBLISHED styleguide-v* tag on the repo
+# in the URL. A pin naming no such tag is a bad bump, not an outage — point it at
+# the newest real tag. (Correcting an unpublished pin is NOT the downgrade
+# forbidden next.) If the tag does exist, it is an outage or a cold cache: re-run,
+# and check jsDelivr/GitHub status.
+#
+# NEVER downgrade a WORKING pin to route around an unresolving fetch. An older
+# version that still resolves from cache silently rolls back the rules this repo
+# enforces, and the rollback looks like a fix.
 #
 # The CI wiring (.github/workflows/contracts-lint.yml) references this file BY
 # PATH, so the pin can move without touching the pipeline.

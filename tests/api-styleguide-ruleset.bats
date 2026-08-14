@@ -270,10 +270,24 @@ CODIFIED_RULE_IDS=(
   # cannot see it — and it is the worst case, shipping a permanently-404 pin.
   # Second pass, owner-AGNOSTIC: every jsDelivr ruleset URL in the tree must be
   # either the real pin or the deliberate fixture sentinel.
-  local stray
-  stray="$(grep -rho 'https://cdn\.jsdelivr\.net/gh/[^ "]*ruleset\.yaml' \
-    --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=site --exclude-dir=worktrees \
-    "$REPO_ROOT" 2>/dev/null | sort -u \
+  # Reuses pass 1's file list rather than a second `grep -r`, so both passes share
+  # ONE exclusion policy — a second, differently-spelled exclusion set is how the
+  # two halves drift apart.
+  local all_urls stray
+  all_urls="$(xargs -0 grep -oh 'https://cdn\.jsdelivr\.net/gh/[^ "]*ruleset\.yaml' \
+    < <(tr '\n' '\0' < "$list") 2>/dev/null | sort -u || true)"
+  # Canary FIRST: this pass is fully silenced, so without it a walk that inspected
+  # nothing would report "no strays" — the same fail-open that made the renovate
+  # helper's coverage check vacuous.
+  case "$all_urls" in
+    *"/gh/$OWNER_REPO@"*) ;;
+    *) printf 'stray-pass canary: the real pin was not found at all\n' >&2; return 1 ;;
+  esac
+  case "$all_urls" in
+    *'/gh/example/styleguide-fixture@'*) ;;
+    *) printf 'stray-pass canary: the fixture sentinel was not found at all\n' >&2; return 1 ;;
+  esac
+  stray="$(printf '%s\n' "$all_urls" \
     | grep -v "/gh/$OWNER_REPO@" | grep -v '/gh/example/styleguide-fixture@' || true)"
   if [ -n "$stray" ]; then
     printf 'jsDelivr URL with an unexpected owner/repo (typo?):\n%s\n' "$stray" >&2
@@ -477,9 +491,27 @@ CODIFIED_RULE_IDS=(
   contains "$output" 'development/skills/bootstrap/templates/common/.spectral.yaml'
   contains "$output" 'styleguide/spectral/ruleset.yaml'
 
-  # …and it cannot be neutered into an advisory.
+  # …and it cannot be neutered into an advisory. Step-level AND job-level: the
+  # job-level knob is how a gate is actually made advisory, and "just set
+  # continue-on-error" is the predictable response to the first CDN blip — which
+  # this job's own header says it deliberately couples itself to.
   run yq -r '[.jobs.check.steps[].continue-on-error] | map(select(. == true)) | length' "$wf"
   [ "$output" = "0" ]
+  run yq -r '.jobs.check.continue-on-error // "unset"' "$wf"
+  [ "$output" = "unset" ]
+  run yq -r '.jobs.check.if // "unset"' "$wf"
+  [ "$output" = "unset" ]
+
+  # All five trigger paths, on BOTH halves: dropping the checker's own path means
+  # a PR editing the checker never runs it, and dropping the fixtures path means a
+  # PR mutating what it asserts against is unguarded.
+  run yq -r '[.on.pull_request.paths[]] | sort | join(",")' "$wf"
+  [ "$status" -eq 0 ]
+  contains "$output" 'scripts/check-styleguide-pin.zsh'
+  contains "$output" 'tests/fixtures/api-styleguide/**'
+  local pr_paths="$output"
+  run yq -r '[.on.push.paths[]] | sort | join(",")' "$wf"
+  [ "$output" = "$pr_paths" ]
 
   # Pin rot has causes outside this repo (a deleted tag, a CDN regression), so a
   # path-triggered-only gate would never see them.

@@ -228,7 +228,8 @@ the release notes first.
 Renovate covers **two** things here, in two separate PRs: the batched
 **github-actions** PR above, and its own **api-styleguide** PR bumping the org
 Spectral pin (#689). That second one is deliberately kept out of the batch — it
-changes what every bootstrapped repo's CI enforces, so it gets its own review —
+changes what every **newly** bootstrapped repo's CI enforces (existing repos keep
+their own pin until a human bumps it, #1359), so it gets its own review —
 and it moves a **three-site lockstep**: `templates/common/.spectral.yaml`,
 `styleguide/spectral/ruleset.yaml` and `docs/how-to/adopt-the-api-styleguide.md`
 must all quote the SAME pin. A repo-wide sweep in

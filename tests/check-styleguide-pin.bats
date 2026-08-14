@@ -56,12 +56,19 @@ shim() {
 # that ignored the shim and fetched a hardcoded URL would pass every case here,
 # defeating the "extracted from the shim, never hardcoded" claim the script makes.
 stub_curl() {
+  # The expected URL goes through a FILE, and every interpolated path is emitted
+  # inside double quotes — same reasoning as stub_npx below: a value containing
+  # an apostrophe would close the generated script's quoting mid-line, and a
+  # tmpdir containing a space would word-split the redirect, either of which
+  # reads as a defect in the checker rather than in this stub.
+  printf '%s' "${2:-}" > "$BATS_TEST_TMPDIR/expect-url"
   {
     printf '#!/usr/bin/env bash\n'
-    printf 'printf "%%s\\n" "$*" >> %s\n' "$ARGV_LOG"
+    printf 'printf "%%s\\n" "$*" >> "%s"\n' "$ARGV_LOG"
     if [ -n "${2:-}" ]; then
       # Answer the given code ONLY for the expected URL; anything else 404s.
-      printf 'for a in "$@"; do [ "$a" = %s ] && { printf %%s %s; exit 0; }; done\n' "'$2'" "'$1'"
+      printf 'want="$(cat "%s")"\n' "$BATS_TEST_TMPDIR/expect-url"
+      printf 'for a in "$@"; do if [ "$a" = "$want" ]; then printf %%s %s; exit 0; fi; done\n' "$1"
       printf 'printf %%s 404\n'
     else
       printf 'printf %%s %s\n' "$1"
@@ -83,25 +90,45 @@ stub_npx() {
   printf '%s' "$c" > "$BATS_TEST_TMPDIR/c.json"
   {
     printf '#!/usr/bin/env bash\n'
-    printf 'printf "%%s\\n" "$*" >> %s\n' "$ARGV_LOG"
+    printf 'printf "%%s\\n" "$*" >> "%s"\n' "$ARGV_LOG"
     printf 'for a in "$@"; do case "$a" in\n'
-    printf '  *nonconforming*) cat %s; exit 1 ;;\n' "$BATS_TEST_TMPDIR/nc.json"
-    printf '  */conforming/*) cat %s; exit 0 ;;\n' "$BATS_TEST_TMPDIR/c.json"
+    printf '  *nonconforming*) cat "%s"; exit 1 ;;\n' "$BATS_TEST_TMPDIR/nc.json"
+    printf '  */conforming/*) cat "%s"; exit 0 ;;\n' "$BATS_TEST_TMPDIR/c.json"
     printf 'esac; done\nprintf %%s "[]"\n'
   } > "$STUB_BIN/npx"
   chmod +x "$STUB_BIN/npx"
 }
 
 # All eight ids at severity 0 — the shape a healthy pin produces.
-stub_npx_all_eight() {
-  stub_npx '[{"code":"operation-operationId","severity":0},{"code":"operation-operationId-unique","severity":0},{"code":"info-description","severity":0},{"code":"operation-description","severity":0},{"code":"operation-tags","severity":0},{"code":"org-deprecated-operation-has-sunset","severity":0},{"code":"org-resource-naming","severity":0},{"code":"org-problem-json-errors","severity":0}]'
+ALL_EIGHT='[{"code":"operation-operationId","severity":0},{"code":"operation-operationId-unique","severity":0},{"code":"info-description","severity":0},{"code":"operation-description","severity":0},{"code":"operation-tags","severity":0},{"code":"org-deprecated-operation-has-sunset","severity":0},{"code":"org-resource-naming","severity":0},{"code":"org-problem-json-errors","severity":0}]'
+
+stub_npx_all_eight() { stub_npx "$ALL_EIGHT"; }
+
+# stub_npx_stderr <message> — spectral "runs" but writes only to stderr, the
+# shape an npx/registry failure produces (empty stdout + a diagnostic).
+stub_npx_stderr() {
+  printf '%s' "$1" > "$BATS_TEST_TMPDIR/err.txt"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'printf "%%s\\n" "$*" >> "%s"\n' "$ARGV_LOG"
+    printf 'cat "%s" >&2\n' "$BATS_TEST_TMPDIR/err.txt"
+    printf 'exit 1\n'
+  } > "$STUB_BIN/npx"
+  chmod +x "$STUB_BIN/npx"
 }
 
-# `zsh -f` with a neutral ZDOTDIR: zsh sources /etc/zshenv and ~/.zshenv even for
-# non-interactive scripts, and a maintainer whose zshenv prepends /opt/homebrew/bin
-# would put the REAL curl and npx ahead of $STUB_BIN — quietly pulling this
-# suite onto the network and making the 404 case pass for the wrong reason.
-check() { run env ZDOTDIR="$BATS_TEST_TMPDIR" zsh -f "$W/scripts/check-styleguide-pin.zsh"; }
+# `zsh -f` with a neutral ZDOTDIR: zsh sources ~/.zshenv even for non-interactive
+# scripts, and a maintainer whose zshenv prepends /opt/homebrew/bin would put the
+# REAL curl and npx ahead of $STUB_BIN — quietly pulling this suite onto the
+# network and making the 404 case pass for the wrong reason.
+#
+# `-f` does NOT skip /etc/zshenv (nothing does), so PATH is re-pinned INSIDE the
+# child, after every startup file has had its say. A host whose /etc/zshenv
+# prepends paths (nix-darwin does) would otherwise still escape the stubs.
+check() {
+  run env ZDOTDIR="$BATS_TEST_TMPDIR" zsh -f -c \
+    'PATH="$1"; shift; exec "$@"' -- "$STUB_BIN:$PATH" "$W/scripts/check-styleguide-pin.zsh"
+}
 
 @test "happy path: a live pin enforcing all eight rules exits 0" {
   check
@@ -156,7 +183,7 @@ check() { run env ZDOTDIR="$BATS_TEST_TMPDIR" zsh -f "$W/scripts/check-styleguid
   local zsh_bin; zsh_bin="$(command -v zsh)"
   run env ZDOTDIR="$BATS_TEST_TMPDIR" PATH="$STUB_BIN" "$zsh_bin" -f "$W/scripts/check-styleguide-pin.zsh"
   [ "$status" -eq 2 ]
-  contains "$output" "is required but not on PATH"
+  contains "$output" "jq is required but not on PATH"
 }
 
 @test "THE case this script exists for: pin resolves but loads NO rules -> exit 1" {
@@ -260,11 +287,46 @@ check() { run env ZDOTDIR="$BATS_TEST_TMPDIR" zsh -f "$W/scripts/check-styleguid
   contains "$output" "fixture not found"
 }
 
+@test "warn-severity findings on the conforming fixture are TOLERATED — only errors over-fire" {
+  # The over-fire guard counts `select(.severity == 0)`. Every other case feeds
+  # the conforming lane either [] or a severity-0 finding, so the FILTER itself
+  # is never exercised in the direction that matters: dropping it keeps the whole
+  # suite green while the live workflow reddens on the real conforming fixture,
+  # which inherits spectral:oas warnings it does not control.
+  stub_npx "$ALL_EIGHT" '[{"code":"info-contact","severity":1},{"code":"oas3-api-servers","severity":2}]'
+  check
+  [ "$status" -eq 0 ]
+  contains "$output" "conforming fixture: 0 error findings"
+}
+
+@test "unparseable output on the CONFORMING fixture is exit 2 too, and says which" {
+  # The second require_json guard is unreached by every other case (they corrupt
+  # only the non-conforming payload), yet it is the one the script's own comment
+  # says stops a crashed spectral from printing "0 error findings" and exiting 0.
+  stub_npx "$ALL_EIGHT" 'not json at all'
+  check
+  [ "$status" -eq 2 ]
+  contains "$output" "for the conforming fixture"
+}
+
+@test "spectral's stderr is surfaced on the tooling-failure path" {
+  # The whole SPECTRAL_ERR mechanism (mktemp, the 2> redirect, the trap ordering)
+  # exists so an npx/registry outage is distinguishable from a genuinely empty
+  # lint. Nothing asserted it, so it could be deleted with only a lost diagnostic.
+  stub_npx_stderr 'npm ERR! 404 Not Found - @stoplight/spectral-cli'
+  check
+  [ "$status" -eq 2 ]
+  contains "$output" "npm ERR! 404 Not Found"
+}
+
 @test "unparseable spectral output is a TOOLING failure (exit 2), not a verdict" {
   stub_npx 'not json at all'
   check
   [ "$status" -eq 2 ]
   contains "$output" "no parseable JSON"
+  # WHICH fixture is the diagnostic's whole value — without this both
+  # require_json branches satisfy the same needle.
+  contains "$output" "for the non-conforming fixture"
 }
 
 @test "the checker's rule roster matches the published ruleset exactly" {

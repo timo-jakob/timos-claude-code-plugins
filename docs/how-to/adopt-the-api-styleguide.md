@@ -1,7 +1,8 @@
 # Adopt the API styleguide
 
 Pin the org [API styleguide](../reference/api-styleguide.md) ruleset in your
-repo, and keep the pin current when Renovate proposes a bump.
+repo, and keep the pin current **by hand** — no bot bumps it for you
+([#1359](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1359)).
 
 **Bootstrap ships the pinned shim as the only `.spectral.yaml` it writes**
 ([#689](https://github.com/timo-jakob/timos-claude-code-plugins/issues/689)), so
@@ -27,10 +28,18 @@ rather than as a file you have to hand-merge.
 Nothing else changes: `contracts-lint` references `.spectral.yaml` **by path**,
 so swapping the content never touches the pipeline.
 
-Then run what CI runs, and fix what it finds. Since
+**Check your own `contracts-lint.yml` first.** A workflow is a copy, not a
+subscription: the same template-vs-copy rule that means no bot bumps your pin
+means your lint job is whatever bootstrap wrote when you ran it. Since
 [#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330) the
-shipped job lints the **newest major of each family** — not every major — so name
-those two files explicitly rather than globbing:
+shipped job lints the **newest major of each family**; a job that predates it
+globs `contracts/v[0-9]*` and lints **every** major, including frozen ones. If
+yours still globs, refresh its selection step from the current template before
+reading the parity claim below — otherwise your local run and your CI disagree in
+both directions.
+
+Then run what CI runs, and fix what it finds — naming the newest major of each
+family explicitly rather than globbing:
 
 ```sh
 npx --yes @stoplight/spectral-cli@6 lint \
