@@ -398,14 +398,20 @@ pull-compat surface served by the SDK's Prometheus exporter.
 
 **This step is mandatory, manual and documented — there is no advisor that does it
 for you.** If your repo carries `contracts/ops/v1/openapi.yaml` and nothing newer,
-v1 is still your newest ops major, so `contracts-lint` still lints it — and the org
-styleguide's `org-problem-json-errors` rule reddens it, on a file you did not
-write. Adopting v2 is what clears that, and nothing else does.
+v1 is still your newest ops major, so `contracts-lint` still lints it — and once
+your `.spectral.yaml` extends the org styleguide, its `org-problem-json-errors`
+rule reddens that file, which you did not write. Adopting v2 is what clears that,
+and nothing else does.
 
 You will notice it in one of two ways:
 
 - **`contracts-lint` goes red** on `contracts/ops/v1/openapi.yaml` with
-  `org-problem-json-errors` on the `/health/live` and `/health/ready` `503`s.
+  `org-problem-json-errors` on the `/health/live` and `/health/ready` `503`s —
+  **but only once your `.spectral.yaml` extends the org styleguide ruleset**
+  (#689). A repo still on the bootstrap starter (`extends: ["spectral:oas"]`,
+  #692) does not carry that rule, so it stays green on ops v1 indefinitely.
+  **Do not read that green as "migration not needed"** — migrate on the schedule
+  below rather than waiting for a check that cannot fire yet.
 - **`check-ops-conformance.zsh` fails** with a message naming the ops-api v1
   envelope and pointing back at this section — that is the checker telling you a
   probe answered 503 while the service is still on a v1 payload. Note the

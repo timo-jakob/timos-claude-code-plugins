@@ -330,6 +330,36 @@ setup() {
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/template-drift-watch.yml")' <<<"$out")" != "null" ]
 }
 
+# --- #1330 ops majors: gap-fill installs the NEWEST only ---------------------
+#
+# templates/common/ now carries TWO ops majors, and collect_from walks the whole
+# tree — so without the hold-out a State-D gap-fill would render the FROZEN v1
+# into a repo that never served it, beside payloads emitting RFC 9457 problem
+# details, and contracts-semver would then refuse to let it be deleted.
+# SKILL.md §3i states the rule ("Install v2, not v1"); this pins the mechanism.
+
+@test "detect-stack: #1330 the frozen ops v1 major is never a gap-fill candidate" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # The newest ops major IS an expected gap on a repo that has no ops surface...
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v2/openapi.yaml")' <<<"$out")" != "null" ]
+  # ...and every older major is held out, so blind rendering can't install it.
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v1/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
+@test "detect-stack: #1330 an EXISTING ops v1 is still reported present, not erased" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  mkdir -p contracts/ops/v1
+  printf 'openapi: 3.1.0\n' > contracts/ops/v1/openapi.yaml
+  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # Held out of the GAP list, but a repo migrating from v1 must still see it in
+  # existing_artifacts — the hold-out suppresses installation, never detection.
+  [ "$(jq -r '.existing_artifacts["contracts/ops/v1/openapi.yaml"]' <<<"$out")" = "true" ]
+  [ "$(jq -r '.missing_artifacts | index("contracts/ops/v1/openapi.yaml")' <<<"$out")" = "null" ]
+}
+
 @test "detect-stack: #406 a present every-repo file is NOT flagged missing" {
   printf 'plugins { java }\n' > build.gradle.kts
   mkdir -p .github/workflows

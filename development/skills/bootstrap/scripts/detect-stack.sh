@@ -1654,6 +1654,30 @@ if grep -q '^openapi|' <<<"$contract_pairs"; then
 	openapi_surface="true"
 fi
 held_out+=("contracts/v1/openapi.yaml")
+# Ops majors: bootstrap installs ONLY the newest (#1330, SKILL.md §3i "Install
+# v2, not v1"). Older ops majors stay in the template tree so a repo migrating an
+# EXISTING installation can keep its frozen major byte-identical (see
+# docs/how-to/adopt-the-ops-surface.md) — but a State-D gap-fill must never
+# INSTALL one: a repo that never served ops v1 would gain a live major it never
+# agreed to, beside payloads that emit RFC 9457 problem details, and
+# contracts-semver's oasdiff leg then refuses to let it be deleted.
+# Derived from the tree, never a hardcoded ban, so the next ops major closes this
+# hole by existing instead of re-opening it.
+ops_newest_n=-1
+for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml; do
+	[[ -f "$_ops_spec" ]] || continue
+	_n="${_ops_spec#"$templates_dir"/common/contracts/ops/v}"
+	_n="${_n%%/*}"
+	[[ "$_n" == *[!0-9]* ]] && continue
+	if [[ "$_n" -gt "$ops_newest_n" ]]; then ops_newest_n="$_n"; fi
+done
+for _ops_spec in "$templates_dir"/common/contracts/ops/v[0-9]*/openapi.yaml; do
+	[[ -f "$_ops_spec" ]] || continue
+	_n="${_ops_spec#"$templates_dir"/common/contracts/ops/v}"
+	_n="${_n%%/*}"
+	[[ "$_n" == *[!0-9]* ]] && continue
+	[[ "$_n" == "$ops_newest_n" ]] || held_out+=("contracts/ops/v$_n/openapi.yaml")
+done
 if [[ "$openapi_surface" != "true" ]]; then
 	held_out+=(
 		".spectral.yaml" "CONTRACTS.md"

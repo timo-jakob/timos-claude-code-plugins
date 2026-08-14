@@ -3,14 +3,22 @@
 # Unlike contracts/v1/openapi.yaml (the per-project business API), this file is
 # an ORG-WIDE STANDARD: every backend service exposes exactly this surface, so
 # "standardised" is testable rather than aspirational (epic #682, design §5).
-# Bootstrap installs it verbatim at contracts/ops/v1/openapi.yaml; it carries no
-# {{PLACEHOLDERS}} because the ops contract is identical across every repo.
+# FROZEN HISTORICAL MAJOR — bootstrap no longer installs this file (#1330).
+# A fresh repo gets contracts/ops/v2/openapi.yaml; this copy ships only so a repo
+# migrating an EXISTING v1 installation can keep it byte-identical while it moves
+# (docs/how-to/adopt-the-ops-surface.md). detect-stack holds every non-newest ops
+# major out of the State-D gap-fill, so a re-bootstrap never installs it either.
+# It carries no {{PLACEHOLDERS}} because the ops contract is identical across
+# every repo.
 #
 # It is versioned exactly like the business contract — the same per-major
-# layout (contracts/ops/vN/openapi.yaml), the same version triangle
-# (info.version major == vN directory == servers /vN), and the same CI gates
-# (contracts-lint Spectral + contracts-semver oasdiff) discover it (#688). A
-# breaking change to the ops surface is a new ops major, never an in-place edit.
+# layout (contracts/ops/vN/openapi.yaml) and the same version triangle
+# (info.version major == vN directory == servers /vN) (#688). A breaking change
+# to the ops surface is a new ops major, never an in-place edit. The two CI gates
+# reach it differently since #1330: contracts-semver's oasdiff still protects
+# THIS file (a live major may not be broken or deleted), but contracts-lint now
+# lints only the NEWEST major per family — so once v2 exists this file is linted
+# only in a repo that has not yet adopted v2.
 #
 # Ops endpoints stay INTERNAL — never published as APIM products. The runtime
 # base URL a service mounts them at is passed to check-ops-conformance.zsh; the

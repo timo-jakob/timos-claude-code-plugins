@@ -1,5 +1,6 @@
 /*
- * The ops-api v1.1 health surface for Spring Boot (#1141, epic #964).
+ * The ops-api v2 health surface for Spring Boot (#1141 dependency health, #1330
+ * problem-details probe 503s; epic #964).
  *
  * Serves the three health endpoints of contracts/ops/v2/openapi.yaml -- /health,
  * /health/live and /health/ready -- with the exact bodies and status codes

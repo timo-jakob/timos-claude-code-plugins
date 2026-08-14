@@ -10,7 +10,11 @@
 # The change exists because the org API styleguide (#689) ships
 # `org-problem-json-errors` at ERROR severity, and contracts-lint globs
 # contracts/ops/vN into the same Spectral invocation as the business contract.
-# Under v1 that reddens every bootstrapped repo on a file it did not write.
+# Under v1 that reddens any repo whose .spectral.yaml extends that styleguide, on
+# a file it did not write. Repos still on the #692 starter ruleset
+# (extends: ["spectral:oas"]) do not carry the rule yet, so for them the collision
+# is pending rather than live — v2 fixes it before it lands, and independently
+# keeps the contract honest about what the payloads actually emit.
 #
 # RFC 9457's `status` is the HTTP status code as an INTEGER, which collides
 # head-on with the Health envelope's `status: "ok" | "down"` string. The health

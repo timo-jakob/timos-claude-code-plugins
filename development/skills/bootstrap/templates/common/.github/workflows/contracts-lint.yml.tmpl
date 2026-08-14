@@ -1,8 +1,9 @@
 # Contracts Lint — Spectral over the versioned OpenAPI contracts (issue #692).
 #
 # The API contract is a published, versioned artifact, so it must stay clean.
-# Spectral lints every contracts/vN/openapi.yaml against the ruleset at
-# .spectral.yaml (repo root). The ruleset CONTENT is replaceable (the org
+# Spectral lints the NEWEST major of each contract family (contracts/vN and
+# contracts/ops/vN) against the ruleset at .spectral.yaml (repo root) — see the
+# selection rationale in the run step (#1330). The ruleset CONTENT is replaceable (the org
 # styleguide epic #689 swaps it) — this workflow references it BY PATH, so a
 # ruleset change never touches this wiring.
 name: Contracts Lint

@@ -9,8 +9,9 @@
 #   tc-corner-health-200-while-down            #1237
 #   tc-corner-soft-down-readiness-stays-200    #1238
 #   tc-corner-hard-down-readiness-503          #1239
-#   tc-corner-seam-unwired-is-v1.0             #1240
+#   tc-corner-seam-unwired-is-v2.0             #1240
 #   tc-error-ops-surface-not-on-app-port       #1244
+#   tc-error-readiness-503-is-bare-problem-json #1347
 #
 # Plus two cases with no tc-* id, each a claim only a RUNNING service can prove:
 # the SIGTERM graceful drain (which the teardown deliberately cannot make), and

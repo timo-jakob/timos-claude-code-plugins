@@ -1,8 +1,13 @@
 #!/usr/bin/env bats
 #
-# Structural tests for the ops-api/v1 fragment + its CI discovery (#688).
+# Structural tests for the ops-api fragments + their CI discovery (#688, #1330).
 #
-# The fragment (templates/common/contracts/ops/v1/openapi.yaml) is a versioned
+# TWO majors now ship: v2 is the current one bootstrap installs, and v1 is frozen
+# beside it for repos still migrating (so the tests below split into the v2 shape,
+# the v1 freeze guard, and the render fence that decides which one a new repo
+# gets). $FRAG is v1 throughout, $V2 the current major.
+#
+# The fragment (templates/common/contracts/ops/vN/openapi.yaml) is a versioned
 # contract artifact linted by Spectral in target-repo CI; its zero-error lint is
 # verified against .spectral.yaml at authoring time and by the contracts-lint job
 # the checker's discovery must cover. The test toolchain has no spectral (and
@@ -128,6 +133,48 @@ setup() {
   [ "$output" = "false" ]
   run yq -r '.components.schemas | has("ReadinessProblem")' "$FRAG"
   [ "$output" = "false" ]
+}
+
+@test "v2: the SKILL.md render fence installs the NEWEST ops major, and only it" {
+  # The single line that decides which ops major a bootstrapped repo receives.
+  # SKILL.md §3i's prose states the rule ("Install v2, not v1"); nothing pinned
+  # the fence itself, so reverting it to v1 — or adding v1 beside v2 — shipped
+  # green while every new repo got a contract contradicting its own payloads.
+  #
+  # Scoped by CONTENT, not by line range: §3i holds 16 render.zsh fences, and the
+  # `common/`-prefixed form appears only in a render list (the prose spells the
+  # path without it), so this needle cannot match the surrounding explanation.
+  local skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
+  [ -f "$skill" ]
+
+  # The newest major is derived from the TEMPLATE TREE, so publishing a v3
+  # without repointing the fence reds here instead of drifting silently.
+  local newest=-1 d n
+  for d in "$COMMON"/contracts/ops/v[0-9]*/; do
+    n="${d%/}"; n="${n##*/v}"
+    case "$n" in '' | *[!0-9]*) continue ;; esac
+    # `if`, never `[ ] && …`: the glob sorts v1, v10, v2, so a trailing false
+    # test would be the loop's exit status and red the test under bats' set -e.
+    if [ "$n" -gt "$newest" ]; then newest="$n"; fi
+  done
+  [ "$newest" -ge 2 ]
+
+  run grep -c "common/contracts/ops/v[0-9]*/openapi\.yaml" "$skill"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]   # exactly one ops major is ever rendered
+
+  run grep -o "common/contracts/ops/v[0-9]*/openapi\.yaml" "$skill"
+  [ "$status" -eq 0 ]
+  [ "$output" = "common/contracts/ops/v$newest/openapi.yaml" ]
+}
+
+@test "v2: SKILL.md keeps the install-v2-not-v1 decision record" {
+  # The fence above is the mechanism; this is the reasoning behind it. Deleting
+  # the rationale is how the fence gets "cleaned up" back to v1 later.
+  local skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
+  run grep -c "Install v2, not v1" "$skill"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
 }
 
 @test "fragment declares /info, /health, /metrics" {
