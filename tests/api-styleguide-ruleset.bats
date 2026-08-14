@@ -343,6 +343,12 @@ CODIFIED_RULE_IDS=(
   [ "$output" = "true" ]
   run yq '.paths."/users/{userId}".get | has("x-sunset")' "$f"
   [ "$output" = "false" ]
+  # TWO operations sharing ONE id — assert the collapse, not just the result.
+  # `unique | length == 1` is equally true of a fixture with a single operation,
+  # so deleting the duplicate `delete:` block (the natural tidy) would leave this
+  # green while operation-operationId-unique lost its only offline coverage.
+  run yq '[.paths."/users/{userId}"[].operationId] | length' "$f"
+  [ "$output" -eq 2 ]
   run yq '[.paths."/users/{userId}"[].operationId] | unique | length' "$f"
   [ "$output" -eq 1 ]
   run yq '.paths."/getUser".post.responses."404".content | has("application/json")' "$f"
@@ -353,12 +359,29 @@ CODIFIED_RULE_IDS=(
   local f="$FIXTURES/nonconforming-error-bodies/openapi.yaml"
   # dual media types -> maxProperties; missing member -> the allOf; range key ->
   # the given's string half. Each clause is deletable without this fixture.
-  run yq '.paths."/orders".get.responses."404".content | keys | length' "$f"
-  [ "$output" -eq 2 ]
+  # Count AND membership together: two non-problem media types would also be
+  # length 2, but would fire the required-problem+json clause instead, leaving
+  # maxProperties un-isolated.
+  run yq '.paths."/orders".get.responses."404".content | keys | sort | join(",")' "$f"
+  [ "$output" = "application/json,application/problem+json" ]
+
+  # The schema must be REFERENCED by the 404, not merely present: repointing
+  # /invoices at the complete `Problem` schema would leave the isolated-schema
+  # assertion green while the RFC 9457 required-members clause lost its coverage.
+  # This fixture is NOT linted by styleguide-pin.yml (that lints only
+  # nonconforming + conforming), so the offline suite is the backstop.
   run yq '.components.schemas.IncompleteProblem.required | contains(["detail"])' "$f"
   [ "$output" = "false" ]
+  run yq '.paths."/invoices".get.responses."404".content."application/problem+json".schema."$ref"' "$f"
+  [ "$output" = "#/components/schemas/IncompleteProblem" ]
+
+  # The 4XX response must still be NON-conforming, not merely present: quietly
+  # fixing it to problem+json keeps `has("4XX")` true while the given's
+  # range-key half stops being exercised anywhere offline.
   run yq '.paths."/receipts".get.responses | has("4XX")' "$f"
   [ "$output" = "true" ]
+  run yq '.paths."/receipts".get.responses."4XX".content | keys | join(",")' "$f"
+  [ "$output" = "application/json" ]
 }
 
 @test "fixtures: the naming fixture isolates ONE resource-naming clause per path" {
@@ -513,6 +536,11 @@ CODIFIED_RULE_IDS=(
   # needle is equally satisfied by `./scripts/check-styleguide-pin.zsh || true`,
   # which neuters the gate inline without touching either knob. Selected by
   # name: the job also has an apt-get step, so an unfiltered `.run` emits both.
+  # Cardinality first: a renamed step selects nothing and a duplicated one
+  # selects two, and either way the equality below fails as a bare `[` with no
+  # explanation. This says which.
+  run yq -r '[.jobs.check.steps[] | select(.name == "Lint the non-conforming fixture THROUGH the pinned shim")] | length' "$wf"
+  [ "$output" = "1" ]
   run yq -r '.jobs.check.steps[] | select(.name == "Lint the non-conforming fixture THROUGH the pinned shim") | .run' "$wf"
   [ "$status" -eq 0 ]
   [ "$output" = "./scripts/check-styleguide-pin.zsh" ]

@@ -68,12 +68,17 @@ KNOWN_PIN_SITES = {
 }
 
 
-def discover_pin_sites() -> list[str]:
-    """Every repo-relative file quoting the real styleguide pin.
+def discover_pin_sites() -> list[tuple[str, str]]:
+    """Every repo-relative file quoting the real styleguide pin, with its text.
 
     Discovered rather than listed, so a new quoting site is covered the day it
     appears — the same reason the repo-wide sweep in
     tests/api-styleguide-ruleset.bats walks the tree instead of naming files.
+
+    Returns (path, text) pairs so callers never re-read: a strict second
+    read_text() would raise on a file this walk deliberately tolerated with
+    errors="ignore", turning a diagnostic into a traceback — and it walks the
+    whole tree, which is not worth doing twice per invocation.
     """
     sites = []
     for path in REPO_ROOT.rglob("*"):
@@ -93,13 +98,13 @@ def discover_pin_sites() -> list[str]:
         except OSError:
             continue
         if PIN_RE.search(text):
-            sites.append(str(rel))
+            sites.append((str(rel), text))
     # IDENTITY, not merely non-empty. A non-empty canary still passes when the
     # walk shrinks from three sites to one — a new SKIP_DIRS entry, a swallowed
     # read error, a rename under a skipped directory — and the coverage check's
     # strength is proportional to what the walk actually finds. Discovery stays
     # open-ended (a fourth site is covered for free); this only pins the floor.
-    missing = KNOWN_PIN_SITES - set(sites)
+    missing = KNOWN_PIN_SITES - {site for site, _ in sites}
     if missing:
         sys.exit(
             f"pin-site discovery is broken — known sites not found: {sorted(missing)} "
@@ -132,7 +137,9 @@ def check_manager() -> None:
     # that silently stops matching produces no PR, and "no PR" is not an error
     # Renovate reports anywhere.
     shim = (REPO_ROOT / SHIM_PATH).read_text()
-    patterns = manager["matchStrings"]
+    patterns = manager.get("matchStrings")
+    if patterns is None:
+        sys.exit("manager has no matchStrings — it extracts nothing")
     # An empty list makes the loop below a no-op and the whole helper print "ok"
     # while the manager extracts nothing — the same empty-producer vacuity the
     # bats sweep and the discovery canary above guard against.
@@ -146,14 +153,37 @@ def check_manager() -> None:
         if not re.fullmatch(r"styleguide-v\d+\.\d+\.\d+", current):
             sys.exit(f"matchStrings[{i}] currentValue is not an exact tag: {current}")
 
+    # Walked ONCE; both checks below consume the same result.
+    discovered = discover_pin_sites()
+
+    # COVERAGE FIRST, then extraction. A site that no managerFilePatterns entry
+    # covers is a coverage defect, and diagnosing it as a matchStrings failure —
+    # which the reverse order does, because an uncovered file also fails to
+    # extract — points the maintainer at the wrong line.
+    #
+    # The site list is DISCOVERED, not hardcoded: the same reasoning that made
+    # the repo-wide sweep repo-wide. A closed list here would leave a fourth
+    # quoting site covered by that sweep (so the bump PR is born red) but
+    # invisible to this check, which exists precisely to prevent that.
+    patterns_fp = manager["managerFilePatterns"]
+    uncovered = [
+        site
+        for site, _ in discovered
+        if not any(re.search(fp.strip("/"), site) for fp in patterns_fp)
+    ]
+    if uncovered:
+        sys.exit(
+            "these files quote the pin but no managerFilePatterns entry covers them, "
+            f"so a Renovate bump would leave them behind: {uncovered}"
+        )
+
     # COVERED is not EXTRACTED. managerFilePatterns listing a file only tells
     # Renovate to open it; if no matchStrings entry matches its contents, that
     # file is silently skipped — Renovate reports nothing, the bump rewrites the
     # others, and the repo-wide sweep reds the PR on arrival. That born-red bump
     # is exactly what the three-site manager exists to prevent, so every
     # discovered site must yield a match, not just the shim.
-    for site in discover_pin_sites():
-        text = (REPO_ROOT / site).read_text()
+    for site, text in discovered:
         if not any(re.search(js_to_py(p), text) for p in patterns):
             sys.exit(
                 f"{site} quotes the pin and is covered by managerFilePatterns, "
@@ -169,7 +199,10 @@ def check_manager() -> None:
     if manager.get("depNameTemplate") != DEP:
         sys.exit(f"unexpected depNameTemplate: {manager.get('depNameTemplate')}")
 
-    versioning = js_to_py(manager["versioningTemplate"].removeprefix("regex:"))
+    versioning_tpl = manager.get("versioningTemplate")
+    if not versioning_tpl:
+        sys.exit("manager has no versioningTemplate — Renovate cannot order the tags")
+    versioning = js_to_py(versioning_tpl.removeprefix("regex:"))
     parsed = re.match(versioning, "styleguide-v1.2.10")
     if not parsed:
         sys.exit("versioning regex does not parse a styleguide tag")
@@ -180,30 +213,14 @@ def check_manager() -> None:
     if re.match(versioning, "docs-latest"):
         sys.exit("versioning regex does not exclude non-styleguide tags")
 
-    # The pin must be bumped everywhere it is quoted, or the repo-wide sweep in
-    # tests/api-styleguide-ruleset.bats reds every bump PR on arrival.
-    #
-    # The site list is DISCOVERED, not hardcoded — the same reasoning that made
-    # that sweep repo-wide. A closed pair here would leave a fourth quoting site
-    # covered by the sweep (so the bump PR is born red) but invisible to this
-    # check, which exists precisely to prevent that.
-    uncovered = [
-        site
-        for site in discover_pin_sites()
-        if not any(re.search(fp.strip("/"), site) for fp in manager["managerFilePatterns"])
-    ]
-    if uncovered:
-        sys.exit(
-            "these files quote the pin but no managerFilePatterns entry covers them, "
-            f"so a Renovate bump would leave them behind: {uncovered}"
-        )
-
     print("ok")
 
 
 def check_grouping() -> None:
     cfg = load_config()
-    rules = cfg["packageRules"]
+    rules = cfg.get("packageRules")
+    if rules is None:
+        sys.exit("renovate.json has no packageRules — nothing governs the pin's grouping")
     # Derive the dep from the manager rather than the constant, so the two halves
     # of renovate.json cannot drift apart with both checks green.
     dep = styleguide_manager(cfg).get("depNameTemplate", DEP)

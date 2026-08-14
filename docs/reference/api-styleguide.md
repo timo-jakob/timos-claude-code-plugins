@@ -195,8 +195,10 @@ The collision survives in **two** shapes. Whichever you are in, the two
 prohibitions are the same:
 
 - **Do not** edit `contracts/ops/v1/openapi.yaml` to make the lint pass. It is an
-  org-standard fragment installed verbatim, a frozen major that `contracts-semver`
-  forbids editing in place, and its shape is pinned by `check-ops-conformance.zsh`.
+  org-standard fragment installed verbatim, and a frozen major that
+  `contracts-semver` forbids editing in place. `check-ops-conformance.zsh` will
+  not vindicate an edited v1 either — since #1330 it asserts the **v2** probe-503
+  shape and reports a v1 `{"status":"down"}` body as an *unmigrated payload*.
 - **Do not** add an `overrides:` exclusion. Scoping is fixed by making the
   contract correct, never by silencing a rule.
 

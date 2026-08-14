@@ -1733,6 +1733,19 @@ The installed set:
   re-deciding (#1358): a stale pin is precisely the drift a re-bootstrap ought to
   surface, and nothing downstream bumps it today (see the api-styleguide how-to),
   so an unstamped shim makes a downstream pin effectively permanent.
+
+  **On a RE-bootstrap, an on-disk #692 starter is overwrite-default.** Recognise
+  it by shape: `extends: ["spectral:oas"]`, its own `rules:` block, and no
+  jsDelivr pin. That file is **retired-template-superseded**, not a user
+  customization — the shim template's own header says the starter is retired —
+  so recommend **overwrite**, pointing at the api-styleguide how-to. Without this
+  rule the idempotency reviewer's nearest class is "user customization → skip"
+  (the on-disk file carries more than the one-line shim), so the replacement the
+  plugin's compatibility note promises — *"a re-run replaces a local ruleset with
+  a remote pin"* — would silently never happen, leaving the repo on last year's
+  enforcement while the run reports the toolchain current. Fall back to the
+  generic diff-and-ask only when the file is **neither** the starter nor the
+  shim, i.e. a genuinely hand-customized ruleset.
 - `.github/workflows/contracts-lint.yml` — Spectral lints `contracts/` in CI,
   referencing `.spectral.yaml` **by path** so a ruleset swap never touches the
   wiring. Its check is **path-conditional** (`paths: contracts/**`) — like the
@@ -3728,7 +3741,19 @@ actually rendered in Step 3 — §3a through §3l):
 | `.github/workflows/scorecard.yml` | `public/.github/workflows/scorecard.yml.tmpl` |
 | `.github/workflows/release.yml` | `languages/java/.github/workflows/release.yml.tmpl` (only when `java` is detected) |
 | `.github/workflows/template-drift-watch.yml` | `common/.github/workflows/template-drift-watch.yml.tmpl` |
+| `.github/workflows/contracts-lint.yml` | `common/.github/workflows/contracts-lint.yml.tmpl` (§3i) |
+| `.github/workflows/contracts-semver.yml` | `common/.github/workflows/contracts-semver.yml.tmpl` (§3i) |
+| `.github/workflows/spec-publish.yml` | `common/.github/workflows/spec-publish.yml.tmpl` (§3i) |
+| `.github/workflows/ops-conformance.yml` | `common/.github/workflows/ops-conformance.yml.tmpl` (§3i, root-Dockerfile-gated) |
 | `trivy.yaml` | `common/trivy.yaml.tmpl` |
+
+The four §3i rows are what makes the **refresh** path both how-tos describe real:
+`docs/how-to/adopt-the-ops-surface.md` step 0 and the api-styleguide how-to each
+tell a reader to refresh `contracts-lint.yml` via `/development:bootstrap` and say
+it re-stamps the provenance marker. Unstamped, the drift detector has no recorded
+hash to compare, so the refresh would surface as an unknown-provenance prompt every
+run instead of a drift finding — and the placeholder trap those pages warn about
+(`{{DEFAULT_BRANCH}}`) is exactly what the render path exists to avoid.
 
 The `*-noop.yml` companions and `release.yml` are tracked, rendered files just
 like their main counterparts — each renders from its **own** template (the
