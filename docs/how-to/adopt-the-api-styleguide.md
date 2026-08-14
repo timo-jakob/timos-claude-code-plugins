@@ -3,17 +3,13 @@
 Pin the org [API styleguide](../reference/api-styleguide.md) ruleset in your
 repo, and keep the pin current when Renovate proposes a bump.
 
-**Check which world you are in first.** Bootstrap currently writes the
-[#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
-starter ruleset, not the pinned shim, and the `styleguide-v1.0.0` tag the shim
-below points at is cut by hand after the ruleset merges. So:
-
-- **Before that tag exists**, the shim will not resolve and `contracts-lint`
-  will fail loudly. Nothing to adopt yet — wait.
-- **From `styleguide-v1.0.0` onward**, bootstrap ships the pinned shim as the
-  only `.spectral.yaml` it writes, so a freshly bootstrapped repo already has
-  it. This page is then for a repo bootstrapped before the styleguide existed,
-  and for the day a bump PR shows up.
+**Bootstrap ships the pinned shim as the only `.spectral.yaml` it writes**
+([#689](https://github.com/timo-jakob/timos-claude-code-plugins/issues/689)), so
+a freshly bootstrapped repo already has it and there is nothing to do here. This
+page is for a repo bootstrapped **before** the shim existed — it still carries
+the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
+starter ruleset and enforces none of the org rules — and for the day a bump
+lands.
 
 ## Pin the ruleset
 
@@ -31,20 +27,24 @@ rather than as a file you have to hand-merge.
 Nothing else changes: `contracts-lint` references `.spectral.yaml` **by path**,
 so swapping the content never touches the pipeline.
 
-Then run the same command CI runs, and fix what it finds — **both** globs, which
-is what the shipped job lints:
+Then run what CI runs, and fix what it finds. Since
+[#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330) the
+shipped job lints the **newest major of each family** — not every major — so name
+those two files explicitly rather than globbing:
 
 ```sh
 npx --yes @stoplight/spectral-cli@6 lint \
   --ruleset .spectral.yaml \
   --fail-severity error \
-  contracts/v[0-9]*/openapi.yaml contracts/ops/v[0-9]*/openapi.yaml
+  contracts/v2/openapi.yaml contracts/ops/v2/openapi.yaml   # your newest of each
 ```
 
-Use those globs verbatim. Dropping the second one is the easy mistake: you get a
-clean local run and then a red PR from a spec you did not write. And a run that
-matched **no files** is not a pass — spectral exits 0 having linted nothing, so
-check it actually named your specs.
+**Both families, and only the newest of each.** Dropping the ops one is the easy
+mistake: you get a clean local run and then a red PR from a spec you did not
+write. Adding a *frozen older* major is the opposite mistake — it reports errors
+CI will never show you, on a file `contracts-semver` forbids you to edit. And a
+run that matched **no files** is not a pass: spectral exits 0 having linted
+nothing, so check it actually named your specs.
 
 Expect a first run to be noisy on an API that predates the styleguide. The
 common findings, and what they mean, are in the
@@ -72,23 +72,32 @@ The other half of that bargain is that
 [tags are immutable](../reference/api-styleguide.md#tags-are-immutable): a
 published tag is never re-pointed, so a pin means the same bytes forever.
 
-## Upgrade when Renovate proposes a bump
+## Upgrade the pin — by hand, today
 
-Once your repo carries the bootstrap `renovate.json`, a Renovate
-`customManagers` entry watches the pinned version and opens a bump PR when a new
-styleguide version is tagged.
+**No bump automation ships to your repo.** Say that plainly, because the opposite
+assumption is the expensive one: a pin nobody bumps is a repo enforcing last
+year's conventions while its build stays green.
 
-**Two ways you might not get one**, both of which look identical to "no new
-version was published" — the same absence-of-signal trap the immutability rule
-is written against:
+The Renovate `customManager` that watches this pin lives in the **plugin repo's
+own** `renovate.json` and moves the pin inside the shipped template — it never
+runs in your repo. Nor could it be shipped as-is: bootstrap installs
+`renovate.json` only for Claude-Code-plugin repos (everything else gets
+Dependabot, which has no equivalent to a regex custom manager), and a plugin repo
+has no OpenAPI surface and therefore no `.spectral.yaml` at all. Downstream bump
+automation is tracked as [#1359](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1359).
 
-- the customManager ships with the shim, so a repo that pinned by hand and never
-  re-bootstrapped has no manager;
-- repos on Dependabot rather than Renovate have no equivalent.
+So: watch the [tags](https://github.com/timo-jakob/timos-claude-code-plugins/tags)
+and edit the version in `.spectral.yaml` yourself. **Do not read silence as
+currency** — it is the same absence-of-signal trap the immutability rule is
+written against.
 
-In either case, bump by hand: watch the
-[tags](https://github.com/timo-jakob/timos-claude-code-plugins/tags) and edit the
-version in `.spectral.yaml`. Do not read silence as currency.
+When a bump does land, review it as a rules change: read the styleguide's
+[versioning policy](../reference/api-styleguide.md#versioning-policy) for what
+the MAJOR/MINOR/PATCH step tells you about whether a previously-green spec can
+go red.
+
+If the bump PR's lint cannot resolve the ruleset at all, see
+[When the pin cannot be fetched](#when-the-pin-cannot-be-fetched) below.
 
 When a bump PR does arrive, read it by the version part that moved —
 the [versioning policy](../reference/api-styleguide.md#versioning-policy) is

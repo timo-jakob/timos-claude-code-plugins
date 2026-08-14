@@ -296,9 +296,11 @@ model, and the children of #684 that deliver each piece:
   drift is structurally impossible, not policed) and, optionally, to an
   **APIM developer portal** with rendered docs (the governance channel, #706).
   A repo without an `apim/` directory gets the full drift guarantee from the npm
-  channel alone. Bootstrap installs the layout, the publish workflow, and a
-  replaceable Spectral starter ruleset when it detects an OpenAPI surface (#692);
-  the org styleguide epic (#689) swaps the ruleset content only.
+  channel alone. Bootstrap installs the layout, the publish workflow, and the
+  **exact-pin `.spectral.yaml` shim** when it detects an OpenAPI surface (#692
+  seeded a replaceable local starter; #689 retired it — the shim carries no rules
+  of its own, so enforcement lives in one published artifact rather than N
+  drifting copies).
 - **The org styleguide ruleset is a PUBLISHED ARTIFACT, versioned on its own
   line (#689).** `styleguide/spectral/ruleset.yaml` lives at the repo root, not
   under `development/skills/bootstrap/templates/`, because it is *fetched by* a

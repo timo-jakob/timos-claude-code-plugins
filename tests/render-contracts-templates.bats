@@ -85,11 +85,20 @@ assert_valid_yaml() {
   # a long unbroken URL.
   render_contracts
   local rs="$OUT/common/.spectral.yaml"
+  local src="$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
   assert_valid_yaml "$rs"
   [ "$(yq -r '.rules // "none"' "$rs")" = "none" ]
   [ "$(yq -r '.extends | length' "$rs")" = "1" ]
+  # BYTE-IDENTICAL to the source template's pin, not merely regex-shaped. That IS
+  # the render contract ("the URL survives unmangled"), and it needs no pattern —
+  # a permissive `[^ ]+` between /gh/ and @styleguide-v would accept a truncated
+  # owner/repo, shipping a permanently-404 pin whose failure surfaces only in
+  # consumers.
+  [ "$(yq -r '.extends[0]' "$rs")" = "$(yq -r '.extends[0]' "$src")" ]
+  # …and the source itself is a real exact pin (asserted in full at
+  # tests/api-styleguide-ruleset.bats, so this only guards the render seam).
   run yq -r '.extends[0]' "$rs"
-  matches "$output" '^https://cdn\.jsdelivr\.net/gh/[^ ]+@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/styleguide/spectral/ruleset\.yaml$'
+  matches "$output" '^https://cdn\.jsdelivr\.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/styleguide/spectral/ruleset\.yaml$'
 }
 
 # Executable Spectral check when the CLI is present (it is NOT in the plugin's
@@ -158,11 +167,11 @@ EOF
   local rs="$OUT/common/.spectral.yaml"
   assert_valid_yaml "$rs"
 
+  # Anchored on the full semver shape rather than a `contains '@styleguide-v'`
+  # plus negative needles: `@styleguide-vmain` satisfies that pairing (the
+  # literal '@main' is not a substring of it) while pinning no version at all.
   run yq -r '.extends[0]' "$rs"
-  contains "$output" '@styleguide-v'
-  lacks "$output" '@latest'
-  lacks "$output" '@main'
-  lacks "$output" '@HEAD'
+  matches "$output" '@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/'
 
   # Replaceable-by-path: the workflow names the file, never the URL — so bumping
   # the pin is a one-line edit here and no pipeline change anywhere.

@@ -1724,8 +1724,15 @@ The installed set:
 - `contracts/v1/openapi.yaml` — the **per-major layout** SEED (one directory per
   live major; old majors frozen by convention here, mechanically with #693). A
   **scaffold**, not a drift-tracked artifact — never provenance-stamped.
-- `.spectral.yaml` — a **replaceable** starter ruleset; the org styleguide epic
-  (#689) later swaps its *content* only. Scaffold — never stamped.
+- `.spectral.yaml` — the **exact-pin shim** (#689): a single `extends` of the
+  published org styleguide ruleset at an immutable `styleguide-vX.Y.Z` tag. It
+  carries **no rules of its own** and is **never edited locally** — the whole
+  point is one org artifact instead of N drifting copies, so enforcement changes
+  only when the pin moves. The #692 starter it replaced is retired and no longer
+  shipped. Still classified **scaffold — never stamped**, which is now worth
+  re-deciding (#1358): a stale pin is precisely the drift a re-bootstrap ought to
+  surface, and nothing downstream bumps it today (see the api-styleguide how-to),
+  so an unstamped shim makes a downstream pin effectively permanent.
 - `.github/workflows/contracts-lint.yml` — Spectral lints `contracts/` in CI,
   referencing `.spectral.yaml` **by path** so a ruleset swap never touches the
   wiring. Its check is **path-conditional** (`paths: contracts/**`) — like the
@@ -1758,9 +1765,10 @@ The installed set:
   versioning, the semver-triangle rules, and the **deprecation lifecycle** (spec
   signal `deprecated: true` + `x-sunset`; runtime `Deprecation` (RFC 9745) +
   `Sunset` (RFC 8594) header advice; a **minimum-deprecation-window** knob,
-  default 6 months). The `.spectral.yaml` ruleset also gains a
-  `deprecation-has-sunset` rule (#695) enforcing that a `deprecated: true`
-  element carries `x-sunset`. Documentation/policy — never provenance-stamped.
+  default 6 months). The deprecation gate itself is enforced by the **pinned org
+  ruleset**'s `org-deprecated-operation-has-sunset` rule (#695 via #689), scoped
+  to **operations only** — nothing is added to `.spectral.yaml`, which carries no
+  rules of its own. Documentation/policy — never provenance-stamped.
 - `contracts/ops/v2/openapi.yaml` (#688, v2 per #1330) — the **org-standard ops
   surface**
   (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s

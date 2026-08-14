@@ -211,28 +211,62 @@ CODIFIED_RULE_IDS=(
   # the bootstrap shim, the only copy downstream repos actually consume. A closed
   # list would have silently stopped covering the file that matters most, so the
   # sweep enumerates tracked files instead and a fourth site is covered for free.
-  local f url first="" first_file="" n=0
-  while IFS= read -r f; do
-    [ -f "$f" ] || continue
-    url="$(grep -oh 'https://cdn\.jsdelivr\.net/gh/[^ "]*ruleset\.yaml' "$f" 2>/dev/null | head -1 || true)"
-    [ -n "$url" ] || continue
-    n=$((n + 1))
-    if [ -z "$first" ]; then
-      first="$url"
-      first_file="$f"
-    elif [ "$url" != "$first" ]; then
-      printf 'pin mismatch:\n  %s: %s\n  %s: %s\n' "$first_file" "$first" "$f" "$url" >&2
-      return 1
-    fi
-  done < <(cd "$REPO_ROOT" && git ls-files)
+  # `find`, NOT `git ls-files`. Two reasons, both learned the hard way:
+  #   - git ls-files skips UNTRACKED files, so a new doc quoting a stale pin
+  #     passes locally and only reds in CI after `git add` (the #1189 lesson);
+  #   - the Docker lane bind-mounts the repo, and in a git WORKTREE `.git` is a
+  #     FILE pointing at a host path absent from the container, so git fatals and
+  #     the sweep would inspect nothing while reporting success (the #1330 lesson).
+  # Keyed on the REAL owner/repo. Test fixtures that deliberately carry a wrong
+  # pin (tests/check-styleguide-pin.bats exercises a floating tag, a superseded
+  # version and a two-pin shim) use gh/example/styleguide-fixture instead, so
+  # they cannot collide with this sweep — and, unlike a file-exclusion list,
+  # that distinction does not rot when a new fixture file appears.
+  local OWNER_REPO='timo-jakob/timos-claude-code-plugins'
+  local list="$BATS_TEST_TMPDIR/pin-sites.txt"
+  local hits="$BATS_TEST_TMPDIR/pin-urls.txt"
 
-  # Canary: the sweep must actually find the known sites. A broken glob or a
-  # renamed path would otherwise make this pass by inspecting nothing.
-  [ "$n" -ge 3 ]
-  # And the shipped shim must be one of them — it is the copy that ships.
+  # Materialised through temp files rather than nested `< <(…)` process
+  # substitutions: the nested form failed only under run-gate.zsh's parallel
+  # runner, with an unattributable "line 0" error, while passing standalone.
+  # EVERY occurrence per file is collected (grep without head), because a
+  # bump/upgrade guide is the natural home for a stale "before" snippet that a
+  # first-match-only sweep would never see.
+  find "$REPO_ROOT" -type f \
+    -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/site/*' > "$list"
+  local files
+  files="$(wc -l < "$list" | tr -d ' ')"
+
+  : > "$hits"
+  local f
+  while IFS= read -r f; do
+    grep -oh "https://cdn\.jsdelivr\.net/gh/$OWNER_REPO@[^ \"]*ruleset\.yaml" "$f" 2>/dev/null >> "$hits" || true
+  done < "$list"
+
+  local n distinct
+  n="$(wc -l < "$hits" | tr -d ' ')"
+  distinct="$(sort -u "$hits" | wc -l | tr -d ' ')"
+  if [ "$distinct" -gt 1 ]; then
+    printf 'pin mismatch — %s distinct pins in the tree:\n' "$distinct" >&2
+    sort -u "$hits" >&2
+    printf 'quoted by:\n' >&2
+    grep -rl "cdn\.jsdelivr\.net/gh/$OWNER_REPO@" "$REPO_ROOT" 2>/dev/null | grep -v '/\.git/' >&2 || true
+    return 1
+  fi
+  local first
+  first="$(sort -u "$hits" | head -1)"
+
+  # Canaries. Without these the sweep passes by inspecting nothing.
+  [ "$files" -gt 100 ]   # the walk actually walked
+  [ "$n" -ge 3 ]         # and found the known pin sites
+
+  # Bind the canary to IDENTITY, not just a count three unrelated files could
+  # satisfy: the shipped shim is the copy downstream repos consume, so it must be
+  # one of the files swept.
   run grep -c 'https://cdn\.jsdelivr\.net/gh/.*ruleset\.yaml' \
     "$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
   [ "$output" -ge 1 ]
+  [ "$first" = "$(yq -r '.extends[0]' "$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml")" ]
 }
 
 @test "fixtures: the whole fixture set exists" {
@@ -392,11 +426,31 @@ CODIFIED_RULE_IDS=(
   run cat "$script"
   contains "$output" '--ruleset "$SHIM"'
 
+  # Read the workflow STRUCTURALLY. A whole-file `contains` is satisfied by the
+  # workflow's own `paths:` filter, which quotes every one of these strings — so
+  # the `run:` step could be deleted, or the pull_request trigger removed, and a
+  # grep-based test would stay green while the gate ran nothing.
   local wf="$REPO_ROOT/.github/workflows/styleguide-pin.yml"
   [ -f "$wf" ]
-  run cat "$wf"
-  contains "$output" 'check-styleguide-pin.zsh'
-  # Triggered by both files that can break the pin.
-  contains "$output" 'templates/common/.spectral.yaml'
+
+  run yq -r '.jobs.check.steps[] | select(.run != null) | .run' "$wf"
+  [ "$status" -eq 0 ]
+  contains "$output" 'scripts/check-styleguide-pin.zsh'
+
+  # The PR half specifically — a post-merge-only gate is not a gate.
+  run yq -r '.on.pull_request.paths[]' "$wf"
+  [ "$status" -eq 0 ]
+  contains "$output" 'development/skills/bootstrap/templates/common/.spectral.yaml'
   contains "$output" 'styleguide/spectral/ruleset.yaml'
+
+  # …and it cannot be neutered into an advisory.
+  run yq -r '[.jobs.check.steps[].continue-on-error] | map(select(. == true)) | length' "$wf"
+  [ "$output" = "0" ]
+
+  # Pin rot has causes outside this repo (a deleted tag, a CDN regression), so a
+  # path-triggered-only gate would never see them.
+  run yq -r '.on.schedule[0].cron' "$wf"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [ "$output" != "null" ]
 }

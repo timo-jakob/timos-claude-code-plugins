@@ -26,6 +26,16 @@ on:
     paths:
       - "development/skills/bootstrap/templates/common/.spectral.yaml"
       - "styleguide/spectral/ruleset.yaml"
+      - "tests/fixtures/api-styleguide/**"
+      - "scripts/check-styleguide-pin.zsh"
+      - ".github/workflows/styleguide-pin.yml"
+  # Pin rot is not caused only by OUR commits. A deleted tag, a jsDelivr
+  # regression or a cache problem can break the pin while none of the paths above
+  # change — and then downstream repos discover it first, which is the exact
+  # inversion this job exists to prevent. A weekly run bounds that window.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read

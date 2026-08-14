@@ -21,8 +21,12 @@
     },
     {
       "customType": "regex",
-      "description": "Bump the org API styleguide pin (#689) in the shipped Spectral shim. The shim is a plain .spectral.yaml with no .tmpl suffix, so the actions manager above (which filters /\\.tmpl$/) cannot see it — hence its own managerFilePatterns. The pin is the immutable tag styleguide-vX.Y.Z on this same repo; the regex versioning below both orders those tags and filters out unrelated ones (e.g. docs-latest), and keeping the whole tag as currentValue means Renovate rewrites the URL segment in place.",
-      "managerFilePatterns": ["/^development/skills/bootstrap/templates/common/\\.spectral\\.yaml$/"],
+      "description": "Bump the org API styleguide pin (#689) everywhere it is quoted. The shim is a plain .spectral.yaml with no .tmpl suffix, so the actions manager above (which filters /\\.tmpl$/) cannot see it — hence its own managerFilePatterns. ALL THREE quoting sites are listed deliberately: tests/api-styleguide-ruleset.bats enforces repo-wide that every file quoting a pin quotes the SAME one, so a manager that rewrote only the shim would open a bump PR that is born red and needs two hand-edits to go green — the opposite of the reviewable one-click bump this exists to produce. The pin is the immutable tag styleguide-vX.Y.Z on this same repo; the regex versioning below both orders those tags and filters out unrelated ones (e.g. docs-latest), and keeping the whole tag as currentValue means Renovate rewrites the URL segment in place.",
+      "managerFilePatterns": [
+        "/^development/skills/bootstrap/templates/common/\\.spectral\\.yaml$/",
+        "/^styleguide/spectral/ruleset\\.yaml$/",
+        "/^docs/how-to/adopt-the-api-styleguide\\.md$/"
+      ],
       "matchStrings": [
         "@(?<currentValue>styleguide-v\\d+\\.\\d+\\.\\d+)/styleguide/spectral/ruleset\\.yaml"
       ],

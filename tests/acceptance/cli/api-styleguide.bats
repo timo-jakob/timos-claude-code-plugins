@@ -23,10 +23,17 @@
 #   tc-error-range-status-key            the given's "4XX"/"5XX" half
 #   tc-error-naming-clauses-isolated     each org-resource-naming pattern alone
 #
-# The three through-the-pin cases (#1304-#1306) are deliberately absent: they
-# assert the PUBLISHED artifact resolving over jsDelivr, which cannot pass
-# before the styleguide-v1.0.0 tag exists. They land with PR-B, per the two-PR
-# ordering in #689 decision 5.
+# The three through-the-pin cases (#1304-#1306) are NOT in this lane. PR-B
+# realised them as scripts/check-styleguide-pin.zsh, run by
+# .github/workflows/styleguide-pin.yml, and unit-tested in
+# tests/check-styleguide-pin.bats — that is where to look for their coverage.
+#
+# Why they moved: the property those ids name is "a dead pin FAILS", and this
+# lane is skipped whenever spectral cannot be fetched. A case that skips on a
+# network problem cannot assert a network-dependent failure — it would be absent
+# exactly when it mattered. The checker instead asserts POSITIVELY that all eight
+# rule ids fire through the pin, so a pin that 404s (or resolves but loads no
+# rules) exits non-zero rather than reporting a clean run.
 #
 # NOT part of the default gate — `bats tests` does not recurse — see
 # ../README.md. The always-on structural half is tests/api-styleguide-ruleset.bats.
