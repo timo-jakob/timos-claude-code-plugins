@@ -2,18 +2,23 @@
 
 The org API conventions, and the Spectral rules that enforce them.
 
-**Not yet in force.** From `styleguide-v1.0.0` onward, bootstrap ships a
-`.spectral.yaml` pinning this ruleset, and every bootstrapped repo's
-`contracts-lint` job runs it. Until that tag is cut and the shim lands, repos
-still run the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
-starter ruleset and nothing here is enforced anywhere.
+**In force.** Bootstrap ships a `.spectral.yaml` pinning this ruleset at an exact
+`styleguide-vX.Y.Z` tag, and every bootstrapped repo's `contracts-lint` job runs
+it. A repo bootstrapped **before** the pin shim ([#689](https://github.com/timo-jakob/timos-claude-code-plugins/issues/689))
+still carries the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
+starter ruleset: of the eight ids below it enforces only the two `operationId`
+rules, and none of the org-specific ones, until it adopts the pin — see
+[Adopt the API styleguide](../how-to/adopt-the-api-styleguide.md).
 
-When it is in force, `contracts-lint` runs it against **both** the per-major
-business contract `contracts/vN/openapi.yaml` **and** the org ops surface
-`contracts/ops/vN/openapi.yaml` ([#688](https://github.com/timo-jakob/timos-claude-code-plugins/issues/688))
-— the shipped job globs both. That second glob is easy to forget and it is the
-whole reason the [ops surface](#the-ops-surface-and-error-bodies) needs its own
-section below.
+`contracts-lint` runs it against **both** contract families — the business
+contract `contracts/vN/openapi.yaml` **and** the org ops surface
+`contracts/ops/vN/openapi.yaml` ([#688](https://github.com/timo-jakob/timos-claude-code-plugins/issues/688)).
+Since [#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330)
+it lints only the **newest major of each family**: a frozen older major is
+immutable by contract, so linting it against a ruleset cut after it froze could
+only produce red nobody is permitted to fix. That second family is easy to forget
+and it is the whole reason the [ops surface](#the-ops-surface-and-error-bodies)
+needs its own section below.
 
 Each **org-owned** rule (`org-*`) links from its own `documentationUrl` to its
 section here, so a failing lint line in CI points a reader straight at the
@@ -66,7 +71,11 @@ operation ships as an undocumented one.
 errors. The two `operationId` rules were already errors and are carried over
 unchanged. Worth being precise about, because the
 [versioning policy](#versioning-policy) keys MAJOR off "a new or stricter
-error-severity rule": this ruleset promotes three, not five.
+error-severity rule": of these **five codified** ids the ruleset promotes three,
+not all five. Counting the re-scoped
+[`org-deprecated-operation-has-sunset`](#deprecation) below, the whole-ruleset
+total is **four** promotions plus two newly-minted errors — the breakdown the
+plugin's compatibility note quotes.
 
 ## Deprecation
 
@@ -169,25 +178,39 @@ that use `default` for a success shape. If your only error declaration is a
 
 ### The ops surface and error bodies
 
-The org ops surface ships `503` responses on `/health/live` and `/health/ready`
-that return `application/json` with a `{status: "ok" | "down"}` body — a
-different field that happens to share RFC 9457's `status` name. Those two
-responses **do not satisfy this rule**, and `contracts-lint` lints the ops
-fragment with the same ruleset.
+**Resolved — ops v2 clears this rule.** `contracts-lint` lints the ops fragment
+with the same ruleset, and **ops v1** shipped `503` responses on `/health/live`
+and `/health/ready` returning `application/json` with a `{status: "ok" | "down"}`
+body — a different field that happens to share RFC 9457's `status` name. Those two
+responses do **not** satisfy this rule.
 
-This is a known, tracked collision, not something for an adopter to solve:
+[#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330)
+fixed it with a new ops major whose probe `503`s return
+`application/problem+json` with an integer `status`, carrying the health detail
+in a `components` extension member. Bootstrap installs **ops v2**, and
+`contracts-lint` lints only the newest major per family, so a freshly bootstrapped
+repo never sees this rule fire on a fragment it did not write.
 
-- **Do not** edit `contracts/ops/vN/openapi.yaml` in your repo to make the lint
-  pass. It is an org-standard fragment installed verbatim, its shape is pinned
-  by `check-ops-conformance.zsh`, and editing it breaks ops conformance.
+The collision survives in **two** shapes. Whichever you are in, the two
+prohibitions are the same:
+
+- **Do not** edit `contracts/ops/v1/openapi.yaml` to make the lint pass. It is an
+  org-standard fragment installed verbatim, and a frozen major that
+  `contracts-semver` forbids editing in place. `check-ops-conformance.zsh` will
+  not vindicate an edited v1 either — since #1330 it asserts the **v2** probe-503
+  shape and reports a v1 `{"status":"down"}` body as an *unmigrated payload*.
 - **Do not** add an `overrides:` exclusion. Scoping is fixed by making the
   contract correct, never by silencing a rule.
-- The resolution is a **new ops major**
-  ([#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330))
-  whose probe `503`s return `application/problem+json`, carrying the health
-  detail as RFC 9457 extension members. It is a hard prerequisite of the PR that
-  pins this ruleset into bootstrap, so no bootstrapped repo ever sees this rule
-  fire on a fragment it did not write.
+
+**Shape 1 — your newest ops major is still v1.** Migrate to ops v2; the procedure
+is in [Adopt the ops surface](../how-to/adopt-the-ops-surface.md#migrate-an-existing-repo-to-ops-v2).
+
+**Shape 2 — you already have ops v2, but your `contracts-lint.yml` predates
+[#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330)**, so
+it lints *every* major and v1 still reddens. Migrating again is a no-op here — the
+fix is the **workflow**, not any spec. Check with
+`grep -q newest_major .github/workflows/contracts-lint.yml` and refresh it per
+[the ops how-to's step 0](../how-to/adopt-the-ops-surface.md#migrate-an-existing-repo-to-ops-v2).
 
 ## Versioning policy
 

@@ -83,6 +83,29 @@ typeset -a tracked=(
   ".github/workflows/scorecard.yml"
   ".github/workflows/release.yml"
   ".github/workflows/template-drift-watch.yml"
+  # the §3i API-contracts machinery (#689/#1330) — same rule as kubernetes-ci
+  # above: bootstrap's Step 3.6 stamps all four, so they must be READ here or
+  # the marker is written and never consumed. contracts-lint.yml is the one that
+  # actually goes stale — #1330 changed it from linting every major to selecting
+  # the newest per family, and both ops/api-styleguide how-tos tell a reader to
+  # "accept the contracts-lint.yml drift update", a prompt that cannot appear
+  # unless this array names it. The [[ ! -f ]] skip below covers repos where §3i
+  # never rendered them (no OpenAPI surface, or no root Dockerfile for the
+  # conformance job).
+  ".github/workflows/contracts-lint.yml"
+  ".github/workflows/contracts-semver.yml"
+  ".github/workflows/spec-publish.yml"
+  ".github/workflows/ops-conformance.yml"
+  # the exact-pin Spectral shim (#689, closing #1358). It was scaffold —
+  # never stamped — which was right when it was the #692 starter the user
+  # owned. As a shim it is OUR artifact, and unstamped it was unreachable:
+  # present (so never a gap), unstamped and untracked (so never a drift
+  # finding), which made State D report "toolchain is current" over a repo
+  # still on the retired starter — while both manifests promise "a re-run
+  # replaces a local ruleset with a remote pin". Tracked, the starter surfaces
+  # as unknown_provenance and takes the byte-compare -> reviewer route, where
+  # §3i's retired-template rule says overwrite.
+  ".spectral.yaml"
   ".github/dependabot.yml"
   "trivy.yaml"
 )

@@ -1724,8 +1724,42 @@ The installed set:
 - `contracts/v1/openapi.yaml` — the **per-major layout** SEED (one directory per
   live major; old majors frozen by convention here, mechanically with #693). A
   **scaffold**, not a drift-tracked artifact — never provenance-stamped.
-- `.spectral.yaml` — a **replaceable** starter ruleset; the org styleguide epic
-  (#689) later swaps its *content* only. Scaffold — never stamped.
+- `.spectral.yaml` — the **exact-pin shim** (#689): a single `extends` of the
+  published org styleguide ruleset at an immutable `styleguide-vX.Y.Z` tag. It
+  carries **no rules of its own** and is **never edited locally** — the whole
+  point is one org artifact instead of N drifting copies, so enforcement changes
+  only when the pin moves. The #692 starter it replaced is retired and no longer
+  shipped. **Drift-tracked and provenance-stamped** (#1358, decided here): as the
+  #692 starter this file was the user's to own, so scaffold was right; as a shim
+  it is OUR artifact. Unstamped it was also unreachable — present (so never a
+  gap), unstamped and untracked (so never a drift finding) — which let State D
+  report "toolchain is current" over a repo still running the retired starter,
+  while both manifests promise *"a re-run replaces a local ruleset with a remote
+  pin"*. Stamped and in `detect-template-drift.zsh`'s `tracked` array, a stale pin
+  is exactly the drift a re-bootstrap surfaces.
+
+  **On a RE-bootstrap, an on-disk #692 starter is overwrite-default.** Recognise
+  it by shape: `extends: ["spectral:oas"]`, its own `rules:` block, and no
+  jsDelivr pin. That file is **retired-template-superseded**, not a user
+  customization — the shim template's own header says the starter is retired —
+  so recommend **overwrite**, pointing at the api-styleguide how-to.
+  `bootstrap-idempotency-reviewer` carries the matching carve-out — without it
+  its "never overwrite a file holding content the template doesn't replicate"
+  rule forces **`merge`** on the starter's `rules:` block, and merge is the
+  harmful answer here: it folds local rules back beside the pin, recreating the N
+  drifting copies the shim abolishes. The replacement the plugin's compatibility
+  note promises — *"a re-run replaces a local ruleset with a remote pin"* —
+  depends on both halves being in step.
+
+  **A file that IS the shim but pins a different tag is neither.** It is a
+  pin-version difference, not drift: **never overwrite in either direction.**
+  Keep the on-disk pin when it is NEWER — that is the hand bump the
+  api-styleguide how-to instructs, and overwriting it back to the template's
+  older tag is the silent enforcement rollback both that page and the shim's own
+  header forbid. When it is OLDER, surface an upgrade suggestion pointing at the
+  how-to rather than rewriting it. Fall back to the generic diff-and-ask only
+  when the file is neither the starter nor a shim of any pin — i.e. a genuinely
+  hand-customized ruleset.
 - `.github/workflows/contracts-lint.yml` — Spectral lints `contracts/` in CI,
   referencing `.spectral.yaml` **by path** so a ruleset swap never touches the
   wiring. Its check is **path-conditional** (`paths: contracts/**`) — like the
@@ -1758,9 +1792,10 @@ The installed set:
   versioning, the semver-triangle rules, and the **deprecation lifecycle** (spec
   signal `deprecated: true` + `x-sunset`; runtime `Deprecation` (RFC 9745) +
   `Sunset` (RFC 8594) header advice; a **minimum-deprecation-window** knob,
-  default 6 months). The `.spectral.yaml` ruleset also gains a
-  `deprecation-has-sunset` rule (#695) enforcing that a `deprecated: true`
-  element carries `x-sunset`. Documentation/policy — never provenance-stamped.
+  default 6 months). The deprecation gate itself is enforced by the **pinned org
+  ruleset**'s `org-deprecated-operation-has-sunset` rule (#695 via #689), scoped
+  to **operations only** — nothing is added to `.spectral.yaml`, which carries no
+  rules of its own. Documentation/policy — never provenance-stamped.
 - `contracts/ops/v2/openapi.yaml` (#688, v2 per #1330) — the **org-standard ops
   surface**
   (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s
@@ -1774,12 +1809,11 @@ The installed set:
   payloads this skill installs beside it serve RFC 9457 problem+json on the two
   probe 503s — the v2 shape. Installing v1 here would make a brand-new repo both
   self-contradictory (a contract declaring `{"status":"down"}` beside a payload
-  emitting problem details) and, as soon as the repo's `.spectral.yaml` extends
-  the org styleguide (#689), **born red** — `contracts-lint` lints the newest
-  major and `org-problem-json-errors` rejects v1's 503s. The starter
-  `.spectral.yaml` this skill installs today (#692) does not yet carry that rule,
-  so the redness is deferred, not avoided; the self-contradiction is reason
-  enough on its own. `contracts/ops/v1/openapi.yaml` still ships in the template tree for
+  emitting problem details) and **born red** — the `.spectral.yaml` this skill
+  installs is the exact-pin shim extending the org styleguide (#689), whose
+  `org-problem-json-errors` rejects v1's 503s, and `contracts-lint` lints the
+  newest major. Both halves of that now bite on the first PR.
+  `contracts/ops/v1/openapi.yaml` still ships in the template tree for
   repos migrating an existing installation (see the ops how-to), but bootstrap
   never installs it.
   Installed verbatim (no placeholders — the ops contract is identical org-wide).
@@ -3721,7 +3755,23 @@ actually rendered in Step 3 — §3a through §3l):
 | `.github/workflows/scorecard.yml` | `public/.github/workflows/scorecard.yml.tmpl` |
 | `.github/workflows/release.yml` | `languages/java/.github/workflows/release.yml.tmpl` (only when `java` is detected) |
 | `.github/workflows/template-drift-watch.yml` | `common/.github/workflows/template-drift-watch.yml.tmpl` |
+| `.github/workflows/contracts-lint.yml` | `common/.github/workflows/contracts-lint.yml.tmpl` (§3i) |
+| `.github/workflows/contracts-semver.yml` | `common/.github/workflows/contracts-semver.yml.tmpl` (§3i) |
+| `.github/workflows/spec-publish.yml` | `common/.github/workflows/spec-publish.yml.tmpl` (§3i) |
+| `.github/workflows/ops-conformance.yml` | `common/.github/workflows/ops-conformance.yml.tmpl` (§3i, root-Dockerfile-gated) |
+| `.spectral.yaml` | `common/.spectral.yaml` (§3i — the exact-pin shim, #689/#1358) |
 | `trivy.yaml` | `common/trivy.yaml.tmpl` |
+
+The four §3i **workflow** rows are what makes the **refresh** path both how-tos
+describe real: `docs/how-to/adopt-the-ops-surface.md` step 0 and the api-styleguide
+how-to each tell a reader to refresh `contracts-lint.yml` via
+`/development:bootstrap` and say it re-stamps the provenance marker. Unstamped, the
+drift detector has no recorded hash to compare, so the refresh would surface as an
+unknown-provenance prompt every run instead of a drift finding — and the
+placeholder trap those pages warn about (`{{DEFAULT_BRANCH}}`) is exactly what the
+render path exists to avoid. The fifth §3i row, `.spectral.yaml`, is that same
+mechanism applied to the pin itself (#1358): stamped and tracked, a stale pin
+surfaces as drift instead of as nothing at all.
 
 The `*-noop.yml` companions and `release.yml` are tracked, rendered files just
 like their main counterparts — each renders from its **own** template (the

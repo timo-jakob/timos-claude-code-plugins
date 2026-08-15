@@ -1,33 +1,41 @@
-# Spectral ruleset — API styleguide (STARTER, issue #692).
+# Spectral ruleset — the org API styleguide, consumed by EXACT PIN (issue #689).
 #
-# This is a minimal starter ruleset. Its CONTENT is meant to be replaced: the
-# org API styleguide epic (#689) swaps in the shared org ruleset. The CI wiring
-# (.github/workflows/contracts-lint.yml) references this file BY PATH, so
-# replacing the ruleset never touches the pipeline — swap content freely.
-extends: ["spectral:oas"]
-rules:
-  # Every operation needs a stable operationId — the consumer's client
-  # generator and the deprecation -> @deprecated mapping (#707) key off it.
-  operation-operationId: error
-  operation-operationId-unique: error
-  # Descriptions ARE the governance-portal docs (the APIM channel, #706), so
-  # a missing one is worth a warning, not a hard failure, in the starter.
-  info-description: warn
-  operation-description: warn
-  # Tags give the portal and the generated client a stable grouping.
-  operation-tags: warn
-  # Deprecation is a producer signal with a deadline (#695): anything the spec
-  # marks `deprecated: true` should also declare `x-sunset: <date>` (RFC 8594),
-  # so a dying operation always announces WHEN it dies. The recursive null-safe
-  # filter mirrors spectral:oas's own `duplicated-entry-in-enum` given; because
-  # it also matches deprecated parameters/schemas (and any `deprecated: true`
-  # inside example data), it is a WARN in the starter — the org styleguide (#689)
-  # can scope it to operations and raise it to error.
-  deprecation-has-sunset:
-    description: A deprecated element should declare an x-sunset date (RFC 8594).
-    message: "deprecated but missing x-sunset: <date> (RFC 8594)"
-    severity: warn
-    given: "$..[?(@ && @.deprecated === true)]"
-    then:
-      field: x-sunset
-      function: truthy
+# This file is a thin SHIM. It carries no rules of its own: the normative content
+# lives in one place — styleguide/spectral/ruleset.yaml in the plugin repo —
+# published as an immutable git tag and served over jsDelivr. Every bootstrapped
+# repo extends the same pinned URL, so "the org styleguide" is one artifact rather
+# than N drifting copies. The #692 starter this replaces is retired: no flag, no
+# "when configured", no vendored fallback copy.
+#
+# THE PIN IS EXACT, ALWAYS. Never a floating tag, never @latest, never a branch
+# ref. Your enforced rules change only when a human edits the version below and
+# merges that PR — never spontaneously, on someone else's release.
+#
+# NOTHING BUMPS THIS FOR YOU. No dependency bot in this repo watches the pin:
+# the Renovate manager that moves it lives in the plugin repo and rewrites the
+# TEMPLATE, not your copy. Watch the styleguide-v* tags and bump by hand, and do
+# not read silence as currency — a pin nobody moves means this repo keeps
+# enforcing an older styleguide with a fully green build. Tracked as #1359.
+#
+# TAGS ARE IMMUTABLE. A styleguide-v* tag, once cut, is never moved or deleted; a
+# mistake is superseded by the next version. jsDelivr caches by tag, so re-pointing
+# one would hand different repos different rules under the same version string,
+# with no PR anywhere to notice.
+#
+# A CDN OUTAGE FAILS THIS LINT LOUDLY, by design. There is deliberately no offline
+# fallback: a lint that degraded to "no rules loaded, 0 problems" would report
+# success while enforcing nothing, which is strictly worse than a red build.
+# FIRST confirm the version below names a PUBLISHED styleguide-v* tag on the repo
+# in the URL. A pin naming no such tag is a bad bump, not an outage — point it at
+# the newest real tag. (Correcting an unpublished pin is NOT the downgrade
+# forbidden next.) If the tag does exist, it is an outage or a cold cache: re-run,
+# and check jsDelivr/GitHub status.
+#
+# NEVER downgrade a WORKING pin to route around an unresolving fetch. An older
+# version that still resolves from cache silently rolls back the rules this repo
+# enforces, and the rollback looks like a fix.
+#
+# The CI wiring (.github/workflows/contracts-lint.yml) references this file BY
+# PATH, so the pin can move without touching the pipeline.
+extends:
+  - https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v1.0.0/styleguide/spectral/ruleset.yaml

@@ -1,0 +1,69 @@
+# Prove the SHIPPED Spectral shim still resolves the published org styleguide,
+# through the pin (issue #689, AC 8).
+#
+# Every other styleguide test lints against the local styleguide/spectral/
+# ruleset.yaml — which proves the rules are right and nothing about what a
+# bootstrapped repo actually gets. A downstream repo never sees this working
+# tree; it extends an exact pinned jsDelivr URL. This job is the only thing
+# between a broken pin and every bootstrapped repo's contracts-lint.
+#
+# It deliberately couples this repo's PR CI to jsDelivr reachability. That is
+# the accepted trade recorded in #689: a transient CDN blip reddening one PR
+# here is far cheaper than shipping a dead pin to every downstream repo.
+
+name: styleguide pin
+
+on:
+  pull_request:
+    paths:
+      - "development/skills/bootstrap/templates/common/.spectral.yaml"
+      - "styleguide/spectral/ruleset.yaml"
+      - "tests/fixtures/api-styleguide/**"
+      - "scripts/check-styleguide-pin.zsh"
+      - ".github/workflows/styleguide-pin.yml"
+  push:
+    branches: [main]
+    paths:
+      - "development/skills/bootstrap/templates/common/.spectral.yaml"
+      - "styleguide/spectral/ruleset.yaml"
+      - "tests/fixtures/api-styleguide/**"
+      - "scripts/check-styleguide-pin.zsh"
+      - ".github/workflows/styleguide-pin.yml"
+  # Pin rot is not caused only by OUR commits. A deleted tag, a jsDelivr
+  # regression or a cache problem can break the pin while none of the paths above
+  # change — and then downstream repos discover it first, which is the exact
+  # inversion this job exists to prevent. A weekly run bounds that window.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: styleguide-pin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install zsh
+        # Ubuntu runners have bash + jq but not zsh; the check script is zsh
+        # (the repo's convention for new scripts) and uses zsh array idioms.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+
+      - name: Lint the non-conforming fixture THROUGH the pinned shim
+        # Asserts positively that all eight org rule ids fire at error severity.
+        # A pin that 404s — or that resolves but loads no rules — produces none
+        # of them and fails here, rather than reporting a clean run.
+        run: ./scripts/check-styleguide-pin.zsh

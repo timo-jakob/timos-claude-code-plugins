@@ -52,8 +52,11 @@ paths:
       # …
 ```
 
-The Spectral ruleset flags a `deprecated: true` element that omits `x-sunset`
-(see `.spectral.yaml` → `deprecation-has-sunset`). A date-only `x-sunset` means
+The pinned org ruleset — extended by `.spectral.yaml`, which carries no rules of
+its own — flags a deprecated **operation** that omits `x-sunset`
+(`org-deprecated-operation-has-sunset`). Note the scope: a deprecated *schema
+property*, a deprecated *parameter*, and the major-level `x-sunset` in §3 are
+**not** linted, so review is what covers those. A date-only `x-sunset` means
 **end of that day, UTC**.
 
 ### 2. On the wire (for running consumers)

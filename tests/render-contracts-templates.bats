@@ -2,8 +2,9 @@
 #
 # Integration tests for the bootstrap API-contracts machinery templates (#692) —
 # render the REAL templates the way SKILL.md §3i instructs and prove the
-# installed set is coherent: the per-major layout starter, a replaceable Spectral
-# ruleset, and the lint + per-major npm publish workflows. The publish workflow's
+# installed set is coherent: the per-major layout starter, the exact-pin Spectral
+# shim (#689 — the #692 replaceable local ruleset is retired), and the lint +
+# per-major npm publish workflows. The publish workflow's
 # APIM governance step must be a clean, skip-when-absent extension point (#706).
 
 bats_require_minimum_version 1.5.0
@@ -65,52 +66,66 @@ assert_valid_yaml() {
   grep -q 'deprecated: true' "$md"
   grep -q 'x-sunset' "$md"
   # runtime headers with their RFCs
-  grep -q 'Deprecation' "$md" && grep -q 'RFC 9745' "$md"
-  grep -q 'Sunset' "$md" && grep -q 'RFC 8594' "$md"
+  # One assertion per line: `A && B` exempts A from errexit on every bash, so
+  # the joined form asserted only the RFC numbers — CONTRACTS.md could lose the
+  # header NAMES entirely and stay green. No lint rule catches that shape
+  # (tests/README.md: "the rule is about joining, not about helpers").
+  grep -q 'Deprecation' "$md"
+  grep -q 'RFC 9745' "$md"
+  grep -q 'Sunset' "$md"
+  grep -q 'RFC 8594' "$md"
   # the minimum-deprecation-window knob, default 6 months
   grep -qi '6 months' "$md"
   # versioning policy present
   grep -qi 'version triangle' "$md"
 }
 
-@test "#695 contracts: the Spectral deprecation-has-sunset rule is structurally sound" {
+@test "#689 contracts: the RENDERED .spectral.yaml is the pin shim, with no inline rules" {
+  # Replaces the #695 starter-rule structural test. That rule was the starter's
+  # `deprecation-has-sunset`; since PR-B the rendered file carries no rules of its
+  # own, and the convention now ships as the org ruleset's
+  # `org-deprecated-operation-has-sunset` — structurally covered, at error and
+  # scoped to operations, in tests/api-styleguide-ruleset.bats.
+  #
+  # This asserts against the RENDERED output, not the template, because that is
+  # what a bootstrapped repo receives — and render.zsh could in principle mangle
+  # a long unbroken URL.
   render_contracts
   local rs="$OUT/common/.spectral.yaml"
+  local src="$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
   assert_valid_yaml "$rs"
-  # parse the rule (not substring greps) so a neutered rule fails the test
-  [ "$(yq -r '.rules.deprecation-has-sunset.then.field' "$rs")" = "x-sunset" ]
-  [ "$(yq -r '.rules.deprecation-has-sunset.then.function' "$rs")" = "truthy" ]
-  [ "$(yq -r '.rules.deprecation-has-sunset.severity' "$rs")" = "warn" ]
-  yq -r '.rules.deprecation-has-sunset.given' "$rs" | grep -q '@.deprecated === true'
+  [ "$(yq -r '.rules // "none"' "$rs")" = "none" ]
+  [ "$(yq -r '.extends | length' "$rs")" = "1" ]
+  # BYTE-IDENTICAL to the source template's pin, not merely regex-shaped. That IS
+  # the render contract ("the URL survives unmangled"), and it needs no pattern —
+  # a permissive `[^ ]+` between /gh/ and @styleguide-v would accept a truncated
+  # owner/repo, shipping a permanently-404 pin whose failure surfaces only in
+  # consumers.
+  [ "$(yq -r '.extends[0]' "$rs")" = "$(yq -r '.extends[0]' "$src")" ]
+  # …and the source itself is a real exact pin (asserted in full at
+  # tests/api-styleguide-ruleset.bats, so this only guards the render seam).
+  run yq -r '.extends[0]' "$rs"
+  matches "$output" '^https://cdn\.jsdelivr\.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/styleguide/spectral/ruleset\.yaml$'
 }
 
-# Executable Spectral check when the CLI is present (it is NOT in the plugin's
-# macOS toolchain, so this skips locally — the rule's runtime behaviour is
-# validated by the target repo's contracts-lint CI, mirroring the oasdiff seam).
-@test "#695 contracts: a deprecated+x-sunset spec passes Spectral lint (when spectral is present)" {
-  command -v spectral >/dev/null 2>&1 || skip "spectral not installed (validated in the target repo's contracts-lint CI)"
-  render_contracts
-  local rs="$OUT/common/.spectral.yaml"
-  cat > "$OUT/ok.yaml" <<'EOF'
-openapi: 3.1.0
-info:
-  title: T
-  version: "1.0.0"
-servers:
-  - url: /v1
-paths:
-  /w:
-    get:
-      operationId: getW
-      deprecated: true
-      x-sunset: "2026-12-31"
-      responses:
-        "200":
-          description: ok
-EOF
-  run spectral lint --ruleset "$rs" --fail-severity error "$OUT/ok.yaml"
-  [ "$status" -eq 0 ]
-}
+# REMOVED by #689 PR-B: "#695 contracts: a deprecated+x-sunset spec passes
+# Spectral lint (when spectral is present)".
+#
+# It linted an inline spec through the RENDERED .spectral.yaml and asserted a
+# clean exit. Two things broke it, both invisible because a
+# `command -v spectral || skip` guard made it vacuous on every machine that runs
+# this suite:
+#   - the inline spec carried no info.description, no operation description and
+#     no tags. The #692 starter had those at `warn`; the org ruleset promotes all
+#     three to `error`, so the assertion became false, not stale;
+#   - since PR-B the rendered file is a shim resolving a jsDelivr URL, so the
+#     case would reach the network — which `bats tests` must not do.
+#
+# The coverage moved, it was not dropped: linting THROUGH the shim is
+# scripts/check-styleguide-pin.zsh (unit-tested offline in
+# tests/check-styleguide-pin.bats, run for real by .github/workflows/
+# styleguide-pin.yml), and the conforming/non-conforming fixtures are linted by
+# tests/acceptance/cli/api-styleguide.bats.
 
 @test "#693 contracts: the semver workflow gates via the wrapper, installs pinned oasdiff, and is path-conditional" {
   render_contracts
@@ -139,12 +154,29 @@ EOF
   grep -q 'Demo Project API' "$spec"
 }
 
-@test "#692 contracts: the Spectral ruleset is valid, extends spectral:oas, and is replaceable-by-path" {
+@test "#689 contracts: the rendered shim is replaceable-by-path and pins an IMMUTABLE tag" {
+  # The #692 form of this test asserted `spectral:oas` + an inline rule id. Both
+  # moved into the published org ruleset when PR-B retired the starter, so the
+  # rendered file now proves the two properties that survived: the workflow still
+  # reaches the ruleset BY PATH (so the pin can move without touching CI), and
+  # the pin is a version tag rather than anything that can shift underneath a
+  # downstream repo.
   render_contracts
   local rs="$OUT/common/.spectral.yaml"
   assert_valid_yaml "$rs"
-  grep -q 'spectral:oas' "$rs"
-  grep -q 'operation-operationId' "$rs"
+
+  # Anchored on the full semver shape rather than a `contains '@styleguide-v'`
+  # plus negative needles: `@styleguide-vmain` satisfies that pairing (the
+  # literal '@main' is not a substring of it) while pinning no version at all.
+  run yq -r '.extends[0]' "$rs"
+  matches "$output" '@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/'
+
+  # Replaceable-by-path: the workflow names the file, never the URL — so bumping
+  # the pin is a one-line edit here and no pipeline change anywhere.
+  local wf="$OUT/common/.github/workflows/contracts-lint.yml"
+  grep -q -- '--ruleset .spectral.yaml' "$wf"
+  run cat "$wf"
+  lacks "$output" 'cdn.jsdelivr.net'
 }
 
 @test "#692 contracts: the lint workflow runs Spectral over contracts/ referencing .spectral.yaml by path" {

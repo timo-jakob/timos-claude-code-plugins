@@ -1,19 +1,16 @@
 # Adopt the API styleguide
 
 Pin the org [API styleguide](../reference/api-styleguide.md) ruleset in your
-repo, and keep the pin current when Renovate proposes a bump.
+repo, and keep the pin current **by hand** — no bot bumps it for you
+([#1359](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1359)).
 
-**Check which world you are in first.** Bootstrap currently writes the
-[#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
-starter ruleset, not the pinned shim, and the `styleguide-v1.0.0` tag the shim
-below points at is cut by hand after the ruleset merges. So:
-
-- **Before that tag exists**, the shim will not resolve and `contracts-lint`
-  will fail loudly. Nothing to adopt yet — wait.
-- **From `styleguide-v1.0.0` onward**, bootstrap ships the pinned shim as the
-  only `.spectral.yaml` it writes, so a freshly bootstrapped repo already has
-  it. This page is then for a repo bootstrapped before the styleguide existed,
-  and for the day a bump PR shows up.
+**Bootstrap ships the pinned shim as the only `.spectral.yaml` it writes**
+([#689](https://github.com/timo-jakob/timos-claude-code-plugins/issues/689)), so
+a freshly bootstrapped repo already has it and there is nothing to do here. This
+page is for a repo bootstrapped **before** the shim existed — it still carries
+the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
+starter ruleset, which enforces only two of the eight ids (the `operationId`
+pair) and none of the org-specific ones — and for the day a bump lands.
 
 ## Pin the ruleset
 
@@ -28,23 +25,53 @@ That is the entire configuration. The rules live in the published artifact, not
 in your repo, so a convention change reaches you as a version bump you review
 rather than as a file you have to hand-merge.
 
-Nothing else changes: `contracts-lint` references `.spectral.yaml` **by path**,
-so swapping the content never touches the pipeline.
+Nothing else changes **for the pin swap itself**: `contracts-lint` references
+`.spectral.yaml` **by path**, so replacing the ruleset content never touches the
+pipeline. (Your workflow may still need a separate, unrelated refresh — next.)
 
-Then run the same command CI runs, and fix what it finds — **both** globs, which
-is what the shipped job lints:
+### Check your own `contracts-lint.yml` first
+
+A workflow is a copy, not a
+subscription: the same template-vs-copy rule that means no bot bumps your pin
+means your lint job is whatever bootstrap wrote when you ran it. Since
+[#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330) the
+shipped job lints the **newest major of each family**; a job that predates it
+lints **every** major of both families, including frozen ones.
+
+**The test is a `newest_major` helper in the run step**, not the glob — both
+versions glob `v[0-9]*`; what #1330 added is the *selection* on top of it. So:
+`grep -q newest_major .github/workflows/contracts-lint.yml`. If that finds
+nothing, refresh the workflow before trusting the parity claim below — otherwise
+your local run and your CI disagree in both directions.
+
+**Refresh it via `/development:bootstrap`, not by copying the template.** The
+template is `contracts-lint.yml.tmpl` and it carries
+`branches: ["{{DEFAULT_BRANCH}}"]`. Copied verbatim, that placeholder stays
+unsubstituted, the `pull_request` filter then matches nothing, and contract
+linting **silently stops running** — with nothing going red, because the check is
+path-conditional and never a required context. If you must copy by hand,
+substitute `{{DEFAULT_BRANCH}}` with your default branch. This is the same trap
+the [ops-surface how-to](adopt-the-ops-surface.md#migrate-an-existing-repo-to-ops-v2)
+spells out at its step 0.
+
+Then run what CI runs, and fix what it finds — naming the newest major of each
+family explicitly rather than globbing:
 
 ```sh
 npx --yes @stoplight/spectral-cli@6 lint \
   --ruleset .spectral.yaml \
   --fail-severity error \
-  contracts/v[0-9]*/openapi.yaml contracts/ops/v[0-9]*/openapi.yaml
+  contracts/v2/openapi.yaml contracts/ops/v2/openapi.yaml   # your newest of each
 ```
 
-Use those globs verbatim. Dropping the second one is the easy mistake: you get a
-clean local run and then a red PR from a spec you did not write. And a run that
-matched **no files** is not a pass — spectral exits 0 having linted nothing, so
-check it actually named your specs.
+**Both families, and only the newest of each.** Dropping the ops one is the easy
+mistake: you get a clean local run and then a red PR from a spec you did not
+write. Adding a *frozen older* major is the opposite mistake — it reports errors
+on a file `contracts-semver` forbids you to edit; a post-#1330 job will never
+show you those, and a job without the `newest_major` selection will (which is what the
+refresh above is for). And a
+run that matched **no files** is not a pass: spectral exits 0 having linted
+nothing, so check it actually named your specs.
 
 Expect a first run to be noisy on an API that predates the styleguide. The
 common findings, and what they mean, are in the
@@ -72,27 +99,29 @@ The other half of that bargain is that
 [tags are immutable](../reference/api-styleguide.md#tags-are-immutable): a
 published tag is never re-pointed, so a pin means the same bytes forever.
 
-## Upgrade when Renovate proposes a bump
+## Upgrade the pin — by hand, today
 
-Once your repo carries the bootstrap `renovate.json`, a Renovate
-`customManagers` entry watches the pinned version and opens a bump PR when a new
-styleguide version is tagged.
+**No bump automation ships to your repo.** Say that plainly, because the opposite
+assumption is the expensive one: a pin nobody bumps is a repo enforcing last
+year's conventions while its build stays green.
 
-**Two ways you might not get one**, both of which look identical to "no new
-version was published" — the same absence-of-signal trap the immutability rule
-is written against:
+The Renovate `customManager` that watches this pin lives in the **plugin repo's
+own** `renovate.json` and moves the pin inside the shipped template — it never
+runs in your repo. Nor could it be shipped as-is: bootstrap installs
+`renovate.json` only for Claude-Code-plugin repos (everything else gets
+Dependabot, which has no equivalent to a regex custom manager), and a plugin repo
+has no OpenAPI surface and therefore no `.spectral.yaml` at all. Downstream bump
+automation is tracked as [#1359](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1359).
 
-- the customManager ships with the shim, so a repo that pinned by hand and never
-  re-bootstrapped has no manager;
-- repos on Dependabot rather than Renovate have no equivalent.
+So: watch the [tags](https://github.com/timo-jakob/timos-claude-code-plugins/tags)
+and edit the version in `.spectral.yaml` yourself. **Do not read silence as
+currency** — it is the same absence-of-signal trap the immutability rule is
+written against.
 
-In either case, bump by hand: watch the
-[tags](https://github.com/timo-jakob/timos-claude-code-plugins/tags) and edit the
-version in `.spectral.yaml`. Do not read silence as currency.
-
-When a bump PR does arrive, read it by the version part that moved —
-the [versioning policy](../reference/api-styleguide.md#versioning-policy) is
-what makes this a two-second triage:
+Review the bump PR you open by the version part that moved — the
+[versioning policy](../reference/api-styleguide.md#versioning-policy) is what
+makes this a two-second triage. (If its lint cannot resolve the ruleset at all,
+see [When the pin cannot be fetched](#when-the-pin-cannot-be-fetched) below.)
 
 - **PATCH** — wording and doc links only. Nothing that was green can go red.
   Merge on green.
@@ -102,6 +131,15 @@ what makes this a two-second triage:
 - **MAJOR** — a new or stricter `error` rule, or a renamed rule id. **This one
   can redden your build**, and that is exactly what the major is telling you.
   Expect to fix spec violations in the bump PR itself.
+
+**Before a MAJOR bump, check your `contracts-lint.yml` too.** On a repo whose
+copy predates [#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330)
+(its run step has no `newest_major` selection — the grep above), the
+bump reds on **frozen** older majors as well — and those you are not permitted to
+edit, because `contracts-semver` rejects an in-place change to a live major. Fix
+the workflow, not the frozen spec: see
+[Check your own `contracts-lint.yml` first](#check-your-own-contracts-lintyml-first)
+above.
 
 Let CI decide the merge either way: `contracts-lint` runs against the proposed
 pin, so a major that breaks your spec fails the bump PR rather than `main`.
@@ -120,10 +158,14 @@ against the
 [published tags](https://github.com/timo-jakob/timos-claude-code-plugins/tags)
 first.
 
+**If the pin names no published tag**, it is a bad bump, not an outage: point it
+at the newest published tag. Correcting an unpublished pin is **not** the
+downgrade forbidden below — it is the fix.
+
 **If the pin is correct**, it is an outage or a cold cache, not your repo: a
 freshly cut tag can take a few minutes to propagate to jsDelivr. Re-run the job,
 and check GitHub and jsDelivr status if it persists.
 
-**Do not downgrade the pin to route around it.** A version that resolves is not
-the goal — an older pin silently rolls back the rules your repo enforces, and
-nothing in the PR says so.
+**Do not downgrade a *working* pin to route around it.** A version that resolves
+is not the goal — an older pin silently rolls back the rules your repo enforces,
+and nothing in the PR says so.

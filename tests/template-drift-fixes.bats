@@ -136,3 +136,38 @@ JSON
   [ -n "$f" ]
   [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
 }
+
+# --- #689/#1358: the stamp table and the drift array must name the same files -
+#
+# Two lists, one invariant, in different files: SKILL.md Step 3.6's table drives
+# STAMPING (bootstrap writes the marker) and detect-template-drift's `tracked`
+# array drives DETECTION (maintenance reads it). They were in exact 1:1
+# correspondence — an UNWRITTEN invariant, which this branch broke silently by
+# adding §3i rows to the table and not the array: bootstrap then wrote markers no
+# consumer read, and a stale contracts-lint.yml was reported drift-free forever.
+# The detector's own kubernetes-ci comment states the rule; nothing enforced it.
+
+@test "#689 the Step 3.6 stamp table and detect-template-drift's tracked array agree" {
+  local skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
+  local detector="$REPO_ROOT/development/skills/maintenance/scripts/detect-template-drift.zsh"
+  local table arr
+
+  # Table targets: the first backticked cell of each row of the pairs table.
+  table="$(sed -n '/^| Target | Template |/,/^$/p' "$skill" \
+    | sed -n 's/^| `\([^`]*\)`.*/\1/p' | sort -u)"
+  # Array entries: the quoted paths inside `typeset -a tracked=( … )`.
+  arr="$(sed -n '/^typeset -a tracked=(/,/^)/p' "$detector" \
+    | sed -n 's/^[[:space:]]*"\([^"]*\)".*/\1/p' | sort -u)"
+
+  # Canaries: a slice that captured nothing would compare "" to "" and pass.
+  [ "$(printf '%s\n' "$table" | grep -c .)" -ge 15 ]
+  [ "$(printf '%s\n' "$arr" | grep -c .)" -ge 15 ]
+
+  if [ "$table" != "$arr" ]; then
+    printf 'stamped-but-never-read (table, not tracked):\n' >&2
+    comm -23 <(printf '%s\n' "$table") <(printf '%s\n' "$arr") >&2
+    printf 'tracked-but-never-stamped (tracked, not table):\n' >&2
+    comm -13 <(printf '%s\n' "$table") <(printf '%s\n' "$arr") >&2
+    return 1
+  fi
+}

@@ -411,12 +411,14 @@ and nothing else does.
 You will notice it in one of two ways:
 
 - **`contracts-lint` goes red** on `contracts/ops/v1/openapi.yaml` with
-  `org-problem-json-errors` on the `/health/live` and `/health/ready` `503`s —
-  **but only once your `.spectral.yaml` extends the org styleguide ruleset**
-  (#689). A repo still on the bootstrap starter (`extends: ["spectral:oas"]`,
-  #692) does not carry that rule, so it stays green on ops v1 indefinitely.
-  **Do not read that green as "migration not needed"** — migrate now, per the
-  steps below, rather than waiting for a check that cannot fire yet.
+  `org-problem-json-errors` on the `/health/live` and `/health/ready` `503`s.
+  Since #689 the shipped `.spectral.yaml` is the exact-pin shim extending the org
+  styleguide, so this fires for every repo bootstrapped from then on. If your repo
+  predates the shim it may still carry the older starter
+  (`extends: ["spectral:oas"]`, #692), which has no such rule — it will stay green
+  on ops v1 until you adopt the pin. **Do not read that green as "migration not
+  needed"**: migrate now, per the steps below, rather than waiting for a check
+  your repo cannot yet fire.
 - **`check-ops-conformance.zsh` fails** with a message naming the ops-api v1
   envelope and pointing back at this section — that is the checker telling you a
   probe answered 503 while the service is still on a v1 payload. Note the

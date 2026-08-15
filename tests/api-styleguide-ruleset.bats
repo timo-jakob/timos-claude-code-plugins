@@ -129,6 +129,36 @@ CODIFIED_RULE_IDS=(
   [ "$output" = '$.paths[*][?(@.deprecated === true)]' ]
 }
 
+@test "ruleset: org-resource-naming keeps BOTH pattern clauses" {
+  # The id, severity, message, doc URL and `given` are all asserted elsewhere —
+  # but not `.then`, which is a TWO-clause array. Delete either and every other
+  # test here stays green: the count is still 8, the severity still error, the
+  # message still says "plural kebab-case". Nothing else covers it offline:
+  # check-styleguide-pin.zsh lints through the PUBLISHED pin, so a working-tree
+  # ruleset edit is invisible to it, and it only asserts the id FIRES — which the
+  # surviving clause would still do.
+  run yq -r '.rules."org-resource-naming".then | length' "$RULESET"
+  [ "$output" -eq 2 ]
+  run yq -r '[.rules."org-resource-naming".then[].functionOptions | keys | .[]] | sort | join(",")' "$RULESET"
+  [ "$output" = "match,notMatch" ]
+  # The trailing-context guard specifically: it is the whole reason /addresses,
+  # /searches and /deleted-items stay clean, so widening it to a bare prefix
+  # alternation is the regression that reddens every downstream repo.
+  run yq -r '.rules."org-resource-naming".then[1].functionOptions.notMatch' "$RULESET"
+  contains "$output" '([A-Z_-]|$|/)'
+}
+
+@test "ruleset: org-deprecated-operation-has-sunset asserts the FIELD, truthily" {
+  # `truthy` rather than `defined` is the load-bearing half — an empty
+  # `x-sunset: ""` must fail. Changing `field` makes the rule fire on every
+  # deprecated operation including the conforming fixture's correctly-sunset one.
+  # Neither is covered by the message needle, which matches the message STRING.
+  run yq -r '.rules."org-deprecated-operation-has-sunset".then.field' "$RULESET"
+  [ "$output" = "x-sunset" ]
+  run yq -r '.rules."org-deprecated-operation-has-sunset".then.function' "$RULESET"
+  [ "$output" = "truthy" ]
+}
+
 @test "ruleset: org-resource-naming is scoped to the paths object" {
   run yq '.rules."org-resource-naming".given' "$RULESET"
   [ "$status" -eq 0 ]
@@ -205,13 +235,116 @@ CODIFIED_RULE_IDS=(
   [ -f "$REPO_ROOT/$path" ]
 }
 
-@test "the ruleset header and the how-to shim quote the SAME pinned URL" {
-  local from_ruleset from_howto
-  from_ruleset="$(grep -o 'https://cdn\.jsdelivr\.net[^ ]*ruleset\.yaml' "$RULESET" | head -1)"
-  from_howto="$(grep -o 'https://cdn\.jsdelivr\.net[^ ]*ruleset\.yaml' "$HOWTO" | head -1)"
-  [ -n "$from_ruleset" ]
-  [ -n "$from_howto" ]
-  [ "$from_ruleset" = "$from_howto" ]
+@test "EVERY file quoting a styleguide pin quotes the SAME one" {
+  # Swept repo-wide, not from a named file list. #689 shipped the pin in two
+  # places (ruleset header, how-to) and PR-B added a third that outranks both —
+  # the bootstrap shim, the only copy downstream repos actually consume. A closed
+  # list would have silently stopped covering the file that matters most, so the
+  # sweep enumerates tracked files instead and a fourth site is covered for free.
+  # `find`, NOT `git ls-files`. Two reasons, both learned the hard way:
+  #   - git ls-files skips UNTRACKED files, so a new doc quoting a stale pin
+  #     passes locally and only reds in CI after `git add` (the #1189 lesson);
+  #   - the Docker lane bind-mounts the repo, and in a git WORKTREE `.git` is a
+  #     FILE pointing at a host path absent from the container, so git fatals and
+  #     the sweep would inspect nothing while reporting success (the #1330 lesson).
+  # Keyed on the REAL owner/repo. Test fixtures that deliberately carry a wrong
+  # pin (tests/check-styleguide-pin.bats exercises a floating tag, a superseded
+  # version and a two-pin shim) use gh/example/styleguide-fixture instead, so
+  # they cannot collide with this sweep — and, unlike a file-exclusion list,
+  # that distinction does not rot when a new fixture file appears.
+  local OWNER_REPO='timo-jakob/timos-claude-code-plugins'
+  local list="$BATS_TEST_TMPDIR/pin-sites.txt"
+  local hits="$BATS_TEST_TMPDIR/pin-urls.txt"
+
+  # Materialised through temp files rather than nested `< <(…)` process
+  # substitutions: the nested form failed only under run-gate.zsh's parallel
+  # runner, with an unattributable "line 0" error, while passing standalone.
+  # EVERY occurrence per file is collected (grep without head), because a
+  # bump/upgrade guide is the natural home for a stale "before" snippet that a
+  # first-match-only sweep would never see.
+  # `.claude/worktrees/` is excluded because this repo's whole workflow lives in
+  # sibling worktrees: `git ls-files` skipped them implicitly, `find` does not.
+  # Run from the main checkout, a sibling branch mid-bump to a newer pin would
+  # red this test in a tree that is perfectly consistent — and, worse, a sibling's
+  # three pin sites could satisfy the canary for a main tree that has none.
+  #
+  # ANCHORED to $REPO_ROOT, not '*/.claude/worktrees/*': the suite itself runs
+  # from inside a worktree, so the unanchored form matches every path in the tree
+  # and excludes the entire repo.
+  find "$REPO_ROOT" -type f \
+    -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/site/*' \
+    -not -path "$REPO_ROOT/.claude/worktrees/*" > "$list"
+  local files
+  files="$(wc -l < "$list" | tr -d ' ')"
+
+  : > "$hits"
+  local f
+  while IFS= read -r f; do
+    grep -oh "https://cdn\.jsdelivr\.net/gh/$OWNER_REPO@[^ \"]*ruleset\.yaml" "$f" 2>/dev/null >> "$hits" || true
+  done < "$list"
+
+  local n distinct
+  n="$(wc -l < "$hits" | tr -d ' ')"
+  distinct="$(sort -u "$hits" | wc -l | tr -d ' ')"
+  if [ "$distinct" -gt 1 ]; then
+    printf 'pin mismatch — %s distinct pins in the tree:\n' "$distinct" >&2
+    sort -u "$hits" >&2
+    printf 'quoted by:\n' >&2
+    grep -rl "cdn\.jsdelivr\.net/gh/$OWNER_REPO@" "$REPO_ROOT" 2>/dev/null | grep -v '/\.git/' >&2 || true
+    return 1
+  fi
+  local first
+  first="$(sort -u "$hits" | head -1)"
+
+  # A MISTYPED owner/repo is not a "hit" at all, so the distinctness check above
+  # cannot see it — and it is the worst case, shipping a permanently-404 pin.
+  # Second pass, owner-AGNOSTIC: every jsDelivr ruleset URL in the tree must be
+  # either the real pin or the deliberate fixture sentinel.
+  # Reuses pass 1's file list rather than a second `grep -r`, so both passes share
+  # ONE exclusion policy — a second, differently-spelled exclusion set is how the
+  # two halves drift apart.
+  local all_urls stray
+  all_urls="$(xargs -0 grep -oh 'https://cdn\.jsdelivr\.net/gh/[^ "]*ruleset\.yaml' \
+    < <(tr '\n' '\0' < "$list") 2>/dev/null | sort -u || true)"
+  # Canary FIRST: this pass is fully silenced, so without it a walk that inspected
+  # nothing would report "no strays" — the same fail-open that made the renovate
+  # helper's coverage check vacuous.
+  case "$all_urls" in
+    *"/gh/$OWNER_REPO@"*) ;;
+    *) printf 'stray-pass canary: the real pin was not found at all\n' >&2; return 1 ;;
+  esac
+  case "$all_urls" in
+    *'/gh/example/styleguide-fixture@'*) ;;
+    *) printf 'stray-pass canary: the fixture sentinel was not found at all\n' >&2; return 1 ;;
+  esac
+  stray="$(printf '%s\n' "$all_urls" \
+    | grep -v "/gh/$OWNER_REPO@" | grep -v '/gh/example/styleguide-fixture@' || true)"
+  if [ -n "$stray" ]; then
+    printf 'jsDelivr URL with an unexpected owner/repo (typo?):\n%s\n' "$stray" >&2
+    return 1
+  fi
+
+  # Canaries. Without these the sweep passes by inspecting nothing.
+  [ "$files" -gt 100 ]   # the walk actually walked
+  [ "$n" -ge 3 ]         # and found the known pin sites
+
+  # Identity, not just a count three unrelated files could satisfy: each known
+  # site must itself carry the pin.
+  local site
+  for site in development/skills/bootstrap/templates/common/.spectral.yaml \
+    styleguide/spectral/ruleset.yaml \
+    docs/how-to/adopt-the-api-styleguide.md; do
+    grep -q "https://cdn\.jsdelivr\.net/gh/$OWNER_REPO@" "$REPO_ROOT/$site" \
+      || { printf 'known pin site no longer quotes the pin: %s\n' "$site" >&2; return 1; }
+  done
+
+  # Bind the canary to IDENTITY, not just a count three unrelated files could
+  # satisfy: the shipped shim is the copy downstream repos consume, so it must be
+  # one of the files swept.
+  run grep -c 'https://cdn\.jsdelivr\.net/gh/.*ruleset\.yaml' \
+    "$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
+  [ "$output" -ge 1 ]
+  [ "$first" = "$(yq -r '.extends[0]' "$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml")" ]
 }
 
 @test "fixtures: the whole fixture set exists" {
@@ -240,6 +373,12 @@ CODIFIED_RULE_IDS=(
   [ "$output" = "true" ]
   run yq '.paths."/users/{userId}".get | has("x-sunset")' "$f"
   [ "$output" = "false" ]
+  # TWO operations sharing ONE id — assert the collapse, not just the result.
+  # `unique | length == 1` is equally true of a fixture with a single operation,
+  # so deleting the duplicate `delete:` block (the natural tidy) would leave this
+  # green while operation-operationId-unique lost its only offline coverage.
+  run yq '[.paths."/users/{userId}"[].operationId] | length' "$f"
+  [ "$output" -eq 2 ]
   run yq '[.paths."/users/{userId}"[].operationId] | unique | length' "$f"
   [ "$output" -eq 1 ]
   run yq '.paths."/getUser".post.responses."404".content | has("application/json")' "$f"
@@ -250,12 +389,29 @@ CODIFIED_RULE_IDS=(
   local f="$FIXTURES/nonconforming-error-bodies/openapi.yaml"
   # dual media types -> maxProperties; missing member -> the allOf; range key ->
   # the given's string half. Each clause is deletable without this fixture.
-  run yq '.paths."/orders".get.responses."404".content | keys | length' "$f"
-  [ "$output" -eq 2 ]
+  # Count AND membership together: two non-problem media types would also be
+  # length 2, but would fire the required-problem+json clause instead, leaving
+  # maxProperties un-isolated.
+  run yq '.paths."/orders".get.responses."404".content | keys | sort | join(",")' "$f"
+  [ "$output" = "application/json,application/problem+json" ]
+
+  # The schema must be REFERENCED by the 404, not merely present: repointing
+  # /invoices at the complete `Problem` schema would leave the isolated-schema
+  # assertion green while the RFC 9457 required-members clause lost its coverage.
+  # This fixture is NOT linted by styleguide-pin.yml (that lints only
+  # nonconforming + conforming), so the offline suite is the backstop.
   run yq '.components.schemas.IncompleteProblem.required | contains(["detail"])' "$f"
   [ "$output" = "false" ]
+  run yq '.paths."/invoices".get.responses."404".content."application/problem+json".schema."$ref"' "$f"
+  [ "$output" = "#/components/schemas/IncompleteProblem" ]
+
+  # The 4XX response must still be NON-conforming, not merely present: quietly
+  # fixing it to problem+json keeps `has("4XX")` true while the given's
+  # range-key half stops being exercised anywhere offline.
   run yq '.paths."/receipts".get.responses | has("4XX")' "$f"
   [ "$output" = "true" ]
+  run yq '.paths."/receipts".get.responses."4XX".content | keys | join(",")' "$f"
+  [ "$output" = "application/json" ]
 }
 
 @test "fixtures: the naming fixture isolates ONE resource-naming clause per path" {
@@ -284,6 +440,21 @@ CODIFIED_RULE_IDS=(
   [ "$output" -eq 0 ]
 }
 
+@test "fixtures: the path-params corner keeps its camelCase {param} segments" {
+  # The only fixture that had no integrity test. Its entire value is that the
+  # path carries camelCase `{param}` segments which would trip the kebab `match`
+  # clause were parameter segments not exempt — so tidying it to
+  # `/users/{user-id}/...`, or flattening it to `/orders/{orderId}`, silently
+  # stops proving the exemption. The acceptance twin is vacuous under the same
+  # mutation (it asserts only that org-resource-naming does NOT fire, which a
+  # fixture with no params also satisfies).
+  local f="$FIXTURES/corner-path-params/openapi.yaml"
+  run yq -r '.paths | keys | .[0]' "$f"
+  [ "$output" = "/users/{userId}/orders/{orderId}" ]
+  run yq -r '[.paths | keys | .[] | select(test("\\{[a-z]+[A-Z]"))] | length' "$f"
+  [ "$output" -eq 1 ]
+}
+
 @test "fixtures: the conforming fixture pins the verb guard's trailing context" {
   local f="$FIXTURES/conforming/openapi.yaml"
   # Nouns that merely BEGIN with a verb must stay clean; a regression widening
@@ -302,16 +473,141 @@ CODIFIED_RULE_IDS=(
   [ "$output" -eq 4 ]
 }
 
-@test "bootstrap template: .spectral.yaml is untouched by PR-A (still the starter)" {
-  # The switch to the pinned shim is PR-B's, and it cannot land before a human
-  # cuts the styleguide tag. Asserting only `extends: ["spectral:oas"]` would
-  # stay green if PR-B ADDED the jsDelivr URL as a second extends member, so
-  # pin a starter-only marker and the absence of the CDN host.
+@test "bootstrap template: .spectral.yaml is the exact-pin shim, starter retired (PR-B)" {
+  # The inverse of PR-A's guard, which asserted this file was still untouched.
+  # PR-B is the switch, so the assertion flips: one extends member, the exact
+  # pin, and none of the starter's own content left behind.
   local tmpl="$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
-  run yq '.rules | has("deprecation-has-sunset")' "$tmpl"
-  [ "$output" = "true" ]
-  run yq '.rules."info-description"' "$tmpl"
-  [ "$output" = "warn" ]
+
+  # No inline rules at all — the whole point is ONE artifact, not a local copy
+  # that can drift from the published one.
+  run yq -r '.rules // "none"' "$tmpl"
+  [ "$output" = "none" ]
+
+  # Exactly one extends member. A second one would let local rules creep back
+  # in beside the pin without any other assertion here noticing.
+  run yq -r '.extends | length' "$tmpl"
+  [ "$output" = "1" ]
+
+  run yq -r '.extends[0]' "$tmpl"
+  matches "$output" \
+    '^https://cdn\.jsdelivr\.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v[0-9]+\.[0-9]+\.[0-9]+/styleguide/spectral/ruleset\.yaml$'
+
+  # Never a floating ref — the failure the story names outright, because it would
+  # change what downstream CI enforces with no PR anywhere to review it.
+  lacks "$output" '@latest'
+  lacks "$output" '@main'
+
+  # The starter's content is RETIRED, not merely overridden.
   run cat "$tmpl"
-  lacks "$output" 'cdn.jsdelivr.net'
+  lacks "$output" 'spectral:oas'
+  lacks "$output" 'deprecation-has-sunset'
+}
+
+# --- PR-B: the pin must stay CURRENT, and bump on its own terms (#689 AC 7) ---
+#
+# The shim is exact by design, which means it is also stale by default. Renovate
+# is the only thing that moves it, so the manager that finds it is part of the
+# contract — an unmatched file pattern or a regex that stops matching would leave
+# every bootstrapped repo pinned to v1.0.0 forever, silently and green.
+
+@test "renovate: a customManager targets the shim and its regex MATCHES the real file" {
+  # Asserted by EXECUTING the shipped regex against the shipped shim, not by
+  # eyeballing both: they drift independently, and a manager that matches nothing
+  # fails open — "no PR" is not an error Renovate reports anywhere.
+  run python3 "$BATS_TEST_DIRNAME/helpers/check-renovate-styleguide.py" manager
+  [ "$status" -eq 0 ]
+  contains "$output" "ok"
+}
+
+@test "renovate: the pin bump is NOT swept into the batched github-actions PR" {
+  # The pre-existing rule groups matchManagers ["github-actions", "custom.regex"]
+  # — which covers EVERY custom manager, including this one. Without a later
+  # override the pin would ride along in the weekly GitHub Actions PR, changing
+  # what every bootstrapped repo enforces under a title about action bumps.
+  run python3 "$BATS_TEST_DIRNAME/helpers/check-renovate-styleguide.py" grouping
+  [ "$status" -eq 0 ]
+  contains "$output" "api-styleguide"
+}
+
+@test "the through-the-pin checker exists, is executable, and is wired into CI" {
+  local script="$REPO_ROOT/scripts/check-styleguide-pin.zsh"
+  [ -f "$script" ]
+  [ -x "$script" ]
+  run zsh -n "$script"
+  [ "$status" -eq 0 ]
+  # It must lint through the SHIM, not the local ruleset — that is the whole
+  # point of AC 8. Pointing it at styleguide/spectral/ruleset.yaml would make it
+  # a duplicate of the acceptance lane while proving nothing about the pin.
+  run cat "$script"
+  contains "$output" '--ruleset "$SHIM"'
+
+  # Read the workflow STRUCTURALLY. A whole-file `contains` is satisfied by the
+  # workflow's own `paths:` filter, which quotes every one of these strings — so
+  # the `run:` step could be deleted, or the pull_request trigger removed, and a
+  # grep-based test would stay green while the gate ran nothing.
+  local wf="$REPO_ROOT/.github/workflows/styleguide-pin.yml"
+  [ -f "$wf" ]
+
+  run yq -r '.jobs.check.steps[] | select(.run != null) | .run' "$wf"
+  [ "$status" -eq 0 ]
+  contains "$output" 'scripts/check-styleguide-pin.zsh'
+
+  # The PR half specifically — a post-merge-only gate is not a gate.
+  run yq -r '.on.pull_request.paths[]' "$wf"
+  [ "$status" -eq 0 ]
+  contains "$output" 'development/skills/bootstrap/templates/common/.spectral.yaml'
+  contains "$output" 'styleguide/spectral/ruleset.yaml'
+
+  # …and it cannot be neutered into an advisory. Step-level AND job-level: the
+  # job-level knob is how a gate is actually made advisory, and "just set
+  # continue-on-error" is the predictable response to the first CDN blip — which
+  # this job's own header says it deliberately couples itself to.
+  # PRESENCE, not truthiness. `select(. == true)` compares against the YAML
+  # boolean, so `continue-on-error: ${{ … }}` and `continue-on-error: "true"`
+  # are strings that slip past it — and an expression is exactly how someone
+  # writes "advisory only when the CDN is flaky", the predictable response to
+  # the first blip on a job that deliberately couples itself to jsDelivr.
+  run yq -r '[.jobs.check.steps[] | select(has("continue-on-error"))] | length' "$wf"
+  [ "$output" = "0" ]
+  run yq -r '.jobs.check | has("continue-on-error")' "$wf"
+  [ "$output" = "false" ]
+  # STEP-level `if` too, not just the job's: a skipped step does not fail its
+  # job, so `if: false` on the lint step reports success having run nothing —
+  # the same parking trick as the job-level knob, one level down.
+  run yq -r '[.jobs.check.steps[] | select(has("if"))] | length' "$wf"
+  [ "$output" = "0" ]
+  # …and the LINT step's run command is pinned exactly, because a `contains`
+  # needle is equally satisfied by `./scripts/check-styleguide-pin.zsh || true`,
+  # which neuters the gate inline without touching either knob. Selected by
+  # name: the job also has an apt-get step, so an unfiltered `.run` emits both.
+  # Cardinality first: a renamed step selects nothing and a duplicated one
+  # selects two, and either way the equality below fails as a bare `[` with no
+  # explanation. This says which.
+  run yq -r '[.jobs.check.steps[] | select(.name == "Lint the non-conforming fixture THROUGH the pinned shim")] | length' "$wf"
+  [ "$output" = "1" ]
+  run yq -r '.jobs.check.steps[] | select(.name == "Lint the non-conforming fixture THROUGH the pinned shim") | .run' "$wf"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./scripts/check-styleguide-pin.zsh" ]
+  # `// "unset"` would also swallow `if: false` — the standard way to park a job
+  # without deleting it — because yq's // fires on false as well as null.
+  run yq -r '.jobs.check | has("if")' "$wf"
+  [ "$output" = "false" ]
+
+  # The EXACT path set, on both halves. Four `contains` needles left the fifth
+  # (the workflow's own path) unpinned, so dropping it from both halves — which
+  # stops the gate self-triggering on a PR that neuters it — stayed green.
+  run yq -r '[.on.pull_request.paths[]] | sort | join(",")' "$wf"
+  [ "$status" -eq 0 ]
+  [ "$output" = ".github/workflows/styleguide-pin.yml,development/skills/bootstrap/templates/common/.spectral.yaml,scripts/check-styleguide-pin.zsh,styleguide/spectral/ruleset.yaml,tests/fixtures/api-styleguide/**" ]
+  local pr_paths="$output"
+  run yq -r '[.on.push.paths[]] | sort | join(",")' "$wf"
+  [ "$output" = "$pr_paths" ]
+
+  # Pin rot has causes outside this repo (a deleted tag, a CDN regression), so a
+  # path-triggered-only gate would never see them.
+  run yq -r '.on.schedule[0].cron' "$wf"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [ "$output" != "null" ]
 }

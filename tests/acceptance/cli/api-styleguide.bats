@@ -13,20 +13,35 @@
 #   tc-corner-deprecated-schema-not-flagged #952
 #   tc-corner-path-params-exempt            #953
 #
-# Plus five cases with no story-spec id of their own, each covering a clause the
+# Plus SIX cases with no story-spec id of their own, each covering a clause the
 # nine above leave undiscriminated — every one of them could be deleted from the
 # ruleset with the story cases still green:
 #
-#   tc-error-operationid-unique          the eighth rule id (#689 AC 4)
-#   tc-error-dual-error-body             `maxProperties: 1` (bare means bare)
-#   tc-error-incomplete-problem-schema   the RFC 9457 required-members allOf
-#   tc-error-range-status-key            the given's "4XX"/"5XX" half
-#   tc-error-naming-clauses-isolated     each org-resource-naming pattern alone
+#   tc-error-operationid-unique           the eighth rule id (#689 AC 4)
+#   tc-error-dual-error-body              `maxProperties: 1` (bare means bare)
+#   tc-error-incomplete-problem-schema    the RFC 9457 required-members allOf
+#   tc-error-range-status-key             the given's "4XX"/"5XX" half
+#   tc-error-naming-clauses-isolated      each org-resource-naming pattern alone
+#   tc-corner-verb-prefixed-nouns-pass    the verb guard's trailing context
 #
-# The three through-the-pin cases (#1304-#1306) are deliberately absent: they
-# assert the PUBLISHED artifact resolving over jsDelivr, which cannot pass
-# before the styleguide-v1.0.0 tag exists. They land with PR-B, per the two-PR
-# ordering in #689 decision 5.
+# …and TWO #1330 premise cases, which belong to neither group: they assert the
+# ops fragment's relationship to org-problem-json-errors (v2 clears it, v1 still
+# fires it), i.e. the reason ops v2 had to land before the pin shipped.
+#
+# 9 + 6 + 2 = 17 @test blocks. Keep this roster and the count in
+# ../README.md in step with the file.
+#
+# The three through-the-pin cases (#1304-#1306) are NOT in this lane. PR-B
+# realised them as scripts/check-styleguide-pin.zsh, run by
+# .github/workflows/styleguide-pin.yml, and unit-tested in
+# tests/check-styleguide-pin.bats — that is where to look for their coverage.
+#
+# Why they moved: the property those ids name is "a dead pin FAILS", and this
+# lane is skipped whenever spectral cannot be fetched. A case that skips on a
+# network problem cannot assert a network-dependent failure — it would be absent
+# exactly when it mattered. The checker instead asserts POSITIVELY that all eight
+# rule ids fire through the pin, so a pin that 404s (or resolves but loads no
+# rules) exits non-zero rather than reporting a clean run.
 #
 # NOT part of the default gate — `bats tests` does not recurse — see
 # ../README.md. The always-on structural half is tests/api-styleguide-ruleset.bats.

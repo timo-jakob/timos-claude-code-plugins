@@ -18,6 +18,21 @@
         "uses:\\s+(?<depName>[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)(?:/[a-zA-Z0-9_./-]+)?@(?<currentDigest>[a-f0-9]{40})\\s+#\\s+(?<currentValue>[a-zA-Z0-9._-]+)"
       ],
       "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "description": "Bump the org API styleguide pin (#689) everywhere it is quoted. The shim is a plain .spectral.yaml with no .tmpl suffix, so the actions manager above (which filters /\\.tmpl$/) cannot see it — hence its own managerFilePatterns. ALL THREE quoting sites are listed deliberately: tests/api-styleguide-ruleset.bats enforces repo-wide that every file quoting a pin quotes the SAME one, so a manager that rewrote only the shim would open a bump PR that is born red and needs two hand-edits to go green — the opposite of the reviewable one-click bump this exists to produce. The pin is the immutable tag styleguide-vX.Y.Z on this same repo; the regex versioning below both orders those tags and filters out unrelated ones (e.g. docs-latest), and keeping the whole tag as currentValue means Renovate rewrites the URL segment in place.",
+      "managerFilePatterns": [
+        "/^development/skills/bootstrap/templates/common/\\.spectral\\.yaml$/",
+        "/^styleguide/spectral/ruleset\\.yaml$/",
+        "/^docs/how-to/adopt-the-api-styleguide\\.md$/"
+      ],
+      "matchStrings": [
+        "@(?<currentValue>styleguide-v\\d+\\.\\d+\\.\\d+)/styleguide/spectral/ruleset\\.yaml"
+      ],
+      "depNameTemplate": "timo-jakob/timos-claude-code-plugins",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "regex:^styleguide-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
     }
   ],
   "packageRules": [
@@ -27,6 +42,14 @@
       "groupName": "github-actions",
       "groupSlug": "github-actions",
       "commitMessageTopic": "GitHub Actions"
+    },
+    {
+      "description": "The API styleguide pin (#689) is NOT a GitHub Action, but it IS a custom.regex dep — so the rule above would otherwise sweep it into the batched actions PR, where a change to what every bootstrapped repo's CI enforces would ride along unannounced. This rule comes after it and wins (later packageRules override), giving the pin its own PR with its own review. Matched by depName because both custom managers use the github-tags datasource.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["timo-jakob/timos-claude-code-plugins"],
+      "groupName": "api-styleguide",
+      "groupSlug": "api-styleguide",
+      "commitMessageTopic": "API styleguide ruleset pin"
     }
   ]
 }
