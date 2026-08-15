@@ -3762,13 +3762,16 @@ actually rendered in Step 3 — §3a through §3l):
 | `.spectral.yaml` | `common/.spectral.yaml` (§3i — the exact-pin shim, #689/#1358) |
 | `trivy.yaml` | `common/trivy.yaml.tmpl` |
 
-The four §3i rows are what makes the **refresh** path both how-tos describe real:
-`docs/how-to/adopt-the-ops-surface.md` step 0 and the api-styleguide how-to each
-tell a reader to refresh `contracts-lint.yml` via `/development:bootstrap` and say
-it re-stamps the provenance marker. Unstamped, the drift detector has no recorded
-hash to compare, so the refresh would surface as an unknown-provenance prompt every
-run instead of a drift finding — and the placeholder trap those pages warn about
-(`{{DEFAULT_BRANCH}}`) is exactly what the render path exists to avoid.
+The four §3i **workflow** rows are what makes the **refresh** path both how-tos
+describe real: `docs/how-to/adopt-the-ops-surface.md` step 0 and the api-styleguide
+how-to each tell a reader to refresh `contracts-lint.yml` via
+`/development:bootstrap` and say it re-stamps the provenance marker. Unstamped, the
+drift detector has no recorded hash to compare, so the refresh would surface as an
+unknown-provenance prompt every run instead of a drift finding — and the
+placeholder trap those pages warn about (`{{DEFAULT_BRANCH}}`) is exactly what the
+render path exists to avoid. The fifth §3i row, `.spectral.yaml`, is that same
+mechanism applied to the pin itself (#1358): stamped and tracked, a stale pin
+surfaces as drift instead of as nothing at all.
 
 The `*-noop.yml` companions and `release.yml` are tracked, rendered files just
 like their main counterparts — each renders from its **own** template (the
