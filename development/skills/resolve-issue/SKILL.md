@@ -40,8 +40,77 @@ gh issue view <N> --json number,title,body,state,labels,url
   `summary.total > 0` — the authoritative signal, #802), when it carries an
   `epic` label, or when the body holds a **task list of child issues**
   (`- [ ] #123`, `- [ ] owner/repo#123` — which marks an *un-backfilled*
-  epic, see E1) → go to **Epic flow**. A **failed** reader call (nonzero
-  exit) is a classification failure — report it and stop; never fall back to
+  epic, see E1) → go to **Epic flow**. A **child line is a checkbox whose
+  content STARTS with the issue reference** (#1260) — a checkbox that merely
+  *mentions* an issue somewhere in its text is an **acceptance criterion**,
+  not a child, and lines inside fenced code blocks don't count at all. Judge
+  it by that rule and nothing looser: a well-specified story routinely cites
+  sibling issues in checkbox-shaped criteria, and counting those routes it
+  into the Epic flow with no children to decompose. `read-dependencies.zsh`
+  codifies the rule (see ARCHITECTURE.md, *Issue-dependency model*) — read it
+  there rather than re-deriving it. Several **near-miss** shapes are
+  deliberately **not** child lines — a bare **issue URL**, an **ordered-list**
+  checkbox (`1. [ ] #687`), a **decorated** ref (`- [ ] **#687**`,
+  `- [ ] [#687](url)`), and a ref glued to the **checkbox** or to a following
+  **word** (`- [ ]#687`, `- [ ] #687x`). *Why* each is excluded — whether the
+  backfill could not migrate it, or the classifier is deliberately stricter
+  than a backfill that would — is recorded once, per shape, in ARCHITECTURE.md
+  (*Issue-dependency model*); **read it there, and never restate the split
+  here**, because your action is the same for every one of them.
+
+  **Native sub-issues and the `epic` label always win.** When either is
+  present, go to the **Epic flow** regardless of the body's shape — the
+  markdown list is only the human-readable view. With the `epic` label and no
+  native sub-issues, E1's `total: 0` classification handles a near-miss body as
+  case 4; with native sub-issues present the body is not consulted at all,
+  because native parenthood is authoritative (#802).
+
+  **A genuine child *declaration* wins over any near-miss line beside it.** If
+  the body holds **at least one** `- [ ] #N` line that matches the rule **and
+  declares that issue as this epic's work**, it is an epic — go to the **Epic
+  flow**, where E1 judges case 1 first. The near-miss branch below is only for
+  a body with **no** such line. The rule is a *shape* test and the classifier
+  script cannot see intent, so matching it is necessary but **not sufficient**:
+  `- [ ] #937's seam is implemented` matches the rule (the ref is at the head
+  of the item, and `'` closes the `\b`) yet is plainly an acceptance criterion.
+  Read the intent test below before concluding "epic" from any single line.
+
+  **Shape alone never triggers the near-miss branch — intent does.** It
+  applies only when *all four* hold: **(0)** **no** child-shaped line in the
+  list is a rule-matching child *declaration* (a rule-matching line that states
+  a condition about an issue is a criterion, not a declaration, and so does not
+  block this branch; the shapes above are the common examples, not a
+  closed set — a child-shaped line in none of them, such as `- [ ] TBD: file
+  the auth child`, halts here too rather than falling through to the
+  Single-issue flow); **(1)** such a list is the **sole** epic signal (`summary.total == 0`,
+  no `epic` label); **(2)** it is plainly the epic's **children declaration**
+  (a Children/Sub-issues/Tasks section whose items are separate **issues** — a
+  *Slices* section, whose items are work descriptions rather than issues, is
+  never a children declaration: that is E1 case 2, and this branch does not
+  apply to it); and **(3)** it is not acceptance criteria. **A checkbox that
+  states a condition about an issue is a criterion however it is written** —
+  decorated or bare, matching the #1260 shape rule or not. Both
+  `- [ ] **#937**'s seam is implemented` and `- [ ] #937's seam is
+  implemented` are criteria, not children, so they route to the Single-issue
+  flow like any other — the second matches the shape rule, which is exactly
+  why intent, not shape, decides. Getting this backwards would
+  refuse an ordinary refined story outright, which is #1260's own defect
+  wearing a new coat. When all four do hold: **stop** — run neither flow on
+  it. Interactive: ask the human to attach native sub-issues, or to rewrite
+  the list as `- [ ] #N`. Autonomous: post the finding as an issue comment and
+  stop; never widen it into a single-issue implementation of an epic body.
+  **A checkbox that states a condition *about* an issue is a criterion, not a
+  child declaration** — a body whose checkboxes are all criteria is not an epic
+  signal at all (condition (3) above), so it takes the Single-issue flow **even
+  when some of those lines match the #1260 shape rule**. That
+  is the *intent* test, not a citing test: a body whose checkboxes are a
+  children **declaration** in a near-miss shape halts as above, even though
+  those lines cite issues too. An epic that declares its
+  work as inline slices (E1 case 2) likewise reaches the Epic flow only via the
+  `epic` label or native sub-issues. On a **failed** `read-sub-issues.zsh` call,
+  **exit 2 is your own bad invocation** — fix the command and re-run, the same
+  rule E1, E3 and §0a apply to their scripts. **Any other nonzero exit is a
+  classification failure** — report it and stop; never fall back to
   the label/task-list signals as if the native signal were checked and
   absent (a native-only epic would misclassify as a single issue).
 - Otherwise → **Single-issue flow**.
@@ -52,7 +121,7 @@ issue must belong to it. If `$ARGUMENTS` is empty, print the invocation help
 
 ## Single-issue flow
 
-### 0a. Dependency precheck — reject on open blockers (do NOT skip)
+### 0a. Dependency precheck — reject unless the graph is clean (do NOT skip)
 
 Dependencies are enforced from **GitHub-native `blockedBy` relationships** —
 the single source of truth (#583); prose declares nothing. Before anything
@@ -66,17 +135,82 @@ It wraps the shared reader (`read-dependencies.zsh`, #584) into one typed
 decision (JSON on stdout; like the readiness gate it performs **no** GitHub
 writes — this skill does the posting):
 
-- **`PROCEED` (exit 0)** — no open blockers. Clear a stale `blocked` label if
+- **`PROCEED` (exit 0)** — the graph was **fully walked** and no open blocker
+  was found. Clear a stale `blocked` label if
   one is present (`gh issue edit <N> --remove-label blocked 2>/dev/null ||
   true`) and continue to step 0b exactly as today.
-- **`REJECT_BLOCKED` (exit 10)** — the issue has open blockers, directly or
-  transitively. Do **not** branch or implement. The decision JSON's
-  `comment_md` is the ready-to-post argumentation naming each open blocker.
-- **`REJECT_CYCLE` (exit 11)** — the blocked-by graph contains a cycle, which
-  no order of work can satisfy. Same handling as `REJECT_BLOCKED`; the
-  `comment_md` names the cycle. Refuse — never try to loop through it.
+- **`REJECT_BLOCKED` (exit 10)** — has **two shapes**. Do **not** branch or
+  implement in either.
 
-On either rejection, what happens next depends on who is driving:
+  **(i) An OPEN blocker was enumerated** — at least one entry with
+  `open: true` in `blockers` or `foreign_blockers`. The decision JSON's
+  `comment_md` is the ready-to-post argumentation naming each open blocker.
+  Handle it as the rest of this step describes.
+
+  **(ii) No OPEN blocker** — no `open: true` entry in either array (however
+  many **closed** ones are listed), and `cycles` empty. The gate rejected on
+  something it **cannot name**, for one of two
+  reasons, and `comment_md` says which:
+
+  Key the split on **open**, not on the arrays being non-empty: `comment_md`
+  builds its list with the same `open` test, so a document listing only
+  **closed** blockers renders the shape (ii) wording — *No blocker could be
+  enumerated* — while matching a non-emptiness test as shape (i). Reading it as
+  (i) sends you into a remediation whose question must "name the open blockers"
+  with none to name and whose chain has no rungs, and "just the dependency"
+  then reports a chain cleared that was never resolvable.
+
+  - **`truncated: true`** — the walk was cut short by the depth cap, so the
+    empty arrays are evidence of **not having looked**, not of no blockers.
+  - **`truncated: false`, `reader_blocked: true`** — the reader itself reported
+    `blocked` for a reason none of the gate's own counts covers. The gate
+    consumes that verdict rather than only re-deriving it, so a new reader
+    reason rejects by default.
+
+  Read `truncated` / `reader_blocked` to tell them apart — never guess, and
+  never treat an unexplained empty set as a malfunction.
+
+  Both are the same fail-closed rule as an open cross-repo blocker, and both
+  are handled identically: there is nothing to remediate and **no rung to
+  run**. Do **not** offer remediation, and never read the empty arrays as a
+  malfunction and continue to 0b. Report the cause `comment_md` names and stop
+  — interactive, in the conversation; autonomous, post `comment_md` (which
+  says *No blocker could be enumerated*) and the `blocked` label. Do not
+  promise the re-run will pass: on a truncated walk it needs a larger
+  `--max-depth` or a shorter chain, and on a reader verdict it needs whatever
+  the reader is seeing, which this gate cannot enumerate.
+
+  **A blocker may live in another repository.** The reader is bound to one, so
+  a cross-repo blocker is reported in `foreign_blockers` (`owner/name#M`) and
+  is **never** in `open_blockers` — a bare number means nothing outside its own
+  repo. An **open** one rejects all the same: the gate cannot verify it, and a
+  gate that cannot verify must never report ready. It also cannot be
+  remediated from here — its own blockers were never enumerated, and this
+  skill's flows operate on the session's repo. Report it and let the human
+  resolve it in its own repository; **never** re-run `resolve-issue` on the
+  bare number against this repo, which would target whichever local issue
+  happens to share it.
+- **`REJECT_CYCLE` (exit 11)** — the blocked-by graph contains a cycle, which
+  no order of work can satisfy. Same handling as `REJECT_BLOCKED` shape (i);
+  the `comment_md` names the cycle. Refuse — never try to loop through it.
+- **Any other exit is NOT a pass**, and the two codes end differently. Every
+  one of these paths prints **nothing** on stdout, so a caller checking only
+  for the three decision strings sees an empty document and no rejection —
+  **never continue to step 0b on an empty decision document**, and never post
+  the `blocked` label from either code.
+  - **`2` is *your own* malformed invocation** — an empty `--repo`, a dangling
+    flag, a bad `--max-depth`; the reader's own usage error is re-raised as 2
+    rather than laundered into 1 precisely so it reads as *fix the call*, not
+    *retry*. **Fix the command and re-run the precheck for this issue.** Stop
+    and report stderr plus the invocation only if it exits 2 again, or you
+    cannot see what is malformed. This is the same rule E1 applies to the
+    backfill's exit 2 and E3 to a child's.
+  - **`1` is an internal failure** (jq missing, the reader failed, a document
+    that could not be read or emitted). Stop the flow and report the script's
+    stderr; do not re-run.
+
+On either rejection **of shape (i)** — a shape (ii) rejection already stopped
+above, and has no remediation — what happens next depends on who is driving:
 
 - **Autonomous / non-interactive** (maintenance pipeline, epic-driven resolve —
   no human to prompt): post `comment_md` as an issue comment, apply the
@@ -100,14 +234,69 @@ On either rejection, what happens next depends on who is driving:
 
 #### Interactive remediation — offer to clear the blockage (#586, #587)
 
-Applies **only** with a human present, and only to `REJECT_BLOCKED`:
+Applies **only** with a human present, and only to a **shape (i)**
+`REJECT_BLOCKED` — one that actually enumerated an **OPEN** blocker:
 
 - **`REJECT_CYCLE` has no remediation.** No order of work satisfies a cycle;
   the fix is a relationship edit (remove whichever blocked-by points the wrong
   way), and that judgment is the human's. Report and stop.
+- **A shape (ii) `REJECT_BLOCKED` has no remediation either.** No OPEN blocker
+  was enumerated (however many closed ones are listed), so nothing names a
+  rung, and both options below would promise to clear a chain that
+  does not exist — and reading "no rungs" as "chain already clear" is exactly
+  the continue-to-0b outcome shape (ii) forbids. Report the cause and stop.
 - **An open blocker classified `kind: "epic"` blocks as a whole** (#587):
   resolving one child wouldn't unblock the dependent — the named issue may
-  depend on the epic's **combined** effect. Remediating an epic blocker means
+  depend on the epic's **combined** effect.
+
+  **Confirm the `kind` before acting on it.** `kind` comes from the same
+  *shape* classifier as step 0 (#1260) and, like it, **cannot see intent**.
+  ARCHITECTURE.md (*Issue-dependency model*) lists **every** consumer that must
+  apply the intent half on top of it — widening or narrowing the classifier
+  means sweeping that list, not just this skill's own sites.
+
+  **Fetch the blocker before judging.** The precheck's decision JSON carries
+  `issue`, `decision`, `open_blockers`, `blockers` (each with `depth` and
+  `kind`), `foreign_blockers`, `cycles`, `truncated`, `reader_blocked` and
+  `comment_md` — that is
+  the named
+  source for every array the sections below read. `truncated` is true when the
+  walk left `blockedBy` edges **unread** at the depth cap — so the blocker
+  arrays are a **floor**, not a complete answer, and when they are empty it is
+  why, rather than proof there are none. Merely *reaching* the cap does not set
+  it: a leaf there leaves nothing unread and reports false. What it does
+  **not** carry is
+  any **breakdown of the signals that produced a `kind`**: no sub-issue count,
+  no label list, no body. So the confirmation evidence is not already in hand:
+
+  ```bash
+  gh issue view <blocker> --json labels,body
+  "<skill-base-dir>/scripts/read-sub-issues.zsh" --repo "$REPO" --epic <blocker>
+  ```
+
+  `summary.total > 0` or an `epic` label **confirms** it — those two are proof
+  on their own. `trackedIssuesCount` is **not**: GitHub derives it from the
+  same body checkbox lines, so judge it exactly like a body signal. A **body**
+  (or tracked-issues) signal is proof only when at least one checkbox line is a
+  child **declaration** (shape *plus* intent). A blocker whose only checkbox
+  refs are acceptance criteria — `- [ ] #937's seam is implemented` — is
+  reported `kind: "epic"` and is an **ordinary issue**: remediate it through
+  the single-issue flow, and say so rather than relaying the `comment_md`'s
+  *epic* wording. Running the Epic flow on it instead ends in E1's `total: 0`
+  halt posting a decomposition complaint on a well-specified story, so the
+  blocker is never resolved and the named issue stays blocked — #1260's own
+  harm, arriving through the dependency path. Getting it backwards is just as
+  costly: treating an unconfirmed `kind` as an ordinary issue completes the
+  rung on one PR and lets the dependent proceed with a genuine epic's remaining
+  children unbuilt.
+
+  **A failed fetch, or a body you cannot judge either way, is not a
+  confirmation.** This path is interactive-only — ask the human which it is,
+  and never guess a rung. **Exit 2 is your own bad invocation, though**: fix
+  the command and re-run the fetch before asking, rather than spending the
+  human's attention on your own typo.
+
+  Remediating a **confirmed** epic blocker means
   running the **full Epic flow** on it (E1–E5: every child, the holistic E4
   verification, the explicit E5 close) — **reuse that flow as written**, never
   a re-implementation of its ordering. The named issue stays queued until the
@@ -117,7 +306,31 @@ Applies **only** with a human present, and only to `REJECT_BLOCKED`:
   boundary. (Autonomous runs are unchanged: an epic blocker rejects +
   escalates like any other — an unattended run never auto-runs the epic.)
 
-Whatever the blocker's kind, put the choice to the human (AskUserQuestion —
+**When `blockers` holds NO `open: true` entry — every open blocker is
+foreign — there is no rung at all: do NOT present the offer.** The chain below
+is the `blockers` array only, so it would be empty, and both options would
+promise to clear a chain that does not exist; option 2 would then report a
+chain merged when nothing was resolvable from this repo. Report the open
+`foreign_blockers` refs as unresolvable here and stop, exactly as a shape (ii)
+rejection does. The either/or below applies **only** when at least one open
+entry exists in `blockers`.
+
+**When an open `foreign_blockers` entry exists alongside local ones, the offer
+cannot fully clear the
+chain** — the local rungs would merge and the precheck would still reject. (A
+shape (ii) rejection — truncated, or the reader's own verdict, both with NO
+**open** blocker enumerated — has no rungs at
+all: it already told you to stop, so never reach this offer. A `truncated`
+rejection that **did** enumerate blockers is shape (i): the rungs are real, so
+offer them deepest-first as usual — clearing them prunes the very walk that hit
+the cap, so the re-run may well pass — but say that the list is a **floor**, so
+a blocker beyond the cap could still surface.) So
+either withhold the offer and stop as an autonomous run does (report + the
+`blocked` label), or present it with that stake stated plainly in the question.
+Never present it as if completing the local rungs would unblock the issue.
+
+Otherwise — whatever the blocker's kind — put the choice to the human
+(AskUserQuestion —
 one question, two options; on rejection, name the open blockers in the
 question, and say when one is an epic, since choosing to resolve it means
 resolving the whole epic):
@@ -131,10 +344,21 @@ resolving the whole epic):
 Declining both (the "Other" escape hatch) stops exactly as before the offer
 existed — never remediate without an explicit choice.
 
-**Either way, the blocker chain resolves deepest-first.** The precheck's
+**Either way, the blocker chain resolves deepest-first.** The chain is the
+`blockers` array only — **`foreign_blockers` are not rungs**: they are in
+another repository, carry no `depth`, and this flow operates on the session's
+repo, so an open one means the offer cannot fully clear the chain. Say so up
+front rather than presenting a remediation that will still re-reject. The
 `blockers` array carries a `depth` per blocker: work from the deepest open
 blocker upward, because a shallower blocker may itself be blocked by a deeper
-one — building it first would just re-reject. Resolve each blocker via the
+one — building it first would just re-reject. **`depth` is the SHORTEST
+distance from the named issue, so it is a hint, not a topological order**: a
+blocker that is both direct and a prerequisite of another direct blocker
+reports `depth: 1` like its dependent (the field's documented meaning is "1 =
+direct blocker", which needs the minimum). What actually guarantees the order
+is the recursion below — each blocker's own step 0a re-rejects it if a deeper
+one is still open — so use `depth` to choose a starting point, never as proof
+that a rung is ready. Resolve each blocker via the
 **full single-issue flow, recursively**: each blocker's run starts at its own
 step 0a, so a still-deeper blocker surfaces there (and, with the human still
 present, gets the same offer), and #585's cycle refusal is inherited rather
@@ -142,9 +366,29 @@ than re-implemented. One issue per PR, as always — a chain of three blockers
 is three PRs, each **merged before its dependent branches** (never stacked;
 the epic flow's "never branch off an unmerged dependency" rule, applied
 across the remediation chain). An **epic-kind blocker occupies its rung as a
-single unit**: that rung runs the Epic flow (above) instead of the
+single unit** — once its `kind` is **confirmed** by the check above, never on
+the reported field alone: that rung runs the Epic flow (above) instead of the
 single-issue flow, and the rung is complete only when the blocking epic is
-closed. Wait for each merge before the next rung: an Approver repo
+closed.
+
+**Failing the confirmation has two *nameable* causes plus a catch-all, and
+they end differently.** Only the first is the criteria case:
+
+- Its checkbox refs are **acceptance criteria** — an ordinary well-specified
+  story. Take an ordinary **single-issue rung**.
+- Its children are written in a **near-miss shape** (step 0's shapes: a bare
+  issue URL, an ordered-list checkbox, a decorated or glued ref). This is a
+  real but **undecomposed epic** — `trackedIssuesCount` reports it as one
+  because GitHub's own task-list tracking is looser than the #1260 shape rule,
+  yet no line passes the shape half. **Halt the rung** exactly as step 0's
+  near-miss branch does: ask for native sub-issues or a `- [ ] #N` rewrite.
+  Never run either flow on it — a single-issue rung here would widen into a
+  single-issue implementation of an epic body, which step 0 forbids, and the
+  rung's own step-0a re-entry does not re-run step 0's near-miss branch.
+- **Anything else you cannot classify**: ask the human.
+
+**Wait for each merge before the next rung** — this applies to *every* rung,
+not only the ones above. An Approver repo
 auto-merges on green (`await-pr-checks.zsh`); in a human-only repo the human
 is present — report the blocker PR ready and continue once they merge it.
 When an epic rung pauses awaiting a child's merge (the human-only cadence),
@@ -156,7 +400,13 @@ Then, per the chosen option:
 
 - **Just the dependency** → stop once the blocker chain is merged. Do not
   branch, implement, or comment on the named issue — it was never touched, and
-  its next `resolve-issue` run passes the precheck by itself.
+  its next `resolve-issue` run passes the precheck by itself. (Unless an open
+  `foreign_blockers` entry remains — then that re-run rejects again, and the
+  human must clear it in **its own** repository first. A `truncated` rejection
+  that enumerated blockers needs no such caveat — clearing them prunes the walk
+  that hit the cap — but the list is a floor, so re-verify rather than assume;
+  only the case where NO open blocker was enumerated needs a larger
+  `--max-depth` or a shorter chain.)
 - **Both** → **re-verify, then proceed**: re-run the precheck on the named
   issue and require `PROCEED` — a squash-merged PR closes its issue via
   `Closes #N`, but verify rather than assume (a blocker may have gained a new
@@ -164,6 +414,25 @@ Then, per the chosen option:
   while the chain was in flight; a merge may not have closed what you think
   it closed). Only on `PROCEED` continue to step 0b and the rest of the
   single-issue flow, exactly as if the precheck had passed first try.
+
+  **If the re-verification returns `REJECT_BLOCKED` or `REJECT_CYCLE`** —
+  guaranteed when
+  an open foreign blocker remains, and possible whenever a relationship
+  changed mid-flight — do **not** branch, do **not** implement, and do **not**
+  re-offer remediation (the chain cannot be cleared by repeating it; that is
+  an unbounded loop). Report the still-open blockers, naming any
+  `foreign_blockers` entry as **unresolvable from this repo**, and stop.
+
+  **An exit 1 or 2 here is NOT a rejection** — nothing was decided and stdout
+  is empty, so there is no fresh blocker list. **Never** relay the list you
+  held from the first rejection: those rungs were just merged, so reporting
+  them asserts a verdict the gate never reached and sends the human back to
+  re-resolve them. Exit 2 is your own malformed invocation — fix the command
+  and re-run the re-verification. Exit 1 is an internal failure — report the
+  script's stderr and stop. Either way, never continue to step 0b.
+  Never read an already-reported blocker as "known, therefore fine" and
+  continue to 0b — building against an unverifiable prerequisite is precisely
+  what the gate exists to prevent.
 
 ### 0b. Readiness gate — is the story ready to build? (do NOT skip)
 
@@ -1534,15 +1803,18 @@ continues from wherever a prior run stopped.
 > |---|---|---|---|
 > | `0` | `0` | Not decomposed — or not backfilled | **Never proceed as-is** (classify below) |
 > | `N` | `< N` | In progress | Resolve the open children |
-> | `N` | `N` | Genuinely done | Do no child work → **E4**, then **E5** |
+> | `N` | `N` | Genuinely done | Do no child work → **E4**, then **E5** — unless the body also holds inline slices, which each need a confirmed merged PR first |
 >
 > The `total: N, completed: N` row is the genuine terminal case — and the step
 > that's easy to miss: such an epic still sits OPEN until E5 closes it, because
 > nothing carries `Closes #<epic>`. Native children closed against the epic
-> **are** the positive evidence of merged work that closing requires.
+> **are** the positive evidence of merged work for the **children** half; when
+> the body also holds inline slices, each slice's merged PR is required too —
+> see the positive-evidence rule below.
 >
 > **`total: 0` never proceeds as-is — classify which zero it is first.
-> Case 1 backfills and continues; cases 2-unrealized and 3 halt:**
+> Case 1 backfills — and halts whenever the dry-run plan is not exactly the
+> genuine children; cases 2-unrealized, 3 and 4 halt outright:**
 >
 > 1. **The body's task list holds `#N` children but none are native
 >    sub-issues** — an **un-backfilled epic** (its children were declared
@@ -1553,23 +1825,137 @@ continues from wherever a prior run stopped.
 >    the plan against the body**: a slice line whose `#N` is a parenthetical
 >    *context* ref (e.g. "validation on the #717 constellation") is case 2,
 >    not a child declaration — migrating it would misparent the referenced
->    issue (one parent only). **When the dry-run's `would_add` contains any
->    ref that is not a genuine child declaration, do NOT run the live
+>    issue (one parent only). This vet is **load-bearing precisely because the
+>    backfill's parser is looser on ref position than the classification
+>    rule** (#1260): it takes the first ref *anywhere* on a checkbox line,
+>    where step 0 counts only a checkbox whose content *starts with* the ref.
+>    That is deliberate — it puts every context ref in front of the operator
+>    (model or human; this vet is required on autonomous runs too) instead of
+>    dropping it silently. **When the dry-run's `would_add` contains any
+>    ref that is not a genuine child declaration** — judged by the full #1260
+>    rule **plus intent**: the line **declares the referenced issue as this
+>    epic's work** (not a *condition about* it — `- [ ] #937's seam is
+>    implemented` passes the shape rule and still fails this vet), the
+>    checkbox content *starts with* the ref, **and** the line is
+>    outside any fence — **do NOT run the live
 >    backfill** — halt and report (interactively: ask the human to fix the
 >    body's task list so only child declarations remain), then re-dry-run
->    before migrating. After a live run, **gate on its outcome**: continue
+>    before migrating.
+>
+>    **The halt is absolute, and it is not rare.** An epic whose acceptance
+>    criteria cite sibling issues in checkbox lines puts every one of those
+>    refs into `would_add`, so this branch fires on ordinary, well-written
+>    epics. Never read the "deliberately looser" rationale above as licence to
+>    wave the extra refs through as known-harmless: the looseness exists to
+>    *surface* them for this decision, not to pre-approve them. There is no
+>    partial or selective migration — the sanctioned remedies are for the human
+>    to attach the genuine children as native sub-issues directly, or to edit
+>    the body so no non-child checkbox line carries a `#N` — and then re-run
+>    the dry-run.
+>
+>    **First, branch on the dry-run's EXIT CODE, not just its JSON.** A
+>    nonzero exit (1: missing jq/awk, epic fetch, body-parse or sub-issue-list
+>    failure; 2: usage) prints **no document at all** — which, read as a plan, looks
+>    exactly like the empty-plan halt below and would tell the human their task
+>    list is not migratable when in fact nothing ever parsed it. **Exit 2 is
+>    your own bad invocation** — fix the command and re-run the dry-run, do not
+>    escalate it. **Exit 1 is a tooling failure**: report it the way the halts
+>    below do — interactive, in the conversation; autonomous, as a comment on
+>    the epic naming the exit code and stderr — and stop. Never read a missing
+>    document as an empty plan.
+>
+>    **The vet runs BOTH ways.** The rule above catches refs in `would_add`
+>    that are not children; this catches the reverse — a line you read as a
+>    child that produced **no** ref. Compare the body's checkbox lines against
+>    the dry-run's arrays as a whole (not `markdown_children` alone — it
+>    excludes both skipped kinds by construction): every line you read as a
+>    child declaration, in **any**
+>    shape, must appear in `would_add` / `already_present` /
+>    `skipped_cross_repo` / `skipped_self_ref` — a line landing in
+>    `skipped_cross_repo` is the cross-repo halt, not a case-4 shape, and one
+>    landing in `skipped_self_ref` is **either** the epic's own tracker line
+>    (expected, halts nothing) **or** a mistyped child ref — resolve which by
+>    the rule below; when you *do* halt, the comment must say
+>    which it was — the cross-repo halt, a case-4 near-miss shape, or a
+>    `skipped_self_ref` line judged a mistyped child.
+>
+>    A `skipped_self_ref` line still gets **recorded**, in whatever comment this
+>    run posts on the epic — E1's own halt comment, E3's summary, E1b's halt
+>    summary, or E5's closing
+>    summary when the flow goes straight to E4/E5 — never omitted because E3
+>    did not run. If a run posts **no** epic comment at all (E4 files a
+>    regression and stops, say), post the note as its own one-line comment
+>    before stopping. **Quote the body LINES, not the array entry**: the array holds
+>    the epic's own number at most once and cannot tell you how many lines
+>    produced it, so a genuine tracker line and a *mistyped* child ref
+>    (`- [ ] #<epic> — build the thing`) yield the identical array. Naming the
+>    lines is what makes the mistyped one visible.
+>
+>    **Then judge each quoted line, because the two demand opposite actions.**
+>    A line that reads as a **tracker** (`- [ ] #<epic> stays open until …`) is
+>    expected and halts nothing. A line that reads as a **child declaration
+>    carrying the epic's own number** (`- [ ] #<epic> — build the thing`) is a
+>    **mistyped child**: it declares work no sub-issue will ever carry, so
+>    **halt exactly as case 4 does**, naming the line. If you cannot tell which
+>    it is, halt and ask rather than proceeding — an autonomous run has no one
+>    reading the comment before E5 fires. A
+>    child-shaped line
+>    that yields nothing is a **case-4 shape sitting inside a case-1 body** —
+>    and nothing else would catch it, because `would_add` stays clean,
+>    `markdown_children` is non-empty and `skipped_cross_repo` is empty.
+>    (Which near-miss shapes yield nothing and which land in `would_add`
+>    instead is ARCHITECTURE.md's per-shape record — you need not predict it:
+>    run both halves and whichever applies fires.) **Halt exactly as case 4
+>    does.** Without this, the epic migrates only its well-formed children,
+>    reaches the `total == completed` row, and is CLOSED at E5 with the
+>    dropped child never filed or built.
+>
+>    **Two more dry-run halts, both BEFORE the live run** (making **four** in
+>    all with the forward and reverse vets above — the same four refine-issue's
+>    Epic walk lists) — a run you must halt
+>    on is a run whose GitHub writes must never happen:
+>    - **`markdown_children` is empty.** The lines you read as children are not
+>      migratable child declarations — either a near-miss shape the backfill
+>      resolves nothing from, or a ref it resolves but never attaches (a
+>      cross-repo ref, a self-reference to the epic). A near-miss shape the
+>      backfill *does* resolve is **not** a cause here: it trips the
+>      `would_add`-holds-a-non-child halt above instead. ARCHITECTURE.md
+>      records which shapes fall on which side. **Either** the classification
+>      was wrong, **or** the body declares children this migration cannot
+>      attach (cross-repo, a self-reference) — name the lines and let the human
+>      decide which; do not assert one. Halt with a comment naming the lines you read as
+>      children and report that native sub-issues (or decomposition) are
+>      needed, exactly as case 3 does. **Never re-run the backfill hoping for a
+>      different result** — it is idempotent, so re-running loops forever.
+>    - **`skipped_cross_repo` is non-empty.** It is reported on the dry-run
+>      too, and cross-repo children are unmigratable here, so the epic halts
+>      either way — halting now avoids attaching the same-repo half first and
+>      leaving the epic half-migrated.
+>
+>    After a live run, **gate on its outcome**: continue
 >    only on exit 0 with every markdown child accounted for in
 >    `added`/`already_present` **and `skipped_cross_repo` empty** — then
 >    re-read through the shared reader and take the table's row for the new
 >    `summary` (that continuation is what keeps E3's "all children, one
 >    invocation" true). Otherwise **halt** with a summary comment naming the
->    unattached children: on exit 5 (partial) or 1, and equally whenever
+>    unattached children: on exit 5 (partial) or 1 — but **exit 2 is your own
+>    bad invocation**, so fix the command and re-run the live backfill (it is
+>    idempotent) rather than posting a halt comment naming children no document
+>    ever reported — and equally whenever
 >    `skipped_cross_repo` is non-empty — cross-repo children are
 >    unmigratable here, and even when same-repo children attached fine
 >    (`total > 0`), an epic with unattached cross-repo children must never
 >    reach the `N == N` row's E4/E5 licence (the human attaches them
 >    natively cross-repo, or descopes them from the task list). A partial
->    child set must never license closure. This is the migration hazard the
+>    child set must never license closure. **Known gap, out of scope for
+>    #1260:** that refusal is enforced only within the run that met the
+>    cross-repo leftovers. The flow is resumable, so a later run sees a
+>    non-zero `summary`, takes the in-progress row and eventually the
+>    `N == N` row, and no step re-inspects the body — the dry-run halt above
+>    at least stops the live write, but closing the loop across runs needs a
+>    pre-E4 gate that judges the plan by the #1260 rule rather than by the
+>    backfill's looser `markdown_children`, which is an epic-flow design
+>    change, not a classifier fix. This is the migration hazard the
 >    contract documents: treating an un-backfilled epic as "done" would
 >    close never-started work en masse.
 > 2. **The task list holds inline slices** (`- [ ]` describing work rather
@@ -1579,13 +1965,56 @@ continues from wherever a prior run stopped.
 >    them. **Confirm a merged PR for each slice.** All slices confirmed →
 >    E4 + E5 as the `N == N` row. **Any slice unrealized → halt**: do not run
 >    E4, do not close.
+>
+>    **Acceptance criteria are never slices.** A checkbox stating a *condition
+>    about* an issue is a criterion, decorated or bare, and a body whose
+>    checkboxes are **all** criteria matches none of cases 1-4 — it takes the
+>    **otherwise** halt below, not this case. Case 2's terminal is the only
+>    non-native door to E4/E5, so absorbing criteria here would let an
+>    `epic`-labelled issue with `total: 0` reach E5 on merge evidence for work
+>    that was never *its* work — closing a never-decomposed epic, which is
+>    exactly what the `total: 0` branch exists to prevent (#798). Criteria
+>    typically assert work that landed elsewhere, so the merged-PR hunt will
+>    often *succeed* — that is the trap, not a confirmation.
 > 3. **No children were ever filed / no task list at all** — the epic has not
 >    been decomposed. → **halt** and report that decomposition comes first.
 >    Never invent children ("don't decide the user's issues for them").
+> 4. **The task list declares children in a near-miss shape** — bare issue
+>    URLs, ordered-list checkboxes, decorated refs, or a ref glued to the
+>    checkbox or to a word (step 0's shapes, all of them). These
+>    are children in intent but not by the rule. **When they stand alone**,
+>    case 1 never fires for them. **When they sit beside genuine child
+>    declarations** (shape plus intent — a shape-matching criterion is not one),
+>    case 1 fires and halts before the live run — by whichever vet applies:
+>    a shape the backfill **does** resolve lands in `would_add` and the
+>    **forward** vet catches it; a shape it resolves nothing from is caught by
+>    the **reverse** vet. You do not need to know which is which in advance —
+>    run both, and one of them fires. Either way case 2
+>    must not absorb them as "slices". The reason differs by shape — for some
+>    the backfill genuinely cannot migrate the line, for others it *would*
+>    resolve and attach it unvetted, which is just as much a reason not to
+>    enter case 1. ARCHITECTURE.md records which is which, per shape; **do not
+>    restate that split here**, since the action below is the same either way.
+>    → **halt** and ask for
+>    native sub-issues (or for the list to be rewritten as `- [ ] #N`).
+>
+> **The cases are exclusive and closed.** Judge case 1 **first**: any genuine
+> child **declaration** — the #1260 shape rule **plus** the intent half (the
+> line declares that issue as this epic's work, not a condition *about* it) —
+> makes it case 1 even when slice lines are also
+> present — the slices are then out of this classification, and E5 still needs
+> a confirmed merged PR for each of them. **A shape-matching *criterion* never
+> makes it case 1**: a criteria-only body takes the otherwise halt (per case 2),
+> and a body of slices beside a citing criterion is still case 2 — filing it as
+> case 1 would strand the epic on a forward vet whose extra ref can only be
+> cleared by editing criteria that were never children. **Otherwise** — any
+> shape matching
+> none of cases 1-4 → **halt** and report; never fall through to E4/E5.
 >
 > **Positive-evidence rule — never close an epic without evidence its work
 > merged.** That evidence is native children all closed (`total == completed`,
-> `total > 0`) or a confirmed merged PR per inline slice (case 2). Zero
+> `total > 0`), or a confirmed merged PR per inline slice (case 2) — **and
+> both when the body carries both**. Zero
 > children is an *absence* of evidence and by itself licenses **nothing**. Do
 > not look to E4 for this: E4 verifies that existing behaviour didn't regress,
 > and a never-started epic passes it trivially — the suite is green because
@@ -1593,10 +2022,27 @@ continues from wherever a prior run stopped.
 > feature doesn't exist. A verification gate cannot tell "the feature works"
 > from "the feature was never built"; only positive merge evidence can.
 >
-> **The halt (cases 2 and 3).** Mirror E1b's halt: post a summary comment on the
-> epic naming which slices are unrealized (case 2) or that no children are filed
-> and decomposition is needed (case 3), build nothing, leave the epic **OPEN**,
-> and stop. Re-running after a human files the children (as native sub-issues —
+> **The halt — every halting branch here** (case 1's **four** dry-run halts —
+> the forward `would_add` vet, the reverse vet, the empty plan, and a non-empty
+> `skipped_cross_repo` — plus its **dry-run tooling failure** (an **exit 1**,
+> which is not a plan at all; exit 2 is your own bad invocation, fixed and
+> re-run rather than reported), a `skipped_self_ref` line judged a **mistyped
+> child** (halted as case 4 does), its post-live-run halt, cases 2, 3 and 4,
+> and the otherwise fall-through). Mirror
+> E1b's halt: post a summary comment on the epic **naming the exact cause** —
+> which slices are unrealized (case 2); that no children are filed and
+> decomposition is needed (case 3); the near-miss lines you read as children
+> (case 4, and the reverse vet); the refs in `would_add` that are not child
+> declarations; the cross-repo refs; an empty plan; that the backfill's **dry
+> run failed with exit 1**, quoting stderr; the body line citing the epic's own
+> number that reads as a child declaration, quoted verbatim; the children a live run
+> left unattached (exit 5 or 1); or, for the fall-through, the shape you
+> actually read — build nothing, leave
+> the epic **OPEN**, and stop. **The comment is not optional on an autonomous
+> run** — epic-driven resolve has no human to ask, so "ask the human to …"
+> means: interactive, ask them; autonomous, post the comment and stop. A silent
+> stop leaves no record of why the epic was not worked. Re-running after a
+> human files the children (as native sub-issues —
 > new epics declare parenthood natively from the start) — or after the missing
 > slices' PRs merge — resumes the flow normally.
 
@@ -1613,7 +2059,11 @@ message — and collect the verdicts.
   each unready child, ensure the `needs-refinement` label and post its
   refinement questions as a comment (exactly as Single-issue step 0b does). Then
   post a **halt summary** on the epic — the checklist of which children are
-  unready and why — and **stop**. One unready child means the epic is not ready.
+  unready and why, plus any `skipped_self_ref` line an E1 backfill reported
+  (quoting the body **lines**, not the array entry, named as a self-reference
+  that was not migrated) — and **stop**. This halt runs *before* E3, so its
+  summary is the only comment the run posts: omitting the item loses it.
+  One unready child means the epic is not ready.
 
 Re-running after the stories are refined (criteria added, the `needs-refinement`
 label cleared) continues the pre-flight from the still-open children — the gate
@@ -1667,8 +2117,10 @@ else**.
 ### E3. Resolve — drive ALL children in one invocation
 
 One epic invocation drives **every** open child to completion — decompose,
-order, resolve each — not "next child, then stop". The only thing that ever
-halts a child is a **typed escalation** (§#564); the readiness pre-flight (E1b)
+order, resolve each — not "next child, then stop". A child is halted only by a
+**typed escalation** (§#564), a §0a **dependency rejection**, or a precheck
+**tooling failure** — all three park just that child (see the triage below);
+the readiness pre-flight (E1b)
 already proved every child was `READY` before the first one starts, so nothing
 else needs a human mid-run.
 
@@ -1712,16 +2164,45 @@ The same triage applies when a child's **dependency precheck rejects it**
 `blocked` comment + label, the child is **parked** — never auto-chained past —
 and the run continues with the children that don't depend on it.
 
+**A precheck exit 1 or 2 on a child is NOT a rejection.** Nothing was decided
+and stdout is empty, so there is no `comment_md` — **never** post the `blocked`
+label or a rejection comment from either (that label asserts open blockers in
+the child's graph, a verdict the gate never reached). They differ in what you
+do next:
+
+- **Exit 1** is a **tooling failure** of that child. Park the child, quote the
+  script's stderr in the epic summary comment, and continue with the children
+  that don't depend on it. Never re-run hoping for a different result.
+- **Exit 2** is **your own malformed invocation** — the same rule E1 applies to
+  the backfill's exit 2. **Fix the command and re-run the precheck for that
+  child.** Park it (quoting stderr *and* the invocation) only if it exits 2
+  again or you cannot see what is malformed. Parking on the first exit 2 would
+  park every child, since the invocation is built the same way for each.
+
+Neither ever continues that child to step 0b, and neither aborts the epic.
+
 **End every run with an epic summary comment** — one comment on the epic listing
-**merged / escalated / parked** children (and any still queued), so the epic's
-state is legible at a glance. Then:
+**merged / escalated / parked** children (and any still queued), plus any
+`skipped_self_ref` line an E1 backfill reported, named as a self-reference that
+was not migrated — by E1's judgement necessarily a **tracker** line, since a
+mistyped child ref halts at E1 and never reaches here — so the epic's state is
+legible at a glance. Then:
 
 - **All children merged** → proceed to **E4** (holistic verification) and **E5**
-  (close the epic). A re-run that finds **zero open children** does no child work
+  (close the epic) — and, when the body also holds inline slices, only once
+  each slice's PR is confirmed merged. A re-run that finds **zero open children** does no child work
   — but it goes to E4 + E5 **only** once E1 confirms the children were filed and
   merged (the table's `total == completed > 0` row — native children all
-  closed), or every inline slice's PR is confirmed merged (case 2). Zero
-  children on its own is never the licence; cases 2-unrealized and 3 halt
+  closed), or every inline slice's PR is confirmed merged (case 2). **A body
+  carrying both kinds needs BOTH**: genuine child *declarations* (shape plus
+  intent) make it case 1, and
+  case 1's vets only ever judge the *child* lines — whether a slice was
+  realized is never something they check (a slice carrying a context ref does
+  trip the forward vet, which halts; a ref-less slice trips nothing) — so
+  satisfying the children half alone would close an epic with its slices
+  unrealized. **If any slice is unrealized, halt exactly as case 2 does**: post
+  the halt comment naming them, do not run E4, do not close. Zero
+  children on its own is never the licence; cases 2-unrealized, 3 and 4 halt
   there instead.
 - **Some escalated/parked** → the epic stays **open**; re-running after the human
   resolves an escalation (the decision lands in the child's comment thread, which
@@ -1763,8 +2244,10 @@ gh issue close <epic#> --comment "<closing summary>"
 ```
 
 The closing summary should carry the **completed checklist** (each child / slice
-→ its merged PR) and the **E4 verification result** (what holistic test ran and
-that it passed), so the closed epic is a self-contained record. Only after this
+→ its merged PR), the **E4 verification result** (what holistic test ran and
+that it passed), and any `skipped_self_ref` line an E1 backfill reported —
+quoting the body **lines**, not the array entry — so the closed epic is a
+self-contained record. Only after this
 is the epic truly done — report it closed, with the PR/verification table.
 
 ## Guardrails
@@ -1783,20 +2266,32 @@ is the epic truly done — report it closed, with the PR/verification table.
   and close it.
 - **Never close an epic without positive evidence its work merged** — closed
   `#N` children, or a confirmed merged PR per inline slice (E1's
-  classification). **Zero children never licenses E5 by itself**: a
+  classification), **and both when the body carries both**. **Zero children
+  never licenses E5 by itself**: a
   never-decomposed epic and an all-merged one enumerate identically, and E4
   cannot tell them apart (it passes trivially when nothing was built). Cases
-  2-unrealized and 3 **halt** with a summary on the epic instead.
+  2-unrealized, 3 and 4 **halt** with a summary on the epic instead.
 - **Dependencies gate first** — the 0a precheck rejects on open GitHub-native
   blockers (and refuses cycles) before anything is branched; in autonomous mode
   the rejection is a typed comment + `blocked` label, and an unattended run
   **never auto-chains** into resolving the blocker itself. Interactive runs get
   the guided offer (§0a remediation) — resolve blocker + named issue, or just
   the blocker — but remediation only ever starts from an explicit human choice,
-  and cycles are never remediated. An epic-kind blocker remediates as a
+  and neither a cycle, an empty-open-set (shape (ii)) rejection, nor one whose
+  every open blocker is **foreign** is ever
+  remediated — none names a rung, so §0a reports the cause and stops. A blocker
+  whose `kind: "epic"` is
+  **confirmed** by the intent half (§0a — native sub-issues or the `epic`
+  label; a body or tracked-issues signal only when a checkbox line is a child
+  *declaration*) remediates as a
   **whole epic** — the full Epic flow to a closed epic (E4/E5 included) before
   the dependent proceeds; never one child, never a reimplementation of the
-  epic's ordering.
+  epic's ordering. A blocker reported `kind: "epic"` that **fails** that
+  confirmation is **not** automatically a single-issue rung — §0a splits it:
+  criteria-only → ordinary single-issue rung (never the Epic flow, which would
+  halt at E1's `total: 0` and leave the blocker unresolved); children in a
+  near-miss shape → a real undecomposed epic, **halt the rung** and ask for
+  native sub-issues; anything else → ask the human.
 - **Gate before you build** — the `story-readiness` gate runs next (single-issue
   step 0b; epic pre-flight over all children). A `NEEDS_REFINEMENT` verdict posts
   refinement questions + the `needs-refinement` label and **stops** — never

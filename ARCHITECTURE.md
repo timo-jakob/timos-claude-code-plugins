@@ -3555,22 +3555,156 @@ nothing can enforce it, and it drifts. So the contract is:
 
 The helper (`read-dependencies.zsh --repo OWNER/NAME --issue N`) emits one JSON
 object: the issue's **transitive** open blockers (`blocked`, `open_blockers`),
-every distinct blocker reached with `state`/`open`/`depth` and a `kind` of
+every distinct blocker reached with `state`/`open`/`depth` (the **shortest**
+distance from the named issue, so `depth: 1` means "direct blocker"; it is a
+hint for ordering remediation, not a topological order — the recursive step-0a
+re-entry is what guarantees a rung is ready) and a `kind` of
 `epic` (native sub-issues (#802), the `epic` label, tracked issues, or a
-task-list body) vs `issue` —
-the hook #587 uses to require a whole epic resolved before its dependent — and
-**cycles reported explicitly** as the paths that closed them. A CLOSED blocker
+**child task list**) vs `issue` — the hook #587 uses to require a whole epic
+resolved before its dependent. **Only the first two sources are decisive on
+their own.** Native sub-issues and the `epic` label are proof; both
+**body-derived** sources — the child task list, which is the shape classifier,
+and `trackedIssuesCount`, which GitHub derives from body checkbox items under
+a rule this repo does not control — carry the intent half below, exactly as
+step 0 does. State the source when you act on a `kind`, so which half applies
+is never guesswork — and
+**cycles reported explicitly** as the paths that closed them, plus
+`truncated: true` **only** when a node reached at the `--max-depth` cap
+(default 20) still had unread `blockedBy` edges — a leaf at the cap left
+nothing unread and reports `false`. When it *is* true the blocker set is a
+**floor**, never a complete answer; when it is false the walk enumerated
+everything. Hitting the cap is not by itself evidence of incompleteness. A CLOSED blocker
 is recorded but not recursed into: a met prerequisite's own history can't block
-anything. `GH_BIN` is the test seam; exit codes are 0 (result), 2 (usage),
-1 (gh/GraphQL failure or nonexistent issue).
+anything. A `blockedBy` edge may point at **another repository**, and the
+reader is bound to one — so cross-repo blockers are split out into
+`foreign_blockers` (`{ref: "owner/name#M", open}`, deduped by the *slug-qualified*
+ref) rather than re-resolved as bare numbers against `--repo`, which would look
+up whichever same-repo issue happened to share the number. They are never
+traversed, but an **open** one still sets `blocked`: a gate that cannot verify
+must never report ready. `read-sub-issues.zsh` handles the identical hazard for
+the sub-issue relation, and `backfill-sub-issues.zsh` for the attached-children
+list — a bare number is only meaningful inside its own repo. `GH_BIN` is the test seam; exit codes are 0 (result), 2 (usage),
+1 (gh/GraphQL/jq failure, or a nonexistent issue).
+
+- **A child task list is a checkbox line whose content *starts with* an issue
+  reference** (#1260) — `- [ ] #N` or `- [x] owner/repo#N`, GitHub's own
+  task-list-to-sub-issue shape, and how every real epic here writes its
+  children (`- [ ] #687 — description`). A checkbox that merely **mentions** an
+  issue somewhere in its text is an **acceptance criterion**, not a child
+  declaration; counting those made a well-specified single story classify as an
+  epic, so the better the story, the more likely it misfired. Lines inside
+  fenced code blocks are ignored, so an issue that *quotes* an epic task list is
+  not itself read as an epic.
+- **The shape rule is necessary but not sufficient — the skills add intent.**
+  The script matches a *shape*; it cannot read intent, so a criterion phrased
+  with the ref at the head of the item (`- [ ] #937's seam is implemented`)
+  still matches. Whether that line is a child **declaration** — it declares the
+  referenced issue as this epic's work — or a criterion **about** it is the
+  reader's judgment, and **all three** consumers of the classifier apply it on
+  top of the shape rule: `resolve-issue` **step 0**, `resolve-issue` **step
+  0a** — where the same classifier sets a *blocker's* `kind`, so an epic-kind
+  blocker's remediation rung is confirmed before the Epic flow runs on it —
+  and `refine-issue` **step 0**, plus each skill's **forward vet** (E1 /
+  step 1). Never treat a shape match alone as proof of an epic: doing so
+  reintroduces #1260's defect for the one family of criteria the narrowing
+  cannot exclude by shape, and E1's live backfill would then **misparent** the
+  cited issue under the story. Conversely, never relax the *script* toward
+  intent — the two-sided invariant below is stated over the shape rule, and a
+  script that guessed intent would break it in both directions.
+- **Classification and migration are two rules with two owners.** The rule
+  above is the **classification** rule (*is this an epic at all?*) and is
+  start-anchored. `backfill-sub-issues.zsh` owns the **migration** rule (*which
+  refs get attached as native sub-issues*) and is deliberately **looser on ref
+  position** — it takes the first ref anywhere on a checkbox line, so a context
+  ref is put in front of whoever vets its `--dry-run` plan (E1 requires that
+  vet on autonomous runs too) instead of being dropped silently.
+- **They are not the same rule; they satisfy a two-sided invariant.** *(a)*
+  Every line the classifier calls a child, the backfill must also resolve a ref
+  from — attaching it, or reporting it in `skipped_cross_repo` /
+  `skipped_self_ref`, never dropping it silently — otherwise an epic is
+  detected and then migrates nothing. *(b)*
+  Every line the classifier ignores as fenced, the backfill must ignore too —
+  otherwise it migrates a quoted ref and **misparents** it, and GitHub allows
+  one parent only. Direction (a) is why a bare **issue-URL** child
+  (`- [ ] https://github.com/o/r/issues/N`) and an **ordered-list** checkbox
+  (`1. [ ] #N`) are **not** detected — the backfill's parser can migrate
+  neither — and why the blank classes around the bullet are identical in both,
+  spelled `[ \t]` and never `[[:blank:]]` (jq's Oniguruma reads a POSIX class
+  as Unicode-aware while awk's is ASCII, so the same spelling would denote
+  different sets). The trailing **word boundary** after the ref is likewise
+  shared **for ASCII** — Oniguruma's `\b` on one side, awk's ASCII test on the
+  other; a ref glued to a *non-ASCII* word character is refused by the
+  classifier only, which is the stricter direction and so violates neither
+  invariant. Two refs the backfill resolves but
+  deliberately does **not**
+  attach — a genuinely cross-repo ref, and a self-reference to the epic — mean
+  a body made only of those is an epic here with an **empty** migration plan,
+  which is why E1 halts on an empty plan rather than reading exit 0 as done.
+  Direction (b) is why both skip ``` and ~~~ fences, and why both track the
+  fence **opener** (character + run length) rather than toggling a flag: a bare
+  toggle lets the ``` inside a ````-fenced example close the outer block, and
+  the quoted `- [ ] #N` lines below it are then read as real children.
+- **Per-shape record — the single place the SKILLS read this split from.** Both
+  skills point here rather than restating it, because a restatement drifts the
+  moment the rule is refined. The two script headers still state their own side
+  locally (each is the file a maintainer edits), so a change to the split must
+  update this record **and** both headers in the same change. Shapes the **backfill cannot migrate**, so the
+  classifier must not detect them (direction (a)): a bare **issue URL** (no
+  `#N`), an **ordered-list** checkbox (bullet outside `[-*+]`), and a ref
+  glued to a following **ASCII** word character (the shared boundary rejects
+  *that* ref — note the migrator keeps scanning the same line, so a later
+  boundary-terminated ref on it can still reach `would_add` and trip the
+  **forward** vet rather than the reverse one). Shapes the **backfill would migrate**, which the classifier refuses
+  anyway as a deliberate one-sided strictness: a **decorated** ref
+  (`- [ ] **#687**`, `- [ ] [#687](url)`), a ref glued to the **checkbox**
+  (`- [ ]#687` — the classifier requires a blank there, the backfill does
+  not), and a ref glued to a **non-ASCII** word character (Oniguruma's `\b` is
+  Unicode-aware, awk's test is ASCII). All are strictly stricter, so (a) holds.
+  Two further refs are child lines to **both** rules but are resolved and then
+  deliberately **not attached**, and so are reported rather than dropped: a
+  genuinely **cross-repo** ref (`skipped_cross_repo`) and a **self-reference**
+  to the epic (`skipped_self_ref` — an issue cannot parent itself). E1's
+  reverse vet reads both arrays. A self-reference is judged by its **body
+  line**: the epic's own **tracker** line is expected and halts nothing, while
+  a line that reads as a **child declaration** carrying the epic's own number
+  is a *mistyped child* and **halts as case 4 does** — the array itself cannot
+  tell them apart, since it holds that number at most once. **Known gap, out of scope
+  for #1260:** neither parser understands an **indented code block** (4+
+  spaces) — the other standard way to quote an epic body — so a task list
+  quoted that way is still read as real by both. That is not an invariant
+  violation (they agree), and closing it needs list-context tracking in both.
+  Widening a shape in either direction means changing **both** scripts in one
+  change, with a test on each side.
 
 **The enforcement point is `dependency-precheck.zsh` (#585)** — step 0a of the
 single-issue flow, before the readiness gate and before any branch exists. It
 wraps the reader into one typed decision (`DEPS_BIN` seam): `PROCEED` (exit 0)
-only when no open blockers exist; `REJECT_BLOCKED` (10) with a ready-to-post
+only when no open blocker exists **and the walk actually finished**;
+`REJECT_BLOCKED` (10) with a ready-to-post
 argumentation naming every open blocker; `REJECT_CYCLE` (11) when the graph
 contains a cycle — the cycle wins over the blocker list, because "resolve these
-first" can never be satisfied. Like the readiness gate it performs no GitHub
+first" can never be satisfied. `REJECT_BLOCKED` **also fires on a `truncated`
+traversal with an empty finding set** — an empty result after the depth cap is
+evidence of not having looked, the same fail-closed rule as an open cross-repo
+blocker — **and when the reader itself reports `blocked` for a reason none of
+the gate's own counts names**: the shared verdict is *consumed*, not merely
+re-derived, so a new reader reason rejects by default instead of silently
+proceeding. Both of those **name no blocker and are not remediable**: there is
+no rung to run, so the skill reports the cause and stops rather than offering
+remediation. The skill splits on whether an **open** blocker was enumerated
+**in `blockers`**, not on the arrays being non-empty — the rendered comment
+uses the same `open` test, so a document listing only closed blockers is the
+no-rung shape too. A
+rejection whose only OPEN blockers are **foreign** is the **third** no-rung
+shape: `foreign_blockers` carry no `depth`, are never traversed, and lie
+outside the session's repo, so the chain — which is the `blockers` array only —
+is empty and the offer is withheld; the skill reports the refs as unresolvable
+here and stops. **Only an open entry in `blockers` is a rung.**
+Every predicate is one checked jq call over a **shape-asserted**
+document — `.cycles | length` on a missing key is 0, not an error, so a
+well-formed document that is not the reader's contract would otherwise read as
+"no findings". A gate whose decision can
+fall through to `PROCEED` when its own tooling fails is worse than no gate. Like the readiness gate it performs no GitHub
 writes; the skill posts. In **autonomous** runs (maintenance pipeline,
 epic-driven resolve) a rejection posts the comment, applies the `blocked` label,
 and stops — an unattended run never auto-chains into resolving the blocker
@@ -3581,11 +3715,29 @@ itself. In **interactive** runs the skill layers guided remediation on top
 blocker, merged before its dependent branches), with closure **re-verified by
 re-running the precheck** before the named issue proceeds. Cycles are never
 remediated (a relationship edit is the human's call). An **epic-kind blocker
-remediates as a whole** (#587): its rung runs the full epic flow — all
+whose `kind` is confirmed by the intent half** — native sub-issues or the
+`epic` label are proof on their own; a **body** signal, and equally a
+**tracked-issues** one (GitHub derives it from the same checkbox lines), only
+when a checkbox line is a child *declaration* — **remediates as a whole**
+(#587): its rung
+runs the full epic flow — all
 children plus the holistic E4 verification and the explicit E5 close, reused
 as written — and the dependent stays queued until the blocking epic is
 **closed**, not merely children-merged; autonomous runs still reject +
-escalate rather than auto-running the epic.
+escalate rather than auto-running the epic. A blocker reported `kind: "epic"`
+that **fails** that confirmation has two *nameable* causes plus a catch-all.
+Its only checkbox refs are
+acceptance **criteria** → an ordinary single-issue rung: running the epic flow
+on it would end in E1's `total: 0` halt posting a decomposition complaint on a
+well-specified story, leaving the blocker unresolved and the dependent blocked.
+Its children are in a **near-miss shape** (tracked issues report it as an epic
+because GitHub's task-list tracking is looser than the shape rule) → a real
+**undecomposed** epic: halt that rung and ask for native sub-issues, never a
+single-issue rung, which would implement an epic body as one PR. **Anything
+else** — including a failed fetch, or a body that cannot be judged either way —
+→ **ask the human**; never guess a rung. Forcing an unjudgeable blocker into
+one of the two named causes either implements a genuine epic as one PR or halts
+a well-specified story.
 
 ## Epic→child model (#802)
 
@@ -3607,8 +3759,9 @@ dependencies stopped being after #583.
   children were ever filed" from "all children are closed" — both enumerate
   zero, which is exactly how #798's terminal case closed a never-started epic.
   `subIssuesSummary { total, completed }` answers it deterministically:
-  `total: 0` is *not decomposed* (halt), `completed < total` is *in progress*,
-  `completed == total > 0` is *genuinely done* (E4 → E5). And the reverse
+  `total: 0` never proceeds as-is (backfill or halt — see the backfill bullet below), `completed < total` is *in progress*,
+  `completed == total > 0` is *genuinely done* (E4 → E5) — unless the body
+  also holds inline slices, which each need a confirmed merged PR first. And the reverse
   lookup — which epic does this child belong to — is a single GraphQL query
   (`Issue.parent`, GraphQL-only; the REST issue payload has no parent field)
   instead of a scan over every epic's body.
@@ -3625,16 +3778,33 @@ dependencies stopped being after #583.
   `development/skills/resolve-issue/scripts/backfill-sub-issues.zsh --repo R
   --epic N [--dry-run]` converts an existing epic's markdown task-list
   children into native sub-issues — idempotent (already-attached children are
-  skipped; a second run is a no-op), dry-run-able, cross-repo refs reported
+  skipped; a second run is a no-op), dry-run-able, cross-repo refs and
+  self-references reported
   but never migrated. The migration hazard it exists for: a native-only reader
   meeting an un-backfilled epic enumerates zero children and would look
   never-decomposed — which is why E1's `total: 0` branch **never proceeds
-  as-is**: when the body still holds `#N` task-list lines it runs this
-  backfill (dry-run vetted) and, only on a clean fully-accounted run,
-  re-reads and continues; otherwise — partial/failed backfill, cross-repo
-  leftovers, or no task list at all — it **halts** rather than ever
-  concluding "done". New epics declare children natively from the start;
-  the backfill is for the pre-#802 stock.
+  as-is**: when the body still holds `- [ ] #N` **child declarations** — checkbox
+  content starting with the ref, outside any fence, per the classification rule
+  in *Issue-dependency model* above, **and** declaring that issue as the epic's
+  work per the intent half; never criteria stating a condition about an issue,
+  which fail the intent half even when they match the shape —
+  it runs this backfill (dry-run vetted) and, only on a clean fully-accounted
+  run, re-reads and continues; otherwise it **halts** rather than ever
+  concluding "done". Its **four dry-run halts**, all before any write, are: a
+  `would_add` holding a ref that is **not** a child line by that rule; a plan
+  that is **empty**, meaning the lines read as children are not migratable
+  ones; **cross-repo leftovers**; and a child-shaped body line the backfill
+  resolved no ref from (E1's **reverse** vet). Those four, plus a
+  **dry-run exit 1** (broken tooling, which is not a plan at all — exit 2 is
+  the caller's own bad invocation, fixed and re-run, never a halt), a
+  `skipped_self_ref` entry whose body line reads as a **child declaration**
+  rather than a tracker (a mistyped child, halted as case 4), and the
+  **post-live-run halt** (a partial or failed backfill), are the
+  backfill-path halts; E1's *classification* halts
+  — an unrealized inline slice, **no task list at all**, a task list written
+  only in a near-miss shape, and any body shape matching none of its cases —
+  are listed with the cases themselves, and never reach the backfill. New epics declare children natively from
+  the start; the backfill is for the pre-#802 stock.
 
 ## Story-spec contract (`story-spec/v1`, #574)
 
