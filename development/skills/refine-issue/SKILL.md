@@ -35,7 +35,51 @@ print `/development:refine-issue <issue-number|url>` and stop.
 `read-sub-issues.zsh --repo "$REPO" --epic <N>`, reports `summary.total > 0` —
 the authoritative signal, #802), when it carries the `epic` label, or when its
 body holds a task list of child issues (`- [ ] #N` — the un-backfilled shape).
-A **failed** reader call (nonzero exit) is a classification failure — report
+A **child line is a checkbox whose content STARTS with the issue reference**
+(#1260) — a checkbox that merely *mentions* an issue is an **acceptance
+criterion**, not a child, and lines inside fenced code blocks don't count;
+counting a refined story's cross-referencing criteria would walk it as an epic
+and it would never get refined at all. `read-dependencies.zsh` codifies the
+rule (see ARCHITECTURE.md, *Issue-dependency model*). Several near-miss shapes
+are deliberately **not** child lines — a bare **issue URL**, an
+**ordered-list** checkbox (`1. [ ] #687`), a **decorated** ref
+(`- [ ] **#687**`, `- [ ] [#687](url)`), and a ref glued to the **checkbox**
+or to a following **word** (`- [ ]#687`, `- [ ] #687x`). *Why* each is
+excluded is recorded once, per shape, in ARCHITECTURE.md (*Issue-dependency
+model*); read it there rather than restating the split here — your action is
+the same for every one of them.
+**Native sub-issues and the `epic` label always win** — with either present,
+go to the Epic walk regardless of the body's shape. **A genuine child *declaration* also
+wins over any near-miss line beside it**: one line that matches the #1260 rule
+**and declares that issue as this epic's work** makes the body an epic, which
+goes to the Epic walk and its backfill path. The rule is a *shape* test and
+the classifier script cannot see intent, so matching it is necessary but
+**not sufficient**. **Shape alone never triggers the near-miss stop — intent
+does**: it applies only when **none** of the child-shaped lines is a
+rule-matching child *declaration*, **and** such a list
+is the *sole* epic signal (`summary.total == 0`, no `epic` label), **and** it
+is plainly the epic's children declaration — a section whose items are
+separate issues, never a *Slices* section (work descriptions, not issues) and
+never acceptance criteria. **A checkbox stating a condition *about* an issue
+is a criterion however it is written** — decorated or bare, matching
+the #1260 shape rule or not. Both `- [ ] **#1189**'s note is updated` and
+`- [ ] #1189's note is updated` are criteria: refine the issue as a single
+story. The second matches the shape rule, which is exactly why intent, not
+shape, decides — walking it as an epic would backfill #1189 as a sub-issue of
+the story (a misparent; one parent only) and the story would never get
+refined, the very harm this narrowing exists to prevent.
+
+**When all three conditions above hold** — no rule-matching child declaration,
+the list is the sole epic signal, and it is plainly a children declaration
+rather than slices or criteria — report it and
+stop: ask for native sub-issues, or for the list to be rewritten as
+`- [ ] #N`, rather than refining the body as a single story. **A criteria-only
+body satisfies none of them**: refine it as a single story, and never
+report-and-stop on it.
+On a **failed** `read-sub-issues.zsh` call, **exit 2 is your own bad
+invocation** — fix the command and re-run, the same rule step 1 applies to the
+backfill's dry run. **Any other nonzero exit is a classification
+failure** — report
 it and stop; never fall back to the label/task-list signals as if the native
 signal were checked and absent (a native-only epic would misclassify as a
 single issue, and you'd refine the epic body itself — which the guardrails
@@ -58,8 +102,13 @@ this is the guided pass that clears them.
    "<skill-base-dir>/scripts/list-refinement-children.zsh" --repo "$REPO" --epic <N>
    ```
 
-   **Branch on the exit code, not just the output.** A **nonzero** exit (3:
-   gh/jq/reader failed) is an enumeration **failure** — report it and stop
+   **Branch on the exit code, not just the output**, and split the two nonzero
+   codes as this skill already splits the backfill dry-run's below. **Exit 2 is
+   your own bad invocation** (an empty `--repo`, a dangling flag) — fix the
+   command and re-run the enumerator for this epic; stop and report stderr only
+   if it exits 2 again or you cannot see what is malformed. Abandoning the walk
+   there would refine **no** child because of your own typo. **Exit 3** is an
+   enumeration **failure** — report it and stop
    *without* claiming the epic has no refinable children; an empty result is
    only meaningful on exit 0.
 
@@ -67,20 +116,103 @@ this is the guided pass that clears them.
    (#798's lesson — an un-backfilled epic and a nothing-to-refine epic
    enumerate identically). Read
    `read-sub-issues.zsh --repo "$REPO" --epic <N>`: when `summary.total == 0`
-   **and** the body still holds `- [ ] #N` task-list lines, the epic is
+   **and** the body still holds `- [ ] #N` task-list lines — **child
+   declarations** by the #1260 rule above **plus intent** (the checkbox STARTS
+   with the ref, the line is outside any fence, **and** it declares that issue
+   as this epic's work), never criteria that merely state a condition about an
+   issue, which fail the intent half even when they pass the shape half — the epic is
    **un-backfilled** — its `needs-refinement` children are invisible to the
    native enumerator. Run resolve-issue's
    `backfill-sub-issues.zsh --repo "$REPO" --epic <N>` (`--dry-run` first and
    vet the plan, per resolve-issue E1's hazard note — context refs are not
-   children), then **gate on its outcome exactly as E1 does**: re-enumerate
-   only after the backfill exits 0 with every markdown child accounted for in
-   `added`/`already_present` and `skipped_cross_repo` empty. On exit 5
-   (partial) or 1, or with cross-repo leftovers, report the **backfill
+   children). **Branch on the dry-run's EXIT CODE first**: a nonzero exit
+   (missing jq/awk, epic fetch, body-parse or sub-issue-list failure, or a
+   usage error) prints
+   no document, which read as a plan looks exactly like the empty-plan halt
+   below. **Exit 2 is your own bad invocation** — fix the command and re-run
+   the dry-run; **exit 1** you report verbatim as a backfill failure and stop,
+   never as a non-migratable task list. Then, **four dry-run halts, all BEFORE the live
+   run** — exactly E1's,
+   because a run you must halt on is a run whose GitHub writes must never
+   happen: `would_add` holding any ref that is not a child line by the rule
+   above (the backfill's parser deliberately reports refs from anywhere on a
+   checkbox line, and the rule's shape half cannot see intent — a ref sourced
+   from `- [ ] #1189's note is updated` is not a child line); a non-empty `skipped_cross_repo`; an empty
+   `markdown_children`; and — the **reverse** of the first — every checkbox
+   line you read as a child declaration, in **any** shape, must appear in
+   `would_add`/`already_present` (or be reported in `skipped_cross_repo`, or
+   in `skipped_self_ref`). A
+   child-shaped line that yields nothing is E1's reverse-vet halt: it is the
+   case where the other three all pass, so nothing else would catch it.
+   In each of those four cases do **NOT** run the live backfill — report
+   it, naming the line, and stop.
+
+   **`skipped_self_ref` is not one of the four halts.** It holds the epic's own
+   number, which is expected: an issue cannot parent itself. Note it in the
+   epic-level summary (or, when the walk ends before step 3, in the report you
+   give the human) as a self-reference that was not migrated, and **quote the
+   body LINES, not the array entry** — it holds that number at most once, so a
+   genuine tracker line and a *mistyped* child ref yield the identical array.
+   **Then judge each line**: a tracker line halts nothing; a line that reads as
+   a child declaration carrying the epic's own number is a *mistyped child* —
+   do **NOT** run the live backfill: report it, naming the line, and stop
+   (exactly as the four halts above), since no sub-issue will ever carry that
+   work. **If you cannot tell which it is, halt and ask rather than
+   proceeding** — a walk that guesses "tracker" migrates the rest and leaves
+   the mistyped child unfiled.
+
+   **Only when no line halts**, run the live backfill and **gate its outcome
+   exactly as E1 does**:
+   re-enumerate only after the backfill exits 0 with every markdown child
+   accounted for in `added`/`already_present` and `skipped_cross_repo` still
+   empty. On exit 5 (partial) or 1, report the **backfill
    failure** to the human, naming the unattached children — never the
    "no children to refine" terminal, which a failed backfill would satisfy
-   vacuously — and stop. Only when a *clean* backfill's re-enumeration is
-   still empty tell the human the epic has no `needs-refinement` children to
-   refine, and stop.
+   vacuously — and stop.
+
+   **An EMPTY plan is not a clean backfill.** A run with `markdown_children:
+   []` exits 0 and satisfies every clause above trivially, so it would reach
+   the benign terminal through the success door instead of the failure one.
+   It means the `- [ ] #N` lines you read are not migratable child
+   declarations by the rule above — either a near-miss shape the backfill
+   resolves nothing from, or a ref it resolves but never attaches (a
+   cross-repo ref, a self-reference to the epic). A near-miss shape the
+   backfill *does* resolve is **not** a cause: it trips the
+   `would_add`-holds-a-non-child halt instead. ARCHITECTURE.md records which
+   shapes fall on which side. Report that to the human,
+   naming the lines, and stop; never re-run the backfill hoping for a
+   different result, since it is idempotent.
+
+   **Which terminal applies — the enumeration is closed, so take the branch
+   that matches:**
+   - **On the backfill path** (this was an un-backfilled epic): only a
+     backfill that actually attached — or found already present — at least one
+     child may re-enumerate, and only THAT re-enumeration coming back empty is
+     the benign terminal.
+   - **`summary.total > 0` with an empty enumeration** — the ordinary healthy
+     case, no backfill involved: that **is** the benign terminal. Tell the
+     human the epic has no `needs-refinement` children to refine, and stop.
+   - **`summary.total == 0` with a task list in a near-miss shape** (step 0's
+     shapes) — children in intent but not by the rule, so the backfill path is
+     never entered for them (for some of these shapes the backfill *would*
+     migrate the line unvetted, which is just as much a reason not to enter
+     it — ARCHITECTURE.md records which). Report it,
+     ask for native sub-issues or for the list to be
+     rewritten as `- [ ] #N`, and stop. (This is resolve-issue E1 case 4.)
+   - **`summary.total == 0` with a task list of inline slices** (resolve-issue
+     E1 case 2) — slices are not issues, so there is nothing here to refine:
+     say so and stop.
+   - **`summary.total == 0` with a task list of citing acceptance criteria** —
+     criteria are neither issues nor slices, so this is **not** case 2: it is
+     resolve-issue E1's **otherwise** halt. Report the shape and stop. Never
+     file it as case 2 — case 2's terminal is the only non-native door to
+     E4/E5, and a labelled epic admitted through it can be closed on merge
+     evidence for work that was never its own.
+   - **`summary.total == 0` with no task list at all** — the epic was never
+     decomposed. Report that decomposition comes first, and stop.
+   - **Anything else** — report the shape you actually read and stop; never
+     force-fit it into a branch above, and never conclude "no children to
+     refine".
 
 2. **Walk each child in turn** through the **single-issue flow** (Steps 0–7) —
    reuse it as written, one child fully before the next. A child either reaches
@@ -90,7 +222,10 @@ this is the guided pass that clears them.
 
 3. **Post an epic-level summary** on the epic issue: for each child, whether it is
    now **ready** (label cleared) or **still parked** (with the park type), plus
-   any that had no work to do — and, separately, any that ended in a **failure**
+   any that had no work to do, plus any `skipped_self_ref` line a backfill
+   reported (named as a self-reference that was not migrated — necessarily a
+   **tracker** line, since a mistyped child ref halts the walk at step 1)
+   — and, separately, any that ended in a **failure**
    state: *skipped (human declined)*, *label-removal failed*, *parked (comment
    build failed)*, or *parked (resume state not saved)* when the comment built
    but did not post. Never fold a failure into "no work to do": a failed child
