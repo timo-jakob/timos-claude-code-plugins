@@ -3817,6 +3817,9 @@ downstream implementer (`resolve-issue`) consumes a precise interface instead of
 re-deriving everything from prose — while the prose stays foregrounded and
 human-authoritative. The `story-readiness` agent (#559) both **emits** a proposed
 block (part of its verdict) and **validates** an existing one against the prose.
+It is not the only emitter: `issue-refiner` emits the block that `refine-issue`
+actually writes back — which is why the worked example's `generated_by` names it,
+and why only that agent populates `persona_derivations` (below).
 
 ### Where the block lives
 
@@ -3848,7 +3851,7 @@ One fenced `json` object inside the `<details>`. Shape:
 {
   "schema": "story-spec/v1",
   "provenance": {
-    "generated_by": "story-readiness via /development:refine-issue",
+    "generated_by": "issue-refiner via /development:refine-issue",
     "generated_at": "2026-07-10T12:00:00Z",
     "prose_sha256": "9b2e0a1c4d6f83b5a7c9e1f3058d2a4b6c8e0f1a3b5d7c9e1f2a4b6c8d0e2f4a"
   },
@@ -3880,6 +3883,50 @@ One fenced `json` object inside the `<details>`. Shape:
       "shape": "POST /jobs with a 40 KB note -> 413, no partial write",
       "tooling": "curl",
       "issue": null
+    },
+    {
+      "id": "tc-corner-unicode-site",
+      "kind": "corner",
+      "shape": "POST /jobs {site_name: 'Müller & Sons'} -> 201, name round-trips unchanged",
+      "tooling": "curl",
+      "issue": null
+    },
+    {
+      "id": "tc-happy-file-job-ui",
+      "kind": "happy",
+      "shape": "fill the job form, submit -> confirmation visible without reading",
+      "tooling": "playwright",
+      "issue": null
+    },
+    {
+      "id": "tc-corner-unicode-site-ui",
+      "kind": "corner",
+      "shape": "type site 'Müller & Sons' -> renders unchanged in the confirmation",
+      "tooling": "playwright",
+      "issue": null
+    },
+    {
+      "id": "tc-error-drop-mid-entry-ui",
+      "kind": "error",
+      "shape": "drop the connection mid-entry -> inline error, half-typed draft preserved",
+      "tooling": "playwright",
+      "issue": null
+    }
+  ],
+  "persona_derivations": [
+    {
+      "slice": "corner-cases",
+      "persona": "dana-dispatcher",
+      "basis": "data_traits.site_name — unicode + ampersands",
+      "target": "test_cases",
+      "ref": "tc-corner-unicode-site"
+    },
+    {
+      "slice": "corner-cases",
+      "persona": "dana-dispatcher",
+      "basis": "data_traits.site_name — unicode + ampersands",
+      "target": "test_cases",
+      "ref": "tc-corner-unicode-site-ui"
     }
   ]
 }
@@ -3898,12 +3945,48 @@ One fenced `json` object inside the `<details>`. Shape:
 | `use_case` | object | `{ actor, goal, data_sketch }` — concrete enough to derive realistic test data |
 | `personas` | string[] | persona ids referencing the target repo's `personas/v1` registry (#665). **Advisory; may be `[]`** |
 | `test_cases` | object[] | outside-in cases: `id`, `kind` (`happy` \| `corner` \| `error`), `shape` (given/when/then or request→expected), `tooling` (`curl` \| `grpcurl` \| `playwright` \| `cli`), and `issue` (the linked test-case issue number after spin-out #671, else `null`) |
+| `persona_derivations` | object[] | **Optional (#1361)** — which entries persona reasoning produced: `slice` (`corner-cases` \| `ux` \| `consistency`), `persona` (a `personas/v1` id, or `null`), `basis` (the persona field it came from, with the shape that made it a corner — e.g. `data_traits.site_name — unicode + ampersands`), `target` (`test_cases` \| `acceptance_criteria`), `ref` (a `test_cases[].id`, or the `acceptance_criteria` string verbatim). `[]` or absent when nothing was derived |
 | `provenance` | object | `{ generated_by, generated_at, prose_sha256 }` — as below |
 
 **No `dependencies` field — deliberately (#583).** Dependencies live in
 GitHub-native `blockedBy` relationships, the single source of truth. A second
 machine-readable copy in the block would drift; the gate and `resolve-issue`
 read dependencies only the native way. See the issue-dependency model above.
+
+### `persona_derivations` — a record, not a mechanism (#1361)
+
+Persona reasoning lands its **substance in the fields that already bind**: a
+derived corner case is a `test_cases[]` entry, and a derived UI/UX consequence is
+an `acceptance_criteria[]` entry, which `resolve-issue`'s Step 3 gate must
+demonstrate. That placement is what gives the reasoning force, and it needs no
+new consumer.
+
+`persona_derivations[]` exists alongside it for a different job: telling a later
+reader **which entries came from a persona** rather than from the human. Its
+`ref` points *into the same block* — a `test_cases[].id`, or an
+`acceptance_criteria` string verbatim.
+
+Two properties are deliberate, and stating them prevents a false expectation:
+
+- **It is optional.** Absent or `[]` is valid, and a consumer that ignores the
+  field is still correct — which is what makes it additive rather than a v2.
+- **Nothing validates it.** `story-readiness` does not check that a `ref` still
+  resolves, so a `ref` orphaned by a later edit is not detected. That is
+  tolerable only because the block is **regenerated wholesale** on every
+  `refine-issue` write-back and is marked *do not hand-edit*: a stale `ref`
+  implies an edit the contract already forbids. It is an audit record, never a
+  gate.
+
+**One producer, not two.** The schema has two documented emitters, but only
+**`issue-refiner`** derives from a persona, so only `issue-refiner` populates this
+field. The `story-readiness` gate's proposed block leaves it **absent** — the gate
+judges a story, it does not reason from personas — which is why that agent's field
+enumeration names it only to **exclude** it. That exclusion is deliberate and
+explicit, recorded here so a later editor does not read it as drift and "fix" it.
+
+**Staged rollout.** #1361 ships the `corner-cases` slice only; `ux` and
+`consistency` are reserved for #1362 and #1363, so a consumer will not see those
+values until those slices land.
 
 ### Provenance and staleness (shared with `personas/v1`)
 
@@ -3940,8 +4023,10 @@ nothing) in two ways:
 `surface` (`rest` | `grpc` | `web-ui` | `cli`, the #242 taxonomy, or `none`) and,
 for **surface-touching** stories, hard-requires **check 5 — outside-in
 testability**: a concrete `use_case`, `test_cases` covering happy/corner/error in
-the surface's native tooling, and the spun-out `test-case` issues existing and
-linked (#671). A `none`-surface story skips check 5 (proportionality — the
+**each classified surface's** native tooling — `interface_surfaces` is an array,
+so a `rest`+`web-ui` story needs both a `curl` and a `playwright` happy/corner/
+error set, and `curl`-only cases leave `web-ui` unexercised and fail — and the
+spun-out `test-case` issues existing and linked (#671). A `none`-surface story skips check 5 (proportionality — the
 backlog is not mass-flipped). The verdict JSON grows two fields:
 `surface` (the classified surfaces, `[]` for none — reported at verdict level
 because it's needed even when `story_spec` is `null`) and

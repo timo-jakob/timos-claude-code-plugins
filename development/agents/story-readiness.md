@@ -70,6 +70,12 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
     when the prose describes a CLI-only change, or a `use_case` actor the prose
     contradicts).
 
+    **`persona_derivations[]` is exempt from both** (#1361). It is an audit
+    record of what `issue-refiner` derived, never a gate: a `ref` that no longer
+    resolves, or a `basis` the prose no longer echoes, is **not** staleness and
+    **not** a contradiction, and never affects the verdict. An existing block may
+    legitimately carry the field even though your own proposed block omits it.
+
   A **stale or contradictory** block fails check 4 (below) and is a concrete
   refinement reason. An **absent** block is **not** a failure — most issues have
   never been refined; you simply *propose* one in your output (`story_spec`
@@ -185,10 +191,14 @@ that would unblock it.
    also fails when an **existing** `story-spec/v1` block is **stale** (provenance
    mismatch) or **contradicts** the prose (#574): the machine block must agree
    with the human-authoritative prose, or it can't be trusted. An **absent**
-   block never fails this check. **Persona-reference problems are the exception**
-   — an unknown id or a stale *persona* registry is an **advisory**, not a
-   contradiction, and never fails this check (see the persona-validation bullet
-   above, #668).
+   block never fails this check. **Two things are exempt.** **Persona-reference
+   problems** — an unknown id or a stale *persona* registry is an **advisory**,
+   not a contradiction, and never fails this check (see the persona-validation
+   bullet above, #668). And **`persona_derivations[]`** (#1361): it is an audit
+   record of what `issue-refiner` derived, never a gate, so a `ref` that no
+   longer resolves or a `basis` the prose no longer echoes is **not** staleness
+   and **not** a contradiction, and never fails this check either (see the
+   validate bullet above).
 5. **Outside-in testability — surface-touching stories only** (#670). When the
    story touches a runtime surface (`surface` is anything other than `none`), it
    must specify how that surface will be exercised **from the outside**, so the
@@ -300,18 +310,25 @@ Rules for the payload:
 - `summary` is one sentence a human can read at a glance.
 - `story_spec` is the **proposed** `story-spec/v1` block (#574) — the machine
   summary of the story as you understand it, per the ARCHITECTURE.md *Story-spec
-  contract* (`acceptance_criteria`, `scope_boundaries`, `risk_classification`,
+  contract* (`schema`, `acceptance_criteria`, `scope_boundaries`,
+  `risk_classification`,
   `testable_checks`, `interface_surfaces`, `use_case`, `personas`, `test_cases`,
-  `provenance`; **no** `dependencies` field). Populate it for a `READY` story so
+  `provenance`; **no** `dependencies` field, and **no** `persona_derivations`).
+  `persona_derivations` records persona-derived entries, and only
+  `issue-refiner` derives from a persona, so your proposed block leaves that
+  field absent rather than empty (#1361). `schema`, by contrast, is literally
+  `story-spec/v1` and is **not** optional: `read-story-spec.zsh` selects the
+  block by it, so a proposed block without it is invisible to `resolve-issue`.
+  Populate `story_spec` for a `READY` story so
   `refine-issue` can write it back (human-approved) and `resolve-issue` can
   consume it; set it to `null` for `NEEDS_REFINEMENT` (the story isn't settled
   enough to summarise). It is advisory output — set the `risk_classification`
   inside it to match the top-level `risk`. Callers that don't want it ignore the
-  field. **Populating `story_spec` never changes the verdict**: the four checks
+  field. **Populating `story_spec` never changes the verdict**: the applicable checks
   are the sole basis for `READY` / `NEEDS_REFINEMENT`. In particular, not being
   able to fill an advisory field (no `personas` registry, a `none`-surface story
   with no `test_cases`) is **not** a gap — emit `[]`/`null` for it and judge the
-  story on the four checks alone.
+  story on the applicable checks alone.
 - `advisories` is a list of **non-blocking** notes (#668) — today, persona
   reference problems (unknown id, stale registry, no registry) found when
   validating a story-spec block's `personas` against the target repo's
