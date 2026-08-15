@@ -65,9 +65,16 @@ approves the rewrite: prose plus a proposed `story-spec/v1` block whose
   "acceptance_criteria": ["POST /jobs files a job in under 200 ms", "a 40 KB note is rejected, no partial write"],
   "interface_surfaces": ["rest"],
   "use_case": { "actor": "dana-dispatcher", "goal": "file a job from the depot floor", "data_sketch": "job_ref JOB-2291, site 'Müller & Sons'" },
+  "personas": ["dana-dispatcher"],
   "test_cases": [
-    { "id": "tc-happy-file-job",   "kind": "happy", "shape": "POST /jobs {job_ref, site_name} -> 201", "tooling": "curl", "issue": null },
-    { "id": "tc-error-oversized",  "kind": "error", "shape": "POST /jobs with a 40 KB note -> 413",    "tooling": "curl", "issue": null }
+    { "id": "tc-happy-file-job",     "kind": "happy",  "shape": "POST /jobs {job_ref, site_name} -> 201", "tooling": "curl", "issue": null },
+    { "id": "tc-corner-unicode-site", "kind": "corner", "shape": "POST /jobs {site_name: 'Müller & Sons'} -> 201, round-trips unchanged", "tooling": "curl", "issue": null },
+    { "id": "tc-error-oversized",    "kind": "error",  "shape": "POST /jobs with a 40 KB note -> 413",    "tooling": "curl", "issue": null }
+  ],
+  "persona_derivations": [
+    { "slice": "corner-cases", "persona": "dana-dispatcher",
+      "basis": "data_traits.site_name — unicode + ampersands",
+      "target": "test_cases", "ref": "tc-corner-unicode-site" }
   ]
 }
 ```
@@ -75,7 +82,9 @@ approves the rewrite: prose plus a proposed `story-spec/v1` block whose
 Realistic data (`Müller & Sons`, not `foo`) is mined from the repo's persona
 registry (`personas/v1`, epic
 [#664](https://github.com/timo-jakob/timos-claude-code-plugins/issues/664),
-docs child #669) — personas are **advisory**, never a hard fail.
+docs child #669) — personas are **advisory**, never a hard fail. The corner case
+is **derived** from that persona's `data_traits` rather than invented (#1361),
+and `persona_derivations[]` records which entry came from which trait.
 
 ### Test-case spin-out (#671)
 
@@ -85,11 +94,12 @@ Before writing the block back, `refine-issue` (Step 2.5) reconciles the
 ```console
 $ test-case-spinout.zsh --repo owner/app --story 900 --spec approved-spec.json
 test-case-spinout.zsh: created #901 ← tc-happy-file-job
-test-case-spinout.zsh: created #902 ← tc-error-oversized
-[{"id":"tc-happy-file-job",...,"issue":901},{"id":"tc-error-oversized",...,"issue":902}]
+test-case-spinout.zsh: created #902 ← tc-corner-unicode-site
+test-case-spinout.zsh: created #903 ← tc-error-oversized
+[{"id":"tc-happy-file-job",...,"issue":901},{"id":"tc-corner-unicode-site",...,"issue":902},{"id":"tc-error-oversized",...,"issue":903}]
 ```
 
-The reconciled array (now carrying `issue: 901` / `902`) is spliced into the
+The reconciled array (now carrying `issue: 901` / `902` / `903`) is spliced into the
 block, which is written back with a provenance hash over the approved prose. The
 spin-out is idempotent on re-refinement — a dropped case closes its orphaned
 issue with a comment.
@@ -97,8 +107,8 @@ issue with a comment.
 ### Re-gate + telemetry
 
 `refine-issue` re-runs `story-readiness` on the edited issue. Now check 5 passes
-(concrete `use_case`, happy+error test cases in `curl`, both spun-out issues
-exist and are linked), so the verdict is `READY` and the `needs-refinement` label
+(concrete `use_case`, happy+corner+error test cases in `curl`, the spun-out
+issues exist and are linked), so the verdict is `READY` and the `needs-refinement` label
 is cleared. One `telemetry/v1` record is appended to the shared sink
 `.claude/telemetry/telemetry.jsonl`, which bootstrap git-ignores (#579,
 retrofitted onto the contract by #1005). The envelope comes from the shared
@@ -136,7 +146,7 @@ its authoritative structured interface:
 
 ```console
 $ gh issue view 900 --json body -q .body | read-story-spec.zsh
-{"schema":"story-spec/v1","acceptance_criteria":[...],"test_cases":[{...,"issue":901},{...,"issue":902}]}
+{"schema":"story-spec/v1","acceptance_criteria":[...],"test_cases":[{...,"issue":901},{...,"issue":902},{...,"issue":903}]}
 ```
 
 `acceptance_criteria` / `testable_checks` drive validation; `scope_boundaries`
@@ -146,18 +156,20 @@ same-PR test-case lifecycle (#696) plans an acceptance test per case:
 ```console
 $ read-story-spec.zsh --file body.md | plan-acceptance-tests.zsh
 [{"issue":901,"id":"tc-happy-file-job","kind":"happy","tooling":"curl","dir":"tests/acceptance/rest"},
- {"issue":902,"id":"tc-error-oversized","kind":"error","tooling":"curl","dir":"tests/acceptance/rest"}]
+ {"issue":902,"id":"tc-corner-unicode-site","kind":"corner","tooling":"curl","dir":"tests/acceptance/rest"},
+ {"issue":903,"id":"tc-error-oversized","kind":"error","tooling":"curl","dir":"tests/acceptance/rest"}]
 ```
 
 resolve-issue writes the feature **and** one acceptance test per case under
 `tests/acceptance/rest/` (the #243 convention; representative data from
 `use_case` + persona `data_traits`), validates the whole suite, and opens a
-bot-authored PR whose body closes the story and both test-case issues together:
+bot-authored PR whose body closes the story and its test-case issues together:
 
 ```text
 Closes #900
 Closes #901
 Closes #902
+Closes #903
 ```
 
 Feature and its acceptance tests land in one PR — they can never drift. A story
@@ -172,7 +184,7 @@ feature-only PR.
 | --- | --- | --- |
 | Gate says no | `story-readiness` (#559, #670) | `NEEDS_REFINEMENT` + check-5 questions, `surface: ["rest"]` |
 | Refine | `refine-issue` + `issue-refiner` (#575/#576) | human-approved prose + proposed `story-spec/v1` |
-| Spin out | `test-case-spinout.zsh` (#671) | linked `test-case` issues #901/#902 |
+| Spin out | `test-case-spinout.zsh` (#671) | linked `test-case` issues #901/#902/#903 |
 | Re-gate | `story-readiness` (#574 validation) | `READY`, label cleared |
 | Telemetry | `build-refine-telemetry-record.zsh` → `emit-telemetry.zsh` (#579, #1005) | one `telemetry/v1` record |
 | Consume | `read-story-spec.zsh` (#577) | the block as structured input |

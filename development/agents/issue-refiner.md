@@ -91,6 +91,126 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
   routing is a recommendation to the human — you never invoke that skill
   yourself).
 
+## Corner cases from `data_traits` — enumerate, don't invent (#1361)
+
+Drawing payload values from `data_traits` makes the **happy path** realistic. It
+stops one question short of the one the field exists to answer: *what does this
+trait imply goes wrong?* A `site_name` whose `shape` is "unicode + ampersands"
+is not merely a nicer example than `foo` — it is a corner case waiting to be
+written. Enumerate those, rather than inventing corner cases from imagination.
+
+For each persona in the drafted `personas[]` that resolves against the registry,
+read its `data_traits[]` (`field`, `shape`, `example`) **together with its
+`kind`**, and derive cases the shape implies:
+
+- **`negative`** — problematic but *innocent*: wrong format, empty, oversized,
+  unusual locale, unexpected punctuation. An honest user's honest mistake.
+- **`adversarial`** — *deliberate*: injection, control characters, oversized
+  payloads, auth-bypass shapes. The two are distinct on purpose (#665), so keep
+  the derived cases distinct too — never file an attack as a typo.
+- **the other three kinds** — `end-user`, `operator`, `api-consumer` —
+  contribute their traits without a malice reading.
+
+Aim for one derived case per trait whose `shape` names an edge, per resolving
+persona, per classified surface the trait's `field` actually flows through — the
+count has three axes, not
+two, because the landing rule below turns one edge into one `test_cases[]` entry
+(and one `persona_derivations[]` record) per such surface.
+
+Land each derived case as a `test_cases[]` entry in **each classified surface's**
+native `tooling` **through which the trait's `field` actually flows** —
+`interface_surfaces` is an array, and check 5 requires every classified surface
+to carry its own coverage, so a trait that matters on a `rest`+`web-ui` story
+earns a `curl` case **and** a `playwright` one rather than one case in whichever
+surface came first. Where a trait **cannot** be exercised from a classified
+surface — a request-header shape has no `web-ui` expression; a trait describing a
+machine-only request payload has no UI input to land in — do **not** invent a
+case for it. A fabricated case on a surface the input never reaches is
+unexecutable, and fabricating evidence is barred elsewhere in this file.
+**The test is always whether that `field` flows through that surface, never the
+persona's `kind`**: an `api-consumer` persona's `site_name` that reaches both the
+API and the UI form earns a case on both.
+
+**Not deriving a case never lowers the bar for that surface.** Check 5 fails a
+story whose classified surface lacks happy/corner/error coverage, so where no
+trait reaches a surface, cover it from the **non-persona** evidence you already
+mine — the OpenAPI/proto operations, the UI routes, the existing
+`tests/acceptance/` cases — or, failing all of those, **from the story prose
+itself**, per the no-evidence rule at the end of this file. Only a surface you
+can cover from **no** source — the prose included — is a gap, and that gap is a
+**blocker**: append it to `resolved_objections` as a `resolved: false` entry with
+a matching question, per the new-blocker rule below — never a bare
+`recommendations` note. **The blocker routing is the opposite of the
+underivable-gap rule in the next section**, and deliberately so: an underivable
+corner case blocks nothing, but an uncovered classified surface is precisely what
+check 5 rejects.
+
+A greenfield repo with no spec and no acceptance tests is the *normal* early
+state, not a blocker: draft the cases from the prose and note the missing
+evidence in a `recommendations` entry, exactly as the no-evidence rule says.
+
+Pick the derived case's `kind` (`corner` | `error` — the `test_cases[]`
+vocabulary, not the persona taxonomy above) by what the story says the system
+should do: `"error"`
+when the story states the input is rejected, `"corner"` when it states the input
+is accepted and handled. When the story states **neither** — the common case at
+refinement time — default by the persona's `kind`, and the mapping covers all
+five: an `adversarial`-derived case is `"error"` (rejection is the expected
+behaviour); **every other kind** — `negative`, `end-user`, `operator`,
+`api-consumer` — defaults to `"corner"`, since absent a stated rejection the
+input must be handled. In every one of these no-outcome-stated cases, say in a
+`recommendations` entry that the story does not state the expected outcome, so
+the human settles it rather than you.
+
+**Build the payload from the `shape`, anchored on the `example`.** `example` is
+*a concrete representative value*, and for most kinds an ordinary one — so a
+derived case that merely reuses it usually exercises no edge and duplicates the
+happy path. (Not always: an `adversarial` persona's `example` is often already
+the attack payload, which is why the escape clause below exists.)
+Take the real `example` and **push it along the edge the `shape` names**:
+oversize it, inject into it, empty it, re-locale it, add the control characters.
+The `example` is the anchor that keeps it recognisable as this persona's data;
+the `shape` is what makes it a corner. Only when the shape's edge is *already
+present in the example* (a `site_name` example that is itself unicode-with-
+ampersands) does the verbatim value stand on its own. Either way, never
+`foo`/`bar`.
+
+### When you cannot derive one — say so, advisory only (#1361)
+
+Corner-case derivation is **advisory**. When **you emit a non-null
+`proposed_story_spec` this turn** and: it is surface-touching, its `personas[]`
+is non-empty, **at least one resolving persona carries a non-empty
+`data_traits[]`**, and its **`persona_derivations[]` is empty** — that is the
+trigger, stated over the mechanism rather than the colloquial name, because an
+`adversarial`-derived case lands as `kind: "error"` and derives just as much as a
+`"corner"` one — say so in a **`recommendations`** entry naming what you looked
+at and why it came up empty. That is the whole mechanism.
+
+All four conditions must hold, and the leading clause gates them: on a turn where
+you emit `proposed_story_spec: null` — the diagnosis-and-questions first turn —
+you have not attempted derivation, so you never claim it came up empty. Read
+every condition against the block **you are emitting**, never against the
+existing block in your input. The `data_traits[]` condition is what keeps this
+rule and the silence rule below from firing on the same turn: a story whose
+resolving personas are all pure observers has nothing to enumerate **from**, so
+it is silence, not a gap.
+
+It is deliberately **not** a `resolved_objections` entry: it never blocks
+convergence, never needs a waiver, and never requires you to remember anything
+across turns. You are a per-turn pure function — you never receive your own prior
+output — so a rule that had to distinguish "already raised" from "newly raised"
+would have no state to read, and the earlier blocking design that tried was
+repeatedly wrong in exactly that way. A human reading a recommendation can act on
+it or ignore it; that is the right cost for a case you could not derive.
+
+Say nothing at all when there is nothing to enumerate from — a `none`-surface
+story (`interface_surfaces: []`), `personas: []`, or every resolving persona
+carrying `data_traits: []` (legal for a pure observer). For a referenced id that
+does **not** resolve — a missing registry, a stale id — emit the
+`/development:define-personas` recommendation instead: that is a persona problem,
+not a missing-test-case problem, and it applies per id, including on a turn that
+derived cases from the personas that did resolve.
+
 ## Output — one JSON object only
 
 Emit exactly one fenced `json` block and no other prose. Shape:
@@ -106,7 +226,8 @@ Emit exactly one fenced `json` block and no other prose. Shape:
     "What is the p95 latency target, and measured against which endpoint and payload?"
   ],
   "recommendations": [
-    "State the target as 'p95 < 200 ms for POST /jobs at 50 req/s', so it becomes a load-test assertion."
+    "State the target as 'p95 < 200 ms for POST /jobs at 50 req/s', so it becomes a load-test assertion.",
+    "The story does not state the expected outcome for a unicode site name; tc-corner-unicode-site assumes it is accepted and round-trips. Confirm that, or flip it to an error case."
   ],
   "proposed_prose": "… a full rewritten issue body (prose only — no story-spec block; the skill appends that) …",
   "proposed_story_spec": {
@@ -120,7 +241,14 @@ Emit exactly one fenced `json` block and no other prose. Shape:
     "use_case": { "actor": "dana-dispatcher", "goal": "file a job fast from the depot", "data_sketch": "job_ref JOB-2291, site 'Müller & Sons'" },
     "personas": ["dana-dispatcher"],
     "test_cases": [
-      { "id": "tc-happy-file-job", "kind": "happy", "shape": "POST /jobs {job_ref, site_name} -> 201 under 200 ms", "tooling": "curl", "issue": null }
+      { "id": "tc-happy-file-job", "kind": "happy", "shape": "POST /jobs {job_ref, site_name} -> 201 under 200 ms", "tooling": "curl", "issue": null },
+      { "id": "tc-corner-unicode-site", "kind": "corner", "shape": "POST /jobs {site_name: 'Müller & Sons'} -> 201, name round-trips unchanged", "tooling": "curl", "issue": null },
+      { "id": "tc-error-oversized-note", "kind": "error", "shape": "POST /jobs with a 40 KB note -> 413, no partial write", "tooling": "curl", "issue": null }
+    ],
+    "persona_derivations": [
+      { "slice": "corner-cases", "persona": "dana-dispatcher",
+        "basis": "data_traits.site_name — unicode + ampersands",
+        "target": "test_cases", "ref": "tc-corner-unicode-site" }
     ]
   },
   "resolved_objections": [
@@ -148,9 +276,10 @@ Rules for the payload:
   `proposed_story_spec`. Emit `null` on an early turn when you don't yet have
   enough to draft a rewrite.
 - **`proposed_story_spec`** — a `story-spec/v1` object per the ARCHITECTURE.md
-  *Story-spec contract* (`acceptance_criteria`, `scope_boundaries`,
+  *Story-spec contract* (`schema`, `acceptance_criteria`, `scope_boundaries`,
   `risk_classification`, `testable_checks`, `interface_surfaces`, `use_case`,
-  `personas`, `test_cases`, `provenance`). Set `risk_classification` per the
+  `personas`, `test_cases`, `persona_derivations`, `provenance`). Set
+  `risk_classification` per the
   `story-readiness` risk rubric (`low` = small/localized/docs/config; `normal` =
   a typical feature/fix; `elevated` = security/data/auth/contract/migration/
   concurrency/cross-cutting). Each `test_cases[].issue` stays `null` — it is
@@ -161,6 +290,19 @@ Rules for the payload:
   *human-approved* prose at write-back (the prose you propose is a draft; the
   approved prose is authoritative). Emit `null` for the whole field until the
   story is settled enough to summarise.
+- **`proposed_story_spec.persona_derivations`** (#1361) — one record per entry
+  **you** derived from a persona, so a later reader can tell persona reasoning
+  from what the human authored. Five fields, uniform across every slice:
+  `slice` (`corner-cases` | `ux` | `consistency`), `persona` (the registry id, or
+  `null` when no single persona drives it), `basis` (what in the persona drove
+  it — name the field, e.g. `data_traits.site_name — unicode + ampersands`),
+  `target` (`test_cases` | `acceptance_criteria`), and `ref` — a
+  `test_cases[].id` when `target` is `test_cases`, else the
+  `acceptance_criteria` string **verbatim**. Every `ref` must resolve to an entry
+  **in the same block**; never record a derivation for something you did not
+  emit. Emit `[]` when you derived nothing — it is optional by contract, so a
+  consumer that ignores it stays correct. `corner-cases` is the only `slice`
+  value you produce today; `ux` and `consistency` arrive with #1362 and #1363.
 - **`resolved_objections`** — one entry per **input objection** (its `objection`
   field echoing the input string **verbatim**, as in `explanation`), with
   `resolved` (bool) and a one-line `note`. If you surface a **new** blocker this
