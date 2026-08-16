@@ -219,6 +219,33 @@
 # (e.g., no project key for the Sonar probe).
 #
 # All paths are evaluated relative to the current working directory.
+#
+# Exit codes (#1177 — this script HAS an error contract now; it did not before):
+#   0  the JSON above is on stdout.
+#   2  detection could not complete, and NOTHING is on stdout. Today every such
+#      path is the kubernetes marker failing to reach a verdict, in one of two
+#      shapes: the repo became unenterable (`cannot enter <cwd> …`, neither half
+#      ran), or both halves came up empty with at least one search unfinished
+#      (`… did not complete …`). Either way `is_kubernetes: false` would be a
+#      claim about a search that never ran, and the JSON has no third state to
+#      say so — so the script names the reason on stderr and emits nothing.
+#      EVERY CALLER MUST CHECK THE STATUS before parsing: an empty file read as
+#      JSON makes every key look absent, which reads as a repo with no git, no
+#      languages and no artifacts. That is an obligation on all callers, not a
+#      list to keep in step here — ARCHITECTURE.md (Shared helpers) states the
+#      rule and names today's call sites. Forward the stderr rather than
+#      re-deriving a cause from the empty document.
+#      Note the trigger is not only a locked directory: `find` also exits
+#      non-zero when a path vanishes mid-traversal (a concurrent `git gc`, an
+#      installer writing into node_modules), and those trees are filtered AFTER
+#      the walk rather than pruned during it. Re-running is the remedy for a
+#      transient one; pruning them in the walk is a cross-copy change to all
+#      four parity-pinned recipes (and to the oracles that hold them identical),
+#      tracked as #1393.
+#   any other non-zero  an unanticipated internal failure under `set -e`. Stdout
+#      is empty there too, so callers must branch on **non-zero**, never on
+#      `== 2`: an enum read literally would treat those as success and parse an
+#      empty document, which is the failure this contract exists to prevent.
 
 set -euo pipefail
 
@@ -1396,23 +1423,80 @@ fi
 # while the argoproj grep quietly became "any file mentioning Argo". Keep the
 # whole recipe (both halves — the find AND the argoproj elif) between them, and
 # keep them a single unique pair.
+# Each search's status is captured SEPARATELY (#1177). The old single `|| true`
+# spanned `cd … && find … | grep -v …`, so a failed `cd`, an I/O error or a find
+# killed mid-run all produced the same empty string as a repo with no charts —
+# "could not look" emitted as `is_kubernetes: false`, which every consumer reads
+# as a completed search. An unfinished search taints only the NEGATIVE verdict:
+# a hit stands whatever else failed, so an argoproj-only repo with one unreadable
+# sibling directory still reports true. Only when BOTH halves came up empty AND
+# one of them did not finish does this script refuse to answer — loudly, on
+# stderr, with a non-zero exit, because its JSON has no third state and
+# `is_kubernetes: false` would be a lie about a search that never ran.
 # is-kubernetes-marker:begin
 is_kubernetes="false"
-k8s_hits="$(cd "$cwd" && find . \( -name Chart.yaml -o -name kustomization.yaml \
-	-o -name kustomization.yml -o -name Kustomization \) \
-	! -type d 2>/dev/null |
+k8s_hits="$(
+	cd "$cwd" 2>/dev/null || exit 125
+	find . \( -name Chart.yaml -o -name kustomization.yaml \
+		-o -name kustomization.yml -o -name Kustomization \) \
+		! -type d 2>/dev/null
+)" && k8s_find_rc=0 || k8s_find_rc=$?
+if [[ "$k8s_find_rc" -eq 125 ]]; then
+	# 125 is the subshell's own sentinel for a failed `cd`, which no find returns:
+	# nothing was searched at all, so there is no verdict to soften.
+	# Deliberately UNTESTED: `$cwd` is this script's own `$(pwd)`, so no seam can
+	# make the `cd` fail — it is defence-in-depth for a repo path that becomes
+	# unenterable mid-run. A test that cannot tell the branch's presence from its
+	# absence would be inert, which is worse than none.
+	printf 'detect-stack: cannot enter %s to run the kubernetes marker\n' "$cwd" >&2
+	exit 2
+fi
+# the filter reads the captured string, not the filesystem, so `|| true` here
+# absorbs only its no-match exit 1 — never a search failure
+k8s_hits="$(printf '%s\n' "$k8s_hits" |
 	grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
-if [[ -n "$k8s_hits" ]]; then
-	is_kubernetes="true"
-elif (cd "$cwd" && grep -rqlF 'argoproj.io' \
-	--include='*.yaml' --include='*.yml' \
-	--exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
-	--exclude-dir=templates . 2>/dev/null); then
+k8s_argo_rc=1
+if [[ -z "$k8s_hits" ]]; then
 	# grep the literal `.` after cd, not "$cwd": GNU grep documents
 	# --exclude-dir as skipping any COMMAND-LINE directory whose name matches, so
 	# passing "$cwd" would skip a repo literally named `templates`/`vendor`/
 	# `node_modules` in its ENTIRETY and report it manifest-free with exit 0.
+	# the SAME 125 sentinel as the find half. Without it a failed `cd` returns 1 —
+	# byte-identical to grep's no-match — and the ladder below would read "could
+	# not enter the repo" as "searched it, no Argo". 125 needs no branch of its
+	# own: it is >= 2, so the operational-error arm already refuses to answer.
+	(
+		cd "$cwd" 2>/dev/null || exit 125
+		grep -rqlF 'argoproj.io' \
+			--include='*.yaml' --include='*.yml' \
+			--exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+			--exclude-dir=templates . 2>/dev/null
+		# stdout REDIRECTED, not merely quiet: this subshell inherits the script's
+		# stdout, which is the JSON document stream. Today only `-q` keeps it
+		# silent — and the prose says the four copies are "kept identical" while
+		# the manifests lister deliberately drops `-q` (it needs the paths), so a
+		# maintainer harmonising them would print yaml paths ahead of the JSON and
+		# every consumer would report "invalid JSON" instead of the real cause. No
+		# parity oracle pins `-q`; this redirect does not depend on one.
+	) >/dev/null && k8s_argo_rc=0 || k8s_argo_rc=$?
+fi
+# 125 again — named, not folded into the generic arm below, which would render it
+# as "grep exit 125"; grep only ever returns 0, 1 or 2, and this stderr is the
+# ONLY thing the user sees for a whole aborted run, since every caller is
+# required to forward it verbatim (ARCHITECTURE.md, Shared helpers).
+if [[ "$k8s_argo_rc" -eq 125 ]]; then
+	printf 'detect-stack: cannot enter %s to run the kubernetes marker\n' "$cwd" >&2
+	exit 2
+fi
+if [[ -n "$k8s_hits" || "$k8s_argo_rc" -eq 0 ]]; then
 	is_kubernetes="true"
+elif [[ "$k8s_find_rc" -ne 0 || "$k8s_argo_rc" -ge 2 ]]; then
+	# grep exit 2 is an OPERATIONAL error, not a no-match — and an unreadable
+	# subtree may equally have hidden a find hit, so neither half can be reported
+	# as "searched, nothing there".
+	printf 'detect-stack: the kubernetes marker search did not complete (find exit %s, grep exit %s) — refusing to report is_kubernetes false\n' \
+		"$k8s_find_rc" "$k8s_argo_rc" >&2
+	exit 2
 fi
 # is-kubernetes-marker:end
 # The infrastructure-as-code tree (SKILL.md §3l, #1154): the kubernetes topic
@@ -1454,12 +1538,17 @@ if [[ -f "$cwd/.maintenance.yml" ]]; then
 	# `primary: "kubernetes"` leaves a trailing \r that defeats the closing-quote
 	# strip, the value reads as `kubernetes"`, and the *) arm below would then
 	# OVERRIDE a correct heuristic and strip a real GitOps repo of its candidate.
-	# `|| true` like every other parse in this file: `[[ -f ]]` is true for a
+	# `|| true` like every other PARSE in this file: `[[ -f ]]` is true for a
 	# file we can stat but not READ (a 0600 .maintenance.yml from another user),
 	# where sed exits 2, pipefail propagates it, and errexit would kill
 	# detect-stack.sh before any JSON is printed — the orchestrator would get an
 	# empty stdout and a bare non-zero status. An empty value is already handled:
 	# the `kubernetes | ""` arm leaves the heuristic standing.
+	# The kubernetes marker (#1177) deliberately does the opposite and exits 2 on
+	# an incomplete SEARCH — the difference is what the failure costs. An
+	# unreadable `primary:` line loses a TIE-BREAK whose absence the heuristic
+	# already handles; an unread subtree loses the ANSWER, and the boolean has no
+	# way to say so. The exit-code block at the top of this file is the contract.
 	recorded_primary="$(sed -n 's/^[[:space:]]*primary:[[:space:]]*//p' "$cwd/.maintenance.yml" 2>/dev/null |
 		head -n1 | sed -E -e 's/[[:space:]]*(#.*)?$//' -e 's/^["'"'"']//' -e 's/["'"'"']$//' || true)"
 	case "$recorded_primary" in

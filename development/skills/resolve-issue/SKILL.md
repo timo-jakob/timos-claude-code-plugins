@@ -660,10 +660,15 @@ applies and run it:
   ```bash
   # Actually skip on a detection failure — never run the comparator on a
   # truncated/stale /tmp/detect.json.
+  # Branch on NON-ZERO, never on a specific code (#1177), and FORWARD
+  # detect-stack's stderr: its non-zero exit carries its whole meaning there
+  # (which search could not complete), and a generic "detection failed" drops
+  # the one diagnostic that names the cause.
   if "<skill-base-dir>/../bootstrap/scripts/detect-stack.sh" > /tmp/detect.json; then
     "<skill-base-dir>/scripts/check-c4-currency.zsh" --repo . --detect-json /tmp/detect.json
   else
     echo "detection failed — C4 check skipped; do NOT touch the diagram"
+    echo "  (relay detect-stack's stderr above verbatim — it names the cause)"
   fi
   #   0 + non-empty plan naming docs/architecture/c4-container.md → REVISIT it:
   #       update the Container diagram to match the new structure, in THIS PR
