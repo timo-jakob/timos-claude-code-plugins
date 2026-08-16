@@ -296,11 +296,12 @@ gather_directly() { "$GATHER" "$W"; }
 }
 
 @test "a RELATIVE repo path beginning with a dash is handled (#1152)" {
-  # the sole reason for the `[[ "$repo" == /* ]] || repo="./$repo"` normalisation:
-  # such a path clears the [[ -d ]] gate but is read as an OPTION by cd and as a
-  # PRIMARY by find, and every resulting failure is absorbed into a confident
-  # all-false payload. Every other test passes an absolute path or none, so
-  # reverting the normalisation would otherwise keep the whole suite green.
+  # the sole reason for the normalisation the script now carries (#1177 narrowed
+  # it to relative paths that are not already `./`-anchored, so the documented
+  # default `.` is left alone): such a path clears the `[[ -d ]]` gate but is
+  # read as a start-point-ending ARGUMENT by `find -L "$policy_dir"`, which has
+  # no `--` to protect it — `cd --` already covers the cd half. Every other test
+  # passes an absolute path or none, so reverting it would keep the suite green.
   local dashed="$BATS_TEST_TMPDIR/-dash-repo"
   mkdir -p "$dashed/charts/app" "$dashed/policies/kyverno"
   printf 'apiVersion: v2\nname: d\nversion: 0.1.0\n' > "$dashed/charts/app/Chart.yaml"
@@ -309,6 +310,26 @@ gather_directly() { "$GATHER" "$W"; }
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.tooling_configured.manifest_validation')" = "true" ]
   [ "$(echo "$output" | jq -r '.tooling_configured.policy')" = "true" ]
+}
+
+@test "an ordinary relative repo path is NOT rewritten into the diagnostics (#1177)" {
+  # the other half of the normalisation contract: `.` and `./x` must pass through
+  # untouched, because the messages this script's exit-2 contract exists to
+  # produce are forwarded verbatim to a human as `gather failed: <stderr>`. The
+  # pre-#1177 blanket form turned the documented no-argument default into `./.`
+  # and printed `././policies/kyverno`; nothing pinned that, so re-widening it
+  # would ship green.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  chart
+  mkdir -p "$W/policies/kyverno/restricted"
+  printf 'apiVersion: kyverno.io/v1\nkind: ClusterPolicy\n' \
+    > "$W/policies/kyverno/restricted/p.yaml"
+  chmod 000 "$W/policies/kyverno/restricted"
+  run --separate-stderr bash -c "cd '$W' && zsh '$GATHER' ."
+  chmod 755 "$W/policies/kyverno/restricted"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "could not list"
+  lacks "$stderr" '././'
 }
 
 @test "an existing but UNREADABLE repo directory is an error, not an all-false payload (#1152)" {
@@ -362,6 +383,147 @@ gather_directly() { "$GATHER" "$W"; }
   contains "$stderr" "policies/kyverno exists but is not readable"
 }
 
+@test "an unreadable SUBTREE with no markers is an error, not manifest_validation:false (#1177)" {
+  # the repo gate above proves the TOP directory readable; it says nothing about
+  # what is under it. A locked subtree may hold the very chart being looked for,
+  # so `manifest_validation: false` here asserts a search that never finished —
+  # and the orchestrator renders a configured-tool-free topic as clean.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  mkdir -p "$W/locked"
+  chmod 000 "$W/locked"
+  run --separate-stderr gather
+  chmod 755 "$W/locked"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "did not complete"
+}
+
+@test "an unreadable node_modules trips the gather's FIND half specifically (#1177)" {
+  # the mirror of the grep-half test below: the locked-DIRECTORY test above fails
+  # BOTH halves, so `manifest_rc != 0` is never the sole cause and could be
+  # deleted with the suite green. node_modules discriminates — the argoproj grep
+  # skips it (--exclude-dir) while find has no -prune and descends it. The
+  # regression pinned here is the common one: a vendored tree with restrictive
+  # permissions emitting manifest_validation:false at exit 0, which the
+  # orchestrator renders as a completed, clean search.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  mkdir -p "$W/node_modules/pkg"
+  chmod 000 "$W/node_modules"
+  run --separate-stderr gather
+  chmod 755 "$W/node_modules"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # BOTH halves named: find failed, grep completed cleanly
+  contains "$stderr" "find exit 1"
+  contains "$stderr" "grep exit 1"
+}
+
+@test "an unreadable FILE trips the gather's GREP half specifically (#1177)" {
+  # the locked-DIRECTORY test above fails BOTH halves, so it is satisfied by
+  # manifest_rc alone and would stay green with `|| argo_rc >= 2` deleted. A
+  # locked FILE discriminates: find never reads file CONTENT, so it completes,
+  # and only the argoproj grep errors — the one case where the grep half is the
+  # sole signal. Without the disjunct this repo emits manifest_validation:false
+  # at exit 0, which the orchestrator renders as a completed, clean search.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses file permissions"; fi
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/secret.yaml"
+  chmod 000 "$W/secret.yaml"
+  run --separate-stderr gather
+  chmod 644 "$W/secret.yaml"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # names WHICH half failed, so the two disjuncts stay distinguishable. BOTH
+  # needles: 'grep exit 2' alone would still match if find had also failed,
+  # silently turning this back into the both-halves fixture it replaces.
+  contains "$stderr" "grep exit 2"
+  contains "$stderr" "find exit 0"
+}
+
+@test "an unreadable SUBTREE does not taint a found manifest (#1177)" {
+  # the tolerant half: a hit is a hit. Only the NEGATIVE answer needs a complete
+  # search, so a repo whose chart WAS found still emits its payload — otherwise
+  # the hardening would fail every repo carrying one locked directory.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  chart
+  mkdir -p "$W/locked"
+  chmod 000 "$W/locked"
+  run --separate-stderr gather
+  chmod 755 "$W/locked"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.tooling_configured.manifest_validation')" = "true" ]
+  # and SILENT on the tolerant path: a leaked "Permission denied" would land in
+  # the orchestrator's transcript and, on the halt path, in the note it prints
+  # verbatim. Dropping a 2>/dev/null is otherwise invisible to this suite.
+  [ -z "$stderr" ]
+}
+
+@test "an unreadable subtree under an ARGO-only repo still detects (#1177)" {
+  # same rule through the grep half, whose exit 2 on an unreadable tree is the
+  # status the old `2>/dev/null` conflated with a clean no-match. With -q, a
+  # match wins over the error, so the verdict stands.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  argocd
+  mkdir -p "$W/locked"
+  chmod 000 "$W/locked"
+  run --separate-stderr gather
+  chmod 755 "$W/locked"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.tooling_configured.manifest_validation')" = "true" ]
+  [ -z "$stderr" ]
+}
+
+@test "an unreadable POLICY subtree is an error, not 'no policies declared' (#1177)" {
+  # the readable-directory gate covers policies/kyverno itself, not a directory
+  # BENEATH it — and policies are commonly grouped per subject. Without the
+  # find's own status check, a repo with several policies in a locked
+  # subdirectory is reported as declaring none.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  chart
+  mkdir -p "$W/policies/kyverno/restricted"
+  printf 'apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: p\n' \
+    > "$W/policies/kyverno/restricted/p.yaml"
+  chmod 000 "$W/policies/kyverno/restricted"
+  run --separate-stderr gather
+  chmod 755 "$W/policies/kyverno/restricted"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "could not list"
+}
+
+@test "unreachable FIXTURES never fabricate the untested-policies finding (#1177)" {
+  # the costliest consequence of the unchecked finds: an empty fixture result
+  # does not merely skip a step, it ACCUSES the repo of shipping policies that
+  # pass everything silently — a high-severity finding resting on a search that
+  # failed. This is the fixture layout that produced it: policies at the top of
+  # policies/kyverno, their `kyverno test` fixtures grouped in a subdirectory
+  # that cannot be read.
+  #
+  # NOTE on which guard fires: both policy finds walk the SAME tree, and the
+  # policy one runs first, so it is that guard which reports here. The fixture
+  # find's own check is defence-in-depth for a tree that changes between the two
+  # walks (a directory locked or removed mid-run) and is deliberately left
+  # without a dedicated test — no seam exists to fail the second walk while the
+  # first succeeds, and a test that could not tell the guard's presence from its
+  # absence would be inert, which is worse than none. What this test pins is the
+  # OUTCOME the issue names: no accusation, and a named error instead.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  chart; policy
+  mkdir -p "$W/policies/kyverno/fixtures"
+  printf 'name: p-test\npolicies:\n  - ../p.yaml\n' \
+    > "$W/policies/kyverno/fixtures/kyverno-test.yaml"
+  chmod 000 "$W/policies/kyverno/fixtures"
+  run --separate-stderr gather
+  chmod 755 "$W/policies/kyverno/fixtures"
+  [ "$status" -eq 2 ]
+  # BOTH assertions: `lacks` alone passes by construction here (the script exits
+  # before emitting, so stdout is empty), which would let a regression that
+  # printed a well-formed all-false payload WHILE exiting 2 slip through — the
+  # exact failure the sibling exit-2 tests in this file guard with `[ -z ]`
+  [ -z "$output" ]
+  lacks "$output" "untested_policies"
+  contains "$stderr" "could not list"
+}
+
 @test "a successful run writes NOTHING to stderr (#1152)" {
   # every search is 2>/dev/null-suppressed; dropping a suppression would leak
   # find/grep permission warnings into the orchestrator's transcript, with the
@@ -373,11 +535,14 @@ gather_directly() { "$GATHER" "$W"; }
   echo "$output" | jq -e '.' >/dev/null
 }
 
-@test "a FAILING jq never emits a partial payload (#1152)" {
-  # jq-absent is exit 3; jq present-but-failing is the other half. The gather has
-  # no emit-failure handler, so pin today's behaviour: a non-zero exit and NO
-  # stdout — a later `|| true` around the emit would print nothing and exit 0,
-  # i.e. an empty payload read as a clean topic
+@test "a FAILING jq never emits a partial payload (#1152, #1177)" {
+  # jq-absent is exit 3; jq present-but-failing is the other half. Since #1177 the
+  # emitter CHECKS jq, so this pins the named guard rather than errexit's
+  # incidental abort: `-eq 2` (inside the documented {0,2,3}) plus the message
+  # the orchestrator relays. Asserting only `-ne 0` would hold identically with
+  # the guard deleted — errexit would abort with jq's own status — so the
+  # plausible "this `||` block is redundant under set -e" cleanup would ship green
+  # while the script exited 5 and lost the named cause.
   chart
   local stub="$BATS_TEST_TMPDIR/jq-stub" real_jq zsh_bin
   real_jq="$(command -v jq)"
@@ -393,8 +558,32 @@ gather_directly() { "$GATHER" "$W"; }
   } > "$stub/jq"
   chmod +x "$stub/jq"
   run --separate-stderr env PATH="$stub:$PATH" "$zsh_bin" "$GATHER" "$W"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
   [ -z "$output" ]
+  contains "$stderr" "could not emit the payload"
+}
+
+@test "a FAILING notes encode is exit 2 with its own named cause (#1177)" {
+  # the sibling guard, and the one no fixture reached at all. `jq -R` appears
+  # exactly once in the script — the notes encoder — and the assignment runs
+  # under pipefail, so failing on `-R` isolates it from the payload emitter.
+  # Without its guard the pipeline's failure aborts under errexit with jq's
+  # status, outside the documented set and with no cause named.
+  chart
+  local stub="$BATS_TEST_TMPDIR/jq-stub-R" real_jq zsh_bin
+  real_jq="$(command -v jq)"
+  zsh_bin="$(command -v zsh)"
+  mkdir -p "$stub"
+  {
+    printf '#!/bin/sh\n'
+    printf 'case "$*" in *-R*) exit 2 ;; esac\n'
+    printf 'exec %s "$@"\n' "$real_jq"
+  } > "$stub/jq"
+  chmod +x "$stub/jq"
+  run --separate-stderr env PATH="$stub:$PATH" "$zsh_bin" "$GATHER" "$W"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "could not encode the notes list"
 }
 
 @test "a repo whose PARENT directory has a pruned name is still searched (#1152)" {

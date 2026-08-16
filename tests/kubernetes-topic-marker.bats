@@ -18,11 +18,13 @@
 # that blows up (127, a set -e abort) cannot masquerade as a clean rejection.
 #
 # The SECOND thing this file exists for is PARITY. The detection rule is stated
-# twice — here and in gather-kubernetes-findings.zsh — and SKILL.md asserts in
-# prose that the two prune the same trees. That claim is DERIVED below rather
-# than trusted: a marker that fires where the gather does not produces an empty
-# topic plan on a real GitOps repo, and a gather that finds what the marker does
-# not never runs at all. Either way nothing would be red.
+# FOUR times — SKILL.md's verdict recipe and its manifests lister (both extracted
+# here), gather-kubernetes-findings.zsh, and detect-stack.sh's
+# `is-kubernetes-marker` block (#1153) — and SKILL.md asserts in prose that they
+# prune the same trees. That claim is DERIVED below rather than trusted: a marker
+# that fires where the gather does not produces an empty topic plan on a real
+# GitOps repo, and a gather that finds what the marker does not never runs at
+# all. Either way nothing would be red.
 
 bats_require_minimum_version 1.5.0
 
@@ -48,9 +50,17 @@ setup() {
   RECIPE="$(sed -n '/^# kubernetes-marker:begin$/,/^# kubernetes-marker:end$/p' "$SKILL" \
     | grep -v '^#')"
   [ -n "$RECIPE" ]
-  [ "$(printf '%s\n' "$RECIPE" | wc -l)" -le 14 ]
+  # the bound is a RUNAWAY guard, not a budget: a sed range that stops matching
+  # prints hundreds of lines, and every one of them would be eval'd. #1177's
+  # per-search status capture roughly doubled the recipe (8 lines -> ~21), so
+  # the bound moved with it and still catches a runaway by two orders of
+  # magnitude.
+  [ "$(printf '%s\n' "$RECIPE" | wc -l)" -le 30 ]
   starts_with "$RECIPE" 'k8s_hits='
-  ends_with "$RECIPE" '. 2>/dev/null'
+  # ends on the verdict ladder's `fi` since #1177 — the recipe now has THREE
+  # statuses (0 kubernetes / 1 not / 2 could-not-look), so its last line is the
+  # close of the if/elif/else that chooses between them
+  ends_with "$RECIPE" 'fi'
   contains "$RECIPE" 'argoproj.io'
 
   # the SECOND executable kubernetes recipe: the path lister that fills
@@ -61,9 +71,12 @@ setup() {
   MANIFESTS="$(sed -n '/^  # kubernetes-manifests:begin$/,/^  # kubernetes-manifests:end$/p' "$SKILL" \
     | grep -v '^  #' | sed 's/^  //')"
   [ -n "$MANIFESTS" ]
-  [ "$(printf '%s\n' "$MANIFESTS" | wc -l)" -le 16 ]
+  [ "$(printf '%s\n' "$MANIFESTS" | wc -l)" -le 30 ]
   starts_with "$MANIFESTS" 'k8s_paths='
-  ends_with "$MANIFESTS" '|| printf '"'"'%s\n'"'"' "$k8s_paths"'
+  # the guarded printf moved INSIDE the same three-way ladder (#1177): print the
+  # list, or name the failed search on stderr, or print nothing at all
+  ends_with "$MANIFESTS" 'fi'
+  contains "$MANIFESTS" 'printf '"'"'%s\n'"'"' "$k8s_paths"'
 
   # and the gather's own detection block, the parity oracles' other operand. Its
   # sed range needs the SAME shape guards as RECIPE above and for the same
@@ -80,7 +93,7 @@ setup() {
   GATHER_BLOCK="$(sed -n '/^# gather-kubernetes-marker:begin$/,/^# gather-kubernetes-marker:end$/p' "$GATHER" \
     | grep -v '^[[:space:]]*#')"
   [ -n "$GATHER_BLOCK" ]
-  [ "$(printf '%s\n' "$GATHER_BLOCK" | wc -l)" -le 20 ]
+  [ "$(printf '%s\n' "$GATHER_BLOCK" | wc -l)" -le 30 ]
   starts_with "$GATHER_BLOCK" 'manifest_hits='
   ends_with "$GATHER_BLOCK" 'fi'
   contains "$GATHER_BLOCK" 'find .'
@@ -110,7 +123,11 @@ setup() {
   DETECT_BLOCK="$(sed -n '/^# is-kubernetes-marker:begin$/,/^# is-kubernetes-marker:end$/p' "$DETECT" \
     | grep -v '^[[:space:]]*#')"
   [ -n "$DETECT_BLOCK" ]
-  [ "$(printf '%s\n' "$DETECT_BLOCK" | wc -l)" -le 20 ]
+  # a looser bound than its three siblings (~21-22 lines) because this copy
+  # carries two NAMED cannot-enter branches the others fold into one, and it is
+  # tab-indented bash rather than a fenced snippet. Still a runaway guard: the
+  # file is ~1900 lines, so a sed range running to EOF misses this by 40x.
+  [ "$(printf '%s\n' "$DETECT_BLOCK" | wc -l)" -le 45 ]
   starts_with "$DETECT_BLOCK" 'is_kubernetes="false"'
   ends_with "$DETECT_BLOCK" 'fi'
   # the block must carry BOTH halves — the find and the argoproj grep — or the
@@ -302,22 +319,226 @@ chart() {
   done
 }
 
-@test "both recipes survive an unreadable subtree under errexit (#1152)" {
+@test "neither recipe ABORTS under errexit on an unreadable subtree (#1152, #1177)" {
   # the orchestrator runs its detection block under `set -e` / `pipefail`, which
-  # is why both recipes carry `2>/dev/null` and `|| true` on the capture. Drop
-  # the `|| true` and one unreadable directory aborts the WHOLE topic detection.
+  # is why both recipes suppress their searches' stderr and never let a bare
+  # non-zero escape uncontrolled: one unreadable directory must not abort the
+  # WHOLE topic detection with a shell diagnostic and no verdict.
+  #
+  # #1177 kept that property and made the two recipes' ANSWERS diverge, because
+  # a boolean and a list are not the same kind of claim:
+  #   - the MARKER still answers 0. A hit settles a yes/no, so the chart it did
+  #     find stands whatever else failed.
+  #   - the LISTER answers 2. Completeness is its payload, so the same partial
+  #     walk that leaves the marker's verdict intact makes the list a wrong
+  #     answer — it would name the files walked before the error and the agents
+  #     would report clean on the rest.
+  # Both are DEFINED verdicts on stdout/stderr, which is what "survives errexit"
+  # was always about.
   if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
   chart
   mkdir -p "$W/locked"
   chmod 000 "$W/locked"
   run bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
   local marker_status="$status"
-  run bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
-  local lister_status="$status" lister_output="$output"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  local lister_status="$status" lister_output="$output" lister_err="$stderr"
   chmod 755 "$W/locked"
   [ "$marker_status" -eq 0 ]
-  [ "$lister_status" -eq 0 ]
-  contains "$lister_output" 'charts/app/Chart.yaml'
+  [ "$lister_status" -eq 2 ]
+  # and NOT the truncated list it could have printed
+  [ -z "$lister_output" ]
+  contains "$lister_err" 'possibly-truncated'
+}
+
+@test "an unreadable subtree with NO manifests is exit 2, not a clean no (#1177)" {
+  # the defect this issue exists for: the old `|| true` spanned the whole
+  # find|grep chain, so a search that could not read part of the tree produced
+  # the same empty string as a repo with no charts — and the recipe answered a
+  # confident "not kubernetes" (1). It must now be distinguishable: status 2,
+  # with the failing search named on stderr. Status 1 here would be the silent
+  # false negative regressing.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  mkdir -p "$W/locked"
+  chmod 000 "$W/locked"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
+  chmod 755 "$W/locked"   # restore BEFORE asserting, so a failure still cleans up
+  [ "$status" -eq 2 ]
+  # the FAILURE-BRANCH wording, not the generic prefix: 'kubernetes marker' also
+  # appears in the ladder's other arms if they ever gain a message, so it could
+  # not tell this branch from another
+  contains "$stderr" 'did not complete'
+}
+
+@test "an unreadable node_modules trips the marker's FIND half specifically (#1177)" {
+  # the mirror of the grep-half test below. The locked-DIRECTORY fixture above
+  # fails BOTH halves, so `[ "$k8s_find_rc" -ne 0 ] ||` can be deleted with every
+  # other test green. `node_modules` discriminates: the argoproj grep SKIPS it
+  # (--exclude-dir), while find has no -prune and descends it, then filters the
+  # paths afterwards. So find fails alone — and the regression this pins is the
+  # common one, a vendored tree with restrictive permissions answering a
+  # confident "not kubernetes" for a tree it could not walk.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  mkdir -p "$W/node_modules/pkg"
+  chmod 000 "$W/node_modules"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
+  chmod 755 "$W/node_modules"
+  [ "$status" -eq 2 ]
+  # BOTH halves named: find failed, grep completed cleanly. Asserting only
+  # 'did not complete' would be satisfied by the grep disjunct too.
+  contains "$stderr" 'find 1'
+  contains "$stderr" 'grep 1'
+}
+
+@test "an unreadable FILE trips the marker's GREP half specifically (#1177)" {
+  # the locked-DIRECTORY fixture above fails BOTH halves, so it is satisfied by
+  # the find disjunct alone — delete `|| [ "$k8s_argo_rc" -ge 2 ]` and it stays
+  # green. A locked FILE is the discriminating case: find never reads file
+  # CONTENT, so it completes (exit 0) and only the argoproj grep errors (exit 2).
+  # Without the grep disjunct this repo goes back to a confident status 1.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses file permissions"; fi
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/secret.yaml"
+  chmod 000 "$W/secret.yaml"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
+  chmod 644 "$W/secret.yaml"
+  [ "$status" -eq 2 ]
+  contains "$stderr" 'did not complete'
+  # and the message names WHICH half failed, so the two disjuncts stay
+  # distinguishable in the transcript. BOTH needles: 'grep 2' alone would still
+  # match if find had also failed, which would silently turn this back into the
+  # both-halves fixture it exists to replace.
+  contains "$stderr" 'grep 2'
+  contains "$stderr" 'find 0'
+}
+
+@test "an unreadable subtree does NOT taint a positive verdict (#1177)" {
+  # the other half of the rule: a hit is a hit. Only a NEGATIVE answer needs a
+  # completed search, so a repo whose chart was found — or whose argoproj match
+  # was found — still reports 0 despite the failed traversal. Without this the
+  # hardening would turn every locked-directory repo into an error, which is the
+  # opposite over-correction.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  mkdir -p "$W/apps" "$W/locked"
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/apps/app.yaml"
+  chmod 000 "$W/locked"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
+  chmod 755 "$W/locked"
+  [ "$status" -eq 0 ]
+  # and SILENT on the tolerant path: the orchestrator quotes a marker's own
+  # stderr verbatim as its unsupported_topics note, so a leaked
+  # "find: ./locked: Permission denied" would become that note — and pollute
+  # every transcript. Dropping a 2>/dev/null is otherwise invisible here.
+  [ -z "$stderr" ]
+}
+
+@test "the manifests recipe reports an incomplete search instead of an empty list (#1177)" {
+  # one level down, the same defect with a different blast radius: an empty
+  # `manifests` list dispatches the topic naming no files at all, so the agents
+  # review nothing and the run looks clean. Empty-and-complete still prints
+  # nothing at exit 0 (the test above this one); empty-because-we-could-not-look
+  # must not.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  mkdir -p "$W/locked"
+  chmod 000 "$W/locked"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  chmod 755 "$W/locked"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" 'did not complete'
+}
+
+@test "the manifests lister trips on the GREP half too, WITHOUT pipefail (#1177)" {
+  # Two gaps in one fixture. (1) Like the marker, the locked-DIRECTORY test above
+  # only fails the find half, so the argoproj disjunct was uncovered. (2) The
+  # no-pipefail leg is the one that matters: the recipe must capture grep's OWN
+  # status, because a pipeline's status is its LAST command's and `sed` always
+  # succeeds — `grep … | sed` would read 0 for a grep that exited 2 in exactly
+  # the shell the orchestrator pastes this into, print nothing, and exit 0. That
+  # is the silent empty manifests list this block exists to abolish, so the
+  # no-pipefail leg is asserted FIRST and is not optional.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses file permissions"; fi
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/secret.yaml"
+  chmod 000 "$W/secret.yaml"
+  # the orchestrator's own shell: errexit and pipefail NOT set
+  run --separate-stderr bash -c "cd '$W'; $(printf '%s' "$MANIFESTS")"
+  local plain_status="$status" plain_out="$output" plain_err="$stderr"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  chmod 644 "$W/secret.yaml"
+  [ "$plain_status" -eq 2 ]
+  [ -z "$plain_out" ]
+  contains "$plain_err" 'did not complete'
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # both needles, so the fixture provably isolates the GREP disjunct
+  contains "$stderr" 'grep 2'
+  contains "$stderr" 'find 0'
+}
+
+@test "an unreadable node_modules trips the lister's FIND half — and it refuses a TRUNCATED list (#1177)" {
+  # Two things at once, because they are the same branch. (1) The find disjunct
+  # was uncovered: node_modules is skipped by the argoproj grep (--exclude-dir)
+  # but descended by find (no -prune), so find fails alone. (2) A chart is
+  # present, so find ALSO produced output — the truncated-list case. A list's
+  # completeness IS its payload, so printing what was walked before the error at
+  # exit 0 would hand the dispatch a partial file set and the agents would report
+  # clean on everything they never saw. The lister therefore tests
+  # incompleteness BEFORE printing, unlike the three boolean copies where one hit
+  # legitimately settles the verdict.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  chart
+  mkdir -p "$W/node_modules/pkg"
+  chmod 000 "$W/node_modules"
+  run --separate-stderr bash -c "cd '$W'; $(printf '%s' "$MANIFESTS")"
+  local plain_status="$status" plain_out="$output"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  chmod 755 "$W/node_modules"
+  # the chart was FOUND, and the list is still refused — that is the point
+  [ "$plain_status" -eq 2 ]
+  [ -z "$plain_out" ]
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" 'possibly-truncated'
+  contains "$stderr" 'find 1'
+  # `grep 1` here is the INITIALISER, not a completed search: the presence half
+  # is non-empty, so the `[ -z "$k8s_paths" ]` branch is skipped and the argoproj
+  # grep never runs at all. It still proves the isolation (rc 1 cannot be the
+  # trigger), but do not read it as "the grep completed cleanly".
+  contains "$stderr" 'grep 1'
+  # POSITIVE CONTROL: with permissions restored the same fixture must produce a
+  # real, non-empty list. Without it, a broken `-name Chart.yaml` clause would
+  # silently degrade this into a duplicate of the empty find-half test above and
+  # stop guarding the incompleteness-before-print ordering it exists for.
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  [ "$status" -eq 0 ]
+  [ "$output" = "charts/app/Chart.yaml" ]
+}
+
+@test "the lister refuses an argoproj list that MATCHED and errored (#1177)" {
+  # the lister drops `-q` deliberately (it needs the paths), so grep can exit 2
+  # having ALREADY printed matches — and that list must still be refused, because
+  # completeness is the payload. Both other grep-half fixtures leave the match set
+  # EMPTY, so this state is uncovered: the tempting "harmonise the lister with the
+  # three boolean copies" edit (treat a non-empty match set as success, mirroring
+  # the marker's -q tolerance) would print a TRUNCATED Argo path list at exit 0
+  # with the whole suite green.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses file permissions"; fi
+  mkdir -p "$W/apps"
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/apps/app.yaml"
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/apps/locked.yaml"
+  chmod 000 "$W/apps/locked.yaml"
+  run --separate-stderr bash -c "cd '$W'; $(printf '%s' "$MANIFESTS")"
+  local plain_status="$status" plain_out="$output"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  chmod 644 "$W/apps/locked.yaml"
+  [ "$plain_status" -eq 2 ]
+  [ -z "$plain_out" ]
+  [ "$status" -eq 2 ]
+  # emphatically NOT the path it did match
+  [ -z "$output" ]
+  lacks "$output" 'apps/app.yaml'
+  contains "$stderr" 'possibly-truncated'
+  contains "$stderr" 'grep 2'
+  contains "$stderr" 'find 0'
 }
 
 @test "the manifests recipe writes NOTHING to stderr (#1152)" {
@@ -550,6 +771,105 @@ chart() {
   contains "$skill" 'k8s_paths='
   # the fallback must drop -q, or it would emit an empty path list
   contains "$skill" "grep -rlF 'argoproj.io'"
+}
+
+@test "the SKILL states what the orchestrator DOES with marker status 2 (#1177)" {
+  # The producer half is pinned thoroughly above, and is worth nothing on its
+  # own: the whole value of exit 2 depends on the orchestrator treating it as
+  # "not evaluated" -> an unsupported_topics entry, rather than as "marker
+  # absent" -> topic silently dropped. That instruction is PROSE, and the recipe
+  # extraction strips comments, so without this test the paragraph can be
+  # deleted and every other test here stays green while the hardening becomes a
+  # no-op. The react twin carries exactly this test for its jq preflight.
+  local skill
+  skill="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  # the three-way read of $?, stated where the partition happens
+  contains "$skill" 'three-way read of `$?`'
+  contains "$skill" 'the marker was not evaluated'
+  # …and the destination bucket, which is the load-bearing half
+  contains "$skill" 'kubernetes marker: search did not complete'
+  # never the absent bucket — the sentence that makes it a rule, not a hint
+  contains "$skill" '**never** the absent bucket'
+  # and the manifests lister's own consumer rule (#1177), which is a different
+  # step with a different consequence — an empty manifests list, not a dropped topic
+  contains "$skill" 'manifest listing did not complete'
+  contains "$skill" 'Read the lister'"'"'s EXIT STATUS'
+}
+
+@test "EVERY prose consumer of detect-stack's exit contract carries the branch (#1177)" {
+  # detect-stack.sh gained its first non-zero exit, which writes NO JSON. Without
+  # this branch the phase validates an empty document and halts telling a user
+  # with a healthy repo to run `git init` — a confidently wrong message derived
+  # from a file that was never written.
+  #
+  # ARCHITECTURE.md states the caller obligation as a RULE (detect-stack.sh's own
+  # header points there rather than enumerating consumers, so this comment must
+  # not re-introduce a count). THREE of the bound call sites are prose — a model
+  # follows them, no script executes them — so all three are pinned here:
+  # maintenance Phase 1, bootstrap Step 1, and resolve-issue's step-3 C4 check.
+  # The remaining two are scripts and are pinned behaviourally by their own
+  # suites (tests/review-dispatch.bats, tests/gather-docs.bats). Bootstrap is
+  # where the producer hardening becomes user-visible, and it re-invokes the
+  # script three more times, so its rule is stated as binding every invocation
+  # rather than only Step 1's.
+  # whitespace-normalised, so a re-wrap of the paragraph cannot red a test whose
+  # subject is the RULE, not the line breaks
+  local skill bootstrap
+  skill="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$skill" 'Check the exit status before parsing'
+  contains "$skill" 'Halt and forward that stderr verbatim'
+  # and the un-guessable half: the cause is NOT derivable from the stderr
+  contains "$skill" 'Do not diagnose the cause beyond what the stderr says'
+
+  bootstrap="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/SKILL.md")"
+  contains "$bootstrap" 'detection aborted and printed NO JSON'
+  contains "$bootstrap" 'Halt and show that stderr'
+  contains "$bootstrap" 'binds EVERY `detect-stack.sh` invocation in this skill'
+  # the half both the script header and ARCHITECTURE.md call the failure this
+  # contract exists to prevent: the needles above all survive an edit rewriting
+  # the rule as "on exit 2, halt", which would read an errexit-aborted detection
+  # (exit 1, empty stdout) as success and drive Step 4 off an empty document
+  contains "$bootstrap" 'Branch on **non-zero**, never on a specific code'
+
+  # the PARITY claim bootstrap makes in prose ("the same wording maintenance
+  # SKILL.md's Phase 1 mandates"), derived rather than trusted — this file's own
+  # standard for its four-copy oracles. Both must hedge: rewriting either to
+  # assert a cause confidently would hand a user opposite certainties about
+  # evidence that cannot distinguish the two causes.
+  contains "$skill" 'most likely'
+  contains "$bootstrap" 'most likely'
+  contains "$skill" 'not "the tree is unreadable"'
+  contains "$bootstrap" 'not "the tree is unreadable"'
+
+  # and the canonical statement of the contract — the site detect-stack.sh's
+  # header redirects readers to, and the only one that binds FUTURE callers
+  local arch
+  arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$arch" 'has an exit-code contract'
+  contains "$arch" 'branch on **non-zero**, never on a specific code'
+  contains "$arch" 'must **not** parse the empty document'
+  contains "$arch" 'The **stderr is the deliverable**'
+  contains "$arch" 'obligation is on every caller'
+
+  # the THIRD prose call site, named by ARCHITECTURE.md and edited by #1177 — no
+  # other suite covers it (tests/check-c4-currency.bats tests the comparator
+  # script, not the SKILL's invocation prose), so without these needles that
+  # branch can be reverted to a bare unchecked run with the whole suite green
+  local resolve
+  resolve="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+  contains "$resolve" 'Branch on NON-ZERO, never on a specific code (#1177)'
+  contains "$resolve" "relay detect-stack's stderr above verbatim"
+}
+
+@test "the halt branch RENDERS the unsupported bucket before halting (#1177)" {
+  # the bucket is worthless if nothing prints it. Phase 9 never runs on the halt
+  # branch, so a GitOps-only repo with no language and an unreadable subtree —
+  # exactly the repo this topic exists for — would otherwise be reported
+  # identically to a repo that has no charts at all.
+  local skill
+  skill="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$skill" 'print every `unsupported` / `unsupported_topics` entry with its note verbatim first'
+  contains "$skill" 'that is not a verdict that this repo has no charts'
 }
 
 @test "the gather script is executable — the partition runs test -x (#1152)" {

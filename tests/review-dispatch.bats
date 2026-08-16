@@ -490,9 +490,484 @@ JSON
   [ "$status" -eq 1 ]
   # and emphatically NOT a successful kubernetes dispatch
   [ "$(echo "$output" | jq -r '.repo_type // "none"' 2>/dev/null || echo none)" != "kubernetes" ]
+  # WHICH guard fires moved with #1177: the probe loop now runs first and
+  # `index($l)` on a boolean exits 5, so this fixture is caught there rather than
+  # at lang_count. Asserting the message keeps the test honest about its subject
+  # — and makes a future re-ordering visible instead of silent. The lang_count
+  # guards have their own shim test above.
+  echo "$output" | grep -q 'could not test the detected-language set'
 }
 
-# NOTE: no companion test for the `[[ "$lang_count" == <-> ]]` half. Every
+# ---- #1177: the three marker reads, and the argument parsers ----------------
+#
+# The three `jq` reads that build langs_json / is_plugin / is_k8s already failed
+# CLOSED — an empty value matches neither "true" nor a language — so no misroute
+# was ever reachable through them. What was wrong is the STATUS: the header
+# contract promises exit 1 for an internal failure, and an unchecked read
+# delivered the exit-3 typed escalation instead, telling the orchestrator to
+# relay "no review panel exists for the detected languages" about a repo whose
+# languages were never read. A jq that dies is a fact about the machine, not a
+# verdict about the repo.
+#
+# Reaching it needs a failing jq, since `_detect_json` has already proved the
+# payload parses — hence the PATH shim: a jq that fails for one filter and
+# delegates every other call to the real binary.
+jq_failing_on() {  # $1 = substring of the jq filter that should fail
+  local shim_dir="$BATS_TEST_TMPDIR/shim-$$"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/jq" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  case "\$a" in *'$1'*) exit 5 ;; esac
+done
+exec "$(command -v jq)" "\$@"
+EOF
+  chmod +x "$shim_dir/jq"
+  printf '%s' "$shim_dir"
+}
+
+@test "plan: #1177 a failing .languages read is exit 1, not the typed escalation" {
+  local shim; shim="$(jq_failing_on '.languages')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q '.languages'
+  # NOT the exit-3 typed escalation about the repo. Asserted by its ABSENCE from
+  # the payload rather than by re-testing the status, which -eq 1 already settled
+  run ! grep -q 'unsupported_repo_type' <<< "$output"
+}
+
+@test "plan: #1177 a detect-stack that EXITS non-zero is exit 1, with its stderr relayed" {
+  # nothing in THIS suite made the stub fail before, so both _detect_json failure
+  # branches were uncovered while the path reaching them became newly reachable
+  # in production (detect-stack gained its first non-zero exit in this change;
+  # gather-docs-findings.zsh already branched on its status). The relay matters
+  # as much as the
+  # status: the named marker-search message IS the deliverable of the hardening,
+  # and a generic "detect-stack failed" sends the operator back to re-run into
+  # the same wall.
+  local stub="$BATS_TEST_TMPDIR/detect-fail.sh"
+  cat > "$stub" <<'EOF'
+#!/usr/bin/env bash
+echo "detect-stack: the kubernetes marker search did not complete (find exit 1, grep exit 2)" >&2
+exit 2
+EOF
+  chmod +x "$stub"
+  run env DETECT_STACK_BIN="$stub" zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'detect-stack failed'
+  echo "$output" | grep -q 'did not complete'
+  run ! grep -q 'unsupported_repo_type' <<< "$output"
+}
+
+@test "plan: #1177 a detect-stack emitting non-JSON is exit 1, not a typed escalation" {
+  local stub="$BATS_TEST_TMPDIR/detect-garbage.sh"
+  cat > "$stub" <<'EOF'
+#!/usr/bin/env bash
+echo "not json at all"
+EOF
+  chmod +x "$stub"
+  run env DETECT_STACK_BIN="$stub" zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not parse detect-stack output'
+}
+
+@test "plan: #1177 a failing .is_claude_plugin read is exit 1, not the typed escalation" {
+  local shim; shim="$(jq_failing_on '.is_claude_plugin')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"is_claude_plugin":true}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'is_claude_plugin'
+}
+
+@test "plan: #1177 a failing .is_kubernetes read is exit 1, not the typed escalation" {
+  local shim; shim="$(jq_failing_on '.is_kubernetes')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"is_kubernetes":true}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'is_kubernetes'
+}
+
+@test "plan: #1177 an UNREADABLE --repo is named as such, not blamed on detect-stack" {
+  # the gate's whole purpose: without it `cd` fails inside _detect_json and the
+  # failure reads "detect-stack failed" — naming a script that never ran, with no
+  # stderr to relay, which is the one non-zero exit the new relay cannot explain.
+  # The sibling gather script carries exactly this test.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  local locked="$BATS_TEST_TMPDIR/locked-repo"
+  mkdir -p "$locked"
+  chmod 000 "$locked"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$locked" --base main
+  chmod 755 "$locked"   # restore BEFORE asserting
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'not a readable directory'
+  # and emphatically NOT the wrong culprit
+  run ! grep -q 'detect-stack failed' <<< "$stderr"
+}
+
+@test "plan: #1177 a missing --repo directory exits 1 naming the directory" {
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$BATS_TEST_TMPDIR/does-not-exist" --base main
+  [ "$status" -eq 1 ]
+  echo "$stderr" | grep -q 'not a directory'
+}
+
+@test "scope-findings: #1177 an UNREADABLE --repo is named as such, not 'not a git repository'" {
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  local locked="$BATS_TEST_TMPDIR/locked-scope"
+  mkdir -p "$locked"
+  chmod 000 "$locked"
+  run --separate-stderr zsh "$S" scope-findings --repo "$locked" --base main --findings /dev/null
+  chmod 755 "$locked"
+  [ "$status" -eq 1 ]
+  # empty stdout too: scope-findings' success contract IS a JSON array on stdout,
+  # so a rearrangement reaching the empty-findings shortcut before the gates would
+  # print `[]`, and a caller reading stdout first would see "nothing in scope" for
+  # a repo that was never scoped
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'not a readable directory'
+  run ! grep -q 'not a git repository' <<< "$stderr"
+}
+
+@test "scope-findings: #1177 a missing --repo directory exits 1 naming the directory" {
+  # the mirror of plan's twin: cmd_scope_findings gained BOTH gates, and the
+  # script's own comment insists both subcommands name one cause with one
+  # wording — but only the readability half was tested. Without `[[ -d ]]` a
+  # nonexistent --repo is reported by _verify_base as "not a git repository":
+  # a confident claim about a path that does not exist.
+  run --separate-stderr zsh "$S" scope-findings \
+    --repo "$BATS_TEST_TMPDIR/does-not-exist" --base main --findings /dev/null
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'not a directory'
+  run ! grep -q 'not a git repository' <<< "$stderr"
+}
+
+@test "plan: #1177 a READABLE but non-traversable --repo is still rejected" {
+  # the `-x` half of `[[ -r && -x ]]`. Every other fixture is chmod 000, which
+  # falsifies BOTH operands — so narrowing the conjunction to `[[ -r ]]` (the
+  # plausible "drop the redundant test" edit) would keep the whole suite green
+  # while a mode-444 directory went back to failing inside `cd` and being
+  # reported as "detect-stack failed", naming a script that never ran.
+  if [ "$(id -u)" -eq 0 ]; then skip "root traverses any directory"; fi
+  local ro="$BATS_TEST_TMPDIR/readable-not-traversable"
+  mkdir -p "$ro"
+  chmod 444 "$ro"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$ro" --base main
+  chmod 755 "$ro"
+  [ "$status" -eq 1 ]
+  echo "$stderr" | grep -q 'not a readable directory'
+  run ! grep -q 'detect-stack failed' <<< "$stderr"
+}
+
+@test "scope-findings: #1177 a READABLE but non-traversable --repo is still rejected" {
+  if [ "$(id -u)" -eq 0 ]; then skip "root traverses any directory"; fi
+  local ro="$BATS_TEST_TMPDIR/ro-scope"
+  mkdir -p "$ro"
+  chmod 444 "$ro"
+  run --separate-stderr zsh "$S" scope-findings --repo "$ro" --base main --findings /dev/null
+  chmod 755 "$ro"
+  [ "$status" -eq 1 ]
+  echo "$stderr" | grep -q 'not a readable directory'
+  run ! grep -q 'not a git repository' <<< "$stderr"
+}
+
+@test "plan: #1177 the REAL detect-stack's failure is relayed end-to-end, unstubbed" {
+  # every other failure fixture is a stub whose stderr this file itself invents,
+  # so the producer's real wording and the consumer's relay are pinned
+  # INDEPENDENTLY — the coupling this suite already refuses to leave unstated on
+  # the success path ("the REAL detect-stack drives the kubernetes fallback
+  # end-to-end"). If detect-stack ever wrote its diagnostic to stdout instead of
+  # stderr, review-dispatch would report "could not parse detect-stack output"
+  # and the named cause would vanish, with no test noticing.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  mkdir -p "$R/locked"
+  chmod 000 "$R/locked"
+  run --separate-stderr env -u DETECT_STACK_BIN zsh "$S" plan --repo "$R" --base main
+  chmod 755 "$R/locked"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # the consumer's frame AND the producer's own wording, which this test did not author
+  echo "$stderr" | grep -q 'detect-stack failed'
+  echo "$stderr" | grep -q 'did not complete'
+  run ! grep -q 'unsupported_repo_type' <<< "$stderr"
+}
+
+@test "plan: #1177 a detect-stack aborting with a NON-2 status is still handled and relayed" {
+  # every other failure fixture exits 2, so narrowing `(( rc != 0 ))` to
+  # `(( rc == 2 ))` — the enum-read-literally mistake both the script header and
+  # ARCHITECTURE.md single out — would keep them all green. detect-stack runs
+  # under `set -euo pipefail`, so an internal abort really does exit 1 with the
+  # same empty stdout.
+  local stub="$BATS_TEST_TMPDIR/detect-abort1.sh"
+  printf '#!/usr/bin/env bash\necho "detect-stack: internal abort under errexit" >&2\nexit 1\n' > "$stub"
+  chmod +x "$stub"
+  run --separate-stderr env DETECT_STACK_BIN="$stub" zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$stderr" | grep -q 'detect-stack failed'
+  # the RELAY is what distinguishes the rc != 0 branch from a fall-through: the
+  # status alone would be 1 either way
+  echo "$stderr" | grep -q 'internal abort under errexit'
+  [ -z "$output" ]
+}
+
+@test "plan: #1177 an ordinary relative --repo is NOT rewritten into the descriptor" {
+  # only a dash-prefixed path needs normalising; rewriting every relative
+  # spelling put `././` into findings_path for the ordinary `--repo .`
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    bash -c "cd '$R' && zsh '$S' plan --repo . --base main"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "./.review/findings-round-1.json" ]
+}
+
+@test "plan: #1177 a failing lang_count read is exit 1 and does NOT open the kubernetes gate" {
+  # the malformed-.languages test below no longer reaches this guard: the newer
+  # probe_rc check short-circuits on the same fixture. Both lang_count guards
+  # exist to fail CLOSED on the kubernetes fallback (an empty value
+  # arithmetic-evaluates to 0, the value that OPENS the gate), so they need a
+  # fixture of their own or a regression to `local -i lang_count=$(…)` would hand
+  # a language-bearing repo to the manifest panel with the suite green.
+  local shim; shim="$(jq_failing_on 'length')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":[],"is_kubernetes":true}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not compute the detected-language count'
+  run ! grep -q 'kubernetes' <<< "$output"
+}
+
+@test "plan: #1177 a failing mktemp DEGRADES the stderr relay, it does not fail the plan" {
+  # the buffer exists only to forward a diagnostic and is never needed on the
+  # success path, so an unwritable TMPDIR must not fail a repo that plans fine.
+  # Tightening this to `|| exit 1` — the obvious "don't ignore errors" cleanup —
+  # would ship green without this test.
+  local shim="$BATS_TEST_TMPDIR/shim-mktemp"
+  mkdir -p "$shim"
+  printf '#!/bin/sh\nexit 1\n' > "$shim/mktemp"
+  chmod +x "$shim/mktemp"
+  # --separate-stderr: the warning goes to stderr and the descriptor to stdout,
+  # and the descriptor must stay parseable JSON — a merged stream would put the
+  # warning line inside it, which is itself the thing to guard against
+  run --separate-stderr env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "python" ]
+  echo "$stderr" | grep -q 'stderr will not be relayed'
+}
+
+@test "plan: #1177 with no buffer, a detect-stack failure is still reported" {
+  # the other half of the degrade fork: without an err_file there is nothing to
+  # relay, but the failure itself must still surface with the documented status
+  local shim="$BATS_TEST_TMPDIR/shim-mktemp2"
+  mkdir -p "$shim"
+  printf '#!/bin/sh\nexit 1\n' > "$shim/mktemp"
+  chmod +x "$shim/mktemp"
+  local stub="$BATS_TEST_TMPDIR/detect-fail2.sh"
+  printf '#!/usr/bin/env bash\necho boom >&2\nexit 2\n' > "$stub"
+  chmod +x "$stub"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$stub" zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'detect-stack failed'
+}
+
+@test "scope-findings: #1177 a --repo beginning with a dash is scoped, not misattributed" {
+  # the plan half has this test; the scope-findings copy of the normalisation had
+  # none, so deleting it left the suite green while the path that decides which
+  # findings survive the round failed with "not a git repository"
+  local dashrepo="$BATS_TEST_TMPDIR/-dash-scope"
+  mkdir -p "$dashrepo"
+  git -C "$dashrepo" init -q
+  git -C "$dashrepo" config user.email t@example.com
+  git -C "$dashrepo" config user.name tester
+  echo old > "$dashrepo/app.py"
+  git -C "$dashrepo" add -A
+  git -C "$dashrepo" commit -qm base
+  git -C "$dashrepo" branch -M main
+  echo new > "$dashrepo/app.py"
+  local findings="$BATS_TEST_TMPDIR/f.json"
+  printf '[{"file":"app.py","title":"x"},{"file":"other.py","title":"y"}]\n' > "$findings"
+  run bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' scope-findings --repo -dash-scope --base main --findings '$findings'"
+  [ "$status" -eq 0 ]
+  # the LENGTH, not just the status: a regression returning [] for everything
+  # would pass a status-only assertion
+  [ "$(echo "$output" | jq 'length')" = "1" ]
+  [ "$(echo "$output" | jq -r '.[0].file')" = "app.py" ]
+}
+
+@test "scope-findings: #1177 an unparseable findings file names the file, at exit 1" {
+  # reachable with no shim at all, and previously unpinned
+  local findings="$BATS_TEST_TMPDIR/garbage.json"
+  printf 'not json\n' > "$findings"
+  run zsh "$S" scope-findings --repo "$R" --base main --findings "$findings"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not parse findings JSON'
+}
+
+@test "plan: #1177 a failing changed-files encode names ITS step, not the emitter's" {
+  # the last pair of checked jq calls without a fixture. With the guard removed
+  # an empty changed_json reaches `--argjson changed ''`, jq rejects it, and the
+  # failure surfaces as "could not emit the dispatch descriptor" — a message
+  # naming the wrong step, the misattribution class this whole change removes.
+  # `-R` reaches only the changed-files encode on a single-language plan (the
+  # candidate encode is unreachable on that branch).
+  local shim; shim="$(jq_failing_on '-R')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not compute changed files'
+}
+
+@test "scope-findings: #1177 a failing changed-files encode names ITS step too" {
+  local shim; shim="$(jq_failing_on '-R')"
+  local findings="$BATS_TEST_TMPDIR/some.json"
+  printf '[{"file":"legacy.py","title":"x"}]\n' > "$findings"
+  run env PATH="$shim:$PATH" zsh "$S" scope-findings --repo "$R" --base main --findings "$findings"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not compute changed files'
+}
+
+@test "plan: #1177 a failing candidate-list encode is exit 1, not a payload-less exit 3" {
+  # the ambiguous branch builds its candidate array with `jq -R . | jq -sc .`.
+  # Unchecked, a failure leaves `--argjson cand ''`, jq rejects it, and the
+  # `exit 3` still runs — the orchestrator is told to escalate and handed nothing
+  # to relay. The shim fails the FIRST `-sc` call, which is that encode.
+  local shim; shim="$(jq_failing_on '-sc')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python","java"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not encode the candidate list'
+  run ! grep -q 'ambiguous_repo_type' <<< "$output"
+}
+
+@test "plan: #1177 a failing ambiguity emitter is exit 1, not a silent exit 3" {
+  # without its guard the script exits 3 having printed NOTHING — a typed
+  # escalation the orchestrator cannot relay, which is the failure class this
+  # whole change set out to remove
+  local shim; shim="$(jq_failing_on 'ambiguous_repo_type')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python","java"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not emit the ambiguous-repo-type error'
+}
+
+@test "plan: #1177 a failing descriptor emitter is exit 1, emphatically not jq's 5" {
+  # the emitter is the last command of the last function, so unchecked it leaves
+  # jq's own status as the script's — a code outside the documented set {0,1,2,3}
+  # that the orchestrator cannot map to internal-error vs typed-escalation
+  local shim; shim="$(jq_failing_on 'review_skill')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  # `-eq 1` already rules out jq's 5 — a second `-ne 5` could never fail
+  # independently, and this file's standard is that every assertion discriminates
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'could not emit the dispatch descriptor'
+}
+
+@test "plan: #1177 a --repo beginning with a dash is planned, not blamed on detect-stack" {
+  # `[[ -d ]]` passes for `-dash-repo` (test operators parse no options) but `cd`
+  # reads it as a flag, so without the ./ normalisation the run fails with
+  # "detect-stack failed" — naming the wrong culprit entirely. The sibling
+  # gather script carries exactly this test.
+  local dashrepo="$BATS_TEST_TMPDIR/-dash-repo"
+  mkdir -p "$dashrepo"
+  git -C "$dashrepo" init -q
+  git -C "$dashrepo" config user.email t@example.com
+  git -C "$dashrepo" config user.name tester
+  echo base > "$dashrepo/README.md"
+  git -C "$dashrepo" add -A
+  git -C "$dashrepo" commit -qm base
+  git -C "$dashrepo" branch -M main
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' plan --repo -dash-repo --base main"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "python" ]
+}
+
+@test "plan: #1177 a value-taking flag in last position is the usage exit, not a nounset abort" {
+  # the script runs under `setopt nounset`, so reading "$2" of an absent value
+  # aborted raw: exit 1 with a zsh diagnostic naming its own internals, where
+  # the contract documents exit 2 and a message naming the flag. A caller that
+  # distinguishes "you called me wrong" from "something broke" was told the
+  # wrong one.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--round requires a value'
+}
+
+@test "plan: #1177 every value-taking plan flag checks its value" {
+  # one flag proving the pattern would let the other three keep the raw abort
+  local flag
+  for flag in --repo --base --round --findings-path; do
+    run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+      zsh "$S" plan "$flag"
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q -- "$flag requires a value"
+  done
+}
+
+@test "scope-findings: #1177 its parser checks flag values too" {
+  local flag
+  for flag in --repo --base --findings; do
+    run zsh "$S" scope-findings "$flag"
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q -- "$flag requires a value"
+  done
+}
+
+@test "plan: #1177 a non-numeric --round is rejected at parse time" {
+  # unvalidated, it reached jq as `--argjson round abc` — a jq parse error at
+  # the very END of an otherwise successful plan, long after the typo, and with
+  # a message about JSON rather than about the flag
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round abc
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--round must be a non-negative integer'
+}
+
+@test "plan: #1177 a negative --round is rejected too, and a numeric one still works" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round -2
+  [ "$status" -eq 2 ]
+  # the positive control: the guard must not reject the values the loop passes
+  plan '{"languages":["python"]}' --round 7
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .round)" = "7" ]
+}
+
+@test "plan: #1177 a zero-padded --round is NORMALISED, not passed to --argjson" {
+  # `007` passes the non-negative-integer pattern but is not valid JSON, so
+  # `--argjson round 007` would fail with jq's exit 5 at the very end of an
+  # otherwise successful plan — the late, misattributed failure the parse-time
+  # check exists to prevent, and a status outside the documented set {0,1,2,3}.
+  # Normalising also stops findings-round-007.json becoming a second, colliding
+  # artifact path for round 7.
+  plan '{"languages":["python"]}' --round 007
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .round)" = "7" ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "$R/.review/findings-round-7.json" ]
+}
+
+# NOTE (updated #1177): the lang_count READ now has its own shim test above
+# ("a failing lang_count read is exit 1 and does NOT open the kubernetes gate"),
+# because the probe guard added in #1177 short-circuits the malformed-.languages
+# fixture that used to reach it. What follows still applies to the NUMERIC half.
+#
+# No companion test for the `[[ "$lang_count" == <-> ]]` half. Every
 # SINGLE-DOCUMENT input reachable through this seam that jq accepts yields one
 # number (an object's length is 1, a string's is its length), so an assertion
 # built on one would behave identically with the guard removed — an inert test,

@@ -2333,7 +2333,13 @@ zero orchestrator edits. The seam is
 `development/skills/resolve-issue/scripts/review-dispatch.zsh`, a pure function
 of the worktree with two subcommands.
 
-**`plan --repo PATH [--base REF] [--round N]`** emits the dispatch descriptor:
+**`plan --repo PATH [--base REF] [--round N] [--findings-path PATH]`** emits the
+dispatch descriptor. `--findings-path` overrides where the panel is told to write
+its aggregate, defaulting to `<repo>/.review/findings-round-<N>.json`; note the
+diff-scoping exclusion covers the **default** location only, so an override
+elsewhere in the repo is not held out of review scope. `--round` must be a
+non-negative integer and is normalised (`007` → `7`), so a zero-padded value
+cannot mint a second artifact path for the same round:
 
 ```json
 {
@@ -2387,7 +2393,11 @@ of whatever the panel reported. A missing/empty file yields `[]`.
 `plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or
 `{"error":"ambiguous_repo_type", …}`) and exits `3`; the orchestrator surfaces
 that as a `needs-human-decision` escalation (#564) rather than proceeding. Exit
-`2` is a usage error; `1` is an internal (detect-stack/git/jq) failure. Tests
+`2` is a usage error; `1` is an internal failure — detect-stack/git/jq, or a
+`--repo` that is present but unusable (absent, not a directory, not
+readable/traversable). The split is deliberate: a *missing* `--repo` is a
+malformed invocation (`2`), a *present but unusable* one is a well-formed
+invocation whose environment failed (`1`). Tests
 seam detection via `DETECT_STACK_BIN` and git via `GIT_BIN`.
 
 ## Review-findings consolidator (#561)
@@ -4801,6 +4811,24 @@ Instead, the orchestrator pre-runs every helper it needs and passes
 the results as part of the JSON payload. Language plugins receive
 "here is the parsed detect-stack output" rather than "here is the path
 to detect-stack.sh; go run it." Pure functions, no path coupling.
+
+**`detect-stack.sh` has an exit-code contract (#1177), and pre-running it means
+honouring that contract.** It exits **non-zero with an empty stdout** when
+detection cannot complete — today, when the kubernetes marker's search did not
+finish and reporting `is_kubernetes: false` would be a claim about a tree it
+could not read. Callers must branch on **non-zero**, never on a specific code
+(`set -euo pipefail` can also abort it with `1`), and must **not** parse the
+empty document: every key reads as absent, which looks exactly like a repo with
+no git, no languages and no artifacts. The **stderr is the deliverable** — it
+names which half of which search failed — so forward it verbatim rather than
+re-deriving a cause. **The obligation is on every caller, present and future** —
+deliberately stated as a rule rather than as a list of call sites, because an
+enumeration rots the moment one is added and the next contract change would then
+be applied to the named ones and miss the rest. Today it binds maintenance
+SKILL.md Phase 1, bootstrap SKILL.md Step 1 (which states it for every
+invocation in that skill), resolve-issue SKILL.md's step-3 C4-currency check,
+`review-dispatch.zsh`'s `_detect_json`, and `gather-docs-findings.zsh` — but a
+new caller is bound by the rule, not by appearing here.
 
 **Cross-skill shared scripts live at `development/scripts/<area>/`.** That is a
 different axis from the cross-*plugin* hazard above: a script used by several

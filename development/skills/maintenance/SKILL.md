@@ -157,27 +157,57 @@ recovery aid, never a gate.
 Run the detection script and capture its JSON:
 
 ```bash
-"<skill-base-dir>/../bootstrap/scripts/detect-stack.sh" > /tmp/detect.json
+"<skill-base-dir>/../bootstrap/scripts/detect-stack.sh" > /tmp/detect.json \
+  || { echo "detection aborted — forward its stderr, do not read detect.json"; exit 1; }
 ```
 
 `<skill-base-dir>` is `development/skills/maintenance/`; the bootstrap
 scripts live one directory up. Use the resolved absolute path.
 
-Validate from `detect.json`:
+**Check the exit status before parsing (#1177).** A non-zero exit means
+detection could not complete and `/tmp/detect.json` is **empty** — the script
+names the reason on stderr (today: a kubernetes marker search that could not
+finish, which refuses to report `is_kubernetes: false` for a tree it could not
+read). **Halt and forward that stderr verbatim.** Do **not** run the validations
+below against an empty document: every key reads as absent, so `git_initialized`
+is not `true` and the run would tell a user with a perfectly healthy repository
+to `git init` — a confidently wrong instruction derived from a document that
+was never written.
+
+**Do not diagnose the cause beyond what the stderr says.** Every copy of the
+marker runs `find … 2>/dev/null` and `grep … 2>/dev/null`, so the OS-level
+message (*Permission denied* vs *No such file or directory*) is discarded, and
+`find` exits `1` for both — a transient vanished file and a permanently
+unreadable tree are **not distinguishable** from the evidence you have. Forward
+the stderr verbatim, say that, and give the one decidable instruction: re-run
+once; if the same statuses recur the cause is **most likely** permissions, so
+have the user check them on the paths the search covers. Say "most likely" and
+not "the tree is unreadable" — a tree being written throughout both runs (an
+installer populating `node_modules`, a background `git gc`) reproduces the same
+statuses. Never assert "transient, just re-run" either: on an unreadable tree
+that is an unbounded retry loop dressed up as a diagnosis.
+
+Validate from `detect.json` (only after a zero exit):
 
 - `git_initialized == true` — if not, halt: "Maintenance needs a git
   repo (worktree-based agents require it). Initialize with `git init`
   and re-run."
-- `languages` is non-empty — if not, halt: "No supported languages
-  detected (swift / javascript / python / go / java). If your project uses
-  one of these, ensure manifest files (pyproject.toml, package.json,
-  build.gradle, etc.) are present."
+- `languages` is non-empty — if not, **do not halt here.** Carry the empty set
+  into Phase 2 and let its Proceed/halt gate decide, because that gate is the
+  single halting authority and it halts only when **both** `supported` and
+  `supported_topics` are empty. A language-less repo is not necessarily an
+  unworkable one: `kubernetes` and `docs` are registered *language-agnostic*
+  (Required language `none`), and a GitOps repo with no application language is
+  precisely the case the kubernetes topic exists for — halting on it here would
+  make that topic permanently undispatchable. **Phase 2 owns the message**; it is
+  written there, beside the halt that emits it.
 
 Extract for use in later phases: `repo` (path = cwd from script),
 `default_branch`, `visibility`, `language_meta` (the nested
 per-language block — e.g. `language_meta.python.version`,
 `language_meta.java.version`, when applicable),
-`languages` (the array — could be one or more).
+`languages` (the array — could be **empty**, one, or more; the empty case is
+carried to Phase 2's gate rather than halted on here).
 
 ### Read the maintenance declaration (primary / auxiliary)
 
@@ -324,17 +354,47 @@ fi
 # `set -o pipefail`, which every maintenance script sets.
 # `! -type d` for the same reason the react recipe carries it: a DIRECTORY named
 # `Kustomization` is not a manifest, while a symlinked one still counts.
+#
+# THREE exit statuses, not two (#1177): 0 = kubernetes, 1 = searched and found
+# nothing, 2 = COULD NOT LOOK. The old single `|| true` spanned the whole
+# `find | grep -v` chain, so a find that died mid-run and a repo with no charts
+# were the same answer — "could not look" rendered as "looked and found
+# nothing", a silent false negative. Each search's status is captured
+# SEPARATELY now, and an unfinished search taints only the NEGATIVE verdict: a
+# hit is a hit regardless of an unreadable sibling directory (which is why the
+# argoproj-only-plus-locked-subtree repo still reports 0), while "no" is only
+# ever reported when both halves genuinely completed.
 # kubernetes-marker:begin
 k8s_hits="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
                        -o -name kustomization.yml -o -name Kustomization \) \
-                 ! -type d 2>/dev/null \
-              | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
-[ -n "$k8s_hits" ] || grep -rqlF 'argoproj.io' \
-  --include='*.yaml' --include='*.yml' \
-  --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
-  --exclude-dir=templates . 2>/dev/null
+                 ! -type d 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
+# the filter reads the captured string, never the filesystem, so it cannot fail
+# for a reason the verdict should care about; `|| true` absorbs its no-match 1
+k8s_hits="$(printf '%s\n' "$k8s_hits" \
+  | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
+k8s_argo_rc=1
+if [ -z "$k8s_hits" ]; then
+  grep -rqlF 'argoproj.io' \
+    --include='*.yaml' --include='*.yml' \
+    --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+    --exclude-dir=templates . 2>/dev/null && k8s_argo_rc=0 || k8s_argo_rc=$?
+fi
+if [ -n "$k8s_hits" ] || [ "$k8s_argo_rc" -eq 0 ]; then
+  true
+elif [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_argo_rc" -ge 2 ]; then
+  printf 'kubernetes marker: search did not complete (find %s, grep %s) — refusing to report "not kubernetes"\n' \
+    "$k8s_find_rc" "$k8s_argo_rc" >&2
+  ( exit 2 )
+else
+  false
+fi
 # kubernetes-marker:end
 ```
+
+`( exit 2 )` rather than a bare `exit 2`: the recipe is a **predicate**, and an
+`exit` in a snippet the orchestrator pastes into its own shell would kill that
+shell instead of yielding a verdict. A subshell yields the status without the
+side effect.
 
 **The `kubernetes-marker:begin`/`:end` sentinels are load-bearing**, exactly as
 react's are: `tests/kubernetes-topic-marker.bats` extracts the text between them
@@ -400,16 +460,23 @@ in its recipe:
   a start-path argument); do not cite it as protection this form actually needs.
 
 **`jq` is a prerequisite of this marker, and its absence is not a verdict.** `react`
-is the only topic marker that shells out to a tool which may be missing
-(`claude-plugin`/`docs` use `test`, `spring` uses `grep`). Because the recipe's
+is the only topic marker that shells out to a tool which may be **missing**
+(`claude-plugin`/`docs` use `test`, `spring` uses `grep`) — it is *not* the only
+one that can fail to reach a verdict: `kubernetes` reaches the same
+not-evaluated state from a search that could not complete, and signals it with
+its own exit `2` rather than a preflight (#1177). Both land in the same
+`unsupported_topics` bucket, by the three-way `$?` rule in the partition step
+below. Because the recipe's
 verdict is "did anything reach stdout", a missing `jq` produces no output and would
 otherwise read as a confident **"this is not a React repo"** — silently skipping a
-whole topic with nothing in the summary to say so. So: run the `command -v jq`
-preflight **first**. If it fails, do **not** run the recipe and do **not** record a
-negative — place `react` in **`unsupported_topics`** with the note
-`jq not on PATH: the React marker could not be evaluated`,
-so the Phase 9 summary reports a topic that
-was never evaluated rather than one that was evaluated as absent. A **malformed**
+whole topic with nothing in the summary to say so. The `command -v jq` check is
+therefore **the recipe's own first statement**, not advice beside it: when it
+fails the recipe emits that reason on stderr and yields **2**, which the
+partition step's three-way rule routes to **`unsupported_topics`** with the note
+`jq not on PATH: the React marker could not be evaluated`. Do **not** record a
+negative, and do not run the check a second time yourself — the Phase 9 summary
+then reports a topic that was never evaluated rather than one evaluated as
+absent. A **malformed**
 `package.json` is a different case and *is* a deliberate non-match: `jq` fails on it,
 the recipe emits nothing for that file, and the traversal continues to the others.
 
@@ -458,16 +525,78 @@ marker, and #793 added the gather plus the `c4_drift` tool. Never hard-code a to
 supported/unsupported status from prose like this paragraph — the `test -x` partition
 below is the single authority, and it is what decides on every run.
 
-For each known topic whose marker is present, check for its gather script:
+For each known topic whose marker **evaluated as present**, check for its gather
+script:
 
 ```bash
 test -x "<skill-base-dir>/scripts/gather-<topic>-findings.zsh"
 ```
 
+**"Evaluated as present" is a three-way read of `$?`, not a two-way one.** A
+marker recipe answers `0` = present and `1` = absent — but a recipe that could
+not finish its search answers with **neither**, and reading its status as
+"absent" is precisely the *could-not-look-rendered-as-nothing-found* failure.
+**Two markers signal it today; the others cannot yet**, so read the `1` row
+below as *provisional* for them:
+
+| `$?` | Meaning | What the partition does |
+| --- | --- | --- |
+| `0` | marker present | continue below (gather script, required language) |
+| `1` | marker absent | the topic is not this repo's — drop it, silently and correctly |
+| anything else | **the marker was not evaluated** | `unsupported_topics`, with the recipe's own stderr as the note — **never** the absent bucket |
+
+- **`kubernetes` exits `2`** when both halves of its search came up empty and at
+  least one of them did not finish (#1177) — an unreadable subtree, a `find`
+  killed mid-run, a `grep` that exited `2`. Note it as
+  `kubernetes marker: search did not complete — the topic was not evaluated`,
+  quoting the recipe's stderr, which names which half failed.
+
+  **In practice Phase 1 usually catches this first, and that is by design.**
+  `detect-stack.sh` runs a **parity-pinned** copy of this marker in Phase 1 —
+  same filename set, prune set, `--exclude-dir`/`--include` tokens and the same
+  three-way ladder, as `tests/kubernetes-topic-marker.bats` derives — and aborts
+  the whole run on the same condition, because *its* answer is a boolean in a
+  JSON document with no third state to say "unknown". (Parity is over those
+  tokens and that ladder, **not** byte-equality: detect-stack's copy also carries
+  `cd`/`exit 125` branches, which must never be pasted into the recipe above —
+  `$cwd` does not exist there and a bare `exit` would kill the orchestrator's
+  shell, which is what the `( exit 2 )` note exists to prevent.)
+
+  So the ordinary outcome for an unreadable GitOps tree is the Phase 1 halt, with
+  detect-stack's stderr forwarded. This row is not therefore dead: it covers the
+  **residual** cases — a tree that becomes unreadable *between* the two searches,
+  a run resumed from a post-detection checkpoint, or any future caller that
+  reaches Phase 2 with a detection this phase did not perform. Two guards on one
+  hazard, at different altitudes; never treat the topic-level one as redundant
+  and delete it.
+- **`react`'s** missing-`jq` case is the same shape reached a different way (its
+  preflight below), and is noted the same way.
+
+- **The other markers cannot signal it.** `claude-plugin`/`docs` use `test` on a
+  path, which does not read a tree. `spring`'s recipe pipes
+  `grep -REl … 2>/dev/null` into `grep -q .`, so the first grep's operational
+  exit `2` becomes *no output* and the pipeline's status is the trailing grep's
+  `1` — an unreadable subtree holding the only `build.gradle.kts` is
+  indistinguishable from a non-match there. `react`'s find half has the same
+  blind spot. It is the same defect #1177 removed from the kubernetes copies,
+  still open in theirs (their own issue, not this one's).
+
+  **Still take the `1` row for them.** This caveat documents a known blind spot
+  for the next reader; it is **not** a partition rule, and it licenses no
+  different action. A marker that cannot signal *not-evaluated* must never be
+  recorded as not-evaluated — doing so would put `spring` in
+  `unsupported_topics` on every Java repo that simply has no Spring, and Phase 9
+  and the halt branch would print that permanent false "we could not tell"
+  verbatim. Only a marker that actually exits non-0/1 takes the third row.
+
+The rule is general because the failure is: a topic dropped from **both** buckets
+never reaches Phase 9 at all, so a repo whose GitOps content could not be read
+would be reported exactly like a repo that has none.
+
 Partition into **`supported_topics`** (marker present AND gather script exists AND
 any **required language** is in `supported`) and **`unsupported_topics`** (marker
-present, but one of those failed). Note topic gather scripts are zsh (`.zsh`); the
-language ones are bash (`.sh`).
+present, but one of those failed — or the marker was not evaluable). Note topic
+gather scripts are zsh (`.zsh`); the language ones are bash (`.sh`).
 
 **Required language — the gate, enforced here.** A topic may require a language;
 this is the single place that requirement is applied, so it can't be stated in the
@@ -484,16 +613,17 @@ marker prose and then quietly skipped:
 **Each `unsupported_topics` entry is `{topic, note}`** — the note says *which*
 condition failed, because Phase 9 renders it verbatim and "we couldn't tell" must
 never be reported as "nothing to do". The same shape applies to an `unsupported`
-**language** entry. Three conditions are decided here in the partition; two more
-producers write into the same bucket later (Phase 3 and Phase 6), so treat this table
-as open, not closed:
+**language** entry. Three conditions are decided here in the partition; three more
+producers write into the same bucket later (Phase 3's gather, Phase 4's manifest
+listing, Phase 6's dispatch), so treat this table as open, not closed:
 
 | Condition that failed | Note |
 | --- | --- |
 | no gather script | `no gather-<topic>-findings.zsh yet` |
 | required language absent | `marker present but required language <lang> is not in the supported set (not detected, or no gather script)` |
-| marker not evaluable | the marker's own reason, e.g. `jq not on PATH: the React marker could not be evaluated` |
+| marker not evaluable | the marker's own reason — a preflight's (`jq not on PATH: the React marker could not be evaluated`) or a recipe's own stderr on a non-0/1 exit (`kubernetes marker: search did not complete — the topic was not evaluated`) |
 | gather failed (Phase 3) | `gather failed: <error>` |
+| manifest listing did not complete (Phase 4) | `manifest listing did not complete: <stderr>` |
 | dispatch failed (Phase 6) | `dispatch failed: <error>` |
 
 A topic in this bucket is never silently dropped and never dispatched. Note the
@@ -508,9 +638,40 @@ it reachable — the gate must not depend on the two staying in sync.
 
 ### Proceed / halt
 
-If **both** `supported` (languages) and `supported_topics` are empty, halt with
-a message listing what was detected and pointing the user at the README's
-Plugins section. Otherwise proceed with whatever is supported, and carry any
+If **both** `supported` (languages) and `supported_topics` are empty, halt —
+but **print every `unsupported` / `unsupported_topics` entry with its note
+verbatim first**. Phase 9 never runs on this branch, so it is the only place
+those notes can reach a human, and a bucket nothing renders is the silent drop
+the partition step's "never silently dropped" rule forbids. Say explicitly when
+an entry is a **not-evaluated marker** — *"the kubernetes marker search did not
+complete; that is not a verdict that this repo has no charts"* — because the
+reachable case is a GitOps-only repo with no detected language and an unreadable
+subtree, which is precisely the repo the topic exists for: without this, it is
+reported identically to a repo that genuinely has none. Then give what *was*
+detected and point at the README's Plugins section.
+
+**The wording is keyed on `unsupported_topics` alone**, because that is the
+bucket the false-absence hazard lives in — a *language* in `unsupported` says
+nothing about whether a topic marker fired:
+
+- **`unsupported_topics` is empty** — no marker was present and none failed to be
+  evaluated, so absence *is* the finding: *"No supported languages detected
+  (swift / javascript / python / go / java) and no topic markers present. If
+  your project uses one of these, ensure manifest files (pyproject.toml,
+  package.json, build.gradle, etc.) are present."*
+- **`unsupported_topics` is non-empty** — **never say "no topic markers
+  present".** Something was present, or could not be evaluated, and the entries
+  printed above say which: *"No supported languages detected, and the topics
+  listed above were either detected but not processable, or could not be
+  evaluated — see their notes."* Asserting absence here would contradict the
+  not-evaluated note printed three lines earlier, on the very repo this halt
+  exists to serve.
+
+**Independently of that choice**, when `unsupported` (languages) is non-empty,
+append *"…and the languages listed above have no plugin or gather script yet."*
+The two buckets are separate facts; neither wording may swallow the other.
+
+Otherwise proceed with whatever is supported, and carry any
 `unsupported` languages / `unsupported_topics` into the Phase 9 summary as
 informational notes ("Detected `<X>` but its plugin isn't built yet — not
 processed").
@@ -1046,17 +1207,49 @@ differences:
   # printf is GUARDED, so an empty result prints NOTHING — matching the two
   # recipes above, whose consumers read "one path per line" and would otherwise
   # turn a lone blank line into a `[""]` manifest naming no file.
+  #
+  # It carries the verdict recipe's three-status error contract too (#1177) —
+  # but applies it STRICTLY, because a list is not a boolean. The verdict copies
+  # can say "a hit stands whatever else failed": one hit settles a yes/no. Here
+  # COMPLETENESS is the payload, so a partial walk is a wrong answer even when it
+  # found plenty — the dispatch would name the files that happened to be walked
+  # before the error and the agents would report clean on the rest. So the
+  # incomplete-search test comes FIRST, ahead of the print: any search that did
+  # not finish exits 2 and names it on stderr, empty result or not. Only a
+  # complete search prints — a list when there is one, nothing when there is not.
+  # (`gather-kubernetes-findings.zsh`'s policy listing already reasons this way:
+  # "ANY non-zero find is fatal here".)
+  #
+  # Note the argoproj half captures grep's status BEFORE the `sed`, into its own
+  # variable. A pipeline's status is its LAST command's, and `sed` always
+  # succeeds — so capturing `grep … | sed` would read 0 for a grep that exited 2
+  # in every shell without `pipefail`, which the Bash tool's shell is. That would
+  # make the `-ge 2` half of the ladder below dead code and print an empty list
+  # for a repo with one unreadable *.yaml: the exact defect this block removes.
+  # The presence half's filter may stay piped — its status is discarded (`||
+  # true`) because it reads the captured string, not the filesystem.
   # kubernetes-manifests:begin
   k8s_paths="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
                          -o -name kustomization.yml -o -name Kustomization \) \
-                   ! -type d 2>/dev/null \
+                   ! -type d 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
+  k8s_paths="$(printf '%s\n' "$k8s_paths" \
                  | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ \
-                 | sed 's|^\./||' || true)"
-  [ -n "$k8s_paths" ] || k8s_paths="$(grep -rlF 'argoproj.io' \
-    --include='*.yaml' --include='*.yml' \
-    --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
-    --exclude-dir=templates . 2>/dev/null | sed 's|^\./||' || true)"
-  [ -z "$k8s_paths" ] || printf '%s\n' "$k8s_paths"
+                 | sed 's|^\./||')" || true
+  k8s_argo_rc=1
+  if [ -z "$k8s_paths" ]; then
+    k8s_argo_raw="$(grep -rlF 'argoproj.io' \
+      --include='*.yaml' --include='*.yml' \
+      --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=.git \
+      --exclude-dir=templates . 2>/dev/null)" && k8s_argo_rc=0 || k8s_argo_rc=$?
+    [ -z "$k8s_argo_raw" ] || k8s_paths="$(printf '%s\n' "$k8s_argo_raw" | sed 's|^\./||')"
+  fi
+  if [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_argo_rc" -ge 2 ]; then
+    printf 'kubernetes manifests: search did not complete (find %s, grep %s) — refusing to report a possibly-truncated list\n' \
+      "$k8s_find_rc" "$k8s_argo_rc" >&2
+    ( exit 2 )
+  elif [ -n "$k8s_paths" ]; then
+    printf '%s\n' "$k8s_paths"
+  fi
   # kubernetes-manifests:end
   ```
 
@@ -1070,6 +1263,29 @@ differences:
   here would emit an empty list. And, per the rule above, never substitute a
   conventional root path such as `["kustomization.yaml"]` for an Argo-only
   repo — no such file exists there.
+
+  **Read the lister's EXIT STATUS, not only its stdout (#1177).** Its contract is
+  stricter than the verdict recipe's, because a list's *completeness* is the
+  payload: `0` with output = the **complete** list; `0` with no output =
+  genuinely nothing to list; **`2` = the search did not complete**, with the
+  failing half named on stderr — and that includes a search that found plenty
+  before it failed, since a truncated list read as whole is the same lie in a
+  quieter form. On `2` there is no payload to build —
+  move `kubernetes` to `unsupported_topics` with the note
+  `manifest listing did not complete: <stderr>` (the same bookkeeping Phase 3
+  uses for a failed gather) and dispatch nothing. Never let a status-2 run
+  become `manifests: []`: the dispatch would name no files, the topic agents
+  would review nothing, and the run would report clean — the empty list the
+  recipe just refused to print, reintroduced by the step that consumes it.
+
+  **The react lister above does NOT carry this contract yet**, and the honest
+  reason is scope, not safety. Do not read its absence as proof the gap is
+  closed there: react's verdict recipe discards `find`'s status and decides on
+  captured stdout, so a walk that dies *after* producing one hit still answers
+  `0`, and its lister then walks the same tree and prints a **truncated** list at
+  status `0` — the same defect, unfixed. #1177's scope is the kubernetes marker's
+  four parity-pinned copies; react's lister is its own change. Until then a react
+  `manifests` list is **trusted, not verified**.
 
   **The `kubernetes-manifests:begin`/`:end` sentinels are load-bearing too**, like
   the verdict recipe's: `tests/kubernetes-topic-marker.bats` extracts this block by
@@ -2400,12 +2616,16 @@ Approver mode:       <ci | local | none — from the Phase 2.5 detection (#642);
      "dispatch failed: <error>")
 
 <If unsupported_topics is non-empty:>
-⚠ Topics detected but not processed:
+⚠ Topics detected or NOT EVALUATED, and not processed:
   - <topic>: <the note recorded when it entered this bucket>
     (e.g. "no gather-<topic>-findings.zsh yet", "marker present but required
      language <lang> is not in the supported set", "jq not on PATH: the React
-     marker could not be evaluated", "gather failed: <error>",
-     "dispatch failed: <error>")
+     marker could not be evaluated", "kubernetes marker: search did not
+     complete — the topic was not evaluated", "gather failed: <error>",
+     "manifest listing did not complete: <stderr>", "dispatch failed: <error>")
+    The heading says "or NOT EVALUATED" deliberately: an entry whose marker
+    exited non-0/1 was never detected, and a bare "detected" heading would
+    assert the very fact the marker refused to assert.
 
 <If topic dispatch was skipped because --tool/--concern scoped the run:>
 ℹ Topic checks skipped under --tool / --concern (those flags scope the

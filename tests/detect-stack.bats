@@ -11,6 +11,11 @@
 # slice of the #296 Java/Gradle epic). The Python assertions read the migrated
 # `.language_meta.python.*` paths (formerly the flat `.python_version` key).
 
+# `run !` is the family's negative-assertion form (tests/no-inert-negative-
+# assertions.bats, #829) — a bare `! cmd` is inert here. Flags on `run` need
+# this declaration, or bats emits BW02 for every one of them.
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   DETECT="$REPO_ROOT/development/skills/bootstrap/scripts/detect-stack.sh"
@@ -1749,10 +1754,13 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   mkdir -p charts/app locked
   printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
   chmod 000 locked
-  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  # `run` rather than `out=$(...)`: bats runs bodies under errexit, so the exact
+  # regression this test guards would abort before the chmod and strand a
+  # mode-000 directory bats cannot clean up (#1177)
+  run bash "$DETECT"
   chmod 755 locked   # restore BEFORE asserting, so a failure still cleans up
-  [ "$rc" -eq 0 ]
-  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .is_kubernetes <<<"$output")" = "true" ]
 }
 
 @test "detect-stack #1153: an argoproj-only repo survives an unreadable subtree too" {
@@ -1764,10 +1772,102 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   mkdir -p argocd locked
   printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > argocd/app.yaml
   chmod 000 locked
-  out=$(bash "$DETECT" 2>/dev/null); rc=$?
+  # `run`, same errexit-restore reason as the test above (#1177)
+  run bash "$DETECT"
   chmod 755 locked
-  [ "$rc" -eq 0 ]
-  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .is_kubernetes <<<"$output")" = "true" ]
+}
+
+@test "detect-stack #1177: an unreadable subtree with NO marker fails loudly" {
+  # the two tests above pin the tolerant half — a search that hit a locked
+  # directory but still FOUND something answers true. This pins the other half.
+  # With nothing found, `is_kubernetes: false` would assert a completed search
+  # that never completed, and the JSON has no third state to say so — so the
+  # script refuses to answer at all: a non-zero exit and a named message on
+  # stderr. Reverting to `|| true` makes this a silent, confident false.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every directory, so the guard cannot be exercised"
+  fi
+  mkdir -p locked
+  chmod 000 locked
+  # --separate-stderr, like the three sibling suites: it lets the assertion be
+  # "stdout is EMPTY" rather than "one key is absent from the merged streams",
+  # which would still pass for a regression emitting a partial document
+  run --separate-stderr bash "$DETECT"
+  chmod 755 locked   # restore BEFORE asserting, so a failure still cleans up
+  # -eq 2, not -ne 0: the script chose 2, the three sibling copies' suites pin it
+  # exactly, and "any non-zero" could not tell the guard firing from the 1600-line
+  # script breaking somewhere else (an errexit abort, a 127)
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'did not complete'
+}
+
+@test "detect-stack #1177: an unreadable FILE trips the argoproj half specifically" {
+  # the locked-DIRECTORY test above fails BOTH halves, so it is satisfied by the
+  # find disjunct alone; deleting `|| "$k8s_argo_rc" -ge 2` keeps it green while
+  # is_kubernetes:false is emitted for a repo whose argoproj grep aborted —
+  # review-dispatch then routes that repo away from the kubernetes panel and
+  # bootstrap treats it as non-GitOps, both silently. A locked FILE is the
+  # discriminating fixture: find completes (it never reads content), grep exits 2.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every file, so the guard cannot be exercised"
+  fi
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > notes.yaml
+  chmod 000 notes.yaml
+  run --separate-stderr bash "$DETECT"
+  chmod 644 notes.yaml
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # BOTH halves named, so the fixture provably isolates the grep disjunct
+  echo "$stderr" | grep -q 'grep exit 2'
+  echo "$stderr" | grep -q 'find exit 0'
+}
+
+@test "detect-stack #1177: an unreadable node_modules trips the FIND half specifically" {
+  # the mirror gap: both fixtures above are satisfied by the grep disjunct, so
+  # `"$k8s_find_rc" -ne 0 ||` could be deleted with the suite green. node_modules
+  # discriminates — the argoproj grep skips it via --exclude-dir, find descends
+  # it (the recipe filters paths after the walk, it never prunes). Consequence of
+  # the regression: is_kubernetes:false for a repo whose find aborted, which
+  # routes a GitOps repo away from the kubernetes review panel and makes
+  # bootstrap treat it as non-GitOps — both silently.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every directory, so the guard cannot be exercised"
+  fi
+  mkdir -p node_modules/pkg
+  chmod 000 node_modules
+  run --separate-stderr bash "$DETECT"
+  chmod 755 node_modules
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'find exit 1'
+  echo "$stderr" | grep -q 'grep exit 1'
+}
+
+@test "detect-stack #1177: an unreadable subtree with a chart still answers true" {
+  # the tolerant half, restated against the NEW code path: the find fails (exit
+  # 1) yet its hits are non-empty, so the positive verdict stands and no error
+  # fires. An over-correction that treated any non-zero find as fatal would
+  # break every repo with one locked directory.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every directory, so the guard cannot be exercised"
+  fi
+  mkdir -p charts/app locked
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  chmod 000 locked
+  # `run`, not `out=$(...)`: bats runs test bodies under errexit and a plain
+  # assignment carries the substitution's status, so the very regression this
+  # test guards (a tolerated partial walk being treated as fatal) would abort the
+  # body BEFORE the chmod below — stranding a mode-000 directory that bats'
+  # cleanup cannot remove, and turning one failure into a noisy cascade.
+  run --separate-stderr bash "$DETECT"
+  chmod 755 locked
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .is_kubernetes <<<"$output")" = "true" ]
+  # silent on the tolerant path, like the sibling suites' tolerant tests
+  [ -z "$stderr" ]
 }
 
 @test "detect-stack #1153: a plugin repo carrying charts sets BOTH markers" {

@@ -98,7 +98,32 @@ chmod +x <skill-base-dir>/scripts/detect-stack.sh
 <skill-base-dir>/scripts/detect-stack.sh
 ```
 
-The script reports:
+**A non-zero exit means detection aborted and printed NO JSON (#1177).** The
+reason is on stderr — today, a kubernetes marker search that could not finish
+(an unreadable subtree, or a `find`/`grep` that failed), where reporting
+`is_kubernetes: false` would be a claim about a search that never ran. **Halt
+and show that stderr**; do not proceed with an empty document, which would read
+as a repo with no git, no languages and no artifacts and would drive Step 4 to
+render the wrong set entirely. Re-run once — if the same statuses recur the
+cause is **most likely** permissions on the paths the search covers. Say "most
+likely", not "the tree is unreadable": the searches suppress their own
+diagnostics, and a tree being *written* throughout both runs (an installer
+populating `node_modules`, a background `git gc`) reproduces the same statuses.
+This is the same wording maintenance SKILL.md's Phase 1 mandates — both skills
+read the same contract off the same suppressed evidence, so they must not give
+the user opposite certainties.
+
+**This rule binds EVERY `detect-stack.sh` invocation in this skill, not just
+this one** — the `--interfaces` re-run below, State C's re-run before proceeding
+as State D, and §3h's `<scratch>/detect.json` before the C4 seed. Each writes
+nothing on a non-zero exit, and each downstream step misattributes the empty
+document: State D reads a healthy repo as artifact-free and renders the wrong
+set, and `seed-c4-diagrams.zsh` reports its own exit 3 ("unreadable/invalid
+JSON"), sending you after a jq bug that does not exist. Branch on **non-zero**,
+never on a specific code, and forward detect-stack's stderr rather than the
+downstream tool's.
+
+On a zero exit the script reports:
 
 - `git_initialized` — is this a git repo
 - `has_github_remote` — is there an `origin` pointing at github.com
@@ -106,7 +131,12 @@ The script reports:
 - `languages` — array of detected languages (`swift`, `javascript`, `python`, `go`, `java`)
 - `has_dockerfile` — whether a Dockerfile exists at the repo root or in common locations
 - `is_kubernetes` — whether the repo carries the **kubernetes topic marker** (a
-  Helm chart, a Kustomization, an Argo CD resource, or a plain manifest). It is
+  Helm `Chart.yaml`, a Kustomize manifest — `kustomization.yaml`,
+  `kustomization.yml` or `Kustomization` — or a file containing `argoproj.io`;
+  **deliberately not** "any YAML with `apiVersion`", which would match a workflow
+  file and an OpenAPI document in half the repos in existence, so a GitOps repo
+  of plain `Deployment`/`Service` YAML is correctly `false` here rather than a
+  detection bug). It is
   a *topic*, not a language, so it can be `true` alongside any language — and,
   with `languages` empty, it is what makes a GitOps repo bootstrappable at all
   (§3l)
@@ -1664,7 +1694,11 @@ pages:
   # detect.json is a WORKING INPUT — write it to a scratch path OUTSIDE the
   # staging dir so it is never copied into the target repo. Re-run with the SAME
   # --interfaces override the user confirmed in §3g if you regenerate it here.
-  "<skill-base-dir>/scripts/detect-stack.sh" [--interfaces "<confirmed set>"] > "<scratch>/detect.json"
+  # check the status, per Step 1's rule — a non-zero exit writes NO JSON, and the
+  # empty file below surfaces as seed-c4-diagrams' exit 3 ("invalid JSON"), which
+  # sends you after a jq bug that does not exist
+  "<skill-base-dir>/scripts/detect-stack.sh" [--interfaces "<confirmed set>"] > "<scratch>/detect.json" \
+    || { echo "detection aborted — forward its stderr, do not read detect.json"; exit 1; }
   "<skill-base-dir>/scripts/seed-c4-diagrams.zsh" \
     --project-name "<name>" \
     --detect-json "<scratch>/detect.json" \
@@ -1682,7 +1716,10 @@ pages:
     (both rendered above), so once the docs set is rendered the strict build
     **requires** both pages. If `seed-c4-diagrams.zsh` exits non-zero (1 = no/absent
     `--detect-json`; 2 = usage error — fix the invocation; 3 = unreadable/invalid
-    JSON, jq missing, or a write failure), do **not** proceed with the docs commit —
+    JSON, jq missing, or a write failure — **check detect-stack's own exit first
+    (Step 1): an aborted detection writes an empty file and produces exactly this
+    exit 3, and the actionable message is on detect-stack's stderr, not this
+    script's**), do **not** proceed with the docs commit —
     fix the cause and re-run until it exits 0.
   - **The seed is gated on `mkdocs.yml`'s C4 nav entries, and the two files move as
     one unit.** On a **re-bootstrap of a pre-#791 repo** the existing `mkdocs.yml` /
