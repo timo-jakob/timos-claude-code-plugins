@@ -1,16 +1,26 @@
-# Conforming fixture for the org API styleguide (#689).
+# Conforming fixture for the org API styleguide (#689, extended by #944).
 #
 # Lints CLEAN under the org ruleset at --fail-severity error. Every normative
 # rule has something here that could have violated it and does not, so a rule
 # that starts over-firing reddens this file rather than passing unnoticed.
+#
+# The #944 half, rule by rule:
+#   org-pagination-cursor-params    every collection GET declares cursor+limit
+#   org-pagination-envelope         every collection 200 is {items, next_cursor}
+#   org-pagination-no-offset-params no banned parameter name anywhere
+#   org-idempotency-key-on-post-patch  POST *and* PATCH carry the key
+#   org-retry-after-on-throttled    the 429 and the (non-ops) 503 declare it
+#   org-deprecation-sunset-headers  the deprecated GET's 2xx carries both
+#   org-no-bespoke-correlation-headers  correlation rides `traceparent`
 openapi: 3.1.0
 info:
   title: Tenant Management API
   version: 1.0.0
   description: >
     Manages tenants and their orders. The conforming half of the styleguide
-    fixture pair — plural kebab-case paths, RFC 9457 error bodies, and a
-    deprecated operation that declares its sunset date.
+    fixture pair — plural kebab-case paths, RFC 9457 error bodies, cursor
+    pagination, the org header conventions, and a deprecated operation that
+    declares both its sunset date and its sunset headers.
 servers:
   - url: /v1
     description: Major v1.
@@ -22,17 +32,39 @@ paths:
     get:
       operationId: listTenants
       summary: List tenants.
-      description: Returns the tenant collection.
+      description: Returns one cursor page of the tenant collection.
       tags: ["tenants"]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor from the previous page's `next_cursor`.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Page size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        # A header parameter that is NOT a bespoke correlation id — the shape
+        # org-no-bespoke-correlation-headers must leave alone.
+        - name: traceparent
+          in: header
+          required: false
+          description: W3C trace context, propagated by the OTel SDK.
+          schema:
+            type: string
       responses:
         "200":
-          description: The tenant collection.
+          description: One page of the tenant collection.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Tenant"
+                $ref: "#/components/schemas/TenantPage"
         "404":
           description: No such tenant collection.
           content:
@@ -44,6 +76,13 @@ paths:
       summary: Create a tenant.
       description: Creates a tenant and returns it.
       tags: ["tenants"]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUIDv4 deduplicating a retried create.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -63,13 +102,25 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "429":
+          description: Too many creates. The only 429 in the fixture pair.
+          headers:
+            Retry-After:
+              description: Delta-seconds until the caller may retry.
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /tenants/{tenantId}/billing-accounts:
     get:
       operationId: listTenantBillingAccounts
       summary: List a tenant's billing accounts.
       description: >
         Kebab-case multi-word segment plus a path parameter — both legal, and
-        the reason org-resource-naming exempts {param} segments.
+        the reason org-resource-naming exempts {param} segments. Its 503 is on
+        an operation that is NOT tagged `ops`, so it owes Retry-After.
       tags: ["tenants"]
       parameters:
         - name: tenantId
@@ -77,17 +128,33 @@ paths:
           required: true
           schema:
             type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
-          description: The billing accounts of the tenant.
+          description: One page of the tenant's billing accounts.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/BillingAccount"
+                $ref: "#/components/schemas/BillingAccountPage"
         "503":
           description: The billing subsystem is unavailable.
+          headers:
+            Retry-After:
+              description: Delta-seconds until the subsystem is expected back.
+              schema:
+                type: integer
           content:
             application/problem+json:
               schema:
@@ -101,52 +168,90 @@ paths:
         scoped by trailing context, so a noun that merely starts with those
         letters is not a verb path. Same for /searches and /deleted-items below.
       tags: ["tenants"]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
-          description: The addresses.
+          description: One page of addresses.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
+                $ref: "#/components/schemas/StringPage"
   /searches:
     get:
       operationId: listSearches
       summary: List saved searches.
       description: Begins with the verb `search`, and must stay clean.
       tags: ["tenants"]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
-          description: The saved searches.
+          description: One page of saved searches.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
+                $ref: "#/components/schemas/StringPage"
   /deleted-items:
     get:
       operationId: listDeletedItems
       summary: List deleted items.
       description: Begins with the verb `delete`, and must stay clean.
       tags: ["tenants"]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
-          description: The deleted items.
+          description: One page of deleted items.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
+                $ref: "#/components/schemas/StringPage"
   /tenants/{tenantId}:
     get:
       operationId: getTenant
       summary: Fetch one tenant.
       description: >
-        Deprecated, and declares its sunset date — the shape
-        org-deprecated-operation-has-sunset demands.
+        Deprecated, and declares BOTH halves of the convention — the `x-sunset`
+        date org-deprecated-operation-has-sunset demands in the spec, and the
+        Deprecation/Sunset response headers org-deprecation-sunset-headers
+        demands at runtime.
       tags: ["tenants"]
       deprecated: true
       x-sunset: "2026-12-31"
@@ -159,6 +264,53 @@ paths:
       responses:
         "200":
           description: The tenant.
+          headers:
+            Deprecation:
+              description: RFC 9745 deprecation indicator.
+              schema:
+                type: string
+            Sunset:
+              description: RFC 8594 sunset date.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: No tenant with that id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    patch:
+      operationId: updateTenant
+      summary: Update one tenant.
+      description: >
+        The PATCH half of org-idempotency-key-on-post-patch. Without it the
+        rule could cover POST alone and this fixture would never notice.
+      tags: ["tenants"]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUIDv4 deduplicating a retried update.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Tenant"
+      responses:
+        "200":
+          description: The updated tenant.
           content:
             application/json:
               schema:
@@ -188,6 +340,45 @@ components:
         id:
           type: string
           description: Opaque billing-account id.
+    TenantPage:
+      type: object
+      description: One cursor page of tenants.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The tenants on this page.
+          items:
+            $ref: "#/components/schemas/Tenant"
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.
+    BillingAccountPage:
+      type: object
+      description: One cursor page of billing accounts.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The billing accounts on this page.
+          items:
+            $ref: "#/components/schemas/BillingAccount"
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.
+    StringPage:
+      type: object
+      description: One cursor page of opaque string ids.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The ids on this page.
+          items:
+            type: string
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.
     Problem:
       type: object
       description: RFC 9457 problem details.

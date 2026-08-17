@@ -1,0 +1,102 @@
+# Corner fixture (#944, tc-corner-traceparent-allowed).
+#
+# W3C trace context is the SANCTIONED correlation channel (#688) — the ops
+# surface's OTel SDK already propagates it. So `traceparent` and `tracestate`
+# must pass org-no-bespoke-correlation-headers, in BOTH the shapes the rule
+# inspects: as request parameters, and as response header KEYS.
+#
+# Without this file the rule's `notMatch` could be widened to any `*-id`-ish or
+# `trace`-ish name and every test would stay green while a conforming spec
+# reddened. The file must lint CLEAN.
+openapi: 3.1.0
+info:
+  title: Trace Context API
+  version: 1.0.0
+  description: >
+    Declares W3C trace context on both the request and the response side, and
+    nothing bespoke.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: tenants
+    description: Tenant records.
+paths:
+  /tenants/{tenantId}:
+    get:
+      operationId: getTenant
+      summary: Fetch one tenant.
+      description: >
+        Accepts W3C trace context as request headers and echoes it back as
+        response headers — the sanctioned correlation channel, never a bespoke
+        X-Request-Id.
+      tags: ["tenants"]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: traceparent
+          in: header
+          required: false
+          description: W3C trace context, propagated by the OTel SDK.
+          schema:
+            type: string
+        - name: tracestate
+          in: header
+          required: false
+          description: W3C trace state, propagated alongside traceparent.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The tenant.
+          headers:
+            traceparent:
+              description: The trace context this response belongs to.
+              schema:
+                type: string
+            tracestate:
+              description: Vendor trace state carried alongside it.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: No tenant with that id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    Tenant:
+      type: object
+      required: ["id", "name"]
+      properties:
+        id:
+          type: string
+          description: Opaque tenant id.
+        name:
+          type: string
+          description: Display name.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.

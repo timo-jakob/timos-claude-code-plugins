@@ -1,7 +1,33 @@
-# Deliberately NON-conforming fixture for the org API styleguide (#689).
+# Deliberately NON-conforming fixture for the org API styleguide (#689,
+# extended by #944).
 #
-# Every normative rule is violated exactly once, so the acceptance suite can
-# assert one rule id per planted defect. Do not "fix" anything here.
+# Every normative rule is violated here, so the acceptance suite can assert one
+# rule id per planted defect. Do not "fix" anything here.
+#
+# MOST have exactly one planted defect SITE. (A site is not a finding: /getUser
+# trips BOTH of org-resource-naming's clauses from one path.) THREE rules have
+# TWO sites, on purpose — do not deduplicate them:
+#
+#   org-pagination-no-offset-params      `page` AND `page_size`, which is the
+#                                        only proof the notMatch alternation
+#                                        still covers more than its first member
+#   org-no-bespoke-correlation-headers   the X-Request-Id PARAMETER and the
+#                                        X-Correlation-Id RESPONSE HEADER — one
+#                                        per `then` clause. This fixture's
+#                                        coverage of `@key` is the response
+#                                        header; nonconforming-headers covers
+#                                        the same clause through its own inline
+#                                        Request-Id and its components.headers
+#                                        key, so neither file is the sole
+#                                        suite-wide witness
+#   org-idempotency-key-on-post-patch    POST and PATCH, the two halves the
+#                                        rule id names
+#
+# Deleting either member of any pair leaves that rule still firing and every
+# id-only assertion still green. The first two pairs are therefore pinned by an
+# exact finding-path SET in the acceptance suite; the idempotency pair is pinned
+# by its two separate cases (…-on-post and …-on-patch), so deleting either reds
+# a test named for it.
 #
 # Planted, in order:
 #   info-description                     — info has no description
@@ -14,6 +40,24 @@
 #                                          with no x-sunset
 #   operation-operationId-unique         — DELETE /users/{userId} reuses
 #                                          getUserById
+#
+# Planted by #944:
+#   org-pagination-cursor-params         — GET /tenants returns the envelope
+#                                          but declares no cursor/limit
+#   org-pagination-no-offset-params      — …and declares page + page_size
+#   org-pagination-envelope              — GET /orders returns a bare array
+#   org-idempotency-key-on-post-patch    — POST /tenants and PATCH
+#                                          /tenants/{tenantId} carry no key
+#   org-retry-after-on-throttled         — POST /tenants' 429 declares no
+#                                          Retry-After header
+#   org-deprecation-sunset-headers       — GET /users/{userId}'s 200 declares
+#                                          no Deprecation/Sunset headers
+#   org-no-bespoke-correlation-headers   — X-Request-Id parameter on
+#                                          GET /tenants, X-Correlation-Id
+#                                          response header on GET /orders
+#
+# /tenants and /orders are plural kebab-case on purpose: a naming defect here
+# would blur which rule the pagination and header cases are actually proving.
 openapi: 3.1.0
 info:
   title: Tenant Management API
@@ -24,10 +68,23 @@ servers:
 tags:
   - name: users
     description: User records.
+  - name: tenants
+    description: Tenant records.
 paths:
   /getUser:
     post:
       summary: Fetch a user.
+      # This POST exists to carry the four OPERATION-level defects above, so it
+      # declares a valid Idempotency-Key it does not otherwise need: without it
+      # org-idempotency-key-on-post-patch would fire here too, and the two
+      # operations planted for that rule below would stop isolating it.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUIDv4 deduplicating a retried call.
+          schema:
+            type: string
       responses:
         "200":
           description: The user.
@@ -49,7 +106,9 @@ paths:
     get:
       operationId: getUserById
       summary: Fetch one user.
-      description: Deprecated, but declares no sunset date.
+      description: >
+        Deprecated, and declares neither half of the convention: no x-sunset in
+        the spec, and no Deprecation/Sunset headers on its 200.
       tags: ["users"]
       deprecated: true
       parameters:
@@ -79,6 +138,121 @@ paths:
       responses:
         "204":
           description: Deleted.
+  /tenants:
+    get:
+      operationId: listTenants
+      summary: List tenants.
+      description: >
+        Returns the org envelope, so org-pagination-envelope is satisfied — but
+        declares offset-style parameters and no cursor/limit, which is what
+        isolates org-pagination-cursor-params from the envelope rule.
+      tags: ["tenants"]
+      parameters:
+        - name: page
+          in: query
+          description: Banned — offset-style pagination.
+          schema:
+            type: integer
+        - name: page_size
+          in: query
+          description: Banned — offset-style pagination.
+          schema:
+            type: integer
+        - name: X-Request-Id
+          in: header
+          description: Banned — correlation rides traceparent.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The tenant collection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantPage"
+    post:
+      operationId: createTenant
+      summary: Create a tenant.
+      description: Declares no Idempotency-Key, and a 429 with no Retry-After.
+      tags: ["tenants"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Tenant"
+      responses:
+        "201":
+          description: The created tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "429":
+          description: Too many creates, with no stated retry delay.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /tenants/{tenantId}:
+    patch:
+      operationId: updateTenant
+      summary: Update one tenant.
+      description: >
+        The PATCH half of org-idempotency-key-on-post-patch. Without it the rule
+        could cover POST alone and every test here would stay green.
+      tags: ["tenants"]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Tenant"
+      responses:
+        "200":
+          description: The updated tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders.
+      description: >
+        Returns a bare array, which is what org-pagination-envelope exists to
+        reject, and declares a bespoke correlation RESPONSE header — the second
+        shape org-no-bespoke-correlation-headers has to see.
+      tags: ["tenants"]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The order collection.
+          headers:
+            X-Correlation-Id:
+              description: Banned — correlation rides traceparent.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
 components:
   schemas:
     User:
@@ -88,3 +262,47 @@ components:
         id:
           type: string
           description: Opaque user id.
+    Tenant:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque tenant id.
+    Order:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque order id.
+    TenantPage:
+      type: object
+      description: One cursor page of tenants.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The tenants on this page.
+          items:
+            $ref: "#/components/schemas/Tenant"
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.

@@ -110,7 +110,7 @@ runs the whole suite once in parallel and exits with bats' real status.
 | `api-styleguide-ruleset.bats` | Structural half of the org API styleguide ruleset (#689) — rule ids, severities, scoping, fix hints and doc anchors, parsed with `yq`. Also holds the **repo-wide pin sweep**: every file quoting a `styleguide-v*` jsDelivr URL must quote the same one, and no URL may carry a mistyped owner/repo. Behavioural halves: `check-styleguide-pin.bats` (offline) and `acceptance/cli/api-styleguide.bats` (needs spectral) |
 | `check-styleguide-pin.bats` | Behaviour of `scripts/check-styleguide-pin.zsh` (#689 AC 8) against fixture trees with `npx`/`curl` stubbed on PATH — fully offline. Covers the case the script exists for: a pin that resolves but loads no rules must exit non-zero, not report a clean run |
 | `helpers/check-renovate-styleguide.py` | Not a bats file — executed BY `api-styleguide-ruleset.bats`. Runs `renovate.json`'s shipped customManager regex against the real shim and resolves which `packageRule` wins, so the pin cannot silently rejoin the batched github-actions PR |
-| `fixtures/api-styleguide/` | Six OpenAPI specs the styleguide suites lint — conforming, non-conforming, plus clause-isolating fixtures for error bodies and resource naming |
+| `fixtures/api-styleguide/` | Eleven OpenAPI specs the styleguide suites lint — conforming, non-conforming, clause-isolating fixtures for error bodies, resource naming, pagination and header conventions, plus corner fixtures for collection detection, idempotent methods, trace headers, deprecated non-operations and path parameters |
 
 ## Adding a test
 

@@ -1,0 +1,120 @@
+# Corner fixture (#944, tc-corner-object-array-not-named-items-not-a-collection).
+#
+# The COLLECTION-DETECTION boundary, in one file. A collection operation is a
+# GET whose 200 `application/json` schema is either (a) a top-level array or
+# (b) an object with a REQUIRED property named `items` of `type: array`.
+# Everything else is out of the reach of `org-pagination-cursor-params`. The
+# other two pagination rules are NOT gated by this definition, so do not read
+# this fixture's clean bill as licence to add either shape to it:
+#   org-pagination-envelope         fires on any bare-array 200, and on any body
+#                                   whose `required` contains `items` without
+#                                   `next_cursor` — whatever `items` is
+#   org-pagination-no-offset-params rejects a banned parameter name here as
+#                                   anywhere, in any `in:` location
+#
+# /build-info is exactly the shipped ops fragment's `/info` shape — an object
+# with `required: ["build", "api"]` whose array is named `api`, not `items` —
+# so neither org-pagination-cursor-params nor org-pagination-envelope may fire
+# on it. That is what keeps the ops surface clean with NO `overrides:` block:
+# if this file ever reddens, someone has widened detection to "an object with
+# an array anywhere", and every bootstrapped repo's ops fragment reddens with
+# it.
+#
+# /reports is the mirror image and the reason this fixture is not vacuous: an
+# object whose array IS named `items` and is required IS a collection, so it
+# owes cursor + limit and does declare them. Delete it and detection could
+# collapse to "nothing is ever a collection" with this file still green.
+#
+# The file must lint CLEAN — the corner's whole claim is that nothing fires.
+openapi: 3.1.0
+info:
+  title: Reporting API
+  version: 1.0.0
+  description: >
+    Two GETs on either side of the collection-detection boundary — the /info
+    shape, which is not a collection, and the envelope shape, which is.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: reporting
+    description: Reports and build metadata.
+paths:
+  /build-info:
+    get:
+      operationId: getBuildInfo
+      summary: Build metadata and served majors.
+      description: >
+        A fixed, non-growing lookup returning an object whose array is named
+        `api`. Not a collection under the org definition, so it declares no
+        cursor pagination and must not be asked for any.
+      tags: ["reporting"]
+      responses:
+        "200":
+          description: Build metadata and the served-major table.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildInfo"
+  /reports:
+    get:
+      operationId: listReports
+      summary: List reports.
+      description: >
+        An object whose array IS the required `items`, so this one IS a
+        collection and declares cursor + limit.
+      tags: ["reporting"]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: One page of reports.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportPage"
+components:
+  schemas:
+    BuildInfo:
+      type: object
+      description: The /info shape — its array is named `api`, not `items`.
+      required: ["build", "api"]
+      properties:
+        build:
+          type: string
+          description: The build version.
+        api:
+          type: array
+          description: Every API major the service currently serves.
+          items:
+            type: integer
+    Report:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque report id.
+    ReportPage:
+      type: object
+      description: One cursor page of reports.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The reports on this page.
+          items:
+            $ref: "#/components/schemas/Report"
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.

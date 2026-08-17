@@ -1,0 +1,182 @@
+# Non-conforming fixture isolating the pagination CLAUSES the main non-conforming
+# fixture cannot discriminate (#944).
+#
+# There, GET /tenants violates the cursor-params rule by declaring NEITHER
+# `cursor` NOR `limit`, and every envelope in the fixture set requires both
+# `items` and `next_cursor` — so three clauses could each be deleted with every
+# test still green. Each path here trips exactly one:
+#
+#   /invoices    declares `cursor` but no `limit`   -> only the limit clause
+#   /receipts    declares `limit` but no `cursor`   -> only the cursor clause
+#   /statements  requires `items` without           -> only the envelope rule's
+#                `next_cursor`                         clause (b)
+#   /ledgers     declares NO `parameters` key at all -> only the cursor rule's
+#                                                      `required: [parameters]`
+#
+# …and the two `given` entries of the offset ban that the main fixture cannot
+# reach (it declares its banned names on an operation only), plus a banned name
+# in a NON-query location — the last being not a given at all, but the only
+# proof anywhere that the rule does not filter on `in:`:
+#
+#   components.parameters   `offset`, a REUSABLE banned parameter — the shape a
+#                           real spec is most likely to use
+#   path-item `parameters:` `skip`, declared once for every operation under
+#                           /statements
+#   in: header              `page`, proving the rule does not filter on `in:`
+#
+# Everything else conforms, so a finding from any other org-* rule is a scoping
+# regression.
+openapi: 3.1.0
+info:
+  title: Billing Statements API
+  version: 1.0.0
+  description: Three collection GETs, each isolating one pagination clause.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: billing
+    description: Billing records.
+paths:
+  /invoices:
+    get:
+      operationId: listInvoices
+      summary: List invoices.
+      description: Declares cursor but not limit — only the limit clause catches it.
+      tags: ["billing"]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One page of invoices.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdPage"
+  /receipts:
+    get:
+      operationId: listReceipts
+      summary: List receipts.
+      description: Declares limit but not cursor — only the cursor clause catches it.
+      tags: ["billing"]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        # A banned name in a NON-query location. The rule never filters on
+        # `in:`, and nothing else in the fixture set proves that.
+        - name: page
+          in: header
+          description: Banned — offset-style pagination, wearing a header's hat.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: One page of receipts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdPage"
+  /statements:
+    # A PATH-ITEM level parameter list — the `$.paths[*].parameters[*]` given
+    # entry, which no other fixture exercises.
+    parameters:
+      - name: skip
+        in: query
+        description: Banned — offset-style pagination, declared path-item-wide.
+        schema:
+          type: integer
+    get:
+      operationId: listStatements
+      summary: List statements.
+      description: >
+        Requires `items` without `next_cursor`, which is the only thing that can
+        trip clause (b) of org-pagination-envelope. It declares cursor + limit,
+        so the cursor-params rule stays silent here.
+      tags: ["billing"]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: One page of statements, missing its cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HalfEnvelope"
+  /ledgers:
+    get:
+      operationId: listLedgers
+      summary: List ledgers.
+      description: >
+        A collection GET with NO `parameters` key at all — the commonest real
+        un-paginated collection, and the ONLY thing that can catch the deletion
+        of org-pagination-cursor-params' `required: ["parameters"]` guard. Every
+        other collection GET in the fixture set declares some parameters array,
+        so the guard would otherwise be dead code no test could miss.
+      tags: ["billing"]
+      responses:
+        "200":
+          description: One page of ledgers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdPage"
+components:
+  parameters:
+    # A REUSABLE banned parameter — the sole witness for the
+    # `$.components.parameters[*]` given, and UNREFERENCED on purpose. Spectral
+    # attributes a finding inside resolved `$ref` content back to the $ref
+    # TARGET, so a referenced component yields the same `components.…` path
+    # whether or not the rule carries that given — and the entry could then be
+    # deleted with every test still green. (`oas3-unused-component` is a
+    # spectral:oas WARNING, so it cannot fail `--fail-severity error`.)
+    OffsetParam:
+      name: offset
+      in: query
+      description: Banned — offset-style pagination, as a reusable component.
+      schema:
+        type: integer
+  schemas:
+    IdPage:
+      type: object
+      description: A well-formed cursor page.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The ids on this page.
+          items:
+            type: string
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.
+    HalfEnvelope:
+      type: object
+      description: Deliberately requires `items` without `next_cursor`.
+      required: ["items"]
+      properties:
+        items:
+          type: array
+          description: The statements on this page.
+          items:
+            type: string
+        next_cursor:
+          type: ["string", "null"]
+          description: Present as a property, but NOT required — which is the defect.

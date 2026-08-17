@@ -1,0 +1,249 @@
+# Non-conforming fixture isolating the HEADER-rule clauses the main
+# non-conforming fixture cannot discriminate (#944).
+#
+# Each defect here is one that would otherwise let half a rule ship dead:
+#
+#   /shipments 503        a NON-ops 503 with no Retry-After. The main fixture has
+#                         no 503 at all, the conforming one declares the header,
+#                         and ops v2's two 503s are exempt — so without this the
+#                         entire 503 branch could be replaced with `{}` and every
+#                         test would stay green.
+#   /shipments POST       an Idempotency-Key declared `in: query`. Present but
+#                         wrong, which is the only thing that can catch the
+#                         deletion of the rule's `in: {const: header}`.
+#   /shipments/{id} PATCH an Idempotency-Key with `required: false`. Likewise the
+#                         only behavioural cover for `required: {const: true}`.
+#   /shipments/{id} GET   deprecated, declaring its success response under the
+#                         RANGE key `2XX`. Proves the sunset-header rule's
+#                         patternProperties really covers `2XX` and not just
+#                         numeric keys — the same class of gap /receipts covers
+#                         for org-problem-json-errors in the error-bodies fixture.
+#
+# …plus the correlation ban's three unexercised `given` entries and the two
+# banned names no other fixture carries:
+#
+#   components.parameters   X-Trace-Id        (reusable parameter)
+#   components.headers      X-Correlation-Id  (reusable response header)
+#   path-item `parameters:` x-request-id      (lowercase, path-item-wide)
+#
+# BOTH component definitions are deliberately UNREFERENCED. Spectral attributes
+# a finding inside resolved `$ref` content back to the $ref TARGET, so a
+# referenced component produces the same `components.…` path whether or not the
+# rule carries a `$.components.*` given — and the entry could then be deleted
+# with every test still green. Unreferenced, that path can only come from the
+# components given. (`oas3-unused-component` is a spectral:oas WARNING, so it
+# cannot fail `--fail-severity error` and is filtered out by every
+# `severity == 0` reduction in the suite.) The PATCH's `Request-Id` response
+# header is declared INLINE for the mirror reason: a $ref'd one would be
+# attributed to its component instead. It is this FIXTURE's witness for
+# `$.paths[*][*].responses[*].headers` and the only bare `Request-Id` spelling
+# anywhere; the main non-conforming fixture's X-Correlation-Id response header
+# reaches that same given, so neither file is the sole suite-wide witness for
+# it — do not delete either on the strength of the other.
+#
+# The lowercase spelling is load-bearing on its own: the pattern is a `/…/i`
+# literal, and nothing else proves the flag survives an edit.
+#
+# It declares its `x-sunset` and its problem+json bodies correctly, so a finding
+# from org-deprecated-operation-has-sunset or org-problem-json-errors here is a
+# scoping regression.
+openapi: 3.1.0
+info:
+  title: Shipment Tracking API
+  version: 1.0.0
+  description: Header-convention defects, one clause each.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: shipments
+    description: Shipment records.
+paths:
+  /shipments:
+    # Path-item-level parameters — the `$.paths[*].parameters[*]` given entry,
+    # in its lowercase spelling.
+    parameters:
+      - name: x-request-id
+        in: header
+        description: Banned — lowercase, and correlation rides traceparent.
+        schema:
+          type: string
+    get:
+      operationId: listShipments
+      summary: List shipments.
+      description: A well-formed collection; it is the 503 below that offends.
+      tags: ["shipments"]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: One page of shipments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdPage"
+        "503":
+          description: >
+            The tracking backend is unavailable, with no stated retry delay.
+            This operation is NOT tagged `ops`, so the exemption cannot apply.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    post:
+      operationId: createShipment
+      summary: Create a shipment.
+      description: >
+        Declares an Idempotency-Key in the WRONG location. Present-but-wrong is
+        the only shape that can catch the deletion of the `in: header` const.
+      tags: ["shipments"]
+      parameters:
+        - name: Idempotency-Key
+          in: query
+          required: true
+          description: "Wrong location — the convention says `in: header`."
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Shipment"
+      responses:
+        "201":
+          description: The created shipment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+  /shipments/{shipmentId}:
+    get:
+      operationId: getShipment
+      summary: Fetch one shipment.
+      description: >
+        Deprecated, declares its x-sunset correctly, and declares its success
+        response under the RANGE key 2XX with no Deprecation/Sunset headers.
+      tags: ["shipments"]
+      deprecated: true
+      x-sunset: "2027-06-30"
+      parameters:
+        - name: shipmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "2XX":
+          description: The shipment, under a range key and with no sunset headers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+    patch:
+      operationId: updateShipment
+      summary: Update one shipment.
+      description: >
+        Declares an Idempotency-Key that is OPTIONAL. An optional key is not
+        idempotency, and only the `required: true` const rejects it.
+      tags: ["shipments"]
+      parameters:
+        - name: shipmentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional — which defeats the point of the key.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Shipment"
+      responses:
+        "200":
+          description: The updated shipment.
+          headers:
+            # Declared INLINE, not via $ref: a $ref'd header is attributed back
+            # to its component, so only an inline key can prove the
+            # `$.paths[*][*].responses[*].headers` given. The bare `Request-Id`
+            # spelling lives here.
+            Request-Id:
+              description: Banned — correlation rides traceparent.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+components:
+  parameters:
+    TraceIdParam:
+      name: X-Trace-Id
+      in: header
+      description: Banned — a reusable bespoke correlation parameter.
+      schema:
+        type: string
+  headers:
+    # UNREFERENCED on purpose, and its KEY is itself banned — those two
+    # properties together are what make this the sole witness for the
+    # `$.components.headers` given. Referenced, its finding would be
+    # indistinguishable from the inline one above; named `RequestId` (no
+    # hyphen), the ban pattern could not match it at all.
+    X-Correlation-Id:
+      description: Banned — a reusable bespoke correlation response header.
+      schema:
+        type: string
+  schemas:
+    Shipment:
+      type: object
+      required: ["id"]
+      properties:
+        id:
+          type: string
+          description: Opaque shipment id.
+    IdPage:
+      type: object
+      description: One cursor page of shipment ids.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The ids on this page.
+          items:
+            type: string
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
