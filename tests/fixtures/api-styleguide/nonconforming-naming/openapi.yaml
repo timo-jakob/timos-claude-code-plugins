@@ -29,27 +29,62 @@ paths:
       summary: A verb path that is nonetheless valid kebab-case.
       description: Only the verb guard can catch this one.
       tags: ["admin"]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
-          description: The orders.
+          description: One page of orders.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
+                $ref: "#/components/schemas/StringPage"
   /Tenant_List:
     get:
       operationId: tenantListBadCase
       summary: A non-verb path that is not kebab-case.
       description: Only the kebab-case pattern can catch this one.
       tags: ["admin"]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
-          description: The tenants.
+          description: One page of tenants.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
+                $ref: "#/components/schemas/StringPage"
+components:
+  schemas:
+    StringPage:
+      type: object
+      description: One cursor page of opaque string ids.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The ids on this page.
+          items:
+            type: string
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.

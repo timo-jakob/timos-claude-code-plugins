@@ -68,10 +68,10 @@ stub_curl() {
     if [ -n "${2:-}" ]; then
       # Answer the given code ONLY for the expected URL; anything else 404s.
       printf 'want="$(cat "%s")"\n' "$BATS_TEST_TMPDIR/expect-url"
-      printf 'for a in "$@"; do if [ "$a" = "$want" ]; then printf %%s %s; exit 0; fi; done\n' "$1"
+      printf 'for a in "$@"; do if [ "$a" = "$want" ]; then printf %%s "%s"; exit 0; fi; done\n' "$1"
       printf 'printf %%s 404\n'
     else
-      printf 'printf %%s %s\n' "$1"
+      printf 'printf %%s "%s"\n' "$1"
     fi
   } > "$STUB_BIN/curl"
   chmod +x "$STUB_BIN/curl"
@@ -92,8 +92,8 @@ stub_npx() {
     printf '#!/usr/bin/env bash\n'
     printf 'printf "%%s\\n" "$*" >> "%s"\n' "$ARGV_LOG"
     printf 'for a in "$@"; do case "$a" in\n'
-    printf '  *nonconforming*) cat "%s"; exit 1 ;;\n' "$BATS_TEST_TMPDIR/nc.json"
-    printf '  */conforming/*) cat "%s"; exit 0 ;;\n' "$BATS_TEST_TMPDIR/c.json"
+    printf '  */nonconforming/openapi.yaml) cat "%s"; exit 1 ;;\n' "$BATS_TEST_TMPDIR/nc.json"
+    printf '  */conforming/openapi.yaml) cat "%s"; exit 0 ;;\n' "$BATS_TEST_TMPDIR/c.json"
     printf 'esac; done\nprintf %%s "[]"\n'
   } > "$STUB_BIN/npx"
   chmod +x "$STUB_BIN/npx"
@@ -365,20 +365,128 @@ LAST-LINE-MARKER'
   contains "$output" "for the non-conforming fixture"
 }
 
-@test "the checker's rule roster matches the published ruleset exactly" {
-  # Four copies of the eight ids exist (script, this suite's fixtures, the
-  # ruleset, the acceptance lane). This binds the two that decide whether a real
-  # regression is caught: adding a ninth org rule without extending the script
-  # would leave it proving eight-of-nine forever, green.
+# The rules that exist in the working-tree ruleset but are NOT yet reachable
+# THROUGH THE PIN, because the tag carrying them has not been cut.
+#
+# This list is the release window made explicit, and it is empty in the steady
+# state. #944 ships as two PRs for a structural reason: the checker asserts that
+# every id in EXPECTED_RULES fires at error severity through the CURRENT pin
+# (styleguide-v1.0.0), which does not carry these seven. Adding them to
+# EXPECTED_RULES in PR-A would fail the gate against a ruleset that is perfectly
+# correct — a dead-pin failure with no dead pin. PR-B cuts styleguide-v2.0.0,
+# bumps the three pin sites, moves these seven into EXPECTED_RULES, and empties
+# this list; the assertion below is exact equality again from that commit on.
+# The version this window is waiting on, stated once. The test below keys off it,
+# so the window CANNOT outlive the bump: while the shim still pins this version
+# the list must hold all seven; the moment it names any other version the list
+# must be empty.
+#
+# Deliberately spelled WITHOUT the `styleguide-v` prefix. The repo forces the pin
+# to be quoted in three files at once and reds unless they all agree, which makes
+# a repo-wide `s/styleguide-v1.0.0/styleguide-v2.0.0/g` the natural way to bump
+# it — and that sweep would rewrite this constant too, silently RETARGETING the
+# window instead of closing it, leaving eight of fifteen rules verified through
+# the pin while every downstream repo enforced all fifteen. Storing only the
+# number means the sweep cannot reach it, so the test reds and asks for a
+# deliberate edit.
+PENDING_UNTIL_VERSION="1.0.0"
+PENDING_PIN_RULES=(
+  org-pagination-cursor-params
+  org-pagination-no-offset-params
+  org-pagination-envelope
+  org-idempotency-key-on-post-patch
+  org-retry-after-on-throttled
+  org-deprecation-sunset-headers
+  org-no-bespoke-correlation-headers
+)
+
+@test "the checker's rule roster accounts for EVERY published rule" {
+  # Four copies of the ids exist (script, this suite's fixtures, the ruleset, the
+  # acceptance lane). This binds the two that decide whether a real regression is
+  # caught: adding a rule to the ruleset without extending the script would leave
+  # it proving eight-of-fifteen forever, green.
+  #
+  # The union — not a subset test — is what keeps that protection during a
+  # release window. A subset test would pass with a new rule declared nowhere;
+  # here a new rule must land in EXPECTED_RULES or be named above as pending, and
+  # either way a human wrote it down.
   # Parsed, not sourced: the script runs on source (it has no main guard), so a
   # `source && print` form captures its OUTPUT, not its array — non-empty garbage
   # that then satisfies any "did we get something" guard.
-  local expected actual
+  # Blank lines and comments are dropped from the slice: PR-B grows this array
+  # from 8 entries to 15, and a `# newly minted` grouping comment between the
+  # groups is the natural way to write that. Left in, it enters the list as an
+  # element and the union below fails as a bare `[` with no explanation.
+  local expected actual accounted n_expected
   expected="$(sed -n '/^EXPECTED_RULES=(/,/^)/p' \
-    "$REPO_ROOT/scripts/check-styleguide-pin.zsh" | sed '1d;$d' | tr -d ' ' | sort)"
+    "$REPO_ROOT/scripts/check-styleguide-pin.zsh" \
+    | sed '1d;$d' | tr -d ' \t' | sed '/^$/d; /^#/d' | sort)"
   actual="$(yq -r '.rules | keys | .[]' "$REPO_ROOT/styleguide/spectral/ruleset.yaml" | sort)"
+
   # Canary: a slice that captured nothing would compare "" to "" on a broken
-  # ruleset read and pass.
-  [ "$(printf '%s\n' "$expected" | wc -l | tr -d ' ')" = "8" ]
-  [ "$expected" = "$actual" ]
+  # ruleset read and pass. Derived rather than restated as a literal, so PR-B
+  # does not have to remember a third edit in a third file when it moves the
+  # seven across — emptying PENDING_PIN_RULES is the whole change.
+  n_expected="$(printf '%s\n' "$expected" | grep -c . || true)"
+  [ "$n_expected" -ge 8 ]
+
+  accounted="$(printf '%s\n' "$expected" "${PENDING_PIN_RULES[@]}" | grep -c . || true)"
+  [ "$accounted" -eq "$(printf '%s\n' "$actual" | grep -c . || true)" ]
+  [ "$(printf '%s\n' "$expected" "${PENDING_PIN_RULES[@]}" | sed '/^$/d' | sort)" = "$actual" ]
+
+  # …and the two lists must be DISJOINT. Without this an id left in both after a
+  # sloppy PR-B would still satisfy the union while the checker's own roster had
+  # silently stopped growing.
+  #
+  # A temp file rather than a process substitution: tests/api-styleguide-ruleset.bats
+  # records this suite's own experience of `<(…)` failing only under
+  # run-gate.zsh's parallel runner, with an unattributable "line 0" error. And
+  # `grep -Fxf` on an EMPTY pattern file matches nothing, which is exactly what
+  # the post-PR-B steady state needs.
+  local pending="$BATS_TEST_TMPDIR/pending.txt"
+  printf '%s\n' "${PENDING_PIN_RULES[@]}" | sed '/^$/d' | sort > "$pending"
+  local overlap
+  overlap="$(printf '%s\n' "$expected" | grep -Fxf "$pending" || true)"
+  [ -z "$overlap" ]
+}
+
+@test "the release window CLOSES when the shim's pin moves" {
+  # The union test above is satisfied by ANY partition of the fifteen ids —
+  # including the post-PR-B state where the shim has been bumped but the seven
+  # were never moved into EXPECTED_RULES. Nothing else in the suite reads the
+  # shim's version, so without this the window has no closing condition: the
+  # checker would report "all 8 org rules enforced through the pin" forever
+  # while #944's entire payload went unverified through it. That is the
+  # script's own silent-failure class — "a pin that resolves but enforces
+  # nothing" — reduced from 0-of-8 to 7-of-15 and therefore invisible.
+  local shim tag
+  shim="$REPO_ROOT/development/skills/bootstrap/templates/common/.spectral.yaml"
+  [ -f "$shim" ]
+  run yq -r '.extends[0]' "$shim"
+  [ "$status" -eq 0 ]
+  tag="$(printf '%s\n' "$output" \
+    | sed -n 's|.*@\(styleguide-v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)/.*|\1|p')"
+  # Canary: a shim whose pin stopped matching the expected shape would otherwise
+  # take the else-branch below and demand an empty list for the wrong reason.
+  [ -n "$tag" ]
+
+  if [ "$tag" = "styleguide-v$PENDING_UNTIL_VERSION" ]; then
+    # Window OPEN: every id #944 added is parked, none has leaked into the
+    # checker's roster early (the disjointness test above covers the overlap).
+    # Asserted BY NAME, not by count: a count alone would accept a hand-edited
+    # constant re-opening the window against some other set of seven ids.
+    [ "${#PENDING_PIN_RULES[@]}" -eq 7 ]
+    run bash -c 'printf "%s\n" "$@" | sort | tr "\n" " "' _ "${PENDING_PIN_RULES[@]}"
+    [ "$output" = "org-deprecation-sunset-headers org-idempotency-key-on-post-patch org-no-bespoke-correlation-headers org-pagination-cursor-params org-pagination-envelope org-pagination-no-offset-params org-retry-after-on-throttled " ]
+  else
+    # Window CLOSED: the pin moved, so the roster must be whole and the parked
+    # list empty. Exact equality, not the open-window floor.
+    [ "${#PENDING_PIN_RULES[@]}" -eq 0 ]
+    local expected actual
+    expected="$(sed -n '/^EXPECTED_RULES=(/,/^)/p' \
+      "$REPO_ROOT/scripts/check-styleguide-pin.zsh" \
+      | sed '1d;$d' | tr -d ' \t' | sed '/^$/d; /^#/d' | sort)"
+    actual="$(yq -r '.rules | keys | .[]' "$REPO_ROOT/styleguide/spectral/ruleset.yaml" | sort)"
+    [ "$expected" = "$actual" ]
+  fi
 }

@@ -9,8 +9,13 @@ repo, and keep the pin current **by hand** — no bot bumps it for you
 a freshly bootstrapped repo already has it and there is nothing to do here. This
 page is for a repo bootstrapped **before** the shim existed — it still carries
 the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
-starter ruleset, which enforces only two of the eight ids (the `operationId`
-pair) and none of the org-specific ones — and for the day a bump lands.
+starter ruleset, which enforces **at error severity** only two of the eight ids
+that the pinned `styleguide-v1.0.0` carries (the `operationId` pair), carries
+three more of them at `warn`, and carries none of the org-specific ones — and
+for the day a bump lands. The denominator is that version's, not the
+repository's: the
+[reference page](../reference/api-styleguide.md) documents rules that are in the
+source file but not yet in any tag, and marks them *pending*.
 
 ## Pin the ruleset
 

@@ -1,0 +1,107 @@
+# Corner fixture (#944, tc-corner-put-delete-exempt-from-idempotency-key).
+#
+# PUT and DELETE are idempotent BY METHOD, so org-idempotency-key-on-post-patch
+# must not ask them for a key. Neither operation here declares one, and the
+# file must lint CLEAN.
+#
+# The rule id names both covered methods precisely so it can never be misread
+# as POST-only — and this fixture is the other half of that claim: the
+# non-conforming fixture proves POST and PATCH are both caught, this one proves
+# PUT and DELETE are both spared. Widening the given to "every write method"
+# reddens this file, which is the point.
+openapi: 3.1.0
+info:
+  title: Tenant Replacement API
+  version: 1.0.0
+  description: >
+    Whole-resource replacement and removal — the two write methods the
+    idempotency-key convention deliberately exempts.
+servers:
+  - url: /v1
+    description: Major v1.
+tags:
+  - name: tenants
+    description: Tenant records.
+paths:
+  /tenants/{tenantId}:
+    put:
+      operationId: replaceTenant
+      summary: Replace one tenant.
+      description: >
+        Idempotent by method — replaying it with the same body converges on the
+        same state, so it owes no Idempotency-Key.
+      tags: ["tenants"]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Tenant"
+      responses:
+        "200":
+          description: The replaced tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: No tenant with that id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    delete:
+      operationId: deleteTenant
+      summary: Delete one tenant.
+      description: Idempotent by method, so it owes no Idempotency-Key either.
+      tags: ["tenants"]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted.
+        "404":
+          description: No tenant with that id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    Tenant:
+      type: object
+      required: ["id", "name"]
+      properties:
+        id:
+          type: string
+          description: Opaque tenant id.
+        name:
+          type: string
+          description: Display name.
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: ["type", "title", "status", "detail"]
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.

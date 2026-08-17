@@ -34,23 +34,47 @@ paths:
           description: Superseded by `filter`.
           schema:
             type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         "200":
-          description: The user collection.
+          description: One page of the user collection.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/UserPage"
               # The third shape: `deprecated: true` appearing inside EXAMPLE
               # DATA, where it is a data value rather than an OpenAPI keyword.
               example:
-                - id: "u-1024"
-                  displayName: "Ada Lovelace"
-                  deprecated: true
+                items:
+                  - id: "u-1024"
+                    displayName: "Ada Lovelace"
+                    deprecated: true
+                next_cursor: null
 components:
   schemas:
+    UserPage:
+      type: object
+      description: One cursor page of users.
+      required: ["items", "next_cursor"]
+      properties:
+        items:
+          type: array
+          description: The users on this page.
+          items:
+            $ref: "#/components/schemas/User"
+        next_cursor:
+          type: ["string", "null"]
+          description: Cursor for the next page; null on the last page.
     User:
       type: object
       required: ["id"]
