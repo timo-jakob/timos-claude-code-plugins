@@ -18,7 +18,19 @@ setup() {
   printf '{"sidechain":true}\n' > "$P/-Users-x-repo-beta/sB/subagents/agent-2.jsonl"
   printf '{"sidechain":true}\n' > "$P/-Users-x-repo-beta/sB/subagents/agent-3.jsonl"
   printf '{"type":"user"}\n'    > "$P/-Users-x-repo-gamma/sG.jsonl"
-  touch "$P/-Users-x-repo-beta/sB.jsonl"   # make beta the most recent
+  # EXPLICIT mtimes, not `touch` ORDERING. The script orders projects with zsh's
+  # `(N.om)` glob qualifier, so "newest" is mtime and nothing else — and on a
+  # filesystem whose mtime granularity is coarse (the debian container's, unlike
+  # APFS) all three writes above land byte-identical stamps, the three-way tie
+  # falls to glob order, and gamma wins where these tests assert beta (#1360).
+  # Stamped minutes rather than hours back, so nothing ages out of the script's
+  # default related-session window. Same `date -v… || date -d…` idiom as below.
+  stamp_minutes_ago() {
+    touch -t "$(date -v-"$1"M '+%Y%m%d%H%M' 2>/dev/null || date -d "$1 minutes ago" '+%Y%m%d%H%M')" "$2"
+  }
+  stamp_minutes_ago 3 "$P/-Users-x-repo-alpha/sA.jsonl"
+  stamp_minutes_ago 2 "$P/-Users-x-repo-gamma/sG.jsonl"
+  stamp_minutes_ago 1 "$P/-Users-x-repo-beta/sB.jsonl"   # make beta the most recent
 }
 
 run_cap() { run zsh "$CAP" --projects-dir "$P" "$@"; }
@@ -26,9 +38,12 @@ run_cap() { run zsh "$CAP" --projects-dir "$P" "$@"; }
 @test "--list shows projects, most recent first" {
   run_cap --list
   [ "$status" -eq 0 ]
-  # beta (touched last) must appear before alpha
+  # The FULL order, not just beta-before-alpha: gamma's stamp is the one setup()
+  # added to break the container's three-way mtime tie, so leaving its position
+  # unasserted leaves the fix itself uncovered here.
   contains "$output" "repo-beta"
-  contains "${output#*repo-beta}" "repo-alpha"
+  contains "${output#*repo-beta}" "repo-gamma"
+  contains "${output#*repo-gamma}" "repo-alpha"
 }
 
 @test "--dry-run with no project defaults to the newest project + session" {

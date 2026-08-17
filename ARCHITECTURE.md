@@ -4978,6 +4978,44 @@ truncated haystack to **stderr** — never stdout, because hundreds of
 and an uncompilable `matches` pattern stays misuse (2), never a mismatch (1),
 so a typo'd regex cannot pass a negative assertion vacuously.
 
+**Two shapes that make a test stop being the test it says it is** (#1360), both
+swept by `tests/no-inert-permission-barriers.bats` over
+`git ls-files 'tests/*.bats'`.
+First — and this one goes inert **only in the Docker lane** — a
+**permission-barrier `chmod`** — any mode denying the owner read or
+write — must carry a root-bypass guard, because `tests/Dockerfile` runs the
+suite as uid 0, where root reads a `chmod 000` file and writes into a `chmod
+555` directory, so the denial path never executes. Two idioms are accepted: the
+**uid test** (`[ "$(id -u)" -ne 0 ] || skip …`, or the multi-line `if … then
+skip … fi`) and the **effect test** (`if [ -r "$F" ]; then skip …; fi`), which
+asks whether the barrier actually bites and so also covers `CAP_DAC_OVERRIDE`
+and root-squashed mounts — but which must come **after** the `chmod` and test
+**the permission the barrier removed, on the same path**, or it fires
+unconditionally and skips the test everywhere. The sweep bans an *unguarded*
+barrier, and associates the guard with its `skip` rather than accepting the two
+merely co-occurring in a test; the effect idiom is recognised only in `if`-form
+and only for `-r`/`-w`, because `[ -x … ] || skip` is how a **dependency** skip
+is written and accepting it would clear every barrier beside it. Being textual,
+the detector recognises those two shapes and no other — an equivalent guard
+spelled `[ "$EUID" -ne 0 ]`, or factored into a helper, is reported unguarded —
+and a `chmod` that is fixture text written by `printf` is reported as a site
+(move such a fixture into a heredoc, which is skipped as data, rather than
+adding a `skip` to a test that is not about permissions — rule 1 only, since the
+backtick rule still reads `@test` lines inside heredocs, so keep fixture
+descriptions backtick-free). The **ordering**
+precondition is enforced — an effect marker counts only once a barrier has been
+seen in the same `@test` — while the path/permission half is not, and nothing
+outside a `@test` block is inspected at all, so a barrier in `setup()`,
+`teardown()` or a helper is guarded by hand. **A green sweep proves a guard is
+present and correctly ordered, never that it tests the right thing.** Second, a
+**`@test` description must contain no
+backtick**: bats evaluates every description to resolve variable references, so
+a backticked word runs as command substitution — printing `<word>: command not
+found` once per test in the file and silently stripping the word from the test's
+own name — on **every** lane, not just in Docker, since bats evaluates
+descriptions everywhere. Both are the same family as the inert-assertion rules
+above: a test that passes while proving less than it claims.
+
 Why zsh:
 
 - macOS ships bash 3.2 (from 2007) as `/bin/bash`; Apple won't update

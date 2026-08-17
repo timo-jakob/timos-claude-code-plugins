@@ -3,15 +3,32 @@
 # from #263. Contains exactly the toolchain the scripts under test need.
 FROM debian:stable-slim
 
+# python3-venv + python3-pip: Debian splits `venv` and `pip` OUT of `python3`, so
+# neither is present in this base image — and `verify-python-state.sh` (exercised
+# by tests/detect-stack.bats's two `verify-python-state:` cases) creates a venv,
+# which fails with "ensurepip is not available … install the python3-venv
+# package". They are installed rather than stubbed: a stubbed toolchain stops the
+# test proving the thing it exists to prove. The `--local` host lane is
+# unaffected — Homebrew's python3 ships both.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      bats jq shellcheck zsh python3 git ca-certificates nodejs yamllint curl \
+      bats jq shellcheck zsh python3 python3-venv python3-pip git ca-certificates \
+      nodejs yamllint curl \
  && rm -rf /var/lib/apt/lists/*
 # mikefarah yq, NOT Debian's `yq` apt package (which is kislyuk's python-yq, a
 # different query language): the suite and the shipped kubernetes-ci template
 # both use `-o=json` and rely on YAML 1.2 semantics, neither of which python-yq
 # provides. This image is the "don't mess up the local dev machine" run, so it
 # is the one leg with no preinstalled mikefarah yq to fall back on.
+# The suite reads the repo's git store through a bind mount the runner adds
+# (#1360). The container is uid 0 while those files carry the host's ownership on
+# any backend that does not remap it (Colima, Rancher Desktop, rootful Docker on
+# Linux) — and git then refuses the repo with `detected dubious ownership`, the
+# same untyped container-only fatal #1360 exists to remove, which the runner's
+# host-side pre-flight cannot see. Docker Desktop for Mac does remap, so this is
+# insurance for backends this repo does not test on, in a disposable test image
+# where a blanket setting costs nothing.
+RUN git config --system --add safe.directory '*'
 ARG YQ_VERSION=4.44.3
 RUN curl -sSfLo /usr/local/bin/yq \
       "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
