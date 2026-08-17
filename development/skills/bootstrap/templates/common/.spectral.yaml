@@ -38,4 +38,4 @@
 # The CI wiring (.github/workflows/contracts-lint.yml) references this file BY
 # PATH, so the pin can move without touching the pipeline.
 extends:
-  - https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v1.0.0/styleguide/spectral/ruleset.yaml
+  - https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v2.0.0/styleguide/spectral/ruleset.yaml

@@ -11,14 +11,16 @@
 # THE FAILURE MODE THIS EXISTS FOR: a pin that 404s must FAIL, never report a
 # clean run. Spectral loading no rules yields "0 problems" — a green check that
 # enforces nothing. So conformance is asserted POSITIVELY: the non-conforming
-# fixture must produce all eight org rule ids at error severity. A dead pin
+# fixture must produce every id in EXPECTED_RULES at error severity. A dead pin
 # produces none of them and the check exits non-zero, loudly.
 #
-# Exits 0 when the pin resolves and enforces all eight rules, 1 on any
+# Exits 0 when the pin resolves and enforces every rule in the roster, 1 on any
 # conformance failure, 2 on usage/tooling errors (missing jq/node/fixture).
 #
-# Invoked by .github/workflows/styleguide-pin.yml on every PR. Also runnable
-# locally — no arguments, but it needs node + network (it fetches the pin).
+# Invoked by .github/workflows/styleguide-pin.yml on every PR that touches the
+# shim, the ruleset, the fixtures or this script — plus a weekly cron, because a
+# pin can rot from outside this repo. Also runnable locally — no arguments, but
+# it needs node + network (it fetches the pin).
 set -euo pipefail
 
 REPO_ROOT="${0:A:h:h}"
@@ -30,8 +32,19 @@ FIXTURES="$REPO_ROOT/tests/fixtures/api-styleguide"
 # rule, which would move this check's goalposts without a commit here.
 SPECTRAL="@stoplight/spectral-cli@6.16.3"
 
-# The v1 normative set (#689 decision 1). Eight IDS, seven conventions —
-# operation-operationId and -unique are one convention with two ids.
+# The v2 normative set. FIFTEEN IDS, twelve conventions — a convention can need
+# more than one id: operation-operationId and -unique are one expressed as two,
+# and cursor pagination is one expressed as three. docs/reference/api-styleguide.md
+# is the authoritative convention text and owns that count; it is repeated here
+# only to make the roster below readable.
+#
+# The first eight are #689's v1 set; the seven below them are #944's pagination
+# and header conventions, which entered the published artifact with
+# styleguide-v2.0.0. They were parked in tests/check-styleguide-pin.bats's
+# PENDING_PIN_RULES for the release window between #944's two PRs — added to the
+# ruleset by PR-A, unverifiable through a pin that did not yet carry them, and
+# moved here by PR-B the moment the shim's pin advanced. That list is now empty
+# and the window is closed.
 EXPECTED_RULES=(
   operation-operationId
   operation-operationId-unique
@@ -41,6 +54,14 @@ EXPECTED_RULES=(
   org-deprecated-operation-has-sunset
   org-resource-naming
   org-problem-json-errors
+  # newly minted in styleguide-v2.0.0 (#944)
+  org-pagination-cursor-params
+  org-pagination-no-offset-params
+  org-pagination-envelope
+  org-idempotency-key-on-post-patch
+  org-retry-after-on-throttled
+  org-deprecation-sunset-headers
+  org-no-bespoke-correlation-headers
 )
 
 die() { print -u2 -- "check-styleguide-pin: $1"; exit "${2:-2}"; }
@@ -81,7 +102,7 @@ PIN_URL="${pins[1]}"
 print "pin: $PIN_URL"
 
 # A distinct, well-labelled failure for the CDN case — otherwise a jsDelivr
-# outage would surface as eight mysteriously-absent rules. The body is never
+# outage would surface as a roster of mysteriously-absent rules. The body is never
 # read, so it is discarded rather than written to a fixed /tmp path.
 http_code="$(curl -fsS -o /dev/null -w '%{http_code}' "$PIN_URL" 2>/dev/null || true)"
 [[ "$http_code" == "200" ]] || die "pin did not resolve (HTTP ${http_code:-000}) — $PIN_URL" 1
@@ -145,4 +166,4 @@ errors="$(jq -r '[.[] | select(.severity == 0)] | length' <<<"$conforming_json")
 [[ "$errors" == "0" ]] || die "the conforming fixture produced $errors error finding(s) through the pin" 1
 print "conforming fixture: 0 error findings through the pin"
 
-print "OK — the shipped shim resolves $PIN_URL and enforces the v1 normative set."
+print "OK — the shipped shim resolves $PIN_URL and enforces the normative set."

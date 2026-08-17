@@ -154,6 +154,29 @@ assert_valid_yaml() {
   grep -q 'Demo Project API' "$spec"
 }
 
+@test "#944 contracts: the starter spec does NOT claim the reserved ops tag" {
+  # `ops` is reserved for the shared operations fragment (contracts/ops/vN),
+  # where org-retry-after-on-throttled treats it as the sole exemption from the
+  # 503 branch. A BUSINESS operation carrying it is a styleguide violation the
+  # linter cannot catch (docs/reference/api-styleguide.md says so out loud), and
+  # it would silently exempt any 503 this seed later grows.
+  #
+  # Asserted POSITIVELY on the value, not as `lacks … ops`: a negative form also
+  # passes against a seed that lost its tags entirely, which would instead break
+  # operation-tags — a green assertion for a different defect.
+  #
+  # Lives in the always-on gate rather than the acceptance lane, so the
+  # invariant holds even where the network-dependent lane cannot run.
+  # Asserted over EVERY operation's tags, not just /health's: the invariant is a
+  # property of the whole contract, and the seed openly invites growth
+  # ("Replace with the real API"). Pinned to one path, a SECOND seeded operation
+  # tagged `ops` would buy every new repo the 503 exemption with this green.
+  # `select(type == "!!map")` skips path-item-level keys like `parameters`.
+  render_contracts
+  local spec="$OUT/common/contracts/v1/openapi.yaml"
+  [ "$(yq -r '[.paths[] | .[] | select(type == "!!map") | .tags // [] | .[]] | unique | join(",")' "$spec")" = "health" ]
+}
+
 @test "#689 contracts: the rendered shim is replaceable-by-path and pins an IMMUTABLE tag" {
   # The #692 form of this test asserted `spectral:oas` + an inline rule id. Both
   # moved into the published org ruleset when PR-B retired the starter, so the

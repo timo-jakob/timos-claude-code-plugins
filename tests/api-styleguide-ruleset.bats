@@ -17,6 +17,14 @@
 # grep on `    severity: error` never ties a severity to a rule id, and a grep at
 # a fixed indentation breaks on a reindent that changes no contract.
 
+# Required by the `run !` form below (#944 PR-B added the first one in this
+# file). Without it bats emits BW01 on every run, and on bats < 1.5 the `!` is
+# taken as the COMMAND name: `run` records status 127, no `[ "$status" … ]`
+# follows a `run !` by design, and the assertion silently asserts nothing — the
+# inert-negative class tests/no-inert-negative-assertions.bats exists to catch,
+# which does not check for this declaration.
+bats_require_minimum_version 1.5.0
+
 load assertions
 
 setup() {
@@ -593,6 +601,43 @@ CODIFIED_RULE_IDS=(
   path="${url#*@styleguide-v*/}"
   [ "$path" = "styleguide/spectral/ruleset.yaml" ]
   [ -f "$REPO_ROOT/$path" ]
+}
+
+@test "the styleguide reference page names NO version literal (#944)" {
+  # The page states, in its own words, "No version is named here on purpose",
+  # and gives the reason: the two guards that keep the pin in lockstep — the
+  # repo-wide sweep below and Renovate's custom manager — both key on the
+  # jsDelivr URL SHAPE. A version restated in prose is invisible to both, so it
+  # survives the very PR that moves the pin and the page ends up describing a
+  # major nobody pins.
+  #
+  # Without this, that sentence is an aspiration a future edit can quietly
+  # falsify. The page is the authoritative convention text, so a stale version
+  # claim there is the most expensive place for one.
+  #
+  # Scoped to this ONE page deliberately: the how-to must keep its pin (it is a
+  # copy-paste target and a Renovate-managed site), and tests/check-styleguide-pin.bats
+  # plus scripts/check-styleguide-pin.zsh carry fixture URLs and release-window
+  # narrative that are SUPPOSED to lag.
+  local page="$REPO_ROOT/docs/reference/api-styleguide.md"
+  [ -f "$page" ]
+  # Canaries first: a page that failed to read would make the greps below
+  # vacuous (grep's exit 2 on an unreadable file would itself satisfy `run !`).
+  #
+  # Bound to the PROMISE, not to a generic heading: this test exists to enforce
+  # one sentence the page makes about itself, so deleting that sentence must red
+  # here rather than leaving an assertion enforcing a claim nobody makes. The
+  # second canary binds to the NEEDLE's shape — if the artifact's tag scheme is
+  # ever renamed, the negatives below stop covering anything, and without this
+  # they would quietly pass forever.
+  grep -q 'No version is named here on purpose' "$page"
+  grep -q 'styleguide-vX\.Y\.Z' "$page"
+  # BOTH spellings are forbidden, and the second is the one that matters most:
+  # the failure the page describes is a version "restated in a sentence", which
+  # is precisely the form that does NOT carry the tag prefix. Forbidding only
+  # `styleguide-v2.0.0` would catch a copy-pasted tag and miss "matches 2.0.0".
+  run ! grep -n 'styleguide-v[0-9]' "$page"
+  run ! grep -nEi '(styleguide|ruleset|pin(ned)?)[^A-Za-z0-9]{0,12}v?[0-9]+\.[0-9]+\.[0-9]+' "$page"
 }
 
 @test "EVERY file quoting a styleguide pin quotes the SAME one" {

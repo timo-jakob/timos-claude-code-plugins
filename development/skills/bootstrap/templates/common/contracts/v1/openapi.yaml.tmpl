@@ -29,7 +29,12 @@ paths:
       operationId: getHealth
       summary: Liveness probe.
       description: Returns the service liveness status. Replace with the real API.
-      tags: ["ops"]
+      # NOT `ops`: that tag is RESERVED for the shared operations fragment
+      # (contracts/ops/vN), where it is what exempts the probe 503s from
+      # org-retry-after-on-throttled. A business operation claiming it is a
+      # styleguide violation the linter cannot catch, and it would silently buy
+      # that exemption for any 503 this contract later declares.
+      tags: ["health"]
       responses:
         "200":
           description: The service is live.

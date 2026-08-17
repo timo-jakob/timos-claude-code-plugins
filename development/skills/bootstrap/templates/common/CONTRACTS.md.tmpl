@@ -54,10 +54,15 @@ paths:
 
 The pinned org ruleset — extended by `.spectral.yaml`, which carries no rules of
 its own — flags a deprecated **operation** that omits `x-sunset`
-(`org-deprecated-operation-has-sunset`). Note the scope: a deprecated *schema
-property*, a deprecated *parameter*, and the major-level `x-sunset` in §3 are
-**not** linted, so review is what covers those. A date-only `x-sunset` means
-**end of that day, UTC**.
+(`org-deprecated-operation-has-sunset`). It **also** requires every `2xx`
+response of a deprecated operation to **declare** `Deprecation` and `Sunset`
+response headers (`org-deprecation-sunset-headers`) — a rule about the **spec**,
+not only about what the service emits at runtime. It applies to the **newest**
+major only, which is the one `contracts-lint` lints; on a frozen major the
+freeze wins and the headers stay runtime-only. See §2.
+Note the remaining scope: a deprecated *schema property*, a deprecated
+*parameter*, and the major-level `x-sunset` in §3 are **not** linted, so review
+is what covers those. A date-only `x-sunset` means **end of that day, UTC**.
 
 ### 2. On the wire (for running consumers)
 
@@ -73,7 +78,30 @@ headers so a running client sees the deprecation without re-reading the spec:
 - Optionally a **`Link`** header with `rel="sunset"` (RFC 8594) pointing at the
   migration guide.
 
-Wiring these headers is framework-specific (a Spring interceptor, a FastAPI
+**On the NEWEST major: declare both in the spec first, then wire them.**
+`org-deprecation-sunset-headers` is an `error` on every `2xx` of a deprecated
+operation that does not declare them, so middleware alone leaves
+`contracts-lint` red:
+
+```yaml
+      responses:
+        "200":
+          description: OK.
+          headers:
+            Deprecation: { schema: { type: string } }
+            Sunset: { schema: { type: string } }
+```
+
+**On a FROZEN (non-newest) major, the freeze wins: do not add them.** Publish
+`deprecated: true` + `x-sunset` only, and wire the headers at runtime. Two
+reasons, and they point the same way: `contracts-lint` lints only the **newest**
+major of each family, so the rule produces no signal on a frozen one — and
+adding response headers there is an **additive** change, which
+`check-contracts-semver.sh` rejects on a frozen major ("ship a new major"),
+advice that makes no sense for a major you are retiring. This matters because
+retiring a *whole* major always runs through exactly this case.
+
+Wiring the values is then framework-specific (a Spring interceptor, a FastAPI
 dependency, an Express middleware). The rule of thumb: for any operation whose
 spec entry has `x-sunset`, set `Sunset` from that date and `Deprecation` from
 `x-deprecated-at`.

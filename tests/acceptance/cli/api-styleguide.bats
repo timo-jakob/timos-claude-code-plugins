@@ -68,8 +68,9 @@
 #   tc-corner-put-delete-exempt-from-idempotency-key       #1301
 #   tc-corner-traceparent-allowed                          #1302
 #   tc-corner-ops-v1-frozen-major-no-new-rule-findings     #1397
+#   tc-corner-business-seed-lints-clean                    (PR-B, no issue)
 #
-# 9 + 15 + 2 + 13 = 39 @test blocks. Keep this roster and the count in
+# 9 + 15 + 2 + 14 = 40 @test blocks. Keep this roster and the count in
 # ../README.md in step with the file.
 #
 # The three through-the-pin cases (#1304-#1306) are NOT in this lane. PR-B
@@ -83,7 +84,7 @@
 # skipping — see below; do not convert that `return 1` to a `skip`, which would
 # make the whole lane vacuous on a network blip). Coverage that can be absent
 # exactly when it matters cannot assert a network-dependent failure. The checker
-# instead asserts POSITIVELY that all eight rule ids fire through the pin, so a
+# instead asserts POSITIVELY that every id in its roster fires through the pin, so a
 # pin that 404s (or resolves but loads no rules) exits non-zero rather than
 # reporting a clean run.
 #
@@ -624,6 +625,51 @@ NEW_RULE_IDS_JSON='[
   [ "$output" -eq 5 ]
   # The ops-tag exemption's SHAPE and the absence of any `overrides:` block are
   # asserted in tests/api-styleguide-ruleset.bats, which is ALWAYS-ON and has yq.
+}
+
+@test "tc-corner-business-seed-lints-clean: the seed business contract is not born red" {
+  # The BUSINESS twin of the ops-fragment case above. contracts-lint feeds both
+  # halves into the same invocation, and the ops half has been pinned since
+  # #1330 — but the seed spec every bootstrapped repo actually starts from was
+  # linted by nothing. PR-B is exactly when that bites: it advances the shim's
+  # pin, so seven new error-severity rules start applying to this template in
+  # every new repo at once. A seed that violates any of them means every repo is
+  # BORN RED on its first contracts-lint run, on a spec it did not write.
+  #
+  # Rendered into the tmpdir with sed rather than driven through render.zsh:
+  # this lane's declared toolchain is node + npx + jq (see ../README.md), and
+  # adding a zsh dependency to reach the renderer would be a bigger change than
+  # the case is worth. The substitution set is the seed's only placeholder.
+  local tmpl="$REPO_ROOT/development/skills/bootstrap/templates/common/contracts/v1/openapi.yaml.tmpl"
+  [ -f "$tmpl" ]
+  local spec="$BATS_TEST_TMPDIR/seed.yaml"
+  sed 's/{{PROJECT_NAME}}/Demo Project/g' "$tmpl" > "$spec"
+  # An unsubstituted placeholder would make the lint below vacuous or wrong.
+  run ! grep -q '{{' "$spec"
+  # Render-fidelity guard. sed models render.zsh's PLACEHOLDER substitution and
+  # nothing else — render.zsh also strips non-applicable `# --- TAG-START ---` /
+  # `-END ---` blocks. The seed carries none today, so this asserts the stand-in
+  # is still faithful: the day the template grows a conditional block, sed emits
+  # every branch at once and this case would lint an artifact no bootstrapped
+  # repo ever receives — in either direction (a spurious red, or a green while
+  # every new repo is born red, which is the defect this case exists to catch).
+  run ! grep -qE -- '# --- [A-Z_-]+-(START|END) ---' "$spec"
+  # Premise, so the assertion cannot go green against an empty or emptied spec.
+  run grep -cE '^[[:space:]]+get:' "$spec"
+  [ "$output" -ge 1 ]
+  # Zero ERROR findings from the whole ruleset, not just the seven: the seed is
+  # what a new repo inherits, so any error-severity rule firing on it is the
+  # same born-red defect regardless of which release minted the rule.
+  #
+  # SCOPE LIMIT, stated rather than implied: this lints the LOCAL ruleset, not
+  # the pinned artifact a bootstrapped repo actually extends — and this lane is
+  # outside the default gate and needs the network. So it proves the seed is
+  # clean against the ruleset in this tree, which is the drift that arrives with
+  # a rule change here; it does not prove it THROUGH the pin. Closing that would
+  # mean giving check-styleguide-pin.zsh a third subject (a follow-up, not PR-B).
+  run lint_path_json "$spec"
+  run jq -e '[.[] | select(.severity == 0)] | length == 0' <<<"$output"
+  [ "$status" -eq 0 ]
 }
 
 @test "tc-corner-ops-v1-frozen-major-no-new-rule-findings: the frozen major is untouched by them too" {

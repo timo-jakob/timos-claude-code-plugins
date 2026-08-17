@@ -9,13 +9,16 @@ repo, and keep the pin current **by hand** — no bot bumps it for you
 a freshly bootstrapped repo already has it and there is nothing to do here. This
 page is for a repo bootstrapped **before** the shim existed — it still carries
 the [#692](https://github.com/timo-jakob/timos-claude-code-plugins/issues/692)
-starter ruleset, which enforces **at error severity** only two of the eight ids
-that the pinned `styleguide-v1.0.0` carries (the `operationId` pair), carries
-three more of them at `warn`, and carries none of the org-specific ones — and
-for the day a bump lands. The denominator is that version's, not the
-repository's: the
-[reference page](../reference/api-styleguide.md) documents rules that are in the
-source file but not yet in any tag, and marks them *pending*.
+starter ruleset, which enforces **at error severity** only two of the ids the
+pinned ruleset carries (the `operationId` pair), carries three more of them at
+`warn`, and carries none of the org-specific ones — and for the day a bump
+lands. The pinned version is named **once** in this file, in the `extends` block
+below: that URL is what Renovate's custom manager and the repo-wide pin sweep
+both match, and a version restated in a sentence is invisible to both, so it
+would survive the very PR that moved the pin. For the rule set itself, read the
+[reference page](../reference/api-styleguide.md)'s table — and note it documents
+the ruleset in *this* repository, so a rule that is in the source file but not
+yet in any tag is marked *pending* there.
 
 ## Pin the ruleset
 
@@ -23,7 +26,7 @@ Replace your repo's `.spectral.yaml` with the shim — the whole file:
 
 ```yaml
 extends:
-  - https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v1.0.0/styleguide/spectral/ruleset.yaml
+  - https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v2.0.0/styleguide/spectral/ruleset.yaml
 ```
 
 That is the entire configuration. The rules live in the published artifact, not
@@ -135,7 +138,37 @@ see [When the pin cannot be fetched](#when-the-pin-cannot-be-fetched) below.)
   when you have time.
 - **MAJOR** — a new or stricter `error` rule, or a renamed rule id. **This one
   can redden your build**, and that is exactly what the major is telling you.
-  Expect to fix spec violations in the bump PR itself.
+  Expect to fix spec violations in the bump PR itself — with the carve-out
+  below.
+
+**Some fixes are themselves BREAKING, and those do not belong in the bump PR.**
+A remediation can be a breaking contract change in its own right: adding a
+`required: true` `Idempotency-Key` parameter to every POST/PATCH
+(`org-idempotency-key-on-post-patch`) is `oasdiff`'s
+`new-required-request-parameter`, and turning a bare-array `200` into the
+`{items, next_cursor}` envelope (`org-pagination-envelope`) changes a response
+shape. `contracts-semver` rejects both as in-place edits to a live major, so the
+obvious move — fix it where the linter points — reds the PR on a *different*
+gate. When a fix is breaking: do **not** edit the live major, and do **not**
+reach for an `overrides:` block (the
+[styleguide](../reference/api-styleguide.md) bans silencing outright — it hides
+a scoping bug instead of fixing it). Two options, and the choice is not
+arbitrary:
+
+- **Ship a new major directory** carrying the fixed shape alongside the pin
+  bump — the default, and the only one that keeps CI green. Prefer it whenever
+  the live major has consumers. A new major is more than a directory: it needs
+  its own `info.version` major and `servers:` URL major (the version triangle in
+  your `CONTRACTS.md`), plus the adapter and route wiring.
+- **Land the bump with `contracts-lint` knowingly red** — only with a human's
+  explicit approval, only with the follow-up issue filed and linked, and say so
+  in the PR body. This is a deliberate exception to the green-CI rule, not a
+  fallback you may take on your own.
+
+Only editorial and additive fixes belong in the bump PR itself — and even those
+need a version bump of that major's `info.version`: at least PATCH for an
+editorial fix, at least MINOR for an additive one, or `contracts-semver` reds
+the PR for a different reason than the one you were fixing.
 
 **Before a MAJOR bump, check your `contracts-lint.yml` too.** On a repo whose
 copy predates [#1330](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1330)
@@ -146,8 +179,11 @@ the workflow, not the frozen spec: see
 [Check your own `contracts-lint.yml` first](#check-your-own-contracts-lintyml-first)
 above.
 
-Let CI decide the merge either way: `contracts-lint` runs against the proposed
-pin, so a major that breaks your spec fails the bump PR rather than `main`.
+**When every remediation is editorial or additive, let CI decide the merge:**
+`contracts-lint` runs against the proposed pin, so a major that breaks your spec
+fails the bump PR rather than `main`. The one exception is the breaking-fix
+carve-out above, whose second option lands a knowingly-red bump — and that one
+is a human's call, never CI's.
 
 ## When the pin cannot be fetched
 
