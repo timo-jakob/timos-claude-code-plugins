@@ -464,6 +464,104 @@ when its Deployment has one replica and no PodDisruptionBudget.
 | `kubernetes-manifest-fixer` | opus | Mechanical `manifest_validation` fixes (schema errors, formatting drift), verified by re-running the failing check. Escalates anything that would change **what gets deployed** — image tags, replica counts, resource values, RBAC subjects, namespace targets |
 | `kubernetes-policy-triage` | opus | Kyverno results, three ways: fix the manifest when the policy is right, **escalate rather than edit** a policy that is wrong (it encodes an architectural decision the consuming repo owns), and write `kyverno test` fixtures for an untested policy. Never adds policies |
 
+## development-opentofu
+
+Topic plugin for **cloud provisioning** — `.tf` / `.tf.json` sources, module
+structure, provider and version constraints, backend and state configuration,
+and `.tfvars` hygiene. It is the sibling of `development-kubernetes` on the
+other side of the cluster boundary: that plugin owns what runs *in* a cluster,
+this one owns the modules that *create* it. The two own disjoint file sets, so a
+repo holding both **will** detect both topics and run both **maintenance**
+pipelines, once #1160 registers the marker that makes the second topic
+detectable. The CI half is narrower: the two bootstrap-rendered workflows will
+share three job ids, **and** at most one of them is rendered per repo, which is
+what makes that safe — the slice that renders both (disambiguating those ids) is
+still open. Like
+`development-kubernetes`, it can also be **primary**: a provisioning repo has no
+application language, and the primary/auxiliary model already permits a topic to
+hold that slot.
+
+The split between the two is the **file set**, not the resource kind. Cluster
+resources written *in HCL* — a `kubernetes_manifest`, a `helm_release` — live in
+a `.tf` file the sibling never reads, so they stay here; only manifests, charts,
+overlays and Argo CD resources go there. Read as a *resource-kind* rule instead,
+a privileged pod declared in HCL would be deferred by this plugin and never reach
+the sibling — reviewed by neither.
+
+**One plugin covers OpenTofu and Terraform-compatible HCL**, on the
+`development-javascript` precedent — shared tooling, the same `.tf` extension,
+~90% shared content. It is named for OpenTofu because that is the MPL-2.0 tool
+the family recommends; BUSL-licensed Terraform is **supported, not endorsed**.
+The name states a recommendation, not a restriction on what it will read.
+
+Its defining split is **mechanism here, policy in the consumer**. The plugin
+knows *how* to run the checks; the repo under test declares *what* to check for,
+at `policies/conftest/**/*.rego` — Conftest being the engine because it parses
+HCL2 *and* plan JSON, so one binary covers both the static stage and the
+deferred plan stage. When no policy file matches, the policy step skips and
+reports "no policies declared" — that absence is never an error, because a
+public plugin has to work in a repo with no opinions yet. When policies *are*
+declared, violations fail, and an untested policy directory is itself a finding —
+a **maintenance** finding, not a CI failure, because an untested policy usually
+matches nothing and so passes everything while looking like it works. Note which
+tool sees it: `conftest verify` **exits green** over a test-less directory, so
+the rendered `policy` job is silent on that state and the defect travels solely
+under the maintenance gather's `policy` key (→ `opentofu-policy-triage`) — one
+defect, one carrier. A declared set Conftest **cannot
+evaluate** — a `.rego` that will not parse, one in a package the step never
+invokes, or a failing `conftest verify` run — fails as well: no-matching-file is
+the only thing that skips, or the check would be green over unenforced policies.
+
+The plugin ships **no policies of its own** with exactly one exception, and the
+exception is a first-class check rather than a policy: **state encryption**.
+Unencrypted state holds provider credentials, generated passwords and connection
+strings in plaintext, and a rule that lives only in a consumer's policy set is a
+rule the consumer can forget to write. What is required of every consumer is
+that state is encrypted *at rest* — not one particular artifact: the
+`terraform { encryption { … } }` block is OpenTofu-native, and a Terraform-dialect
+repo satisfies the same requirement at the backend, so the check is dialect-aware
+rather than demanding a block that dialect rejects. It also binds only where the
+repo owns state: a reusable-module library is `source`d by someone else's root,
+so it has nothing to encrypt and the check reports nothing there. That keys on
+module-library shape, never on backend absence alone — a *root* with no
+`backend` block runs on the implicit local backend and owns a plaintext state
+file, which is exactly what the opinion exists to catch. An
+**unpinned provider** is
+likewise a finding, not a style note — the same source producing different
+infrastructure on different days is the IaC equivalent of an irreproducible
+build; that is a severity ruling on `tflint`'s existing rule, not a second
+built-in check. Everything else generic belongs to `tflint` and `trivy`.
+
+**Static checks first; the plan-based stage will ship disabled.** Static analysis
+needs no credentials and **will run** on every pull request (credential-free
+because `tofu init` runs with `-backend=false`; see ARCHITECTURE). Plan analysis sees
+what actually matters — *this destroys the database* — but needs cloud
+credentials and state access in a pull-request-triggered workflow, so the
+generated pipeline **will contain** that stage behind a repository variable
+defaulting off: enabling it later is configuration, not a redesign. There is deliberately **no approver
+agent** — a provisioning change can destroy state that no rollback recovers, so
+a human approves.
+
+**What's built (v0.1):** the ownership boundary and the marketplace
+registration
+([#1159](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1159)) —
+and nothing executable yet. Getting the boundary wrong is the expensive mistake,
+so it was settled before anything filled it. The rest of epic
+[#1158](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1158)
+follows: the gather script, `opentofu` topic marker and maintenance dispatcher
+([#1160](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1160)),
+the four agents and the review panel
+([#1161](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1161)),
+the bootstrap check pipeline
+([#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)),
+and the self-contained test fixtures
+([#1163](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1163)).
+Until #1160 lands there is no `opentofu` topic marker, so a repo declaring
+`primary: opentofu` is treated as a stale declaration; and as with the sibling,
+the check **pipeline** will not be here — it **will ship** as a bootstrap
+template in the generic `development` plugin, the same boundary that keeps
+detection there.
+
 ## development-go
 
 Go maintenance — a **full-maintenance tier**, mirroring `development-python` /
