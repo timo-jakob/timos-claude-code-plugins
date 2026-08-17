@@ -24,6 +24,12 @@
 # `bats (macos-latest)` CI leg and another on `bats (ubuntu-latest)`. The ban is
 # what makes the suite say the same thing on every platform.
 #
+# That macos-latest leg is DEACTIVATED as of #1407 (#1408 tracks restoring it).
+# It is named above as the ORIGIN of the divergence, not as its enforcement:
+# this ban is repo-wide, runs on ubuntu, and is unaffected. It is also now the
+# only automated thing standing between an inert `[[ ]]` and main, since bash
+# 3.2 is otherwise exercised only on the maintainer's Mac before a push.
+#
 # This is the same defect class as the bare-`!` negation guarded by #829 in
 # tests/no-inert-negative-assertions.bats — that guard's own comment used to
 # wave `[[ ]]` through, which is what let them accumulate: 285 inert `[[ ]]`

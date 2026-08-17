@@ -18,6 +18,13 @@
 # surfaced it here, by reddening the premise tests when they pinned the macOS
 # outcome as universal.
 #
+# The macos-latest leg named above is DEACTIVATED as of #1407 (#1408 tracks
+# restoring it), so read it as why this ban exists, not as what enforces it
+# today. The ban matters MORE while the lane is down, not less: bash 3.2 is now
+# exercised only on the maintainer's Mac before a push, so a newly-inert
+# assertion would reach main unchallenged. This ban is repo-wide and runs on
+# ubuntu, so it keeps holding with the lane off.
+#
 # Verified empirically: bats 1.10.0/1.11.0/1.12.0/1.13.0/1.14.0 ALL report `ok`
 # under bash 3.2.57 and `not ok` under bash 4.4/5.2 — the bats version is not the
 # variable, the bash version is. `[ ... ]` in the same position fails correctly

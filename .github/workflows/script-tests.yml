@@ -5,10 +5,22 @@ name: script-tests
 # only for local isolation). Triggered when the scripts under test, the tests, or
 # this workflow change.
 #
-# Runs on BOTH ubuntu (bash 5) and macOS (Apple's stock /bin/bash 3.2). macOS is
-# the primary platform for bootstrap/maintenance, and a whole class of bash-4-isms
-# (e.g. `mapfile`, which broke detect-stack.sh in #292) pass on bash 5 but abort
-# on 3.2. The macOS lane closes that gap. See #293.
+# Runs on ubuntu (bash 5) only. The macOS lane (Apple's stock /bin/bash 3.2) is
+# DEACTIVATED, not removed — see the matrix below and #1408 to re-enable.
+#
+# It exists because macOS is the primary platform for bootstrap/maintenance, and
+# a whole class of bash-4-isms (e.g. `mapfile`, which broke detect-stack.sh in
+# #292) pass on bash 5 but abort on 3.2. That gap is real and the lane is the
+# only automated thing that closes it (#293). It is deactivated anyway, as an
+# explicit, temporary, cost-driven decision: macOS runners bill at 10x, the leg
+# had grown to 22–24 min against a 25-minute cap and began tripping it (#1407),
+# and the maintainer develops on a Mac and runs the full suite locally before
+# every push — so the 3.2 gap is covered by a human habit rather than by CI.
+#
+# What that costs, stated plainly so re-enabling is a decision and not a
+# formality: a bash-4-ism reaching main now depends on that habit holding, and
+# it will not be caught for any contributor who lacks it. #1408 tracks putting
+# the lane back.
 
 on:
   pull_request:
@@ -131,7 +143,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # DEACTIVATED, not removed (#1407): restore `macos-latest` to this list
+        # to bring the bash-3.2 lane back — that one edit is the whole re-enable,
+        # which is why every macOS-specific step below is left in place and
+        # working rather than deleted. #1408 tracks doing it.
+        #   os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     # 25, not 15 (#1206). The macos leg is the binding one and it had been
     # running at 94% of the old budget: 14m05s against 15m on the last green
@@ -146,6 +163,16 @@ jobs:
     # new value is ~1.7x the measured need, which absorbs runner variance while
     # still bounding a genuine hang. Re-measure when it next gets close: the
     # figure to watch is the macos leg's wall time on a green main run.
+    #
+    # STILL 25 after the macos lane was deactivated (#1407) — but the number now
+    # means something different, so do not read the paragraph above as current.
+    # The binding leg is ubuntu, which runs the same suite in ~15 min, so 25 is
+    # ~1.7x by the same rule rather than by coincidence. What went away is the
+    # leg that was at 97% of budget, not the pressure: the suite still grows
+    # every story. If ubuntu approaches 25 the answer is a re-measure here, not
+    # a nudge — and if #1408 restores the macos leg, this budget must be
+    # re-derived from THAT leg again, because it will immediately be binding at
+    # ~29 min on a slow runner and would trip 25 on arrival.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
