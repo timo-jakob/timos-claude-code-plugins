@@ -346,6 +346,12 @@ seed_awaiting() {
   seed_awaiting
   mkdir -p "$R/.review"
   chmod 555 "$R/.review"          # read-only dir: the round's cp cannot land
+  # tests/Dockerfile runs the suite as root, where `chmod 555` is not a barrier
+  # at all — root writes into a read-only directory regardless, so the copy
+  # succeeds and the failure path this test exists for never executes (#1360).
+  # The EFFECT test rather than a uid test: it also covers CAP_DAC_OVERRIDE and
+  # root-squashed mounts, and `-w` is what root actually bypasses here.
+  if [ -w "$R/.review" ]; then skip "running as a user that bypasses directory permissions"; fi
   printf '%s' "$CRIT2" > "$F"
   step --resume
   [ "$status" -eq 1 ]

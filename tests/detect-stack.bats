@@ -2085,7 +2085,12 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   [ "$(missing_has "$out" ".github/workflows/scorecard.yml")" = "number" ]
 }
 
-@test "detect-stack #1154: a quoted, CRLF-authored `kubernetes` still reaches its arm" {
+# NO BACKTICKS in the description. bats *evaluates* every @test description to
+# resolve variable references, so a backticked word runs as command substitution:
+# this one emitted `kubernetes: command not found` to stderr once per test in
+# this file and silently STRIPPED the word from the test's own name
+# (#1360). tests/no-inert-permission-barriers.bats sweeps for it.
+@test "detect-stack #1154: a quoted, CRLF-authored 'kubernetes' still reaches its arm" {
   # the quote-stripping arm of the parser, and the ordering that makes it work:
   # comment/trailing whitespace are stripped END-ANCHORED first, so a CRLF file's
   # trailing \r cannot defeat the closing-quote strip.

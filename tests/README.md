@@ -10,8 +10,14 @@ PR #259) showed they need.
 ## Run them
 
 ```sh
-# Isolated in Docker (default) — won't touch your machine, except the shared
-# IaC toolchain cache described below:
+# Isolated in Docker (default) — the container gets four mounts in a worktree:
+# your repo root at /work and the IaC toolchain cache, both read-WRITE, and your
+# git dir + git common dir read-only. In a plain clone those last two resolve to
+# the same path and collapse into one, so it is three. The read-only git mounts
+# protect a
+# WORKTREE checkout only: in a plain clone `.git` sits inside /work and is
+# reachable read-write, which is why tests must never run a mutating `git`
+# command against the mounted tree. Needs the tree to be a git checkout:
 tests/run-script-tests.zsh
 
 # Directly on the host — host bats, the mode CI runs in. The toolchain it needs
@@ -27,7 +33,7 @@ tests/run-script-tests.zsh
 tests/run-script-tests.zsh --local
 ```
 
-**One exception to that isolation, in both modes.** The `kubernetes-ci`
+**Three exceptions to that isolation.** The first, in both modes: the `kubernetes-ci`
 real-tool harness needs a **pinned** IaC toolchain, and `tests/iac-tools.zsh`
 fetches roughly 100 MB of it from the network into
 `${IAC_TOOLS_CACHE:-${XDG_CACHE_HOME:-~/.cache}/timos-claude-code-plugins/iac-tools}/<os>-<arch>/`
@@ -36,7 +42,32 @@ under `~/.cache`, and `IAC_TOOLS_CACHE` overrides both (it is also how the
 Docker mode points the container at the mounted host cache). The Docker mode creates that directory on the **host** and
 bind-mounts it into the container — the `os-arch` leaf is what lets one cache
 root serve both — so the container downloads once per platform rather than once
-per run. Nothing else leaves the container.
+per run. The second is **Docker-mode only**: the runner also bind-mounts the
+repo's **git store** — both `git rev-parse --git-dir` and `--git-common-dir`,
+each at its own host-absolute path, **read-only** (in a plain clone the two
+resolve to the same path, so it is one mount). Without it a linked **worktree**
+checkout has no usable git inside the container at all — its `.git` is a *file*
+pointing at a host path the container cannot see — and every `git` call the
+suite makes fails. With it, the container can *read* part of your git store.
+The third is **PyPI**, described below with the rest of the network story: two
+`detect-stack.bats` cases `pip install` into a venv, and unlike the IaC toolchain
+that traffic is not cached. All three are in-bound, so *nothing the tests do
+escapes to the host* — but do not read the count as "the lane can run with its
+network closed": it needs the two release hosts **and** PyPI.
+
+**What `:ro` does and does not buy.** It denies writes *through those mounts*,
+which is the whole store only in a **worktree**, where both dirs sit outside the
+repo root. In a **plain clone** `.git` is inside the repo root, and the repo root
+is mounted read-**write** at `/work` — so `/work/.git` is the copy the
+container's git actually resolves, and the read-only mounts grant no protection
+there. The rule is the same either way: **tests must never run a mutating `git`
+command against the mounted tree.**
+
+The Docker mode also now **requires the tree to be a git checkout**: it resolves
+the two git dirs before building the image and exits 1 with a named error —
+see the pre-flight at the top of `run-script-tests.zsh` for the exact set, which
+is where it can't drift — rather than letting a bare `fatal: not a git
+repository` surface from inside the container.
 
 Four of the six pins (`kubeconform`, `kube-linter`, `kyverno`, `yq`) are read
 **from the workflow template**, so bumping the template moves the harness with
@@ -82,6 +113,14 @@ diagnose a red as a harness bug:
   template would help consumers identically, and is deliberately out of this
   story's scope.)
 
+**A third thing needs the network, and it is not cached: PyPI.** The two
+`verify-python-state:` cases in `detect-stack.bats` call
+`verify-python-state.sh`, which creates a venv and runs `pip install`. They have
+always done so on the host lane; since #1360 gave the image `python3-venv` and
+`python3-pip` they do it in Docker too, and there is no cache for it — with no
+network they fail with pip's own error. That is the price of not stubbing the
+toolchain: a stubbed test stops proving the thing it exists to prove.
+
 CI runs them on every PR via `.github/workflows/script-tests.yml` (natively — the
 runner is already disposable; Docker is only for local isolation). Its entry
 point is not this script: the workflow drives
@@ -94,7 +133,8 @@ runs the whole suite once in parallel and exits with bats' real status.
 | --- | --- |
 | `Dockerfile` | Disposable image — the declared test dependencies; see the file's own header rather than a list that drifts |
 | `run-script-tests.zsh` | Runner — Docker by default, `--local` for host bats |
-| `run-script-tests.bats` | Tests the runner's Docker wiring — the IaC toolchain cache mount, its precedence and its guards (#1199) |
+| `run-script-tests.bats` | Tests the runner's Docker wiring — the IaC toolchain cache mount, its precedence and its guards (#1199); the read-only git dir + git common dir mounts, in a plain clone and in a worktree (#1360) |
+| `no-inert-permission-barriers.bats` | Repo-wide suite lint (#1360) — bans an *unguarded* permission-barrier `chmod` (root bypasses it, so the denial path never runs) and a backticked `@test` description (bats evaluates descriptions) |
 | `assertions.bash` | Shared assertion helpers (`load assertions`) — the sanctioned way to assert (#1011) |
 | `roster.bash` | Derives the helper roster from `assertions.bash` (`load roster`) — the single source both guards use (#1067) |
 | `acceptance/` | Outside-in cases against a **running** service built from a bootstrap template — deliberately NOT in the default gate (`bats` does not recurse); see [`acceptance/README.md`](acceptance/README.md) and #243 |
@@ -166,3 +206,61 @@ misuse (an uncompilable `matches` pattern included), and on a genuine mismatch
 prints the needle and a truncated haystack to **stderr** — so a CI failure shows
 what the value actually was, not just what it should have contained. More scripts
 (the bash gather, helpers) are follow-on increments of #263.
+
+**Guard every permission-barrier `chmod`.** The Docker lane runs as **uid 0**,
+where `chmod` is not a barrier at all: root reads a `chmod 000` file and writes
+into a `chmod 555` directory, so the denial path your test exists to exercise
+never executes. Pair any mode that denies the **owner** read or write with a
+root-bypass guard — either idiom:
+
+```sh
+[ "$(id -u)" -ne 0 ] || skip "chmod proves nothing as root"    # the uid test
+
+chmod 000 "$F"                                                 # the effect test —
+if [ -r "$F" ]; then skip "a user that bypasses file permissions"; fi   # AFTER the chmod
+chmod 555 "$D"
+if [ -w "$D" ]; then skip "a user that bypasses directory permissions"; fi
+```
+
+The effect test is the stronger of the two — it also covers `CAP_DAC_OVERRIDE`
+and root-squashed mounts — but it has two preconditions the uid test does not:
+it must come **after** the `chmod` — on a *later line*, not merely later on the
+same line — and it must test **the permission the barrier removed, on the same
+path** (`-r` for a mode denying owner read, `-w` for one denying owner write). A
+guard that can fire *before* the barrier is set skips the test on every lane and
+proves nothing.
+
+`no-inert-permission-barriers.bats` sweeps every tracked `tests/*.bats` and
+fails on an unguarded barrier (#1360). It enforces the **ordering** precondition
+— an effect marker counts only once a barrier has been seen in the same
+`@test`, so an effect guard written above every `chmod` in its test is reported
+unguarded — but **not** the path/permission half: it does not check that the
+guard tests the same path, or `-r` versus `-w`. Nor does it look outside a
+`@test` block, so a barrier in `setup()`, `teardown()` or a helper is out of
+scope and must be guarded by hand. **A green sweep proves a guard is present and
+correctly ordered, never that it tests the right thing.** It is a **textual**
+detector, so it
+recognises exactly two shapes: a line whose `id -u` **precedes** its `skip` (or
+opens an `if` whose body carries one), and an `if` whose condition is a
+`[ -r … ]` / `[ -w … ]` test and whose body carries `skip`. An `id -u` inside a
+skip's own *message* is not a guard. A semantically
+identical guard written another way — `[ "$EUID" -ne 0 ]`, a `require_nonroot`
+helper — is fine shell but **will** be reported unguarded, so write it inline in
+one of those two shapes. Conversely `[ -x "$BIN/tool" ] || skip …` is *not*
+accepted as a guard, because that is how a dependency skip is written and
+accepting it would clear every barrier beside it.
+
+One carve-out worth knowing before you meet it: a `chmod` written into a fixture
+by `printf` is reported as a site — at this granularity it is indistinguishable
+from code. The fix is to move the fixture into a **heredoc** (heredoc bodies are
+skipped as data), **never** to add a root-bypass `skip` to a test that is not
+about permissions — that would silently drop its real coverage in the Docker
+lane.
+
+**Never put a backtick in a `@test` description.** bats *evaluates* every
+description to resolve variable references, so a backticked word runs as command
+substitution: it prints `<word>: command not found` to stderr once per test in
+the file and silently strips the word from the test's own name. Quote it some
+other way (`'kubernetes'`). The same sweep pins this — and it does **not** skip
+heredoc bodies, so plant fixture `@test` lines with `printf`, not in a heredoc,
+or the sweep will read them as your file's own descriptions.

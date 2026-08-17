@@ -22,9 +22,12 @@ nothing under `tests/acceptance/` runs in the normal suite or in `script-tests`.
 That is deliberate, not an oversight:
 
 - these cases exercise a **running service** built from a bootstrap template, so
-  they need a toolchain and a package registry the offline suite deliberately
-  does not have (`tests/Dockerfile` runs offline; `tests/ops-api-language-payloads.bats`
-  states the same rule for every ops-api payload);
+  they need a toolchain the default suite deliberately does not have
+  (`tests/ops-api-language-payloads.bats` states the same rule for every ops-api
+  payload). Note the default suite is not literally offline — it fetches the
+  pinned IaC toolchain, and since #1360 the two `verify-python-state:` cases
+  reach PyPI in the container too — but that is a short, declared list, not a
+  package registry standing up a running service;
 - **standing up this tier and its CI execution is #243's concern.** A story that
   writes cases into the tree does not also get to wire the runner.
 
