@@ -44,7 +44,19 @@ snapshot="$(git -C "$repo_root" show "${FIXTURE_COMMIT}:${FIXTURE_PATH}" 2>/dev/
 # Guard the fixture's premise: the snapshot must still contain the defective
 # terminal case. If this ever fails, the fixture's known answer is gone and
 # the guard failing loudly beats a silently meaningless PASS/FAIL.
-print -r -- "$snapshot" | grep -q "$DEFECT_MARKER" \
+#
+# A here-string, NOT `print -r -- "$snapshot" | grep -q` (#1404). `grep -q` exits
+# at the first match, so with the payload still being written the writer takes
+# SIGPIPE — and under `pipefail` that turns a SUCCESSFUL match into a non-zero
+# pipeline, failing the guard in exactly the case it exists to accept. Whether
+# the writer has finished is decided by whether the payload fits the pipe buffer:
+# the snapshot is ~39 KB against Linux's default 64 KB, so it normally does —
+# until a process exceeding `fs/pipe-user-pages-soft` gets new pipes with a
+# single 4 KiB page, which `bats --jobs $(nproc)` over the full suite reaches.
+# That reddened `bats (ubuntu-latest)` while macOS and every sequential run
+# stayed green. The snapshot is already in a variable, so there is nothing to
+# stream and no pipe to get this wrong.
+grep -q "$DEFECT_MARKER" <<< "$snapshot" \
   || { print -u2 "error: snapshot at ${FIXTURE_COMMIT} lacks the #798 defect marker"; exit 3; }
 
 local target

@@ -67,3 +67,31 @@ teardown() {
   run env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" "$S"
   [ "$status" -eq 3 ]
 }
+
+# --- #1404: the marker guard must not stream through a pipe ------------------
+# `print -r -- "$snapshot" | grep -q "$MARKER"` under `pipefail` reports a
+# SUCCESSFUL match as a failed pipeline whenever the writer is still writing
+# when `grep -q` exits at the match: the writer takes SIGPIPE and pipefail
+# adopts its status. That reddened `bats (ubuntu-latest)` on main while macOS
+# and every sequential run stayed green, because the ~39 KB snapshot fits
+# Linux's default 64 KB pipe until `fs/pipe-user-pages-soft` is exceeded and
+# new pipes get one 4 KiB page — which the full suite under `--jobs $(nproc)`
+# reaches. The behavioural tests above cannot catch a regression here: they pass
+# whenever the payload happens to fit, which is almost always. So pin the
+# construct itself.
+@test "the marker guard reads the snapshot without a pipe (#1404)" {
+  local guard
+  # the guard line: whatever feeds the DEFECT_MARKER grep
+  guard="$(grep -n 'DEFECT_MARKER"' "$S" | grep -v '^[0-9]*:readonly' || true)"
+  [ -n "$guard" ]
+  # NEGATIVE: no writer piped into the match. Anchored on the pipe-into-grep
+  # shape rather than the word `grep`, so a rewrite that keeps a pipe is caught
+  # however it spells the writer.
+  if printf '%s\n' "$guard" | grep -qE '\|[[:space:]]*grep'; then
+    printf 'marker guard pipes into grep — see #1404:\n%s\n' "$guard" >&2
+    return 1
+  fi
+  # POSITIVE: and it really does still check the marker, so the negative above
+  # cannot be satisfied by deleting the guard outright.
+  printf '%s\n' "$guard" | grep -qE 'grep -q .*DEFECT_MARKER'
+}
