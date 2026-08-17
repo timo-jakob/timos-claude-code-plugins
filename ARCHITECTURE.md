@@ -333,7 +333,11 @@ model, and the children of #684 that deliver each piece:
 - **Deprecation lifecycle: active → deprecated (sunset) → retired
   (#695/#707/#708).** `deprecated: true` + `x-sunset: <date>` in the spec (a
   versioned contract change); `Deprecation` (RFC 9745) + `Sunset` (RFC 8594)
-  runtime headers; the consumer client generator maps `deprecated: true` to
+  headers — **declared in the spec** on the newest major, where the org
+  styleguide's `org-deprecation-sunset-headers` lints them at `error` (#944),
+  and runtime-only on a frozen major, where the freeze wins because adding them
+  is an additive change `check-contracts-semver.sh` rejects; the consumer client
+  generator maps `deprecated: true` to
   TypeScript `@deprecated` so ESLint warns at every call site; a maintenance
   finding fires when a major is served past its sunset, and retirement deletes
   the adapter + spec and the gateway returns 410.

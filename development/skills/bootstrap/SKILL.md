@@ -1827,12 +1827,19 @@ The installed set:
   files) — never a required context, same as contracts-lint.
 - `CONTRACTS.md` (#695) — the top-level **contract + policy index**: URL-path
   versioning, the semver-triangle rules, and the **deprecation lifecycle** (spec
-  signal `deprecated: true` + `x-sunset`; runtime `Deprecation` (RFC 9745) +
-  `Sunset` (RFC 8594) header advice; a **minimum-deprecation-window** knob,
+  signal `deprecated: true` + `x-sunset`; the `Deprecation` (RFC 9745) +
+  `Sunset` (RFC 8594) response headers, which must be **declared in the spec**
+  and then wired at runtime; a **minimum-deprecation-window** knob,
   default 6 months). The deprecation gate itself is enforced by the **pinned org
   ruleset**'s `org-deprecated-operation-has-sunset` rule (#695 via #689), scoped
-  to **operations only** — nothing is added to `.spectral.yaml`, which carries no
-  rules of its own. Documentation/policy — never provenance-stamped.
+  to **operations only**, and — since `styleguide-v2.0.0` (#944) —
+  `org-deprecation-sunset-headers`, which requires both headers on every `2xx`
+  of a deprecated operation, so header wiring alone leaves `contracts-lint` red.
+  That one binds the **newest** major only (the one `contracts-lint` lints,
+  #1330); on a **frozen** major the freeze wins and the headers stay
+  runtime-only, since adding them there is an additive change
+  `check-contracts-semver.sh` rejects. Nothing is added to `.spectral.yaml`,
+  which carries no rules of its own. Documentation/policy — never provenance-stamped.
 - `contracts/ops/v2/openapi.yaml` (#688, v2 per #1330) — the **org-standard ops
   surface**
   (`/info`, aggregate `/health`, split `/health/live` + `/health/ready` K8s

@@ -12,20 +12,25 @@ document-wide `deprecation-has-sunset` warning, and none of the org-specific
 rules — until it adopts the pin, see
 [Adopt the API styleguide](../how-to/adopt-the-api-styleguide.md).
 
-**Release window — the last seven rules are not published yet.** This page
-documents the ruleset **in this repository**, which runs ahead of the tag. The
-currently published major carries **eight** rule ids; the seven
-[pagination](#pagination) and [header](#headers) rules below exist in the source
-file and reach no consumer until the next MAJOR is cut and the pin bumped —
-[#944](https://github.com/timo-jakob/timos-claude-code-plugins/issues/944) ships
-as two PRs for exactly this reason. The live version is whatever the shim's
-`extends` names; see
-[Adopt the API styleguide](../how-to/adopt-the-api-styleguide.md).
+This page documents the ruleset **in this repository**. It currently matches the
+published major exactly: every rule id below is carried by the pinned artifact,
+including the [pagination](#pagination) and [header](#headers) rules
+([#944](https://github.com/timo-jakob/timos-claude-code-plugins/issues/944)).
 
-**Do not pin the next MAJOR before its tag exists** — jsDelivr serves a 404 to
-every `contracts-lint` run in a repo that pins a tag nobody has cut, and the
-failure surfaces in that repo rather than this one. Rows in the table below are
-marked *pending* until then.
+**No version is named here on purpose.** The pin is quoted at exactly three
+sites — the bootstrap shim, this ruleset's own header, and
+[Adopt the API styleguide](../how-to/adopt-the-api-styleguide.md) — and both
+guards that keep those three in lockstep (the repo-wide sweep and Renovate's
+custom manager) key on the **jsDelivr URL shape**, not on prose. A version
+restated in a sentence is invisible to both, so the next bump would leave it
+claiming a major that is no longer pinned, with nothing red. The live version is
+whatever the shim's `extends` names.
+
+**Do not pin a MAJOR before its tag exists** — jsDelivr serves a 404 to every
+`contracts-lint` run in a repo that pins a tag nobody has cut, and the failure
+surfaces in that repo rather than this one. When this page runs ahead of the tag,
+the rows in the table below are marked *pending* until the tag is cut; no row is
+pending today.
 
 `contracts-lint` runs it against **both** contract families — the business
 contract `contracts/vN/openapi.yaml` **and** the org ops surface
@@ -74,24 +79,23 @@ convention expressed as two; cursor pagination needs three).
 | `org-deprecated-operation-has-sunset` | A deprecated operation declares its sunset date | Codified, re-scoped |
 | `org-resource-naming` | Paths are kebab-case nouns, never verbs (plurality: convention only — see [Resource naming](#resource-naming)) | Newly minted |
 | `org-problem-json-errors` | Errors are RFC 9457 problem documents | Newly minted |
-| `org-pagination-cursor-params` | A collection GET takes `cursor` + `limit` | Newly minted, **pending** |
-| `org-pagination-no-offset-params` | …and never `page` / `offset` / their friends | Newly minted, **pending** |
-| `org-pagination-envelope` | …and returns `{items, next_cursor}`, never a bare array | Newly minted, **pending** |
-| `org-idempotency-key-on-post-patch` | POST and PATCH take a required `Idempotency-Key` | Newly minted, **pending** |
-| `org-retry-after-on-throttled` | A 429 — and a non-ops 503 — returns `Retry-After` | Newly minted, **pending** |
-| `org-deprecation-sunset-headers` | A deprecated operation returns `Deprecation` + `Sunset` | Newly minted, **pending** |
-| `org-no-bespoke-correlation-headers` | Correlation rides `traceparent`, never `X-Request-Id` | Newly minted, **pending** |
+| `org-pagination-cursor-params` | A collection GET takes `cursor` + `limit` | Newly minted |
+| `org-pagination-no-offset-params` | …and never `page` / `offset` / their friends | Newly minted |
+| `org-pagination-envelope` | …and returns `{items, next_cursor}`, never a bare array | Newly minted |
+| `org-idempotency-key-on-post-patch` | POST and PATCH take a required `Idempotency-Key` | Newly minted |
+| `org-retry-after-on-throttled` | A 429 — and a non-ops 503 — returns `Retry-After` | Newly minted |
+| `org-deprecation-sunset-headers` | A deprecated operation returns `Deprecation` + `Sunset` | Newly minted |
+| `org-no-bespoke-correlation-headers` | Correlation rides `traceparent`, never `X-Request-Id` | Newly minted |
 
-**Pending** means exactly what the release-window note above says: in this file,
-not yet in the tag anyone pins. The eight unmarked ids are what the published
-major enforces today.
+All fifteen are what the published major enforces today. A row would read
+**pending** only while this file ran ahead of the tag; none does.
 
-Those seven arrived together and are all `error`-severity, which is what will
-make the **next** revision of the artifact a **MAJOR** under the
-[versioning policy](#versioning-policy)'s existing MAJOR row; it publishes as
-`styleguide-v2.0.0`. Exact pinning is what makes that cheap: nobody's build
-changes until they move their pin, so a MAJOR costs a consumer one reviewable
-PR.
+The last seven arrived together and are all `error`-severity, which is what made
+the artifact's most recent revision a **MAJOR** under the
+[versioning policy](#versioning-policy)'s existing MAJOR row
+([#944](https://github.com/timo-jakob/timos-claude-code-plugins/issues/944)).
+Exact pinning is what makes that cheap: nobody's build changes until they move
+their pin, so a MAJOR costs a consumer one reviewable PR.
 
 ### Operation identity and description
 
@@ -113,9 +117,9 @@ not all five. Counting the re-scoped
 total is **four** promotions plus nine newly-minted errors.
 
 The plugin's compatibility note quotes the **published** breakdown — four
-promotions plus two newly minted, over eight ids — because that is what the
-pinned major carries. It moves to four-plus-nine in the same PR that cuts the
-next tag and bumps the pin.
+promotions plus nine newly minted, over fifteen ids — because that is what the
+pinned major carries. It moves in lockstep with the tag and the pin, in the same
+PR.
 
 ## Deprecation
 

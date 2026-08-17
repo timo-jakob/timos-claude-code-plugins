@@ -4,7 +4,7 @@
 # jsDelivr from an immutable git tag (styleguide-vX.Y.Z) and every bootstrapped
 # repo's .spectral.yaml `extends` it at an EXACT pinned version:
 #
-#   https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v1.0.0/styleguide/spectral/ruleset.yaml
+#   https://cdn.jsdelivr.net/gh/timo-jakob/timos-claude-code-plugins@styleguide-v2.0.0/styleguide/spectral/ruleset.yaml
 #
 # That is why it lives at the repo root rather than under
 # development/skills/bootstrap/templates/ — a template is rendered INTO a repo,
