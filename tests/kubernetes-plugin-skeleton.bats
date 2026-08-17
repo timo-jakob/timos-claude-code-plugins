@@ -42,9 +42,14 @@ setup() {
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   ENTRY='.plugins[] | select(.name == "development-kubernetes")'
 
-  # the ownership section only — the end address is a generic `^## `, so it
-  # stops at whatever H2 follows rather than coupling to one section's name
-  ARCH_SECTION="$(sed -n '/^### `development-kubernetes` owns/,/^## /p' "$ARCH")"
+  # the ownership section only — the end address is a generic `^##`, so it stops
+  # at the next heading of ANY level rather than coupling to one section's name.
+  # It was `^## ` (H2 only) until #1159 added a SIBLING H3 ownership section
+  # immediately after this one: an H2-only terminator silently swallowed it, so
+  # every needle below kept passing against a widened haystack while the plan
+  # comparison — the one assertion that reads the extraction as a whole — failed
+  # with an unrelated-looking diff.
+  ARCH_SECTION="$(sed -n '/^### `development-kubernetes` owns/,/^##/p' "$ARCH")"
 
   # every marketplace plugin name, read once so jq's status is observable
   PLUGIN_NAMES="$(jq -r '.plugins[].name' "$MARKETPLACE")"
@@ -801,11 +806,16 @@ rstep() {
   local plan
   plan="$REPO_ROOT/docs/superpowers/plans/2026-08-02-development-kubernetes.md"
   [ -f "$plan" ]
-  # the sed range in setup() INCLUDES its terminating `## ` heading; the plan
-  # reproduces the section without it, so compare the body only
+  # the sed range in setup() INCLUDES its terminating heading; the plan
+  # reproduces the section without it, so compare the body only. Stripped on the
+  # LAST line only (`$!b` branches away for every other line), not by a bare
+  # `/^## /d`: since #1159 the terminator is a sibling H3, which that pattern
+  # missed — and an unanchored `/^##/d` would instead delete this section's OWN
+  # H3 heading, quietly dropping it from the compared body.
   local body plan_text
   plan_text="$(cat "$plan")"
-  body="$(printf '%s\n' "$ARCH_SECTION" | sed '/^## /d' | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')"
+  body="$(printf '%s\n' "$ARCH_SECTION" | sed -e '$!b' -e '/^##/d' \
+            | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')"
   [ -n "$body" ]
   contains "$plan_text" "$body"
 
@@ -927,7 +937,15 @@ rstep() {
   # an older draft cannot restore a row advertising a landed capability as
   # forthcoming
   lacks "$topic_row" 'CI pipeline lands with #1154'
-  contains "$topic_row" '`development-kubernetes`, future:'
+  # the positive complement to the three `lacks` above: no caveat may sit
+  # between THIS plugin's name and whatever follows it, so a caveat merely
+  # REWORDED rather than deleted still reds. Scoped to this plugin's own name
+  # and its immediate successor — NOT through to `future:`, which would couple
+  # the kubernetes suite to whether the NEXT plugin carries a caveat of its own
+  # (#1159's does: it is skeleton-stage, so its entry reads
+  # "`development-opentofu` (dispatch lands with #1160)", and a through-to-
+  # `future:` needle would force this suite to red until #1160 retires it).
+  contains "$topic_row" '`development-kubernetes`, `development-opentofu`'
   # the tree is column-aligned, so match the gap as whitespace rather than
   # pinning a literal run of spaces that reflows when a longer name is added
   matches "$(grep -F 'development-kubernetes ' "$ARCH" | head -n1)" \
@@ -947,7 +965,15 @@ rstep() {
   # terminate on a blank line: item 5 is the LAST numbered item, so a
   # /^[0-9]\./ end address never matches, the range runs to EOF, and `sed '$d'`
   # would delete a real content line rather than the delimiter
-  para="$(sed -n '/topic plugins are still aspirational/I,/^$/p' "$motivation" | tr -s '[:space:]' ' ')"
+  # anchored on the wording-INVARIANT half of the sentence: the count word moves
+  # every time a plugin ships (#1159 took it from "Two topic plugins" to "One
+  # topic plugin"), and an address pinning the plural made the extraction — and
+  # with it this whole sweep — silently empty rather than red.
+  # no `/I` flag: it is a non-POSIX address modifier (this was the only use of
+  # one in tests/), and the anchor phrase sits mid-sentence in lowercase, so it
+  # can never change case at that position — it bought nothing and would red the
+  # whole sweep on any sed that rejects it.
+  para="$(sed -n '/is still aspirational/,/^$/p' "$motivation" | tr -s '[:space:]' ' ')"
   [ -n "$para" ]
   aspirational="${para%%but not implemented*}"
   [ -n "$aspirational" ]
@@ -959,6 +985,33 @@ rstep() {
 
   # and the positive half — otherwise deleting the sentence outright also passes
   contains "$para" '`development-kubernetes` has landed'
+
+  # the COUNT WORD, derived rather than restated. Re-anchoring the address above
+  # off the count (#1159, when opentofu left the aspirational list) removed the
+  # only thing that reded when it moved: the phrase is now referenced solely as
+  # a wording-invariant sed address in both suites, so nothing covered the
+  # number. Derive it from the names still listed as aspirational, so the NEXT
+  # plugin to ship reds here instead of leaving a user-facing page stating the
+  # wrong count.
+  local n_aspirational word
+  # grep -c counts LINES, and $aspirational is a single flattened line — so
+  # count occurrences with -o and wc, and tolerate the no-match exit
+  # sort -u: count DISTINCT names, not occurrences — a segment that mentions one
+  # aspirational plugin twice would otherwise demand the plural and red falsely
+  n_aspirational="$(printf '%s' "$aspirational" \
+                      | grep -oE '`development-[a-z-]+`' | sort -u | wc -l | tr -d ' ')"
+  case "$n_aspirational" in
+    1) word="One topic plugin is" ;;
+    2) word="Two topic plugins are" ;;
+    3) word="Three topic plugins are" ;;
+    *) word="UNMAPPED-$n_aspirational" ;;
+  esac
+  # reds loudly when the family outgrows the mapping rather than asserting
+  # nothing, the same discipline tests/dogfood-c4.bats's word_for applies
+  [ "${word#UNMAPPED-}" = "$word" ]
+  # against $aspirational, not $para: the count word must live in the segment
+  # whose names were just counted, and the narrower haystack was already derived
+  contains "$aspirational" "$word still aspirational"
 }
 
 @test "every marketplace plugin is registered in the docs-reference generator (#1151)" {

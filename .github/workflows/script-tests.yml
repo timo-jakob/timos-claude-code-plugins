@@ -112,6 +112,10 @@ on:
       # load-bearing description clauses and README's plugin table (#1151);
       # note 'development/**' above does NOT match 'development-kubernetes/**'
       - 'development-kubernetes/**'
+      # tests/opentofu-plugin-skeleton.bats does the same for the OpenTofu
+      # sibling's manifest, charter clauses and registry rows (#1159) — same
+      # non-**-prefixed hazard as every per-plugin line above
+      - 'development-opentofu/**'
       - 'README.md'
       - 'docs/index.md'
       - 'mkdocs.yml'

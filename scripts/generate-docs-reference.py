@@ -41,6 +41,7 @@ PLUGINS = [
     "development-go",
     "development-java",
     "development-kubernetes",
+    "development-opentofu",
     "development-python",
     "development-react",
     "development-spring",

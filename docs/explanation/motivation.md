@@ -183,8 +183,8 @@ this section when it lands.
    scripts assume macOS + Homebrew. The generated `SETUP.md` is
    platform-agnostic but the one-shot bootstrap isn't. Tracked:
    [#171](https://github.com/timo-jakob/timos-claude-code-plugins/issues/171).
-5. **Two topic plugins are still aspirational.** `development-container` and
-   `development-opentofu` are described in
+5. **One topic plugin is still aspirational.** `development-container` is
+   described in
    [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
    but not implemented. `development-kubernetes` has landed its ownership
    boundary and marketplace registration
@@ -198,6 +198,14 @@ this section when it lands.
    ([#1154](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1154));
    its self-contained test fixtures are the remaining child of
    [#1150](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1150).
+   `development-opentofu` — the sibling on the other side of the cluster
+   boundary, covering the cloud provisioning that creates the cluster — has
+   landed its ownership boundary and marketplace registration
+   ([#1159](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1159));
+   the rest of epic
+   [#1158](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1158)
+   — gather script and dispatcher, the four agents, the bootstrap check
+   pipeline, and test fixtures — follows.
    Security-by-default really wants the container plugin
    (Trivy, SBOM, distroless) shipped. Tracked:
    [#172](https://github.com/timo-jakob/timos-claude-code-plugins/issues/172).

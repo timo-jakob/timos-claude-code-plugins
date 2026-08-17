@@ -21,7 +21,8 @@ development-spring       ← topic: Spring framework (composes with development-
 development-docs         ← topic: documentation (C4 architecture docs; marker docs/architecture/)
 development-react        ← topic: React framework (composes with development-javascript)
 development-kubernetes   ← topic: infrastructure-as-code (manifests, Helm, Kustomize, Argo CD; may be primary)
-development-…            ← future topics: opentofu, …
+development-opentofu     ← topic: infrastructure-as-code (cloud provisioning; OpenTofu + Terraform-compatible HCL; may be primary)
+development-…            ← future topics: …
 ```
 
 All plugins live in this monorepo. End users install whichever subset
@@ -33,7 +34,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, future: `development-container`, `development-opentofu` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu` (dispatch lands with #1160), future: `development-container` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -1578,6 +1579,307 @@ render them. Branch protection still runs: `branch-protection.sh --iac-only true
 workflow on such a repo would ever report), leaving the protection rule and the
 repo merge settings auto-merge depends on unchanged.
 
+### `development-opentofu` owns
+
+`.tf` and `.tf.json` sources, module structure, provider and version
+constraints, backend and state configuration, and `.tfvars` hygiene.
+
+It does **not** own anything the modules deploy *into* a cluster — that is
+[`development-kubernetes` owns](#development-kubernetes-owns), the sibling this
+plugin stops at the boundary of — nor container images, nor application code of
+any kind. The two IaC plugins own **disjoint file sets**, so a repo holding both
+**will** detect both topics and run both **maintenance** pipelines with no
+coordination between them, once #1160 registers the marker that makes the second
+topic detectable. The **CI** half is narrower — the two
+bootstrap-rendered workflows will share three job ids, **and** at most one of
+them is rendered per repo, which is what makes that safe; see the job-id
+collision below.
+
+**The boundary is the FILE SET, not the resource kind**, and the two statements
+above only agree because of it. Cluster resources *expressed in HCL* — a
+`kubernetes_manifest`, a `helm_release` — are deployed into a cluster, but they
+live in a `.tf` file, which the sibling never reads. So they stay with **this**
+plugin: only manifests, charts, overlays and Argo CD resources belong to the
+sibling. Reading the disclaimer as a resource-kind rule instead would open a gap
+neither plugin covers, in which a privileged pod or a cluster-admin role binding
+declared in HCL is deferred by this plugin's agents and never reachable by the
+sibling's — reviewed by nobody.
+
+**Ownership covers `.tf.json`; the topic MARKER is #1160's to define.** The
+marker as specified there globs `*.tf` only, so a module tree written entirely
+as `.tf.json` is owned by this charter yet would not fire detection. That
+asymmetry is recorded here rather than silently resolved: #1160 either widens
+the glob to match this ownership statement or records why the JSON syntax is
+out of scope, and nothing downstream may assume the narrower reading is
+deliberate.
+
+**One plugin, both dialects.** It covers **OpenTofu and Terraform-compatible
+HCL** together, on the `development-javascript` precedent (JavaScript and
+TypeScript ship as one plugin rather than duplicating ~90% of their content):
+the tooling is shared, the file extension is the same `.tf`, and a consumer who
+has not migrated should still find the plugin useful. **It is named for
+OpenTofu because that is the MPL-2.0 tool the family recommends; BUSL-licensed
+Terraform is supported, not endorsed.** That is the naming decision, recorded
+here so it is not re-litigated: the name states a recommendation, never a
+restriction on what the plugin will read.
+
+**Mechanism here, policy in the consumer.** The plugin knows how to run checks;
+the repo under test declares what to check for, at `policies/conftest/**/*.rego`.
+That glob — **not** the mere existence of the `policies/conftest/` directory —
+is the contract: the skip condition is **no matching files**, so an empty (or
+non-`.rego`) policy directory skips exactly like an absent one. Conftest is the
+engine because it parses HCL2 *and* plan JSON, so one binary covers both the
+static stage and the deferred plan stage, and the Rego stays portable if the
+consumer ever runs OPA properly.
+
+When nothing matches, the policy step **skips and reports "no policies
+declared"**. *That absence* is never an error — a public plugin has to work in a
+repo that has no opinions yet. The guarantee scopes to the absence and nothing
+else: when policies **are** declared, violations **fail** the step, or the
+mechanism would be decorative. **Policies are code and get tests**: `conftest
+verify` runs the Rego unit tests, and an untested policy directory is a finding —
+a **maintenance** finding, not a step failure (see the one-carrier rule below) —
+because an untested policy usually matches nothing, so it passes everything and
+looks like it is working.
+
+**A declared set Conftest CANNOT EVALUATE never skips** — no-matching-file is
+the one and only skip condition; anything else would be a green check over
+unenforced policies, which is the same defect the untested policy has one level
+down. Concretely: a `.rego` that fails to parse, a policy in a package outside
+the namespaces the step invokes (Conftest silently matches nothing there, so it
+passes everything), and a failing `conftest verify` run.
+
+**Both consumers of that rule are bound by it too**, in the terms each has —
+the same dual binding the state-encryption rule carries below, and for the same
+reason. In #1162's rendered `policy` job the three states **fail the step**.
+In #1160's gather there is no step to fail, so they are **findings**, emitted
+under the configured `policy` key exactly as the untested-policy case is.
+Stating only the CI half would leave the gather free to run Conftest, watch it
+exit 0 having matched nothing, and report an empty `policy` set — the
+green-over-unenforced state this paragraph exists to forbid, with
+`opentofu-policy-triage` never handed the defect. **#1160 pins the Conftest
+version** its gather evaluates against, and #1162's template **hard-codes the
+same pin** as a job-level env var — it cannot read the gather's, because a
+consumer repo's rendered workflow cannot call this plugin's scripts at all — so
+the two are independent constants that **must be bumped
+together**, and asserting that is #1162's to own. Nothing shares them
+automatically; saying so would describe a mechanism this family does not have.
+
+**One deliberate exception to the `missing_tooling` rule**, inherited from the
+sibling for the same reason. The family default builds `missing_tooling` from
+`tooling_configured` entries that are `false` and dispatches the tool's agent to
+say "here's how to add it". This plugin exempts `policy` and `policy_tests`
+from that default — a repo with no file matching
+`policies/conftest/**/*.rego` has not failed to configure a tool, it has
+**declined to declare opinions**, which is the whole point of
+mechanism-here-policy-in-the-consumer, so surfacing it would re-emit the
+adopt-Conftest-policies recommendation the charter forbids.
+
+**The declared-but-untested case has exactly ONE carrier.** When policies *are*
+declared but carry no `conftest verify` tests, `policy_tests` is `false` for a
+repo that has emphatically *not* declined to declare opinions. Both keys stay
+**out of `missing_tooling`** here too — the repo has not failed to configure a
+tool in this case either — and the finding travels **solely under the configured
+`policy` key** in `findings_by_tool`. State it that way round, because the
+alternatives are both wrong: routing it through `missing_tooling` as well would
+emit one defect twice (an "add `conftest verify` tests" entry *and* a `policy`
+finding group — two issues, two PRs, one fix), while suppressing it in both
+places would report it nowhere at all, and nothing else would catch it
+(`conftest verify` over a test-less directory exits green, so the pipeline is
+silent on it too).
+
+Every **known** `false` entry other than these two populates `missing_tooling`
+normally. An **unknown** key arriving `false` is the `tooling_configured` face of
+routing drift and is escalated via `human_action_required` instead, never listed
+as missing tooling — the same rule as the sibling. (The `known` qualifier is
+load-bearing: without it the first sentence licenses exactly what the second
+forbids, since an unknown key is also "other than these two".)
+
+The plugin ships **no policies of its own**, with exactly one exception, and the
+exception is a **first-class check rather than a policy: state encryption**.
+OpenTofu can encrypt state natively, and unencrypted state holds provider
+credentials, generated passwords and connection strings in plaintext. A rule
+that lives only in a consumer's policy set is a rule the consumer can forget to
+write, so the plugin checks that **state encryption is configured — in whichever
+form the repo's dialect provides** — and reports its absence as a finding, under
+the gather's `state_encryption` key, which #1160 routes to an **advisory** agent
+(→ `opentofu-security-reviewer`), **never to an auto-fixer** — escalated via
+`human_action_required` until #1161 lands that agent, the same order the sibling
+took. That is the one opinion it holds, and it is held because the
+failure is silent and severe.
+
+**The check is dialect-aware, because the mechanism is not.** `terraform {
+encryption { … } }` is OpenTofu-native; BUSL Terraform rejects that block, and
+its users encrypt state at the backend instead (SSE-KMS on S3, and the like). A
+check that demanded the block unconditionally would fire permanently and
+unfixably on every Terraform-dialect repo — including repos whose state *is*
+encrypted — which would make "supported, not endorsed" false in practice, since
+the only way to clear the finding would be to break the tool the repo actually
+runs. So what is *identical for every consumer* is the **requirement** — state
+must be encrypted at rest — not the artifact that satisfies it. **Both
+consumers of the rule are bound by it**: #1160 owns the detection rule for the
+maintenance gather, and #1162's `state-encryption` job must implement the same
+dialect-aware rule inline in the rendered workflow — a consumer repo's workflow
+cannot call this plugin's gather script, so #1162 embeds its own copy and is
+just as capable of narrowing it. Both must satisfy the requirement in both
+dialects — **any at-rest form the repo's own tool provides clears it, when the
+repo actually uses it**, so an
+OpenTofu repo encrypting at the backend is as satisfied as one using the
+block — and neither may narrow the rule to the OpenTofu block alone.
+
+**The requirement binds only where the repo owns state.** A **reusable-module
+library** — a shape this charter explicitly owns ("module structure") and the
+`*.tf` marker detects — has nothing to encrypt: it is `source`d by someone
+else's root, where that root's backend covers the state, and an `encryption`
+block does not belong in a consumed module. Such a repo can satisfy *neither*
+enumerated form, so an unconditional check would fire on it permanently and
+unclearably — the same defect the dialect paragraph above exists to prevent, one
+repo-shape over. The check therefore **reports nothing** there: no finding in the
+gather #1160 ships, and #1162's `state-encryption` job **passes**, still reporting
+its context (a required context that never reports would sit at `expected`
+forever, which is the failure the seventh job is kept out of the requirable set
+to avoid).
+
+**The exemption keys on module-library shape, never on backend absence alone.**
+A **root** module that declares no `backend` block does not thereby escape — it
+runs on the **implicit local backend** and owns a plaintext `terraform.tfstate`
+holding exactly the credentials this opinion exists to protect, and the
+`encryption` block is precisely its remedy. Keyed on "no backend block", the
+exemption would clear the one case it most needs to catch.
+
+**#1160 owns the classifier; this section states only what it must satisfy.**
+Writing the rule out here would be over-reach — the shapes are many (a root with
+no explicit `provider` block, a backend whose platform encrypts unconditionally
+and offers no flag to scan for) and enumerating them badly is worse than
+delegating them clearly. What binds is **three invariants**, and #1162's job
+embeds **its own copy of the same classifier rule** — it cannot call the gather,
+for the reason the pin paragraph above gives — so the two must not diverge:
+(1) never report a
+repo whose state **is** encrypted at rest, in any form its own tool provides —
+that is the fires-permanently-and-unclearably defect, and it is the one this
+whole rule exists to avoid; (2) never clear a repo that owns unencrypted state,
+including a root on the implicit local backend; (3) resolve every shape the same
+way in both consumers — **where both run**, a repo must not be a finding in
+maintenance and clean in CI. (Only where both run: a repo with an application
+language composes for maintenance but renders no IaC workflow at all, so there
+is no CI verdict there to agree with.)
+
+**Where those three leave a shape undecidable from source, #1160 records the
+decision it took in this section** — not only inside its own script, which the
+job #1162 renders cannot read. That record is the transmission path, and it is what makes
+invariant 3 checkable rather than aspirational: #1163's fixtures exercise both
+embeddings over the same shape set, and asserting that they agree is #1162's to
+own, exactly as asserting the shared Conftest pin is.
+
+Everything else generic belongs to `tflint` and `trivy`; the policy layer is for
+what they cannot express — required module structure, mandated backend
+configuration, provider version floors, naming and tagging conventions,
+forbidden resource types. **An unpinned provider is likewise a finding, not a
+style note**: the same source producing different infrastructure on different
+days is the IaC equivalent of an irreproducible build. "Likewise" is about
+**severity, not mechanism** — this is emphatically *not* a second built-in
+check, and the exception above stays at exactly one. It is `tflint`'s
+`terraform_required_providers` rule, and the plugin's contribution is to refuse
+to treat its output as a style note.
+
+**Static checks first; the plan-based stage will ship disabled.** Static analysis —
+`tofu fmt -check -recursive`, `tofu validate`, `tflint`, `trivy config`, the
+state-encryption check, and Conftest over HCL — needs no credentials and no
+state access, so it **will run** on every pull request. (`-recursive` is
+load-bearing: without it `tofu fmt` inspects the working directory alone, so a
+module tree's submodules go unchecked while the job reports green. So is
+`-backend=false`: `tofu validate` requires `tofu init`, and the credential-free
+claim holds **only** under that flag — a bare `init` initialises the consumer's
+configured remote backend, needing exactly the credentials and state access this
+set is promised never to need, and the job would then fail permanently on every
+remote-backend repo. Reaching the provider registry is a *network* dependency,
+not a credential one.) Plan-based
+analysis — Conftest over `tofu show -json` — sees what actually matters (*this
+destroys the database*), but needs provider credentials and state access in a
+**pull-request-triggered** workflow, which is a real security surface. So the
+generated pipeline **will contain** the plan stage, guarded by a repository
+variable that defaults off: enabling it later is configuration, not a redesign.
+(Future tense throughout this paragraph, for the same reason the enumeration
+below uses it: #1162's template does not exist yet, and one section should not
+describe one unbuilt artifact in two tenses.) This is
+deliberately *not* a source-level destroy-detection heuristic — module
+composition produces exactly the cases such a heuristic misses, and a guardrail
+that is right most of the time trains people to stop checking.
+
+**No approver agent**, following `development-claude-plugin` and
+`development-kubernetes`, and here in its sharpest form: **a provisioning change
+can destroy state that no rollback recovers.** A human approves. Note this is
+*not* the same as no auto-merge — the Maintenance App cannot approve its own
+pull request, so a human approval is structurally required, and auto-merge armed
+afterwards fires only once that approval lands.
+
+A repo declaring `primary: opentofu` in `.maintenance.yml` will **select this
+plugin for maintenance dispatch** once `opentofu` is in the detected+supported
+set; the primary/auxiliary model already permits a topic to be primary, so no
+new mechanism is needed. **Until #1160 registers the topic marker and the gather
+script, such a declaration names a stack the orchestrator cannot dispatch and is
+therefore treated as stale** (see the `dispatch_mode` contract), and #1162 is
+what teaches bootstrap to render the pipeline and require its checks.
+
+**#1159 landed the boundary only.** This plugin currently ships its manifest and
+its charter and nothing executable: the gather script, topic marker and
+dispatcher arrive with #1160, the four agents and the review panel with #1161,
+the bootstrap check pipeline with #1162, and the self-contained test fixtures
+with #1163. Settling the boundary first is deliberate: a topic plugin that
+creeps into Dockerfiles, cluster manifests or application code contradicts
+language-first and has to be unpicked across several plugins later.
+
+That pipeline is the **seven jobs** #1162's bootstrap template **will emit** —
+future tense deliberately, because no such template exists yet — of which the
+**credential-free six will be the requirable set**, in pipeline order: `fmt`,
+`validate`, `lint`, `config-scan`, `state-encryption`, `policy`. Those six job
+ids *are* the branch-protection contexts, so they are enumerated rather than
+counted — a guessed set makes `branch-protection.sh` require a context no
+workflow ever reports, which blocks every merge on the repo it was meant to
+protect. The seventh, `plan-policy`, is the credentialed plan stage and is
+deliberately **not** requirable: required-and-disabled would sit at `expected`
+forever. Note where the workflow will live — a *bootstrap* template owned by the
+generic `development` plugin, not something this plugin's skills run, the same
+boundary that keeps detection in `development`.
+
+**Neither half of that contract is wired yet, and #1162 owns both.**
+`branch-protection.sh`'s IaC path is today a **boolean** `--iac-only` resolving
+to a literal kubernetes context set, and `detect-stack.sh` derives it as *the
+kubernetes marker with no application language* — with a recorded
+`primary: opentofu` taking a repo **off** that path rather than onto it. So the
+enumeration above is a specification for #1162, not a description of a flag that
+can select it: widening `--iac-only` (and the `iac_only` derivation, including
+the `primary: opentofu` arm) is that story's work — as is the **third** site,
+the §3l / Step 4b prose in `development/skills/bootstrap/SKILL.md`, which states
+the same flag's contract in its kubernetes-only form and would otherwise be left
+describing a flag that had grown a second context set.
+
+**Three of those six ids will collide with the sibling's** — `lint`,
+`config-scan` and `policy` are enumerated byte-identically to the shipped
+kubernetes template's job ids (future tense for the same reason as above: only
+one IaC template exists on disk today), and a required status context is matched
+by **name**. That is a known, accepted collision
+rather than an oversight, because **at most one IaC workflow is rendered per
+repo**: a repo with an application language takes neither IaC path, and a
+zero-language repo takes at most one — the path whose marker it carries. A
+marker-less repo takes neither, and the dual-marker case must halt (below); the
+condition is the **marker**, not merely the absence of a language, which is what
+`detect-stack.sh` already enforces and what #1162's widening must preserve. It
+is the *maintenance* pipelines that compose freely (above); CI is the narrower
+half.
+
+**The dual-marker case is a specification, not current behaviour.** A
+zero-language repo carrying *both* markers must **halt** at bootstrap rather
+than pick a workflow, and nothing does that today — bootstrap keys its IaC path
+on the kubernetes marker alone, so such a repo currently renders the sibling's
+workflow. **#1162 owns adding the halt**, alongside the `--iac-only` widening
+and against the marker #1160 creates; it is an acceptance criterion of that
+story, and that criterion cites **#1394** — the later slice that must render
+both workflows and therefore owns disambiguating the three ids. Until the halt lands,
+the collision is bounded by the absence of an `opentofu` marker rather than by a
+check. Do not "fix" any of this by renaming the ids here — #1162 renders them
+exactly as enumerated.
+
 ## Build policy — Gradle + Kotlin DSL only (Java/Spring)
 
 The Java/Spring plugins maintain exactly **one** blessed build format:
@@ -1910,7 +2212,8 @@ allowed to demote everything else to `"auxiliary"`: every target
 dispatches as `"primary"` and the Phase 9 summary notes the stale
 declaration (`development/skills/maintenance/SKILL.md`). That is the case
 a repo hits when it declares a primary the orchestrator cannot yet
-dispatch, e.g. `primary: kubernetes` before #1152 registered the marker.
+dispatch, e.g. `primary: kubernetes` before #1152 registered the marker,
+and `primary: opentofu` before #1160 registers its own.
 
 In `"auxiliary"` mode a language plugin runs only its
 mechanical fixers and **skips its app-grade gates** (coverage

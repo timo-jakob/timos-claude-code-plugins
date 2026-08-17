@@ -37,6 +37,16 @@ constraints, backend and state configuration, and `.tfvars` hygiene.
 **Does not own:** anything the modules deploy *into* a cluster — that is
 `development-kubernetes`; container images; application code.
 
+> **Superseded in part by #1159 — authoritative text is `ARCHITECTURE.md`'s
+> `development-opentofu owns` section.** Read as a *resource-kind* rule, the
+> disclaimer above opens a gap neither plugin covers: a `kubernetes_manifest` or
+> `helm_release` is deployed into a cluster but lives in a `.tf` file, which the
+> sibling never reads — so a privileged pod declared in HCL would be deferred by
+> this plugin and unreachable by the other. The boundary is the **file set**:
+> cluster resources expressed in HCL stay here; only manifests, charts, overlays
+> and Argo CD resources belong to the sibling. As with §4, §5, §6 and §8, the record
+> is kept rather than rewritten.
+
 **Ships no approver agent**, for the reason `development-claude-plugin` and
 `development-kubernetes` already establish, with the sharpest form here: a
 provisioning change can destroy state that no rollback recovers. A human approves.
@@ -74,7 +84,9 @@ produces exactly the cases a source-level heuristic misses.
 
 Identical to the sibling plugin, with a different engine and path:
 `policies/conftest/**/*.rego`. Absent, the policy step **skips and reports "no
-policies declared"** — it never fails.
+policies declared"** — it never fails *for that reason*; declared policies whose
+violations fire still fail the step, and so does a declared set Conftest cannot
+evaluate.
 
 **Conftest** is the engine. It parses HCL2 natively *and* plan JSON, so one binary
 and one language cover both the static stage and the deferred plan stage. It is the
@@ -106,6 +118,25 @@ write. The plugin therefore checks that an `encryption` block is configured and
 reports its absence as a finding. This is the one opinion the plugin holds, and it
 is held because the failure is silent, severe, and identical for every consumer.
 
+> **Superseded in part by #1159 — read `ARCHITECTURE.md`'s
+> `development-opentofu owns` section as authoritative for this check.** The
+> paragraph above states the mechanism as the OpenTofu-native `encryption`
+> block, which BUSL Terraform rejects — so taken literally it would make the
+> check fire permanently and unfixably on every Terraform-dialect repo, the
+> dialect §1 declares supported. The decision that survives is the
+> **requirement** — state encrypted at rest, in whichever form the repo's own
+> tool provides — not the artifact satisfying it. And the requirement itself
+> binds only where the repo **owns** state: a reusable-module library is
+> exempt, a root on the implicit local backend is not. §5's Tool cell for this
+> row originally read "plugin check" and has been **corrected in place** — a
+> consumer's rendered workflow cannot call this plugin's scripts, so the check
+> is inline; that is the one deviation in this document from the
+> keep-the-record convention, made because a Tool cell has no room to carry a
+> banner. The rest of this section
+> stands. As with §2, §5, §6 and §8, the record is kept rather than rewritten, per
+> this repo's treatment of design documents as evidence of what was decided
+> when.
+
 ## 5. The check pipeline
 
 Bootstrap-generated, on pull requests, cheap failures first:
@@ -116,7 +147,7 @@ Bootstrap-generated, on pull requests, cheap failures first:
 | 2 | **Validate** — syntax, references, types | `tofu validate` | none |
 | 3 | **Lint** — provider-aware best practice, deprecations | `tflint` | none |
 | 4 | **Misconfiguration scan** | `trivy config` | none |
-| 5 | **State encryption configured** | plugin check | none |
+| 5 | **State encryption configured** | inline in the rendered workflow (see ARCHITECTURE) | none |
 | 6 | **Policy** — the consumer's own Rego, plus `conftest verify` for its tests | `conftest` | none |
 | 7 | **Plan policy** — *disabled by default* | `tofu plan` + `conftest` | **cloud + state** |
 
@@ -132,11 +163,34 @@ untested policy directory is a finding — the same reasoning as the sibling plu
 untested policy usually matches nothing, so it passes everything and looks like it
 is working.
 
+> **Superseded in part by #1159 — authoritative text is `ARCHITECTURE.md`'s
+> `development-opentofu owns` section.** "A finding" here sits inside a section
+> that otherwise speaks only in CI terms, so it reads as *the `policy` job
+> fails*. It is the opposite: `conftest verify` over a test-less directory exits
+> green, so the rendered pipeline is **silent** on that state; the verify leg
+> fails only on a *failing* `conftest verify` run (violations and the
+> cannot-evaluate states fail the step as before — this bounds the verify leg,
+> not the job). The declared-but-untested defect travels **solely** under the
+> maintenance gather's `policy` key — one defect, one carrier. Building the CI
+> half from this paragraph would turn a consumer's pipeline permanently red on a
+> state the charter routes to `opentofu-policy-triage`. As with §2, §4, §6 and §8,
+> the record is kept rather than rewritten.
+
 ## 6. Maintenance
 
 **Gather:** `development/skills/maintenance/scripts/gather-opentofu-findings.zsh`,
 discovered by the orchestrator's existing convention. Detection marker is the
 presence of `*.tf` files, pruning vendored trees and `.terraform/`.
+
+> **Superseded in part by #1159 — authoritative text is `ARCHITECTURE.md`'s
+> `development-opentofu owns` section.** The marker sentence above reads as a
+> settled decision. It is not: the charter's ownership statement covers
+> `.tf.json` as well, so a module tree written entirely as HCL-JSON would be
+> owned yet undetected by a `*.tf`-only glob. #1160 must therefore **either
+> widen the glob to match the ownership statement or record why the JSON syntax
+> is out of scope** — nothing downstream may assume the narrower reading here
+> was deliberate. As with §2, §4, §5 and §8, the record is kept rather than
+> rewritten.
 
 **Dispatcher:** `development-opentofu/skills/maintenance/SKILL.md` — validates the
 payload, returns a PR-grouped plan, spawns nothing.
@@ -192,6 +246,15 @@ configuration, not redesign.
 **A repo holding both `.tf` and Kubernetes manifests** detects both topics and runs
 both pipelines. No coordination is needed — the plugins own disjoint file sets, and
 that disjointness is what makes composition free.
+
+> **Superseded in part by #1159 — authoritative text is `ARCHITECTURE.md`'s
+> job-id collision paragraph.** The sentence above holds for the *maintenance*
+> pipelines, which do compose freely. It does **not** hold for the
+> bootstrap-rendered **CI** workflows: the two share three job ids (`lint`,
+> `config-scan`, `policy`) and a required status context is matched by name, so
+> at most one IaC workflow is rendered per repo and the dual-marker case must
+> halt until the slice that renders both disambiguates them. As with §2, §4, §5 and
+> §6, the record is kept rather than rewritten.
 
 ## 9. Considered and rejected
 
