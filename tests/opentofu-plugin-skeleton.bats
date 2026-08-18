@@ -90,13 +90,13 @@ setup() {
   [ "$from_marketplace" = "$from_plugin" ]
   # the shipped-slice label is pinned by VALUE in two OTHER tests in this file —
   # "the README plugin-table row states the slice HONESTLY" (README's "only in
-  # v0.1") and the plugins.md narrative test ("What's built (v0.1)") — so the
+  # v0.2") and the plugins.md narrative test ("What's built (v0.2)") — so the
   # manifests must agree with both; otherwise a PR could land a later child's
   # content and prose while leaving both manifests at 0.1.0, staying green while
   # installs never see the change. (Round 1 of #1159's review caught this
   # comment claiming the README half was covered when nothing read README.md;
   # the assertion, not the comment, is what makes it true.)
-  starts_with "$from_plugin" "0.1."
+  starts_with "$from_plugin" "0.2."
 }
 
 @test "the marketplace source resolves to the real plugin directory (#1159)" {
@@ -191,7 +191,7 @@ setup() {
   # maintenance dispatcher") were transplanted from the sibling's phrasing,
   # which this description never uses, so neither could fail under any plausible
   # rewrite and the whole slice-label guarantee rested on one `contains`.
-  contains "$desc" "This slice is the skeleton"
+  contains "$desc" "This slice adds the maintenance dispatch"
   contains "$desc" "the bootstrap check pipeline (#1162), and the self-contained test fixtures (#1163) follow."
   # every remaining child named, so the manifest cannot silently drop one — the
   # marketplace description is byte-equal, so an omission here reaches users
@@ -211,19 +211,21 @@ setup() {
   [ "$from_marketplace" = "$from_plugin" ]
 }
 
-@test "the plugin ships the manifest and NOTHING executable yet (#1159)" {
-  # an asserted decision, not an oversight: #1159 is the boundary alone. When
-  # #1160 adds skills/ and #1161 adds agents/, this test must be updated in the
-  # same PR, which is the point — the entry set is the one place a half-applied
-  # later child shows up. The [ -d "$PLUGIN_DIR" ] guard matters: a mis-derived
-  # path makes `ls` fail and the equality below compare two empty strings.
+@test "the plugin's entry set is exactly the manifest and the dispatcher skill (#1160)" {
+  # the entry set is the one place a half-applied later child shows up, so each
+  # child widens this equality in its own PR (see the note below the assertion).
+  # The [ -d "$PLUGIN_DIR" ] guard matters: a mis-derived path makes `ls` fail
+  # and the equality below compare two empty strings.
   [ -d "$PLUGIN_DIR" ]
   local entries
   # LC_ALL=C: under a glibc en_US.UTF-8 collation punctuation is ignored at the
   # primary level, so `.claude-plugin` would sort as `claudeplugin` and this
   # equality would flip for a maintainer running the suite in a UTF-8 locale
   entries="$(cd "$PLUGIN_DIR" && LC_ALL=C ls -A | LC_ALL=C sort | tr '\n' ' ')"
-  [ "$entries" = ".claude-plugin " ]
+  # #1160 added skills/ (the maintenance dispatcher). #1161 adds agents/, and
+  # must widen this equality again in the same PR — that is the point: the entry
+  # set is the one place a half-applied later child shows up.
+  [ "$entries" = ".claude-plugin skills " ]
   # and the charter's negative half, asserted where it will still be asserted
   # after #1161 fills agents/: no approver agent, ever
   [ ! -e "$PLUGIN_DIR/agents/opentofu-approver.md" ]
@@ -234,13 +236,13 @@ setup() {
   # marketplace plugin; its content assertions are hard-coded to
   # development-kubernetes. So this row — on the one table most users read — is
   # gated nowhere else, and a later child could land the agents while it still
-  # says "only in v0.1", or drop the no-approver clause entirely.
+  # says "only in v0.2", or drop the no-approver clause entirely.
   local row
   row="$(grep -F '| **development-opentofu** |' "$REPO_ROOT/README.md")"
   [ -n "$row" ]
   [ "$(printf '%s\n' "$row" | wc -l | tr -d ' ')" -eq 1 ]
   # the time-bounded claim a later child must retire deliberately
-  contains "$row" 'only in v0.1'
+  contains "$row" 'only in v0.2'
   # the charter clause, restated where a user first meets the plugin
   contains "$row" 'no approver agent'
   contains "$row" 'can destroy state no rollback recovers'
@@ -306,7 +308,7 @@ setup() {
   # where a tense edit shipped ungrammatical prose in the authoritative charter
   # with the suite green — the plugins.md twin was pinned word-for-word and did
   # not break, which is the argument for pinning this one too.
-  contains "$ARCH_FLAT" 'own **disjoint file sets**, so a repo holding both **will** detect both topics and run both **maintenance** pipelines with no coordination between them, once #1160 registers the marker'
+  contains "$ARCH_FLAT" 'own **disjoint file sets**, so a repo holding both **does** detect both topics and runs both **maintenance** pipelines with no coordination between them, now that #1160 has registered the marker'
   # and the maintenance-vs-CI scoping where it is FIRST stated, not only in the
   # collision paragraph 200 lines later
   contains "$ARCH_FLAT" 'The **CI** half is narrower'
@@ -318,11 +320,15 @@ setup() {
   contains "$ARCH_FLAT" 'The boundary is the FILE SET, not the resource kind'
   contains "$ARCH_FLAT" 'they live in a `.tf` file, which the sibling never reads'
   contains "$ARCH_FLAT" 'reviewed by nobody'
-  # and the ownership/marker asymmetry, recorded rather than silently resolved:
-  # ownership covers .tf.json, #1160's marker globs *.tf only, so a JSON-only
-  # module tree is owned but undetected until #1160 settles it
-  contains "$ARCH_FLAT" 'the topic MARKER is #1160'
-  contains "$ARCH_FLAT" 'widens the glob to match this ownership statement or records why'
+  # and the ownership/marker asymmetry, now SETTLED rather than merely recorded:
+  # ownership covers .tf.json, the marker globs *.tf only, and #1160 took the
+  # "record why" branch of the choice #1159 left it — so a JSON-only module tree
+  # is owned but not detected, deliberately. The reason is pinned, not just the
+  # outcome: without it a later reader reads the narrow glob as an oversight and
+  # widens it across three copies plus #1162's inline twin.
+  contains "$ARCH_FLAT" 'the topic MARKER does not — and that is the recorded decision, not an oversight'
+  contains "$ARCH_FLAT" 'machine-*generation* target rather than a hand-authored one'
+  contains "$ARCH_FLAT" '**owned but not detected**'
   # the cross-link's target must exist, or the boundary points at nothing —
   # ARCHITECTURE.md is outside the mkdocs tree, so nothing else validates it
   contains "$ARCH_FLAT" '(#development-kubernetes-owns)'
@@ -387,11 +393,18 @@ setup() {
   # drops policy_tests pass
   contains "$ARCH_FLAT" 'This plugin exempts `policy` and `policy_tests`'
   contains "$ARCH_FLAT" 'declined to declare opinions'
-  # the scoping half — without it the exemption reads as blanket suppression
-  # the `known` qualifier is load-bearing: without it this sentence licenses
-  # exactly what the unknown-key escalation below forbids, since an unknown key
-  # is also "other than these two"
-  contains "$ARCH_FLAT" 'Every **known** `false` entry other than these two populates `missing_tooling` normally'
+  # the scoping half. #1160 replaced the old "every OTHER known false entry
+  # populates missing_tooling normally" with the rule the shipped dispatcher
+  # actually applies — the other five keys are presence detection and cannot
+  # legitimately be false, so nothing is left for the family default and
+  # missing_tooling is always empty here. The two documents prescribed opposite
+  # handling before, and SKILL.md requires them kept in agreement.
+  contains "$ARCH_FLAT" 'leaves `missing_tooling` ALWAYS EMPTY on this topic'
+  contains "$ARCH_FLAT" '**presence detection, not configuration**'
+  contains "$ARCH_FLAT" 'is not "tflint is unconfigured"'
+  # and the unknown-key branch, which must stay distinct from the five
+  contains "$ARCH_FLAT" 'An **unknown** key arriving `false` is the'
+  contains "$ARCH_FLAT" 'face of routing drift and is escalated the same way'
   # the DECLARED-BUT-UNTESTED case, and its SINGLE carrier. Both keys stay out
   # of missing_tooling here too, and the finding travels solely under the
   # configured `policy` key — stated that way round because both alternatives
@@ -399,16 +412,28 @@ setup() {
   # (two issues, two PRs, one fix), and suppressing it in both places reports it
   # nowhere, with `conftest verify` exiting green over a test-less directory so
   # the pipeline is silent too.
-  contains "$ARCH_FLAT" 'The declared-but-untested case has exactly ONE carrier'
-  contains "$ARCH_FLAT" 'travels **solely under the configured `policy` key**'
+  contains "$ARCH_FLAT" 'The declared-but-untested case has exactly ONE carrier, and it is the `policy_tests` key'
+  # #1160 corrected this record: the gather sets tooling_configured.policy_tests
+  # from policy PRESENCE (true whenever a .rego matches) and emits the defect
+  # under findings_by_tool.policy_tests, which is what the dispatcher orders its
+  # group by. The old wording named the `policy` key and a false policy_tests,
+  # so a model keeping ARCHITECTURE and the gather in agreement would have
+  # "fixed" the script and destroyed the ordering-blocking rule.
+  contains "$ARCH_FLAT" 'travels **solely under `findings_by_tool.policy_tests`**'
+  contains "$ARCH_FLAT" '**mirrors policy presence**'
   contains "$ARCH_FLAT" 'would emit one defect twice'
   contains "$ARCH_FLAT" 'would report it nowhere at all'
   # and the UNKNOWN-key branch the bolded "known" alludes to. Stated only as an
   # emphasis, it tells a dispatcher that unknown keys differ without saying how,
   # leaving the family default (recommend a tool for a drifted key) as the only
   # readable rule — which is what the sibling forbids.
-  contains "$ARCH_FLAT" 'is the `tooling_configured` face of routing drift and is escalated via `human_action_required`'
+  # the escalation channel is now named in the five-keys paragraph above (which
+  # this test pins separately); here the unknown-key branch must still say it is
+  # escalated the SAME way and stays out of missing_tooling
+  contains "$ARCH_FLAT" 'face of routing drift and is escalated the same way'
   contains "$ARCH_FLAT" 'never listed as missing tooling'
+  contains "$ARCH_FLAT" 'escalated via'
+  contains "$ARCH_FLAT" '`human_action_required`'
 }
 
 @test "ARCHITECTURE.md records the ONE opinion — state encryption — and its scope (#1159)" {
@@ -613,11 +638,14 @@ setup() {
   [ -f "$ds" ]
   ds_body="$(cat "$ds")"
   contains "$ds_body" 'iac_only='
-  # case-INSENSITIVE: literal twins cover two spellings, but `Opentofu` in a
-  # comment or `OPENTOFU` in a constant name would slip past both, and a
-  # constant is a realistic shape for a new detect-stack arm. `run -1` pins
-  # grep's exact no-match status, so an error (status 2) still reds.
-  run -1 grep -qi 'opentofu' "$ds"
+  # #1160 landed `is_opentofu` in this file, so a bare "opentofu appears nowhere"
+  # sweep no longer expresses the claim. What the prose still hangs on is
+  # narrower and is what is pinned now: `iac_only` is derived from the KUBERNETES
+  # marker alone, and the recorded-primary veto has no opentofu arm. #1162 adds
+  # both and must retire these two deliberately.
+  contains "$ds_body" 'if [[ "$is_kubernetes" == "true" && ${#langs[@]} -eq 0 ]]; then'
+  lacks "$ds_body" 'is_opentofu" == "true" && ${#langs[@]}'
+  lacks "$ds_body" '"opentofu")'
 }
 
 @test "ARCHITECTURE.md records the job-id collision with the sibling, and who owns it (#1159)" {
@@ -679,9 +707,22 @@ setup() {
   # mention alone — the negated-clause hazard this file's header forbids, and it
   # would survive the very relocation this scoped haystack exists to catch.
   contains "$skill_3l" '`branch-protection.sh` with `--iac-only true`'
-  # case-insensitive over the WHOLE file, for the same reason as detect-stack.sh
-  # — and prose is where a sentence-initial `Opentofu` is likeliest of all
-  run -1 grep -qi 'opentofu' "$skill"
+  # #1160 put opentofu into this file at TWO sites — the detect-stack exit-2
+  # contract (either marker can abort the run) and the `is_opentofu` output-key
+  # bullet — so the whole-file sweep is replaced by a SCOPED one: §3l is where
+  # the IaC wiring lives, and it is §3l that must stay free of an opentofu arm
+  # until #1162 generalises it. That keeps the claim ("the branch-protection
+  # contract is not wired yet") checkable without forbidding accurate mentions
+  # elsewhere.
+  run -1 grep -qi 'opentofu' <<<"$skill_3l"
+  # both legitimate mentions pinned positively, so neither can be lost — and the
+  # second states the reads-it-nowhere-yet fact #1162 must retire deliberately
+  # whitespace-normalised: the bullet wraps mid-clause, so a raw-file needle
+  # would be pinning the line break rather than the sentence
+  local skill_flat
+  skill_flat="$(tr -s '[:space:]' ' ' < "$skill")"
+  contains "$skill_flat" 'is_opentofu: false'
+  contains "$skill_flat" 'Bootstrap reads it nowhere yet'
 }
 
 @test "ARCHITECTURE.md records the no-approver rationale AND the auto-merge distinction (#1159)" {
@@ -693,25 +734,30 @@ setup() {
   contains "$ARCH_FLAT" 'not* the same as no auto-merge'
 }
 
-@test "ARCHITECTURE.md keeps the primary claim HONEST until the marker lands (#1159)" {
-  # the capability is real, but nothing dispatches it yet: the topic enters the
-  # detected+supported set only when #1160's gather script exists. Asserting the
-  # caveat here is what stops the section over-promising, and the child that
-  # lands the marker must retire it deliberately.
+@test "ARCHITECTURE.md records the primary claim as LIVE now the marker and gather landed (#1160)" {
+  # #1159 asserted the caveat ("stale until the marker lands") to stop the
+  # section over-promising, and named #1160 as the child that must retire it.
+  # This is that retirement: the topic is in the detected+supported set because
+  # the gather script exists and is executable, so the claim is now LIVE and it
+  # is the caveat's ABSENCE that this test pins.
   contains "$ARCH_FLAT" 'A repo declaring `primary: opentofu`'
   # the PREDICATE, not just the subject — a needle on the sentence's subject is
   # satisfied by a rewrite to "will NOT select this plugin", which is exactly
   # the negated-clause hazard this file's header forbids, and it would delete
   # the one statement the primary/auxiliary model and #1160 hang on
-  contains "$ARCH_FLAT" 'will **select this plugin for maintenance dispatch**'
-  contains "$ARCH_FLAT" 'once `opentofu` is in the detected+supported set'
-  contains "$ARCH_FLAT" 'Until #1160 registers the topic marker'
-  contains "$ARCH_FLAT" 'treated as stale'
+  contains "$ARCH_FLAT" '**selects this plugin for maintenance dispatch**'
+  contains "$ARCH_FLAT" 'since #1160 registered the topic marker and the gather script'
+  # the caveat that replaced the stale-declaration one: the maintenance half is
+  # live, the CI half is not, and that asymmetry is deliberate rather than a gap
+  contains "$ARCH_FLAT" 'no longer treated as stale'
+  contains "$ARCH_FLAT" 'the maintenance half is live while the CI half is not'
   # the slice-content claim, the ARCHITECTURE counterpart of the entry-set test
   # above — without it the section can keep describing a slice the manifest and
   # the on-disk tree contradict
-  contains "$ARCH_FLAT" '**#1159 landed the boundary only.**'
-  contains "$ARCH_FLAT" 'ships its manifest and its charter and nothing executable'
+  contains "$ARCH_FLAT" '**#1159 landed the boundary; #1160 landed the dispatch.**'
+  contains "$ARCH_FLAT" 'the marker in three parity-pinned copies'
+  # the caveat that replaces "nothing executable": routing waits on the agents
+  contains "$ARCH_FLAT" 'Until #1161 lands, the dispatcher routes nothing'
   contains "$ARCH_FLAT" 'creeps into Dockerfiles, cluster manifests or application code'
   # every remaining child named here too, so ARCHITECTURE and the manifest
   # cannot enumerate different remainders — asserted against the REMAINDER
@@ -720,16 +766,20 @@ setup() {
   # stale-primary caveat), so a section-wide loop would stay green with either
   # dropped from the enumeration it is meant to gate.
   local rest child
-  rest="$(sed -n '/^\*\*#1159 landed the boundary only\.\*\*/,/^$/p' "$ARCH" \
+  rest="$(sed -n '/^\*\*#1159 landed the boundary; #1160 landed the dispatch\.\*\*/,/^$/p' "$ARCH" \
             | tr -s '[:space:]' ' ')"
   [ -n "$rest" ]
+  # #1160 is still named here — as what LANDED rather than as a remainder — so
+  # the loop keeps its full span and the enumeration cannot silently shrink
   for child in 1160 1161 1162 1163; do
     contains "$rest" "#$child"
   done
-  # the gather script genuinely does NOT exist yet — the caveat must describe
-  # reality, not merely be present. Flipped by #1160 in the same PR that
-  # retires the wording above.
-  [ ! -e "$REPO_ROOT/development/skills/maintenance/scripts/gather-opentofu-findings.zsh" ]
+  # the gather script genuinely DOES exist now, and is executable — the
+  # orchestrator partitions on `test -x`, so that is the fact the retired
+  # stale-primary caveat turned on. Asserted rather than assumed: prose saying
+  # the topic dispatches while the file is missing or non-executable would be
+  # the same over-promise #1159's caveat existed to prevent, inverted.
+  [ -x "$REPO_ROOT/development/skills/maintenance/scripts/gather-opentofu-findings.zsh" ]
 }
 
 @test "the dispatch_mode payload contract names this stale case too (#1159)" {
@@ -770,25 +820,28 @@ setup() {
   contains "${topic_row%%future:*}" '`development-opentofu`'
 }
 
-@test "the C4 Container diagram declares this plugin, CAVEATED to this slice (#1159)" {
+@test "the C4 Container diagram declares this plugin, UNCAVEATED now the dispatch landed (#1160)" {
   # dogfood-c4.bats derives the declared SET and the count words from
   # marketplace.json, so those are already gated. What it cannot state is that
-  # the entry says the right thing — and at this slice the right thing is
-  # time-bounded: nothing dispatches this topic until #1160's marker exists, and
-  # `primary: opentofu` is stale until then. An UNCAVEATED edge would make the
-  # diagram the one restatement site contradicting ARCHITECTURE and plugins.md,
-  # and pinning it that way would lock the over-claim in — no child of #1158
-  # would ever be forced to revisit it. The sibling carried exactly these two
-  # caveats at its own skeleton slice and retired them with the marker.
+  # the entry says the right thing — and since #1160 the right thing is the
+  # UNCAVEATED form: the marker, the gather and the dispatcher have landed, so
+  # `primary: opentofu` genuinely dispatches. A REINSTATED caveat is now what
+  # would make the diagram the one restatement site contradicting ARCHITECTURE
+  # and plugins.md, which is why both retired strings are pinned by absence.
+  # (#1159 pinned the opposite direction for exactly the same reason, and named
+  # #1160 as the child that must retire them — this is that retirement.)
   local c4
   [ -f "$REPO_ROOT/docs/architecture/c4-container.md" ]
   c4="$(cat "$REPO_ROOT/docs/architecture/c4-container.md")"
   contains "$c4" 'Container(development-opentofu, "development-opentofu", "Claude Code plugin",'
-  contains "$c4" 'may be primary (skeleton, #1159)'
-  contains "$c4" 'Rel(development, development-opentofu, "dispatches (planned, #1160)")'
-  # both directions, so #1160 must retire the caveats DELIBERATELY rather than
-  # the diagram silently drifting into the uncaveated form
-  lacks "$c4" 'Rel(development, development-opentofu, "dispatches")'
+  # #1160 landed the marker, the gather and the dispatcher, so BOTH caveats the
+  # skeleton slice carried are retired and their absence is what is pinned now.
+  # CLAUDE.md requires docs/architecture/ to be kept true in the same PR as the
+  # structural change; a reinstated caveat would make the diagram the one
+  # restatement site contradicting ARCHITECTURE and plugins.md.
+  contains "$c4" 'Rel(development, development-opentofu, "dispatches")'
+  lacks "$c4" 'skeleton, #1159'
+  lacks "$c4" 'dispatches (planned, #1160)'
   # inside the TOPIC boundary, not the language one: the two boundaries are what
   # the diagram uses to say which plugins are marker-dispatched. The end address
   # is indent-AGNOSTIC — pinning eight literal spaces would fail OPEN on a
@@ -816,14 +869,20 @@ setup() {
   lacks "$topics" 'Container(tests,'
 }
 
-@test "the ARCHITECTURE topic-category row is caveated until the marker lands (#1159)" {
-  # the row's "Dispatched when" cell is the topic marker, so listing this plugin
-  # uncaveated advertises a dispatch the same document says does not exist yet.
-  # The sibling's entry carried 'dispatch lands with #1152' at this slice.
+@test "the ARCHITECTURE topic-category row lists the plugin UNCAVEATED now the marker landed (#1160)" {
+  # the row's "Dispatched when" cell is the topic marker. #1159 caveated this
+  # entry ('dispatch lands with #1160') because listing it plainly would have
+  # advertised a dispatch the same document said did not exist; #1160 landed the
+  # marker, so the caveat is retired and its ABSENCE is what is pinned — a
+  # reinstated caveat would understate a topic that now genuinely dispatches.
   local topic_row
   topic_row="$(grep -E '^\| \*\*Topic\*\* \|' "$ARCH")"
   [ -n "$topic_row" ]
-  contains "$topic_row" '`development-opentofu` (dispatch lands with #1160)'
+  contains "$topic_row" '`development-opentofu`'
+  lacks "$topic_row" 'dispatch lands with #1160'
+  # and the marker itself now appears in the row's trigger list, beside the
+  # sibling's — the cell is what tells a reader when the topic fires
+  contains "$topic_row" '.tf files'
 }
 
 @test "the plugins.md narrative restates the charter without contradicting ARCHITECTURE (#1159)" {
@@ -909,7 +968,9 @@ setup() {
   # and the CI-vs-maintenance scoping, without which this page tells a user that
   # a both-markers repo gets both check pipelines while ARCHITECTURE says at
   # most one workflow is rendered
-  contains "$section" 'run both **maintenance** pipelines, once #1160 registers the marker'
+  # landed tense since #1160, matching the ARCHITECTURE twin — the two reference
+  # documents must not disagree about whether the capability exists
+  contains "$section" 'runs both **maintenance** pipelines, now that #1160 has registered the marker'
   contains "$section" 'at most one of them is rendered per repo, which is what makes that safe'
   # the render-both slice, named as still open here. NOTE the asymmetry: the
   # #1394 OWNER is pinned at the ARCHITECTURE site only — this page states the
@@ -920,26 +981,29 @@ setup() {
   # user decides what the plugin does
   contains "$section" 'first-class check rather than a policy: **state encryption**'
   contains "$section" 'BUSL-licensed Terraform is **supported, not endorsed**'
-  contains "$section" "**What's built (v0.1):**"
+  contains "$section" "**What's built (v0.2):**"
   # the remaining-children enumeration, swept here as at the manifest and
   # charter sites — scoped PAST the built-so-far heading because #1160 is cited
   # elsewhere in this section, so an unscoped loop would be satisfied by those
   local built child
-  built="${section#*What\'s built (v0.1):}"
+  built="${section#*What\'s built (v0.2):}"
   [ -n "$built" ]
   [ "$built" != "$section" ]
-  for child in 1160 1161 1162 1163; do
+  # #1160 has landed, so it is cited in the built-so-far half rather than the
+  # remaining-children enumeration; the three still-open children stay swept
+  for child in 1161 1162 1163; do
     contains "$built" "issues/$child"
   done
-  # the honest caveats: nothing executable yet, no marker yet, and the pipeline
-  # will land in `development` rather than here — all three are claims a later
-  # child must retire deliberately
-  contains "$section" 'and nothing executable yet'
-  contains "$section" 'Until #1160 lands there is no `opentofu` topic marker'
+  # the honest caveats. #1160 retired two of them by landing the marker and the
+  # dispatch — the "nothing executable yet" claim and the stale-declaration one —
+  # and replaced them with the caveat that IS now true: the dispatcher routes
+  # nothing until #1161 ships the agents. The pipeline-lands-in-`development`
+  # caveat is untouched and still a claim #1162 must retire deliberately.
+  contains "$section" 'Until #1161 lands the agents, the dispatcher routes nothing'
   # rule AND consequence, the pairing discipline this file applies everywhere
-  # else — the premise alone leaves the user-facing page silent on what a stale
-  # declaration actually does
-  contains "$section" 'is treated as a stale declaration'
+  # else — the premise alone leaves the user-facing page silent on what the
+  # escalation actually buys
+  contains "$section" 'naming the agent the group will route to'
   contains "$section" 'it **will ship** as a bootstrap template in the generic `development` plugin'
 }
 
@@ -1047,6 +1111,11 @@ setup() {
   # the OBLIGATION, contiguously — a banner that merely notes the asymmetry
   # without binding #1160 to act leaves the omission licensed
   contains "$after_marker" 'widen the glob to match the ownership statement or record why the JSON syntax is out of scope'
+  # ...and the OUTCOME, so the banner cannot keep posing a decision #1160 made:
+  # a later implementer reading the spec instead of the charter would otherwise
+  # treat the narrow glob as unsettled and widen it
+  contains "$after_marker" 'took the second branch'
+  contains "$after_marker" 'owned but not detected'
   contains "$after_marker" 'nothing downstream may assume the narrower reading here was deliberate'
   # the QUOTING itself, asserted on the raw text: the blockquote prefix is
   # stripped before flattening, so a banner de-quoted into plain prose would
@@ -1057,12 +1126,13 @@ setup() {
   [ "$(grep -c '^> \*\*Superseded in part by #1159' "$spec")" -eq 5 ]
 }
 
-@test "the orchestrator's topic-plugin dispatch list still OMITS this plugin (#1159)" {
-  # every other time-bounded site is pinned so a later child must retire it
-  # deliberately; this enumeration — on the page README advertises as the full
-  # inventory — had no guard in either direction, so when #1160 registers the
-  # marker the row could silently stay stale while the orchestrator dispatches a
-  # plugin the list does not name.
+@test "the orchestrator's topic-plugin dispatch list now NAMES this plugin (#1160)" {
+  # #1159 pinned this row's OMISSION and predicted exactly this flip: "when
+  # #1160 registers the marker the row could silently stay stale while the
+  # orchestrator dispatches a plugin the list does not name." The marker landed,
+  # so the guard is inverted rather than deleted — the row is on the page README
+  # advertises as the full inventory, and a topic that dispatches but is absent
+  # from it is invisible to every reader who trusts that page.
   local maint_row
   maint_row="$(grep -F '| Maintenance | `/development:maintenance' "$REPO_ROOT/docs/reference/plugins.md")"
   [ -n "$maint_row" ]
@@ -1073,16 +1143,17 @@ setup() {
   # an unrelated topic plugin is appended. The name occurs once in the row, so
   # the anchor stays non-vacuous without encoding list order.
   contains "$maint_row" '`development-kubernetes`'
-  lacks "$maint_row" 'development-opentofu'
+  contains "$maint_row" '`development-opentofu`'
 }
 
-@test "the plugin is registered with the docs generator, which still emits nothing for it (#1159)" {
+@test "the plugin is registered with the docs generator, which now emits its command but no agents (#1160)" {
   # PLUGINS is hardcoded, so an unregistered plugin is SILENTLY skipped: the
   # generator never scans it, --check compares two equally incomplete files, and
   # the drift gate passes while the reference pages omit the plugin entirely.
   # The all-plugins sweep lives in the sibling suite; what is asserted here is
-  # the pair of facts that only hold at THIS slice — registered, and correctly
-  # emitting nothing, because the plugin has no skills or agents yet.
+  # the pair of facts that only hold at THIS slice — registered, and emitting
+  # its maintenance COMMAND (#1160 landed the skill) while the agents page must
+  # stay empty until #1161 ships them. Each half flips with its own child.
   local gen block commands agents
   gen="$REPO_ROOT/scripts/generate-docs-reference.py"
   [ -f "$gen" ]
@@ -1098,9 +1169,11 @@ setup() {
   # otherwise a mis-derived path makes both `lacks` trivially true
   contains "$commands" '## development-kubernetes'
   contains "$agents" '## development-kubernetes'
-  # flipped by #1160 (the dispatcher skill) and #1161 (the agents), each of
-  # which must update this test in the same PR
-  lacks "$commands" '## development-opentofu'
+  # #1160 landed the dispatcher skill, so the COMMANDS page now carries it; the
+  # agents page still must not, until #1161. Each half is asserted separately so
+  # the flip is one child at a time rather than a single blanket expectation.
+  contains "$commands" '## development-opentofu'
+  contains "$commands" '/development-opentofu:maintenance'
   lacks "$agents" '## development-opentofu'
   # and prove that is what the generator WOULD emit, not merely what is committed
   run python3 "$gen" --check

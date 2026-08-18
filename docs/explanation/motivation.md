@@ -201,11 +201,13 @@ this section when it lands.
    `development-opentofu` — the sibling on the other side of the cluster
    boundary, covering the cloud provisioning that creates the cluster — has
    landed its ownership boundary and marketplace registration
-   ([#1159](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1159));
+   ([#1159](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1159)),
+   plus the gather script, topic marker and maintenance dispatcher
+   ([#1160](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1160));
    the rest of epic
    [#1158](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1158)
-   — gather script and dispatcher, the four agents, the bootstrap check
-   pipeline, and test fixtures — follows.
+   — the four agents and review panel, the bootstrap check pipeline, and test
+   fixtures — follows.
    Security-by-default really wants the container plugin
    (Trivy, SBOM, distroless) shipped. Tracked:
    [#172](https://github.com/timo-jakob/timos-claude-code-plugins/issues/172).

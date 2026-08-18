@@ -941,10 +941,10 @@ rstep() {
   # between THIS plugin's name and whatever follows it, so a caveat merely
   # REWORDED rather than deleted still reds. Scoped to this plugin's own name
   # and its immediate successor — NOT through to `future:`, which would couple
-  # the kubernetes suite to whether the NEXT plugin carries a caveat of its own
-  # (#1159's does: it is skeleton-stage, so its entry reads
-  # "`development-opentofu` (dispatch lands with #1160)", and a through-to-
-  # `future:` needle would force this suite to red until #1160 retires it).
+  # the kubernetes suite to whether the NEXT plugin carries a caveat of its own.
+  # #1159's did — "`development-opentofu` (dispatch lands with #1160)" — and
+  # #1160 has since retired it; the scope stays narrow so a FUTURE caveated
+  # neighbour cannot red this suite either.
   contains "$topic_row" '`development-kubernetes`, `development-opentofu`'
   # the tree is column-aligned, so match the gap as whitespace rather than
   # pinning a literal run of spaces that reflows when a longer name is added
