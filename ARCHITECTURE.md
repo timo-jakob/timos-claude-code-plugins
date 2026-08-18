@@ -34,7 +34,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu` (dispatch lands with #1160), future: `development-container` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`, future: `development-container` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -1592,9 +1592,9 @@ It does **not** own anything the modules deploy *into* a cluster — that is
 [`development-kubernetes` owns](#development-kubernetes-owns), the sibling this
 plugin stops at the boundary of — nor container images, nor application code of
 any kind. The two IaC plugins own **disjoint file sets**, so a repo holding both
-**will** detect both topics and run both **maintenance** pipelines with no
-coordination between them, once #1160 registers the marker that makes the second
-topic detectable. The **CI** half is narrower — the two
+**does** detect both topics and runs both **maintenance** pipelines with no
+coordination between them, now that #1160 has registered the marker that makes
+the second topic detectable. The **CI** half is narrower — the two
 bootstrap-rendered workflows will share three job ids, **and** at most one of
 them is rendered per repo, which is what makes that safe; see the job-id
 collision below.
@@ -1609,13 +1609,19 @@ neither plugin covers, in which a privileged pod or a cluster-admin role binding
 declared in HCL is deferred by this plugin's agents and never reachable by the
 sibling's — reviewed by nobody.
 
-**Ownership covers `.tf.json`; the topic MARKER is #1160's to define.** The
-marker as specified there globs `*.tf` only, so a module tree written entirely
-as `.tf.json` is owned by this charter yet would not fire detection. That
-asymmetry is recorded here rather than silently resolved: #1160 either widens
-the glob to match this ownership statement or records why the JSON syntax is
-out of scope, and nothing downstream may assume the narrower reading is
-deliberate.
+**Ownership covers `.tf.json`; the topic MARKER does not — and that is the
+recorded decision, not an oversight.** #1160 was left the choice of widening the
+glob or recording why the JSON syntax is out of scope, and it **recorded**:
+the marker globs `*.tf` only, in all three copies. The reason is that `.tf.json`
+is a machine-*generation* target rather than a hand-authored one — no consumer
+in this family emits it, and every tool in the pipeline reads it only after
+`tofu init` has already resolved the module — so widening the marker would add
+a detection surface with no fixture behind it, no consumer asking for it, and no
+way to keep #1162's inline copy of the same recipe honest. A `.tf.json`-only
+tree is therefore **owned but not detected**: the charter still governs it if the
+topic fires for another reason, and nothing downstream may read the narrow glob
+as an accident. Widening it later is a three-copy change plus a fixture, and it
+belongs to whoever brings the first real `.tf.json` consumer.
 
 **One plugin, both dialects.** It covers **OpenTofu and Terraform-compatible
 HCL** together, on the `development-javascript` precedent (JavaScript and
@@ -1651,13 +1657,18 @@ the one and only skip condition; anything else would be a green check over
 unenforced policies, which is the same defect the untested policy has one level
 down. Concretely: a `.rego` that fails to parse, a policy in a package outside
 the namespaces the step invokes (Conftest silently matches nothing there, so it
-passes everything), and a failing `conftest verify` run.
+passes everything), a failing `conftest verify` run, and — in the gather, which
+unlike the rendered job cannot assume its toolchain — a Conftest that is not
+available to evaluate them at all. The list is **open, not exhaustive**: any
+other state in which a declared set went unevaluated belongs here too.
 
 **Both consumers of that rule are bound by it too**, in the terms each has —
 the same dual binding the state-encryption rule carries below, and for the same
 reason. In #1162's rendered `policy` job the three states **fail the step**.
 In #1160's gather there is no step to fail, so they are **findings**, emitted
-under the configured `policy` key exactly as the untested-policy case is.
+under the configured `policy` key. (The untested-policy case is likewise a
+finding rather than a step failure, but it travels under `policy_tests` — see
+the one-carrier rule below.)
 Stating only the CI half would leave the gather free to run Conftest, watch it
 exit 0 having matched nothing, and report an empty `policy` set — the
 green-over-unenforced state this paragraph exists to forbid, with
@@ -1679,25 +1690,45 @@ from that default — a repo with no file matching
 mechanism-here-policy-in-the-consumer, so surfacing it would re-emit the
 adopt-Conftest-policies recommendation the charter forbids.
 
-**The declared-but-untested case has exactly ONE carrier.** When policies *are*
-declared but carry no `conftest verify` tests, `policy_tests` is `false` for a
-repo that has emphatically *not* declined to declare opinions. Both keys stay
-**out of `missing_tooling`** here too — the repo has not failed to configure a
-tool in this case either — and the finding travels **solely under the configured
-`policy` key** in `findings_by_tool`. State it that way round, because the
-alternatives are both wrong: routing it through `missing_tooling` as well would
-emit one defect twice (an "add `conftest verify` tests" entry *and* a `policy`
-finding group — two issues, two PRs, one fix), while suppressing it in both
-places would report it nowhere at all, and nothing else would catch it
-(`conftest verify` over a test-less directory exits green, so the pipeline is
-silent on it too).
+**The declared-but-untested case has exactly ONE carrier, and it is the
+`policy_tests` key.** `tooling_configured.policy_tests` **mirrors policy
+presence** — true whenever a `.rego` matches the glob, tested or not — because
+what it reports is whether the tool is configured, and a declared policy set
+configures both. The defect itself travels **solely under
+`findings_by_tool.policy_tests`**, as `policy_tests:untested-policies`, never
+duplicated under `policy`. Both keys stay **out of `missing_tooling`** here too:
+the repo has not failed to configure a tool in this case either.
 
-Every **known** `false` entry other than these two populates `missing_tooling`
-normally. An **unknown** key arriving `false` is the `tooling_configured` face of
-routing drift and is escalated via `human_action_required` instead, never listed
-as missing tooling — the same rule as the sibling. (The `known` qualifier is
-load-bearing: without it the first sentence licenses exactly what the second
-forbids, since an unknown key is also "other than these two".)
+State it that way round, because every alternative is wrong in a way that costs
+something. Setting `policy_tests: false` for a declared-but-untested set would
+make it indistinguishable from *no policies at all*, and would drop the finding
+into the `missing_tooling` default the exemption above exists to prevent.
+Carrying the defect under `policy` instead would leave `policy_tests` with no
+finding to carry, which is what #1160's dispatcher orders its group by — an
+untested set would then never be ordering-blocking, and the tests would never get
+written. Routing it through `missing_tooling` *as well* would emit one defect
+twice (an "add `conftest verify` tests" entry *and* a finding group — two issues,
+two PRs, one fix), while suppressing it in both places would report it nowhere at
+all, and nothing else would catch it (`conftest verify` over a test-less
+directory exits green, so the pipeline is silent on it too).
+
+**In practice that leaves `missing_tooling` ALWAYS EMPTY on this topic**, and it
+is worth stating as a rule rather than leaving to be derived. The other five
+known keys — `format`, `validate`, `lint`, `misconfiguration`,
+`state_encryption` — are **presence detection, not configuration** in their
+`tooling_configured` flag (the `state_encryption` FINDING is still evaluated in
+the gather — that is the 4/3 split below): the gather
+sets all five from the same `*.tf` search the topic marker uses, so a repo with
+no HCL never fires the marker and never dispatches. They therefore cannot
+legitimately be `false` on a payload that reached the dispatcher, and one
+arriving `false` is a payload-contract break escalated via
+`human_action_required` — never listed as missing tooling, because "no `.tf`
+found" is not "tflint is unconfigured". With those five excluded and `policy` /
+`policy_tests` exempted above, no key is left for the family default to act on.
+
+An **unknown** key arriving `false` is the `tooling_configured` face of routing
+drift and is escalated the same way, never listed as missing tooling — the same
+rule as the sibling.
 
 The plugin ships **no policies of its own**, with exactly one exception, and the
 exception is a **first-class check rather than a policy: state encryption**.
@@ -1758,10 +1789,16 @@ and offers no flag to scan for) and enumerating them badly is worse than
 delegating them clearly. What binds is **three invariants**, and #1162's job
 embeds **its own copy of the same classifier rule** — it cannot call the gather,
 for the reason the pin paragraph above gives — so the two must not diverge:
-(1) never report a
-repo whose state **is** encrypted at rest, in any form its own tool provides —
-that is the fires-permanently-and-unclearably defect, and it is the one this
-whole rule exists to avoid; (2) never clear a repo that owns unencrypted state,
+(1) never emit a finding **no edit the maintainer can make would clear** — in
+particular, never report a repo whose state **is** encrypted at rest in any
+accepted form *visible in the sources the check could read*; that is the
+fires-permanently-and-unclearably defect, and it is the one this whole rule
+exists to avoid. (Read it in that unfixable sense, not as an absolute: an
+unreadable `.tf` still yields a finding, because repairing the permission clears
+it — see the clearability discriminator below. Read absolutely, invariant (1)
+would license suppressing the check on any repo with one unreadable file, which
+is invariant (2) broken and CI green where maintenance reports high severity.)
+(2) never clear a repo that owns unencrypted state,
 including a root on the implicit local backend; (3) resolve every shape the same
 way in both consumers — **where both run**, a repo must not be a finding in
 maintenance and clean in CI. (Only where both run: a repo with an application
@@ -1774,6 +1811,178 @@ job #1162 renders cannot read. That record is the transmission path, and it is w
 invariant 3 checkable rather than aspirational: #1163's fixtures exercise both
 embeddings over the same shape set, and asserting that they agree is #1162's to
 own, exactly as asserting the shared Conftest pin is.
+
+**The classifier #1160 landed, stated as the two questions it answers.** #1162's
+inline copy must answer them identically; a divergence is invariant 3 broken.
+
+*Does the repo own state?* Yes when any non-pruned `.tf` declares a
+`provider "…"` block, a `backend "…"` block, or a `cloud {}` block — each
+matched at the start of a line **ignoring leading whitespace**
+(`^[[:space:]]*`), exactly as the encryption forms below are. That tolerance is
+load-bearing here too: `backend "s3" {` and `cloud {` are nested inside
+`terraform { … }` and are never at column 0, so a copy anchored there would
+classify every backend- or cloud-only root as a module library and skip the
+check entirely. Configuring
+a provider is a **root-module** concern — a consumed module inherits its caller's
+— so that block is the discriminator, and `required_providers` inside
+`terraform {}` is deliberately **not** matched, because declaring which providers
+a module needs is exactly what a reusable module library does. A repo answering
+no is the module-library shape the section above exempts, and the gather emits a
+note saying so rather than staying silent. A repo declaring a provider but **no**
+backend answers **yes** and is not exempt: it runs on the implicit local backend
+and owns a plaintext `terraform.tfstate`, which is invariant (2).
+
+Both questions are answered **repo-wide, over the union of every non-pruned
+`.tf`** — not per root directory. A multi-root tree therefore resolves to a
+single verdict: any owned state anywhere plus any accepted encryption form
+anywhere clears the repo. That is a recorded decision, not an oversight, and it
+has a known cost — a monorepo whose root A is encrypted and whose root B runs on
+the implicit local backend is cleared, which is invariant (2) unsatisfied for B.
+It is taken because the alternative needs per-root attribution the gather cannot
+do without parsing HCL, and a half-parser that guessed block and directory
+boundaries would violate invariant (1) instead, which is the unfixable
+direction. Splitting the verdict per root is #1394's to revisit, together with
+the dual-marker repo. **#1162's inline copy must aggregate the same way**, or
+invariant (3) is broken.
+
+*Is that state encrypted at rest?* Yes on any of five forms. The scan is
+**textual over the concatenated sources** — each name below is matched at the
+start of a line **ignoring leading whitespace** (`^[[:space:]]*`), anywhere in
+the tree, deliberately **not** scoped to the enclosing `backend` block, for the
+same no-HCL-parser reason. The whitespace tolerance is load-bearing rather than
+incidental: every one of these attributes is *indented* in real HCL — `encrypt
+= true` and `kms_key_id` live inside `terraform { backend "s3" { … } }` — so a
+copy anchored at column 0 matches nothing and reports every S3- or
+GCS-encrypted repo as unencrypted, which is invariant (1) firing permanently and
+unfixably.
+
+**The sources are joined with a newline-terminating pass (`awk 1`), never
+`cat`.** A `.tf` with no trailing newline — ordinary in an unformatted repo, and
+unformatted repos are this topic's audience, since `tofu fmt` is only
+presence-detected here — otherwise glues its last line onto the next file's
+first. Every probe is line-anchored, so the swallowed line becomes invisible: a
+lost `provider "aws" {` reads as a module library (invariant 2), a lost
+`encryption {` accuses an encrypted repo (invariant 1). **#1162's inline copy
+owes both the whitespace tolerance and the join.** Read the forms as attribute
+names to look for, never as "an S3 backend carrying…": an unrelated
+`kms_key_id` on an `aws_ebs_volume` clears the check, and that is the accepted
+cost of staying on the safe side of invariant (1). The list is deliberately
+generous, because invariant (1) — never report a repo whose state IS encrypted —
+is the one that fires permanently and unfixably when it is got wrong:
+
+1. an `encryption { … }` block inside `terraform {}` — OpenTofu-native;
+2. an S3 backend carrying `encrypt = true`, `kms_key_id` or `sse_customer_key`;
+3. a GCS backend carrying `encryption_key` or `kms_encryption_key`;
+4. an `azurerm` backend, unconditionally — Azure Storage encrypts at rest and
+   offers **no flag to scan for**, so this is the "platform encrypts
+   unconditionally" shape named above; demanding a flag that does not exist would
+   be invariant (1) again;
+5. a `cloud {}` block — HCP Terraform encrypts state at rest.
+
+A `local` backend, and no backend at all, clear **nothing**. One finding is
+emitted per repo, not per file: the defect is the repo's state configuration.
+
+**The classifier reads `.tf` only, and a mixed `.tf.json` tree is a recorded
+BLIND SPOT.** Ownership covers the JSON syntax (above), so a repo whose
+`main.tf` declares a provider while its backend and encryption live in
+`backend.tf.json` is a shape this charter admits — and the classifier, reading
+only the HCL, would answer *owns state, not encrypted* and emit a finding no
+edit to the `.tf` files can clear. That is invariant (1), so it is **not**
+allowed to happen: when a non-pruned `.tf.json` is present alongside the `.tf`
+sources, the check emits a **note** recording that state configuration may live
+in a file it cannot read, and **no finding**. Silence beats an unfixable
+accusation, and the note is what keeps the gap visible instead of merely absent.
+
+**Both questions are affected, not just the second.** A `.tf.json` can carry the
+root-module block as easily as the encryption block, so an `owns_state` answer
+of *no* is equally unreliable there — and reporting it as "this is a reusable
+module library, which owns no state" would state an absence of evidence as a
+verified fact, clearing a repo that may run on the implicit local backend
+(invariant 2). So the note replaces the module-library wording too, and says the
+ownership question is **unresolved**. **An unreadable `.tf` softens the OWNERSHIP verdict only.** A file that could
+not be read may have carried the root-module block, so `owns_state: no` is
+reported as unresolved rather than as a module library. It does **not** soften
+the ENCRYPTION verdict: a repo that owns state and shows no accepted encryption
+form in the sources that could be read still receives the finding — **but the
+finding carries a note saying the read was partial, and how many `.tf` files
+went unread**, so the reader can fix the permissions and re-run before acting.
+
+**The discriminator is CLEARABILITY, not "could not satisfy the check".** That
+phrase is equally true of a `.tf.json`, which must suppress — so it cannot be
+what separates the two cases. What separates them is whether the maintainer can
+*clear* the accusation: an unreadable `.tf` is a permission they can repair,
+after which the check sees it; a `.tf.json` this classifier can never parse
+leaves an accusation no edit to the HCL will ever answer. Only the **unclearable**
+one is suppressed. Softening both would let one unreadable file silence the
+opinion entirely. #1162's inline copy must resolve both halves the same way. The
+`.tf.json` probe is run **once, up front**, before either question is answered.
+
+**A `.tf.json` search that could not complete counts as present.** The cost of a
+false negative here is the unfixable accusation invariant (1) forbids, so an
+incomplete walk takes the same branch as a positive hit rather than being
+treated as "none found".
+
+**That probe prunes DURING its walk, not afterwards** — the one place in this
+family where the order matters. Every other recipe filters a captured list, and
+can, because there an unfinished search only ever softens a NEGATIVE verdict.
+Here the status SUPPRESSES a finding, so it must describe only the region
+actually searched: a permission error inside `.terraform/` or `node_modules/` —
+trees the marker ignores by design — must not read as "could not rule out" and
+silence the plugin's one built-in check. **#1162's inline copy owes the same
+scoping**, and following house style (walk everything, filter after) would break
+invariant (3) on any repo with an unreadable provider cache.
+
+**If NO `.tf` can be read at all, the gather refuses outright** — there is
+nothing to classify, and an unresolved-ownership note would still be a claim
+about a tree it never saw. It emits no payload (exit 2) and the orchestrator
+records the topic as unsupported; a rendered job in the same position must
+**fail** rather than pass.
+
+**#1162's inline copy owes every part of this carve-out**, enumerated rather
+than counted so nothing has to be reconciled with the paragraph structure:
+(a) suppress on a `.tf.json`, with a note, never a finding — the note naming
+ONLY the causes that actually held (`.tf.json` present, probe incomplete, and
+how many `.tf` went unread), because Phase 9 renders it verbatim and a note
+citing files the repo does not ship sends the reader hunting for them;
+(b) report an unresolved ownership question rather than a module library when
+anything went unread, its cause list built the same way — and "unread" covers
+**three** sources of blindness, not two: a `.tf` that could not be read, a
+`.tf.json` this classifier cannot parse (or whose probe did not finish), and a
+**`.tf` search that did not finish**. The third is easy to omit because the
+JSON probe walks the same tree and usually trips alongside it; relying on that
+is relying on a coincidence between two independently-run searches, and it
+leaves the window where a directory becomes readable between them. With hits
+present but the walk incomplete, files never enumerated are indistinguishable
+from files that do not exist, so a tree whose only root-module block sat in the
+un-enumerated region would be cleared as a module library on absence of
+evidence — invariant (2) inverted; (c) run the `.tf.json` probe once, up front, before either question;
+(d) treat an incomplete probe as "present"; (e) prune during that walk, not
+after; (f) **where the repo owns state and no accepted encryption form was found**,
+and NO `.tf.json` is present and its probe completed, emit the encryption
+finding — and, **only if at least one `.tf` actually went unread**, attach a
+partial-read caveat naming how many — and a SEPARATE caveat when the `.tf`
+search itself did not finish, since an unenumerated file is a different blind
+spot from an unreadable one and the reader's next action differs; with every
+`.tf` readable and the search complete the finding carries no caveat at all,
+since a caveat reading "over 0 `.tf` file(s) the check could not read" is the
+same fabricated cause (a) forbids. Both antecedents are
+load-bearing: without the ownership and encryption clauses, an implementer
+working from this list alone accuses a correctly-encrypted root and a reusable
+module library, and no edit to their HCL clears it — invariant (1) firing
+permanently, the one defect this whole section exists to prevent. (f) is the
+exact complement of (a) **on the `.tf.json` condition alone** — the ownership
+and encryption questions gate it independently — so the two cannot both hold on
+that condition and no tie-break is needed; suppression outranking the caveat is
+(a)'s own condition doing the work. And (g) refuse
+outright when no `.tf` was readable at all; and (h) where the ownership question
+resolves to **no** and nothing went unread, say so — a note reporting the
+module-library shape and that the check does not bind — rather than passing
+silently, since a job that emits nothing is indistinguishable from one that
+never ran.
+
+**"Unreadable" means "not a readable REGULAR file"** (`-f && -r`). A dangling
+symlink or a FIFO counts toward the skipped set even though the marker's
+`! -type d` glob admitted it, because reading one aborts or blocks the job.
 
 Everything else generic belongs to `tflint` and `trivy`; the policy layer is for
 what they cannot express — required module structure, mandated backend
@@ -1817,19 +2026,34 @@ can destroy state that no rollback recovers.** A human approves. Note this is
 pull request, so a human approval is structurally required, and auto-merge armed
 afterwards fires only once that approval lands.
 
-A repo declaring `primary: opentofu` in `.maintenance.yml` will **select this
-plugin for maintenance dispatch** once `opentofu` is in the detected+supported
-set; the primary/auxiliary model already permits a topic to be primary, so no
-new mechanism is needed. **Until #1160 registers the topic marker and the gather
-script, such a declaration names a stack the orchestrator cannot dispatch and is
-therefore treated as stale** (see the `dispatch_mode` contract), and #1162 is
-what teaches bootstrap to render the pipeline and require its checks.
+A repo declaring `primary: opentofu` in `.maintenance.yml` **selects this plugin
+for maintenance dispatch**: since #1160 registered the topic marker and the
+gather script, `opentofu` is in the detected+supported set, and the
+primary/auxiliary model already permitted a topic to be primary, so no new
+mechanism was needed. Such a declaration is therefore no longer treated as stale
+(see the `dispatch_mode` contract). #1162 is what teaches bootstrap to render the
+pipeline and require its checks — so the maintenance half is live while the CI
+half is not, which is the ordinary state of a topic mid-epic, not a defect.
 
-**#1159 landed the boundary only.** This plugin currently ships its manifest and
-its charter and nothing executable: the gather script, topic marker and
-dispatcher arrive with #1160, the four agents and the review panel with #1161,
-the bootstrap check pipeline with #1162, and the self-contained test fixtures
-with #1163. Settling the boundary first is deliberate: a topic plugin that
+**#1159 landed the boundary; #1160 landed the dispatch.** This plugin now ships
+its manifest, its charter, and a maintenance dispatcher fed by
+`gather-opentofu-findings.zsh` and the `opentofu` topic marker — the marker in
+three parity-pinned copies (the orchestrator recipe, the gather, and
+`detect-stack.sh`'s `is_opentofu` classification). Still to come: the four
+agents and the review panel with #1161, the bootstrap check pipeline with #1162,
+and the self-contained test fixtures with #1163. **Until #1161 lands, the
+dispatcher routes nothing** — it escalates every group via
+`human_action_required` naming the agent the group will route to, because naming
+a `subagent_type` that does not exist would make Phase 8 fail to spawn and read
+as a broken dispatcher rather than as work waiting on a known dependency. #1161
+flips **every** row to routing when it creates the agents — the four
+auto-fix/triage rows to their two fixers (`format` and `lint` to
+`opentofu-format-fixer`, `policy` and `policy_tests` to
+`opentofu-policy-triage`), and the three advisory rows to
+`opentofu-security-reviewer` as ordinary plan groups, never as
+`human_action_required` entries (that field is the halt branch, and an advisory
+entry there would discard the plan the mechanical fixes travel in).
+Settling the boundary first is deliberate: a topic plugin that
 creeps into Dockerfiles, cluster manifests or application code contradicts
 language-first and has to be unpicked across several plugins later.
 
@@ -1877,7 +2101,7 @@ zero-language repo carrying *both* markers must **halt** at bootstrap rather
 than pick a workflow, and nothing does that today — bootstrap keys its IaC path
 on the kubernetes marker alone, so such a repo currently renders the sibling's
 workflow. **#1162 owns adding the halt**, alongside the `--iac-only` widening
-and against the marker #1160 creates; it is an acceptance criterion of that
+and against the marker #1160 landed; it is an acceptance criterion of that
 story, and that criterion cites **#1394** — the later slice that must render
 both workflows and therefore owns disambiguating the three ids. Until the halt lands,
 the collision is bounded by the absence of an `opentofu` marker rather than by a
@@ -2217,7 +2441,7 @@ dispatches as `"primary"` and the Phase 9 summary notes the stale
 declaration (`development/skills/maintenance/SKILL.md`). That is the case
 a repo hits when it declares a primary the orchestrator cannot yet
 dispatch, e.g. `primary: kubernetes` before #1152 registered the marker,
-and `primary: opentofu` before #1160 registers its own.
+and `primary: opentofu` before #1160 registered its own.
 
 In `"auxiliary"` mode a language plugin runs only its
 mechanical fixers and **skips its app-grade gates** (coverage
@@ -5121,9 +5345,11 @@ to detect-stack.sh; go run it." Pure functions, no path coupling.
 
 **`detect-stack.sh` has an exit-code contract (#1177), and pre-running it means
 honouring that contract.** It exits **non-zero with an empty stdout** when
-detection cannot complete — today, when the kubernetes marker's search did not
-finish and reporting `is_kubernetes: false` would be a claim about a tree it
-could not read. Callers must branch on **non-zero**, never on a specific code
+detection cannot complete — when a **topic marker's** search did not finish and
+reporting `is_kubernetes: false` or `is_opentofu: false` would be a claim about a
+tree it could not read. Both markers can reach that state independently, so a
+repo with an unreadable subtree and no `.tf` aborts on the opentofu half even
+with readable charts. Callers must branch on **non-zero**, never on a specific code
 (`set -euo pipefail` can also abort it with `1`), and must **not** parse the
 empty document: every key reads as absent, which looks exactly like a repo with
 no git, no languages and no artifacts. The **stderr is the deliverable** — it

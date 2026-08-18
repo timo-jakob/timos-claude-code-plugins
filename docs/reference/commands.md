@@ -60,6 +60,12 @@ For the narrative overview of what each plugin is for, see the
 | `/development-kubernetes:maintenance` | Kubernetes/IaC maintenance dispatcher. Receives a v2 maintenance payload (a file path in $ARGUMENTS) that /development:maintenance built from the kubernetes topic gather (gather-kubernetes-findings.zsh), validates it, and returns a plan routing each finding group to an agent. A TOPIC plugin that can also be PRIMARY: a GitOps repo with no application language declares `primary: kubernetes` and gets the full pipeline. It ROUTES each finding group by the live routing table (manifest_validation → kubernetes-manifest-fixer; policy + policy_tests → kubernetes-policy-triage, grouped into one PR). A single invocation returns the plan; the per-group work agents are the orchestrator's job. Pure function of its JSON input; runs no detection of its own. Ships NO approver — a cluster definition is approved by a human. |
 | `/development-kubernetes:review` | Perform a comprehensive Kubernetes/IaC review using three specialized parallel agents — security, reliability, and Argo CD. Reviews rendered manifests, not templates. |
 
+## development-opentofu
+
+| Command | Description |
+| --- | --- |
+| `/development-opentofu:maintenance` | OpenTofu/Terraform maintenance dispatcher. Receives a v2 maintenance payload (a file path in $ARGUMENTS) that /development:maintenance built from the opentofu topic gather (gather-opentofu-findings.zsh), validates it, and returns a plan routing each finding group to an agent. A TOPIC plugin that can also be PRIMARY: a provisioning repo with no application language declares `primary: opentofu` and gets the full pipeline. It ROUTES each finding group by the routing table (format + lint → opentofu-format-fixer; policy + policy_tests → opentofu-policy-triage, grouped into one PR); state_encryption, validate and misconfiguration route to opentofu-security-reviewer as advisory review, never to an auto-fixer. Until #1161 lands those agents it routes NOTHING — every group is escalated via human_action_required, naming the agent it will route to — because naming a subagent_type that does not exist would make Phase 8 fail to spawn. A single invocation returns the plan; the per-group work agents are the orchestrator's job. Pure function of its JSON input; runs no detection of its own. Ships NO approver — a provisioning change can destroy state no rollback recovers, so a human approves. |
+
 ## development-python
 
 | Command | Description |

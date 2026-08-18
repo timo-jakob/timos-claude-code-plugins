@@ -171,7 +171,7 @@ is working.
 > fails only on a *failing* `conftest verify` run (violations and the
 > cannot-evaluate states fail the step as before — this bounds the verify leg,
 > not the job). The declared-but-untested defect travels **solely** under the
-> maintenance gather's `policy` key — one defect, one carrier. Building the CI
+> maintenance gather's `policy_tests` key — one defect, one carrier. Building the CI
 > half from this paragraph would turn a consumer's pipeline permanently red on a
 > state the charter routes to `opentofu-policy-triage`. As with §2, §4, §6 and §8,
 > the record is kept rather than rewritten.
@@ -189,8 +189,11 @@ presence of `*.tf` files, pruning vendored trees and `.terraform/`.
 > owned yet undetected by a `*.tf`-only glob. #1160 must therefore **either
 > widen the glob to match the ownership statement or record why the JSON syntax
 > is out of scope** — nothing downstream may assume the narrower reading here
-> was deliberate. As with §2, §4, §5 and §8, the record is kept rather than
-> rewritten.
+> was deliberate. **#1160 took the second branch**: the marker globs `*.tf` only
+> in all three copies, and a `.tf.json`-only tree is *owned but not detected*,
+> recorded with its reasoning in ARCHITECTURE.md. Read the decision there, not
+> the open question here. As with §2, §4, §5 and §8, the record is kept rather
+> than rewritten.
 
 **Dispatcher:** `development-opentofu/skills/maintenance/SKILL.md` — validates the
 payload, returns a PR-grouped plan, spawns nothing.

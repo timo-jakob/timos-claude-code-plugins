@@ -166,9 +166,12 @@ scripts live one directory up. Use the resolved absolute path.
 
 **Check the exit status before parsing (#1177).** A non-zero exit means
 detection could not complete and `/tmp/detect.json` is **empty** — the script
-names the reason on stderr (today: a kubernetes marker search that could not
-finish, which refuses to report `is_kubernetes: false` for a tree it could not
-read). **Halt and forward that stderr verbatim.** Do **not** run the validations
+names the reason on stderr (a **topic marker** search that could not finish —
+today the kubernetes one or the opentofu one, and the message names which —
+refusing to report `is_kubernetes: false` / `is_opentofu: false` for a tree it
+could not read). **Halt and forward that stderr verbatim**, and read which
+marker it names rather than assuming: a repo with an unreadable subtree and no
+`.tf` aborts on the opentofu half even when its charts are perfectly readable. Do **not** run the validations
 below against an empty document: every key reads as absent, so `git_initialized`
 is not `true` and the run would tell a user with a perfectly healthy repository
 to `git init` — a confidently wrong instruction derived from a document that
@@ -196,7 +199,7 @@ Validate from `detect.json` (only after a zero exit):
   into Phase 2 and let its Proceed/halt gate decide, because that gate is the
   single halting authority and it halts only when **both** `supported` and
   `supported_topics` are empty. A language-less repo is not necessarily an
-  unworkable one: `kubernetes` and `docs` are registered *language-agnostic*
+  unworkable one: `claude-plugin`, `docs`, `kubernetes` and `opentofu` are all registered *language-agnostic*
   (Required language `none`), and a GitOps repo with no application language is
   precisely the case the kubernetes topic exists for — halting on it here would
   make that topic permanently undispatchable. **Phase 2 owns the message**; it is
@@ -283,6 +286,7 @@ manifest. Known topics:
 | `docs` | a `docs/architecture/` **directory** (the C4 architecture docs home — language-agnostic, so it composes with any language, or none) | `gather-docs-findings.zsh` |
 | `react` | `react` in the **`dependencies`** (runtime, **not** `devDependencies`) of **any** `package.json`, monorepo-aware, under `detect_lang`'s prune set (`node_modules`, `.git`, `vendor`, `.build`, `dist`, `templates`). Requires `jq`; **requires language `javascript`** | `gather-react-findings.zsh` |
 | `kubernetes` | a Helm `Chart.yaml`, a Kustomize manifest (`kustomization.yaml`, `kustomization.yml` or `Kustomization` — all three spellings kustomize accepts), **or** a file containing `argoproj.io` — language-agnostic, so it composes with any language, or none | `gather-kubernetes-findings.zsh` |
+| `opentofu` | any `*.tf`, pruning `.terraform/` (the provider cache) and vendored trees — language-agnostic, so it composes with any language, or none. `.tf.json` is owned by the charter but deliberately **not** matched; ARCHITECTURE.md records why | `gather-opentofu-findings.zsh` |
 
 **Detecting a marker — use these exact recipes, don't improvise.** A
 *file-presence* marker (the `claude-plugin` dir) is robust to test with
@@ -389,6 +393,44 @@ else
   false
 fi
 # kubernetes-marker:end
+
+# opentofu marker (file presence; prune the provider cache and vendored trees).
+# A PREDICATE, like every recipe above — its EXIT STATUS is the verdict, and the
+# partition step below does the registering. Never make a recipe register the
+# topic itself: a side-effecting `if … fi` tail exits 0 whether or not the
+# marker fired, so the caller's `$?` stops meaning anything.
+#
+# THREE exit statuses, not two: 0 = opentofu, 1 = searched and found nothing,
+# 2 = the search did not complete. The third exists for the same reason the
+# kubernetes recipe's does — an unreadable subtree must never render as "this
+# repo has no infrastructure code", which is the one answer that silently drops
+# a whole topic.
+#
+# `*.tf` only; `.tf.json` is deliberately not matched, and that decision is
+# recorded in ARCHITECTURE.md (`development-opentofu` owns) rather than left to
+# be inferred here.
+# opentofu-marker:begin
+tofu_hits="$(find . -name '*.tf' ! -type d 2>/dev/null)" && tofu_find_rc=0 || tofu_find_rc=$?
+# the filter reads the captured string, never the filesystem — but it CAN still
+# fail (grep exit 2, or no grep at all), and `|| true` absorbed those exactly
+# like the intended no-match 1, so an unfinished filter returned the recipe's
+# "searched and found nothing" status instead of its "did not complete" one.
+# Capture-before-filter for the same reason the kubernetes recipe does it:
+# `find … | grep -q` inverts under `set -o pipefail` once find's output outruns
+# the pipe buffer, turning a genuine match into "not opentofu".
+tofu_hits="$(printf '%s\n' "$tofu_hits" \
+  | grep -v -e '/\.terraform/' -e /node_modules/ -e '/\.git/' -e /vendor/
+)" && tofu_filter_rc=0 || tofu_filter_rc=$?
+if [ -n "$tofu_hits" ]; then
+  true
+elif [ "$tofu_find_rc" -ne 0 ] || [ "$tofu_filter_rc" -ge 2 ]; then
+  printf 'opentofu marker: search did not complete (find %s, filter %s) — refusing to report "not opentofu"\n' \
+    "$tofu_find_rc" "$tofu_filter_rc" >&2
+  ( exit 2 )
+else
+  false
+fi
+# opentofu-marker:end
 ```
 
 `( exit 2 )` rather than a bare `exit 2`: the recipe is a **predicate**, and an
@@ -404,6 +446,24 @@ second test derives the recipe's marker names and prune set from
 `development/skills/bootstrap/scripts/detect-stack.sh`'s `is-kubernetes-marker`
 block, a FOURTH copy of this recipe — and requires all of them to agree. Keep
 the whole recipe between them, and keep them a single unique pair.
+
+**The `opentofu-marker:begin`/`:end` sentinels are load-bearing** in exactly the
+same way, and pin a **3-way parity**: `tests/opentofu-topic-marker.bats` extracts
+the text between them and executes it, so the suite tests *this* recipe rather
+than a copy, and a second test derives the marker glob, the prune set and the
+`! -type d` guard from
+this block, from `gather-opentofu-findings.zsh`'s own
+`gather-opentofu-marker` block, and from
+`development/skills/bootstrap/scripts/detect-stack.sh`'s `is-opentofu-marker`
+block — a third copy — and requires all three to agree. Keep the whole recipe
+between them, and keep them a single unique pair. Parity is over the glob, the
+prune set and the `! -type d` guard, **not** byte-equality — the guard is
+load-bearing, not cosmetic: without it a directory someone named `env.tf` fires
+the topic on a repo with no HCL, so a copy that dropped it would detect a repo
+the other two reject. What is deliberately NOT shared: detect-stack's copy also carries
+`cd`/`exit 125` branches, which must never be pasted into the recipe above —
+`$cwd` does not exist there and a bare `exit` would kill the orchestrator's
+shell, which is what the `( exit 2 )` note exists to prevent.
 
 **The `react-marker:begin`/`:end` sentinels are load-bearing**, not decoration:
 `tests/react-topic-marker.bats` extracts exactly the text between them and executes
@@ -462,10 +522,10 @@ in its recipe:
 **`jq` is a prerequisite of this marker, and its absence is not a verdict.** `react`
 is the only topic marker that shells out to a tool which may be **missing**
 (`claude-plugin`/`docs` use `test`, `spring` uses `grep`) — it is *not* the only
-one that can fail to reach a verdict: `kubernetes` reaches the same
-not-evaluated state from a search that could not complete, and signals it with
-its own exit `2` rather than a preflight (#1177). Both land in the same
-`unsupported_topics` bucket, by the three-way `$?` rule in the partition step
+one that can fail to reach a verdict: `kubernetes` and `opentofu` reach the
+same not-evaluated state from a search that could not complete, and each signals
+it with its own exit `2` rather than a preflight (#1177). All three land in the
+same `unsupported_topics` bucket, by the three-way `$?` rule in the partition step
 below. Because the recipe's
 verdict is "did anything reach stdout", a missing `jq` produces no output and would
 otherwise read as a confident **"this is not a React repo"** — silently skipping a
@@ -536,7 +596,7 @@ test -x "<skill-base-dir>/scripts/gather-<topic>-findings.zsh"
 marker recipe answers `0` = present and `1` = absent — but a recipe that could
 not finish its search answers with **neither**, and reading its status as
 "absent" is precisely the *could-not-look-rendered-as-nothing-found* failure.
-**Two markers signal it today; the others cannot yet**, so read the `1` row
+**Three markers signal it today; the others cannot yet**, so read the `1` row
 below as *provisional* for them:
 
 | `$?` | Meaning | What the partition does |
@@ -569,6 +629,17 @@ below as *provisional* for them:
   reaches Phase 2 with a detection this phase did not perform. Two guards on one
   hazard, at different altitudes; never treat the topic-level one as redundant
   and delete it.
+- **`opentofu` exits `2`** when its `*.tf` search came up **EMPTY** and either
+  the `find` or the **prune filter** did not finish — an unreadable subtree, a
+  `find` killed mid-run, a `grep` that exited `2`. Note it as `opentofu marker:
+  search did not complete — the topic was not evaluated`, quoting the recipe's
+  stderr, which names both statuses. **A hit stands whatever else failed**: the
+  recipe tests `[ -n "$tofu_hits" ]` first, so one `*.tf` settles the yes/no and
+  a repo with modules plus one unreadable subtree is still detected. It has one
+  half rather than kubernetes' two, so there is no fallback search to soften a
+  **negative** verdict — an empty result from an unfinished search refuses to
+  answer rather than reporting "not opentofu".
+
 - **`react`'s** missing-`jq` case is the same shape reached a different way (its
   preflight below), and is noted the same way.
 
@@ -607,6 +678,7 @@ marker prose and then quietly skipped:
 | `claude-plugin` | none |
 | `docs` | none |
 | `kubernetes` | none |
+| `opentofu` | none |
 | `spring` | `java` |
 | `react` | `javascript` |
 
@@ -1161,11 +1233,12 @@ differences:
 - `language`: the **topic name** (e.g. `"claude-plugin"`) — it identifies the
   dispatch target. Most topic dispatchers don't branch on it, but the value is
   **contractual, not informational**: a topic dispatcher MAY validate it, and
-  `development-kubernetes` does — it errors and stops when `.language` is not
-  `"kubernetes"`, because the v2 payload has no `topic` key for it to check
-  instead. So never null it, normalise it, or move the topic name to a new key
-  without updating the topic dispatchers in the same change: every kubernetes
-  dispatch would land in `unsupported_topics` as `dispatch failed`.
+  `development-kubernetes` and `development-opentofu` both do — each errors and
+  stops when `.language` is not its own topic name, because the v2 payload has no
+  `topic` key for them to check instead. So never null it, normalise it, or move
+  the topic name to a new key without updating the topic dispatchers in the same
+  change: every kubernetes **and** opentofu dispatch would land in
+  `unsupported_topics` as `dispatch failed`.
 - `dispatch_mode`: `"primary"` if this topic == the declared `primary` (or no
   declaration); else `"auxiliary"` — same rule as language payloads (Phase 1).
 - `language_meta`: `{ "version": null, "manifests": ["<the topic marker>"] }` —
@@ -1277,6 +1350,22 @@ differences:
   become `manifests: []`: the dispatch would name no files, the topic agents
   would review nothing, and the run would report clean — the empty list the
   recipe just refused to print, reintroduced by the step that consumes it.
+
+  **`opentofu` needs no lister, and that is a decision rather than an omission.**
+  Its marker matches arbitrarily many `*.tf` files and has no single marker path,
+  so the file-or-directory rule above cannot answer it — and the rule that
+  forbids inventing a conventional root path applies with full force: `main.tf`
+  need not exist, and a repo whose modules live under `environments/` would be
+  handed a `manifests` entry naming no file. So set
+  **`manifests: ["*.tf"]`** — the marker GLOB itself, not a path list. It is
+  honest (it says what the topic matched, and names nothing that does not
+  exist), it needs no walk and therefore has no truncation hazard to guard, and
+  nothing downstream reads it: `development-opentofu`'s dispatcher routes on
+  `findings_by_tool` alone, and its gather re-derives the file set itself from
+  the same recipe. **Never** substitute an enumerated `.tf` list here without
+  also giving it a sentinel-pinned lister and the status-2 completeness contract
+  the kubernetes one carries — a bare enumeration would be the truncated-list
+  lie in its quietest form, since a partial walk and a small repo look identical.
 
   **The react lister above does NOT carry this contract yet**, and the honest
   reason is scope, not safety. Do not read its absence as proof the gap is
@@ -1504,18 +1593,37 @@ topic `plan` depends first on `human_action_required`, then on
   whenever it cannot understand the payload: a `findings_by_tool` key its
   routing table has no row for, a `dispatch_mode` outside the two-value enum,
   or `manifest_validation: false` (presence detection, so `false` means the
-  payload was not built by the orchestrator). Its **routable** groups return a
-  real `plan` — the escalate-everything override retired with #1153.
+  payload was not built by the orchestrator). **For `development-kubernetes`**
+  its routable groups return a real `plan` — that plugin's escalate-everything
+  override retired with #1153.
+
+  **`development-opentofu` produces the same shape as its ORDINARY case**, not
+  only on a payload it cannot understand: until #1161 ships its agents, every
+  routed group escalates rather than routing (naming a `subagent_type` that does
+  not exist would make Phase 8 fail to spawn), so a payload carrying any finding
+  comes back with an empty `plan` and one `human_action_required` entry per
+  group. Read it as work waiting on a known dependency, not as a malformed
+  payload — and never as "nothing to do".
 - else `tooling_configured` **non-empty** → "this topic is clean — its tools ran
-  and found nothing";
+  and found nothing" — **except** for a dispatch in AUXILIARY mode whose topic
+  SKILL.md declares keys it suppresses there (`development-opentofu` omits
+  `policy_tests`): that verdict carries the auxiliary-scope suffix naming them,
+  since a key the gather evaluated and the dispatcher suppressed forms no group
+  and would otherwise read as "found nothing". Phase 9 owns the exact wording;
 - else (**empty**) → "no tools are registered for this topic yet — nothing was
   inspected". Render it as such and cite the topic's `notes`, so a no-op is never
   reported as a clean bill of health.
 
-A topic's `notes` can also contradict a clean reading directly — the kubernetes
-gather always carries `manifest_validation: presence-detected only`, meaning its
-tools have **not** run in the gather at all. Cite the notes whenever they say so,
-even on the "clean" branch.
+A topic's `notes` can also contradict a clean reading directly. **Two gathers
+always carry such a note today**, and the rule is general rather than a property
+of either: the kubernetes gather's `manifest_validation: presence-detected
+only`, and the opentofu gather's `format/validate/lint/misconfiguration:
+presence-detected only` — four of its seven keys, whose tools run in the CI
+pipeline and not here. In both cases the tools have **not** run in the gather at
+all. Whenever a topic's `notes` say a tool was presence-detected rather than
+executed, cite them and never render a bare clean verdict for that topic — "its
+tools ran and found nothing" about `tofu fmt`, `tofu validate`, tflint and
+`trivy config` would be false on every opentofu payload there is.
 
 ## Phase 7 — handle `human_action_required` early-outs
 
@@ -2663,7 +2771,16 @@ pushed fixes for — detected, never dispatched:>
    otherwise fall through to "Clean" and report an escalation as a clean bill of
    health. `development-kubernetes` returns exactly this shape for a payload it
    cannot understand — an unrouted `findings_by_tool` key, a `dispatch_mode`
-   outside its enum, or `manifest_validation: false`:>
+   outside its enum, or `manifest_validation: false`. `development-opentofu`
+   returns it for its own equivalents (an unrouted `findings_by_tool` key, a
+   `dispatch_mode` outside its enum, or any of the five keys whose
+   `tooling_configured` flag its gather sets from the `*.tf` presence detection
+   — `format`, `validate`, `lint`, `misconfiguration`, `state_encryption` —
+   arriving `false`; it has no `manifest_validation`. Note the two senses:
+   Phase 6's "presence-detected only" names the FOUR tools that do not run in
+   the gather, which excludes `state_encryption`, whose finding is evaluated
+   there) AND as its ordinary case,
+   since every routed group escalates until #1161 ships its agents:>
   Halted — <N> group(s) need a human decision.
     <one line per entry: <reason> → <recommendation>>
   <Else if tooling_configured is EMPTY (no tools registered for this topic yet):>
@@ -2676,6 +2793,20 @@ pushed fixes for — detected, never dispatched:>
   <Else if groups were planned:>
   <N> group(s) planned, <M> processed.
   <Otherwise: state the observed state plainly.>
+
+  <AUXILIARY-SCOPE SUFFIX — appended to whichever verdict fired above, not to
+   one branch of it. Emit it whenever the dispatch was in AUXILIARY mode AND the
+   topic's own SKILL.md declares keys it suppresses in that mode (today only
+   `development-opentofu`, which omits `policy_tests`); a topic that suppresses
+   nothing in auxiliary mode gets NO suffix, because its full key set WAS
+   considered and a hedge naming no keys is worse than none:>
+  Auxiliary scope — keys this topic suppresses in auxiliary mode were not
+  considered (<name them from the topic's SKILL.md>); their findings, if any,
+  were deferred, not cleared.
+  <It is a SUFFIX and not a Clean-branch qualifier because the halted branch is
+   the ordinary case today — every opentofu group escalates until #1161 ships
+   its agents — so attaching it only to "Clean" would let the deferred finding
+   vanish on exactly the path most runs take.>
 
   <`--no-merge` is a SUFFIX on the verdict above, never a replacement for it —
    the topic WAS dispatched, so its verdict is known and must still be stated.

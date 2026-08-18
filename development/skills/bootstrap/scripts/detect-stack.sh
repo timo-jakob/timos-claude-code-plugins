@@ -67,6 +67,22 @@
 #                                  per-language fragments are swept too, though
 #                                  that sweep is vacuous while the language set
 #                                  is necessarily empty.
+#   is_opentofu           bool     repo carries the opentofu TOPIC marker — any *.tf
+#                                  outside .terraform/ and vendored trees (#1160).
+#                                  Language-agnostic, so it composes with any
+#                                  language or none. Kept identical — in GLOB, PRUNE SET
+#                                  and the `! -type d` guard — to the orchestrator's topic-marker
+#                                  recipe and to gather-opentofu-findings.zsh;
+#                                  tests/opentofu-topic-marker.bats derives all
+#                                  three and requires them to agree.
+#                                  `.tf.json` is deliberately NOT matched;
+#                                  ARCHITECTURE.md records that decision.
+#                                  This slice EMITS the classification only.
+#                                  Consuming it — the IaC candidate set, the
+#                                  widened `--iac-only` context set, and the
+#                                  dual-marker repo — is #1162's, which is why
+#                                  `iac_only` below still keys on is_kubernetes
+#                                  alone.
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #   missing_artifacts     []string templates expected under THIS repo's conditions
 #                                  (visibility/languages/bot path) that are absent —
@@ -222,13 +238,17 @@
 #
 # Exit codes (#1177 — this script HAS an error contract now; it did not before):
 #   0  the JSON above is on stdout.
-#   2  detection could not complete, and NOTHING is on stdout. Today every such
-#      path is the kubernetes marker failing to reach a verdict, in one of two
-#      shapes: the repo became unenterable (`cannot enter <cwd> …`, neither half
-#      ran), or both halves came up empty with at least one search unfinished
-#      (`… did not complete …`). Either way `is_kubernetes: false` would be a
-#      claim about a search that never ran, and the JSON has no third state to
-#      say so — so the script names the reason on stderr and emits nothing.
+#   2  detection could not complete, and NOTHING is on stdout. Every such path is
+#      a TOPIC MARKER failing to reach a verdict — today the kubernetes one or
+#      the opentofu one, and the stderr message names which — in one of two
+#      shapes: the repo became unenterable (`cannot enter <cwd> …`, nothing ran),
+#      or the search came up empty with at least one half unfinished
+#      (`… did not complete …`). Either way `is_kubernetes: false` /
+#      `is_opentofu: false` would be a claim about a search that never ran, and
+#      the JSON has no third state to say so — so the script names the reason on
+#      stderr and emits nothing. Read the message rather than assuming a marker:
+#      a repo with an unreadable subtree and no `.tf` aborts on the OPENTOFU
+#      half even when its charts are perfectly readable.
 #      EVERY CALLER MUST CHECK THE STATUS before parsing: an empty file read as
 #      JSON makes every key look absent, which reads as a repo with no git, no
 #      languages and no artifacts. That is an obligation on all callers, not a
@@ -1499,6 +1519,53 @@ elif [[ "$k8s_find_rc" -ne 0 || "$k8s_argo_rc" -ge 2 ]]; then
 	exit 2
 fi
 # is-kubernetes-marker:end
+# The `is-opentofu-marker:begin`/`:end` sentinels are LOAD-BEARING for the same
+# reason the kubernetes pair above is: tests/opentofu-topic-marker.bats extracts
+# the text between them and derives the parity oracles — the marker GLOB, the
+# PRUNE SET and the `! -type d` type guard — from that bounded block rather than
+# from this whole file.
+# Unbounded, a prune token added anywhere else would mask its deletion from THIS
+# recipe and leave the parity test green while the search quietly widened.
+#
+# One half, not two: the marker is pure file presence, so there is no fallback
+# search to soften a failed NEGATIVE. A hit stands whatever else failed — the
+# hits test comes first — but an EMPTY result from a find or a prune filter that
+# did not complete refuses to answer, rather than emitting `is_opentofu: false` — which every consumer reads as a
+# completed search, and which this script's JSON has no third state to qualify.
+# is-opentofu-marker:begin
+is_opentofu="false"
+tofu_hits="$(
+	cd "$cwd" 2>/dev/null || exit 125
+	find . -name '*.tf' ! -type d 2>/dev/null
+)" && tofu_find_rc=0 || tofu_find_rc=$?
+if [[ "$tofu_find_rc" -eq 125 ]]; then
+	# 125 is the subshell's own sentinel for a failed `cd`, which no find returns:
+	# nothing was searched at all, so there is no verdict to soften. Deliberately
+	# UNTESTED for the same reason the kubernetes twin's is: `$cwd` is this
+	# script's own `$(pwd)`, so no seam can make the `cd` fail.
+	printf 'detect-stack: cannot enter %s to run the opentofu marker\n' "$cwd" >&2
+	exit 2
+fi
+# the filter reads the captured string, not the filesystem — but `|| true`
+# absorbs a status without inspecting it, so grep's operational error (exit 2)
+# and a missing grep (127) were absorbed exactly like the intended no-match 1,
+# leaving `tofu_hits` empty with `tofu_find_rc` still 0. The refusal below then
+# did not fire and the script emitted `is_opentofu: false` — the very claim this
+# block's header says it will never make. A filter status of 2 or more is
+# therefore an unfinished search, exactly as a non-zero find is; 1 is the
+# genuine "everything was pruned" answer.
+tofu_hits="$(
+	printf '%s\n' "$tofu_hits" |
+		grep -v -e '/\.terraform/' -e /node_modules/ -e '/\.git/' -e /vendor/
+)" && tofu_filter_rc=0 || tofu_filter_rc=$?
+if [[ -n "$tofu_hits" ]]; then
+	is_opentofu="true"
+elif [[ "$tofu_find_rc" -ne 0 || "$tofu_filter_rc" -ge 2 ]]; then
+	printf 'detect-stack: the opentofu marker search did not complete (find exit %s, filter exit %s) — refusing to report is_opentofu false\n' \
+		"$tofu_find_rc" "$tofu_filter_rc" >&2
+	exit 2
+fi
+# is-opentofu-marker:end
 # The infrastructure-as-code tree (SKILL.md §3l, #1154): the kubernetes topic
 # marker with no application language. `.github/workflows/kubernetes-ci.yml`
 # becomes a candidate there — and only there. Without it the one workflow that
@@ -1939,6 +2006,7 @@ cat <<EOF
   "language_meta": $language_meta_json,
   "is_claude_plugin": $(json_bool "$is_claude_plugin"),
   "is_kubernetes": $(json_bool "$is_kubernetes"),
+  "is_opentofu": $(json_bool "$is_opentofu"),
   "existing_artifacts": $artifacts_json,
   "missing_artifacts": $missing_json,
   "github_state": $github_state

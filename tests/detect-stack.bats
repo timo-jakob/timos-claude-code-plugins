@@ -993,7 +993,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   out=$(bash "$DETECT" 2>/dev/null)
   echo "$out" | jq -e . >/dev/null
   for k in git_initialized has_github_remote languages has_dockerfile interfaces language_meta \
-           is_claude_plugin is_kubernetes existing_artifacts missing_artifacts github_state containers \
+           is_claude_plugin is_kubernetes is_opentofu existing_artifacts missing_artifacts github_state containers \
            detection_confidence contracts; do
     [ "$(jq --arg k "$k" 'has($k)' <<<"$out")" = "true" ]
   done
@@ -1753,6 +1753,12 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   fi
   mkdir -p charts/app locked
   printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  # A readable .tf so the OPENTOFU marker also reaches a verdict (#1160). Since
+  # that second refusing marker landed, a fixture leaving ANY marker unresolvable
+  # aborts the whole script — so a test pinning ONE marker's tolerance must leave
+  # the others resolvable, or it stops testing what its title says and starts
+  # testing the other marker's refusal.
+  printf 'provider "aws" {}\n' > main.tf
   chmod 000 locked
   # `run` rather than `out=$(...)`: bats runs bodies under errexit, so the exact
   # regression this test guards would abort before the chmod and strand a
@@ -1771,6 +1777,10 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   fi
   mkdir -p argocd locked
   printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > argocd/app.yaml
+  # a readable .tf for the same reason as the test above (#1160): the opentofu
+  # marker must reach a verdict, or its refusal — not the argoproj half — is
+  # what this test would be measuring
+  printf 'provider "aws" {}\n' > main.tf
   chmod 000 locked
   # `run`, same errexit-restore reason as the test above (#1177)
   run bash "$DETECT"
@@ -1801,7 +1811,37 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   # script breaking somewhere else (an errexit abort, a 127)
   [ "$status" -eq 2 ]
   [ -z "$output" ]
-  echo "$stderr" | grep -q 'did not complete'
+  # arm-UNIQUE needles. Since #1160 added a SECOND refusing marker, a bare
+  # 'did not complete' needle no longer identifies WHICH arm spoke; pin the
+  # arm-unique strings so a future reorder, or a third refusing marker, cannot
+  # satisfy this test from the wrong guard. (On this fixture the kubernetes
+  # block exits before the opentofu one runs, so the opentofu arm is not an
+  # alternative source TODAY — the needles guard the ordering, not a live
+  # ambiguity.)
+  echo "$stderr" | grep -q 'the kubernetes marker search did not complete'
+  echo "$stderr" | grep -q 'refusing to report is_kubernetes false'
+}
+
+@test "detect-stack #1160: the OPENTOFU marker refuses on its own, with charts readable" {
+  # the opentofu twin of the test above, and it needs its own fixture: with NO
+  # marker at all the kubernetes half refuses FIRST and its message is what
+  # reaches stderr, so that test cannot tell whether the opentofu arm exists.
+  # A readable chart settles the kubernetes verdict, leaving the *.tf search as
+  # the only one that could not finish — which is exactly the state that must
+  # refuse rather than emit `is_opentofu: false`.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every directory, so the guard cannot be exercised"
+  fi
+  mkdir -p charts/app locked
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  chmod 000 locked
+  run --separate-stderr bash "$DETECT"
+  chmod 755 locked
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # needles unique to THIS arm, so the kubernetes refusal cannot satisfy them
+  echo "$stderr" | grep -q 'the opentofu marker search did not complete'
+  echo "$stderr" | grep -q 'refusing to report is_opentofu false'
 }
 
 @test "detect-stack #1177: an unreadable FILE trips the argoproj half specifically" {
@@ -1856,6 +1896,10 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   fi
   mkdir -p charts/app locked
   printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  # a readable .tf so the opentofu marker reaches a verdict too (#1160) — see
+  # the #1153 tolerant tests above for why a fixture must leave every marker
+  # resolvable once a second refusing marker exists
+  printf 'provider "aws" {}\n' > main.tf
   chmod 000 locked
   # `run`, not `out=$(...)`: bats runs test bodies under errexit and a plain
   # assignment carries the substitution's status, so the very regression this

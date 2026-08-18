@@ -33,7 +33,7 @@ of this plugin):
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. Public repos get SonarCloud + Snyk + CodeQL; private repos get self-hosted SonarQube + Trivy + a self-hosted runner. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see [Requirements](requirements.md)). |
-| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`, `development-javascript`) and any topic plugins (`development-spring`, `development-claude-plugin`, `development-docs`, `development-react`, `development-kubernetes`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
+| Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`, `development-javascript`) and any topic plugins (`development-spring`, `development-claude-plugin`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Swift / Python / Java / Go / Claude-plugin / Kubernetes). |
 | Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Spins out linked `test-case` issues for a surface-touching story's outside-in cases; takes a typed parked exit when a session can't converge; pointed at an **epic**, walks each `needs-refinement` child and posts an epic summary. |
@@ -471,8 +471,8 @@ structure, provider and version constraints, backend and state configuration,
 and `.tfvars` hygiene. It is the sibling of `development-kubernetes` on the
 other side of the cluster boundary: that plugin owns what runs *in* a cluster,
 this one owns the modules that *create* it. The two own disjoint file sets, so a
-repo holding both **will** detect both topics and run both **maintenance**
-pipelines, once #1160 registers the marker that makes the second topic
+repo holding both **does** detect both topics and runs both **maintenance**
+pipelines, now that #1160 has registered the marker that makes the second topic
 detectable. The CI half is narrower: the two bootstrap-rendered workflows will
 share three job ids, **and** at most one of them is rendered per repo, which is
 what makes that safe — the slice that renders both (disambiguating those ids) is
@@ -506,8 +506,8 @@ a **maintenance** finding, not a CI failure, because an untested policy usually
 matches nothing and so passes everything while looking like it works. Note which
 tool sees it: `conftest verify` **exits green** over a test-less directory, so
 the rendered `policy` job is silent on that state and the defect travels solely
-under the maintenance gather's `policy` key (→ `opentofu-policy-triage`) — one
-defect, one carrier. A declared set Conftest **cannot
+under the maintenance gather's `policy_tests` key (→ `opentofu-policy-triage`) —
+one defect, one carrier. A declared set Conftest **cannot
 evaluate** — a `.rego` that will not parse, one in a package the step never
 invokes, or a failing `conftest verify` run — fails as well: no-matching-file is
 the only thing that skips, or the check would be green over unenforced policies.
@@ -542,25 +542,85 @@ defaulting off: enabling it later is configuration, not a redesign. There is del
 agent** — a provisioning change can destroy state that no rollback recovers, so
 a human approves.
 
-**What's built (v0.1):** the ownership boundary and the marketplace
-registration
-([#1159](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1159)) —
-and nothing executable yet. Getting the boundary wrong is the expensive mistake,
-so it was settled before anything filled it. The rest of epic
+### Maintenance: the gather contract and dispatcher routing
+
+The `opentofu` topic marker is **any `*.tf`** outside `.terraform/` (the provider
+cache) and vendored trees. It is language-agnostic, so it composes with any
+detected language or with none — a provisioning repo declaring
+`primary: opentofu` is exactly the case it exists for. `.tf.json` is owned by the
+charter but deliberately **not** matched; ARCHITECTURE records why.
+
+`gather-opentofu-findings.zsh` emits the v2 payload over **seven** tool keys.
+Four are presence-detected — the tools themselves **will run** in the check
+pipeline (#1162), never in the gather — and **three genuinely evaluate**:
+
+| Key | What it is | Evaluated? |
+|---|---|---|
+| `format` | `tofu fmt` territory | presence-detected |
+| `validate` | `tofu validate` territory | presence-detected |
+| `lint` | tflint territory, including the unpinned-provider opinion | presence-detected |
+| `misconfiguration` | `trivy config` territory | presence-detected |
+| `state_encryption` | the plugin's one built-in opinion | **evaluated** |
+| `policy` | the repo's own Conftest policies | **evaluated** |
+| `policy_tests` | `conftest verify` coverage for them | **evaluated** |
+
+`coverage` is always `null` — a topic has no application test suite.
+
+**Policy presence is a glob, never a directory.** No `policies/conftest/**/*.rego`
+match means `tooling_configured.policy: false` plus a skip note — never a
+finding, and an empty or non-`.rego` directory skips exactly like an absent one.
+But a declared set the tool **cannot evaluate** never skips: a `.rego` that does
+not compile, a policy in a package Conftest never invokes, a failing
+`conftest verify`, and conftest not being installed at all are each a `policy`
+finding, because reporting them clean would be a green check over unenforced
+policies. The gather **pins the Conftest version** it evaluates against; the
+rendered pipeline hard-codes the same pin as an independent constant, and the
+two must be bumped together.
+
+**State encryption is checked dialect-aware, and only where the repo owns
+state.** A repo whose `.tf` declare a `provider`, `backend` or `cloud` block owns
+state; a reusable module library declares none of those, has nothing to encrypt,
+and gets no finding. Where state *is* owned, any at-rest form the repo's own tool
+provides clears the check — the OpenTofu `encryption` block, S3 `encrypt = true`
+or a KMS key, GCS encryption keys, an `azurerm` backend (encrypted
+unconditionally), or HCP Terraform. A local backend, or none at all, clears
+nothing: a root on the implicit local backend owns a plaintext state file, which
+is precisely what the opinion exists to catch.
+
+Routing, with the agent names pinned by contract — **every row escalates
+today; #1161 turns them live** when it ships the agents:
+
+| Finding tool | Disposition | Agent |
+|---|---|---|
+| `format`, `lint` | auto-fix, one PR | `opentofu-format-fixer` |
+| `policy`, `policy_tests` | triage, one PR | `opentofu-policy-triage` |
+| `validate`, `misconfiguration`, `state_encryption` | **advisory — review only** | `opentofu-security-reviewer` |
+
+The three advisory rows never route to an auto-fixer: a provisioning change can
+destroy state no rollback recovers, so they are described for a human to act on
+rather than rewritten. They are still ordinary plan groups, though — routing
+them through the halt channel would cancel the mechanical fixes on the very
+repos that need them most.
+
+**What's built (v0.2):** the ownership boundary and the marketplace registration
+([#1159](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1159)),
+plus the gather script, `opentofu` topic marker and maintenance dispatcher
+([#1160](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1160)).
+Getting the boundary wrong is the expensive mistake, so it was settled before
+anything filled it. The rest of epic
 [#1158](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1158)
-follows: the gather script, `opentofu` topic marker and maintenance dispatcher
-([#1160](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1160)),
-the four agents and the review panel
+follows: the four agents and the review panel
 ([#1161](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1161)),
 the bootstrap check pipeline
 ([#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)),
 and the self-contained test fixtures
 ([#1163](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1163)).
-Until #1160 lands there is no `opentofu` topic marker, so a repo declaring
-`primary: opentofu` is treated as a stale declaration; and as with the sibling,
-the check **pipeline** will not be here — it **will ship** as a bootstrap
-template in the generic `development` plugin, the same boundary that keeps
-detection there.
+**Until #1161 lands the agents, the dispatcher routes nothing** — it escalates
+every group for human action, naming the agent the group will route to, because
+naming a subagent that does not exist would look like a broken dispatcher rather
+than work waiting on a known dependency. And as with the sibling, the check
+**pipeline** will not be here — it **will ship** as a bootstrap template in the
+generic `development` plugin, the same boundary that keeps detection there.
 
 ## development-go
 

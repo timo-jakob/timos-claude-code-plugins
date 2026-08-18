@@ -99,9 +99,12 @@ chmod +x <skill-base-dir>/scripts/detect-stack.sh
 ```
 
 **A non-zero exit means detection aborted and printed NO JSON (#1177).** The
-reason is on stderr — today, a kubernetes marker search that could not finish
-(an unreadable subtree, or a `find`/`grep` that failed), where reporting
-`is_kubernetes: false` would be a claim about a search that never ran. **Halt
+reason is on stderr — a **topic marker** search that could not finish (an
+unreadable subtree, or a `find`/`grep` that failed), where reporting
+`is_kubernetes: false` or `is_opentofu: false` would be a claim about a search
+that never ran. The message names which marker; read it rather than assuming,
+since a repo with an unreadable subtree and no `.tf` aborts on the opentofu
+half. **Halt
 and show that stderr**; do not proceed with an empty document, which would read
 as a repo with no git, no languages and no artifacts and would drive Step 4 to
 render the wrong set entirely. Re-run once — if the same statuses recur the
@@ -140,6 +143,14 @@ On a zero exit the script reports:
   a *topic*, not a language, so it can be `true` alongside any language — and,
   with `languages` empty, it is what makes a GitOps repo bootstrappable at all
   (§3l)
+- `is_opentofu` — whether the repo carries the **opentofu topic marker** (any
+  `*.tf` outside `.terraform/` and vendored trees). Also a *topic*, so it can be
+  `true` alongside any language, and alongside `is_kubernetes`. **Bootstrap
+  reads it nowhere yet**: §3l's IaC path, the `--iac-only` context set and the
+  dual-marker repo are [#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)'s,
+  so this key is EMITTED ONLY — nothing reads it yet, here or in the
+  maintenance orchestrator (which re-derives the topic from its own marker
+  recipe), and it is deliberately absent from every branch below
 - `interfaces` — the runtime interface(s) a deployed build is exercised through,
   each with its detection evidence: `[{"interface": "...", "evidence": "..."}]`,
   `interface ∈ {cli, rest, web-ui, library}` (issue #242). This is the signal that
