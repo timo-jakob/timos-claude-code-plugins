@@ -1,8 +1,11 @@
 # Maintaining this plugin repo
 
-Two unrelated upkeep tasks live here: **per-merge plugin version bumps**
-(critical, every PR that changes plugin content) and a **quarterly template
-refresh** (slower-paced, the original purpose of this doc).
+Three things live here: **per-merge plugin version bumps** (critical, every PR
+that changes plugin content), a **quarterly template refresh** (slower-paced,
+the original purpose of this doc), and the **propagation-invariant pattern**
+plus the registry of invariants in force — a repo-wide testing convention rather
+than a template task, at the end of this file, which two bats suites assert
+against.
 
 > **Writing or moving documentation?** See the
 > [Authoring guide](docs/how-to/authoring-guide.md) for where each kind of page
@@ -245,40 +248,6 @@ Renovate doesn't see, so those stay manual. The `*_VERSION:` class is worth a de
 templates' `yq -o=json` behaviour; move all four or the suite validates the
 shipped workflows under a different yq than they ship with.
 
-**The #1206 gate has a prose lockstep of its own.** Its v1 command set and its
-three exemptions are restated in **seven** places — the checker's header
-(`templates/common/scripts/check-no-cluster-deploy.zsh`) is the authoritative
-one, and the other six must follow it:
-
-| Site | Carries |
-| --- | --- |
-| `templates/common/scripts/check-no-cluster-deploy.zsh` header | **authoritative** — full command set, three exemptions, known gaps |
-| `templates/common/.github/workflows/no-cluster-deploy.yml.tmpl` header | the three exemptions, in summary |
-| `templates/common/SETUP.md.tmpl` §3h | the consumer-facing table + all three exemptions + known gaps |
-| `templates/common/CLAUDE.md.tmpl` | the agent-facing CI bullet |
-| `templates/common/CONTRIBUTING.md.tmpl` | the contributor-facing CI bullet |
-| `development/skills/bootstrap/SKILL.md` §3a | the bootstrap instruction's own restatement |
-| `docs/how-to/keep-app-repos-out-of-the-cluster.md` | this repo's how-to |
-
-Widening the command set or changing an exemption's scope moves all seven; the
-checker's header says "anywhere this script's rules are restated, all three have
-to be", and this is the list of where. **Rebuild the list rather than trusting
-it** — a prose lockstep rots exactly as this one did (#1206's own round 3 found
-it naming four sites when there were seven, after a `--dry-run` rule change
-reached only two):
-
-```sh
-grep -rln 'no-cluster-deploy' development/skills/bootstrap docs MAINTAINING.md \
-  ARCHITECTURE.md | sort
-```
-
-`tests/no-cluster-deploy.bats` pins the substantive clauses across the
-restatements, so a rule change that misses one reds rather than drifting. And
-`kubernetes-ci.yml.tmpl` pins `KYVERNO_VERSION`, where a Kyverno minor can add
-policy *kinds* the pinned CLI cannot evaluate — which that workflow reports as a
-failure rather than silently passing, so a stale pin surfaces as a red check in
-a consumer repo.
-
 `tests/iac-tools.zsh`'s `helm_v` / `kustomize_v` are the odd pair out (#1199):
 their upstream is the **`ubuntu-latest` runner image**, not a release tag, so
 "current" means whatever that image ships today.
@@ -445,3 +414,192 @@ existing bootstrap-* review agents if the changes are significant.
 If the manual cadence ever starts feeling tedious, revisit the
 self-hosted-updater option. Until then, this checklist is the cheapest
 path.
+
+## Propagation invariants
+
+This repo deliberately **restates** each cross-cutting rule in many artifacts —
+a skill, a template, a workflow header, a script header, a how-to,
+`ARCHITECTURE.md`, this file. The redundancy is a feature for whoever is reading
+one of those artifacts and a trap for whoever is editing the rule: a change is
+an N-site edit, and the sites that lag get found **one review round at a time**.
+The #687 review loop spent rounds 7, 8 *and* 9 on a single partially-propagated
+clause; roughly 20 of its 49 blocking findings across those rounds were one rule.
+
+A **propagation invariant** is the fix. It is a test that **derives** a rule's
+restatement sites and holds every site that *states* a clause to that clause,
+gating on the sites that do, so a half-finished propagation reds the suite
+rather than surfacing as a review finding a round later.
+
+**When to add one.** A rule restated in **three or more** artifacts, or **any**
+rule a review has already caught partially propagated. Add the assertion in the
+**same PR that introduces the clause** — a sweep only pins the clauses someone
+thought to pin, and #687's escapee was a clause added to a rule that already had
+a sweep.
+
+**Name the authoritative site.** Exactly one artifact states the rule; the others
+follow it. Name it in the test and in the table below, so a disagreement has a
+defined winner instead of a debate about which copy is right.
+
+**Derive the roster, never transcribe it.** A closed hand-written file list rots
+— #936 broke #1188's within a week, and #1206's own round 3 found this file
+naming four sites when there were seven. Four discovery mechanisms are in use (two of them `find`, at different scopes)
+and the criterion is neutral among them; which one fits is a property of the
+rule:
+
+| Mechanism | Fits a rule whose sites | In use by |
+| --- | --- | --- |
+| `git ls-files` | span the repo, or share a filename token | `tests/messaging-position.bats`, `tests/no-inert-permission-barriers.bats` |
+| `find` over a named tree | are confined to one tree | `tests/kubernetes-plugin-skeleton.bats`, `tests/no-inert-bracket-assertions.bats`, `tests/render-docs-templates.bats` |
+| `find` over the repo root | span the repo, where untracked files must count | `tests/api-styleguide-ruleset.bats` |
+| `grep -rl` over named directories (fixed string or ERE) | are identified by a distinctive phrase | `tests/no-cluster-deploy.bats`, `tests/iac-selection-rule.bats` |
+
+**`git ls-files` has one live caveat, and one that is now historical.**
+`api-styleguide-ruleset.bats` uses `find` over the repo root *deliberately*,
+because `git ls-files` skips **untracked** files — a new doc quoting a stale pin
+then passes locally and fails in CI (#1189's lesson). That reason is live: weigh
+it whenever untracked files must count. It also *used* to fatal in the Docker
+lane's worktree checkout, inspecting nothing while reporting success (#1330);
+**#1360 repaired that** by bind-mounting the git dir and the git common dir in
+`tests/run-script-tests.zsh`, and two sweeps in the table above rely on it
+working there today. So a `git ls-files` sweep is fine — it just has to run
+under that runner.
+
+**One rule, one discovery.** A rule that already has a derived roster gets its
+new clause added to *that* sweep. Two rosters for one rule can disagree, and a
+site would then be swept by one clause test and not another.
+
+**Scope the needle to the statement, not the file.** In an artifact large enough
+that an unrelated paragraph could satisfy the needle — a 5000-line `SKILL.md`, a
+2000-line `ARCHITECTURE.md` — a file-scoped sweep reports green having proved
+nothing about the statement it was written to pin. Locate the gate phrase's line
+with `prose_gate_lines` and assert over `prose_window`; `prose_body` is safe only
+on a file whose whole subject is the rule. The same applies to a needle *inside*
+the authoritative site: pin the full clause, because a short phrase that recurs
+elsewhere in the file survives the rule statement losing it.
+
+**Gate on every spelling the sites use.** A gate is a literal, and one literal
+finds one wording. If the rule is stated three ways across the roster, gate on
+all three — a statement written in an ungated spelling is invisible to the sweep
+*and* to the tripwire, so the file looks covered while its other restatements
+drift freely. Keep each gate short enough to survive a reflow: `prose_gate_lines`
+matches per line, so a gate phrase that wraps stops matching silently.
+
+**Gate the clause, and prove the gate fired.** Not every roster member restates
+every clause — a summary that points elsewhere ("see `SETUP.md` §3h for the three
+exemptions") should not be forced to carry one. So gate each clause on a needle
+that identifies the sites which do state it, and assert `gated >= 1` as the
+anti-no-op floor, or a needle that quietly stopped matching turns the sweep into
+a green no-op. A floor alone is weak, though — it is satisfied by one surviving
+site — so **record the exact gated count in the table below** and tie it to the
+derivation, as both invariants in force do.
+
+**Carry a roster tripwire.** A derived sweep answers *do the sites I found
+agree?* and never *did a site appear or vanish?* — so a new restatement can land
+tomorrow, carry every clause, and pass in silence. Record the derived count and
+tie the recorded figure to the derivation, so adding or removing a site reds
+until this file is updated in the same PR. Record every figure that moves
+independently: a roster count alone will not notice a seventh *statement* inside
+files already on the roster.
+
+**Carry a non-vacuity control.** Mutate at least two real sites — **one prose
+site and one code/template site** — and assert the sweep reds on each. Two file
+kinds, because the normalisation these sweeps depend on (stripping comment
+markers, so a clause wrapped across two `#` lines still reads as prose) can fail
+on one kind and not the other. Record both mutations in the test file, or the
+control rots into a tautology nobody can audit. Cover each distinct *gap kind*
+the sweep can report, too — an arm no control exercises is an arm that can rot
+unnoticed.
+
+**These sweeps pin WORDING, not meaning.** A needle is a literal, so a
+substantively-correct rephrase at one site reds the suite. That is the intended
+cost: the red is telling you to reword all N sites, not reporting a bug. Say so
+to yourself before "fixing" the test.
+
+### Invariants in force
+
+| Invariant | Authoritative site | Sweep | Derived roster |
+| --- | --- | --- | --- |
+| **#1206 direct-to-cluster gate** — the v1 command set and the three exemptions, including the guarded-creator narrowing (#1432) | `templates/common/scripts/check-no-cluster-deploy.zsh` header | `tests/no-cluster-deploy.bats` | `grep -rln 'no-cluster-deploy'` over `development/skills/bootstrap docs MAINTAINING.md ARCHITECTURE.md`, minus wiring, index and authoritative sites — 6 restatements plus the authoritative header, 5 enumerating the ephemeral exemption (gated on `ctlptl`), 5 ephemeral-exemption statements |
+| **IaC selection rule** — at most one IaC workflow per repo; the condition is the marker, not merely the absence of a language (the dual-marker halt is a #1162 specification, not current behaviour) (#1432) | `ARCHITECTURE.md` | `tests/iac-selection-rule.bats` | `grep -rlE 'iac[-_]only'` over `development docs ARCHITECTURE.md`, minus the authoritative site and `docs/superpowers/` — 6 roster files, 4 stating the selection, 8 selection statements |
+
+**Both rosters are deliberately scoped, and neither scope is an accident.** The
+gate's own roster (#1206) sweeps `development/skills/bootstrap`, `docs/`, this file and
+`ARCHITECTURE.md`; a restatement of the gate's rules landing in the root
+`README.md`, a sibling topic plugin or `tests/` is out of roster on purpose,
+because those describe the gate rather than state its rules. Widen it if that
+stops being true.
+
+**The IaC roster is scoped to the `development` plugin and `docs/`, and that is
+a decision.** Membership is decided by naming the *flag*; the clause is judged on
+how the site states the *rule*. Sibling topic plugins
+(`development-kubernetes/`, `development-opentofu/`) and `README.md` describe
+primary-**eligibility** — which plugin may declare `primary:` for a
+language-less repo — rather than which CI workflow gets rendered, so they are
+out of roster on purpose. Widen the roster if that ever stops being true.
+
+**Known residue, so the registry is not read as stronger than it is.** Three
+things are recorded here rather than fixed, each wanting its own issue:
+
+1. `tests/bootstrap-iac-pipeline.bats`'s *the `--iac-only` qualifier is stated
+   identically at every restatement* (#1154) walks a **closed, hand-written
+   three-file list**. It predates this pattern and should be converted to a
+   derived roster.
+2. **The three pre-#1432 clause sweeps in `tests/no-cluster-deploy.bats` are
+   still file-scoped** — the three-exemptions, `--dry-run`-value and
+   command-set sweeps flatten the whole file and needle it. On
+   `bootstrap/SKILL.md` that is near-vacuous for the command-set sweep, whose
+   needles include bare `create`, `delete` and `install`: dropping a verb from
+   §3a's restatement is satisfied by any other use of the word in a 5000-line
+   document. Only the #1432 guarded-creator sweep is statement-scoped. So
+   *Scope the needle to the statement* describes where this invariant is going,
+   not everywhere it already is.
+3. The **IaC roster is derived from sites naming the `--iac-only` flag**, not
+   from the rule's own spellings, so sibling topic plugins, the plugin
+   manifests, `README.md` and `development/skills/maintenance/SKILL.md` state
+   the selection outside its reach. `tests/iac-selection-rule.bats`'s header
+   enumerates them.
+
+### The #1206 lockstep, in detail
+
+**The #1206 gate has a prose lockstep of its own.** Its v1 command set and its
+three exemptions are restated in **seven** places — the checker's header
+(`templates/common/scripts/check-no-cluster-deploy.zsh`) is the authoritative
+one, and the other six must follow it:
+
+| Site | Carries |
+| --- | --- |
+| `templates/common/scripts/check-no-cluster-deploy.zsh` header | **authoritative** — full command set, three exemptions, known gaps, the guarded-creator narrowing |
+| `templates/common/.github/workflows/no-cluster-deploy.yml.tmpl` header | the three exemptions, in summary + the guarded-creator clause (#1432) |
+| `templates/common/SETUP.md.tmpl` §3h | the consumer-facing table + all three exemptions + known gaps + the guarded-creator clause |
+| `templates/common/CLAUDE.md.tmpl` | the agent-facing CI bullet + the guarded-creator clause (#1432) |
+| `templates/common/CONTRIBUTING.md.tmpl` | the contributor-facing CI bullet — a summary that points at §3h, so deliberately outside the exemption-enumerating gate |
+| `development/skills/bootstrap/SKILL.md` §3a | the bootstrap instruction's own restatement + the guarded-creator clause (#1432) |
+| `docs/how-to/keep-app-repos-out-of-the-cluster.md` | this repo's how-to + the guarded-creator clause + **its own `Known gaps (v1)` mirror** (#1432) |
+
+Widening the command set or changing an exemption's scope moves all seven; the
+checker's header says "anywhere this script's rules are restated, all three have
+to be", and this is the list of where. **Rebuild the list rather than trusting
+it** — a prose lockstep rots exactly as this one did (#1206's own round 3 found
+it naming four sites when there were seven, after a `--dry-run` rule change
+reached only two):
+
+```sh
+grep -rln 'no-cluster-deploy' development/skills/bootstrap docs MAINTAINING.md \
+  ARCHITECTURE.md | LC_ALL=C sort \
+  | grep -vE '^(MAINTAINING|ARCHITECTURE)\.md$|/scripts/|^docs/how-to/index\.md$'
+```
+
+The bare `grep` returns twelve paths; the filter above drops the **six** that
+are **wiring, index or authoritative** sites and carry no restatement —
+`MAINTAINING.md`, `ARCHITECTURE.md`, `docs/how-to/index.md`, and three paths
+under a `scripts/` directory (two wiring scripts plus the authoritative
+header) — leaving the six the table lists. `restatement_sites()` in `tests/no-cluster-deploy.bats` is
+the authoritative filter — this snippet mirrors it, so if the two ever disagree,
+the test wins.
+
+`tests/no-cluster-deploy.bats` pins the substantive clauses across the
+restatements, so a rule change that misses one reds rather than drifting. And
+`kubernetes-ci.yml.tmpl` pins `KYVERNO_VERSION`, where a Kyverno minor can add
+policy *kinds* the pinned CLI cannot evaluate — which that workflow reports as a
+failure rather than silently passing, so a stale pin surfaces as a red check in
+a consumer repo.

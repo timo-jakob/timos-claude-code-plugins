@@ -29,6 +29,7 @@
 bats_require_minimum_version 1.5.0
 
 load assertions
+load prose-lockstep
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -709,6 +710,149 @@ jobs:
         run: kubectl apply -f k8s/
       - name: second cluster
         run: kind create cluster --name b'
+  check
+  [ "$status" -eq 0 ]
+  contains "$output" 'PASSED: 1 workflow file(s) scanned'
+}
+
+@test "a LATER unconditional creator does not re-widen the earliest creator's condition (#1432)" {
+  # The header's clause — pinned as authoritative by the #1432 sweep — says the
+  # exemption keys on the earliest creating step AND ON THAT STEP'S CONDITION.
+  # The index half has a fixture above; the CONDITION half had none, because
+  # every other ephemeral fixture in this file has exactly one creating step,
+  # so `ephemeral_cond` is never written twice for a job.
+  #
+  # MUTATION THIS CATCHES: move `ephemeral_cond[$job]="$cond"` out of PASS 1's
+  # `if`, so the LAST creator's condition wins while the earliest index is kept.
+  # Every single-creator case stays byte-identical and the earliest-index test
+  # above still records "", so the suite would stay green — while the shipped
+  # behaviour flips fail-CLOSED to fail-OPEN: the guarded creator's condition is
+  # replaced by the unconditional one's empty string, PASS 2's `-z` arm fires,
+  # and the unguarded deploy below is silently exempted on a required check that
+  # documents itself as having no escape hatch.
+  wf it.yml "name: it
+on:
+  pull_request:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: kind
+        if: github.event_name == 'pull_request'
+        run: kind create cluster
+      - name: second cluster
+        run: minikube start
+      - name: ship
+        run: helm upgrade --install myapp ./chart"
+  check
+  [ "$status" -eq 1 ]
+  # name the DEPLOY step, so the case cannot pass on a finding reported
+  # against some other step of the job
+  contains "$output" "step 'ship'"
+}
+
+@test "POSITIVE CONTROL: the same shape passes under the EARLIEST creator's condition (#1432)" {
+  # the other direction, so the pair above is not satisfiable by a blanket
+  # refusal: the deploy carries the byte-identical condition of the EARLIEST
+  # creator, which is exactly what the clause says still confers the exemption
+  wf it.yml "name: it
+on:
+  pull_request:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: kind
+        if: github.event_name == 'pull_request'
+        run: kind create cluster
+      - name: second cluster
+        run: minikube start
+      - name: ship
+        if: github.event_name == 'pull_request'
+        run: helm upgrade --install myapp ./chart"
+  check
+  [ "$status" -eq 0 ]
+  contains "$output" 'PASSED: 1 workflow file(s) scanned'
+}
+
+@test "KNOWN GAP: a YAML-BOOLEAN if: is read as no condition, so the creator exempts (#1432)" {
+  # PINS A STATED GAP, not a desired behaviour. The extractor keeps `if:` only
+  # when its JSON type is "string", so `if: false` — a YAML boolean, and the
+  # usual way to park a step — records NO condition, PASS 1 reads the creator as
+  # unconditional, and PASS 2's `-z` arm exempts everything at or after it. That
+  # is the gate's ONE documented fail-OPEN, stated at all three known-gaps
+  # mirrors (the checker header, SETUP.md.tmpl §3h, and the how-to).
+  #
+  # MUTATION THIS CATCHES: changing the extractor to
+  # `cond: (if .value."if" == null then null else (.value."if" | tostring) end)`
+  # makes the boolean a condition and flips this to a red. Every other fixture
+  # carries a string `if:` or none, so both spellings map identically there and
+  # the whole suite would stay green while three consumer-facing documents
+  # started telling every bootstrapped repo the opposite of what the check does.
+  # NOTE that bare stringification is NOT the right fix — see the `if: true`
+  # case below, which it would wrongly red. A fix maps `false` to a condition
+  # and `true` to unconditional.
+  #
+  # If the gap is ever CLOSED, this case changes in the same PR as those three
+  # prose sites — which is the whole point of pinning it.
+  wf it.yml "name: it
+on:
+  pull_request:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: parked kind
+        if: false
+        run: kind create cluster
+      - name: ship
+        run: helm upgrade --install myapp ./chart"
+  check
+  [ "$status" -eq 0 ]
+  contains "$output" 'PASSED: 1 workflow file(s) scanned'
+}
+
+@test "POSITIVE CONTROL: without the parked creator the same deploy IS caught (#1432)" {
+  # proves the exit 0 above is a DECISION about the exemption, not an empty scan
+  wf it.yml 'name: it
+on:
+  pull_request:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ship
+        run: helm upgrade --install myapp ./chart'
+  check
+  [ "$status" -eq 1 ]
+  contains "$output" "step 'ship'"
+}
+
+@test "CORRECT BY ACCIDENT: an if: true creator is genuinely unconditional (#1432)" {
+  # NOT a gap, and the distinction is load-bearing. `if: true` always runs, so
+  # reading it as unconditional is the RIGHT answer — reached without inspecting
+  # the value, but right. Only `if: false` is the fail-open, because that step
+  # never runs and creates no cluster.
+  #
+  # This case exists to CONSTRAIN the fix for its sibling gap, not to license
+  # it: a fix that simply stringifies the value gives this creator the condition
+  # `true`, PASS 2's byte-identical test then rejects the unguarded deploy, and
+  # a legitimate always-run integration job — the shape the guarded-creator
+  # clause explicitly keeps exempt — starts failing a required check. So any
+  # fix must map a YAML `true` to UNCONDITIONAL (empty condition), and this
+  # fixture must keep passing across it.
+  wf it.yml "name: it
+on:
+  pull_request:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: always kind
+        if: true
+        run: kind create cluster
+      - name: ship
+        run: helm upgrade --install myapp ./chart"
   check
   [ "$status" -eq 0 ]
   contains "$output" 'PASSED: 1 workflow file(s) scanned'
@@ -2454,7 +2598,7 @@ restatement_sites() {
   # a broken grep would turn both lockstep invariants below into silent no-ops
   local sites n
   sites="$(restatement_sites)"
-  n="$(printf '%s\n' "$sites" | grep -c . )"
+  n="$(printf '%s\n' "$sites" | awk 'NF{c++} END{print c+0}')"
   [ "$n" -ge 6 ]
   contains "$sites" 'SETUP.md.tmpl'
   contains "$sites" 'keep-app-repos-out-of-the-cluster.md'
@@ -2465,7 +2609,7 @@ restatement_sites() {
   # the count is the cheapest tell that a site has gone stale, and the
   # repo-wide `primary: kubernetes` one is the exemption a stale site drops —
   # the single edit that turns the whole required check into a permanent no-op
-  local f body
+  local f body gated=0
   while IFS= read -r f; do
     [ -f "$f" ]
     body="$(tr -s '[:space:]' ' ' < "$f")"
@@ -2478,26 +2622,40 @@ restatement_sites() {
     # turns the whole required check into a permanent no-op.
     case "$body" in
       *--dry-run*)
+        gated=$(( gated + 1 ))
         # the repo-wide one is the exemption a stale site drops — the single
         # edit that turns the whole required check into a permanent no-op
         contains "$body" 'primary: kubernetes'
         ;;
     esac
   done < <(restatement_sites)
+  # NON-VACUITY (#1432): the positive arm above is the only assertion that can
+  # FAIL here — the two `lacks` are satisfied by a body that says nothing at
+  # all. Without this floor, every site dropping its `--dry-run` mention (a
+  # plausible trim: CONTRIBUTING.md.tmpl already points at SETUP.md §3h instead
+  # of enumerating) would leave the sweep green having checked nothing.
+  [ "$gated" -ge 1 ]
 }
 
 @test "every site that mentions --dry-run carries the VALUE rule (#1206)" {
   # `--dry-run=none` is kubectl's DEFAULT and really writes. A site that says
   # only "carrying --dry-run" licenses the reader to add the one spelling that
   # does not exempt — or to call a red check a checker bug.
-  local f body
+  local f body gated=0
   while IFS= read -r f; do
     body="$(tr -s '[:space:]' ' ' < "$f")"
     case "$body" in
-      *--dry-run*) contains "$body" '--dry-run=none' ;;
+      *--dry-run*)
+        gated=$(( gated + 1 ))
+        contains "$body" '--dry-run=none'
+        ;;
       *) : ;;   # a site need not mention the exemption at all
     esac
   done < <(restatement_sites)
+  # NON-VACUITY (#1432): the `*) : ;;` arm makes "no site mentions --dry-run" an
+  # explicit PASS, so without this floor the sweep reports green having asserted
+  # nothing the moment the last site stops naming the flag.
+  [ "$gated" -ge 1 ]
 }
 
 @test "every site that enumerates the command set names ALL of it (#1206)" {
@@ -2535,6 +2693,326 @@ restatement_sites() {
   [ "$gated" -ge 1 ]
 }
 
+# --- the guarded-creator clause (#1432) ------------------------------------
+#
+# The clause the three clause sweeps above do NOT pin: a cluster-creating step carrying
+# an `if:` guard does not confer the ephemeral exemption, because the
+# branch-per-environment shape (`if: pull_request` stands up kind, `if: ref ==
+# main` deploys) is exactly what the gate exists to catch. It reached the
+# checker's header, SETUP.md.tmpl §3h and the how-to, and stopped there — the
+# workflow-template header, CLAUDE.md.tmpl and SKILL.md §3a were still
+# summarising the exemption without it until this story's own round-1 review
+# named all three. (#687 is the PATTERN's motivating precedent, recorded in
+# MAINTAINING.md, and concerned a different partially-propagated clause — the
+# two histories are separate.)
+#
+# This is a fourth CLAUSE test inside the existing section, NOT a second sweep:
+# it reuses `restatement_sites()` untouched, so the clause inherits the same
+# derived roster, the same exclusions and the same canary as its siblings. Two
+# rosters for one rule can disagree, and a site would then be swept by one
+# clause test and not another.
+
+# The normalisation comes from tests/prose-lockstep.bash (`load prose-lockstep`,
+# at the top of this file): this section finds each statement with
+# `prose_gate_lines` and reads around it with `prose_window` — never
+# `prose_body`, whose whole-file scope is exactly what the paragraph below
+# argues against. Its header explains why the comment marker and the markdown
+# emphasis are stripped as well as the whitespace the three clause sweeps above
+# collapse inline; the short version is that one of the six restatement sites is
+# a workflow header — and the authoritative site it follows is a script header —
+# where the clause wraps across two `#` lines.
+
+# Is this site GATED — does it ENUMERATE the ephemeral exemption? `ctlptl` is
+# the discriminator: the fourth and least famous of the four cluster-creators,
+# so naming it means the site is listing the exemption's own terms rather than
+# referring to the gate in passing.
+#
+# CONTRIBUTING.md.tmpl's bullet ("see `SETUP.md` §3h for the exact command set
+# and the three exemptions") is the site this deliberately skips: forcing the
+# clause into a summary whose job is to point elsewhere would be a restatement
+# nobody asked for, and a seventh place to keep in step.
+#
+# ONE definition, called by both functions below. Duplicating the gate literal
+# would let the sweep and its own non-vacuity controls disagree — widen one copy
+# and the control's count rises while the sweep still skips the site.
+GC_GATE='ctlptl'
+
+# STATEMENT-scoped, not file-scoped. `bootstrap/SKILL.md` is five thousand
+# lines: a whole-file needle there is satisfied by any paragraph that happens to
+# carry the phrase, so a SECOND summary of the ephemeral exemption could land
+# without the clause and the sweep would still report green off the first one —
+# the #687 failure mode verbatim, and exactly what MAINTAINING.md's *Scope the
+# needle to the statement* rule forbids.
+#
+# The span is set by the widest REAL site, measured rather than guessed: the
+# how-to enumerates the creators at its line 74 and states the clause at 90-93,
+# a gap of 19, because it discusses the exemption over a whole prose section
+# rather than in one bullet. Every other site keeps the two within four lines.
+# 22 clears the how-to with a little room for a reflow, and is still far narrower
+# than the 5000-line file scope it replaces — a second exemption summary landing
+# anywhere else in SKILL.md is now its own statement with its own window, which
+# is the property this scoping buys.
+GC_SPAN=22
+
+# Every gate-line of a site: where it ENUMERATES the ephemeral exemption.
+guarded_creator_gate_lines() {
+  [ "$#" -eq 1 ] || { printf 'guarded_creator_gate_lines: needs exactly one file\n' >&2; return 2; }
+  [ -f "$1" ] && [ -r "$1" ] || { printf 'guarded_creator_gate_lines: unreadable site %s\n' "$1" >&2; return 2; }
+  prose_gate_lines "$1" "$GC_GATE"
+}
+
+guarded_creator_gated() {
+  local f
+  for f in "$@"; do
+    [ -f "$f" ] && [ -r "$f" ] || { printf 'guarded_creator_gated: unreadable site %s\n' "$f" >&2; return 2; }
+    if guarded_creator_gate_lines "$f" | grep -q .; then
+      printf '%s\n' "$f"
+    fi
+  done
+  return 0
+}
+
+# Of the gated sites, those that FAIL the clause — one line per gap, empty when
+# the invariant holds. Factored out of the test body on purpose: the
+# non-vacuity controls below run this same code over a deliberately staled copy
+# of a real site, which is only honest if it is the same code.
+guarded_creator_gaps() {
+  local f ln win
+  for f in "$@"; do
+    [ -f "$f" ] && [ -r "$f" ] || { printf 'guarded_creator_gaps: unreadable site %s\n' "$f" >&2; return 2; }
+    while IFS= read -r ln; do
+      [ -n "$ln" ] || continue
+      win="$(prose_window "$f" "$ln" "$GC_SPAN")"
+      # The clause states the checker's narrowing, not a blanket refusal: the
+      # exemption keys on the EARLIEST creator and its condition, so a guarded
+      # one exempts a step under the byte-identical condition (pinned green at
+      # "an if-guarded kind step DOES exempt a deploy under the SAME
+      # condition"). A site that flattens this to "an `if:` guard does not
+      # confer the exemption" is telling an agent to avoid the commonest real
+      # integration shape, which is why the needle is the narrowing.
+      case "$win" in
+        *"exempts only a step carrying the byte-identical condition"*) : ;;
+        *) printf '%s:%s: clause\n' "$f" "$ln" ; continue ;;
+      esac
+      # …and the REASON, because a site that states the narrowing without saying
+      # why reads as an arbitrary restriction and invites the next author to
+      # "simplify" it away. This is the clause's own rationale, not decoration.
+      case "$win" in
+        *branch-per-environment*) : ;;
+        *) printf '%s:%s: rationale\n' "$f" "$ln" ;;
+      esac
+    done < <(guarded_creator_gate_lines "$f")
+  done
+  return 0
+}
+
+@test "every site enumerating the ephemeral exemption carries the GUARDED-CREATOR clause (#1432)" {
+  local f gated row table statements
+  local -a sites=()
+  while IFS= read -r f; do
+    sites+=("$f")
+  done < <(restatement_sites)
+  [ "${#sites[@]}" -ge 6 ]
+  run guarded_creator_gaps "${sites[@]}"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # NON-VACUITY, pinned to an EXACT count rather than `>= 1`. A floor is
+  # satisfied by one surviving site, so an ordinary edit — a site shortening
+  # its list to "kind/k3d/minikube" — drops that site out of the gate and out
+  # of the clause check with the suite still green. Five of the six
+  # restatements enumerate the exemption; CONTRIBUTING.md.tmpl is the sixth and
+  # is correctly outside it. Counted through awk, which always exits 0: a
+  # `grep -c` here returns 1 on an empty list and would abort the test before
+  # this assertion could report it.
+  gated="$(guarded_creator_gated "${sites[@]}" | awk 'END{print NR}')"
+  [ "$gated" -eq 5 ]
+  # The STATEMENT count, which the two file counts cannot see: a second
+  # enumeration of the exemption inside a file already on the roster moves
+  # neither the roster size nor the gated count, and it is exactly the shape
+  # #687 kept re-finding — a summarising site that omits the clause.
+  statements=0
+  for f in "${sites[@]}"; do
+    statements=$(( statements + $(guarded_creator_gate_lines "$f" | awk 'END{print NR}') ))
+  done
+  [ "$statements" -eq 5 ]
+  # …and all three tied to the figures MAINTAINING.md records, so the registry
+  # cannot go stale while the sweep stays green — the roster-tripwire rule the
+  # propagation-invariant pattern states. Read the ROW out of the extracted
+  # TABLE, not the whole document: a future paragraph naming the gate and
+  # quoting a figure would otherwise let the row itself be deleted green.
+  table="$(sed -n '/^| Invariant | Authoritative site |/,/^$/p' "$REPO_ROOT/MAINTAINING.md")"
+  [ -n "$table" ]
+  row="$(awk '/#1206 direct-to-cluster gate/' <<< "$table")"
+  [ -n "$row" ]
+  matches "$row" '(^|[^0-9])6 restatements'
+  matches "$row" '(^|[^0-9])5 enumerating the ephemeral exemption'
+  matches "$row" '(^|[^0-9])5 ephemeral-exemption statements'
+}
+
+@test "the guarded-creator sweep skips a site that does not enumerate the exemptions (#1432)" {
+  # CONTRIBUTING.md.tmpl summarises the gate and points at SETUP.md §3h without
+  # enumerating the exemptions, so it is correctly outside the gate. Pinned as
+  # its own case: if it ever starts enumerating them, the gate must pick it up,
+  # and if the gate ever widens to every site, this reds first.
+  local f="$REPO_ROOT/development/skills/bootstrap/templates/common/CONTRIBUTING.md.tmpl"
+  [ -f "$f" ]
+  # It must actually BE on the derived roster, or this case asserts nothing
+  # about the sweep: a rename or a changed grep would drop it silently and
+  # leave "correctly outside the gate" true of a file the sweep never sees.
+  contains "$(restatement_sites)" "$f"
+  run guarded_creator_gated "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run guarded_creator_gaps "$f"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the checker's header is the one authoritative statement of the guarded-creator clause (#1432)" {
+  # WITHOUT THIS the invariant is anchored to nothing. `restatement_sites()`
+  # EXCLUDES the checker's header as authoritative, so the five restatements are
+  # held to a source of truth no test holds: deleting the header's whole
+  # GUARDED CREATORS paragraph leaves the roster, the gated count, the statement
+  # count and all three non-vacuity controls untouched, and the suite green with
+  # the authoritative statement of the rule gone. The five could then stay in
+  # perfect lockstep with each other while the rule they follow had vanished.
+  #
+  # The sibling invariant already does this (tests/iac-selection-rule.bats's
+  # "ARCHITECTURE.md is the one authoritative statement"); this is the #1206
+  # half, and MAINTAINING.md's *Name the authoritative site* rule is what both
+  # implement.
+  local ln body n
+  [ -f "$CHECK" ]
+  # statement-scoped, like the sweep it anchors
+  n="$(prose_gate_lines "$CHECK" 'GUARDED CREATORS' | awk 'END{print NR}')"
+  [ "$n" -eq 1 ]
+  ln="$(prose_gate_lines "$CHECK" 'GUARDED CREATORS')"
+  body="$(prose_window "$CHECK" "$ln" 12)"
+  # the clause the five restatements copy — pinned in the HEADER's spelling
+  # ("carrying"), not the implementation comment's ("guarded by"), because the
+  # header is what they follow
+  contains "$body" 'exempts only a step carrying the byte-identical condition'
+  # the earliest-creator keying, which is the half round 2 found missing
+  contains "$body" 'EARLIEST creating step'
+  # the rationale, and the direction it fails
+  contains "$body" 'branch-per-environment'
+  contains "$body" 'fails CLOSED'
+}
+
+@test "FAIL CLOSED: an unreadable site is a typed failure, never a clean sweep (#1432)" {
+  # Same rule as the sibling invariant's: the roster is derived and its paths
+  # are re-opened later, so a renamed site must red rather than read as clean.
+  # `win="$(prose_window …)"` and `< <(guarded_creator_gate_lines …)` both discard the helper's exit 2, which is why each
+  # entry point carries its own guard — and why each is pinned here by its own
+  # prefix, so a case cannot pass on a sibling's arm.
+  local gone="$BATS_TEST_TMPDIR/renamed-away.md"
+  [ ! -e "$gone" ]
+  run guarded_creator_gate_lines "$gone"
+  [ "$status" -eq 2 ]
+  contains "$output" 'guarded_creator_gate_lines: unreadable site'
+  run guarded_creator_gated "$gone"
+  [ "$status" -eq 2 ]
+  contains "$output" 'guarded_creator_gated: unreadable site'
+  run guarded_creator_gaps "$gone"
+  [ "$status" -eq 2 ]
+  contains "$output" 'guarded_creator_gaps: unreadable site'
+}
+
+@test "NON-VACUITY: the guarded-creator sweep reds on a stale PROSE site (#1432)" {
+  # MUTATION (recorded so this control cannot rot into a tautology): in
+  # docs/how-to/keep-app-repos-out-of-the-cluster.md — a prose site — flatten
+  # the three-way narrowing back to the blanket refusal this story's round-1
+  # review caught: `exempts only a step carrying the byte-identical condition`
+  # -> `does not confer the exemption`. That is the exact drift, not a synthetic
+  # edit: it is what all six sites said before this change, and it tells an
+  # agent to avoid the commonest real integration shape.
+  local src="$REPO_ROOT/docs/how-to/keep-app-repos-out-of-the-cluster.md"
+  local mut="$BATS_TEST_TMPDIR/stale-prose.md"
+  [ -f "$src" ]
+  # the how-to wraps the clause mid-sentence, so the mutation targets the half
+  # that lands on one source line — enough to break the needle, which is the
+  # whole point of a control
+  sed 's/one carrying an `if:` guard \*\*exempts only a step carrying the byte-identical/one carrying an `if:` guard does **not** confer the/' \
+    "$src" > "$mut"
+  # the mutation must have bitten, or the control proves nothing
+  run cmp -s "$src" "$mut"
+  # exactly 1 = "files differ". `cmp` exits 2 when it cannot READ one of them,
+  # which a `-ne 0` test would accept as "the mutation bit" on a sed whose
+  # redirect went nowhere.
+  [ "$status" -eq 1 ]
+  # the staled copy must still be GATED, or it would be skipped rather than caught
+  run guarded_creator_gated "$mut"
+  # status 0 = the sweep RAN. Without this, the [ -f ] guard's own diagnostic
+  # ("guarded_creator_gated: unreadable site <path>") contains $mut and would satisfy the
+  # needle below on the very path where the sweep never executed.
+  [ "$status" -eq 0 ]
+  [ "$output" = "$mut" ]
+  run guarded_creator_gaps "$mut"
+  [ "$status" -eq 0 ]
+  contains "$output" "$mut:"
+  contains "$output" ": clause"
+}
+
+@test "NON-VACUITY: the guarded-creator sweep reds on a stale TEMPLATE site (#1432)" {
+  # MUTATION (recorded, as above): in templates/common/SETUP.md.tmpl §3h — a
+  # template site, shipped verbatim into every consumer repo — the same
+  # flattening. Two distinct sites and two distinct file kinds, so a
+  # normalisation that silently stopped working on one of them cannot leave the
+  # control green.
+  local src="$SETUP_TMPL"
+  local mut="$BATS_TEST_TMPDIR/stale-template.tmpl"
+  [ -f "$src" ]
+  sed 's/guard exempts only a step carrying the byte-identical condition\*\*/guard does not** confer the exemption/' \
+    "$src" > "$mut"
+  run cmp -s "$src" "$mut"
+  # exactly 1 = "files differ". `cmp` exits 2 when it cannot READ one of them,
+  # which a `-ne 0` test would accept as "the mutation bit" on a sed whose
+  # redirect went nowhere.
+  [ "$status" -eq 1 ]
+  run guarded_creator_gated "$mut"
+  # status 0 = the sweep RAN. Without this, the [ -f ] guard's own diagnostic
+  # ("guarded_creator_gated: unreadable site <path>") contains $mut and would satisfy the
+  # needle below on the very path where the sweep never executed.
+  [ "$status" -eq 0 ]
+  [ "$output" = "$mut" ]
+  run guarded_creator_gaps "$mut"
+  [ "$status" -eq 0 ]
+  contains "$output" "$mut:"
+  contains "$output" ": clause"
+}
+
+@test "NON-VACUITY: the guarded-creator sweep reds on a site that drops the RATIONALE (#1432)" {
+  # The `rationale` arm was unobserved: both controls above produce a `clause`
+  # gap, so a typo in the branch-per-environment pattern would leave half the
+  # invariant unenforced with every control green.
+  #
+  # MUTATION (recorded): in CLAUDE.md.tmpl — a template site — delete only the
+  # word `branch-per-environment`, leaving the clause sentence intact. The
+  # realistic drift is an author trimming the "why" as editorial padding, which
+  # is exactly what invites the next author to simplify the rule away.
+  local src="$REPO_ROOT/development/skills/bootstrap/templates/common/CLAUDE.md.tmpl"
+  local mut="$BATS_TEST_TMPDIR/stale-rationale.tmpl"
+  [ -f "$src" ]
+  sed 's/branch-per-environment/two-job/' "$src" > "$mut"
+  run cmp -s "$src" "$mut"
+  # exactly 1 = "files differ". `cmp` exits 2 when it cannot READ one of them,
+  # which a `-ne 0` test would accept as "the mutation bit" on a sed whose
+  # redirect went nowhere.
+  [ "$status" -eq 1 ]
+  run guarded_creator_gated "$mut"
+  # status 0 = the sweep RAN. Without this, the [ -f ] guard's own diagnostic
+  # ("guarded_creator_gated: unreadable site <path>") contains $mut and would satisfy the
+  # needle below on the very path where the sweep never executed.
+  [ "$status" -eq 0 ]
+  [ "$output" = "$mut" ]
+  run guarded_creator_gaps "$mut"
+  [ "$status" -eq 0 ]
+  contains "$output" ": rationale"
+  # …and specifically NOT a clause gap, or this would be proving the same arm
+  # the two controls above already cover
+  lacks "$output" ": clause"
+}
+
 @test "MAINTAINING.md's lockstep list names every site the sweep finds (#1206)" {
   # the list that rotted. Derived, not transcribed: the grep MAINTAINING.md
   # itself prescribes is run here, and every hit outside the allowlist of
@@ -2552,7 +3030,7 @@ restatement_sites() {
   # tie the PROSE count to the DERIVED one, or an eighth site keeps the suite
   # green while the table still says seven — the rot round 3 found, inverted
   local n
-  n="$(restatement_sites | grep -c . )"
+  n="$(restatement_sites | awk 'END{print NR}')"
   [ "$n" -eq 6 ]   # six restatements + the authoritative header = seven
   hits="$(cd "$REPO_ROOT" && grep -rln 'no-cluster-deploy' \
     development/skills/bootstrap docs MAINTAINING.md ARCHITECTURE.md | sort)"
@@ -2568,8 +3046,12 @@ restatement_sites() {
   # the table's data rows must equal the derived site count plus the
   # authoritative header row, so a site appended to neither reds here
   local rows
-  rows="$(printf '%s\n' "$table" | grep -c '^| `')"
-  [ "$rows" -eq "$(( $(restatement_sites | grep -c . ) + 1 ))" ]
+  # `[|]` rather than `\|`: in an awk regexp constant `\\` is a literal-backslash
+  # atom, so `/^\\| `/` compiles as the ALTERNATION "starts with a backslash" OR
+  # "contains space-backtick" — which counts a stray backslash line as a table
+  # row. A character class needs no escaping and says what it means.
+  rows="$(printf '%s\n' "$table" | awk '/^[|] `/{c++} END{print c+0}')"
+  [ "$rows" -eq "$(( $(restatement_sites | awk 'END{print NR}') + 1 ))" ]
 }
 
 @test "§3l names the pair among what the IaC path does NOT emit (#1206)" {

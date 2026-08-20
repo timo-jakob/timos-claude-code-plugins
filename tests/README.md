@@ -137,6 +137,8 @@ runs the whole suite once in parallel and exits with bats' real status.
 | `no-inert-permission-barriers.bats` | Repo-wide suite lint (#1360) — bans an *unguarded* permission-barrier `chmod` (root bypasses it, so the denial path never runs) and a backticked `@test` description (bats evaluates descriptions) |
 | `assertions.bash` | Shared assertion helpers (`load assertions`) — the sanctioned way to assert (#1011) |
 | `roster.bash` | Derives the helper roster from `assertions.bash` (`load roster`) — the single source both guards use (#1067) |
+| `prose-lockstep.bash` | Shared normalisation for **propagation invariants** (`load prose-lockstep`) — `prose_body`, `prose_window`, `prose_gate_lines`; strips comment markers and markdown emphasis so a clause wrapped across two `#` lines still matches, and fails closed (exit 2) on an unreadable site (#1432) |
+| `prose-lockstep.bats` | Unit coverage for the above — the normalisations no current sweep exercises (emphasis in a gate, `-F` literalness, the window's forward half, the `## Heading` carve-out) pinned against fixtures (#1432) |
 | `acceptance/` | Outside-in cases against a **running** service built from a bootstrap template — deliberately NOT in the default gate (`bats` does not recurse); see [`acceptance/README.md`](acceptance/README.md) and #243 |
 | `find-inert-bracket-assertions.zsh` | Detector behind the inert-assertion suite lint — `bracket` (#1011) and `and-tail` (#1067) rules |
 | `iac-tools.zsh` | Resolves the **pinned** helm/kustomize/kubeconform/kube-linter/kyverno/yq the `kubernetes-ci` harness runs on (#1199) |
@@ -144,7 +146,8 @@ runs the whole suite once in parallel and exits with bats' real status.
 | `fixtures/clean/` | A self-contained, finding-free mini plugin repo (a `development-fixture` plugin) |
 | `fixtures/kubernetes-repo*/` | Three GitOps repository shapes — clean, broken, untested-policy (#1155) |
 | `kubernetes-ci-fixtures.bats` | Executes the bootstrapped `kubernetes-ci` workflow with **real tools** over those fixtures (#1199) |
-| `no-cluster-deploy.bats` | The #1206 direct-to-cluster gate — `check-no-cluster-deploy.zsh` behaviour, its workflow template's requirable shape (`yq`-structural), and both `branch-protection.sh` directions |
+| `no-cluster-deploy.bats` | The #1206 direct-to-cluster gate — `check-no-cluster-deploy.zsh` behaviour, its workflow template's requirable shape (`yq`-structural), and both `branch-protection.sh` directions. Also holds that rule's **propagation invariant**: four clause sweeps plus the roster canary over a derived restatement roster, the guarded-creator clause among them (#1432) |
+| `iac-selection-rule.bats` | Propagation invariant for the zero-language **IaC selection rule** (#1432) — every site stating the selection by the absence of a language must name the marker in the same statement; derived roster, roster tripwire against `MAINTAINING.md`, prose + code non-vacuity controls |
 | `gather-claude-plugin.bats` | Tests `gather-claude-plugin-findings.zsh` — one mutation of `clean` per validator, asserting the matching finding |
 | `check-marketplace-sync.bats` | Tests `check-marketplace-sync.zsh` — in-sync, version mismatch, missing entry, missing plugin.json |
 | `api-styleguide-ruleset.bats` | Structural half of the org API styleguide ruleset (#689) — rule ids, severities, scoping, fix hints and doc anchors, parsed with `yq`. Also holds the **repo-wide pin sweep**: every file quoting a `styleguide-v*` jsDelivr URL must quote the same one, and no URL may carry a mistyped owner/repo. Behavioural halves: `check-styleguide-pin.bats` (offline) and `acceptance/cli/api-styleguide.bats` (needs spectral) |

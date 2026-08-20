@@ -115,11 +115,18 @@
 #     the CREATING step's own body is exempt too, since the creation is earlier
 #     in that body — the single-step `run: |` with `kind create cluster` then
 #     `kubectl apply` is the common integration-job shape and is exempt.
-#     A cluster-creating step carrying an `if:` GUARD does NOT confer the
-#     exemption: the branch-per-environment shape (`if: pull_request` stands up
-#     kind, `if: ref == main` deploys) is exactly what this gate exists to
-#     catch, because the two are mutually exclusive and the deploy then hits the
-#     real cluster. That direction fails CLOSED — a false alarm a human reads.
+#     GUARDED CREATORS narrow it, and the narrowing is not a blanket refusal.
+#     The exemption keys on the EARLIEST creating step in the job and on THAT
+#     step's condition: an unconditional one exempts every cluster-writing step
+#     at or after it, while one carrying an `if:` guard exempts only a step
+#     carrying the byte-identical condition. The branch-per-environment shape
+#     (`if: pull_request` stands up kind, `if: ref == main` deploys) is exactly
+#     what this gate exists to catch: there the two are mutually exclusive and
+#     the deploy hits the real cluster, so a DIFFERING condition — and an
+#     unguarded deploy under a guarded creator — fails CLOSED, a false alarm a
+#     human reads. The identical-condition pair, both steps guarded alike, is
+#     the commonest real integration shape and keeps the exemption; see the
+#     PASS 2 comment at the implementation for the two `continue` arms.
 #   * DRY RUN, COMMAND-scoped. A command carrying a REAL dry-run flag never
 #     matches: bare `--dry-run`, `--dry-run=client`, `--dry-run=server`,
 #     `--dry-run=true`, or the separate-argument `--dry-run client|server`.
@@ -150,6 +157,28 @@
 #     cluster stood up by a marketplace action (`helm/kind-action`) does not
 #     exempt its job. That direction fails CLOSED (a false alarm a human sees),
 #     which is the safe side of the same gap.
+#   * Only the EARLIEST creating step in a job is recorded, along with its
+#     condition, so a job whose first creator is `if:`-guarded and whose SECOND
+#     creator is unconditional is judged against the guarded condition — an
+#     unguarded deploy after both fails, although a cluster was unconditionally
+#     stood up. Fails CLOSED, and the shape is rare enough that recording every
+#     creator is not worth the ambiguity of choosing between them; reorder the
+#     unconditional creator first if you hit it.
+#   * An `if:` written as a YAML BOOLEAN is not a string, so the extractor
+#     records NO condition and the creator is read as unconditional. The two
+#     spellings are NOT the same defect:
+#       - `if: true` — the step always runs, so "unconditional" is the CORRECT
+#         reading. Right answer, reached without inspecting the value.
+#       - `if: false` — the usual way to park a step. It never runs and no
+#         cluster is created, yet the creator still exempts every
+#         cluster-writing step at or after it, unguarded ones included. This
+#         one fails OPEN: a `kind create cluster` parked with `if: false`
+#         currently exempts a real `helm upgrade --install` after it. Write the
+#         guard as an expression string (`if: ${{ false }}`) if you need the
+#         narrowing. Tracked for a fix.
+#     A fix must map a YAML `true` to UNCONDITIONAL — not to the condition
+#     string `true` — or it reds the always-run integration job the
+#     guarded-creator clause exists to keep exempt.
 #   * A command reached only through a shell variable or an alias defined
 #     earlier in the same body is not resolved.
 #   * A NESTED command substitution (`$( … $( … ) … )`) is lifted at the first

@@ -12,7 +12,8 @@
 # note below). .zsh scripts are syntax-checked with `zsh -n` (shellcheck can't
 # parse zsh). Extension matches the shebang for every script, so no per-file
 # exceptions are needed — the shebang-less `tests/**/*.bash` libraries bats
-# sources (assertions.bash, roster.bash, acceptance/lib/ops-acceptance.bash) each
+# sources (assertions.bash, roster.bash, prose-lockstep.bash,
+# acceptance/lib/ops-acceptance.bash) each
 # carry a `# shellcheck shell=bash` directive instead. A new one must too, or
 # shellcheck cannot tell its dialect. Note the `**`: a library may be nested (the
 # acceptance tier's is), and a `tests/*.bash` reading would miss it.

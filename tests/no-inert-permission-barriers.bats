@@ -517,13 +517,15 @@ scan_backticks() {
   # the git common dir (#1360). Before that, in a worktree checkout, git fataled
   # and a sweep like this one would have inspected nothing.
   bats_file_list "$list"
-  # ANTI-VACUITY, part 1: git actually spoke. 114 files are tracked, 113 scanned
+  # ANTI-VACUITY, part 1: git actually spoke. 121 files are tracked, 120 scanned
   # (this file is excluded); the floor sits far enough below to survive normal
-  # churn and far enough above zero to catch a roster that collapsed.
+  # churn and far enough above zero to catch a roster that collapsed. The
+  # figures are a snapshot for the reader — only the floor is enforced, so they
+  # drift with every added suite rather than redding; re-measure when you notice.
   local nfiles
   nfiles="$(wc -l < "$list" | tr -d ' ')"
   if [ "$nfiles" -lt 90 ]; then
-    printf 'git ls-files returned only %s tests/*.bats (113 expected) — the sweep scanned almost nothing.\n' "$nfiles" >&2
+    printf 'git ls-files returned only %s tests/*.bats (~120 expected) — the sweep scanned almost nothing.\n' "$nfiles" >&2
     return 1
   fi
 

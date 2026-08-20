@@ -5483,7 +5483,9 @@ libraries they `load` are **bash**, not zsh, because bats is a bash harness — 
 `.bats` file is preprocessed into bash, so the tests and anything they source
 have no choice in the matter. Those libraries are `tests/assertions.bash` (the
 shared assertion helpers, `load assertions`), `tests/roster.bash` (the helper
-roster derived from it, `load roster`) and `tests/acceptance/lib/ops-acceptance.bash`
+roster derived from it, `load roster`), `tests/prose-lockstep.bash` (the
+propagation invariants' shared prose normalisation, `load prose-lockstep`, #1432)
+and `tests/acceptance/lib/ops-acceptance.bash`
 (the acceptance tier's fixture helpers, `load ../lib/ops-acceptance`) — note that
 last one is **nested**, so a library is not necessarily at `tests/*.bash`. They
 are standalone `.bash` files,
