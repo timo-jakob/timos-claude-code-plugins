@@ -2789,11 +2789,19 @@ follow-up issue" recommendation — never as a blocking `WARNING`/`CRITICAL`.
 Nothing is lost (the observation still rides into the dossier as a suggestion):
 a scope-expanding remedy is meant to no longer force a round of work the story
 never authorized — the #976 round-1 overreach that round 2 then reverted. **This
-demotion only activates when the reviewer is actually given the issue's stated
-scope.** Under today's panel wiring the reviewer receives only a review scope (a
-file list), not the issue text, so carve-out (3) below fires and full severity is
-kept (fail-safe); passing the issue scope into the panel — the step that makes the
-bound bite in the resolve-issue loop — is tracked follow-up (#988).
+ISSUE-scope demotion only activates when the reviewer is actually given the
+issue's stated scope.** Under today's panel wiring the reviewer receives only a
+review scope (a file list), not the issue text, so carve-out (3) below fires and
+full severity is kept (fail-safe) for every defect **in the reviewed change**;
+passing the issue scope into the panel — the step that makes the bound bite in the
+resolve-issue loop — is tracked follow-up (#988).
+
+A coverage gap confined to code the change **never touched** is a different
+question, and stays demotable under carve-out (1): its extent is read off the
+change itself — the diff, or the file list the reviewer was handed — not off an
+*issue* scope that was never supplied. Carve-out (3) forbids inferring the
+**issue** scope, not observing the change's own extent; `claude-plugin-test-reviewer`
+states the same split where its mutation bar meets this rule.
 
 **Three carve-outs keep this from muzzling real blockers.** (1) **Tests and
 coverage for the change under review are always in-scope** — they are part of the
@@ -2830,6 +2838,35 @@ Reviewers also **enumerate every instance of a repeating pattern in one round**
 rather than one exemplar per round; the fix pass sibling-sweeps to match (both in
 the reviewer prompts and resolve-issue's fix-round step). This is a per-round
 thoroughness *increase*, orthogonal to the schema fields here.
+
+### Terminating severity bars (#1433)
+
+A second, differently-scoped convention sits alongside scope-bounding above, and
+only in the claude-plugin panel so far. Its reviewers that carry a bar do so in a
+`## The <name> bar (severity rule — this bounds you)`
+— today `claude-plugin-prose-logic` (the *behavioural* bar, the original),
+`claude-plugin-contract-integrity` (the *consumer* bar) and
+`claude-plugin-test-reviewer` (the *mutation* bar). Each states a three-row
+severity table and one bolded, **falsifiable** rule that a finding may not carry
+`>= WARNING` unless it names the rule's own falsifier: the concrete wrong action a
+model would take, the concrete wrong action a named consumer takes because of the
+drift, or a concrete mutation of the source under test that the current suite would
+pass. Each agent's Reporting Format then requires that falsifier in the finding
+body, so the bar is enforceable rather than advisory.
+
+The point is a **fixed point**: a bar phrased as a judgement ("assertions too weak",
+"misleads the next editor") has none, because every fix is a new artifact reviewable
+under the same bar — the generator epic #1431 was filed to close. The bars bound
+*severity only*: what they demote becomes a `SUGGESTION`, still reported and still
+raisable by the #994 promotion path, so no dimension loses coverage.
+`tests/claude-plugin-review-severity-bars.bats` is the guard, and it asserts the
+bars are one convention rather than a set of ad-hoc rules — including against this
+section, so the two cannot drift apart. It derives the roster from the tree rather
+than transcribing it, which is why no count is stated here: a fourth reviewer given
+a bar reds that test rather than silently leaving this paragraph stale. Giving the
+remaining panel reviewers a bar is not done; it belongs to epic #1431, which filed
+this convention, not to #987, which tracks extending the *scope-bounding* rule
+above.
 
 ### Aggregation (per round)
 
