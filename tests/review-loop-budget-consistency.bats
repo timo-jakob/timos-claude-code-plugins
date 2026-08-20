@@ -18,6 +18,15 @@
 # rounds", "5-round default") in agent instructions. A site guarded in only one
 # spelling is a site that can drift.
 #
+# A third kind exists since #1433: NUMERAL-FREE restatements ("escalates once
+# its round budget runs out") in the two panel agents that gained a severity
+# bar. They quote no number, so no value assertion can reach them and they are
+# absent from the digit-form test. They get their OWN test — positive on the
+# numeral-free spelling, negative on any numeral form — because ALL_SITES
+# membership alone would not catch a rewrite into the CURRENT digit form: the
+# two sweeps ALL_SITES feeds ban the superseded 3/+2 literals only. Membership
+# is kept as the second line of defence, not as the guard.
+#
 # Scope: LIVE instruction/documentation only. Dated design records under
 # docs/superpowers/{plans,specs}/ are deliberately frozen snapshots of what was
 # decided at the time — they still say 3 / +2 and must NOT be swept.
@@ -52,8 +61,20 @@ setup() {
   # the whole evidence sentence rather than only the word form: the 1,3,3,3,6,10
   # data produced *five*, and must not be re-attached to a later cap.
   TELEM="$REPO_ROOT/docs/explanation/pipeline-telemetry.md"
+  # #1433 gave two more panel agents a severity bar, and each opens by restating
+  # the same escalation rule. Both are deliberately NUMERAL-FREE ("escalates
+  # once its round budget runs out"), so neither belongs in the digit-form test
+  # above. They join ALL_SITES for the stale 3/+2 sweeps, but membership alone
+  # does NOT catch the drift worth catching here: those sweeps ban the
+  # SUPERSEDED literals, so a rewrite into the CURRENT digit form ("escalates
+  # after 5 rounds") would trip neither and mint a site the next retune never
+  # reads. The dedicated test below is what actually guards them, in both
+  # directions; ALL_SITES membership is the second line of defence.
+  BAR_TESTS="$REPO_ROOT/development-claude-plugin/agents/claude-plugin-test-reviewer.md"
+  BAR_CONTRACT="$REPO_ROOT/development-claude-plugin/agents/claude-plugin-contract-integrity.md"
   # every live prose site, for the sweeps that must cover all of them at once
-  ALL_SITES=("$SKILL" "$ARCH" "$EXPLAIN" "$MOTIV" "$GATE" "$PROSE" "$TELEM")
+  ALL_SITES=("$SKILL" "$ARCH" "$EXPLAIN" "$MOTIV" "$GATE" "$PROSE" "$TELEM" \
+    "$BAR_TESTS" "$BAR_CONTRACT")
 
   # the executable copies — every prose site is checked AGAINST these
   MAXR="$(grep -Eom1 'MAX_REVIEW_ROUNDS=[0-9]+' "$LOOP" | cut -d= -f2)"
@@ -135,6 +156,106 @@ grep_site() {  # grep_site <file> <fixed-string>
   while IFS= read -r hit; do
     [ "$hit" = "$MAXR-round default" ]
   done <<< "$output"
+}
+
+@test "the numeral-free bar restatements stay numeral-free (#1433)" {
+  # The guard the ALL_SITES entries do NOT buy. Positive: the spelling is
+  # actually there, so deleting the escalation clause reds instead of silently
+  # retiring the site. Negative: no round count in ANY form may appear in either
+  # file — that is the "minting a site the retune never reads" drift, and the
+  # stale-3 sweep cannot see it because "escalates after 5 rounds" is the
+  # CURRENT spelling, not a superseded one.
+  local site
+  for site in "$BAR_TESTS" "$BAR_CONTRACT"; do
+    grep_site "$site" 'escalates once its round budget runs out'
+  done
+  # Ban the SHAPE, not three sentences. Three named spellings would still let
+  # "escalates once its 5-round budget runs out", "a budget of 5 rounds", or the
+  # word form "after five rounds" through — each of which mints exactly the
+  # unread digit site this test exists to prevent, alongside an intact
+  # numeral-free clause the positive pin above still matches.
+  #
+  # Safe against these files' real content: they cite issues as (#982), (#994),
+  # (#1067) and #1433, never a round count, so no digit here abuts a round word.
+  #
+  # The word branch mirrors the digit branch shape-for-shape. An earlier version
+  # only matched "<word> rounds" — a space and a plural — so "the panel's
+  # five-round budget", "its round budget of five" and any retune past "eight"
+  # all slipped through and minted precisely the unread site this bans.
+  #
+  # The word branch carries the `review` variant too: "five review rounds" is
+  # this repo's commonest human-facing spelling — pinned as live prose by the
+  # word-form test above — and the digit companion below already bans its digit
+  # form, so without it the two branches stayed asymmetric on the one spelling
+  # the repo actually writes.
+  #
+  # Verified against the real files: both agents say "one instance per round"
+  # and "across extra rounds", and neither contains "review round", "one round"
+  # or "one-round" — no count precedes "round" anywhere in them — so this cannot
+  # false-red on today's content.
+  run -1 grep -Eqi '[0-9]+[- ]rounds?|[0-9]+ (more )?rounds|round budget of [0-9]+|(one|two|three|four|five|six|seven|eight|nine|ten)[- ](more )?(review )?rounds?|round budget of (one|two|three|four|five|six|seven|eight|nine|ten)' \
+    "$BAR_TESTS" "$BAR_CONTRACT"
+  # and the superseded spellings stay banned too, belt and braces
+  run -1 grep -Eq 'escalates after [0-9]+ rounds|[0-9]+-round default|[0-9]+ review rounds' \
+    "$BAR_TESTS" "$BAR_CONTRACT"
+}
+
+@test "every numeral-free bar restatement is on the roster (#1433)" {
+  # The closed-list tripwire. A sibling of #1431 that gives a fourth reviewer a
+  # bar restates this clause in a file ALL_SITES does not name, and the test
+  # above would sweep only the two we happen to list. Derive the real set from
+  # the tree and require it to equal the rostered one, so a new site fails
+  # here rather than going unguarded — the repo-wide-invariant rule adopted
+  # after a closed swept-file list rotted (#936 / #1188).
+  #
+  # Swept REPO-WIDE, not over one plugin's agents dir: the rest of epic #1431
+  # works on the `development` plugin, so the likeliest fourth site is
+  # development/agents/ or a SKILL.md — scoping the sweep to
+  # development-claude-plugin/agents/ would be the same closed-list rot the
+  # comment above disclaims, one level up.
+  #
+  # A read loop rather than `xargs`: xargs word-splits its input, and on empty
+  # input GNU xargs runs grep once with no operands (falling through to stdin)
+  # where BSD xargs runs nothing — the two CI legs would disagree in exactly the
+  # degenerate case this tripwire is meant to catch.
+  # Enumerated exactly like the sibling roster in
+  # tests/claude-plugin-review-severity-bars.bats, so the two really do agree
+  # about what "the tree" means rather than merely claiming to:
+  #  * `-c core.quotePath=false` with `-z` / `read -d ''`, because git C-quotes
+  #    a path holding a non-ASCII byte, a quote or a backslash, and grep then
+  #    cannot open the literal — it exits 2, the `if` is false, and the file
+  #    drops out SILENTLY. That is the fail-OPEN direction, and since `expected`
+  #    is fixed it only changes the verdict when the dropped file DOES carry the
+  #    clause — i.e. exactly the fourth site this tripwire exists to catch.
+  #  * the NUL stream read straight from the process substitution: a `$(...)`
+  #    capture cannot carry NUL bytes, so capturing first would collapse the
+  #    whole listing into one unopenable path and empty the roster.
+  #  * `--` and `</dev/null` on the probe, so a path beginning with `-` is not
+  #    parsed as options, and an empty path cannot read the loop's own stdin and
+  #    swallow the rest of the listing.
+  #  * `sort -u` on both sides: a conflicted index lists a path once per stage,
+  #    and the equality below would otherwise red mid-rebase while nothing had
+  #    changed — a realistic state given this repo's sequential-PR cadence.
+  local discovered expected
+  local found=()
+  git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1 || {
+    printf 'not a git worktree, cannot derive the roster: %s\n' "$REPO_ROOT" >&2
+    return 1
+  }
+  while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    if grep -q 'escalates once its round budget runs out' -- "$REPO_ROOT/$f" </dev/null; then
+      found+=("$f")
+    fi
+  done < <(cd "$REPO_ROOT" \
+    && git -c core.quotePath=false ls-files -z '*.md' ':!:docs/superpowers/**')
+  [ "${#found[@]}" -ge 1 ]
+  discovered="$(printf '%s\n' "${found[@]}" | sort -u)"
+  [ -n "$discovered" ]
+  expected="$(printf '%s\n' \
+    "development-claude-plugin/agents/claude-plugin-contract-integrity.md" \
+    "development-claude-plugin/agents/claude-plugin-test-reviewer.md" | sort -u)"
+  [ "$discovered" = "$expected" ]
 }
 
 @test "no stale round-count spelling survives at any live site (#993)" {

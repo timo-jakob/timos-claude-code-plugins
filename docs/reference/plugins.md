@@ -296,9 +296,9 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 | claude-plugin-structure-validator | opus | Triages plugin directory-layout findings (missing/misnamed `plugin.json`, wrong `skills/`-`agents/` layout, marketplace `source` mismatch); fixes source paths, escalates file moves / identity renames |
 | claude-plugin-script-quality | opus | Triages shell-script lint (shellcheck error/warning, `zsh -n` syntax, shebang/extension mismatch); applies verified safe fixes + justified suppressions, escalates renames and behavior-changing rewrites |
 | claude-plugin-prose-logic | fable | Review panel, `prose_logic` dimension: skill/agent instructions as behaviour — missing failure branches, contradictions, model-ambiguous rules; severity bounded by the behavioural bar (no `>= WARNING` without naming the concrete wrong action) |
-| claude-plugin-contract-integrity | opus | Review panel, `contract` dimension: dangling skill/agent/script references, prose-vs-script flag/subcommand drift, ARCHITECTURE.md schema drift |
+| claude-plugin-contract-integrity | opus | Review panel, `contract` dimension: dangling skill/agent/script references, prose-vs-script flag/subcommand drift, ARCHITECTURE.md schema drift; severity bounded by the consumer bar (no `>= WARNING` without naming the concrete wrong action a consumer takes) |
 | claude-plugin-script-reviewer | fable | Review panel, `script_quality` dimension: zsh logic review — exit codes, quoting, error paths, unhandled failure modes (not a shellcheck re-run) |
-| claude-plugin-test-reviewer | opus | Review panel, `tests` dimension (core dimension reused): bats coverage for changed scripts, weak assertions, untested failure branches |
+| claude-plugin-test-reviewer | opus | Review panel, `tests` dimension (core dimension reused): bats coverage for changed scripts, weak assertions, untested failure branches; severity bounded by the mutation bar (no `>= WARNING` without naming a mutation the current suite would pass) |
 | claude-plugin-manifest-check | sonnet | Review panel, `manifest` dimension: `plugin.json` ↔ `marketplace.json` lockstep + semver bump appropriateness |
 
 > ⚠️ **Cost**: a full maintenance run as a test is a real autonomous
