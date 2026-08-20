@@ -9,7 +9,13 @@
 # cluster-WRITING command. The checker's header states the full command set, all
 # THREE exemptions — a job that stands up its own ephemeral kind/k3d/minikube/
 # ctlptl cluster, job-scoped (covering the steps at or after it, the rest of the
-# creating step's own body included); a single COMMAND carrying a REAL dry-run
+# creating step's own body included) — keyed on the EARLIEST creator in the job
+# and its condition, so an unconditional one exempts every cluster-writing step
+# at or after it, while a creator carrying an `if:` guard exempts only a step
+# carrying the byte-identical condition, because the branch-per-environment
+# shape (`if: pull_request` stands up kind, `if: ref == main` deploys) is
+# exactly what this gate exists to catch, so a differing condition fails closed;
+# a single COMMAND carrying a REAL dry-run
 # value — bare `--dry-run`, `--dry-run=client|server|true`, or `--dry-run
 # client|server`, but NOT `--dry-run=none` / `--dry-run=false`, which mean the
 # opposite — command-scoped, NOT the whole step; and, repo-wide, a

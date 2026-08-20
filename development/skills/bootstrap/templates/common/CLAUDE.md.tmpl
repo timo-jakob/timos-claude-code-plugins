@@ -49,7 +49,14 @@ complete.
   versioned, immutable images and never deploys itself — a version change
   reaches a cluster as a PR against the infrastructure repo. **Three
   exemptions:** a job that stands up its own kind/k3d/minikube/ctlptl cluster
-  (covering the steps at or after it in that job); a single command carrying a
+  (covering the steps at or after it in that job) — keyed on the **earliest**
+  creator in the job and its condition, so an unconditional one exempts every
+  cluster-writing step at or after it, while one carrying an **`if:` guard
+  exempts only a step carrying the byte-identical condition**, because the
+  branch-per-environment shape (`if: pull_request` stands up kind, `if: ref ==
+  main` deploys) is exactly what this gate exists to catch, so a differing
+  condition fails closed (guarding both steps alike is fine, and is the usual
+  integration shape); a single command carrying a
   real dry-run value (bare `--dry-run`, `--dry-run=client|server|true`, or
   `--dry-run client|server` — `--dry-run=none` and `--dry-run=false` do **not**
   exempt); and, repo-wide, a `.maintenance.yml` recording `primary: kubernetes`.

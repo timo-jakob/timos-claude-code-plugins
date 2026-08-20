@@ -592,10 +592,17 @@ index when the step is unnamed) and the command.
   apply` exempts the cluster-writing steps *at or after* it in that same job —
   including the rest of the creating step's own body, so a single `run: |` that
   stands up kind and then applies to it is exempt. An integration test that
-  spins up kind and applies manifests to it is not a deploy. A creating step
-  carrying an **`if:` guard does not** confer the exemption — the
-  branch-per-environment shape is what the gate exists to catch, so that
-  direction fails closed. The exemption is **job-scoped**: the same step in a sibling job still
+  spins up kind and applies manifests to it is not a deploy. The exemption keys on
+  the **earliest** creating step in the job and on its condition: an
+  unconditional one exempts every cluster-writing step at or after it, while one
+  carrying an **`if:`
+  guard exempts only a step carrying the byte-identical condition**, because the
+  branch-per-environment shape (`if: pull_request` stands up kind, `if: ref ==
+  main` deploys) is exactly what the gate exists to catch — there the two are
+  mutually exclusive and the deploy reaches the real cluster, so a differing
+  condition, or an unguarded deploy under a guarded creator, fails closed. Both
+  steps guarded alike is the commonest real integration shape and keeps the
+  exemption. The exemption is **job-scoped**: the same step in a sibling job still
   fails, because a sibling job writes to whatever cluster its own credentials
   point at.
 - **A command carrying a real dry-run flag**, **command-scoped**: bare
@@ -639,6 +646,19 @@ a cluster:
   silent pass. Your recourse is to stand the cluster up in a `run:` step
   (`kind create cluster`), or to change the check in a reviewed pull request;
   there is no annotation that will silence it.
+- Only the **earliest** creating step in a job is recorded, with its condition,
+  so a job whose first creator is `if:`-guarded and whose second is
+  unconditional is judged against the guarded condition. Fails *closed*;
+  reorder the unconditional creator first if you hit it.
+- An `if:` written as a YAML **boolean** is not a string, so the checker records
+  no condition and reads that creator as unconditional. The two spellings differ:
+  `if: true` always runs, so "unconditional" is the **correct** reading; but
+  `if: false` — the usual way to park a step — never runs and creates no
+  cluster, and yet still exempts every cluster-writing step at or after it,
+  unguarded ones included. That direction fails **open**: a `kind create
+  cluster` parked with `if: false` currently exempts a real `helm upgrade
+  --install` after it. Write the guard as an expression string
+  (`if: ${{ false }}`) if you need the narrowing. `if: true` needs no remedy.
 - Some cluster-mutating verbs are outside the closed v1 set **by decision, not
   because they are harmless**: `kubectl run`, `edit`, `annotate`, `label`,
   `expose`, `cordon`, `uncordon`, `drain`, `taint`, `exec`, and `helm plugin

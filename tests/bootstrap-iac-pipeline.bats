@@ -1756,6 +1756,11 @@ EOF
   contains "$block" 'ask Q4 (IaC wording) **first**'
   # the condition, with the qualifier's binding made explicit
   contains "$block" '`kubernetes-ci.yml` is present **AND**'
+  # …and the MARKER as the condition, not the rendered workflow alone (#1432).
+  # The workflow's presence is evidence the repo already took the §3l path; the
+  # rule detect-stack.sh and §3l actually state keys on the marker, and this
+  # site is swept for that clause by tests/iac-selection-rule.bats.
+  contains "$block" 'the repo carries the **kubernetes topic marker**'
   contains "$block" 'a recorded `primary: kubernetes` grants nothing on its own'
   # RESOLVED, not merely detected — and the ORDERING that makes it achievable.
   # This tree is ordered and step 3 runs before Q4 is asked in step 6, so keying

@@ -84,11 +84,18 @@ whatever cluster its own credentials point at — and it runs *forward* from the
 creating step, because a job that deploys and only afterwards stands up a kind
 cluster deployed to someone else's.
 
-A cluster-creating step carrying an `if:` guard does **not** confer the
-exemption: the branch-per-environment shape (`if: pull_request` stands up kind,
-`if: ref == main` deploys) is exactly what the gate exists to catch, since the
-two are mutually exclusive and the deploy then reaches the real cluster. That
-direction fails closed.
+A guarded creator narrows the exemption rather than losing it. The exemption
+keys on the **earliest** creating step in the job and on its condition: an
+**unconditional** one exempts every cluster-writing step at or after it, while
+one carrying an `if:` guard **exempts only a step carrying the byte-identical
+condition**. (Only the earliest creator is recorded, so a later unconditional
+one does not re-widen it — reorder if you hit that.) The
+branch-per-environment shape (`if: pull_request` stands up kind, `if: ref ==
+main` deploys) is exactly what the gate exists to catch, since there the two are
+mutually exclusive and the deploy then reaches the real cluster — so a
+**differing** condition, and an unguarded deploy under a guarded creator, fail
+closed. Both steps guarded alike is the commonest real integration shape and
+keeps the exemption.
 
 **A command carrying a real dry-run flag** — **command-scoped**, and the scope
 is the point. Bare `--dry-run`, `--dry-run=client`, `--dry-run=server`,
@@ -190,6 +197,20 @@ A pass means "no cluster-writing command appears literally in a workflow's own
   deploy`, `run: task deploy`, or a composite action under `.github/actions/**`
   reaches a cluster with nothing here to see. This is the commonest way a real
   deploy is invisible to v1.
+- Only the **earliest** creating step in a job is recorded, with its condition,
+  so a job whose first creator is `if:`-guarded and whose second is
+  unconditional is judged against the guarded condition. Fails *closed*;
+  reorder the unconditional creator first if you hit it.
+- **An `if:` written as a YAML boolean is read as NO condition**, so that
+  creator counts as unconditional. The two spellings are not the same thing.
+  `if: true` always runs, so unconditional is the **right** reading and the
+  verdict is correct. `if: false` — the usual way to park a step — never runs
+  and creates no cluster, yet still exempts every cluster-writing step at or
+  after it, unguarded ones included. That is the one gap that fails **open**: a
+  `kind create cluster` parked with `if: false` currently exempts a real `helm
+  upgrade --install` after it, so the guarded-creator narrowing described above
+  does *not* apply to it. Write the guard as an expression string
+  (`if: ${{ false }}`) if you need the narrowing; `if: true` needs no remedy.
 - The ephemeral exemption reads `run:` bodies for the same reason, so a cluster
   stood up by `helm/kind-action` does not exempt its job. That direction fails
   **closed** — a false alarm a human sees — which is the safe side of the same

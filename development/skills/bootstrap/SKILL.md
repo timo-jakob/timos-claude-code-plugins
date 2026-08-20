@@ -291,6 +291,7 @@ flow. Stop and ask for input wherever marked; do not guess.
    >
    > **Resolve the IaC condition before invoking `branch-protection.sh` in any
    > of the three bullets below** (#1154). The condition is:
+   > the repo carries the **kubernetes topic marker**, so
    > `kubernetes-ci.yml` is present **AND**
    > the **resolved** language set is empty **AND**
    > no other `primary:` is recorded — matching `detect-stack.sh`'s
@@ -1193,7 +1194,12 @@ Copy from `templates/common/`:
   reconcile|bootstrap`, and `helm delete|del|un` as documented aliases of `uninstall`) and exits 1 naming the file, job,
   step and command. **Three exemptions**, all in the checker's header: a job that stands up its **own** ephemeral
   cluster (`kind`/`k3d`/`minikube`/`ctlptl`), job-scoped — exempting the cluster-writing steps **at or after** the
-  creating step, including the rest of that step's own body; a **command** carrying a **real dry-run value**
+  creating step, including the rest of that step's own body — keyed on the **earliest** creator in the job
+  and its condition, so an unconditional one exempts every cluster-writing step at or after it, while one
+  carrying an **`if:` guard exempts only a step carrying the byte-identical
+  condition**, because the branch-per-environment shape (`if: pull_request` stands up kind, `if: ref == main`
+  deploys) is exactly what this gate exists to catch, so a differing condition fails closed (both steps
+  guarded alike keeps the exemption, and is the usual integration shape); a **command** carrying a **real dry-run value**
   (bare `--dry-run`, `--dry-run=client|server|true`, or the separate-argument `--dry-run client|server` — note that
   `--dry-run=none` and `--dry-run=false` mean the OPPOSITE and do **not** exempt), command-scoped (not step-scoped — a
   step-wide test would let one `--dry-run` silence every real deploy beside it, which is the standing escape hatch
@@ -4846,8 +4852,8 @@ For private path the checklist additionally includes:
 - Register self-hosted runner (see `infra/github-runner/README.md`).
 - Mint SonarQube project token, store as `SONAR_TOKEN` secret.
 
-For the **IaC path** (§3l — the `kubernetes` topic marker with an empty
-resolved language set and no other `primary:` recorded; a recorded
+For the **IaC path** (§3l — the `kubernetes` topic marker with an empty RESOLVED language set
+and no other `primary:` recorded; a recorded
 `primary: kubernetes` never grants this path on its own — #1193)
 Step 4b already required the six `kubernetes-ci.yml` checks via
 `--iac-only true`, so branch protection is **not** an outstanding item. What the
