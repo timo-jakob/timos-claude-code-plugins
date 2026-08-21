@@ -31,6 +31,15 @@ SemVer-ish:
 - **Major** (`1.x → 2.0.0`) — breaking change to a plugin's external
   contract (input schema, response shape, expected file layout).
 
+**One plugin-local override.** A plugin whose version prefix is pinned to a
+**shipped-slice label** moves only its patch digit until the slice itself grows,
+whatever the table above would say. Today that is `development-kubernetes`,
+where `tests/kubernetes-plugin-skeleton.bats` asserts the `0.3.` prefix and the
+label is reproduced in `README.md` and `docs/reference/plugins.md`. So a
+`development`-side story that also edits that plugin's review SKILL.md takes a
+patch there and a minor in `development` — moving its minor means moving both
+label sites in the same PR, and the test enforces it.
+
 **Why this matters.** Claude Code caches plugins by version in
 `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`. If you ship a
 change without bumping the version, end users (including you on subsequent
@@ -491,7 +500,7 @@ that identifies the sites which do state it, and assert `gated >= 1` as the
 anti-no-op floor, or a needle that quietly stopped matching turns the sweep into
 a green no-op. A floor alone is weak, though — it is satisfied by one surviving
 site — so **record the exact gated count in the table below** and tie it to the
-derivation, as both invariants in force do.
+derivation, as the invariants in force do.
 
 **Carry a roster tripwire.** A derived sweep answers *do the sites I found
 agree?* and never *did a site appear or vanish?* — so a new restatement can land
@@ -521,8 +530,22 @@ to yourself before "fixing" the test.
 | --- | --- | --- | --- |
 | **#1206 direct-to-cluster gate** — the v1 command set and the three exemptions, including the guarded-creator narrowing (#1432) | `templates/common/scripts/check-no-cluster-deploy.zsh` header | `tests/no-cluster-deploy.bats` | `grep -rln 'no-cluster-deploy'` over `development/skills/bootstrap docs MAINTAINING.md ARCHITECTURE.md`, minus wiring, index and authoritative sites — 6 restatements plus the authoritative header, 5 enumerating the ephemeral exemption (gated on `ctlptl`), 5 ephemeral-exemption statements |
 | **IaC selection rule** — at most one IaC workflow per repo; the condition is the marker, not merely the absence of a language (the dual-marker halt is a #1162 specification, not current behaviour) (#1432) | `ARCHITECTURE.md` | `tests/iac-selection-rule.bats` | `grep -rlE 'iac[-_]only'` over `development docs ARCHITECTURE.md`, minus the authoritative site and `docs/superpowers/` — 6 roster files, 4 stating the selection, 8 selection statements |
+| **Closing-sweep grant** — the review loop's closing full sweep gets a one-round grant past the ceiling, once (#1434). *(Summarised, not restated: carrying the pinned clause here would make this registry a fourth governed site.)* | `development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — `closing_sweep_round=$(( round + 1 ))`, the line the sweep derives its increment from rather than transcribing it. The one-round bound is *also* enforced by the `--resume` adoption clamp (`closing_sweep_round > max_rounds + 1`), which the sweep does not derive from — see residue 4 | `tests/review-loop-budget-consistency.bats` | `git ls-files '*.md'` minus `docs/superpowers/**`, kept to the sites carrying the literal grant clause — 3 roster files (`SKILL.md`, `docs/explanation/review-loop.md`, `ARCHITECTURE.md`), each gated on exactly 1 statement, so gated == roster == 3 |
+| **Review-panel loop duties** — every review panel states that an EMPTY scope from the loop is never a licence to widen, and that on a **delta** round **carrying nothing** it must still write `[]` — never on a full round, and never against a non-empty (or, on a round >= 2, null) carry — and that it reports how many carried entries it confirmed on any round whose carry is non-empty, whatever it writes to the findings file, and that from round 2 on it forwards the plan's two carry paths into every agent's prompt (#1434). *(The invariant is the two duties, not the wording: each panel spells them in its own scope vocabulary.)* | `ARCHITECTURE.md` — *the emission directive lives in one place* | `tests/review-loop-budget-consistency.bats` | `git ls-files 'development-*/skills/review/SKILL.md'` — 6 panels, each gated on both duties, so gated == roster == 6 |
 
-**Both rosters are deliberately scoped, and neither scope is an accident.** The
+**All four rosters are deliberately scoped, and no scope is an accident.** The
+closing-sweep roster (#1434) is the widest and the simplest: every tracked
+`*.md` outside `docs/superpowers/**`, narrowed to the sites that carry the
+literal grant clause. It can afford that width because the clause is a distinct
+sentence rather than a flag name, so membership needs no proxy — and it must
+have it, because the rule's restatements are spread across an instruction skill,
+a user-facing explanation and the contract doc rather than clustered in one
+plugin. The panel-duties roster (#1434) is the narrowest and needs no clause
+proxy at all: its members are identified by *path* — every
+`development-*/skills/review/SKILL.md` — so the roster cannot drift from the
+population, and the needles it then applies are load-bearing fragments rather
+than whole sentences, because the two duties are deliberately worded per panel.
+The other two are narrower than the closing sweep's, for the reasons below. The
 gate's own roster (#1206) sweeps `development/skills/bootstrap`, `docs/`, this file and
 `ARCHITECTURE.md`; a restatement of the gate's rules landing in the root
 `README.md`, a sibling topic plugin or `tests/` is out of roster on purpose,
@@ -537,8 +560,9 @@ primary-**eligibility** — which plugin may declare `primary:` for a
 language-less repo — rather than which CI workflow gets rendered, so they are
 out of roster on purpose. Widen the roster if that ever stops being true.
 
-**Known residue, so the registry is not read as stronger than it is.** Three
-things are recorded here rather than fixed, each wanting its own issue:
+**Known residue, so the registry is not read as stronger than it is.** The
+entries below are recorded here rather than fixed, each wanting its own issue —
+stated without a count so the next addition cannot desynchronise it:
 
 1. `tests/bootstrap-iac-pipeline.bats`'s *the `--iac-only` qualifier is stated
    identically at every restatement* (#1154) walks a **closed, hand-written
@@ -558,6 +582,25 @@ things are recorded here rather than fixed, each wanting its own issue:
    manifests, `README.md` and `development/skills/maintenance/SKILL.md` state
    the selection outside its reach. `tests/iac-selection-rule.bats`'s header
    enumerates them.
+4. **Both #1434 sweeps are file-scoped and carry no recorded mutation
+   control.** The closing-sweep grant sweep and the panel-duties sweep in
+   `tests/review-loop-budget-consistency.bats` needle whole files — including a
+   5000-line `SKILL.md` and `ARCHITECTURE.md` — rather than the statement, and
+   neither records the two-site mutation control *Carry a non-vacuity control*
+   asks for. What each does carry is a **derived roster with an asserted size**,
+   which is the property that stops a new site landing unguarded; the needles
+   are then load-bearing fragments of the rules themselves (`exactly one round` … `beyond`,
+   `never a licence to`, `fix_verification_path` — split here on purpose: the
+   grant sweep derives its roster by grepping every tracked `*.md` for that
+   needle as ONE line, so quoting it whole would add this file to the roster
+   and red the test with no rule having changed), not incidental
+   words, so file scope costs less here than it does for the command-set sweep
+   in residue 2. Read the two rows as "the roster cannot rot", not as "the
+   statement cannot drift within a file". The closing-sweep row carries a
+   second, narrower gap of the same kind: the grant's one-round size is stated
+   twice in the script — once as the promotion's `round + 1`, which the sweep
+   derives from, and once as the `--resume` adoption clamp's `max_rounds + 1`,
+   which nothing derives from. A retune would have to move both.
 
 ### The #1206 lockstep, in detail
 

@@ -506,3 +506,44 @@ EOF
   run zsh "$S" --changelist "$CL" --round abc --verdict v
   [ "$status" -eq 2 ]
 }
+
+# ---- adjudicated re-raise drops (#1434) -------------------------------------
+
+@test "a non-zero adjudicated_dropped renders its own line (#1434)" {
+  cat > "$CL" <<'EOF'
+{"round":3,"summary":{"critical":0,"high":1,"low":2,"blocking":1,"conflicts":0,"false_trips":0,"adjudicated_dropped":2},
+ "blocking":[{"file":"a.py","line":1,"dimension":"bugs","title":"x","non_converging":false}],
+ "suggestions":[{},{}],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 3 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- adjudicated re-raises dropped: 2'
+}
+
+@test "a ZERO adjudicated_dropped renders nothing — and neither does an absent key (#1434)" {
+  # Rendered only when there is something to say, the same rule the promoted
+  # term follows: that is what keeps a run with no adjudicated list byte-
+  # identical to before the count existed, and what lets a pre-#1434 changelist
+  # (no key at all) still render.
+  cat > "$CL" <<'EOF'
+{"round":3,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0,"false_trips":0,"adjudicated_dropped":0},
+ "blocking":[{"file":"a.py","line":1,"dimension":"bugs","title":"x","non_converging":false}],
+ "suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 3 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  local with_zero="$output"
+  run -1 grep -q -- 'adjudicated re-raises dropped' <<< "$with_zero"
+
+  # the same changelist with the key removed entirely renders identically
+  cat > "$CL" <<'EOF'
+{"round":3,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0,"false_trips":0},
+ "blocking":[{"file":"a.py","line":1,"dimension":"bugs","title":"x","non_converging":false}],
+ "suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 3 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  # the timestamp in the heading is the only thing that could differ, so compare
+  # the body lines rather than the whole block
+  [ "$(echo "$output" | tail -n +2)" = "$(echo "$with_zero" | tail -n +2)" ]
+}

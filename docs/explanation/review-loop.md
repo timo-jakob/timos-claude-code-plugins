@@ -7,8 +7,6 @@ on work that still has open review blockers.
 
 ## What one round does
 
-Each round, scoped to the story's diff:
-
 1. **Review** — a language-appropriate reviewer panel inspects the change and
    emits findings (bugs, security, performance, code quality, tests — plus
 resilience on the service languages, and Swift-6 compliance on Swift). The
@@ -22,9 +20,42 @@ resilience on the service languages, and Swift-6 compliance on Swift). The
 4. **Re-test** — the full test suite runs again; a fix that breaks anything
    aborts the loop rather than shipping.
 
-The loop repeats until it **converges** — a round with **zero blockers**.
-Suggestions remaining is still converged; on an interactive run you are then
-offered the chance to promote some of them (below).
+## What each round is scoped to
+
+Rounds after the first are an **iteration** on the previous one, not an
+independent repeat of it. Three kinds of round:
+
+- **Round 1 — the full sweep.** Scoped to the whole story diff against the base
+  branch. Nothing has happened yet to iterate on.
+- **Intermediate rounds — the delta.** Scoped to what the *previous round's fix
+  pass actually changed*. Two things ride along: the previous round's blockers,
+  so the panel verifies the fixes it asked for actually landed; and the list of
+  suggestions earlier rounds already surfaced and you already let go, which a
+  reviewer must not re-raise. An already-waived suggestion re-raised at
+  Suggestion level is dropped and counted, never silently — but the same finding
+  re-raised as a **Warning or Critical** is never suppressed, and neither is a
+  suggestion in a file the last fix pass touched, because there it may be a new
+  observation about new code.
+- **The closing full sweep — a converging run always ends on a full sweep.**
+  Delta scoping buys convergence, but on its own it could hide a defect that
+  exists only in the *interaction* between rounds. So the loop can never
+  *converge* on a delta round: one that reaches zero blockers **promotes the
+  next round** to a closing sweep over the whole story diff instead of
+  finishing. (A run that converges on round 1 needs no promotion — round 1 is
+  already a full sweep — and a run that ends by exhausting its budget or
+  escalating opens no PR at all. So: every run the loop **converges** ends on a
+  full-diff review. The deliberate `--no-review` fast path and the "nothing to
+  review" choices below are the two ways a PR is opened without one — both
+  explicit human decisions.)
+
+Without this, a long run is N independent full reviews rather than N iterations:
+round 9 re-reads all 49 changed files with no memory of what eight earlier rounds
+weighed and let go, so re-litigation is free and a nitpick in the implementer's
+own review response is indistinguishable from a defect in shipped behaviour.
+
+The loop repeats until it **converges** — a **full-sweep** round with **zero
+blockers**. Suggestions remaining is still converged; on an interactive run you
+are then offered the chance to promote some of them (below).
 
 ## Watching it run
 
@@ -57,12 +88,40 @@ bound, not a target — the loop stops the moment there are no blockers left, so
 story that converges in one round is unaffected by the size of the cap. It exists
 only to bound the hard tail. A round can end the loop in one of a few ways:
 
-- **Converged** — zero blockers. The run proceeds to open the PR.
+- **Converged** — zero blockers on a **full-sweep** round. The run proceeds to
+  open the PR. A delta round with zero blockers does not end the run: it
+  promotes the next one to the closing full sweep (above). If that happens on
+  the very last round of the budget, the loop grants the closing full sweep
+  exactly one round beyond the ceiling — once, and only for that sweep. The
+  budget you set is still what gets reported; the extra round is a fact about
+  this run, not a bigger budget.
 - **Budget exhausted** — the rounds ran out with blockers still open.
 - **Not converging** — the *same* blocker survived two rounds unchanged; more
   automated fixing clearly is not moving it.
 - **Conflict / ambiguous** — two reviewers gave opposing recommendations, or the
   repository type could not be resolved to a review panel.
+
+There are also two ways a round can be **refused rather than counted** —
+neither cleared by re-running the review itself. If a round's delta is
+empty *and* the previous round left no blockers to verify, there is nothing for
+a panel to look at and nothing to re-check, so the loop refuses the round rather
+than counting it. That is a refusal, not an outcome: no PR is opened, no
+escalation comment is posted, and re-running changes nothing — the way forward
+is usually to restore the closing-sweep record the previous round earned — or
+to re-run under the round budget that record was written under; the message says
+which. That is the reachable cause: this refusal only fires after a round that
+found nothing, so there is nothing left to fix, and inventing a code change just
+to move the tree is never the answer. Stopping is the last option, not the
+first.
+
+The second is a **full** round with nothing to review: the story diff itself is
+empty, or — on a Kubernetes repo — it touches nothing that deploys. The panel
+reports that and writes no findings, and the loop refuses the round rather than
+reading "no findings" as "no problems", which on a full round would converge the
+run. An empty story diff means going back and implementing; a diff that simply
+touches no manifests is a decision for you: skip the review deliberately and
+ship, review the diff yourself and record the review as waived, or stop without
+opening a PR.
 
 ## When a human is driving: the interactive extension
 
@@ -95,9 +154,12 @@ converging** — do not dead-end. Instead the run pauses and talks to you:
    any guidance you gave), then the loop **resumes where it left off** — the
    round count and the not-converging detection carry across the extension, so
    it is a true continuation, not a restart.
-   A grant raises the run's *ceiling* by three. When the budget ran out that is
+   A grant raises the run's *ceiling* by three, but what that **buys** depends
+   on how far the run already got. When the budget ran out at the ceiling it is
    exactly three more rounds; when the run stopped early for not converging, it
-   can be more — the run tells you what it actually bought.
+   can be more; and when the run had already been granted its closing sweep — a
+   round past the ceiling — it is two. The run tells you what it actually
+   bought, rather than promising a flat three.
 4. You can extend repeatedly, +3 to the ceiling each time.
    After about five grants, or any round that removes no blockers, the run will
    warn you that it does not look like it is converging and suggest stopping or

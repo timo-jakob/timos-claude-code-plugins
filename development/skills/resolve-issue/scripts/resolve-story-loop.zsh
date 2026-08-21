@@ -16,10 +16,48 @@
 # headless `claude -p` behind it is NOT a supported pattern — it hides the
 # whole loop from the user behind one opaque background task.
 #
+# Rounds after the first ITERATE (#1434). At the START of every round the loop
+# computes and persists the working-tree identity the round's reviewers will see
+# (`git-tree-id.zsh` -> `<work-dir>/tree-<N>.txt`), and from round 2 on hands the
+# PREVIOUS round's identity to `plan --prior-tree`, so an intermediate round is
+# scoped to exactly what the last fix pass changed. This is deliberately
+# INDEPENDENT of `--gate-attest` — that flag is optional, session-supplied and
+# produced only by run-gate.zsh on plugin repos, so leaning on it would make
+# "no prior tree" the normal case off plugin repos. Three carries ride along:
+#   * `<work-dir>/verify-<N>.json` — the previous round's `.blocking` array,
+#     i.e. exactly what the fix pass was told to fix, passed as
+#     `--fix-verification` and exported as REVIEW_FIX_VERIFICATION;
+#   * `<work-dir>/adjudicated.json` — the Low findings prior rounds surfaced and
+#     the human let go, passed as `--adjudicated` and exported as
+#     REVIEW_ADJUDICATED ("do not re-raise these"). Every entry whose file the
+#     last fix pass touched is REMOVED before the round consolidates, so a
+#     suggestion legitimately re-raised because the fix was incomplete is never
+#     suppressed;
+#   * `<work-dir>/.closing-sweep` — the round number of the CLOSING FULL SWEEP.
+# Delta scoping buys convergence but could hide a defect that only exists in the
+# interaction between rounds, so no run may END on a delta round: `CONVERGED` is
+# declarable only on a `scope_mode: "full"` round. A delta round that reaches
+# zero blockers therefore PROMOTES the next round to a closing full sweep rather
+# than converging itself — and if it was already at the ceiling, that sweep is
+# granted ONE round beyond `--max-rounds` (once), because the safety net must
+# not be skipped exactly when the run has been longest. `--max-rounds` in the
+# status JSON keeps reporting what the caller passed; `closing_sweep_granted`
+# records the grant.
+#
 # Per-round flow:
-#   re-dispatch (fresh scope; ambiguous => ESCALATE_AMBIGUOUS, #912)
-#     -> run review panel (diff-scoped) -> scope to diff -> consolidate
-#     -> no blockers            => CONVERGED
+#   persist this round tree identity (#1434; missing prior identity => exit 1)
+#     -> re-dispatch (fresh scope; ambiguous => ESCALATE_AMBIGUOUS, #912)
+#     -> run review panel (scoped: full diff on round 1 and the closing sweep,
+#        else the delta since the previous round) -> scope to diff (ALWAYS the
+#        full story diff — scope-findings is never handed --prior-tree, or a
+#        fix-verification finding in a file untouched since the last round would
+#        be silently dropped) -> consolidate
+#     -> no blockers on a FULL round   => CONVERGED
+#     -> no blockers on a DELTA round  => promote the next round to the closing
+#        full sweep (no fix pass runs; step mode exits AWAITING_FIX with
+#        final_changelist.summary.blocking == 0). A round whose panel saw an
+#        EMPTY scope stays a delta round in step mode for exactly this reason:
+#        it can then never be a run's last word.
 #     -> surviving conflict     => ESCALATE_CONFLICT   (early exit)
 #     -> non_converging blocker => ESCALATE_NO_CONVERGENCE (early exit). Identity-
 #          based (#983): a cross-round proximity match whose title identity
@@ -48,31 +86,84 @@
 #
 # Step mode:
 #   --findings-file  this round's aggregate findings JSON (issue #558 schema,
-#                    a flat array). On a FRESH run's round 1 a missing/empty
-#                    file = "no findings". On --resume, --test-cmd (when given)
+#                    a flat array). A missing/empty file is refused on every
+#                    FULL round, including a fresh run's round 1 (#1434): zero
+#                    blockers on a full round is the CONVERGED condition, so an
+#                    absent aggregate must never be read as a clean review. It
+#                    is still read as "no findings" on a DELTA round, where the
+#                    round cannot converge anyway — reachable through hook mode,
+#                    since in step mode every delta round arrives via --resume,
+#                    where the missing/empty arm below refuses first.
+#                    On --resume, --test-cmd (when given)
 #                    runs FIRST — it gates the previous round's in-session fix;
 #                    red exits ERROR (1).
 #
-#                    Shapes of one caller mistake are refused as STALE_FINDINGS
-#                    (exit 2, #974) — the panel is the driving session's job
-#                    BETWEEN invocations, so each means it never ran for this
-#                    round:
+#                    FIVE shapes are refused as STALE_FINDINGS (exit 2, #974,
+#                    #1434), on either of two grounds: the round's findings were
+#                    never produced (the panel is the driving session's job
+#                    BETWEEN invocations, so these are caller mistakes), or no
+#                    reviewer could have seen anything this round. TWO of the
+#                    five are wiring-independent — they fire in hook mode too,
+#                    where the panel is --review-cmd's job: the EMPTY-DELTA arm
+#                    and the FULL-ROUND arm below. They key on the round's own
+#                    state rather than on --findings-file, which is why. The
+#                    other three are step-mode-only by construction, since hook
+#                    mode has no --findings-file at all. (Named, not numbered:
+#                    an ordinal cross-reference goes stale the next time a shape
+#                    is added, and this one already did once.)
+#
+#                    All five, with the two wiring-independent arms marked:
 #                      * missing/empty on --resume — a panel that found nothing
 #                        must still write `[]`, so silence is not evidence;
 #                      * content byte-identical to the round just consumed — a
 #                        stale path re-passed, or the new round's file never
-#                        written;
+#                        written. WAIVED (#1434) for the promoted closing full
+#                        sweep when the round before it LOOKED AT SOMETHING AND
+#                        FOUND NOTHING — there `[]` twice running is the
+#                        expected shape of a healthy convergence rather than
+#                        evidence of a stale path. All three facts are required
+#                        (a recorded sweep, empty consumed findings, a non-empty
+#                        scope): the empty-delta promotion records a sweep too
+#                        and follows a round WITH blockers, and a blind round
+#                        found nothing only because it saw nothing;
+#                      * (WIRING-INDEPENDENT) the round's delta is EMPTY and
+#                        NOTHING is carried to verify (#1434) — nothing has changed since a round that
+#                        already found nothing, so no reviewer would see
+#                        anything, and re-running the panel cannot help. (An
+#                        empty delta WITH a carry is not refused: see the
+#                        verification-only round above.)
+#                      * (WIRING-INDEPENDENT) the round is FULL and its panel
+#                        produced NO findings file at all (#1434) — zero blockers on a full round is
+#                        the CONVERGED condition, so an absent aggregate must
+#                        never be read as a clean review. WIRING-INDEPENDENT:
+#                        this arm keys on findings_path, so it fires on a fresh
+#                        run's round 1 and on every full round in hook mode. It
+#                        is what makes the panels' own "on a full round, report
+#                        and write no findings file" terminal enforceable. The
+#                        `[]` default survives only on a DELTA round, which
+#                        cannot converge anyway;
 #                      * --findings-file IS the round's own dispatch
 #                        findings_path — the caller aimed at the internal sink,
 #                        which this script truncates; refused up front so the
 #                        panel output is never destroyed.
-#                    Left unguarded, the first converges the loop on an
-#                    unreviewed round (a false CONVERGED that green-lights the
-#                    PR) and the second reads as a blocker surviving two rounds
-#                    — the non-convergence fingerprint (#606) — tripping a
-#                    phantom ESCALATE_NO_CONVERGENCE that blames the fix pass
-#                    for a mistake made by the caller. Both are recoverable:
-#                    produce this round's findings and re-invoke.
+#                    Left unguarded, the MISSING/EMPTY and FULL-ROUND arms let
+#                    a round nobody reviewed be consumed — on a full round that
+#                    is the false CONVERGED that green-lights the PR — and the
+#                    BYTE-IDENTICAL arm reads as a blocker surviving two rounds,
+#                    the non-convergence fingerprint (#606), tripping a phantom
+#                    ESCALATE_NO_CONVERGENCE that blames the fix pass for a
+#                    mistake made by the caller.
+#
+#                    The remedy is per arm, not one rule: MISSING/EMPTY,
+#                    BYTE-IDENTICAL and FULL-ROUND are cleared by producing this
+#                    round's real aggregate and re-invoking; the ALIAS arm by
+#                    pointing --findings-file at the panel's own file (its
+#                    output is intact); and the EMPTY-DELTA arm by restoring
+#                    the closing-sweep marker the previous round earned, or
+#                    re-invoking under the --max-rounds it was written under.
+#                    That arm fires only when the carry is EMPTY too, so there
+#                    is nothing to fix there either — and no re-run of the panel
+#                    can clear it.
 #
 # Telemetry note: an extended run (escalate -> grant -> --resume) appends one
 # record per terminal exit, each spanning from .t0 — so consecutive records of
@@ -95,7 +186,17 @@
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
 #                 schema) to $REVIEW_FINDINGS. Also sees $REVIEW_ROUND,
 #                 $REVIEW_SKILL, $REVIEW_SCOPE_FILE (changed files, one per line),
-#                 $REVIEW_REPO. Missing/empty output is treated as "no findings".
+#                 $REVIEW_REPO, and — since #1434 — $REVIEW_SCOPE_MODE ("full" |
+#                 "delta"), $REVIEW_FIX_VERIFICATION (round >= 2: the previous
+#                 round's blockers, to verify the fix actually landed) and
+#                 $REVIEW_ADJUDICATED (already-waived suggestions the panel must
+#                 not re-raise). $REVIEW_FIX_VERIFICATION is EMPTY on round 1,
+#                 which has nothing to verify; $REVIEW_ADJUDICATED is ALWAYS a
+#                 path — the file simply holds `[]` until something is waived —
+#                 so test its CONTENTS, never its presence. Missing/empty
+#                 output is treated as "no findings" on a DELTA round only; on
+#                 a FULL round it is refused as STALE_FINDINGS (#1434), since
+#                 zero blockers there is the CONVERGED condition.
 #   --fix-cmd     applies the blockers. Sees $REVIEW_ROUND, $REVIEW_REPO,
 #                 $REVIEW_CHANGELIST (full changelist) and $REVIEW_BLOCKERS
 #                 (blockers-only slice). Expected to leave the tree buildable.
@@ -140,7 +241,12 @@
 #       consumer never reads the previous round's verdict as if it were this
 #       invocation's. It is a non-terminal refusal: no telemetry record and no
 #       progress.md `**Final:**` line, because the loop resumes once the caller
-#       supplies the round's real findings.
+#       supplies the round's real findings. Since #1434 the same refusal covers
+#       two further causes, BOTH of which also fire in hook mode, so exit 2
+#       mid-run is no longer step-mode-only: a delta round with an EMPTY scope
+#       and nothing carried to verify, and a FULL round whose panel produced no
+#       findings file at all. There is no reviewed round in either, and reading
+#       one as CONVERGED is the same false green.
 #   1   internal/operational error (sub-script failed, hook failed, tests red)
 
 emulate -L zsh
@@ -244,6 +350,16 @@ while [[ $# -gt 0 ]]; do
 done
 local t0=$(date +%s)   # for the telemetry wall-clock (#566)
 
+# The closing-sweep grant (#1434), read by emit_and_exit on EVERY exit — so it
+# must exist before the first one (the --no-review fast path). A plain
+# assignment, not `local`: at top level there is no new scope, and a bare
+# `local NAME` whose name already exists in the environment PRINTS `NAME=value`
+# on stdout, ahead of the status JSON.
+closing_sweep_granted=0
+# the round number of the closing full sweep, 0 until a zero-blocker delta round
+# promotes one (or a --resume adopts one from <work-dir>/.closing-sweep)
+closing_sweep_round=0
+
 # Clear a stale telemetry run-id sidecar (#995) as EARLY as the run is known to
 # be fresh — here, right after argument parsing, where `work_dir` and `resume`
 # are final. The invariant is "a fresh run never hands back the PREVIOUS run's
@@ -326,13 +442,23 @@ emit_and_exit() {
   # file that predates the key".
   local promotion_phase='false'
   [[ -n "$promote" ]] && promotion_phase='true'
+  # closing_sweep_granted (#1434) is ALWAYS present, for the same reason
+  # promotion_phase is: a consumer must never have to tell `false` from "a status
+  # file that predates the key". `max_rounds` deliberately keeps reporting the
+  # value the caller PASSED — the one-round grant is a fact about this run, not a
+  # retune of the budget, and a mutated ceiling here would make every downstream
+  # budget reader (the SKILL soft cap, the escalation summary) disagree with the
+  # command line that produced it.
+  local granted_json='false'
+  (( closing_sweep_granted )) && granted_json='true'
   out=$(jq -nc \
     --arg status "$st" --argjson rounds "$rounds" --argjson max "$max_rounds" \
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
     --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
+    --argjson granted "$granted_json" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
-      promotion_phase:$promotion_phase,
+      promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
       repo_type:(if $repo_type=="" then null else $repo_type end),
       review_skill:(if $review_skill=="" then null else $review_skill end),
       escalation_reasons:$esc, history:$history, round_changelists:$clists,
@@ -470,7 +596,7 @@ emit_ambiguous() {
   local carrier="$work_dir/dispatch-error.json"
   jq -nc --argjson e "$err_json" --argjson r "$rounds" \
     '{escalation_reasons:["ambiguous_dispatch"], dispatch_error:$e,
-      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0,false_trips:0}, blocking:[], suggestions:[],
+      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0,false_trips:0,adjudicated_dropped:0}, blocking:[], suggestions:[],
       conflicts:[], non_converging:false, false_trips:[], round:$r}' > "$carrier"
   emit_and_exit "ESCALATE_AMBIGUOUS" "$rounds" 10 "$rtype" "$rskill" "$carrier" "$history_file" "$changelists_file"
 }
@@ -493,6 +619,31 @@ append_progress_round() {
   # 2>/dev/null covers the redirection setup too, not just the command (#971).
   { "$RENDER_PROGRESS" --changelist "$cl" --round "$r" --verdict "$v" "${extra[@]}" \
     >> "$work_dir/progress.md" ; } 2>/dev/null || true
+}
+
+# Write this round's review scope: the dispatch descriptor's changed_files
+# (#911 — refreshed per round, so a file the previous fix pass created is
+# reviewed rather than invisible behind a scope frozen at invocation start),
+# minus a repo-internal work-dir's own state files (#909/#911 — those are loop
+# state, never story code, and the dispatch's own exclusions cover only the
+# default artifact prefixes). ONE definition, because #1434 may re-plan a round
+# and must re-derive the scope the same way; two copies is how they drift.
+# Returns non-zero on a failed extraction — the caller aborts the round rather
+# than leaving a truncated scope behind.
+write_round_scope() {  # $1 = descriptor JSON, $2 = round
+  local desc="$1" r="$2"
+  print -r -- "$desc" | jq -r '.changed_files[]?' > "$scope_file" || {
+    print -u2 -- "resolve-story-loop: could not extract scope at round $r"; return 1 }
+  if [[ -n "$wd_rel" && -s "$scope_file" ]]; then
+    local -a lines
+    lines=("${(@f)$(<"$scope_file")}")
+    lines=(${lines:#${(b)wd_rel}*})
+    if (( ${#lines} )); then
+      print -rl -- "${lines[@]}" > "$scope_file"
+    else
+      : > "$scope_file"
+    fi
+  fi
 }
 
 # refuse this round's findings as never-produced (#974) and exit 2. Typed, so
@@ -660,6 +811,14 @@ local promote_state="$work_dir/.promote"
 # prior round so non-convergence detection spans the extension. A fresh run
 # (no --resume) truncates both accumulators as before.
 local resume_round=0 resume_prev=""
+# Per-round iteration state (#1434), all of it per-RUN: truncated on a fresh
+# start beside .findings-digest-* / .promote, adopted on --resume.
+local closing_sweep_file="$work_dir/.closing-sweep"
+local adjudicated_file="$work_dir/adjudicated.json"
+# The ceiling the WHILE loop and the BUDGET_EXHAUSTED test actually use. It
+# equals --max-rounds except on a run whose closing sweep was granted the one
+# extra round; --max-rounds itself is never mutated (see emit_and_exit).
+local effective_max=$max_rounds
 if (( resume )); then
   [[ -s "$history_file" ]] || {
     print -u2 -- "resolve-story-loop: --resume needs an existing non-empty history in --work-dir"; exit 2 }
@@ -681,28 +840,89 @@ if (( resume )); then
   # single kill window — it is foreign corruption, and silently repairing it
   # could drop a completed round's record, so it errors like the corrupt-JSONL
   # cases above.
-  local hist_n clist_n
+  local hist_n=0 clist_n=0
   hist_n=$(jq -sc 'length' "$history_file")
   clist_n=0
   [[ -s "$changelists_file" ]] && clist_n=$(jq -sc 'length' "$changelists_file")
   if (( clist_n == hist_n + 1 )); then
     print -u2 -- "resolve-story-loop: --resume dropping 1 orphaned changelist line — prior run killed mid-append"
     local clist_trunc="$work_dir/.changelists-trunc"
-    head -n "$hist_n" "$changelists_file" > "$clist_trunc" && mv "$clist_trunc" "$changelists_file" || {
+    head -n "$hist_n" -- "$changelists_file" > "$clist_trunc" && mv -- "$clist_trunc" "$changelists_file" || {
       print -u2 -- "resolve-story-loop: --resume could not truncate $changelists_file"; exit 1 }
   elif (( clist_n != hist_n )); then
     print -u2 -- "resolve-story-loop: --resume accumulator skew beyond the kill window (history $hist_n vs changelists $clist_n) in $work_dir — corrupt work-dir"; exit 1
   fi
-  resume_round=$(tail -n 1 "$history_file" | jq -r '.round')
+  resume_round=$(tail -n 1 -- "$history_file" | jq -r '.round')
   [[ "$resume_round" == <-> ]] || {
     print -u2 -- "resolve-story-loop: --resume could not read a round number from $history_file"; exit 1 }
   resume_prev="$work_dir/changelist-$resume_round.json"
   [[ -s "$resume_prev" ]] || {
     print -u2 -- "resolve-story-loop: --resume cannot find prior changelist $resume_prev"; exit 1 }
+  # Adopt a granted closing sweep BEFORE the ceiling guard (#1434). Without
+  # this, the one case the grant exists for — a zero-blocker delta round at the
+  # ceiling — would be refused by the very next --resume, so the safety net
+  # would be unreachable in step mode, which is the canonical wiring.
+  if [[ -s "$closing_sweep_file" ]]; then
+    # `local cs_round=""`, never a bare `local cs_round`: at TOP LEVEL there is
+    # no new scope, so a bare typeset whose name already exists in the
+    # environment PRINTS `cs_round=value` — on stdout, ahead of the status JSON.
+    local cs_round=""
+    cs_round=$(<"$closing_sweep_file")
+    cs_round="${cs_round//[[:space:]]/}"
+    # a garbage sidecar must not become a ceiling: fall back to --max-rounds and
+    # say so, rather than silently granting or silently refusing
+    if [[ "$cs_round" == <-> ]] && (( ${#cs_round} <= 18 )); then
+      closing_sweep_round=$(( 10#$cs_round ))
+      # The format check above is not enough: a WELL-FORMED but wrong number is
+      # the road that actually defeats the budget. The grant is contracted as
+      # ONE round beyond --max-rounds, so anything past that is refused rather
+      # than adopted — a foreign or corrupted marker holding `99` would
+      # otherwise raise the ceiling by 94 rounds with no diagnostic, and a
+      # resume passing a SMALLER --max-rounds than the run that wrote the
+      # marker would adopt a sweep two or more rounds out while also stamping
+      # closing_sweep_granted on a sweep that was never a grant. The promotion
+      # path cannot produce this (it always writes round + 1); only adoption
+      # can, so only adoption needs the clamp.
+      if (( closing_sweep_round > max_rounds + 1 )); then
+        print -u2 -- "resolve-story-loop: ignoring a closing-sweep marker beyond the one-round grant (got $closing_sweep_round, --max-rounds $max_rounds, so the highest grantable sweep is $(( max_rounds + 1 ))) in $closing_sweep_file"
+        closing_sweep_round=0
+      elif (( closing_sweep_round > max_rounds )); then
+        effective_max=$closing_sweep_round
+        closing_sweep_granted=1
+      fi
+    else
+      print -u2 -- "resolve-story-loop: ignoring an unreadable closing-sweep marker in $closing_sweep_file (got: ${cs_round:-<empty>})"
+      closing_sweep_round=0
+    fi
+  fi
   # a ceiling at or below the resumed round would run zero rounds and fall out
   # of the loop with an empty status — refuse it as a usage error instead
-  (( resume_round + 1 <= max_rounds )) || {
+  (( resume_round + 1 <= effective_max )) || {
     print -u2 -- "resolve-story-loop: --resume would start at round $(( resume_round + 1 )) but --max-rounds is $max_rounds — raise --max-rounds"; exit 2 }
+  # an older work-dir (or one whose file was cleaned up) simply starts empty
+  [[ -f "$adjudicated_file" && -s "$adjudicated_file" ]] || print -r -- '[]' > "$adjudicated_file" || {
+    print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
+  # ...and a non-empty one is adopted only if it still holds ONE JSON array.
+  # This is PERSISTENT state: a truncated or hand-edited file would abort the
+  # invalidation jq (or the consolidator's own --adjudicated refusal) as a BARE
+  # exit 1 that writes no status JSON, and every later --resume would die at the
+  # same point with the work-dir bricked. Re-initialise rather than refuse — the
+  # cost is at most one already-waived suggestion logged again, which is the
+  # harmless direction the whole drop rule is built on.
+  # The predicate must match what the DOWNSTREAM refusals check, not merely the
+  # container: `["foo"]` passes an array test and then aborts the invalidation
+  # jq on `$e.file`, and `[{"file":"a.zsh"}]` passes both and is refused by the
+  # consolidator's own --adjudicated validator. Either way the loop dies as a
+  # BARE exit 1 that writes no status JSON, and because this file is PERSISTENT
+  # state every later --resume dies at the same point. So mirror the
+  # consolidator's element predicate exactly.
+  jq -e -s 'length == 1 and (.[0] | type == "array" and all(.[]; type == "object"
+              and (.file | type == "string" and length > 0)
+              and (.dimension | type == "string" and length > 0)
+              and (.title | type == "string")))' -- "$adjudicated_file" >/dev/null 2>&1 || {
+    print -u2 -- "resolve-story-loop: --resume found a damaged $adjudicated_file — re-initialising to [] (no suggestion will be suppressed this run)"
+    print -r -- '[]' > "$adjudicated_file" || {
+      print -u2 -- "resolve-story-loop: could not re-initialise $adjudicated_file"; exit 1 } }
   # adopt the run's promoted set when this invocation did not carry it: dropping
   # --promote on a resume is a one-flag slip in a long command line, and its
   # failure mode is a silent CONVERGED rather than an error. An explicit
@@ -725,16 +945,34 @@ if (( resume )); then
     print -u2 -- "resolve-story-loop: --resume adopting the run's promoted set from $promote_state ($promote)"
   fi
 else
-  : > "$history_file"
-  : > "$changelists_file"
+  : > "$history_file" || {
+    print -u2 -- "resolve-story-loop: could not truncate $history_file for a fresh run"; exit 1 }
+  : > "$changelists_file" || {
+    print -u2 -- "resolve-story-loop: could not truncate $changelists_file for a fresh run"; exit 1 }
   # the consumed-findings digests are per-run state too (#974): a re-used
   # work-dir must not let a previous run's round-N digest veto this run's
   # round N+1
-  rm -f -- "$work_dir"/.findings-digest-*(N)
+  rm -f -- "$work_dir"/.findings-digest-*(N) "$work_dir"/.findings-empty-*(N)
   # the promoted set is per-run state too: record it for later --resume
   # invocations, and clear a previous run's so a re-used work-dir cannot
   # resurrect an overlay this run did not ask for
   rm -f -- "$promote_state"
+  # the iteration state (#1434) is per-run for exactly the same reason: a
+  # re-used work-dir must not let a previous run's tree identity scope THIS
+  # run's round 2 (a delta against a foreign tree is arbitrary), nor its waived
+  # suggestions suppress this run's findings, nor its closing-sweep marker grant
+  # a round this run never earned. `(N)` so an empty glob is not an error.
+  # DIAGNOSED, not silent — the same argument the telemetry-sidecar clear above
+  # makes: a silent failure leaves the previous run's state in place, which is
+  # the exact condition this clear exists to prevent, with nothing to notice it.
+  # A foreign `verify-2.json` in particular is read as present by the round-2
+  # fallback (`! -s`), so a PREVIOUS run's blockers would be forwarded to this
+  # run's panel as its fix-verification carry.
+  local rm_state_err=""
+  rm_state_err=$(rm -f -- "$work_dir"/tree-*.txt(N) "$work_dir"/verify-*.json(N) "$closing_sweep_file" 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry or closing-sweep marker may be adopted (#1434)"
+  print -r -- '[]' > "$adjudicated_file" || {
+    print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
   # (the telemetry run-id sidecar is cleared far earlier — see the #995 note
   # above the --no-review fast path, which must run before every exit that can
   # precede this setup)
@@ -794,7 +1032,7 @@ if (( step_mode && resume )) && [[ -n "$test_cmd" ]]; then
 fi
 
 # --- dispatch: which panel, on what scope (typed escalation on failure) -----
-local plan rc
+local plan="" rc=0
 plan=$("$DISPATCH" plan --repo "$repo" --base "$base" --round 1); rc=$?
 if (( rc == 3 )); then
   # unsupported / ambiguous repo type — surface as an escalation. On --resume
@@ -805,7 +1043,7 @@ elif (( rc != 0 )); then
   print -u2 -- "resolve-story-loop: dispatch plan failed (rc=$rc)"; exit 1
 fi
 
-local repo_type review_skill scope_file="$work_dir/scope.txt"
+local repo_type="" review_skill="" scope_file="$work_dir/scope.txt"
 repo_type=$(print -r -- "$plan" | jq -r '.repo_type')
 review_skill=$(print -r -- "$plan" | jq -r '.review_skill')
 # scope_file is written per round inside the loop (#911) — no pre-loop write,
@@ -825,13 +1063,106 @@ fi
 # later iteration makes zsh PRINT the existing parameter to stdout, which would
 # corrupt the status JSON. Inside the loop we plain-assign only.
 local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
-local rp findings_path scoped scoped_filtered changelist blockers
-local digest prev_digest_file
-local blocking conflict nonconv nconf verdict ftrips
-local -a scope_lines consolidate_args
-while (( round <= max_rounds )); do
+# EVERY declaration here carries an initialiser. At top level zsh opens no new
+# scope, so a bare `local NAME` for a name that already exists in the
+# environment PRINTS `NAME=value` on stdout — ahead of the status JSON, which is
+# this script's stdout contract. The file states that rule three times above,
+# and `blocking`, `verdict`, `changelist`, `scoped` and `carried` are ordinary
+# enough words to inherit from a caller's environment — so the rule now covers
+# the whole block rather than only the lines #1434 added.
+local rp="" findings_path="" scoped="" scoped_filtered="" changelist="" blockers=""
+local digest="" prev_digest_file=""
+local prev_findings_empty=0
+local blocking=0 conflict=0 nonconv=0 nconf=0 verdict="" ftrips=0
+local adj_dropped=0
+local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
+local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
+local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
+local round_scope_empty=0 round_findings_empty=0 rc_empty=0
+local skip_fix=0 adj_tmp=""
+local -a consolidate_args=() plan_args=()
+while (( round <= effective_max )); do
+  # --- this round's working-tree identity (#1434) ---------------------------
+  # Computed BEFORE anything else in the round, so it is exactly the tree the
+  # round's reviewers see; the NEXT round diffs against it, which makes its delta
+  # precisely what this round's fix pass changed.
+  cur_tree=$("$TREE_ID" "$repo" 2>/dev/null) || cur_tree=""
+  [[ -n "$cur_tree" ]] || {
+    print -u2 -- "resolve-story-loop: could not compute the working-tree identity for round $round in $repo — the next round would have nothing to iterate on"; exit 1 }
+  print -r -- "$cur_tree" > "$work_dir/tree-$round.txt" || {
+    print -u2 -- "resolve-story-loop: could not persist the round $round tree identity to $work_dir/tree-$round.txt"; exit 1 }
+
+  # the PREVIOUS round's identity is what scopes this one. A missing or blank
+  # one is a hard error, never a silent fall back to the full diff: that
+  # fallback is the defect this story fixes, and it would be invisible.
+  prior_tree=""
+  if (( round >= 2 )); then
+    prior_tree_file="$work_dir/tree-$(( round - 1 )).txt"
+    prior_tree=""
+    [[ -s "$prior_tree_file" ]] && prior_tree="${$(<"$prior_tree_file")//[[:space:]]/}"
+    [[ -n "$prior_tree" ]] || {
+      print -u2 -- "resolve-story-loop: round $round has no usable prior tree identity at $prior_tree_file — cannot scope a delta round; start a fresh --work-dir"; exit 1 }
+  fi
+
+  # --- fix-verification carry (#1434) --------------------------------------
+  # Exactly what the previous round's fix pass was told to fix, so this round's
+  # panel can verify each item actually landed instead of re-deriving it.
+  #
+  # It is normally written at the END of the PREVIOUS round (see below), because
+  # in step mode — the canonical wiring — this round's panel runs BEFORE this
+  # invocation exists, so a file first created here would never be readable by
+  # the reviewers who are supposed to consume it. This block is the FALLBACK for
+  # the cases where no such file is on disk: an older work-dir, or the first
+  # round of a `--resume` into a run that predates the end-of-round write.
+  fix_verification=""
+  if (( round >= 2 )); then
+    fix_verification="$work_dir/verify-$round.json"
+    # `! -s`, not `! -e`: the end-of-round write opens and truncates its target
+    # before jq fills it, so a run killed in that window (or an ENOSPC) leaves a
+    # ZERO-BYTE carry behind. Read as "present", it would be forwarded as an
+    # empty carry — the panel gets nothing to verify and a blocker rides out to
+    # CONVERGED, the exact guarantee this carry exists to add — or, on an
+    # empty-delta round, refuse with "the previous round left no blockers",
+    # a claim about the previous round the loop never established. A legitimate
+    # `[]` is three bytes and still counts as present.
+    if [[ ! -s "$fix_verification" ]]; then
+      if [[ -n "$prev_changelist" && -s "$prev_changelist" ]]; then
+        jq -c '.blocking // []' -- "$prev_changelist" > "$fix_verification" || {
+          print -u2 -- "resolve-story-loop: could not build the fix-verification carry at $fix_verification"; exit 1 }
+      else
+        print -r -- '[]' > "$fix_verification" || {
+          print -u2 -- "resolve-story-loop: could not build the fix-verification carry at $fix_verification"; exit 1 }
+      fi
+    fi
+    # ...and it must be a JSON ARRAY before anything consumes it. A corrupt
+    # carry is otherwise invisible on an ordinary delta round: only the
+    # empty-delta path ever runs `jq length` on it, so a truncated or
+    # half-written file would be handed to the panel as though it were a carry.
+    jq -e -s 'length == 1 and (.[0] | type == "array")' -- "$fix_verification" >/dev/null 2>&1 || {
+      print -u2 -- "resolve-story-loop: the fix-verification carry $fix_verification is not a JSON array — the round $(( round - 1 )) blockers cannot be verified"; exit 1 }
+  fi
+
+  # a round is the closing full sweep only if a prior zero-blocker delta round
+  # promoted it — never by default, and never twice. `is_closing_sweep` keeps
+  # that fact separate from `is_final`, which the empty-delta branch below may
+  # also set: only the PROMOTED sweep follows a round that found nothing, and
+  # the stale-findings digest guard needs to tell the two apart.
+  is_closing_sweep=0
+  (( closing_sweep_round > 0 && round == closing_sweep_round )) && is_closing_sweep=1
+  is_final=$is_closing_sweep
+  # ...and a third, set by the empty-delta branch below: a round whose delta was
+  # empty knows NOTHING in the tree changed since the round before, so identical
+  # findings are a shape its own scope explains. The digest guard reads it only
+  # to word its refusal, never to waive it.
+  is_empty_delta=0
+
   # per-round dispatch: the round's well-known findings path AND a fresh scope
-  rp=$("$DISPATCH" plan --repo "$repo" --base "$base" --round "$round"); rc=$?
+  plan_args=( plan --repo "$repo" --base "$base" --round "$round" )
+  [[ -n "$prior_tree" ]] && plan_args+=( --prior-tree "$prior_tree" )
+  (( is_final )) && plan_args+=( --final )
+  [[ -n "$fix_verification" ]] && plan_args+=( --fix-verification "$fix_verification" )
+  plan_args+=( --adjudicated "$adjudicated_file" )
+  rp=$("$DISPATCH" "${plan_args[@]}"); rc=$?
   if (( rc == 3 )); then
     # a fix pass changed what detection sees (e.g. added a second supported
     # language) — the same typed escalation as the pre-loop path, not a bare
@@ -840,26 +1171,166 @@ while (( round <= max_rounds )); do
   elif (( rc != 0 )); then
     print -u2 -- "resolve-story-loop: dispatch plan failed at round $round (rc=$rc)"; exit 1
   fi
-  findings_path=$(print -r -- "$rp" | jq -r '.findings_path')
-  # refresh the scope from THIS round's plan (#911): a file the previous round's
-  # fix pass created must be reviewed, not silently invisible behind a scope
-  # frozen at invocation start (artifact paths stay excluded — #909 lives in
-  # the dispatch's _changed_files, which this recomputation goes through).
-  # This write is the review hook's ONLY scope source, so a failed extraction
-  # must abort the round, never leave a truncated scope behind.
-  print -r -- "$rp" | jq -r '.changed_files[]?' > "$scope_file" || {
-    print -u2 -- "resolve-story-loop: could not extract scope at round $round"; exit 1 }
-  # a repo-internal work-dir's own files are loop state, never story code
-  if [[ -n "$wd_rel" && -s "$scope_file" ]]; then
-    scope_lines=("${(@f)$(<"$scope_file")}")
-    scope_lines=(${scope_lines:#${(b)wd_rel}*})
-    if (( ${#scope_lines} )); then
-      print -rl -- "${scope_lines[@]}" > "$scope_file"
+  # --- an EMPTY delta is never a reviewed round (#1434) ---------------------
+  # A delta round whose scope is empty saw nothing. Consuming it as an ordinary
+  # round would let it reach zero blockers and — via the closing-sweep
+  # promotion — green-light a PR on the strength of a round in which no reviewer
+  # looked at anything. Two shapes, and they end differently:
+  #   * something IS carried to verify (the previous round's blockers) — a
+  #     legitimate verification-only round, and the two wirings handle it
+  #     differently (see the branch below). HOOK MODE promotes it to a full
+  #     sweep in place, because its panel runs after the re-plan, and it may then
+  #     declare CONVERGED. STEP MODE leaves it a DELTA round — its panel already
+  #     ran against the empty delta — so it is consumed normally but cannot
+  #     converge; a clean result promotes the closing full sweep instead;
+  #   * nothing carried either — refuse it, typed, exactly as a never-produced
+  #     findings file is refused. This is the ONLY empty-delta refusal.
+  #
+  # Emptiness is judged on the WRITTEN scope, not on the descriptor's
+  # `scope_empty`. The two differ in exactly one case, and it is a real one: a
+  # repo-internal `--work-dir` puts the loop's own state files (history.jsonl,
+  # the changelists, progress.md, the tree ids) squarely inside every delta, so
+  # the descriptor reports a non-empty scope while the #909/#911 filter leaves
+  # the panel with nothing at all. Trusting `scope_empty` there would wave
+  # through precisely the unreviewed round this branch exists to catch. A
+  # descriptor-empty scope is filtered-empty too, so this is a superset.
+  # The descriptor's own `scope_empty` is deliberately NOT read: it would be a
+  # second, weaker answer to the question the line below already answers, and a
+  # dead read carrying `|| exit 1` gives an unused value the power to end a run.
+  scope_mode=$(print -r -- "$rp" | jq -r '.scope_mode // "full"') || {
+    print -u2 -- "resolve-story-loop: could not read scope_mode at round $round"; exit 1 }
+  write_round_scope "$rp" "$round" || exit 1
+  if [[ "$scope_mode" == "delta" && ! -s "$scope_file" ]]; then
+    # A DAMAGED carry is not "nothing to verify". Collapsing the two would make
+    # the refusal below claim "the previous round left no blockers to verify" —
+    # a statement about the previous round the loop never established — and
+    # advise stopping on a run whose blockers are merely unreadable.
+    carried=0
+    if [[ -n "$fix_verification" && -s "$fix_verification" ]]; then
+      carried=$(jq 'length' -- "$fix_verification") || {
+        print -u2 -- "resolve-story-loop: could not read the fix-verification carry $fix_verification at round $round"; exit 1 }
+      [[ "$carried" == <-> ]] || {
+        print -u2 -- "resolve-story-loop: non-numeric fix-verification length at round $round ($fix_verification): ${carried:-<empty>}"; exit 1 }
+    fi
+    if (( carried > 0 )); then
+      is_empty_delta=1
+      # A legitimate verification-only round: nothing changed, but the previous
+      # round's blockers still need checking. WHERE the panel runs relative to
+      # this invocation decides what the loop may do about it, and the two
+      # wirings differ:
+      #
+      # HOOK MODE — `--review-cmd` runs BELOW, after the re-plan, so widening
+      # the round to a full sweep here genuinely widens what the panel sees. The
+      # round is then a real full sweep and may declare CONVERGED.
+      #
+      # STEP MODE — the panel already ran, BEFORE this invocation, against the
+      # scope the session's own plan returned: the empty delta. Re-planning
+      # would change only the descriptor, not what anybody reviewed, and
+      # `scope_mode: "full"` with zero blockers is exactly the CONVERGED
+      # condition — a false green that ships the previous round's unfixed
+      # blockers AND skips the closing sweep, since CONVERGED ends the run. So
+      # the round is left a DELTA round: it is consumed normally (its blockers,
+      # if any, still count) but it CANNOT converge, and a zero-blocker result
+      # promotes the next round to the closing full sweep, which the session
+      # scopes with --final and really does review. The guarantee is structural
+      # — a round whose panel saw an empty scope can never be a run's last word
+      # — rather than a refusal that would pre-empt the more specific #974
+      # findings guards below.
+      #
+      # progress.md, not stderr: a normal-path event on a healthy run, and the
+      # loop keeps its two streams clean (stdout is the status JSON contract).
+      # Same non-fatal brace-group idiom as the `**Gate (round N):**` line.
+      if [[ -n "$work_dir" && -d "$work_dir" ]]; then
+        if (( step_mode )); then
+          { print -r -- "**Scope (round ${round}):** empty delta with ${carried} carried blocker(s) to verify — this round cannot converge; a clean result promotes the closing full sweep (#1434)" \
+            >> "$work_dir/progress.md" ; } 2>/dev/null || true
+        else
+          { print -r -- "**Scope (round ${round}):** empty delta with ${carried} carried blocker(s) to verify — running this round as a full sweep (#1434)" \
+            >> "$work_dir/progress.md" ; } 2>/dev/null || true
+        fi
+      fi
+      # BOTH wirings re-plan and re-derive the SCOPE, because in both the round
+      # is reviewed against the whole story diff: hook mode's `--review-cmd`
+      # runs below, after this, and step mode's session-side panel was told the
+      # same by SKILL.md ("re-plan with --final and review the whole story
+      # diff"). Recording the delta's empty scope here would contradict what was
+      # actually reviewed: the loop's own record of the round would say the
+      # panel saw nothing when it saw everything, and every downstream reader of
+      # that record — the empty-findings marker, the progress tail, a
+      # maintainer — would be reasoning about a round that did not happen.
+      is_final=1
+      plan_args+=( --final )
+      rp=$("$DISPATCH" "${plan_args[@]}"); rc=$?
+      if (( rc == 3 )); then
+        emit_ambiguous "$rp" "$(( round - 1 ))" "$repo_type" "$review_skill"
+      elif (( rc != 0 )); then
+        print -u2 -- "resolve-story-loop: dispatch plan failed at round $round (rc=$rc)"; exit 1
+      fi
+      # the SAME status guard as the first read (#1434 review): an unchecked
+      # jq here leaves scope_mode EMPTY, which fails the `== "full"` test
+      # below, so a round that should be classified as full would be read as a
+      # delta round — promoting yet another sweep, and at the ceiling burning
+      # the one-round grant, instead of being able to converge
+      replanned_scope_mode=$(print -r -- "$rp" | jq -r '.scope_mode // "full"') || {
+        print -u2 -- "resolve-story-loop: could not read scope_mode after the re-plan at round $round"; exit 1 }
+      write_round_scope "$rp" "$round" || exit 1
+      # ...but only HOOK mode adopts the full mode for the CONVERGENCE decision.
+      # In step mode the panel ran before this invocation, so however wide its
+      # scope was, this round must not be able to end the run: it stays a delta
+      # round, and a clean result promotes the closing full sweep.
+      if (( ! step_mode )); then
+        scope_mode="$replanned_scope_mode"
+      fi
     else
-      : > "$scope_file"
+      # "or stop" is deliberately NOT offered here. The previous round found
+      # nothing, but a zero-blocker round is either a full sweep (which would
+      # have ended the run as CONVERGED, so it cannot be the round before this
+      # one) or a DELTA round — and no run may end on a delta round, which is
+      # the whole point of the closing sweep. So reaching this branch means the
+      # sweep the previous round earned is not queued: either the tree really
+      # has not moved and the fix pass has not happened yet, or the run's
+      # `.closing-sweep` marker was lost after that round was recorded.
+      refuse_stale_findings "the round $round delta against the previous round is EMPTY and the previous round left no blockers to verify — nothing has changed since it, so no reviewer would see anything — and with an empty carry there is nothing to fix either. The previous round found nothing, so its closing full sweep should have been queued in $closing_sweep_file: restore that marker (its content is round $round), or re-invoke under the --max-rounds it was written under, rather than ending the run on a delta round. Do NOT invent a code change just to move the tree."
     fi
   fi
-  mkdir -p -- "${findings_path:h}"
+  # delta_files is read AFTER any re-plan, so the invalidation below always uses
+  # the descriptor the round actually ran with. It is present on a full round too
+  # whenever a prior tree was given — which is exactly the closing sweep.
+  delta_json=$(print -r -- "$rp" | jq -c '.delta_files // []') || {
+    print -u2 -- "resolve-story-loop: could not read delta_files at round $round"; exit 1 }
+
+  # --- INVALIDATE the adjudications the last fix pass disturbed (#1434) -----
+  # Every entry whose file appears in this round's delta_files goes, because a
+  # suggestion re-raised in a file that was just edited is plausibly a NEW
+  # observation about the new code, not a re-litigation of the old one.
+  # Computed from this story's own attested-tree delta — deliberately not from a
+  # fix-touched capture, which does not exist yet (#1435 lands after this).
+  # File-granular on purpose: it errs toward keeping a suggestion visible, and
+  # the cost of that is one logged Low where the cost of erring the other way is
+  # a real finding silently deleted.
+  #
+  # It runs HERE — before the panel, not just before the consolidator — because
+  # the panel is told "do not re-raise these" via REVIEW_ADJUDICATED. A
+  # suggestion the panel withholds never reaches the consolidator at all, so an
+  # invalidation that ran only downstream would protect nothing on the path that
+  # actually suppresses. (In step mode the panel runs between invocations and
+  # reads the file as the PREVIOUS round left it; making that exact too needs
+  # the session to invalidate before it spawns its panel — a follow-up.)
+  if [[ "$delta_json" != "[]" && "$delta_json" != "null" ]]; then
+    adj_tmp="$work_dir/.adjudicated-invalidated.json"
+    # bind the entry FIRST: inside `$d | index(...)` the input is $d, so a bare
+    # `.file` would index the delta ARRAY with a string and abort the program
+    jq -c --argjson d "$delta_json" \
+      '[ .[] | . as $e | select(($d | index($e.file // "")) == null) ]' -- "$adjudicated_file" > "$adj_tmp" || {
+      print -u2 -- "resolve-story-loop: could not invalidate adjudications at round $round"; exit 1 }
+    mv -- "$adj_tmp" "$adjudicated_file" || {
+      print -u2 -- "resolve-story-loop: could not write back $adjudicated_file at round $round"; exit 1 }
+  fi
+  findings_path=$(print -r -- "$rp" | jq -r '.findings_path')
+  # (the scope was written by write_round_scope above, before the empty-delta
+  # decision that has to read it)
+  mkdir -p -- "${findings_path:h}" || {
+    print -u2 -- "resolve-story-loop: could not create the findings sink directory ${findings_path:h} at round $round"; exit 1 }
   # (#974) refuse the alias BEFORE truncating: findings_path is the round's
   # internal sink, and the very next line zero-bytes it. A session that passed
   # the dispatch plan's findings_path as --findings-file (instead of its own
@@ -873,7 +1344,8 @@ while (( round <= max_rounds )); do
      { [[ "${findings_file:A}" == "${findings_path:A}" ]] || [[ "$findings_file" -ef "$findings_path" ]] }; then
     refuse_stale_findings "--findings-file must not be the round's own findings_path ($findings_path) — pass this round's aggregated findings (e.g. findings-round-${round}.json), not the dispatch sink."
   fi
-  : > "$findings_path"
+  : > "$findings_path" || {
+    print -u2 -- "resolve-story-loop: could not truncate the round $round findings sink $findings_path"; exit 1 }
 
   # 1. obtain this round's findings: step mode consumes --findings-file (the
   # session already ran the panel in-session, #971); hook mode runs the
@@ -883,14 +1355,23 @@ while (( round <= max_rounds )); do
     # invocations, and one that found nothing still writes `[]`. Consuming a
     # missing/empty file as "no findings" here would converge the loop on a
     # round nobody reviewed — the false CONVERGED that per-round file names
-    # make the LIKELIER shape of this mistake. A fresh run's round 1 keeps the
-    # documented missing == no-findings behaviour.
+    # make the LIKELIER shape of this mistake. A fresh run's round 1 is a FULL
+    # round, so a missing/empty --findings-file is refused there too — by the
+    # full-round guard further down, not by this --resume arm.
     if (( resume )) && [[ ! -s "$findings_file" ]]; then
       refuse_stale_findings "--findings-file is missing or empty on --resume ($findings_file) — did this round's review panel run? A panel that found nothing must still write []."
     fi
     if [[ -s "$findings_file" ]]; then
-      jq -e 'type=="array"' "$findings_file" >/dev/null 2>&1 || {
-        print -u2 -- "resolve-story-loop: --findings-file is not a JSON array: $findings_file"; exit 1 }
+      # `--slurp`, never a bare `jq -e`: `jq -e`'s status reflects only the LAST
+      # output value, so a file holding two concatenated arrays (a panel that
+      # wrote with `>>` instead of `>` — the likeliest slip in a file a model
+      # writes between invocations) emits true,true and PASSES. Every consumer
+      # downstream then multiplies: two scoped arrays, two changelist objects,
+      # a two-line `blocking` capture that aborts the arithmetic, and a BLANK
+      # status JSON emitted beside an exit code that claims a verdict. Same
+      # rule, same reason, as `_validate_promote`.
+      jq -e -s 'length == 1 and (.[0] | type == "array")' -- "$findings_file" >/dev/null 2>&1 || {
+        print -u2 -- "resolve-story-loop: --findings-file must hold exactly ONE JSON array: $findings_file"; exit 1 }
       # stale-findings guard (#974): the panel is the session's job, run between
       # invocations — so findings byte-identical to the round just consumed mean
       # it did NOT run (a stale path re-passed, or the new round's file never
@@ -904,26 +1385,170 @@ while (( round <= max_rounds )); do
       # [file, dimension, line-proximity] with a title-identity verdict (#983), so
       # an exact or token-sharing re-find still escalates (only a fully disjoint
       # retitle auto-continues as a false trip, which this guard is unrelated to).
+      #
+      # ONE exception (#1434): a round that follows a round which itself found
+      # NOTHING. That is the promoted closing full sweep — it exists precisely
+      # because the delta round before it was clean, so the previous round's
+      # findings were `[]`, and a full sweep that also finds nothing writes `[]`
+      # again, byte for byte. The guard cannot tell that from a stale path, and
+      # refusing it would make convergence unreachable on exactly the healthiest
+      # runs.
+      #
+      # The waiver is keyed on ALL THREE facts — a recorded sweep, the previous
+      # round's consumed findings being `[]`, and that round's scope having been
+      # non-empty — never on `is_closing_sweep` alone: a sweep is also recorded
+      # by the empty-delta promotion, which follows a round WITH blockers, where
+      # a byte-identical repeat is still the real mistake the guard exists to
+      # catch.
+      #
+      # And the second fact is read from the previous round's CONSUMED findings
+      # (`.findings-empty-<N>`), not from its scoped ones. `scoped-<N>.json` is
+      # what survives `scope-findings` and the work-dir filter, so it is empty
+      # whenever a panel reported ONLY out-of-diff findings — a round whose raw
+      # findings were substantial. Keying on that would waive the guard for a
+      # round the justification does not cover, and a caller re-passing the
+      # stale path would have it consumed by the sweep, filtered to nothing
+      # again, and exit CONVERGED on a panel that never ran. The consumed file
+      # is the fact the sentence above is actually about.
+      # The missing/empty half of the guard always applies: a panel that found
+      # nothing must still write `[]`.
       digest=$(findings_digest "$findings_file")
       prev_digest_file="$work_dir/.findings-digest-$(( round - 1 ))"
-      if [[ -n "$digest" && -s "$prev_digest_file" && "$digest" == "$(<"$prev_digest_file")" ]]; then
-        refuse_stale_findings "--findings-file is byte-identical to round $(( round - 1 ))'s consumed findings ($findings_file) — did this round's review panel run? Write each round's aggregate findings to its own path (findings-round-N.json) before --resume."
+      prev_findings_empty=0
+      # `-f && -s`, both conjuncts load-bearing, and the same parity the other
+      # work-dir reads carry. `-s` because the marker's own write truncates
+      # before it fills, so a zero-byte file is a FAILED write; `-f` because
+      # `-s` alone is TRUE for a directory, so anything that left one at this
+      # path — a failed write into it, a restored backup — would read as a
+      # valid marker. Either misread waives the guard on the run's last word:
+      # fail-OPEN, and the opposite of what the write's own diagnostic promises.
+      (( is_closing_sweep )) && [[ -f "$work_dir/.findings-empty-$(( round - 1 ))" && -s "$work_dir/.findings-empty-$(( round - 1 ))" ]] && prev_findings_empty=1
+      # ...and the DIGEST half takes the same `-f && -s` shape, as PARITY rather
+      # than as a behaviour change — state it honestly, because the two halves
+      # are not alike. On the marker read above `-f` is load-bearing: a
+      # directory there passes `-s`, sets prev_findings_empty and WAIVES the
+      # guard. Here the condition ends in a content comparison, so a directory
+      # or a partial file makes it false either way (`$(<dir)` yields the empty
+      # string, which never equals a real hex digest) — the guard does not
+      # refuse with or without the conjuncts. They are kept so both halves read
+      # the same way and neither invites the other's mistake; if a damaged
+      # digest sidecar should ever REFUSE rather than silently not-refuse, that
+      # needs its own diagnostic arm, not these conjuncts.
+      if (( ! prev_findings_empty )) && [[ -n "$digest" && -f "$prev_digest_file" && -s "$prev_digest_file" && "$digest" == "$(<"$prev_digest_file")" ]]; then
+        # The refusal is EXTENDED by the round's own scope, never waived by it.
+        # The stale-path diagnosis stays first — it is the likelier cause and
+        # the only one the caller can fix by re-invoking. But on an empty-delta
+        # round the loop additionally KNOWS the tree did not move, so a panel
+        # that really did run would legitimately re-find the same things; left
+        # unsaid, the caller reads "run the panel again" as the whole remedy and
+        # loops on it, since no per-round path can change the bytes.
+        empty_delta_note=""
+        (( is_empty_delta )) && empty_delta_note=" Round $round's delta was also EMPTY: if the panel DID run, nothing in the tree changed since round $(( round - 1 )), so the same blockers are simply still unfixed — apply the fixes, or stop and escalate."
+        refuse_stale_findings "--findings-file is byte-identical to round $(( round - 1 ))'s consumed findings ($findings_file) — did this round's review panel run? Write each round's aggregate findings to its own path (findings-round-N.json) before --resume.${empty_delta_note}"
       fi
       cp -- "$findings_file" "$findings_path" || {
         print -u2 -- "resolve-story-loop: could not copy --findings-file"; exit 1 }
+      # Classify the round once, for both records below.
+      # `jq -e`'s status is read, never used as a verdict: it exits 1 for a
+      # false result but 5 for a program error, and treating a dead jq as "the
+      # findings are not empty" would flip BOTH records the wrong way at once —
+      # a blind round would record a digest again, and the marker would be
+      # cleared, leaving the sweep's waiver disarmed. Same rule the sibling
+      # dispatch applies to its language probe (#1177).
+      round_scope_empty=0; round_findings_empty=0
+      [[ -s "$scope_file" ]] || round_scope_empty=1
+      jq -e -s 'length == 1 and (.[0] | length == 0)' -- "$findings_path" >/dev/null 2>&1
+      rc_empty=$?
+      (( rc_empty <= 1 )) || {
+        print -u2 -- "resolve-story-loop: could not classify the round $round findings as empty ($findings_path)"; exit 1 }
+      (( rc_empty == 0 )) && round_findings_empty=1
+
       # record only AFTER a successful consume, so a failed round leaves no
       # digest to veto its retry
-      if [[ -n "$digest" ]]; then
-        print -r -- "$digest" > "$work_dir/.findings-digest-$round"
+      #
+      # ...and record NOTHING for a BLIND round that consumed `[]` (#1434): its
+      # panel saw an empty scope, so `[]` is not a fingerprint of anything and a
+      # byte comparison against it carries no information. Keeping one would
+      # wedge the run: the closing sweep such a round promotes reviews the whole
+      # diff, legitimately finds nothing, writes `[]` — and would be refused as
+      # a stale re-pass, with no action able to change the bytes of an empty
+      # array. The guard loses nothing, because an empty findings file asserts
+      # nothing that a re-pass could falsify. The stale `rm -f` matters for a
+      # retried round: a previous attempt's digest must not veto this one.
+      if (( round_scope_empty && round_findings_empty )); then
+        rm -f -- "$work_dir/.findings-digest-$round"
+      elif [[ -n "$digest" ]]; then
+        print -r -- "$digest" > "$work_dir/.findings-digest-$round" || \
+          print -u2 -- "resolve-story-loop: could not record the round $round findings digest — the byte-identical stale-findings guard will be off for round $(( round + 1 ))"
+      fi
+      # ...and, beside it, whether this round's panel LOOKED AT SOMETHING AND
+      # FOUND NOTHING (#1434). That is the fact the closing sweep's digest
+      # waiver rests on, and both halves matter:
+      #   * the consumed findings must be `[]` — knowable only here, because
+      #     downstream they have been scope-filtered, which also empties a round
+      #     whose panel reported plenty but all of it out of diff;
+      #   * the round's SCOPE must have been non-empty — otherwise "found
+      #     nothing" is really "saw nothing", and waiving after such a round
+      #     would disarm the guard on the sweep that is the last chance to catch
+      #     what it never saw. (A verification-only round is re-planned to the
+      #     full diff above, so the remaining scope-empty case is a FULL round
+      #     over a story diff that is itself empty.)
+      # A marker file rather than a value, so its ABSENCE (an older work-dir, a
+      # round that never got this far, a failed write) reads as "not empty" and
+      # the guard stays armed — fail-closed, like every other arm; the reader
+      # uses `-f && -s`, so a zero-byte partial write AND a directory left at
+      # the path both read as absent too (the `-f` half is load-bearing on this
+      # guard — see the read site's own note). The clear on
+      # the else branch is diagnosed rather than silent: it is the one direction
+      # that fails OPEN (a stale marker from a retried round would disarm the
+      # waiver), and nothing else would notice.
+      if (( ! round_scope_empty && round_findings_empty )); then
+        print -r -- 1 > "$work_dir/.findings-empty-$round" || \
+          print -u2 -- "resolve-story-loop: could not record the round $round empty-findings marker — the closing-sweep digest waiver will stay armed (fail-closed)"
+      else
+        rm -f -- "$work_dir/.findings-empty-$round" || \
+          print -u2 -- "resolve-story-loop: could not clear the round $round empty-findings marker — the closing-sweep digest waiver may be wrongly disarmed"
       fi
     fi
   else
+    # #1434 adds three: the round's scope mode, the previous round's blockers to
+    # verify, and the already-waived suggestions the panel must not re-raise.
+    # REVIEW_FIX_VERIFICATION is an empty string on round 1 (nothing to verify);
+    # REVIEW_ADJUDICATED is always a path, holding `[]` until something is
+    # waived — so a hook must read its CONTENTS, not test for emptiness.
     ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
              REVIEW_SKILL="$review_skill" REVIEW_SCOPE_FILE="$scope_file" \
-             REVIEW_REPO="$repo"; eval "$review_cmd" ) || {
+             REVIEW_REPO="$repo" REVIEW_SCOPE_MODE="$scope_mode" \
+             REVIEW_FIX_VERIFICATION="$fix_verification" \
+             REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {
       print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
   fi
-  [[ -s "$findings_path" ]] || print -r -- '[]' > "$findings_path"
+  # The `[]` default is a DELTA-round convenience, never a full-round one
+  # (#1434). On a full round zero blockers IS the CONVERGED condition, so
+  # synthesizing `[]` for a panel that produced no file would converge the run
+  # on a review nobody performed — and it would silently overrule the terminal
+  # every panel now carries, which says that on a full round with an empty
+  # scope (or, for the render-first `kubernetes` panel, any not-applicable
+  # shape) the panel reports to its caller and writes NO findings file
+  # precisely so the loop refuses. Without this the promise is unenforced on
+  # exactly the rounds that matter: a fresh run's round 1, which is always
+  # full and never `--resume`, and every full round in hook mode, where the
+  # `--findings-file` guards do not apply at all.
+  if [[ ! -s "$findings_path" ]]; then
+    if [[ "$scope_mode" == "full" ]]; then
+      # Branched on the wiring, because the two name DIFFERENT files. In step
+      # mode the caller's own --findings-file is what was empty, and pointing
+      # them at $findings_path would send them to write into the internal sink
+      # — which the alias guard above then refuses, so one mistake would cost
+      # two contradictory refusals.
+      if (( step_mode )); then
+        refuse_stale_findings "round $round is a FULL round and --findings-file is missing or empty ($findings_file) — a full round with zero blockers is the CONVERGED condition, so an absent aggregate is refused rather than read as a clean review. If the panel reported the round failed or not applicable, act on that (see §3.5 step 2); otherwise run the panel and write its aggregate to its OWN path (findings-round-${round}.json), never the dispatch sink $findings_path."
+      fi
+      refuse_stale_findings "round $round is a FULL round and --review-cmd produced no findings at \$REVIEW_FINDINGS ($findings_path) — a full round with zero blockers is the CONVERGED condition, so an absent aggregate is refused rather than read as a clean review. A panel that found nothing must still write []."
+    fi
+    print -r -- '[]' > "$findings_path" || {
+      print -u2 -- "resolve-story-loop: could not initialise the round $round findings sink $findings_path"; exit 1 }
+  fi
 
   # 2. scope findings to the story's diff (#560)
   scoped="$work_dir/scoped-$round.json"
@@ -936,10 +1561,13 @@ while (( round <= max_rounds )); do
     jq -c --arg wd "$wd_rel" '[ .[] | select(((.file // "") | sub("^\\./"; "")) | startswith($wd) | not) ]' \
       "$scoped" > "$scoped_filtered" || {
       print -u2 -- "resolve-story-loop: work-dir scope filter failed at round $round"; exit 1 }
-    mv "$scoped_filtered" "$scoped"
+    mv -- "$scoped_filtered" "$scoped" || {
+    print -u2 -- "resolve-story-loop: could not write back the work-dir-filtered scope at round $round"; exit 1 }
   fi
 
   # 3. consolidate (#561), carrying the previous round for non-convergence
+  # (the adjudicated list was already invalidated above, before the panel read
+  # it — see the block next to `delta_json`)
   changelist="$work_dir/changelist-$round.json"
   # built as an array so --prev and --promote compose: the old if/else pair had
   # no room for a second optional flag without a four-way branch, and a promoted
@@ -948,11 +1576,43 @@ while (( round <= max_rounds )); do
   consolidate_args=( --findings "$scoped" --round "$round" )
   [[ -n "$prev_changelist" ]] && consolidate_args+=( --prev "$prev_changelist" )
   [[ -n "$promote" ]] && consolidate_args+=( --promote "$promote" )
+  consolidate_args+=( --adjudicated "$adjudicated_file" )
   "$CONSOLIDATE" "${consolidate_args[@]}" > "$changelist" || {
     print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
   final_changelist="$changelist"
-  cat "$changelist" >> "$changelists_file"   # one compact line per round (for the dossier, #563)
+  # CHECKED, because the accumulators ARE the resume state. A failed or partial
+  # write leaves changelists BEHIND history, and the --resume repair only knows
+  # how to fix the other direction (exactly one line AHEAD, the kill-window
+  # orphan) — this skew falls to "corrupt work-dir" with no recovery but
+  # discarding every prior round. Aborting here instead leaves the two equal, so
+  # the round simply re-runs.
+  cat -- "$changelist" >> "$changelists_file" || {   # one compact line per round (for the dossier, #563)
+    print -u2 -- "resolve-story-loop: could not append the round $round changelist to $changelists_file"; exit 1 }
 
+  # Write the NEXT round's fix-verification carry HERE, not at that round's
+  # start (#1434 review). In step mode the next round's panel runs between
+  # invocations, so a file created at the start of the next invocation would be
+  # written after the reviewers who are meant to read it have already finished —
+  # the carry would be contracted, passed to `plan`, and inert. Writing it now
+  # means it is on disk before the session spawns that panel.
+  jq -c '.blocking // []' -- "$changelist" > "$work_dir/verify-$(( round + 1 )).json" || {
+    print -u2 -- "resolve-story-loop: could not write the round $(( round + 1 )) fix-verification carry"; exit 1 }
+
+  # Only NOW record this round's own suggestions as adjudicated (#1434) — doing
+  # it before consolidation would let a round drop its own findings, which is
+  # both wrong and impossible to notice from the outside.
+  #
+  # NORMALISE and FILTER on the way in, to the consolidator's own --adjudicated
+  # predicate. The consolidator deliberately TOLERATES malformed reviewer input
+  # in these fields — a missing `dimension` becomes "", and `// ` leaves a
+  # non-string `title` (a reviewer emitting `"title": 42`) untouched — so copying
+  # `suggestions[]` verbatim can persist an entry its own validator will reject.
+  # The next round then fails validation, the loop aborts as a BARE exit 1 that
+  # writes no status JSON (the #912 hazard), and because the bad entry is
+  # PERSISTENT state every later --resume dies at the same point: one reviewer
+  # forgetting `dimension` on one finding bricks the work-dir. An entry that
+  # cannot carry a non-empty file+dimension matches nothing anyway, so dropping
+  # it costs no suppression.
   blocking=$(jq '.summary.blocking' "$changelist")
   conflict=$(jq 'if ((.escalation_reasons // []) | index("unresolved_conflict")) then 1 else 0 end' "$changelist")
   nonconv=$(jq 'if .non_converging then 1 else 0 end' "$changelist")
@@ -962,17 +1622,100 @@ while (( round <= max_rounds )); do
   # drive an escalation (that is $nonconv, which the consolidator already excludes
   # them from).
   ftrips=$(jq '.summary.false_trips // 0' "$changelist")
+  # adjudicated_dropped (#1434) rides the per-round line so history.jsonl stays a
+  # single-file run summary: "why did round 4 log fewer suggestions than round 3"
+  # is answerable without opening four changelists.
+  # status-checked, unlike its pre-existing siblings above: an empty capture
+  # would reach `--argjson ad` below, jq would refuse it, and the whole history
+  # append would write nothing — leaving history one line short of changelists,
+  # which the next --resume reads as the kill-window orphan and repairs by
+  # TRUNCATING a completed round's changelist. (The siblings want the same
+  # treatment; that is a follow-up, not this story's scope.)
+  adj_dropped=$(jq '.summary.adjudicated_dropped // 0' -- "$changelist") || {
+    print -u2 -- "resolve-story-loop: could not read summary.adjudicated_dropped at round $round"; exit 1 }
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
-     --argjson ft "$ftrips" \
-     '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft}' <<< '{}' >> "$history_file"
+     --argjson ft "$ftrips" --argjson ad "$adj_dropped" \
+     '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft,
+       adjudicated_dropped:$ad}' <<< '{}' >> "$history_file" || {
+    print -u2 -- "resolve-story-loop: could not append the round $round history line to $history_file"; exit 1 }
+
+  # ...and ONLY NOW record this round's suggestions as adjudicated. The append
+  # is deliberately the LAST write of the round, after the history line.
+  #
+  # The --resume kill-window repair reads "changelists exactly one line ahead of
+  # history" as "the orphaned round re-runs", so anything committed between the
+  # changelist append and the history line is state a re-run inherits as if the
+  # round had completed. With the append ordered before it, a round that re-runs
+  # would find its OWN suggestions already adjudicated and drop them — and the
+  # invalidation above cannot save the case that matters, because the closing
+  # sweep applies no fix pass, so its `delta_files` is `[]` and nothing is
+  # invalidated. A suggestion only the sweep found would then be deleted from
+  # the changelist that the promotion phase and the telemetry `waived` count
+  # both read, with no surface left to restore it from.
+  #
+  # Ordered last, a kill in the window instead loses one round's adjudications,
+  # so a waived suggestion is logged once more. That is the direction the drop
+  # rule is built on: over-dropping deletes a real defect, under-dropping costs
+  # one line. Nothing between the two reads $adjudicated_file, and its next
+  # consumer is the NEXT invocation's consolidate, so the happy path is
+  # unchanged.
+  #
+  # ...and for the SAME reason this pair WARNS instead of exiting. An `exit 1`
+  # here would sit between the round's history line and the promotion record
+  # below, on an ordinary I/O failure rather than a kill: the round would be
+  # complete and consistent on disk (history and changelists equal, so the
+  # --resume repair correctly does nothing) with the closing sweep it just
+  # earned never written. The next --resume would then plan an ordinary delta
+  # round against an unmoved tree and refuse it, every time, until someone
+  # hand-wrote the marker. Warning costs one re-logged suggestion; exiting
+  # costs the run.
+  adj_tmp="$work_dir/.adjudicated-appended.json"
+  jq -sc '(.[0] + [ .[1].suggestions[]?
+                    | { file: ((.file // "") | tostring),
+                        line,
+                        dimension: ((.dimension // "") | tostring),
+                        title: ((.title // "") | tostring) }
+                    | select(((.file | length) > 0) and ((.dimension | length) > 0)) ])
+          | unique_by([.file, (.line|tostring), .dimension, .title])' \
+    -- "$adjudicated_file" "$changelist" > "$adj_tmp" && \
+  mv -- "$adj_tmp" "$adjudicated_file" || \
+    print -u2 -- "resolve-story-loop: could not record round $round's suggestions as adjudicated ($adjudicated_file) — the round STANDS; at most one already-waived suggestion is logged again next round"
+  rm -f -- "$adj_tmp"
+
 
   # 4. decide the round's fate. In step mode a survivable round (blockers,
   # budget left) exits AWAITING_FIX (20): the fix pass is the driving session's
   # job, in-session, before it re-invokes with --resume (#971).
-  if (( blocking == 0 )); then loop_status="CONVERGED"
+  # #1434: CONVERGED is declarable only on a FULL round. A delta round that
+  # reaches zero blockers has proved nothing about the story as a whole — only
+  # about the slice it looked at — so it promotes the NEXT round to a closing
+  # full sweep instead of ending the run. That sweep is the safety net against
+  # the one thing delta scoping could hide: a defect that exists only in the
+  # interaction between rounds.
+  skip_fix=0
+  if (( blocking == 0 )); then
+    if [[ "$scope_mode" == "full" ]]; then
+      loop_status="CONVERGED"
+    else
+      closing_sweep_round=$(( round + 1 ))
+      print -r -- "$closing_sweep_round" > "$closing_sweep_file" || {
+        print -u2 -- "resolve-story-loop: could not record the closing sweep at $closing_sweep_file"; exit 1 }
+      # The grant, once and by exactly one round: a run that spent its whole
+      # budget is precisely the run whose safety net matters most, so skipping
+      # the sweep there would remove it exactly when it is least affordable to.
+      # --max-rounds itself is untouched (see emit_and_exit).
+      if (( closing_sweep_round > max_rounds )); then
+        effective_max=$closing_sweep_round
+        closing_sweep_granted=1
+      fi
+      # nothing to fix — the round found no blockers; the next round only
+      # re-reviews, at full scope
+      skip_fix=1
+      (( step_mode )) && loop_status="AWAITING_FIX"
+    fi
   elif (( conflict == 1 )); then loop_status="ESCALATE_CONFLICT"
   elif (( nonconv == 1 )); then loop_status="ESCALATE_NO_CONVERGENCE"
-  elif (( round == max_rounds )); then loop_status="BUDGET_EXHAUSTED"
+  elif (( round == effective_max )); then loop_status="BUDGET_EXHAUSTED"
   elif (( step_mode )); then loop_status="AWAITING_FIX"
   fi
   case "$loop_status" in
@@ -980,15 +1723,32 @@ while (( round <= max_rounds )); do
     ESCALATE_CONFLICT) verdict="escalating (unresolved conflict)" ;;
     ESCALATE_NO_CONVERGENCE) verdict="escalating (non-converging blocker)" ;;
     BUDGET_EXHAUSTED) verdict="budget exhausted" ;;
-    AWAITING_FIX) verdict="awaiting fix — apply blockers in-session, then --resume" ;;
-    *) verdict="fix pass (in-loop), continuing" ;;
+    AWAITING_FIX)
+      if (( skip_fix )); then
+        verdict="no blockers in the delta — round $closing_sweep_round is the closing full sweep; apply no fix, just --resume"
+      else
+        verdict="awaiting fix — apply blockers in-session, then --resume"
+      fi ;;
+    *) if (( skip_fix )); then
+         verdict="no blockers in the delta — promoting round $closing_sweep_round to the closing full sweep"
+       else
+         verdict="fix pass (in-loop), continuing"
+       fi ;;
   esac
   append_progress_round "$changelist" "$round" "$verdict" "$prev_changelist"
   if [[ -n "$loop_status" ]]; then break; fi
+  # a zero-blocker delta round has nothing for the fix hook; advancing straight
+  # to the closing sweep is the whole point (hook mode)
+  if (( skip_fix )); then
+    prev_changelist="$changelist"
+    (( round++ ))
+    continue
+  fi
 
   # 5. fix pass — blockers only (Low suggestions never loop)
   blockers="$work_dir/blockers-$round.json"
-  jq -c '{round, blocking, conflicts}' "$changelist" > "$blockers"
+  jq -c '{round, blocking, conflicts}' -- "$changelist" > "$blockers" || {
+    print -u2 -- "resolve-story-loop: could not build the round $round blockers slice at $blockers"; exit 1 }
   ( export REVIEW_ROUND="$round" REVIEW_REPO="$repo" \
            REVIEW_CHANGELIST="$changelist" REVIEW_BLOCKERS="$blockers"; eval "$fix_cmd" ) || {
     print -u2 -- "resolve-story-loop: --fix-cmd failed at round $round"; exit 1 }
@@ -1004,7 +1764,7 @@ while (( round <= max_rounds )); do
   (( round++ ))
 done
 
-local code
+local code=1
 case "$loop_status" in
   CONVERGED) code=0 ;;
   AWAITING_FIX) code=20 ;;

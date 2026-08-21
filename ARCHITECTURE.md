@@ -2681,6 +2681,54 @@ pure prose reviewers; only the skill knows about the JSON layer. A new language
 wires this up once — in its own `review` skill's Step 1 — and every reviewer it
 launches emits the block for free, with no per-agent boilerplate to maintain.
 
+**Step 1 has a second injection duty since #1434**, and it is per-panel for the
+same reason: from round 2 on the loop's dispatch descriptor carries
+`fix_verification_path` and `adjudicated_path`, and the `review` skill must
+forward both into each agent's launch prompt — the previous round's blockers to
+verify (the only way a fix that silently did not land gets re-raised, since a
+delta round cannot re-derive it) and the already-waived suggestions the panel
+must not re-litigate. Each panel also states that when it DOES verify a
+non-empty carry it **reports how many carried entries it confirmed** — on ANY
+round whose `fix_verification_path` holds entries, and whatever it writes to the
+findings file, `[]` or otherwise. That count is what tells a result which passed
+verification from one that skipped it, and `/development:resolve-issue` §3.5
+step 2 keys a recovery arm on its absence — so scoping the duty to a clean `[]`
+would make a legitimate round (carry confirmed, new blockers found) look failed.
+
+Each panel also states that an **empty** scope handed down
+by the loop is never a licence to review the whole project, and that on a
+**delta** round **that carries nothing** the panel must still write `[]` rather
+than no file at all. Two qualifications ride with that, and a panel is not
+correctly wired without them. Not on a **full** round: there an empty scope
+means the story diff itself is empty, and `[]` would be the CONVERGED condition
+over a story that changed nothing. And not when the round's
+`fix_verification_path` holds entries — a bare `[]` would retire carried
+blockers with no agent confirming them, so the panel dispatches with the carry
+or re-raises what it cannot confirm. A `null` or unreadable carry on a round ≥ 2
+is a **different** case, not merely "the same as non-empty" — and it is read
+from the descriptor's `fix_verification_path` **or** hook mode's
+`$REVIEW_FIX_VERIFICATION`, since a hook-mode panel sees no descriptor at all
+and would otherwise declare every hook-mode round's carry absent. When neither
+names a readable carry the caller omitted `--fix-verification`, so there is
+nothing to enumerate and nothing to cite. All six panels therefore write **no findings file at all** there and
+report the slip to the caller, naming the flag — absence of the carry is never
+evidence of an empty one, and the missing aggregate is what makes the caller's
+omission surface as a refusal instead of a silently unverified round.
+
+All six panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `kubernetes`)
+carry **both rules**, with the empty-scope one's two qualifications and the
+confirmation-count report; a new panel is not wired up until it states them all. The
+invariant is the two duties, **not the bytes** — each panel spells them in its
+own scope vocabulary (the repo, the project, the rendered temp tree) and against
+its own not-applicable terminal, and `kubernetes` necessarily says more, because
+its render-first flow has a terminal that otherwise writes no findings file at
+all. Where each rule sits also varies: five panels carry the empty-scope rule in
+the scope preamble **above** `## Step 1`, `kubernetes` inside it. Read a
+divergence in wording or placement as adaptation, and only a **missing duty** as
+drift — normalising `kubernetes` to the generic phrasing would delete the
+temp-tree scoping and the `[]`-versus-`.failed.json` reconciliation that keep
+its own gate from licensing a whole-tree review.
+
 ### The finding object
 
 Each reviewer emits one fenced `json` block whose body is a **JSON array of
@@ -2901,7 +2949,8 @@ zero orchestrator edits. The seam is
 `development/skills/resolve-issue/scripts/review-dispatch.zsh`, a pure function
 of the worktree with two subcommands.
 
-**`plan --repo PATH [--base REF] [--round N] [--findings-path PATH]`** emits the
+**`plan --repo PATH [--base REF] [--round N] [--findings-path PATH] [--final]
+[--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]`** emits the
 dispatch descriptor. `--findings-path` overrides where the panel is told to write
 its aggregate, defaulting to `<repo>/.review/findings-round-<N>.json`; note the
 diff-scoping exclusion covers the **default** location only, so an override
@@ -2916,9 +2965,61 @@ cannot mint a second artifact path for the same round:
   "round": 1,
   "base": "origin/main",
   "findings_path": "<repo>/.review/findings-round-1.json",
-  "changed_files": ["src/app/checkout.py", "src/app/cart.py"]
+  "changed_files": ["src/app/checkout.py", "src/app/cart.py"],
+  "scope_mode": "full",
+  "scope_empty": false,
+  "prior_tree": null,
+  "delta_files": null,
+  "fix_verification_path": null,
+  "adjudicated_path": null
 }
 ```
+
+- **Rounds after the first are an ITERATION, not a repeat (#1434).**
+  `scope_mode` is `"full"` when `round <= 1 || --final`, else `"delta"` — `<= 1`
+  because `--round` is contracted as any non-negative integer and there is no
+  round 0 to iterate on, so scoping it as a delta would emit a `null` review
+  scope where the shape above promises an array. And
+  `changed_files` keeps its meaning as *the review scope*: the full diff against
+  `--base` on a full round, exactly `delta_files` on a delta one. `delta_files`
+  is everything differing between `--prior-tree` (the working-tree identity the
+  **previous** round's reviewers saw — `git-tree-id.zsh`, the same identity
+  `--gate-attest` uses) and the current tree, so an intermediate round reviews
+  precisely what the last fix pass changed. Both sides are `git add -A` trees, so
+  tracked edits, deletions and untracked additions compare by one uniform rule,
+  and the delta goes through the **same** normalisation and the same `.review/` +
+  `.claude/telemetry/` exclusions (#909) as the full scope — one file-listing
+  path, never a second. `delta_files` is computed whenever `--prior-tree` is
+  given, **including on a full round**, so the adjudication invalidation the
+  loop drives from it runs under one uniform rule rather than a mode test. On a
+  closing sweep or a re-planned verification-only round the delta is empty by
+  construction — no fix pass ran between them — so the invalidation is a no-op
+  there, which is the correct outcome, not a reason to skip the computation.
+  `scope_empty` is `changed_files == []`, always present,
+  and it exists for **callers**: the driving session plans its own panel and
+  needs to know a delta came back empty *before* it spawns reviewers. The **loop
+  deliberately does not read it** — it judges emptiness on the scope file it has
+  already written, after the `.review/` + work-dir filtering, which is a strict
+  superset: a repo-internal `--work-dir` puts the loop's own state inside every
+  delta, so the descriptor reports a non-empty scope while the panel would be
+  handed nothing. Round 1's "a scope that is only
+  artifacts yields an empty `changed_files`, not an error" behaviour is
+  untouched either way. `--fix-verification` / `--adjudicated` are **echoed through** as
+  `fix_verification_path` / `adjudicated_path` — this script never reads either
+  file, so one descriptor value carries everything a round's panel needs.
+  `--max-rounds` is deliberately **not** a flag here: finality is the loop's
+  rule (the ceiling moves with every human grant), and a second copy of it would
+  be a second place to change.
+- **Neither failure degrades to the full diff.** `--round > 1` with neither
+  `--final` nor `--prior-tree` is a **usage error (exit 2)** naming
+  `--prior-tree`; a `--prior-tree` that does not resolve
+  (`rev-parse --verify --quiet <id>^{tree}`) is **exit 1** from
+  `_verify_prior_tree`, called next to `_verify_base` **before anything is
+  scoped**, with a named stderr line and no descriptor on stdout. A silent
+  full-diff fallback would make every intermediate round an independent repeat
+  again while still *reporting* `scope_mode: "delta"` — invisible by
+  construction; a silently empty scope is the #910 hazard, a round the loop
+  happily converges on that no panel ever saw.
 
 - **Repo-type detection reuses the maintenance logic** — it runs
   `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
@@ -2955,7 +3056,12 @@ cannot mint a second artifact path for the same round:
 **`scope-findings --repo PATH [--base REF] --findings FILE`** reads the panel's
 aggregate and prints only the findings whose `file` is inside the story's diff —
 the enforcement point for "findings outside the diff do not appear", downstream
-of whatever the panel reported. A missing/empty file yields `[]`.
+of whatever the panel reported. A missing/empty file yields `[]`. It filters
+against the **full story diff on every round, delta rounds included**, and is
+never handed `--prior-tree`: a fix-verification finding about a file changed
+earlier in the story but not since the previous round is exactly the kind the
+delta round exists to surface, and filtering it by the delta would silently drop
+it.
 
 **An unsupported or ambiguous repo type is a typed escalation, not a crash.**
 `plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or
@@ -3099,9 +3205,38 @@ reliable but the merging needs semantics:
   `Warning − Promoted` negative for every reader. The two stay separate blocking
   items instead; both get fixed either way.
 
+- **The adjudicated-re-raise drop** (`--adjudicated FILE`, #1434) is the one way a
+  finding a reviewer *did* report never reaches the changelist. `FILE` holds a
+  JSON array of the same identity keys as `--promote` — the Low findings prior
+  rounds surfaced and the human waived — and **may be empty** (`[]`), unlike
+  `--promote`, because an early round legitimately has nothing waived yet. A
+  matching item is dropped from `suggestions[]` and counted in
+  `summary.adjudicated_dropped` only when **all three** guards hold: it matches
+  under the **reused #983 matcher** (gather on `file`+`dimension`+line
+  proximity) on the **exact normalized-title arm ONLY** — never the
+  shared-token or tokenless arms, which exist to fail *toward* the human on a
+  possible survivor and would here delete real findings on a single shared word,
+  and an entry whose normalized title is empty matches nothing rather than
+  silencing every untitled finding in its file; the incoming finding is itself
+  **Low**, so a re-raise at `WARNING`/`CRITICAL` is never suppressed; and the
+  entry is still **valid**, which the *loop* enforces by removing every
+  adjudication whose file appears in the round's `delta_files` before
+  consolidating. The drop runs **after** the #994 promotion overlay and
+  **before** the conflict / non-convergence classification — so a
+  human-promoted item is `WARNING` by then and fails guard 2 structurally
+  rather than by a special case, and a dropped item cannot go on to seed a
+  conflict pair or a carried-blocker match. Selection is by **position**, not by
+  a rebuilt identity key: dedup has already made `[file, line, dimension]`
+  unique, and jq's `index` on an *array* argument is a subsequence search, not a
+  membership test. Bad input is typed exactly like `--promote`'s and names the
+  **adjudicated** file. `summary.adjudicated_dropped` is **always present** (0
+  without the flag), so a consumer never has to tell "dropped nothing" from "an
+  older changelist" — the same argument `promotion_phase` carries in the status
+  JSON — and that key is the *only* difference a run without the flag sees.
+
 Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts,
-false_trips}, blocking[], suggestions[], conflicts[], non_converging,
-false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
+false_trips,adjudicated_dropped}, blocking[], suggestions[], conflicts[],
+non_converging, false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
 carries `false_trip: bool` (#983) and, when the overlay raised it,
 `promoted: true` (#995). The `blocking` array (Critical first, then
 High) is what the loop must clear; `suggestions` ride into the dossier (#563) and
@@ -3140,11 +3275,88 @@ count), a `promoted: N` term inside that split plus one `- promoted suggestion:`
 line per human-promoted blocker — both rendered only when there is one (#995),
 new vs carried, fixed-since-prior, the cumulative blocking trend, and
 a per-blocker *possible false trip* line whenever the consolidator flagged a
-carried match with no shared non-empty prior title (#913/#969) — so the human can read "are we
-actually clearing things?" straight off the tail.
+carried match with no shared non-empty prior title (#913/#969), and an
+`- adjudicated re-raises dropped: N` line whenever a re-raise of an
+already-waived suggestion was suppressed (#1434, rendered only when N > 0, on the
+same direct-read/no-stamp-gate rule as the promoted term) — so the human can read "are we
+actually clearing things?" straight off the tail. The per-round `history.jsonl`
+line carries `adjudicated_dropped` too, so that question is answerable from one
+file without opening every changelist.
 
-Per round: run panel (diff-scoped) → `scope-findings` → `consolidate-findings`.
-No blockers ⇒ `CONVERGED`. Otherwise the early-exit escalations fire *before* the
+**Rounds after the first iterate (#1434).** At the **start** of every round the
+loop computes and persists the working-tree identity its reviewers will see
+(`git-tree-id.zsh` → `<work-dir>/tree-<N>.txt`) and, from round 2 on, hands the
+previous round's identity to `plan --prior-tree`. This is deliberately
+independent of `--gate-attest`, which is optional, session-supplied and produced
+only by `run-gate.zsh` on plugin repos — leaning on it would make "no prior
+tree" the normal case off plugin repos. A missing or blank `tree-<N-1>.txt` on a
+round ≥ 2, or a failure to compute or persist this round's identity, is a named
+stderr line and **exit 1**, never a silent fall back to the full diff. Three
+carries ride along, all per-**run** work-dir state (truncated on a fresh start
+beside `.findings-digest-*`, `.findings-empty-*` and `.promote`, adopted on
+`--resume`, and deliberately
+**not** under the repo-internal `.review/`, where writing every round would move
+the tree identity and defeat the #981 attestation this depends on):
+`verify-<N>.json` (the previous round's `.blocking`, passed as
+`--fix-verification` and exported as `REVIEW_FIX_VERIFICATION`, and written at
+the **end** of round N-1 rather than the start of round N — in step mode the
+round's panel runs between invocations, so a file first created at round N's
+start would be written after the reviewers meant to read it had finished; the
+round-start build survives only as the fallback for an older work-dir),
+`adjudicated.json` (the waived Lows, passed as `--adjudicated`, exported as
+`REVIEW_ADJUDICATED`, invalidated per round against `delta_files`, and appended
+to only **after** the round consolidates so a round can never drop its own
+findings), and `.closing-sweep`. The review hook also sees `REVIEW_SCOPE_MODE`.
+
+**No run may END on a delta round.** Delta scoping buys convergence but could
+hide a defect that exists only in the *interaction* between rounds, so
+`CONVERGED` is declarable **only** on a `scope_mode: "full"` round. A delta round
+that reaches zero blockers instead writes `<work-dir>/.closing-sweep` and
+**promotes the next round** to a closing full sweep: step mode exits
+`AWAITING_FIX` (20) with `final_changelist.summary.blocking == 0` (the session
+applies **no** fix and just resumes), hook mode advances without invoking
+`--fix-cmd`. If that zero-blocker delta round was already at the ceiling, the
+sweep is granted exactly one round beyond `--max-rounds`, once — the safety
+net must not be skipped precisely when the run has been longest. The grant is a
+fact about the run, not a retune of the budget: `max_rounds` in the status JSON
+keeps reporting what the caller passed, a new always-present boolean
+`closing_sweep_granted` records it, and `--resume`'s ceiling guard reads the
+effective ceiling from `.closing-sweep` so the granted round is resumable (in
+step mode it is the *only* way to reach it). Two consequences worth stating
+rather than discovering: on a granted run `rounds` legitimately **exceeds**
+`max_rounds` (the escalation summary renders "6/5 rounds" and means it), and the
+grant is **status-JSON-only** — it is deliberately not copied into the telemetry
+payload, because it is a fact about one run's safety net rather than a
+convergence measure, and `payload.rounds` already carries the extra round.
+
+A **delta round whose scope is empty** is never read as a reviewed round, and
+what the loop does about it splits along **where the panel runs relative to the
+invocation**. With a non-empty `verify-<N>.json` the round is a legitimate
+verification-only round, and **both** wirings re-plan it with `--final` and
+record the **full story diff** as its scope — because in both the round really
+is reviewed against that diff: hook mode's `--review-cmd` runs *after* the
+re-plan, and step mode's session-side panel was told the same by
+`resolve-issue`'s SKILL.md. Recording the delta's empty scope instead would
+contradict what was reviewed and mark the round **blind** — the loop's own
+record would say the panel saw nothing when it saw everything, and every
+downstream reader of that record (the empty-findings marker below, the progress
+tail, a maintainer) would be reasoning about a round that did not happen.
+
+What the two wirings do **not** share is the convergence decision. Hook mode
+adopts `scope_mode: "full"`, so the round may converge. Step mode keeps the
+round a **delta** round: its panel ran before this invocation, so however wide
+its scope was, `scope_mode: "full"` with zero blockers would be the `CONVERGED`
+condition — shipping the previous round's unfixed blockers *and* skipping the
+closing sweep, since `CONVERGED` ends the run. The round is consumed normally,
+its blockers still counted, but it is structurally unable to be the run's last
+word: a clean result promotes the closing full sweep instead. Structural rather
+than a refusal, so it cannot pre-empt the more specific `STALE_FINDINGS`
+findings guards. With nothing carried either, both wirings refuse for the
+simpler reason — no reviewer saw anything.
+
+Per round: run panel (scoped per `scope_mode`) → `scope-findings` (always against
+the **full** story diff) → `consolidate-findings`.
+No blockers on a **full** round ⇒ `CONVERGED`. Otherwise the early-exit escalations fire *before* the
 budget is spent — a surviving conflict ⇒ `ESCALATE_CONFLICT`, a `non_converging`
 blocker (same fingerprint two rounds running) ⇒ `ESCALATE_NO_CONVERGENCE` — else
 feed the blockers-only slice to the fix hook, re-run the gate, and loop. Reaching
@@ -3154,7 +3366,8 @@ type from dispatch ⇒ `ESCALATE_AMBIGUOUS`. Each state is a distinct exit code
 "blockers remain, budget left, fix in-session then `--resume`"; 10 ambiguous;
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
-status JSON (`{status, rounds, max_rounds, promotion_phase, repo_type,
+status JSON (`{status, rounds, max_rounds, promotion_phase,
+closing_sweep_granted, repo_type,
 review_skill, escalation_reasons, history, round_changelists,
 final_changelist}`), where `promotion_phase` (#995) is an **always-present**
 boolean — `true` exactly when the invocation **carried or adopted** a promoted
@@ -3162,11 +3375,72 @@ set, i.e. when it is the promotion sub-loop (a `--resume` that omits `--promote`
 and re-adopts the work-dir's `.promote` records `true` too) — that
 `build-telemetry-record.zsh` copies into the payload so the documented
 convergence metrics can exclude a promotion pass.
-Step mode adds one further exit-2 semantic, `STALE_FINDINGS` (#974): a
-`--findings-file` that is missing/empty on `--resume`, byte-identical to the
-round just consumed, or aliased to the round's own dispatch `findings_path`
-(the internal sink the loop truncates) means the session's panel never ran for
-this round, so the loop refuses it — typed (it writes its own status JSON,
+One further exit-2 semantic, `STALE_FINDINGS` (#974), means the round's panel
+never ran. In step mode it covers a `--findings-file` that is missing/empty on
+`--resume`, byte-identical to the round just consumed, or aliased to the round's
+own dispatch `findings_path` (the internal sink the loop truncates). Since #1434
+it also covers two arms that are **wiring-independent** — they key on the
+round's state rather than on `--findings-file`, so both fire in hook mode: a
+**delta round with an empty scope and nothing carried**, and a **full round
+whose panel produced no findings file at all**. The second additionally fires on
+a fresh run's round 1 — which is always planned `"full"`, so the delta arm
+cannot reach it.
+The second is what makes the panels' own "on a full round, report and write no
+findings file" terminal enforceable: zero blockers on `scope_mode: "full"` is
+the CONVERGED condition, so an absent aggregate must never be read as a clean
+review. Where no `--findings-file` is passed (hook mode, and the loop reading
+`findings_path` itself), the `[]` default survives only on a delta round, which
+cannot converge anyway; in step mode the missing/empty arm refuses it first, on
+every round it can reach.
+
+**A missing aggregate has a second cause the refusal cannot distinguish**, and
+the session — not the loop — owns telling them apart: a panel that *did* run and
+reported the round **FAILED** (a dimension that did not run, a render step that
+failed) deliberately writes no findings file, exactly so the loop refuses rather
+than consolidating a fabricated clean round. The panel's report to its caller is
+the primary signal. The `kubernetes` panel additionally leaves durable detail in
+`<findings-path>.failed.json` — the sidecar convention — and on a loop-driven
+**delta** round that carries nothing it uses that same sidecar to report NOT
+APPLICABLE while still writing `[]` (with a non-empty carry it dispatches with
+the carry, or re-raises what it cannot confirm — see the panel duties above); on
+a loop-driven **full** round it writes nothing, because `[]` with zero blockers
+on `scope_mode: "full"` is the CONVERGED condition. The other
+five panels report a failed round to their caller and write no sidecar, so
+sidecar *absence* proves nothing. `/development:resolve-issue` §3.5 step 2
+carries the consumer-side rule: the session never authors a **review round's**
+findings file. Every `[]` that reaches `--findings-file` is some panel's own
+output. (The promotion sub-loop's *seeded* round 1 is not a counter-example —
+it is never a `[]`, and every item in it was already reported by the blocking
+phase's own panel.) A missing aggregate is either recovered from the panel's
+output, or the panel is re-run and its real aggregate written, or — when the
+panel reported FAILED, or NOT APPLICABLE on a full round — the run stops. A
+session that cannot establish what happened must not resolve the ambiguity by
+writing `[]`: that converges the round on a review nobody performed, and on a
+full round it is the CONVERGED condition itself. Since #1434 the same refusal covers a
+**delta round with an empty scope and nothing carried to verify** — no reviewer
+saw anything there either, and reading such a round as a result is the same
+false green — and it fires in hook mode too, not only step mode. Conversely the
+**byte-identical** arm is waived for a round that follows a round which itself
+found **nothing**: the promoted closing full sweep exists only because the delta
+round before it was clean, so `[]` twice running is the shape of a healthy
+convergence, not evidence of a stale path — and refusing it would make
+convergence unreachable on exactly the runs that went best. The waiver is keyed
+on **all three** facts, never on the sweep marker alone, so it stays exactly as
+wide as its justification: a recorded sweep, the previous round's **consumed**
+findings being `[]`, and that round's **scope** having been non-empty. Consumed
+rather than scoped, because `scope-findings` also empties a round whose panel
+reported plenty but all of it out of diff; and non-empty scope, because
+otherwise "found nothing" is really "saw nothing", and waiving after such a
+round would disarm the guard on the sweep that is the last chance to catch what
+it never saw. (A verification-only round is re-planned to the full diff above,
+so the remaining scope-empty case is a *full* round over a story diff that is
+itself empty.) The fact is persisted as `<work-dir>/.findings-empty-<N>`,
+written beside the round's digest — and a round that is scope-empty **and**
+found nothing records **no digest at all**, since a byte comparison against a
+round whose panel saw nothing carries no information and keeping one would wedge
+the sweep that follows. The missing/empty arm always applies (a panel that found nothing must
+still write `[]`), as does the whole guard on every other round.
+Every arm of the refusal is **typed** (it writes its own status JSON,
 never leaving the prior verdict to be misread) but non-terminal (no telemetry
 record, no progress `**Final:**` line; it does append a `**Refused (round N):**`
 line to `progress.md`), because the caller re-invokes with the round's real
@@ -3251,7 +3525,11 @@ interactive extension (#902): the skill summarizes via `--format summary`,
 offers +3 to the round ceiling / guidance, and resumes the loop via `--resume`;
 only a Stop/decline falls back to the typed comment.
 A grant raises `--max-rounds` by 3 — exactly three more rounds after a
-`BUDGET_EXHAUSTED`, more after an early `ESCALATE_NO_CONVERGENCE`.
+`BUDGET_EXHAUSTED` at the ceiling, more after an early
+`ESCALATE_NO_CONVERGENCE`, and **only two** after a `BUDGET_EXHAUSTED` on a
+granted closing sweep (#1434), which already ran one round past `max_rounds`.
+What a grant *buys* is therefore `new ceiling − rounds already run`: compute
+that remainder and say it, rather than promising a flat three.
 The 5-grant soft cap stays a
 **nudge**, not a hard stop: by the fifth grant the ceiling already stands at
 5 + 5×3 = 20 rounds.

@@ -150,13 +150,114 @@ and Step 3 would write a clean aggregate for a change no agent ever reviewed.
 So do not dispatch: report the round as **failed** (an empty tree after render
 errors) or explicitly **not applicable** (nothing to render at all, or nothing
 in scope rendered) to the caller, with the detail in
-`<findings-path>.failed.json` and **nothing** written to the findings path.
+`<findings-path>.failed.json` and **nothing** written to the findings path —
+except on a loop-driven **delta** round, where the NOT-APPLICABLE half writes
+`[]` instead; see *On a loop-driven DELTA round* below. The FAILED half is
+unchanged on every round.
 
 **The second shape applies only when a changed-file list exists.** On a
 standalone run there is none, so "no document maps back to any changed file" is
 vacuously true — read literally it would report *every* standalone run as not
 applicable and dispatch nobody, a review command that never reviews. In that
 mode only the empty-tree shape gates: a non-empty tree always dispatches.
+
+**The no-argument fallback is for a standalone invocation only.** When the
+**review loop** drives this panel (`/development:resolve-issue` §3.5), the scope
+it hands you is a round's `changed_files` — and from round 2 on that is the
+*delta* since the previous round, which can legitimately be empty (#1434). An
+empty scope from the loop is never a licence to review the whole temp tree: that
+is exactly the independent-repeat behaviour delta scoping removes, and the
+in-diff findings it produced would be consolidated as the round's result. The
+loop's caller is required to re-plan or stop rather than run a panel over an
+empty delta, so if you are invoked by the loop with nothing in scope, say so and
+review nothing — but still write `[]` to this round's findings file **when the
+round is a delta round** — an instance of the delta rule below, carry
+precondition included, not a competing one. An empty scope on a **full** round
+means the *story diff itself* is empty and is decided by the FULL paragraph
+below instead.
+
+**On a loop-driven DELTA round that carries NOTHING, every NOT-APPLICABLE shape
+writes `[]`** — not just the empty scope. Scoping the carve-out to the empty
+delta alone leaves the commonest delta shape uncovered: a round whose delta is
+*non-empty* but maps back to no rendered document, because the previous round's
+fix pass edited only a README, a workflow, or a doc page. Nothing that deploys
+moved **since the previous round**, so all three not-applicable shapes (an empty
+scope, nothing to render at all, nothing in scope rendered) write `[]` to the
+findings path and put the detail in `<findings-path>.failed.json`. A panel that
+writes no file at all is refused as `STALE_FINDINGS`, so the round cannot be
+consumed at all — and one of the driving session's recovery arms is to re-run
+this same panel over this same scope, which reproduces the same verdict. And `[]`
+costs nothing there: the loop cannot converge on a delta round, so at worst it
+promotes the closing sweep.
+
+**"Carries nothing" is a precondition, not a detail — check it before you write
+`[]`.** The plan's `fix_verification_path` names the previous round's blockers,
+and a delta round claims two things, not one: that nothing deploy-relevant moved
+since the previous round, *and* that the previous round's fixes landed. The
+carve-out covers only the first. So when the plan names a `fix_verification_path`
+holding **at least one** entry, this round is never a bare `[]` — the gate fires
+before dispatch, so writing one would retire those blockers without a single
+agent confirming them, and the loop would then record `verify-<R+1>.json` as
+`[]`, dropping the carry chain for good and narrating the carried blockers as
+fixed. Instead, either **dispatch the agents anyway** with the carry (the tree
+renders; they can confirm the carried fixes against the source files named in
+each entry, which is what the carry duty already asks of them), or write a
+findings array that **re-raises every carried blocker you could not confirm, at
+its original severity, citing the carried entry**. `[]` is correct when the carry is
+`[]`, and also when you dispatched with the carry and the agents positively
+confirmed every carried entry landed while finding nothing new. The rule forbids
+a `[]` that skipped the verification, not one that passed it.
+
+**Report the count whenever the carry is non-empty** — `say in your report that
+you confirmed N carried entries` — **whatever you write to the findings file**,
+`[]` or otherwise. A round that confirms the carry and *also* finds new blockers
+still owes it; omitting it is treated as a failed round.
+
+**A `null` or unreadable carry on a round ≥ 2 is a caller slip, not an empty
+carry.** Read it from the plan's `fix_verification_path` **or, in hook mode,
+from `$REVIEW_FIX_VERIFICATION`** (`$REVIEW_ADJUDICATED` carries the waived
+list) — a hook-mode panel sees no dispatch descriptor at all, so treating a
+null `fix_verification_path` as decisive there would declare every hook-mode
+round's carry absent when the loop had in fact passed one. The terminal fires
+only when **neither** names a readable carry; then it means
+`--fix-verification` was omitted, an easy and silent slip. You cannot enumerate what to re-raise and have no entry to
+cite, so do not write `[]` and do not write a findings file at all: report to
+the caller that the carry path was absent or unreadable and that the round could
+not be verified, naming `--fix-verification` as what to fix (the detail goes in
+`<findings-path>.failed.json`, as for any failed round). Absence of the carry is never
+evidence of an empty one.
+
+**On a loop-driven FULL round the terminal stands as written — for all THREE
+not-applicable shapes, the empty scope included.** Read the round's `scope_mode`
+from the dispatch descriptor rather than inferring it — `"delta"` selects the
+paragraph above, `"full"` this one; in hook mode the same value arrives as
+`$REVIEW_SCOPE_MODE`. A full round whose scope is empty means the story diff
+itself is empty, which is not a clean review of anything. (`"full"` is round 1, a `--final` re-plan, and
+the promoted closing sweep, but that enumeration is the gloss, not the test.) Write **nothing** to the
+findings path, name the cause in `<findings-path>.failed.json`, and report
+not-applicable to the caller. `[]` on a full round is not a clean delta: zero
+blockers on `scope_mode: "full"` is exactly the loop's CONVERGED condition, so a
+story whose diff touches only an excluded chart's `values.yaml` would converge
+and open a PR with **no manifest reviewed at all** — verbatim the outcome this
+gate exists to block. The unbounded-loop worry does not apply here either:
+`/development:resolve-issue` §3.5 step 2 carries a **not-applicable-on-a-full-round**
+recovery arm of its own, separate from the FAILED one — it says the verdict is
+not fixable, forbids re-running the panel, and names the forward path (report;
+autonomous, stop; interactive, three explicit options). That list has one home;
+read it there rather than from this restatement.
+
+Note also what shapes 2 and 3 actually establish. An empty scope (shape 1) is
+positive knowledge that nothing changed; "nothing to render" and "nothing in
+scope rendered" only mean the change produced nothing **this panel can see** —
+absence of evidence. That is a fair basis for "no manifest moved since last
+round" and not for "the story's manifests are clean".
+
+**A FAILED round keeps the terminal on every round, delta or full**: an empty
+temp tree *after render errors*, or a dimension that failed twice, means the
+round did not review what it was supposed to. Write **nothing** to the findings
+path, name the cause in `<findings-path>.failed.json`, and report the round as
+failed. `[]` there would be a fabricated clean round over a dimension nobody
+ran, and the loop would consolidate it as the round's real result.
 
 **Scope.** `$ARGUMENTS` names the review scope; with no argument, review every
 file **in the temp tree** — rendered output *and* the standalone manifests
@@ -220,8 +321,24 @@ kustomize output. Say so explicitly when you pass
 changed-file rule as absolute in that mode withholds every finding it has, which
 is the same silent loss by the opposite route.
 
+When the **review loop** drives this panel from round 2 on, its dispatch plan
+also carries two paths — `fix_verification_path` and `adjudicated_path` — and
+the reviewers must be told about both. They are the point of a delta round, not
+decoration: the first is the only way a fix that silently did not land gets
+re-raised (a delta round cannot re-derive it), and the second is what stops the
+panel re-litigating what the human already waived. Bind the two extra
+placeholders below, filling each line only when the plan names a **non-null**
+path for it — that one test covers both cases you would otherwise reason about
+separately: a standalone run has no descriptor at all, and on round 1 the loop's
+own caller passes no `--fix-verification`. (Don't read it as "omit both on round 1": the
+loop's own `plan` call passes `--adjudicated` on every round, so a loop-side
+descriptor may name it from round 1. The driving session's round-1 plan does
+not — and either way the non-null test gives the right answer.)
+
 For each agent, use its name as the `subagent_type` and pass the prompt below,
-substituting **all seven** placeholders: `{SCOPE}` (the scope above),
+substituting **all seven** placeholders, plus one line per **non-null** carry
+path the plan names (up to nine on a loop-driven round ≥ 2):
+`{SCOPE}` (the scope above),
 `{DIMENSION}` and `{AGENT NAME}` from the table, `{ROUND}` (the review
 round; `1` for a standalone run), `{RENDER MAP}` (the path to the
 `render-map.json` the render step wrote), `{REPO}` (the **source repository
@@ -243,6 +360,8 @@ wired in once, for every agent, so the reviewer definitions stay pure prose:
     Source repository root: {REPO}
     Rendered-to-source map: {RENDER MAP}
     Changed source files in scope: {CHANGED FILES}
+    Fix verification (round >= 2): {FIX VERIFICATION} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new, and re-raise any you cannot confirm at its ORIGINAL severity, citing the carried entry — even when its file is outside this round's scope. Say in your report how many of them you confirmed landed, whatever else you find.
+    Already waived (round >= 2): {ADJUDICATED} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a full/closing-sweep round no file qualifies, so withhold them). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 
     Analyze the rendered manifests in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 

@@ -11,7 +11,8 @@
 #
 # Input: the round's aggregate findings JSON (issue #558 schema — a flat array
 # of finding objects). Output on stdout: one changelist JSON:
-#   { round, summary{critical,high,low,blocking,conflicts,false_trips},
+#   { round, summary{critical,high,low,blocking,conflicts,false_trips,
+#                     adjudicated_dropped},
 #     blocking[], suggestions[], conflicts[], non_converging, false_trips[],
 #     escalation_reasons[] }  (each blocking[] item also carries false_trip:bool,
 #     and promoted:true when the overlay raised it — #995)
@@ -57,9 +58,30 @@
 #     reason; false_trips are counted in the summary and surfaced for the loop to
 #     record.
 #
+#   - Adjudicated re-raises (#1434): with --adjudicated, a Low finding that
+#     re-states a suggestion an EARLIER round already surfaced and waived is
+#     dropped instead of being logged again. Three guards, ALL required —
+#     narrow on purpose, because the cost of over-dropping is a real defect
+#     silently deleted, while the cost of under-dropping is one more logged
+#     suggestion that never blocked anything:
+#       1. the #983 matcher, reused — gather on [file, dimension] + line
+#          proximity (LINEWIN, a null line a wildcard), verdict on the
+#          `normtitle` EXACT arm ONLY. Never the shared-token or tokenless arms:
+#          those exist to fail TOWARD the human on a possible survivor, and the
+#          same leniency here would delete findings on a single shared word;
+#       2. the incoming finding is itself Low — a re-raise at WARNING or
+#          CRITICAL is never suppressed, whatever an earlier round waived;
+#       3. the entry is still valid, which the LOOP enforces by removing every
+#          adjudication whose file the last fix pass touched before calling this.
+#     The drop runs AFTER the #994 promotion overlay and BEFORE the conflict /
+#     non-convergence classification, so a human-promoted item (now WARNING) is
+#     structurally ineligible by guard 2 rather than by a special case.
+#     `summary.adjudicated_dropped` is ALWAYS present (0 without the flag), so a
+#     consumer never has to tell "no drops" from "an older changelist".
+#
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
-#                            [--promote FILE]
+#                            [--promote FILE] [--adjudicated FILE]
 #     --findings  aggregate findings JSON for THIS round (required)
 #     --round     round number (default 1)
 #     --prev      previous round's changelist JSON (this script's own output);
@@ -67,13 +89,18 @@
 #     --promote   JSON array of identity keys {file, line, dimension, title}
 #                 (#994) — the human-selected waived suggestions to raise to
 #                 blocking for this round. Omitted outside a promotion sub-loop.
+#     --adjudicated  JSON array of the same identity keys (#1434) — the Low
+#                 findings prior rounds already surfaced and waived. MAY be
+#                 empty (`[]`): an early round legitimately has nothing waived
+#                 yet, unlike --promote, where an empty selection is contracted
+#                 to skip the sub-loop entirely.
 #
 # Exit codes: 0 ok · 2 usage error · 1 internal (unreadable / invalid JSON)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE]"
+local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE]"
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake that this script used to turn into the wrong failure. Under `nounset`
@@ -98,13 +125,14 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
     print -u2 -- "consolidate-findings: $1 requires a non-empty value"; exit 2 }
 }
 
-local findings="" round=1 prev="" promote=""
+local findings="" round=1 prev="" promote="" adjudicated=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --findings) _need_val "$1" $# "${2:-}"; findings="$2"; shift 2 ;;
   --round) _need_val "$1" $# "${2:-}"; round="$2"; shift 2 ;;
   --prev) _need_val "$1" $# "${2:-}"; prev="$2"; shift 2 ;;
   --promote) _need_val "$1" $# "${2:-}"; promote="$2"; shift 2 ;;
+  --adjudicated) _need_val "$1" $# "${2:-}"; adjudicated="$2"; shift 2 ;;
   -h|--help) print -r -- "$usage"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -185,6 +213,43 @@ if [[ -n "$promote" ]]; then
   # --argjson either (the failure mode above, arrived at by a different road)
   [[ -n "$promote_json" ]] || {
     print -u2 -- "consolidate-findings: --promote file yielded no JSON value: $promote"; exit 1 }
+fi
+
+# The adjudicated list (#1434) defaults to [] so the drop rule is a provable
+# no-op without the flag — the same byte-identity discipline --promote follows,
+# and the reason `adjudicated_dropped` is the ONLY output difference a run
+# without the flag sees. Every refusal below mirrors --promote's, for the same
+# reasons (an unchecked bad file aborts the MAIN jq and gets relabelled "invalid
+# findings JSON", sending the caller to the wrong input) — with ONE deliberate
+# divergence: an EMPTY array is accepted here. Rounds 1-2 of a real run routinely
+# have nothing waived yet, so refusing `[]` would make the loop choose between
+# omitting the flag on some rounds and failing on others.
+local adjudicated_json='[]'
+if [[ -n "$adjudicated" ]]; then
+  # `-s` alone is true for a directory, which would fail inside jq with "Is a
+  # directory" and be relabelled a content problem
+  [[ -f "$adjudicated" && -s "$adjudicated" ]] || {
+    print -u2 -- "consolidate-findings: --adjudicated must be a non-empty regular file: $adjudicated"; exit 1 }
+  # element shape, not just container: `["a title"]` would pass a bare
+  # `type == "array"` test and then abort the main jq at `.file` on a string.
+  # `file`/`dimension` are compared for EQUALITY so an empty one is meaningless;
+  # `title` must be a string but may be empty (the exact arm below refuses to
+  # match on an empty normalized title anyway, so such an entry is inert rather
+  # than a file-wide suppressor); `line` is the one optional member.
+  adjudicated_json=$(jq -c 'if (type == "array")
+                              and (all(.[]; type == "object"
+                                    and (.file | type == "string" and length > 0)
+                                    and (.dimension | type == "string" and length > 0)
+                                    and (.title | type == "string")))
+                           then . else error("adjudicated input is not an array of identity-key objects") end' \
+    -- "$adjudicated") || {
+    print -u2 -- "consolidate-findings: --adjudicated file unreadable, or not a JSON array of objects with non-empty file and dimension and a string title: $adjudicated"; exit 1 }
+  # a file holding two concatenated arrays (>> instead of >) makes jq emit two
+  # lines, which --argjson would reject inside the MAIN jq and blame on findings
+  [[ "$adjudicated_json" != *$'\n'* ]] || {
+    print -u2 -- "consolidate-findings: --adjudicated file must hold exactly ONE JSON array: $adjudicated"; exit 1 }
+  [[ -n "$adjudicated_json" ]] || {
+    print -u2 -- "consolidate-findings: --adjudicated file yielded no JSON value: $adjudicated"; exit 1 }
 fi
 
 local -r PROG='
@@ -354,6 +419,43 @@ def nearest($c): sort_by(
           end)
     | .its ) as $items
 
+# ADJUDICATED RE-RAISE DROP (#1434) — a Low that an earlier round already
+# surfaced and the human already let go. Placed HERE deliberately: after the
+# promotion overlay (so a human-promoted item is WARNING by now and fails guard 2
+# structurally — no special case, and no ordering hazard if the overlay changes)
+# and before conflicts / non-convergence (so a dropped item cannot go on to seed
+# a conflict pair or a carried-blocker match, which would resurrect through a
+# side door what the drop just removed).
+#
+# NB: no apostrophes in this block — the jq program is single-quoted.
+# The verdict uses the EXACT arm of the #983 matcher only. Its other two arms — a shared
+# significant token, and a tokenless side — exist to fail TOWARD the human when a
+# blocker MIGHT be a reworded survivor. Suppression is the opposite direction:
+# here a false match deletes a genuine new finding, so only an exact normalized
+# title counts, and an entry with an EMPTY normalized title matches nothing at
+# all rather than silencing every untitled finding in its file+dimension.
+#
+# Selection is by POSITION, the same idiom the promote overlay uses for its
+# claimed set: an identity-key rebuild would have to re-derive a key that dedup
+# already made unique, and `index` on an ARRAY argument is a subsequence search
+# in jq, not a membership test — a trap this file must not set for its next
+# editor. Positions also leave `$items` itself untouched, which is what keeps a
+# run without the flag byte-identical apart from the new count.
+| ( [ $items | to_entries[]
+      | select(.value.priority == "Low")
+      | .value as $it
+      | select([ $adjudicated[]
+                 | select((($it.title | normtitle) != "")
+                     and (((.title // "") | normtitle) == ($it.title | normtitle))
+                     and (((.file // "") | normfile) == $it.file)
+                     and (((.dimension // "") | tostring) == $it.dimension)
+                     and line_near((.line | normline); $it.line)) ] | length > 0)
+      | .key ] ) as $adj_idx
+| ( $adj_idx | length ) as $adj_dropped
+| ( [ $items | to_entries[]
+      | select(.key as $i | ($adj_idx | index($i)) == null)
+      | .value ] ) as $items
+
 # conflicts: co-located, opposite-direction dimensions (performance vs code_quality)
 | ( $items | group_by([.file, (.line|tostring)]) | map(
       select( (length >= 2)
@@ -444,7 +546,12 @@ def nearest($c): sort_by(
       low: ($low | length),
       blocking: ($blocking | length),
       conflicts: ($conflicts | length),
-      false_trips: ($ftrips | length)
+      false_trips: ($ftrips | length),
+      # ALWAYS present (#1434) — 0 without --adjudicated. A consumer must never
+      # have to tell "this round dropped nothing" from "this changelist predates
+      # the key", which is the same argument promotion_phase carries in the
+      # status JSON.
+      adjudicated_dropped: $adj_dropped
     },
     blocking: $blocking,
     suggestions: $low,
@@ -459,6 +566,7 @@ def nearest($c): sort_by(
 '
 
 jq -c --argjson round "$round" --argjson prev "$prev_json" --argjson promote "$promote_json" \
+  --argjson adjudicated "$adjudicated_json" \
   "$PROG" -- "$findings" || {
   print -u2 -- "consolidate-findings: invalid findings JSON: $findings"; exit 1
 }

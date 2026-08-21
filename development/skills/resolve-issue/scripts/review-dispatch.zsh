@@ -15,10 +15,46 @@
 #   - an unsupported/ambiguous repo type is a TYPED error the orchestrator
 #     surfaces as an escalation instead of crashing.
 #
+# Round 1 reviews the whole story diff; every round after it is an ITERATION on
+# the previous one (#1434), not an independent repeat. `--prior-tree` names the
+# working-tree identity the PREVIOUS round's reviewers saw (git-tree-id.zsh), so
+# an intermediate round's scope is exactly what that round's fix pass changed —
+# and `--final` marks the run's CLOSING FULL SWEEP, the one round after round 1
+# that is scoped to the whole story diff again, so a defect only visible in the
+# interaction between rounds can never ride out unseen. The loop owns WHEN a
+# closing sweep happens (that rule moves with each human grant); this script owns
+# only the one descriptor value that decides the scope.
+#
 # Subcommands:
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
+#        [--final] [--prior-tree TREE_ID] [--fix-verification PATH]
+#        [--adjudicated PATH]
 #       Emit the dispatch descriptor JSON on stdout:
-#         { repo_type, review_skill, round, base, findings_path, changed_files[] }
+#         { repo_type, review_skill, round, base, findings_path, changed_files[],
+#           scope_mode, scope_empty, prior_tree, delta_files,
+#           fix_verification_path, adjudicated_path }
+#       scope_mode is "full" when `round <= 1 || --final`, else "delta" — `<= 1`
+#       because `--round` is contracted as any NON-NEGATIVE integer, and there is
+#       no round 0 to iterate on.
+#       changed_files keeps its meaning as THE REVIEW SCOPE: the full diff
+#       against --base on a full round, and exactly delta_files on a delta one.
+#       delta_files is everything differing from --prior-tree — computed whenever
+#       the flag is given, INCLUDING on a full round, because the loop needs it to
+#       invalidate adjudications whose file the last fix pass touched.
+#       scope_empty is `changed_files == []`; it is always present, and it exists
+#       for CALLERS — the driving session plans its own panel and must know a
+#       delta came back empty BEFORE it spawns reviewers. The loop deliberately
+#       does NOT read it: it judges emptiness on the scope file it has already
+#       written, after the .review/ + work-dir filtering, which is a strict
+#       superset (a repo-internal --work-dir puts the loop's own state inside
+#       every delta, so this field would say non-empty while the panel is handed
+#       nothing). Round 1's existing "a scope that is ONLY artifacts yields empty
+#       changed_files, not an error" behaviour stands either way.
+#       --fix-verification / --adjudicated are echoed through as
+#       fix_verification_path / adjudicated_path (null when absent) — this script
+#       never reads either file; the loop writes them and the reviewers consume
+#       them. `--max-rounds` is deliberately NOT a flag here: finality is the
+#       loop's rule, and duplicating the ceiling would mean two places to change.
 #       repo_type ∈ {swift, python, java, go, claude-plugin, kubernetes};
 #       review_skill is the
 #       review skill the orchestrator invokes (development-<repo_type>:review),
@@ -48,17 +84,23 @@
 #                     JSON, at least the `.languages` array; `.is_claude_plugin`
 #                     and `.is_kubernetes` are read with a false default when
 #                     absent).
-#   GIT_BIN           overrides the `git` binary.
+#   GIT_BIN           overrides the `git` binary. It is also handed to
+#                     git-tree-id.zsh (as its own GIT_TREE_ID_BIN seam) when the
+#                     delta is computed, so ONE override covers every git call.
 #
 # Exit codes:
 #   0  success — descriptor (plan) or filtered array (scope-findings) on stdout
 #   2  usage error — an unknown flag or subcommand, a value-taking flag with no
-#      value, or a `--round` that is not a non-negative integer. Every one of
-#      these is checked at PARSE time, so the message names the flag rather than
-#      surfacing later as a zsh nounset abort or a jq --argjson parse error.
+#      value, a `--round` that is not a non-negative integer, or a `--round > 1`
+#      carrying neither `--final` nor `--prior-tree` (there is no silent fallback
+#      to the full diff: a round that cannot say what it is iterating on has no
+#      scope). Every one of these is checked at PARSE time, so the message names
+#      the flag rather than surfacing later as a zsh nounset abort or a jq
+#      --argjson parse error.
 #   3  typed escalation — unsupported or ambiguous repo type; a JSON error object
 #      { error, ... } is printed on stdout for the orchestrator to relay
-#   1  internal error — detect-stack / git / jq failed, or `--repo` names
+#   1  internal error — detect-stack / git / jq failed, a `--prior-tree` that
+#      does not resolve to a tree-ish in the repo, or `--repo` names
 #      something unusable (absent, not a directory, not readable/traversable).
 #      Note the split from 2: a MISSING `--repo` is a usage error (2), a `--repo`
 #      that is present but unusable is this one, because the invocation was
@@ -70,6 +112,10 @@ setopt nounset pipefail
 local self_dir="${0:A:h}"
 local detect_bin="${DETECT_STACK_BIN:-${self_dir}/../../bootstrap/scripts/detect-stack.sh}"
 local git_bin="${GIT_BIN:-git}"
+# The delta is computed against the SAME working-tree identity the loop persists
+# per round (#981/#1434), so the two must be one implementation — hence the
+# sibling script rather than a second inlined `write-tree` here.
+local tree_id_bin="${self_dir}/git-tree-id.zsh"
 
 die_usage() { print -u2 -- "$1"; exit 2 }
 
@@ -78,8 +124,23 @@ die_usage() { print -u2 -- "$1"; exit 2 }
 # and $3 its value — present only when the caller supplied one. Without this,
 # `setopt nounset` turns a trailing `--round` into a raw abort (exit 1) instead
 # of the exit-2 usage path the header documents.
+# Three shapes, not one — the contract both sibling scripts (`_need_val` in
+# resolve-story-loop.zsh and consolidate-findings.zsh) have carried for a while,
+# and which this one was missing. #1434 routed three new value flags through
+# here, and the gap bites hardest on them:
+#   * a FLAG-SHAPED value, the realistic unquoted `--prior-tree $VAR` with VAR
+#     unset, assigns the NEXT flag as the value. `--prior-tree --final` then
+#     swallows `--final`, so the round is planned as a delta and
+#     `_verify_prior_tree` fails with "does not resolve to a tree: --final" —
+#     exit 1 (internal error) with a confidently wrong cause, where a malformed
+#     invocation is contracted as exit 2;
+#   * an EXPLICITLY EMPTY value reads downstream as "flag omitted" at exit 0:
+#     `--fix-verification ""` / `--adjudicated ""` emit a null path, so the
+#     round's panel silently gets no carry and no waived list.
 need_value() {
   (( $# >= 3 )) || die_usage "$1: $2 requires a value"
+  [[ "$3" != --* ]] || die_usage "$1: $2 requires a value (got the flag $3)"
+  [[ -n "$3" ]] || die_usage "$1: $2 requires a non-empty value"
 }
 
 # --- repo-relative changed files = the story's diff -------------------------
@@ -95,6 +156,16 @@ need_value() {
 # too — runtime JSONL is never review scope. sed (not grep -v) so an
 # all-artifact scope yields empty output with exit 0 under pipefail, not a
 # pipeline failure.
+#
+# The normalisation + exclusion half is factored out because the DELTA scope
+# (#1434) must go through the very same rules: one file-listing path, so a
+# `.review/` artifact excluded from a full round can never sneak into a delta
+# round, and a `./`-prefixed spelling can never make the two disagree.
+_normalise_paths() {
+  sed -E 's#^\./##' | sort -u \
+    | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d'
+}
+
 _changed_files() {
   local repo="$1" base="$2"
   # A failed diff or ls-files must FAIL the scope computation (#910) — the old
@@ -104,8 +175,36 @@ _changed_files() {
   {
     "$git_bin" -C "$repo" diff --name-only "$base" -- || return 1
     "$git_bin" -C "$repo" ls-files --others --exclude-standard || return 1
-  } | sed -E 's#^\./##' | sort -u \
-    | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d'
+  } | _normalise_paths
+}
+
+# --- the delta since the previous round's tree (#1434) ----------------------
+# Everything differing between --prior-tree and the CURRENT working tree. Both
+# sides are `git add -A` trees (git-tree-id.zsh), so tracked edits, deletions and
+# untracked additions are compared by one uniform rule — where `git diff <tree>`
+# would see only what the index knows and mis-report a file that was untracked at
+# the prior identity. Prior-tree resolvability is validated up front by
+# _verify_prior_tree, so a failure here is a genuine git/identity error and must
+# FAIL the scope rather than degrade to an empty delta (the #910 rule: an empty
+# scope the loop would happily converge on is the worst possible fallback).
+_delta_files() {
+  local repo="$1" prior="$2" cur=""
+  [[ -x "$tree_id_bin" ]] || {
+    print -u2 -- "review-dispatch: cannot compute the delta — $tree_id_bin is missing or not executable"
+    return 1
+  }
+  cur=$(GIT_TREE_ID_BIN="$git_bin" "$tree_id_bin" "$repo") || {
+    print -u2 -- "review-dispatch: could not compute the current working-tree identity for $repo"
+    return 1
+  }
+  [[ -n "$cur" ]] || {
+    print -u2 -- "review-dispatch: the current working-tree identity for $repo came back empty"
+    return 1
+  }
+  # same normalisation + #909 exclusions as the full scope — `pipefail` is set,
+  # so a failing diff-tree still fails the function rather than yielding an
+  # empty delta
+  "$git_bin" -C "$repo" diff-tree -r --name-only "$prior" "$cur" | _normalise_paths
 }
 
 # --- base ref must resolve before it scopes anything (#910) -----------------
@@ -121,6 +220,22 @@ _verify_base() {
   }
   "$git_bin" -C "$repo" rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&1 || {
     print -u2 -- "review-dispatch: --base does not resolve to a commit in $repo: $base"
+    return 1
+  }
+}
+
+# --- prior tree must resolve before it scopes anything (#1434) --------------
+# Exactly _verify_base's argument, one round later: an unresolvable --prior-tree
+# (a truncated id, a tree gc'd out of a foreign object DB, a work-dir carried to
+# another clone) must be a fast, NAMED failure. Degrading to the full diff would
+# silently turn every intermediate round back into an independent repeat, and
+# degrading to an empty delta would let the loop converge on code no panel saw.
+# `^{tree}` deliberately, not `^{commit}`: the identity the loop persists is a
+# tree, and a commit-ish is accepted only because it peels to one.
+_verify_prior_tree() {
+  local repo="$1" prior="$2"
+  "$git_bin" -C "$repo" rev-parse --verify --quiet "${prior}^{tree}" >/dev/null 2>&1 || {
+    print -u2 -- "review-dispatch: --prior-tree does not resolve to a tree in $repo: $prior"
     return 1
   }
 }
@@ -173,6 +288,12 @@ _primary() {
 
 cmd_plan() {
   local repo="" base="origin/main" round=1 findings_path=""
+  # `prior_tree_given` tracks PRESENCE, separately from the value. The blank
+  # check below cannot be written against the value alone: `--prior-tree ""` —
+  # the realistic `--prior-tree "$(<tree-1.txt)"` with the file absent — is
+  # indistinguishable from "flag omitted" once assigned, and would be waved
+  # through, which is precisely the shape the check exists to catch.
+  local final=0 prior_tree="" prior_tree_given=0 fix_verification="" adjudicated=""
   while [[ $# -gt 0 ]]; do
     # `need_value` BEFORE the assignment (#1177): this script runs under
     # `setopt nounset`, so a value-taking flag in last position made `"$2"` a raw
@@ -189,7 +310,16 @@ cmd_plan() {
     # surfacing as an unexplained failure at the very END of a successful plan,
     # long after the typo that caused it.
     --round) need_value "plan" "$@"
-             [[ "$2" == <-> ]] || die_usage "plan: --round must be a non-negative integer: $2"
+             # WIDTH too, not just the character class — the sibling value
+             # flags all carry the cap (`--issue`, `--max-rounds`,
+             # consolidate's own `--round`). zsh arithmetic is 64-bit, so a
+             # 20-digit value WRAPS to a negative round in the normalisation
+             # below: `scope_mode` is then forced "full" by the `round <= 1`
+             # test — a caller asking for a delta silently gets the whole
+             # story diff — and the default sink becomes
+             # `findings-round--7766279631452241920.json`.
+             [[ "$2" == <-> ]] && [[ ${#2} -le 18 ]] || \
+               die_usage "plan: --round must be a non-negative integer of at most 18 digits: $2"
              # NORMALISE, don't just accept: `007` is a non-negative integer and
              # passes the pattern, but it is not valid JSON, so `--argjson round
              # 007` below would fail with jq's exit 5 at the very end of an
@@ -200,6 +330,15 @@ cmd_plan() {
              # colliding artifact path for round 7.
              round=$(( $2 )); shift 2 ;;
     --findings-path) need_value "plan" "$@"; findings_path="$2"; shift 2 ;;
+    # --final is a BOOLEAN — the loop's "this is the closing full sweep" signal.
+    # No value, so it never goes through need_value.
+    --final) final=1; shift ;;
+    --prior-tree) need_value "plan" "$@"; prior_tree="$2"; prior_tree_given=1; shift 2 ;;
+    # Echoed through, never read here: the loop writes both files and the
+    # reviewers consume them. Keeping them in the descriptor is what lets one
+    # value (the plan) carry everything a round's panel needs.
+    --fix-verification) need_value "plan" "$@"; fix_verification="$2"; shift 2 ;;
+    --adjudicated) need_value "plan" "$@"; adjudicated="$2"; shift 2 ;;
     -*) die_usage "plan: unknown flag: $1" ;;
     *) die_usage "plan: unexpected argument: $1" ;;
     esac
@@ -220,8 +359,32 @@ cmd_plan() {
   # is already unambiguous — and rewriting them all put a doubled prefix into the
   # emitted `findings_path` for the ordinary `--repo .` (which `./*` never
   # matched), a descriptor field the orchestrator consumes and hands back.
+  # An EXPLICIT empty value is the one shape `need_value`'s arg-count check
+  # cannot see, and it is the realistic `--prior-tree "$(<tree-1.txt)"` with the
+  # file absent. Left alone it reads downstream as "flag omitted": harmless on a
+  # --final round (the scope is the full diff either way) but it would silently
+  # drop delta_files, and the loop's adjudication invalidation reads exactly that
+  # field — so an adjudicated suggestion whose file the last fix pass touched
+  # would stay suppressed. Name it instead.
+  #
+  # Keyed on PRESENCE, not on the value: a `[[ -z "$prior_tree" || … ]]` test
+  # short-circuits on its first operand for the empty string, so it would accept
+  # the very shape the paragraph above says it exists to catch and refuse only a
+  # whitespace-ONLY value — the one spelling no caller produces.
+  (( ! prior_tree_given )) || [[ -n "${prior_tree//[[:space:]]/}" ]] || \
+    die_usage "plan: --prior-tree requires a non-blank value"
+  # A round after the first is an ITERATION (#1434): it must say what it is
+  # iterating on, or declare itself the closing full sweep. There is deliberately
+  # no fallback to the full diff — that fallback IS the defect this story fixes,
+  # and it would be invisible (a full-diff round emitting scope_mode "delta").
+  if (( round > 1 && ! final )) && [[ -z "$prior_tree" ]]; then
+    die_usage "plan: --round $round needs --prior-tree (the previous round's tree identity), or --final for the closing full sweep"
+  fi
   if [[ "$repo" == -* ]]; then repo="./$repo"; fi
   _verify_base "$repo" "$base" || exit 1
+  # next to _verify_base, and BEFORE anything is scoped — the whole point is that
+  # an unresolvable identity never reaches a scope computation
+  [[ -z "$prior_tree" ]] || _verify_prior_tree "$repo" "$prior_tree" || exit 1
 
   local detect_json; detect_json=$(_detect_json "$repo") || exit 1
   # All three reads CHECK jq's status (#1177), like the `lang_count` read below.
@@ -345,10 +508,35 @@ cmd_plan() {
 
   [[ -n "$findings_path" ]] || findings_path="${repo%/}/.review/findings-round-${round}.json"
 
-  local changed_json
-  changed_json=$(_changed_files "$repo" "$base" | jq -R . | jq -sc .) || {
+  local full_json
+  full_json=$(_changed_files "$repo" "$base" | jq -R . | jq -sc .) || {
     print -u2 -- "plan: could not compute changed files"; exit 1
   }
+
+  # The delta is computed whenever --prior-tree is given, INCLUDING on a full
+  # round: `changed_files` is then still the whole story diff, but the loop reads
+  # delta_files to decide which adjudications the last fix pass invalidated, and
+  # the closing sweep is exactly a full round that must still do that.
+  local delta_json='null'
+  if [[ -n "$prior_tree" ]]; then
+    delta_json=$(_delta_files "$repo" "$prior_tree" | jq -R . | jq -sc .) || {
+      print -u2 -- "plan: could not compute the delta against --prior-tree: $prior_tree"; exit 1
+    }
+  fi
+
+  # ONE descriptor value decides the scope, so it is testable on its own and the
+  # loop's finality rule (which moves with every human grant) stays in the loop.
+  # `round <= 1`, not `round == 1`: `--round` is contracted as any NON-NEGATIVE
+  # integer, so 0 is legal, and it satisfies neither `== 1` nor `--final`. It
+  # would then be scoped "delta" with no `--prior-tree` required (that guard
+  # fires only for `round > 1`), and `changed_files` would take delta_json's
+  # `null` default — an emitted descriptor whose review scope is not an array,
+  # which the contract says it always is. There is no round 0 to iterate on, so
+  # the full scope is the only meaning it can have.
+  local scope_mode="delta"
+  (( round <= 1 || final )) && scope_mode="full"
+  local changed_json="$full_json"
+  [[ "$scope_mode" == "delta" ]] && changed_json="$delta_json"
 
   # the descriptor emitter is checked like every other jq call (#1177). It is the
   # last command of the last function, so an unchecked failure would leave jq's
@@ -361,8 +549,19 @@ cmd_plan() {
     --arg base "$base" \
     --arg findings_path "$findings_path" \
     --argjson changed "$changed_json" \
+    --arg scope_mode "$scope_mode" \
+    --arg prior_tree "$prior_tree" \
+    --argjson delta "$delta_json" \
+    --arg fixver "$fix_verification" \
+    --arg adjud "$adjudicated" \
     '{repo_type:$repo_type, review_skill:$review_skill, round:$round, base:$base,
-      findings_path:$findings_path, changed_files:$changed}' || {
+      findings_path:$findings_path, changed_files:$changed,
+      scope_mode:$scope_mode,
+      scope_empty:(($changed | length) == 0),
+      prior_tree:(if $prior_tree=="" then null else $prior_tree end),
+      delta_files:$delta,
+      fix_verification_path:(if $fixver=="" then null else $fixver end),
+      adjudicated_path:(if $adjud=="" then null else $adjud end)}' || {
     print -u2 -- "plan: could not emit the dispatch descriptor"; exit 1
   }
 }
