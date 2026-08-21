@@ -97,8 +97,9 @@ Establishes the ownership boundary before anything fills it. Child #1151.
 **Interfaces:**
 
 - Produces: plugin name `development-kubernetes` — the identity every later
-  task references. Version `0.3.0` as of #1153 (Task 5) — this line moves with
-  the manifest blocks below. Every later task references this name.
+  task references. For the version, the manifest blocks below are authoritative —
+  this line deliberately restates no number, so it cannot fall out of lockstep
+  with them. Every later task references this name.
 
 - [x] **Step 1: Establish a green baseline**
 
@@ -116,7 +117,7 @@ root and is what actually gates this task.
 {
   "name": "development-kubernetes",
   "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. Its CI pipeline ships as a `development` bootstrap template — six requirable checks over rendered manifests (#1154).",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": {
     "name": "Timo Jakob"
   },
@@ -144,7 +145,7 @@ exact equality. Edit one, edit both.
 {
   "name": "development-kubernetes",
   "description": "Infrastructure-as-code topic plugin for Kubernetes manifests, Helm charts, Kustomize overlays and Argo CD resources. Composes ALONGSIDE a language plugin, and can itself be PRIMARY for a repo with no application language (a GitOps repo). Charter — mechanism only: render and validate manifests, and run the repo's own Kyverno policies from policies/kyverno/**/*.{yaml,yml}, skipping when no policy file matches. Defers Dockerfiles and image builds to language plugins (language-first). Ships no approver agent — a cluster definition is approved by a human. This slice adds the five agents and the review panel (#1153): the security, reliability and Argo CD review dimensions behind /development-kubernetes:review, plus the manifest fixer and policy triage agents the maintenance dispatcher now routes every finding group to. Its CI pipeline ships as a `development` bootstrap template — six requirable checks over rendered manifests (#1154).",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": {
     "name": "Timo Jakob"
   },

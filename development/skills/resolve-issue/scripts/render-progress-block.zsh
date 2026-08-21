@@ -13,7 +13,11 @@
 # the human promoted a suggestion (#995) — a `promoted: N` term inside the
 # blockers line's severity parens plus one "- promoted suggestion:" line per
 # promoted blocker, so the human's own picks read differently from
-# reviewer-raised Warnings.
+# reviewer-raised Warnings. Since #1434 it also carries an
+# `- adjudicated re-raises dropped: N` line whenever the consolidator suppressed
+# a re-raise of an already-waived suggestion — rendered only when N > 0, on the
+# same direct-read, no-stamp-gate rule, so a run with no adjudicated list is
+# byte-identical to before the count existed.
 #
 # The new/carried split (and everything derived from it: fixed-since, the
 # escalating possible-false-trip lines) is rendered ONLY when every blocker
@@ -146,6 +150,15 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
      else empty end),
     (if ($blk | length) > 0 then
        "- by dimension: " + ($blk | group_by(.dimension // "") | map("\(.[0].dimension | dimlabel) \(length)") | join(", "))
+     else empty end),
+    # adjudicated re-raises (#1434): suggestions an earlier round already
+    # surfaced and the human already let go, dropped instead of re-logged.
+    # Rendered ONLY when non-zero — the same rule the promoted term follows, and
+    # what keeps a run with no adjudicated list byte-identical to before the
+    # count existed. A direct read with no stamp gate: a pre-#1434 changelist
+    # simply has no key, `// 0` makes it zero, and no line renders.
+    (if (.summary.adjudicated_dropped // 0) > 0 then
+       "- adjudicated re-raises dropped: \(.summary.adjudicated_dropped)"
      else empty end),
     ($promoted[] | "- promoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
        + " — raised from Suggestion by the human at convergence; blocking until cleared"),

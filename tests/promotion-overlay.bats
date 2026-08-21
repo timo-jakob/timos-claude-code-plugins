@@ -202,12 +202,18 @@ EOF
   # be indistinguishable from one produced before this feature existed. Asserting
   # a few scalars would pass on a build that added a `promoted` key to every
   # item, reordered `summary`, or added a top-level field — so pin the SHAPE.
+  #
+  # `adjudicated_dropped` joined the summary in #1434 and is ALWAYS present (0
+  # without --adjudicated), which is that story's own contract: a consumer must
+  # never have to tell "dropped nothing" from "an older changelist". So it is
+  # part of the shape a no-promote run must have — this pin still says "nothing
+  # about PROMOTION leaks in", which is what it is for.
   low_finding
   run --separate-stderr zsh "$S" --findings "$F" --round 1
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
   [ "$(jq -Sc 'keys' <<<"$output")" = '["blocking","conflicts","escalation_reasons","false_trips","non_converging","round","suggestions","summary"]' ]
-  [ "$(jq -Sc '.summary | keys' <<<"$output")" = '["blocking","conflicts","critical","false_trips","high","low"]' ]
+  [ "$(jq -Sc '.summary | keys' <<<"$output")" = '["adjudicated_dropped","blocking","conflicts","critical","false_trips","high","low"]' ]
   [ "$(jq -Sc '.suggestions[0] | keys' <<<"$output")" = '["agreement","blocking","description","dimension","false_trip","file","line","non_converging","priority","reviewers","severity","suggested_fix","title"]' ]
   [ "$(jq '.summary.blocking' <<<"$output")" -eq 0 ]
   [ "$(jq -r '.suggestions[0].priority' <<<"$output")" = "Low" ]
@@ -340,6 +346,21 @@ EOF
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   contains "$stderr" "not a JSON array"
+}
+
+@test "#1434 promote: a WHITESPACE-only promote file names --promote, not the findings" {
+  # The twin of the --adjudicated sixth arm, same guard in the same script: a
+  # blank-but-non-empty file passes `-f && -s`, jq reads no JSON value from it
+  # and exits 0 with EMPTY stdout, so both shape guards pass and only the
+  # empty-output guard catches it. Unguarded, `--argjson promote ""` aborts the
+  # main jq and the caller is sent to a findings file that is perfectly good.
+  low_finding
+  printf '   \n' > "$P"
+  con_sep --round 1 --promote "$P"
+  [ "$status" -eq 1 ]
+  contains "$stderr" "yielded no JSON value"
+  contains "$stderr" "--promote"
+  lacks "$stderr" "invalid findings JSON"
 }
 
 @test "#1025 promote: an empty promote file exits 1" {

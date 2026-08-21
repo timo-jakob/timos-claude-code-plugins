@@ -20,9 +20,9 @@ The mechanical consolidation is done by a tested script; **do not redo its
 arithmetic in your head** (that is how an LLM miscounts). Run it:
 
 ```bash
-"<skill-base-dir>/../skills/resolve-issue/scripts/consolidate-findings.zsh" \
+"<skill-base-dir>/../resolve-issue/scripts/consolidate-findings.zsh" \
   --findings <round-aggregate.json> --round <N> [--prev <prev-changelist.json>] \
-  [--promote <promoted.json>]
+  [--promote <promoted.json>] [--adjudicated <adjudicated.json>]
 ```
 
 `--promote` (#994) carries a human-selected set of waived suggestions to raise to
@@ -37,9 +37,19 @@ work-dir, or a statement that suggestions were promoted — but gives you no
 run demotes the promoted items back to Low and converges the phase without doing
 the work.
 
+`--adjudicated` (#1434) is the same kind of flag and takes the same rule: it
+carries the Low findings earlier rounds surfaced and the human waived, and the
+engine defaults it to `[]` when it is absent — so the drop below is a provable
+no-op on a bare run. **Forward the path your prompt gives you verbatim on every
+round ≥ 2, and never edit the file.** Without it the changelist re-lists every
+already-waived Low and reports `adjudicated_dropped: 0`, which you are then told
+to emit verbatim — so progress.md renders no drop line and the dossier's waived
+list disagrees with the loop's own changelist. **If your prompt names an
+adjudicated set but gives you no path, stop and say so.**
+
 Your prompt gives you the round's aggregate findings path, the round number, and
-(for round ≥ 2) the previous round's changelist path. The engine returns the
-changelist with:
+(for round ≥ 2) the previous round's changelist path and the adjudicated-set
+path. The engine returns the changelist with:
 
 - **severity mapping** — `CRITICAL→Critical`, `WARNING→High`, `SUGGESTION→Low`;
   **blocking = Critical + High**; Low is logged in `suggestions` and never
@@ -47,6 +57,18 @@ changelist with:
 - **dedup** — findings sharing `file`+`line`+`dimension` merged, most-detailed
   description kept, reviewers unioned (`agreement` count);
 - **conflicts** — co-located `performance` vs `code_quality` recommendations;
+- **adjudicated re-raises (#1434)** — from round 2 on the engine is given the
+  Low findings earlier rounds surfaced and the human waived, and it DROPS a
+  re-raise of one, counting it in `summary.adjudicated_dropped`. The drop is
+  narrow by design: only a `Low` whose **exact** normalized title matches, only
+  within the same file + dimension and line-proximity window, and only while the
+  entry is still valid (the loop removes every adjudication whose file the last
+  fix pass touched). **A suggestion the engine dropped stays dropped** — it is
+  not a finding the engine lost, and restoring it is not a merge judgment. Carry
+  `summary.adjudicated_dropped` through verbatim, and if you edit the arrays,
+  leave that count alone: it records what the engine suppressed, not what your
+  final `suggestions` array happens to hold. A re-raise at `WARNING`/`CRITICAL`
+  is never dropped, so nothing blocking is ever hidden this way;
 - **non-convergence (#983)** — candidates for "this blocked last round too" are
   gathered by fingerprint (file+dimension+line-proximity), but the verdict is
   title-identity: an **exact** normalized-title match => a genuine survivor
@@ -126,7 +148,7 @@ your judgment edits applied on top:
 {
   "round": 2,
   "summary": { "critical": 1, "high": 2, "low": 3, "blocking": 3, "conflicts": 1,
-               "false_trips": 0 },
+               "false_trips": 0, "adjudicated_dropped": 0 },
   "blocking": [
     { "priority": "Critical", "severity": "CRITICAL", "dimension": "bugs",
       "file": "src/app/checkout.py", "line": 42, "title": "…", "description": "…",
@@ -156,3 +178,12 @@ your judgment edits applied on top:
 Keep `summary` consistent with the arrays after your edits. If you merged or
 re-flagged anything, the counts must still add up — recompute them from the
 final arrays rather than copying the engine's pre-edit numbers.
+
+**One exception: `adjudicated_dropped` is copied, never recomputed.** It counts
+what the engine SUPPRESSED before you saw the arrays, so there is nothing in the
+final arrays to derive it from — recomputing it can only produce 0, which would
+silently blank the count on both surfaces that read it (the round's
+`history.jsonl` line and progress.md's `- adjudicated re-raises dropped: N`).
+Emit the engine's value verbatim, and emit the key even when it is 0: it is
+always present in the engine's output, so a consumer never has to tell "dropped
+nothing" from "an older changelist".

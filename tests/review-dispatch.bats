@@ -80,7 +80,10 @@ plan() {  # $1 = languages json ; rest = extra flags
 }
 
 @test "plan: findings_path is a well-known per-round path in the worktree" {
-  plan '{"languages":["python"]}' --round 2
+  # --final, because since #1434 a round past the first must say what it is
+  # iterating on. This test is about the artifact PATH, not the scope, so
+  # declaring it a closing sweep is the cheapest way to keep it on that subject.
+  plan '{"languages":["python"]}' --round 2 --final
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .round)" = "2" ]
   [ "$(echo "$output" | jq -r .findings_path)" = "$R/.review/findings-round-2.json" ]
@@ -95,6 +98,270 @@ plan() {  # $1 = languages json ; rest = extra flags
   # app.py is in scope; the untouched committed legacy.py is not
   echo "$output" | jq -e '.changed_files | index("app.py")' >/dev/null
   echo "$output" | jq -e '.changed_files | index("legacy.py") | not' >/dev/null
+}
+
+# ---- delta scoping: a round past the first ITERATES on the previous one (#1434)
+#
+# The identity a round is scoped against is git-tree-id.zsh's — the same one the
+# loop persists per round — so the tests compute it the same way rather than
+# hand-rolling a second notion of "the tree as it was".
+
+tree_id() {  # echo the current working-tree identity of $R
+  zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh" "$R"
+}
+
+@test "plan: #1434 round 1 is the full sweep — scope_mode full, no prior tree, no delta" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "full" ]
+  [ "$(echo "$output" | jq -r .scope_empty)" = "false" ]
+  [ "$(echo "$output" | jq -r .prior_tree)" = "null" ]
+  [ "$(echo "$output" | jq -r .delta_files)" = "null" ]
+  [ "$(echo "$output" | jq -r .fix_verification_path)" = "null" ]
+  [ "$(echo "$output" | jq -r .adjudicated_path)" = "null" ]
+  # unchanged from before #1434: the whole story diff
+  [ "$(echo "$output" | jq -c '.changed_files')" = '["app.py"]' ]
+}
+
+@test "plan: #1434 an intermediate round is scoped to the DELTA since the prior tree" {
+  echo "print(1)" > "$R/app.py"          # changed BEFORE the prior tree
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"       # changed AFTER it
+  # a NESTED path too: `diff-tree` without -r reports the top-level TREE entry
+  # (`src`) rather than the file, so a nested delta member is what actually pins
+  # the recursive flag — every other fixture here is at the repo root, where the
+  # two spellings agree
+  mkdir -p "$R/src"
+  echo "print(3)" > "$R/src/nested.py"
+  plan '{"languages":["python"]}' --round 3 --prior-tree "$t1" \
+    --fix-verification /tmp/verify-3.json --adjudicated /tmp/adjudicated.json
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
+  [ "$(echo "$output" | jq -r .scope_empty)" = "false" ]
+  [ "$(echo "$output" | jq -r .prior_tree)" = "$t1" ]
+  # the review scope IS the delta: the file changed before the prior tree is
+  # absent, the ones changed after it are present, as FILE paths. Re-reviewing
+  # app.py is the independent-repeat behaviour this story removes.
+  [ "$(echo "$output" | jq -c '.changed_files')" = '["helper.py","src/nested.py"]' ]
+  [ "$(echo "$output" | jq -c '.delta_files')" = '["helper.py","src/nested.py"]' ]
+  # the two carries are echoed through for the panel
+  [ "$(echo "$output" | jq -r .fix_verification_path)" = "/tmp/verify-3.json" ]
+  [ "$(echo "$output" | jq -r .adjudicated_path)" = "/tmp/adjudicated.json" ]
+}
+
+@test "plan: #1434 --final makes a late round a FULL sweep, and still reports the delta" {
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  plan '{"languages":["python"]}' --round 4 --final --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "full" ]
+  # the closing sweep re-reads the WHOLE story diff...
+  [ "$(echo "$output" | jq -c '.changed_files')" = '["app.py","helper.py"]' ]
+  # ...and delta_files is still computed, because the loop needs it to
+  # invalidate adjudications whose file the last fix pass touched
+  [ "$(echo "$output" | jq -c '.delta_files')" = '["helper.py"]' ]
+}
+
+@test "plan: #1434 a round past the first with neither --prior-tree nor --final is a usage error" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 3
+  [ "$status" -eq 2 ]
+  # named, so the caller can fix it — and emphatically NOT a silent fallback to
+  # the full diff, which would report scope_mode "delta" while reviewing
+  # everything
+  echo "$output" | grep -q -- '--prior-tree'
+}
+
+@test "plan: #1434 an unresolvable --prior-tree exits 1 with a named line and NO descriptor" {
+  echo "print(1)" > "$R/app.py"
+  # --separate-stderr, because the point is that STDOUT is empty: with the two
+  # streams merged the diagnostic itself would satisfy a naive output check
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round 3 \
+    --prior-tree deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+  [ "$status" -eq 1 ]
+  # stdout carries no descriptor at all — a caller must never get a scope here
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- '--prior-tree does not resolve to a tree'
+}
+
+@test "plan: #1434 a delta with no new work is an EMPTY scope at exit 0, flagged scope_empty" {
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  plan '{"languages":["python"]}' --round 3 --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
+  [ "$(echo "$output" | jq -c '.changed_files')" = '[]' ]
+  [ "$(echo "$output" | jq -r .scope_empty)" = "true" ]
+  # all three delta fields pinned together: changed_files and delta_files are
+  # assigned from one variable today, so asserting only the first would survive
+  # a refactor that split them — and the loop reads delta_files independently
+  [ "$(echo "$output" | jq -c '.delta_files')" = '[]' ]
+  [ "$(echo "$output" | jq -r .prior_tree)" = "$t1" ]
+}
+
+@test "plan: #1434 a blank --prior-tree is refused, in BOTH spellings" {
+  # The realistic slip is `--prior-tree "$(cat tree-1.txt)"` with the file
+  # absent, which yields the EMPTY string — so a guard keyed on the value alone
+  # short-circuits and accepts exactly the shape it exists to catch. On a
+  # --final round nothing about the scope would look wrong; delta_files would
+  # simply go null and the loop would stop invalidating adjudications, leaving a
+  # waived suggestion suppressed in a file the last fix pass had just edited.
+  echo "print(1)" > "$R/app.py"
+  # the EMPTY string is caught by the shared `need_value` (its non-empty arm),
+  # which every value flag now goes through...
+  plan '{"languages":["python"]}' --round 4 --final --prior-tree ''
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--prior-tree requires a non-empty value'
+  # ...and a whitespace-only value, which `need_value` cannot see, by this
+  # flag's own blank guard. Both exit 2; neither degrades to a null delta.
+  plan '{"languages":["python"]}' --round 4 --final --prior-tree '   '
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--prior-tree requires a non-blank value'
+  # positive control: a real identity on the same invocation yields a delta
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  plan '{"languages":["python"]}' --round 4 --final --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.delta_files')" = '["helper.py"]' ]
+}
+
+@test "plan: #1434 round 0 keeps changed_files an ARRAY, not the delta's null" {
+  # --round is contracted as any non-negative integer, and 0 satisfies neither
+  # `== 1` nor --final. Scoped as a delta it would emit changed_files: null —
+  # `null | length` is 0, so scope_empty would even say true — where the
+  # descriptor contract promises an array a consumer may iterate.
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 0
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "full" ]
+  [ "$(echo "$output" | jq -r '.changed_files | type')" = "array" ]
+  [ "$(echo "$output" | jq -c '.changed_files')" = '["app.py"]' ]
+}
+
+@test "plan: #1434 a failed delta computation is exit 1, never an empty scope" {
+  # The #910 rule, one round later: a git failure while computing the delta must
+  # FAIL the scope. Degrading to [] would hand the loop an unreviewed round it
+  # can promote to a closing sweep and converge on.
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  # a git wrapper that works for everything except diff-tree
+  local fakegit="$BATS_TEST_TMPDIR/git-no-difftree"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "diff-tree" ]; then echo "boom" >&2; exit 128; fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 3 --prior-tree "$t1"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'could not compute the delta against --prior-tree'
+}
+
+@test "plan: #1434 an unusable tree-id computation is exit 1 with a named line, never an empty delta" {
+  # A git whose write-tree prints nothing. git-tree-id.zsh itself fails closed
+  # on an empty identity (exit 1), so this lands on _delta_files' "could not
+  # compute" arm rather than its "came back empty" one — the latter stays as
+  # defence in depth for a future tree-id that exits 0 with no output, and is
+  # deliberately not reachable through this seam. What matters either way is the
+  # #910 rule: exit 1 with a named line, never a silently empty scope.
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  local fakegit="$BATS_TEST_TMPDIR/git-empty-writetree"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "write-tree" ]; then exit 0; fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 3 --prior-tree "$t1"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'could not compute the current working-tree identity'
+  echo "$stderr" | grep -q -- 'could not compute the delta against --prior-tree'
+}
+
+@test "plan: #1434 GIT_BIN reaches the tree-id sibling too — one override, every git call" {
+  # The Seams header promises GIT_BIN is handed to git-tree-id.zsh, so a caller
+  # that overrides it does not end up with two different git binaries computing
+  # the two sides of the delta. Nothing else in this file exercises that.
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  local log="$BATS_TEST_TMPDIR/git-calls.log"
+  local fakegit="$BATS_TEST_TMPDIR/git-logging"
+  cat > "$fakegit" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+exec git "\$@"
+EOF
+  chmod +x "$fakegit"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 3 --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.delta_files')" = '["helper.py"]' ]
+  # the delta's own diff went through the override...
+  grep -q 'diff-tree' "$log"
+  # ...and so did the tree-id computation on the other side of it, which only
+  # happens if GIT_BIN is propagated as git-tree-id.zsh's own seam
+  grep -q 'write-tree' "$log"
+}
+
+@test "plan: #1434 an artifact-only delta is empty too — the #909 exclusions still apply" {
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  # the loop's OWN outputs must never become review scope, on a delta round any
+  # more than on a full one — one file-listing path, one set of exclusions
+  mkdir -p "$R/.review" "$R/.claude/telemetry"
+  echo '[]' > "$R/.review/findings-round-2.json"
+  echo '{}' > "$R/.claude/telemetry/telemetry.jsonl"
+  plan '{"languages":["python"]}' --round 3 --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.changed_files')" = '[]' ]
+  [ "$(echo "$output" | jq -r .scope_empty)" = "true" ]
+}
+
+@test "plan: #1434 scope_empty is reported on a FULL round too, not only a delta one" {
+  # The field is contracted as always present and independent of scope_mode.
+  # Every other true-valued assertion in this file is on a delta round, so an
+  # emitter narrowed to `scope_mode == "delta" and empty` would keep the suite
+  # green while the caller-facing half of the contract silently went false.
+  # An artifact-only change is the round-1 case that produces it (#909).
+  mkdir -p "$R/.review"
+  echo '[]' > "$R/.review/findings-round-1.json"
+  plan '{"languages":["python"]}' --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "full" ]
+  [ "$(echo "$output" | jq -c '.changed_files')" = '[]' ]
+  [ "$(echo "$output" | jq -r .scope_empty)" = "true" ]
+}
+
+@test "scope-findings: #1434 still filters on the FULL story diff, never the delta" {
+  # A fix-verification finding about a file changed earlier in the story but not
+  # since the previous round is exactly what a delta round exists to surface;
+  # filtering it by the delta would silently drop it, so scope-findings is never
+  # handed --prior-tree.
+  echo "print(1)" > "$R/app.py"          # in the story diff, not in any delta
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  local f="$BATS_TEST_TMPDIR/findings.json"
+  printf '%s' '[{"severity":"WARNING","dimension":"bugs","file":"app.py","line":1,"title":"t","description":"d","reviewer":"r"}]' > "$f"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" scope-findings --repo "$R" --base main --findings "$f"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.[0].file')" = "app.py" ]
 }
 
 # ---- unsupported / ambiguous repo type is a TYPED escalation, not a crash
@@ -910,13 +1177,33 @@ EOF
 }
 
 @test "plan: #1177 every value-taking plan flag checks its value" {
-  # one flag proving the pattern would let the other three keep the raw abort
+  # one flag proving the pattern would let the others keep the raw abort — so
+  # the list must be the WHOLE flag set, and #1434 added three more to it
+  # (--prior-tree, --fix-verification, --adjudicated). Without them, deleting
+  # need_value from any of the three re-introduces the exact #1177 regression
+  # (a nounset abort at exit 1 where the contract documents exit 2) with the
+  # whole suite green.
   local flag
-  for flag in --repo --base --round --findings-path; do
+  for flag in --repo --base --round --findings-path \
+              --prior-tree --fix-verification --adjudicated; do
     run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
       zsh "$S" plan "$flag"
     [ "$status" -eq 2 ]
     echo "$output" | grep -q -- "$flag requires a value"
+    # ...and the FLAG-SHAPED value, the realistic unquoted `--flag $VAR` with
+    # VAR unset. Without this arm the next flag is swallowed as the value:
+    # `--prior-tree --final` plans a delta and then fails inside
+    # _verify_prior_tree at exit 1 (internal error) with "does not resolve to a
+    # tree: --final" — the wrong code AND a confidently wrong cause.
+    run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+      zsh "$S" plan --repo "$R" --base main "$flag" --final
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q -- "$flag requires a value (got the flag --final)"
+    # ...and an explicitly empty one, which reads downstream as "flag omitted"
+    run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+      zsh "$S" plan --repo "$R" --base main "$flag" ''
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q -- "$flag requires a non-empty value"
   done
 }
 
@@ -944,9 +1231,29 @@ EOF
     zsh "$S" plan --repo "$R" --base main --round -2
   [ "$status" -eq 2 ]
   # the positive control: the guard must not reject the values the loop passes
-  plan '{"languages":["python"]}' --round 7
+  # (--final keeps this on the --round guard, not on #1434's scoping rule)
+  plan '{"languages":["python"]}' --round 7 --final
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .round)" = "7" ]
+}
+
+@test "plan: #1434 an over-wide --round is rejected by WIDTH, and 18 digits still pass" {
+  # A 19/20-digit value passes the `<->` class but WRAPS in the arithmetic
+  # normalisation below it: the round goes negative, `round <= 1` forces
+  # scope_mode "full" (a caller asking for a delta silently gets the whole
+  # story diff), and the sink is minted as
+  # findings-round--7766279631452241920.json. The three siblings in this
+  # family (--issue, --max-rounds, .closing-sweep) all carry the same cap.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round 99999999999999999999 --final
+  [ "$status" -eq 2 ]
+  # the WIDTH wording specifically: the digits-only refusal shares the prefix,
+  # so asserting on `--round` alone would pass with the cap deleted
+  echo "$output" | grep -q -- 'at most 18 digits'
+  # the positive control pins the cap's SIZE, not merely its existence
+  plan '{"languages":["python"]}' --round 999999999999999999 --final
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .round)" = "999999999999999999" ]
 }
 
 @test "plan: #1177 a zero-padded --round is NORMALISED, not passed to --argjson" {
@@ -956,7 +1263,7 @@ EOF
   # check exists to prevent, and a status outside the documented set {0,1,2,3}.
   # Normalising also stops findings-round-007.json becoming a second, colliding
   # artifact path for round 7.
-  plan '{"languages":["python"]}' --round 007
+  plan '{"languages":["python"]}' --round 007 --final
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .round)" = "7" ]
   [ "$(echo "$output" | jq -r .findings_path)" = "$R/.review/findings-round-7.json" ]

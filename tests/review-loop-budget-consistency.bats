@@ -48,6 +48,16 @@ setup() {
   ESCALATE="$REPO_ROOT/development/skills/resolve-issue/scripts/build-escalation.zsh"
   SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
+  # The panel-duties block of ARCHITECTURE.md, extracted ONCE and asserted
+  # against instead of the whole file (#1434). Every ARCH needle in the
+  # panel-duties test below is a `grep -F` fragment, and a fragment run over a
+  # 3000-line document silently stops pinning its own sentence the moment the
+  # same bytes appear anywhere else — which happened three times in this
+  # story's own review, each time "fixed" by a longer fragment that the next
+  # edit re-broke. Scoping to the section makes locality hold by construction,
+  # so a recurrence elsewhere in the file can no longer retire a pin.
+  ARCH_PANEL_DUTIES="$BATS_TEST_TMPDIR/arch-panel-duties.md"
+  awk '/^## Review finding schema/{f=1} f&&/^### /{exit} f' "$ARCH" > "$ARCH_PANEL_DUTIES"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
   MOTIV="$REPO_ROOT/docs/explanation/motivation.md"
   GATE="$REPO_ROOT/development/agents/story-readiness.md"
@@ -72,6 +82,41 @@ setup() {
   # directions; ALL_SITES membership is the second line of defence.
   BAR_TESTS="$REPO_ROOT/development-claude-plugin/agents/claude-plugin-test-reviewer.md"
   BAR_CONTRACT="$REPO_ROOT/development-claude-plugin/agents/claude-plugin-contract-integrity.md"
+  # #1434 added a SECOND number to this file's remit: the closing full sweep's
+  # one-round grant. It is a budget statement — it moves the ceiling — but it is
+  # not a retune of MAX_REVIEW_ROUNDS or the +3 increment, so it needs its own
+  # pin rather than riding on either.
+  #
+  # #1434 also brought this file its first NON-numeric invariant: the two duties
+  # every review panel owes the loop (the panel-duties roster below). They live
+  # in the same review-loop contract as the budget and would otherwise have no
+  # sweep at all, which is why they are here rather than in a suite of their own.
+  #
+  # THREE sites, not the two the story named. #1434 scoped the prose work to the
+  # two instruction sites (SKILL.md and the explanation page), but the loop's
+  # contract section in ARCHITECTURE.md states the same grant and had to be
+  # brought current in the same change — and guarding two of three would mint
+  # exactly the unread third site the roster tripwire below exists to prevent
+  # (the #1433 lesson). All three are already in ALL_SITES for the stale sweeps;
+  # they are named separately here so the grant's own test says which sites it
+  # governs.
+  SWEEP_SITES=("$SKILL" "$EXPLAIN" "$ARCH")
+  # DERIVED, not transcribed. The grant has no named constant, but it does have
+  # an executable statement — the loop writes `round + 1` into the closing-sweep
+  # marker — so the increment can be read out of the source like MAXR and
+  # SOFTCAP are, instead of being a literal asserted against itself. A retune to
+  # `round + 2` then reds here rather than passing a tautology.
+  # `|| true` so an absent needle reaches the guard below with its explanation,
+  # instead of failing setup on the pipeline's own exit status (the SOFTCAP
+  # idiom above). The digits are extracted with sed, not a second grep anchored
+  # at end-of-line: the matched text ends in `))`, not in the number.
+  SWEEP_GRANT="$(grep -Eom1 'closing_sweep_round=\$\(\( round \+ [0-9]+ \)\)' "$LOOP" \
+    | sed -E 's/.*round \+ ([0-9]+).*/\1/' || true)"
+  [ -n "$SWEEP_GRANT" ] || {
+    printf 'the closing-sweep increment (closing_sweep_round=$(( round + N ))) was not found in %s — the guard has nothing to check against\n' \
+      "$LOOP" >&2
+    return 1
+  }
   # every live prose site, for the sweeps that must cover all of them at once
   ALL_SITES=("$SKILL" "$ARCH" "$EXPLAIN" "$MOTIV" "$GATE" "$PROSE" "$TELEM" \
     "$BAR_TESTS" "$BAR_CONTRACT")
@@ -111,7 +156,10 @@ grep_num() {  # grep_num <file> <regex, digits at either end already embedded>
 # below check one needle across several sites, and bats reports only the source
 # line, so without this a failure cannot say WHICH site drifted
 grep_site() {  # grep_site <file> <fixed-string>
-  grep -Fq "$2" "$1" || {
+  # `--` so a needle that begins with a dash (e.g. a flag name) is a PATTERN,
+  # not an option: without it `grep_site … '--fix-verification'` dies with
+  # "unrecognized option", which `|| return 1` then reports as a missing needle.
+  grep -Fq -e "$2" -- "$1" || {
     printf 'missing in %s: %s\n' "$1" "$2" >&2
     return 1
   }
@@ -255,6 +303,276 @@ grep_site() {  # grep_site <file> <fixed-string>
   expected="$(printf '%s\n' \
     "development-claude-plugin/agents/claude-plugin-contract-integrity.md" \
     "development-claude-plugin/agents/claude-plugin-test-reviewer.md" | sort -u)"
+  [ "$discovered" = "$expected" ]
+}
+
+@test "the closing full sweep's one-round grant is stated identically at every live site (#1434)" {
+  # The grant is the one place the review loop may run PAST the ceiling the
+  # caller set, so a site that drifts to a different size is a site that
+  # mis-describes the budget. Positive pins first, so deleting the statement
+  # reds here instead of silently retiring the guard.
+  [ "$SWEEP_GRANT" -eq 1 ]   # the word form below is spelled for this value
+  local site
+  for site in "${SWEEP_SITES[@]}"; do
+    # `closing full sweep` is INERT as a guard — it also matches the unrelated
+    # promotion prose at every site — so it stays only as a cheap presence
+    # check; the pins that do the work are below it.
+    grep_site "$site" 'closing full sweep'
+    grep_site "$site" 'exactly one round beyond'
+  done
+  # ...and the two qualifications that ride with the SIZE. Without them the
+  # grant could be reworded repeatable ("each time it is needed"), or the
+  # not-a-retune claim deleted, with the size needle still matching — and a
+  # session reading either would then have no reason not to "fix" the overrun
+  # by raising --max-rounds itself, which the same paragraph forbids. Pinned
+  # per site because each states them in its own voice.
+  grep_site "$SKILL" 'beyond the ceiling, once'
+  grep_site "$ARCH" 'beyond `--max-rounds`, once'
+  grep_site "$EXPLAIN" 'once, and only for that sweep'
+  grep_site "$SKILL" 'still reports what you passed'
+  grep_site "$ARCH" 'keeps reporting what the caller passed'
+  grep_site "$EXPLAIN" 'is still what gets reported'
+  # ban the REPEATABLE shape outright, in either spelling
+  run -1 grep -Eqi 'rounds? beyond [^.]*(each|every) time|granted (again|repeatedly)' \
+    "${SWEEP_SITES[@]}"
+  # Ban the SHAPE, not three sentences: any OTHER count of rounds "beyond" the
+  # ceiling, in either spelling, including a digit form of the correct value —
+  # the canonical spelling is the word form, and a digit twin is a second site
+  # the next retune would not read. "one round beyond" is deliberately not
+  # matched: neither the word alternation nor `[0-9]+` can reach it.
+  run -1 grep -Eqi '(exactly )?(two|three|four|five|six|seven|eight|nine|ten|[0-9]+) (more |extra |additional )?rounds? beyond' \
+    "${SWEEP_SITES[@]}"
+}
+
+@test "every review panel carries all FOUR loop obligations, and the roster is exactly six (#1434)" {
+  # ARCHITECTURE.md asserts a cross-file invariant over seven sites: each of the
+  # six `development-*/skills/review/SKILL.md` panels states (a) that an EMPTY
+  # scope handed down by the loop is never a licence to review everything, and
+  # that on a DELTA round that carries nothing the panel must still write `[]`
+  # rather than no file at all — with its THREE mandatory qualifications: not on
+  # a FULL round, where an empty scope means the story diff itself is empty; not
+  # with a non-empty carry, where a bare `[]` would retire carried blockers
+  # unconfirmed; and not on a null/unreadable carry at round >= 2, which is a
+  # caller slip rather than an empty carry. Plus the confirmation-count report,
+  # and its SCOPE (any non-empty carry, whatever is written). Each is needled
+  # separately below. And (b)
+  # that from round 2 on it forwards the plan's two carry paths into every
+  # agent's prompt. Neither duty had a sweep, so a seventh panel — or a
+  # refactor of an existing one — could land without either and ship green.
+  #
+  # The invariant is the two DUTIES, not the bytes: each panel spells them in
+  # its own scope vocabulary (repo / project / rendered temp tree), so the
+  # needles below are the load-bearing fragments common to all six, never a
+  # whole sentence. Adding a panel means adding both duties, not matching
+  # anyone's phrasing.
+  local discovered expected panel
+  local found=()
+  git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1 || {
+    printf 'not a git worktree, cannot derive the roster: %s\n' "$REPO_ROOT" >&2
+    return 1
+  }
+  # `-z` + `read -d ''` for the same reason the rosters below use it: git
+  # C-quotes an awkward path, grep then exits 2, and the file would drop out
+  # SILENTLY — the fail-OPEN direction this tripwire exists to catch.
+  while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    found+=("$f")
+  done < <(cd "$REPO_ROOT" \
+    && git -c core.quotePath=false ls-files -z 'development-*/skills/review/SKILL.md')
+  discovered="$(printf '%s\n' "${found[@]}" | sort -u)"
+  expected="$(printf '%s\n' \
+    "development-claude-plugin/skills/review/SKILL.md" \
+    "development-go/skills/review/SKILL.md" \
+    "development-java/skills/review/SKILL.md" \
+    "development-kubernetes/skills/review/SKILL.md" \
+    "development-python/skills/review/SKILL.md" \
+    "development-swift/skills/review/SKILL.md" | sort -u)"
+  # roster equality FIRST: a new panel reds here before the duty checks below
+  # can pass over it
+  [ "${#found[@]}" -ge 1 ]
+  [ -n "$discovered" ]
+  [ "$discovered" = "$expected" ]
+  # the SEVENTH site: ARCHITECTURE.md states the same invariant and hardcodes
+  # the roster's size, so without these a drift there (or a seventh panel that
+  # never reaches the contract doc) leaves the suite green
+  [ "${#found[@]}" -eq 6 ]
+  # Fragments unique to the sentence each one pins — the bare descriptor tokens
+  # recur in the same section's JSON sample, so they are presence checks only.
+  grep_site "$ARCH_PANEL_DUTIES" 'a second injection duty'
+  grep_site "$ARCH_PANEL_DUTIES" "forward both into each agent's launch prompt"
+  grep_site "$ARCH_PANEL_DUTIES" 'All six panels (`claude-plugin`'
+  grep_site "$ARCH_PANEL_DUTIES" 'carry **both rules**'
+  grep_site "$ARCH_PANEL_DUTIES" 'never a licence to'
+  grep_site "$ARCH_PANEL_DUTIES" 'fix_verification_path'
+  grep_site "$ARCH_PANEL_DUTIES" 'adjudicated_path'
+  # ...including the two qualifications it declares mandatory, so deleting them
+  # from the contract doc cannot pass either
+  # Each ARCH needle is UNIQUE to the panel-duties section. `CONVERGED
+  # condition` on its own is not: it occurs three more times 700 lines away, in
+  # the refusal discussion, so the qualification could be deleted here and the
+  # sweep would still pass on that unrelated prose — the same wrong-branch
+  # defect this test was hardened for on the panel half.
+  grep_site "$ARCH_PANEL_DUTIES" 'Not on a **full** round'
+  grep_site "$ARCH_PANEL_DUTIES" 'over a story that changed nothing'
+  # `fix_verification_path` holds entries` became INERT once the widened
+  # confirmation-count paragraph introduced a second line carrying the same
+  # bytes — grep -F is line-oriented, so it now matches that paragraph and no
+  # longer pins the qualification it was written for. Pin the qualification on
+  # fragments unique to its own sentence instead, and keep the old needle only
+  # as a presence check.
+  grep_site "$ARCH_PANEL_DUTIES" '`fix_verification_path` holds entries'
+  grep_site "$ARCH_PANEL_DUTIES" 'would retire carried'
+  grep_site "$ARCH_PANEL_DUTIES" 'the panel dispatches with the carry'
+  grep_site "$ARCH_PANEL_DUTIES" 'reports how many carried entries it confirmed'
+  grep_site "$ARCH_PANEL_DUTIES" 'confirmation-count report'
+  # (2) the SCOPE of the count duty — the widening itself, not merely that a
+  # count exists. Every needle above survives a re-narrowing to "when it writes
+  # `[]`", which is the regression the widening exists to prevent.
+  grep_site "$ARCH_PANEL_DUTIES" 'whatever it writes to the'
+  grep_site "$ARCH_PANEL_DUTIES" '`[]` or otherwise'
+  # (3) the THIRD qualification: a null carry is a caller slip, not an empty one
+  grep_site "$ARCH_PANEL_DUTIES" 'write **no findings file at all** there'
+  for panel in "${found[@]}"; do
+    # (a) the empty-scope duty. FOUR needles, not two, and each chosen to be
+    # unique to the branch it asserts:
+    #   * the refusal to widen;
+    #   * the obligation to write `[]` anyway — as `still write `[]``, NOT the
+    #     bare `write `[]``, which every panel also carries in the paragraph
+    #     saying the OPPOSITE ("Do **not** write `[]` there"). With the bare
+    #     needle the positive half could be deleted outright and this sweep
+    #     would still pass on the negative half's bytes;
+    #   * the FULL-round qualification, and
+    #   * the CARRY precondition — ARCHITECTURE calls both mandatory ("a panel
+    #     is not correctly wired without them"), so a sweep that reaches
+    #     neither lets either be deleted silently.
+    grep_site "$REPO_ROOT/$panel" 'never a licence to'
+    grep_site "$REPO_ROOT/$panel" 'still write `[]`'
+    grep_site "$REPO_ROOT/$panel" 'CONVERGED condition'
+    # `carried blocker you c` — NOT the bare `carried blocker`, which also
+    # matches the EXEMPTION paragraph ("every carried blocker landed"), so the
+    # prohibition could be deleted outright and the sweep would pass on the
+    # sentence granting the opposite permission.
+    grep_site "$REPO_ROOT/$panel" 'carried blocker you c'
+    # ...and the confirmation-count REPORT, which §3.5 step 2 keys a recovery
+    # arm on: without the count a caller cannot tell a `[]` that passed
+    # verification from one that skipped it
+    grep_site "$REPO_ROOT/$panel" 'you confirmed N carried'
+    # ...and the SCOPE of that duty, which the needle above survives losing
+    grep_site "$REPO_ROOT/$panel" 'whatever you write to the findings file'
+    grep_site "$REPO_ROOT/$panel" '`[]` or otherwise'
+    # the null-carry terminal, the third qualification
+    grep_site "$REPO_ROOT/$panel" 'Absence of the carry is never'
+    grep_site "$REPO_ROOT/$panel" '--fix-verification'
+    # (b) the two-carry injection duty. The descriptor tokens alone do NOT
+    # pin it: they also occur in the maintainer-facing narrative that
+    # introduces the duty, and kubernetes' prompt binds {FIX VERIFICATION} /
+    # {ADJUDICATED} instead — so deleting both prompt lines from all six would
+    # leave every token needle matching. Pin the PROMPT LINES themselves, which
+    # are byte-identical across all six.
+    grep_site "$REPO_ROOT/$panel" 'fix_verification_path'
+    grep_site "$REPO_ROOT/$panel" 'adjudicated_path'
+    grep_site "$REPO_ROOT/$panel" "the previous round's blockers. Confirm each one actually landed"
+    grep_site "$REPO_ROOT/$panel" 'Say in your report how many of them you confirmed landed'
+    grep_site "$REPO_ROOT/$panel" 'suggestions earlier rounds surfaced and the human waived'
+  done
+}
+
+@test "the five language panels state the delta-carry block in LOCKSTEP, not merely in fragments (#1434)" {
+  # A structural assertion, deliberately NOT another needle. The per-panel
+  # `grep -F` fragments above cannot express two things this invariant asserts,
+  # and every recurrence of "the sweep was green on a broken panel" in this
+  # story traced to one of them:
+  #
+  #   * a fragment is LINE-oriented, and every load-bearing sentence here wraps,
+  #     so no needle can span a clause. Inverting a prohibition — "do not write
+  #     a bare `[]`" -> "you may still write a bare `[]`" — leaves every
+  #     fragment matching, because the negation and its object are on different
+  #     lines.
+  #   * a fragment set is BLIND between its needles. A dangling aside and a
+  #     duplicated line survived five panels for a full round precisely there.
+  #
+  # Normalise the block (wraps joined, emphasis stripped) and require the five
+  # language panels to agree byte-for-byte. Any of those mutations changes the
+  # string in at least one panel, so all of them red. kubernetes is excluded on
+  # purpose: its render-first flow states the same duties in its own vocabulary,
+  # which the per-panel needles above cover.
+  local -a lang=(
+    "$REPO_ROOT/development-claude-plugin/skills/review/SKILL.md"
+    "$REPO_ROOT/development-go/skills/review/SKILL.md"
+    "$REPO_ROOT/development-java/skills/review/SKILL.md"
+    "$REPO_ROOT/development-python/skills/review/SKILL.md"
+    "$REPO_ROOT/development-swift/skills/review/SKILL.md"
+  )
+  local f ln ref="" cur
+  for f in "${lang[@]}"; do
+    # the block runs from the delta-carry heading to the FULL-round heading
+    ln="$(grep -n -e 'On a DELTA round that' -- "$f" | head -n 1 | cut -d: -f1)"
+    [ -n "$ln" ] || { printf 'no delta-carry block in %s\n' "$f" >&2; return 1; }
+    cur="$(awk -v s="$ln" 'NR>=s{print} NR>s && /^\*\*That `\[\]` is the DELTA-round rule/{exit}' "$f" \
+           | tr -d '*`' | tr -s '[:space:]' ' ')"
+    [ -n "$cur" ] || { printf 'empty delta-carry block in %s\n' "$f" >&2; return 1; }
+    # a duplicated line is invisible to a fragment set but not to this
+    if [ -z "$ref" ]; then ref="$cur"; else
+      [ "$cur" = "$ref" ] || {
+        printf 'delta-carry block differs in %s\n  ref: %s\n  cur: %s\n' "$f" "$ref" "$cur" >&2
+        return 1
+      }
+    fi
+  done
+  # ...and it really does say the load-bearing things, so five identically
+  # BROKEN panels cannot pass by agreeing with each other
+  case "$ref" in
+    *"do not write a bare []"*) : ;;
+    *) printf 'the agreed block does not forbid a bare []: %s\n' "$ref" >&2; return 1 ;;
+  esac
+  case "$ref" in
+    *"re-raise every carried blocker you cannot confirm"*) : ;;
+    *) printf 'the agreed block does not require the re-raise: %s\n' "$ref" >&2; return 1 ;;
+  esac
+  case "$ref" in
+    *"Absence of the carry is never evidence of an empty one."*) : ;;
+    *) printf 'the agreed block lacks the null-carry terminal: %s\n' "$ref" >&2; return 1 ;;
+  esac
+}
+
+@test "every site stating the closing-sweep grant is on the roster (#1434)" {
+  # The closed-list tripwire, same construction as the #1433 one below-ish: a
+  # sibling of #1431 that restates the grant in a file SWEEP_SITES does not name
+  # would go unguarded, and the sweep above would happily pass over the two we
+  # happen to list. Derive the real set from the tree and require equality.
+  #
+  # Enumerated exactly like the sibling roster in the #1433 test: `-z` +
+  # `read -d ''` because git C-quotes a path holding a non-ASCII byte, a quote
+  # or a backslash — grep then exits 2, the `if` is false, and the file drops
+  # out SILENTLY, which is the fail-OPEN direction and precisely the case this
+  # tripwire exists to catch. `--` and `</dev/null` on the probe so a path
+  # beginning with `-` is not parsed as options and an empty path cannot eat the
+  # loop's stdin. `sort -u` on both sides so a conflicted index (one path listed
+  # per stage) does not red mid-rebase.
+  #
+  # Frozen design records under docs/superpowers/ are excluded for the same
+  # reason the rest of this file excludes them: they are dated snapshots, not
+  # live instruction.
+  local discovered expected
+  local found=()
+  git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1 || {
+    printf 'not a git worktree, cannot derive the roster: %s\n' "$REPO_ROOT" >&2
+    return 1
+  }
+  while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    if grep -q 'exactly one round beyond' -- "$REPO_ROOT/$f" </dev/null; then
+      found+=("$f")
+    fi
+  done < <(cd "$REPO_ROOT" \
+    && git -c core.quotePath=false ls-files -z '*.md' ':!:docs/superpowers/**')
+  [ "${#found[@]}" -ge 1 ]
+  discovered="$(printf '%s\n' "${found[@]}" | sort -u)"
+  [ -n "$discovered" ]
+  # SWEEP_SITES holds absolute paths; the listing is repo-relative
+  local rel=() s
+  for s in "${SWEEP_SITES[@]}"; do rel+=("${s#"$REPO_ROOT/"}"); done
+  expected="$(printf '%s\n' "${rel[@]}" | sort -u)"
   [ "$discovered" = "$expected" ]
 }
 

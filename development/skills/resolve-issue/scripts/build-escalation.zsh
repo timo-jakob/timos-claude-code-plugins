@@ -206,7 +206,10 @@ round_table=$(jq -r '
             + " \($new // "–") | \($carried // "–") | \($fixed // "–") |"
         ]
       | join("\n") ) end' "$status_file")
-assessment=$(jq -r '
+# --arg st: the zero-blocker arm below reads very differently on a CONVERGED
+# status than on an escalation, and this block renders for EVERY status the
+# script accepts (see the case arms above), not just the escalating ones.
+assessment=$(jq -r --arg st "$st" '
   (.round_changelists // []) as $rs
   | if ($rs | length) == 0 then "" else
     ( [ $rs[] | ((.blocking // []) | length) ] ) as $series
@@ -222,7 +225,11 @@ assessment=$(jq -r '
       + (if $ftrips > 0 then
            " \($ftrips) of the \($carried) non-convergence match(es) look like line-proximity false trips (the matched prior blocker has a different title) — those blockers may be new, not stuck."
          else "" end)
-      + (if ($series[-1] == 0) then " The final round has zero blockers — converged; no further rounds needed."
+      + (if ($series[-1] == 0) then
+           (if $st == "CONVERGED"
+            then " The final round has zero blockers on a FULL round — that is the convergence condition; the run ended here."
+            else " The final round has zero blockers, but the run did NOT end there: since #1434 a zero-blocker DELTA round promotes the closing full sweep rather than converging, and that sweep is what this exit interrupted."
+            end)
          elif ($trend == null) or ($carried == null) then ""
          elif ($trend == "improving") and (($carried - $ftrips) == 0)
          then " Blockers are falling and the remaining \($series[-1]) are new rather than carried — another round is likely to help."

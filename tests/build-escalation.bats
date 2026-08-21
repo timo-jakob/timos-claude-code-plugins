@@ -200,6 +200,45 @@ EOF
   run ! grep -q 'without converging' <<< "$output"
 }
 
+@test "#1434 a zero-blocker final round reads as CONVERGENCE on a CONVERGED status" {
+  # The assessment block renders for EVERY status, so its zero-blocker arm must
+  # be gated on the status: unconditional escalation wording would have this
+  # document say "converged" three lines above "the run did NOT end there".
+  # The fixture carries round_changelists, which the sibling CONVERGED test
+  # omits — without it the assessment renders empty and neither arm is reached.
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":2,"max_rounds":3,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":0,"conflicts":0,"non_converging":false}],
+ "round_changelists":[{"round":1,"blocking":[{"priority":"Critical","dimension":"bugs","file":"a.py","line":1,"title":"t","non_converging":false}]},
+                      {"round":2,"blocking":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'that is the convergence condition; the run ended here'
+  run ! grep -q 'the run did NOT end there' <<< "$output"
+}
+
+@test "#1434 a zero-blocker final round reads as an INTERRUPTED sweep on a non-CONVERGED status" {
+  # The other arm: since #1434 a zero-blocker DELTA round promotes the closing
+  # sweep instead of ending the run, so an escalation whose last recorded round
+  # found nothing did NOT converge — the sweep is what the exit interrupted.
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_AMBIGUOUS","rounds":2,"max_rounds":3,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":0,"conflicts":0,"non_converging":false}],
+ "round_changelists":[{"round":1,"blocking":[{"priority":"Critical","dimension":"bugs","file":"a.py","line":1,"title":"t","non_converging":false}]},
+                      {"round":2,"blocking":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'the run did NOT end there'
+  echo "$output" | grep -q 'that sweep is what this exit interrupted'
+  run ! grep -q 'that is the convergence condition' <<< "$output"
+}
+
 @test "BUDGET_EXHAUSTED remaining blockers use the Warning vocabulary, never the internal High (#969)" {
   cat > "$ST" <<'EOF'
 {"status":"BUDGET_EXHAUSTED","rounds":3,"max_rounds":3,"history":[],

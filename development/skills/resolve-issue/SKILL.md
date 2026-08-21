@@ -745,6 +745,207 @@ Each round:
    the user), scoped to the plan's `changed_files` — minus anything under the
    loop's `--work-dir`, which is loop state, never story code. Aggregate their
    findings into one #558-schema JSON array file — the round's findings file.
+
+   **From round 2 on, `plan` needs flags — and it refuses a round ≥ 2 that
+   names neither `--prior-tree` nor `--final` (#1434).** The two carry flags are
+   optional to the parser, but they are not alike. `--adjudicated` is genuinely
+   optional and a `null` path is benign. Omitting `--fix-verification` on a
+   round ≥ 2 is **not**: the descriptor reports a `null` path and every panel
+   then refuses the round outright — writing no findings file and naming the
+   flag — so the omission costs a full panel run before the round can be
+   re-planned.
+   Your panel must be scoped the way the loop will consolidate
+   the round, so run the loop's own invocation as your baseline — then apply the
+   `--final` rule below. The loop reaches the same two `--final` rounds itself
+   (for a verification-only round, via its own re-plan), so your plan and its
+   plan agree; the rule is what you need in order to scope your panel *before*
+   the loop's invocation exists:
+
+   ```bash
+   # round 1 — no flags beyond the round; there is nothing yet to iterate on
+   "<skill-base-dir>/scripts/review-dispatch.zsh" plan \
+     --repo <repo> --base <base> --round 1
+   # round R >= 2
+   "<skill-base-dir>/scripts/review-dispatch.zsh" plan \
+     --repo <repo> --base <base> --round <R> \
+     --prior-tree "$(cat <work-dir>/tree-$((R-1)).txt)" \
+     [--final] \
+     --fix-verification <work-dir>/verify-<R>.json \
+     --adjudicated <work-dir>/adjudicated.json
+   ```
+
+   The work-dir files above are written **by the loop**. Three are **normally**
+   on disk
+   before every round ≥ 2: `tree-<N>.txt` (the working-tree identity round N's
+   reviewers saw), `verify-<N>.json` (round N-1's blockers, written at the end
+   of round N-1) and `adjudicated.json`. The fourth, `.closing-sweep`, is
+   absent until a zero-blocker delta round promotes a sweep — and then
+   **persists for the rest of the run**, since a sweep that finds blockers does
+   not end it. So read its **content**, never its mere existence: it means
+   "this round is the closing sweep" only when it holds **this** round's number.
+   A marker naming an earlier round means the sweep already happened and this
+   round is ordinary. Neither its absence nor a stale number is a broken
+   work-dir. A missing or blank
+   `tree-<R-1>.txt` IS an error: it means the loop never ran round R-1, so
+   report it and stop.
+
+   **Read the carry before you plan ANY round ≥ 2**, not only when the delta
+   turns out to be empty. `jq length` on `<work-dir>/verify-<R>.json`: if it is
+   **absent**, **zero-byte**, or does not print a non-negative integer, it is an
+   **unreadable carry** — report it and stop. Both causes are orthogonal to
+   whether the delta is empty (a `--resume` into an older work-dir predating
+   that write; a run killed in the write's truncate-then-fill window), so on a
+   NON-empty delta round the empty-delta branch below never runs and nothing
+   else would catch it. Planning the round anyway names a `--fix-verification`
+   path you could not read: the panel gets a carry it cannot enumerate, re-raises
+   nothing, and the loop then writes `verify-<R+1>.json` from this round's
+   blockers alone — the carry chain gone for good. **Never plan a round with a
+   carry path you have not successfully read.**
+   **Never synthesize a prior tree** — computing one from the current tree
+   yields an empty delta and a panel that reviews nothing.
+
+   **A non-zero `plan` exit is never a scope.** The call is as fallible as the
+   file read above — you hand-build it, including `$(cat <work-dir>/tree-<R-1>.txt)`
+   — and it has three documented failures:
+
+   - **exit 2** is your own malformed invocation (an empty value, a dangling
+     flag, a `--round` that is not a non-negative integer of at most 18
+     digits). Fix the command and re-run it, the same rule §0a applies to its
+     own script;
+   - **exit 1** is an internal failure (an unresolvable `--base` or
+     `--prior-tree`, a failed `jq` or stack probe). Report its stderr and stop;
+   - **exit 3** prints a **typed error object** on stdout (`unsupported_repo_type`,
+     or an ambiguous repo type) and names no panel. It is the same condition the
+     loop reports as `ESCALATE_AMBIGUOUS` — report it and stop.
+
+   Exit 3 is the trap worth naming twice: its stdout *parses as JSON*, so a
+   descriptor read that only checks "did I get JSON?" sails past it with
+   `review_skill` and `changed_files` null. In none of the three cases may you
+   derive `changed_files` yourself or pick a panel by inspection — a
+   `git diff <base>` substitute is a **full** scope on a delta round, the
+   independent repeat this whole section exists to remove.
+
+   **Pass `--final` in exactly two cases, and never otherwise:**
+
+   - **this round is the closing full sweep** — `<work-dir>/.closing-sweep`
+     holds this round's number (the loop writes it, and the zero-blocker
+     `AWAITING_FIX` in step 3 is the same signal). The loop passes `--final` on
+     its own `plan` call for that round whether or not you do; if you don't,
+     your panel is scoped to a delta that is **empty** (the sweep applies no
+     fix), so it reviews nothing while the loop records a full-sweep round with
+     zero blockers and converges — the safety net silently becoming a no-op;
+   - **this round is a verification-only round** — the plan came back
+     `scope_mode: "delta"` with `scope_empty: true` while blockers are carried
+     (below). Re-plan it with `--final` so the carried blockers are actually
+     checked against the whole story diff.
+
+   **`changed_files` is the round's scope, and what it MEANS varies by round.**
+   `scope_mode` says which — read the field rather than inferring it:
+
+   - **`"full"`** — the whole story diff against `--base`. That is round 1, the
+     closing full sweep, and a verification-only round you re-planned with
+     `--final`.
+   - **`"delta"`** — every intermediate round: exactly what the previous
+     round's fix pass changed. Review that, and **do not** re-read the rest of
+     the story diff: a round that re-reviews everything is an independent
+     repeat, not an iteration, which is what let round 9 of the #687 run
+     produce 49 blocking findings and zero Criticals.
+
+   **A `"full"` plan with `scope_empty: true` is not a round to review either,
+   and it is a different problem.** The scope of a full round *is* the story
+   diff, so an empty one means the implementation produced nothing. Do not spawn
+   a panel, and do not write `[]` — go back to **§2 (Implement)** and write the
+   code, then re-run §3's gate before returning here; or, if the story genuinely
+   needs no code change, say so and stop. The loop will refuse
+   such a round rather than converge it (`STALE_FINDINGS`, naming the full
+   round), so there is nothing to recover by re-running the panel: this is the
+   verdict all six panels emit as *the story diff itself is empty*, and its
+   recovery arm is in step 2.
+
+   **A `"delta"` plan with `scope_empty: true` is not a round to review.**
+   Nothing changed since the previous round, so there is nothing for a panel to
+   look at. Judge that emptiness on the set you will actually hand the panel —
+   `changed_files` **after** the `--work-dir` subtraction above — not on
+   `scope_empty` alone. The two agree whenever the work-dir is outside the repo
+   or git-ignored, which this section already requires, and the loop itself
+   judges on the filtered set; keying on the raw flag would send you to spawn a
+   panel over nothing on the one wiring that section forbids. Two cases, split by **how many blockers `<work-dir>/verify-<R>.json`
+   carries** — `jq length` on it, not whether the file exists or is non-empty:
+   the loop writes that file at the end of every round, storing `[]` when the
+   round had no blockers, so for any work-dir this loop version created it is
+   normally present and non-empty — and you have already read it, because the
+   precondition above required that before this round was planned at all. An
+   **absent or zero-byte** carry, or a `jq length` that is not a non-negative
+   integer, is **not** "carries none": it is the unreadable carry that stopped
+   you there (the loop treats absent and zero-byte identically, `! -s`), and it
+   never reads as 0 — the loop's own round-start fallback only rebuilds
+   it after your panel has already run.
+
+   - **carries blockers** — a verification-only round. **Re-plan with
+     `--final`** and review the whole story diff, so the carried blockers are
+     actually checked. (In step mode the loop keeps this a delta round either
+     way — it cannot converge, and a clean result promotes the closing sweep.
+     What `--final` changes is what your panel *reads*: without it the panel
+     sees an empty scope and the carried blockers go unverified for another
+     round.)
+   - **carries none (`[]`)** — **check `<work-dir>/.closing-sweep` first.** If
+     it holds this round's number, this is the promoted closing full sweep and
+     the empty delta is expected: re-plan with `--final` and run the full-diff
+     panel (above). Stopping here would abandon the run one round short of
+     convergence, and skip the very sweep this story exists to add.
+
+     If the marker does **not** name this round, do not read that as "nothing
+     to review" either. An empty carry means the previous round found **zero
+     blockers**, and such a round is either full — which would have CONVERGED
+     and ended the run — or a delta round, for which the loop *writes* the
+     marker. So in a healthy run the marker naming this round is the only
+     reachable state: its absence means it was lost after that round was
+     recorded, or the `--resume` adoption clamp ignored it (a resume passing a
+     smaller `--max-rounds` than the run that wrote it, or an unreadable
+     marker — the loop says so on stderr). **Recover, don't stop**: restore
+     `<work-dir>/.closing-sweep` holding this round's number, or re-invoke with
+     the `--max-rounds` the marker was written under, and re-plan the round with
+     `--final`. Stop only when you cannot establish that the previous round was
+     a zero-blocker delta round. The loop's own refusal message names the same
+     recovery — never invent a code change just to move the tree.
+
+   Two carries ride in the plan from round 2 on, and the reviewers must be
+   **told about both** — they are the point of the delta, not decoration:
+
+   - **`fix_verification_path`** — the previous round's blockers. Each
+     reviewer's first job is to confirm those fixes actually landed, before
+     looking for anything new. **Say what to do when one did not:** a fix that
+     did not land, or that the reviewer cannot confirm landed, must be
+     **re-raised at its original severity**, citing the carried entry, *even
+     when its file is outside this round's delta* — a delta round cannot
+     re-derive it, so silence here converges the run with the blocker unfixed.
+     **And tell each reviewer to report how many carried entries it confirmed
+     landed** — on any round whose carry is non-empty, whatever it writes to the
+     findings file, `[]` or otherwise. Step 2 refuses a round that does not
+     account for every carried entry, so asking for the count belongs to the
+     dispatch, not to the recovery.
+
+     **You get one count per reviewer, and the round's count is their UNION.**
+     A carried entry is confirmed when **at least one** reviewer says so; the
+     round's count is `|union| of M`. A reviewer silent about the carry
+     contributes zero confirmations — it does **not** fail the round on its own,
+     since the entry may be outside its dimension. What fails the round is a
+     carried entry that no reviewer confirmed **and** no reviewer re-raised.
+   - **`adjudicated_path`** — suggestions earlier rounds already surfaced and
+     the human already waived. **Do not re-raise them as Suggestions — except
+     in a file the PREVIOUS ROUND'S FIX PASS touched**, where new code has just
+     been written and a same-titled observation may be genuinely new. Key it on
+     the fix pass, not on the round's scope: on a **delta** round the two are
+     the same set, but on the **closing full sweep** the scope is the whole
+     story diff while the fix pass touched nothing — so there, withhold every
+     waived suggestion. That exemption is an *instruction*, not a footnote: in
+     step mode the panel reads `adjudicated.json` as the previous round left it,
+     before the loop drops the entries whose file the fix pass touched, so a
+     reviewer that withholds one there kills a finding nothing downstream can
+     restore. And if one is genuinely *blocking* on this round's code, raise it
+     at `CRITICAL`/`WARNING` and say what changed — a re-raise above Suggestion
+     level is never suppressed, and withholding it would converge the run with a
+     Critical nobody reported.
 2. **One loop invocation.**
 
    ```bash
@@ -814,9 +1015,12 @@ Each round:
 
    **Write each round's findings to its own path** (`findings-round-R.json` —
    hence the `R`), and pass that round's path. On a `--resume` round the loop
-   refuses two shapes of "this round's panel never ran" as
-   **`STALE_FINDINGS` (exit 2, #974)** — a *recoverable* usage error, not a
-   verdict:
+   refuses **four** shapes of "this round was never really reviewed" as
+   **`STALE_FINDINGS` (exit 2, #974, #1434)** — a *recoverable* usage error, not
+   a verdict. Three are about the findings file you passed; the fourth is about
+   the tree. A **fifth** shape is not limited to `--resume` rounds at all — a
+   **full** round whose panel produced no findings file, stated below — and that
+   one and the fourth both also fire in hook mode:
 
    - the file is **missing or empty** — a panel that found nothing still writes
      `[]`, so silence is never read as a clean round (that would converge the
@@ -824,14 +1028,143 @@ Each round:
    - its content is **byte-identical to the round just consumed** — a stale
      path re-passed, or the new round's file never written. Consumed, it would
      read as a blocker surviving two rounds and trip a phantom
-     `ESCALATE_NO_CONVERGENCE`.
+     `ESCALATE_NO_CONVERGENCE`. **One exception (#1434):** the promoted closing
+     full sweep is exempt when the round before it **looked at something and
+     found nothing** — all three facts (a recorded sweep, that round's findings
+     being `[]`, and its scope having been non-empty), because `[]` twice
+     running is the expected shape there and refusing it would make convergence
+     unreachable. You never have to work around this arm: a round whose panel
+     saw *nothing* records no digest at all, so it cannot refuse its successor
+     either. **Never hand-edit findings to make the bytes differ** — see the
+     recovery rules below;
+   - `--findings-file` **IS** the round's own dispatch `findings_path` — you
+     aimed at the internal sink the loop truncates. It is refused up front, so
+     your panel output was never destroyed; it is simply at the wrong path;
+   - the round's **delta is empty and nothing is carried** to verify (#1434) —
+     nothing has changed since a round that **left no blockers to verify** (its
+     `verify-<R>.json` is `[]`; that round may still have logged Suggestions). This one is
+     **not** a re-run-the-panel case: a re-invocation recomputes the same empty
+     delta and refuses again. **Recover per the empty-delta arm below** —
+     restore the closing-sweep marker the previous round earned, or re-invoke
+     under the `--max-rounds` it was written under (step 1 sets out why the
+     marker is the reachable state). Stop only when you cannot establish that
+     the previous round was a zero-blocker delta round, and never invent a code
+     change just to move the tree.
+     (An empty delta *with* a carry is **not** refused — it is a
+     verification-only round; see step 1 for how to scope it.)
 
-   **Recover by cause, then re-invoke** — the round is not lost:
+   **Recover by cause, then re-invoke** — the round is not lost. One arm below
+   (the missing-confirmation-count one) is a **pre-invocation** check rather than a
+   recovery: the loop cannot refuse that shape for you, so it is on you to spot
+   it before you pass the file:
 
    - if round R's panel **did** run and its aggregate exists at its own path,
      just re-invoke with the correct `--findings-file` (don't re-run the panel);
-   - if it **never** ran (or you can't tell), run round R's panel (step 1),
-     write its aggregate — `[]` when it found nothing — and re-invoke.
+   - if round R's panel reported the round **FAILED** — a dimension that did
+     not run, a render step that failed, or (on a round ≥ 2) a
+     `fix_verification_path` that was **null or unreadable** — it deliberately
+     wrote no findings file and named the cause. That last shape splits: a **null**
+     carry is *your own* omitted `--fix-verification` — re-plan the round with
+     the carry path (step 1's precondition) and re-run the panel; an
+     **unreadable** one means the path was passed but the panel could not read
+     it (a relative path resolved against a different cwd, a file outside the
+     agent's reach), which step 1's read-before-plan precondition should already
+     have caught — fix the path so the agent can read it, then re-run. Either
+     way, re-running the panel *unchanged* reproduces the same report. Do **not** write `[]` and do **not** re-invoke:
+     fix what it named and re-run the panel, or, if it cannot be fixed, report
+     it in the conversation and stop. Writing `[]` here records a clean round
+     over a dimension nobody reviewed, and on a delta round that also promotes
+     the closing sweep — so the run can reach CONVERGED and open a PR on an
+     unreviewed dimension, the exact outcome the panels' write-nothing rule
+     exists to prevent.
+
+     **The panel's report to you is the primary signal**, not a file on disk.
+     Only the `kubernetes` panel additionally leaves durable detail in
+     `<findings-path>.failed.json`; the other five report a failed round to
+     their caller and nothing else. So a missing sidecar is **not** evidence
+     the panel ran cleanly. (On a loop-driven **delta** round that carries
+     nothing, the `kubernetes` panel reports **not applicable** by writing `[]`
+     itself plus that sidecar — the opposite case, with nothing to recover.
+     With a non-empty carry it either dispatches with the carry or re-raises what
+     it could not confirm. A **full** round's not-applicable verdict has its own
+     arm below.);
+   - **any** panel, on a round carrying a non-empty `verify-<R>.json`, that
+     does not account for **every** carried entry took the wrong branch —
+     whatever it wrote to the findings file. Two shapes: it states **no count
+     at all**, or it states `N of M` with `N < M` and does **not** re-raise, at
+     its original severity, each of the `M − N` it could not confirm. A `[]` is
+     the starkest case, but two *new* findings with nothing said about the carry
+     retire the carried blockers just as unconfirmed — and so does a partial
+     count with no re-raises to reconcile it. The count and the findings file
+     must add up: every carried entry is either confirmed in the report or
+     re-raised in the file. All six carry the same rule ("say in your report
+     that you confirmed N carried entries"), so this is not a kubernetes-only
+     shape — a confirmed-clean `[]` is legitimate and says so. Treat an
+     unconfirmed one exactly like a FAILED round: do **not** pass it to
+     `--findings-file`. Re-run the round's panel, telling it explicitly to
+     confirm each carried entry and to report how many it confirmed; if the
+     re-run again reports no confirmation count, report it in the conversation
+     and stop. Consuming it retires carried blockers no reviewer
+     confirmed: the entries this round did not re-raise never reach
+     `verify-<R+1>.json`, so the carry chain is gone for good — and when the
+     report was a `[]`, the round additionally promotes the closing sweep, so
+     the run can reach CONVERGED with the previous round's blockers unfixed;
+   - if round R's panel reported the round **NOT APPLICABLE on a full round** —
+     the `kubernetes` panel's verdict when a story's diff touches nothing it can
+     review (a workflow, a docs page, an excluded chart's `values.yaml`), and
+     the other five panels' *the story diff itself is empty* — it is neither a
+     failure nor something you can fix, and **re-running it is deterministic**:
+     it will report the same thing. Do **not** write `[]` (zero blockers on a
+     full round is the CONVERGED condition, so that would open a PR on a story
+     nothing reviewed), and do **not** loop on the panel. Report to the user
+     what the panel said. Then:
+
+     - **autonomous** — stop, and say so. An unattended run does not get to
+       waive its own review. Do **not** commit and do **not** open a PR;
+     - **interactive** — put it to the human as three options, and take none of
+       them without an explicit choice: (1) the deliberate `--no-review` fast
+       path (below), which records status `SKIPPED` and does open a PR; (2) a
+       **non-panel review** — you read the story diff yourself and report what
+       you find in the conversation; it produces **no** findings file and does
+       not resume the loop, so the run ends with the review recorded as waived
+       in the PR body; (3) stop, with no commit and no PR.
+
+     An **empty story diff** is the one shape not to offer any of these for:
+     nothing was implemented, so there is nothing to review or to ship — see
+     step 1's `"full"` plan branch and go back to **§2 (Implement)**;
+   - if it **never** ran, and you can establish that positively (no panel was
+     dispatched this round, or it was interrupted before any dimension
+     completed), run round R's panel (step 1) and write **its** aggregate —
+     which is `[]` only when that panel really found nothing — then re-invoke.
+
+   **You never author a review round's findings file yourself.** In every arm
+   above the `[]` that reaches `--findings-file` is a panel's own output; there
+   is no state in which the right move is to write `[]` on a panel's behalf. If
+   you cannot positively establish that this round's panel ran to completion
+   over **every** dimension, the absent aggregate is ambiguous — re-run the
+   panel, or stop. Filling it in yourself converges the round on a review nobody
+   performed. The loop enforces the same rule from its side: on a **full** round
+   a missing or empty `--findings-file` is refused as `STALE_FINDINGS` rather
+   than read as `[]`, because zero blockers there is the CONVERGED condition.
+
+   **The one carve-out is the promotion sub-loop's seeded round 1** (below),
+   and it is not an exception to the rule above: that file is never a `[]`
+   substituted for a panel, and it adds nothing a panel did not already report
+   — it is the blocking phase's own panel aggregate plus items projected from
+   that phase's own changelist, so a human's promoted pick is reproducible. It
+   is a *seed* for a round that then runs its panel normally, not a stand-in
+   for one.
+   - on the **alias** refusal, re-invoke with `--findings-file` pointing at this
+     round's own path (`findings-round-R.json`). Do **not** re-run the panel —
+     its output is intact, and re-running it into the same sink repeats the
+     mistake;
+   - on the **empty-delta** refusal, no re-run of the **panel** can clear it,
+     and there is nothing to fix either: this arm fires only when the carry is
+     `[]`, and the refusal message says so itself. Restore `<work-dir>/.closing-sweep` holding this round's number, or
+     re-invoke under the `--max-rounds` the marker was written under (step 1
+     sets out why the marker is the reachable state). **Never invent a code
+     change just to move the tree.** Stop only when you cannot establish that
+     the previous round was a zero-blocker delta round.
 
    **Re-pass the same `--gate-attest` on the recovery re-invoke** (plugin repos).
    The refusal happens *after* the resume-start gate has already run (or validly
@@ -841,13 +1174,18 @@ Each round:
    removes; drop it only if you edited the tree since the green gate.
 
    Never re-pass the previous round's file, and **never hand-edit findings to
-   make the bytes differ** — that fakes a round. The refusal can only fire
-   *again* if you feed it byte-identical findings *again*; two genuinely
-   independent panel runs never serialise to identical bytes (evidence text,
-   ordering, and reviewer set all vary), so a repeat means the file still
-   wasn't this round's real panel output — recover it (above), don't work
-   around it. A blocker the reviewers keep re-finding is a real problem to
-   **fix in-session**, not a reason to defeat the guard.
+   make the bytes differ** — that fakes a round. The **byte-identical** refusal
+   can only fire *again* if you feed it byte-identical findings *again*; two
+   genuinely independent panel runs **that each found something** never
+   serialise to identical bytes (evidence text, ordering, and reviewer set all
+   vary), so a repeat means the file still wasn't this round's real panel
+   output — recover it (above), don't work around it. Two rounds that both
+   found **nothing** do serialise identically, of course, and that case is
+   governed by the waiver above rather than by this rule. A blocker the reviewers keep re-finding is a real problem to
+   **fix in-session**, not a reason to defeat the guard. That reasoning is
+   specific to that arm. The **empty-delta** refusal depends on the tree and the
+   **alias** refusal on the invocation, so re-passing different bytes does
+   nothing for either — take their own recoveries above.
 
    Exit 2 **writes** its own status JSON (`status: "STALE_FINDINGS"`) to
    stdout and `--status-file`, so the previous round's verdict is never left
@@ -869,14 +1207,39 @@ Each round:
    real findings, running the panel first if it never ran). The missing/empty
    half of the guard (and the alias guard — `--findings-file` must never be the
    dispatch `findings_path`) needs no digest tool and always applies.
-3. **On `AWAITING_FIX` (exit 20)** — blockers remain and budget is left:
+3. **On `AWAITING_FIX` (exit 20)** — the round is over and the run continues.
+   **First check `final_changelist.summary.blocking` (#1434): a ZERO there is
+   not a fix turn.** It is a delta round that found nothing, so the loop wrote
+   `<work-dir>/.closing-sweep` and promoted the **next** round to a closing full
+   sweep over the whole story diff. Say so, **apply no fix at all** (there is
+   nothing to fix, and an invented one would change the tree the sweep is about
+   to read), then run the next round's panel **with `--final` on your own `plan`
+   call** (step 1) so it is scoped `"full"`, and `--resume`. The `--final` is
+   not optional: no fix ran, so a plan without it returns an **empty** delta and
+   your panel would review nothing while the loop — which passes `--final`
+   itself — records a full-sweep round with zero blockers and converges, turning
+   the safety net into a no-op. **Re-pass the same `--gate-attest`** on that
+   resume (plugin repos): no fix ran, so the attestation you are holding still
+   matches and the sweep need not re-run the whole suite. Only that closing
+   sweep can declare `CONVERGED`; treating this exit as a normal fix turn would
+   either stall the run or, worse, invent changes nothing reviewed. If the promoted sweep sits past `--max-rounds`,
+   that is deliberate: the loop grants the closing full sweep
+   exactly one round beyond the ceiling, once, so the safety net is not skipped
+   precisely when the run has been longest.
+   The status JSON carries `closing_sweep_granted: true`,
+   `max_rounds` still reports what you passed, and the `--resume` is accepted —
+   do **not** "fix" it by raising `--max-rounds` yourself.
+
+   Otherwise blockers remain and budget is left:
    **narrate the round in the conversation** (round number; the
    Critical/Warning/Suggestion counts — plus, on a promotion sub-loop round, the
    `promoted` count and each `- promoted suggestion:` line; blockers found, new
    vs carried;
    fixed-since-prior and the cumulative blocking trend from round 2 on; the
    dimensions they came from; what you fix next — the same block the loop
-   just appended to progress.md, which carries these where applicable). Two
+   just appended to progress.md, which carries these where applicable, plus an
+   `- adjudicated re-raises dropped: N` line when the consolidator suppressed a
+   re-raise of an already-waived suggestion, #1434). Two
    false-trip shapes to narrate: an **escalating possible false trip** — a
    carried match with no shared (non-empty) prior title that is still
    ambiguous (#913/#969) — can only appear on an *escalating* round (an
@@ -942,10 +1305,14 @@ with a status JSON + code:
   in-session, `--resume`" turn of the round protocol above. Never build an
   escalation comment from it.
 - **`STALE_FINDINGS` (exit 2)** → neither a verdict nor an escalation — the
-  round's findings were never produced (missing/empty on `--resume`,
-  byte-identical to the last round, or `--findings-file` aliased the dispatch
-  `findings_path`). Recover by cause per §3.5 step 2 and re-invoke; **never**
-  build an escalation comment or a dossier from it.
+  round was never really reviewed (missing/empty on `--resume`, byte-identical
+  to the last round, `--findings-file` aliased the dispatch `findings_path`, or
+  — #1434 — an empty delta with nothing carried to verify, or a **full** round
+  whose panel produced no findings file at all). Recover **by cause** per §3.5
+  step 2 before re-invoking: several causes are **not** cleared by re-running
+  the panel — an empty delta with nothing carried, an aliased `--findings-file`,
+  and a panel that reported NOT APPLICABLE on a full round. **Never** build an escalation comment or a
+  dossier from it.
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
   *Escalation* below. Opening a PR here would spend CI on unconverged work.
@@ -1568,7 +1935,9 @@ alongside the summary so the human still sees the story's full cost:
    exactly three more rounds (ceiling 8 after the default budget, rounds 6-8),
    but an `ESCALATE_NO_CONVERGENCE` can fire as early as round 2, where the same
    `prev_max + 3` leaves more than three
-   (ceiling 8 after a round-2 exit = 6 rounds left). Compute the remainder
+   (ceiling 8 after a round-2 exit = 6 rounds left) — and a run whose closing
+   sweep was granted its extra round is already **one past** `max_rounds`
+   (#1434), where the same `prev_max + 3` buys only two. Compute the remainder
    (`new ceiling − rounds already run`) and say what the resume actually buys,
    rather than promising a flat three. The soft cap counts **grants** and the
    20-round figure is a `max_rounds` value, so the varying remainder changes
@@ -1605,10 +1974,13 @@ alongside the summary so the human still sees the story's full cost:
    On `AWAITING_FIX` (20) → continue the §3.5 round protocol (narrate, fix
    in-session, re-run the gate, run the next panel, `--resume` with the same
    raised `--max-rounds`) — no grant bookkeeping; the grant was already
-   counted. On `STALE_FINDINGS` (exit 2, #974) → **not terminal**: recover by
-   cause per §3.5 step 2 (re-invoke with round R's real findings path, or run
-   its panel first, re-passing the same `--gate-attest` per §3.5's recovery
-   rule) and resume with the same raised `--max-rounds`. The grant
+   counted. On `STALE_FINDINGS` (exit 2, #974) → **not terminal**: recover **by
+   cause** per §3.5 step 2 — for the findings-file causes that means re-invoking
+   with round R's real path, or running its panel first (re-passing the same
+   `--gate-attest` per §3.5's recovery rule); the empty-delta, alias and
+   not-applicable-on-a-full-round causes have their own recoveries there, none
+   of which is a panel re-run — then resume with the same raised
+   `--max-rounds`. The grant
    was already counted at the resume that produced this exit — the recovery
    re-invocation neither increments nor decrements `grants`, and never re-runs
    step 1's `build-escalation.zsh` summary on the `STALE_FINDINGS` status. On

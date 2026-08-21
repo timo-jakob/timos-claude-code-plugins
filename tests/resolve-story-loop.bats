@@ -67,6 +67,37 @@ ambiguous_run() {   # -> ESCALATE_AMBIGUOUS (pre-loop: two languages)
     --review-cmd 'true' --fix-cmd 'true' "$@"
 }
 
+@test "#1434 hook mode: a FULL round whose panel writes NO findings is refused, never converged" {
+  # Hook mode has no --findings-file guards at all, so this branch is the only
+  # thing that keeps a silent panel from converging a run. Round 1 is always
+  # full, so `--review-cmd 'true'` (which writes nothing) lands squarely on it.
+  loop --review-cmd 'true' --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  # the HOOK-mode wording: it names $REVIEW_FINDINGS, the file the hook must
+  # write, not the --findings-file a step-mode caller passes
+  contains "$output" "is a FULL round and --review-cmd produced no findings"
+}
+
+@test "#1434 hook mode: a DELTA round whose panel writes NO findings is still consumed as no findings" {
+  # The other arm of the same condition, and the reason it is conditional: a
+  # delta round cannot converge, so a silent panel there is harmless and the
+  # `[]` default stands. Round 1 finds a blocker, the fix hook really moves the
+  # tree, and from round 2 on the panel writes nothing.
+  loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'echo "print(2)" > "$REVIEW_REPO/fixed.py"'
+  # round 2 is consumed as zero blockers and promotes the closing sweep; round
+  # 3 IS that sweep — a full round whose panel is again silent, so it refuses
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "round 3 is a FULL round and --review-cmd produced no findings"
+  # the delta round really did run and really did promote: without the
+  # conditional the run would have refused at round 2 instead
+  [ "$(cat "$BATS_TEST_TMPDIR/wd/.closing-sweep")" = "3" ]
+  [ -s "$BATS_TEST_TMPDIR/wd/changelist-2.json" ]
+  [ "$(jq '.summary.blocking' "$BATS_TEST_TMPDIR/wd/changelist-2.json")" -eq 0 ]
+}
+
 @test "clean story converges in round 1 (exit 0), one-line status JSON" {
   clean_loop
   [ "$status" -eq 0 ]
@@ -450,7 +481,7 @@ assert_envelope() {
   echo "$output" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
   # ...and the record is NOT on stdout, which capturing it could easily leak
-  run ! grep -q 'telemetry/v1' <<<"$output"
+  run -1 grep -q 'telemetry/v1' <<<"$output"
 
   [ -s "$WD/.telemetry-run-id" ]
   # the id must be THE emitted record's, not a fresh or fabricated one — that
@@ -536,6 +567,11 @@ assert_envelope() {
   # the run exits terminally instead.
   local FIND="$BATS_TEST_TMPDIR/resume-keeps-findings.json"
   printf '%s' '[{"severity":"CRITICAL","dimension":"tests","file":"app.py","line":500,"title":"a different blocker","description":"d","reviewer":"r"}]' > "$FIND"
+  # the in-session fix, so round 2 has a real delta to review: since #1434 a
+  # resumed round whose delta is empty while blockers are carried is refused
+  # (its findings were produced against an empty scope), which would put this
+  # test on a subject that is not the telemetry sidecar
+  echo "x = 1" > "$R/fixed.py"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 5 \
     --telemetry-file "$T" --issue 995 --findings-file "$FIND"
@@ -866,12 +902,13 @@ seed_exhausted_wd() {
     zsh "$S" --repo "$R" --base refs/heads/does-not-exist --work-dir "$BATS_TEST_TMPDIR/wd-badbase" \
     --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
   [ "$status" -eq 1 ]
-  run ! grep -q 'CONVERGED' <<< "$output"
+  run -1 grep -q 'CONVERGED' <<< "$output"
 }
 
-@test "scope refreshes each round: a file the fix pass creates is reviewed next round (#911)" {
+@test "scope refreshes each round: a file the fix pass creates is reviewed next round (#911, delta-scoped since #1434)" {
   WD="$BATS_TEST_TMPDIR/wd-scope-refresh"
-  # round 1: blocker + the fix pass creates helper.py; round 2: clean -> CONVERGED.
+  # round 1 (full): blocker + the fix pass creates helper.py; round 2 (delta):
+  # clean, so it promotes round 3 to the closing full sweep, which converges.
   # The review hook snapshots its scope per round so we can assert the refresh.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     SNAP="$WD" \
@@ -880,13 +917,23 @@ seed_exhausted_wd() {
     --fix-cmd 'echo "x = 1" > "$REVIEW_REPO/helper.py"'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # capture BEFORE any `run !` below: `run` overwrites $output, so a later
+  # `jq <<<"$output"` would be reading grep's output, not the loop's
+  local rounds; rounds="$(echo "$output" | jq -r '.rounds')"
+  # the closing full sweep sees the WHOLE story diff again, which is the safety
+  # net that makes the delta scoping below safe to have
+  [ "$rounds" = "3" ]
   # round 1 reviewed the real pre-fix scope (positive assertion proves the
   # snapshot captured content, so the negative one below discriminates)
   grep -qx 'app.py' "$WD/scope-r1.txt"
-  run ! grep -qx 'helper.py' "$WD/scope-r1.txt"
-  # round 2 must see the fix's new file
+  run -1 grep -qx 'helper.py' "$WD/scope-r1.txt"
+  # round 2 is a DELTA round: it must see the fix's new file, and ONLY that —
+  # app.py has not changed since round 1's tree, so re-reviewing it would be the
+  # independent-repeat behaviour #1434 removed
   grep -qx 'helper.py' "$WD/scope-r2.txt"
-  grep -qx 'app.py' "$WD/scope-r2.txt"
+  run -1 grep -qx 'app.py' "$WD/scope-r2.txt"
+  grep -qx 'app.py' "$WD/scope-r3.txt"
+  grep -qx 'helper.py' "$WD/scope-r3.txt"
 }
 
 @test "a repo-internal --work-dir's own state files never enter the refreshed scope (#911)" {
@@ -898,10 +945,448 @@ seed_exhausted_wd() {
     --fix-cmd 'echo "x = 1" > "$REVIEW_REPO/helper.py"'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
-  # round 2's refreshed scope: the story files, but none of the loop's own state
-  grep -qx 'app.py' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
+  # round 2's refreshed DELTA scope: the file the fix created, and none of the
+  # loop's own state — which a repo-internal work-dir puts squarely INSIDE the
+  # delta, so this is the harder half of the #911 guarantee, not the easier one
   grep -qx 'helper.py' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
-  run ! grep -q '^\.loop-wd/' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
+  run -1 grep -q '^\.loop-wd/' "$BATS_TEST_TMPDIR/wdscope-r2.txt"
+  # the closing full sweep re-reads the whole story diff, still without the
+  # work-dir's own files
+  grep -qx 'app.py' "$BATS_TEST_TMPDIR/wdscope-r3.txt"
+  grep -qx 'helper.py' "$BATS_TEST_TMPDIR/wdscope-r3.txt"
+  run -1 grep -q '^\.loop-wd/' "$BATS_TEST_TMPDIR/wdscope-r3.txt"
+}
+
+# ---- delta scoping, the closing full sweep, and the adjudicated list (#1434)
+#
+# A fix hook that does NOT touch the tree leaves an empty delta, which the loop
+# promotes back to a full sweep — so these tests use hooks that really edit
+# files, otherwise they would silently exercise the promotion path instead of
+# the delta path they claim to test.
+
+@test "#1434 each round persists its tree identity, and round 2 is scoped against round 1's" {
+  WD="$BATS_TEST_TMPDIR/wd-tree-id"
+  # round 1 blocks; its fix pass edits ONLY helper.py; round 2 (delta) is clean,
+  # promoting round 3 to the closing sweep, which converges.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope-r$REVIEW_ROUND.txt"; printf "%s" "$REVIEW_SCOPE_MODE" > "$SNAP/mode-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = 1" > "$REVIEW_REPO/helper.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # one identity per round, and they MOVED — a tree id that never changes would
+  # make every delta empty and quietly restore full-sweep behaviour
+  [ -s "$WD/tree-1.txt" ]
+  [ -s "$WD/tree-2.txt" ]
+  [ "$(cat "$WD/tree-1.txt")" != "$(cat "$WD/tree-2.txt")" ]
+  # the round modes the panel actually saw
+  [ "$(cat "$WD/mode-r1.txt")" = "full" ]
+  [ "$(cat "$WD/mode-r2.txt")" = "delta" ]
+  [ "$(cat "$WD/mode-r3.txt")" = "full" ]
+  # ...and round 2's scope is EXACTLY what planning against tree-1.txt yields,
+  # which is what proves the loop passed that identity rather than some other
+  # (the tree has not moved since round 2: rounds 2 and 3 ran no fix pass)
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/review-dispatch.zsh" \
+    plan --repo "$R" --base main --round 2 --prior-tree "$(cat "$WD/tree-1.txt")"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.changed_files | join("\n")')" = "$(cat "$WD/scope-r2.txt")" ]
+}
+
+@test "#1434 a zero-blocker DELTA round does not converge — it promotes a closing full sweep" {
+  WD="$BATS_TEST_TMPDIR/wd-closing-sweep"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
+    --review-cmd 'printf "%s" "$REVIEW_SCOPE_MODE" > "$SNAP/mode-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = 1" > "$REVIEW_REPO/helper.py"; echo "ran-r$REVIEW_ROUND" >> "$SNAP/fixes.txt"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # round 2 found nothing but did NOT end the run; round 3 — the closing full
+  # sweep over the whole story diff — is what converged
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq '.history | length')" -eq 3 ]
+  [ "$(echo "$output" | jq '.history[1].blocking')" -eq 0 ]
+  [ "$(cat "$WD/mode-r3.txt")" = "full" ]
+  [ -f "$WD/.closing-sweep" ]
+  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  # a sweep INSIDE the budget is not a grant: without this control the flag's
+  # two `true` assertions elsewhere would pass just as happily on a build that
+  # set it for every promoted sweep, and every ordinary run would then report
+  # `closing_sweep_granted: true` in its status JSON and telemetry
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "false" ]
+  # and the fix hook was NOT invoked for the clean round — there is nothing to
+  # fix, and an invented change would alter the tree the sweep is about to read
+  [ "$(grep -c . "$WD/fixes.txt")" -eq 1 ]
+  grep -qx 'ran-r1' "$WD/fixes.txt"
+  # the round's own verdict line says what happened, naming the sweep's round:
+  # rendering the ordinary "fix pass (in-loop), continuing" here would tell a
+  # user tailing progress.md that a fix ran on a round that found nothing
+  grep -q -- '- no blockers in the delta — promoting round 3 to the closing full sweep' "$WD/progress.md"
+}
+
+@test "#1434 the closing sweep is not STICKY — a later round is a delta round again" {
+  WD="$BATS_TEST_TMPDIR/wd-sweep-not-sticky"
+  # Round 2 is clean, so round 3 is the closing sweep. Round 3 then FINDS a
+  # blocker, so the run continues — and round 4 must be a DELTA round again.
+  # A sweep marker read as `round >= closing_sweep_round` would plan every later
+  # round --final, restoring the independent-repeat behaviour #1434 removes.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 5 \
+    --review-cmd 'printf "%s" "$REVIEW_SCOPE_MODE" > "$SNAP/mode-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":1,\"title\":\"unquoted variable in matcher\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 3 ]; then printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":900,\"title\":\"missing pipefail on the download pipeline\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = $REVIEW_ROUND" > "$REVIEW_REPO/helper.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(cat "$WD/mode-r1.txt")" = "full" ]
+  [ "$(cat "$WD/mode-r2.txt")" = "delta" ]
+  [ "$(cat "$WD/mode-r3.txt")" = "full" ]   # the promoted sweep
+  [ "$(cat "$WD/mode-r4.txt")" = "delta" ]  # ...and NOT sticky
+}
+
+@test "#1434 a closing sweep that FINDS blockers at the ceiling is BUDGET_EXHAUSTED, not a verdictless exit" {
+  WD="$BATS_TEST_TMPDIR/wd-sweep-budget"
+  # --max-rounds 2, so round 2 is the ceiling. It is a clean delta round, so the
+  # sweep is granted round 3 — and the sweep finds a blocker. The budget test
+  # must use the EFFECTIVE ceiling: keyed on --max-rounds it would fall out of
+  # the while loop with no verdict at all and exit 1.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 2 \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 2 ]; then printf "[]" > "$REVIEW_FINDINGS"; else printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":$((REVIEW_ROUND*900)),\"title\":\"blocker r$REVIEW_ROUND unique wording\",\"description\":\"d\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = $REVIEW_ROUND" > "$REVIEW_REPO/helper.py"'
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 2 ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
+}
+
+@test "#1434 a malformed suggestion never reaches adjudicated.json — the work-dir cannot be bricked" {
+  WD="$BATS_TEST_TMPDIR/wd-adj-normalise"
+  # The consolidator TOLERATES a non-string title and a missing dimension on a
+  # reviewer's finding, but its own --adjudicated validator refuses both. An
+  # unnormalised append would persist them, and every later round (and every
+  # later --resume) would die on the consolidator's refusal as a bare exit 1.
+  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"helper.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":42,"description":"d","reviewer":"r"},{"severity":"SUGGESTION","file":"app.py","line":2,"title":"no dimension at all","description":"d","reviewer":"r"}]'
+  echo "print(1)" > "$R/helper.py"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    R1="$r1" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = 2" > "$REVIEW_REPO/helper.py"'
+  # the run reached its verdict rather than dying on round 2's consolidator
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # every persisted entry satisfies the consolidator's own --adjudicated
+  # predicate, and the dimension-less one was dropped rather than stored empty
+  jq -e 'all(.[]; (.file | type == "string" and length > 0)
+                  and (.dimension | type == "string" and length > 0)
+                  and (.title | type == "string"))' "$WD/adjudicated.json" >/dev/null
+  [ "$(jq 'length' "$WD/adjudicated.json")" -eq 1 ]
+  [ "$(jq -r '.[0].title' "$WD/adjudicated.json")" = "42" ]
+}
+
+@test "#1434 a zero-blocker delta round at the ceiling is granted the closing sweep, once" {
+  WD="$BATS_TEST_TMPDIR/wd-grant"
+  # --max-rounds 2, so round 2 IS the ceiling. It is a delta round that finds
+  # nothing, so the sweep must still run — at round 3.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 2 \
+    --review-cmd 'printf "%s" "$REVIEW_SCOPE_MODE" > "$SNAP/mode-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = 1" > "$REVIEW_REPO/helper.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  [ "$(cat "$WD/mode-r3.txt")" = "full" ]
+  # the grant is a fact about THIS run, not a bigger budget: max_rounds still
+  # reports what the caller passed, and a separate boolean records the grant
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 2 ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
+}
+
+@test "#1434 closing_sweep_granted is present and false on an ordinary run" {
+  # always-present, for the same reason promotion_phase is: a consumer must
+  # never have to tell `false` from "a status file that predates the key"
+  clean_loop
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'has("closing_sweep_granted")')" = "true" ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "false" ]
+}
+
+@test "#1434 an empty delta with carried blockers runs as a full sweep, not a refusal" {
+  WD="$BATS_TEST_TMPDIR/wd-empty-delta-carried"
+  # the fix hook deliberately changes NOTHING, so round 2's delta is empty —
+  # but round 1's blocker is carried for verification, so the round is a
+  # legitimate verification-only sweep, not an unreviewed round
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
+    --review-cmd 'printf "%s" "$REVIEW_SCOPE_MODE" > "$SNAP/mode-r$REVIEW_ROUND.txt"; cp "$REVIEW_SCOPE_FILE" "$SNAP/scope-r$REVIEW_ROUND.txt"; printf "%s" "$REVIEW_FIX_VERIFICATION" > "$SNAP/verify-path-r$REVIEW_ROUND.txt"; cp "$REVIEW_FIX_VERIFICATION" "$SNAP/verify-seen-r$REVIEW_ROUND.json" 2>/dev/null || true; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  [ "$(cat "$WD/mode-r2.txt")" = "full" ]
+  # the scope was RE-DERIVED after the promotion: without the second
+  # write_round_scope the panel would be handed the delta round's empty scope
+  # while the descriptor said full, converging on a sweep that read zero files
+  grep -qx 'app.py' "$WD/scope-r2.txt"
+  # round 2 was handed the previous round's blockers to verify
+  [ "$(jq 'length' "$WD/verify-2.json")" -eq 1 ]
+  [ "$(jq -r '.[0].title' "$WD/verify-seen-r2.json")" = "T" ]
+  # ...and round 1 was handed NOTHING — the documented asymmetry a hook is told
+  # to code against (REVIEW_FIX_VERIFICATION is empty on round 1;
+  # REVIEW_ADJUDICATED is always a path). Snapshot the VARIABLE, not the file it
+  # names: a `cp` that quietly fails proves nothing either way.
+  [ ! -s "$WD/verify-path-r1.txt" ]
+  [ -s "$WD/verify-path-r2.txt" ]
+  # the HOOK-mode wording specifically: the two wirings deliberately say
+  # different things here, and asserting only the shared prefix would let the
+  # step-mode sentence ("this round cannot converge") be rendered on a hook run
+  # that just did converge
+  grep -q '^\*\*Scope (round 2):\*\* empty delta' "$WD/progress.md"
+  grep -q 'running this round as a full sweep' "$WD/progress.md"
+  run -1 grep -q 'cannot converge' "$WD/progress.md"
+}
+
+@test "#1434 an empty delta with NOTHING carried is refused as STALE_FINDINGS, not converged" {
+  WD="$BATS_TEST_TMPDIR/wd-empty-delta-bare"
+  ST="$BATS_TEST_TMPDIR/status-empty-delta.json"
+  TEL="$BATS_TEST_TMPDIR/telemetry-empty-delta.jsonl"
+  # Reached by RESUMING a run that already converged: the tree has not moved, so
+  # round 2's delta is empty, and the previous round had no blockers, so nothing
+  # is carried to verify either. No reviewer would look at anything — reading
+  # such a round as a result is the same false green a never-run panel would be.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
+    --status-file "$ST" --telemetry-file "$TEL" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$ST")" = "CONVERGED" ]
+  [ "$(grep -c . "$TEL")" -eq 1 ]   # the converged run's own terminal record
+
+  # separate-stderr, so the stdout-is-one-JSON-line contract is observed rather
+  # than blurred by bats merging the human complaint into $output
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 --resume \
+    --status-file "$ST" --telemetry-file "$TEL" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(printf '%s' "$output" | grep -c '')" -eq 1 ]
+  [ "$(jq -r '.status' <<<"$output")" = "STALE_FINDINGS" ]
+  contains "$stderr" "delta against the previous round is EMPTY"
+  # typed: the status file carries THIS invocation's refusal, never the prior
+  # CONVERGED verdict
+  [ "$(jq -r '.status' "$ST")" = "STALE_FINDINGS" ]
+  # ...and non-terminal: no new telemetry record, no Final line, but a Refused
+  # line so a human tailing progress.md sees why round 2 did not happen
+  [ "$(grep -c . "$TEL")" -eq 1 ]
+  grep -q '^\*\*Refused (round 2):\*\*' "$WD/progress.md"
+  run -1 grep -q '^## Round 2' "$WD/progress.md"
+}
+
+@test "#1434 the adjudicated list suppresses a re-raised suggestion, and says so" {
+  WD="$BATS_TEST_TMPDIR/wd-adjudicated"
+  # round 1 raises a blocker AND a suggestion; the fix pass edits helper.py
+  # (never app.py, where the suggestion lives, so the adjudication stays valid);
+  # round 2 re-raises the very same suggestion and nothing else.
+  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"helper.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  local r2='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d2","reviewer":"r2"}]'
+  echo "print(1)" > "$R/helper.py"     # so the fix pass EDITS rather than creates
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    R1="$r1" R2="$r2" SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
+    --review-cmd 'cp "$REVIEW_ADJUDICATED" "$SNAP/adj-seen-r$REVIEW_ROUND.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "x = 2" > "$REVIEW_REPO/helper.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # round 1 waived the suggestion; round 2 re-raised it and was dropped
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.adjudicated_dropped')" -eq 0 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.adjudicated_dropped')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 0 ]
+  # the count rides the per-round history line and the progress tail
+  [ "$(echo "$output" | jq '.history[1].adjudicated_dropped')" -eq 1 ]
+  grep -q -- '- adjudicated re-raises dropped: 1' "$WD/progress.md"
+  # the list itself is work-dir state, never written under .review/
+  [ -s "$WD/adjudicated.json" ]
+  [ ! -e "$R/.review/adjudicated.json" ]
+  # REVIEW_ADJUDICATED really reaches the panel, and really carries the waived
+  # item by round 2 — without this the export could be deleted and every panel
+  # would run blind to the list, re-raising everything the human let go
+  [ "$(jq 'length' "$WD/adj-seen-r1.json")" -eq 0 ]
+  [ "$(jq -r '.[0].title' "$WD/adj-seen-r2.json")" = "rename the temp variable" ]
+  [ "$(jq -r '.[0].file' "$WD/adj-seen-r2.json")" = "app.py" ]
+}
+
+@test "#1434 the adjudication is invalidated on the CLOSING SWEEP too, not just delta rounds" {
+  WD="$BATS_TEST_TMPDIR/wd-adjudicated-sweep"
+  # Round 2 is a clean DELTA round, so it promotes round 3 to the closing full
+  # sweep. delta_files must still be computed on that full round — it is the
+  # only thing that re-opens an adjudication whose file the last fix pass
+  # touched — so gating --prior-tree on `is_final` would leave the safety-net
+  # round suppressing a suggestion it should have re-raised.
+  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"helper.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  local r3='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d3","reviewer":"r3"}]'
+  echo "print(1)" > "$R/helper.py"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    R1="$r1" R3="$r3" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 3 ]; then printf "%s" "$R3" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "print(99)" > "$REVIEW_REPO/app.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  # round 3 IS the closing sweep, and the round-1 fix pass edited app.py, so the
+  # waived suggestion there was re-opened rather than suppressed
+  [ "$(echo "$output" | jq '.round_changelists[2].summary.adjudicated_dropped')" -eq 0 ]
+  [ "$(echo "$output" | jq '.round_changelists[2].summary.low')" -eq 1 ]
+}
+
+@test "#1434 a delta of ONLY work-dir state is empty for the panel, however the descriptor reads it" {
+  WD="$R/.loop-wd"   # deliberately INSIDE the repo
+  # The descriptor's scope_empty is FALSE here — the loop's own history,
+  # changelists and progress file are all inside the delta — while the #909/#911
+  # filter leaves the panel with nothing at all. Judging emptiness on
+  # scope_empty would run this as an ordinary delta round, reach zero blockers,
+  # promote a closing sweep and green-light the PR on a round nobody reviewed.
+  ST="$BATS_TEST_TMPDIR/status-wd-delta.json"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 --status-file "$ST" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$ST")" = "CONVERGED" ]
+
+  # resume: nothing in the repo changed, so round 2's only delta entries are the
+  # loop's own state files, and round 1 left no blockers to verify
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 --resume --status-file "$ST" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' <<<"$output")" = "STALE_FINDINGS" ]
+  contains "$stderr" "delta against the previous round is EMPTY"
+}
+
+@test "#1434 an uncomputable tree identity aborts the round, naming it" {
+  WD="$BATS_TEST_TMPDIR/wd-treeid-fail"
+  # An empty tree-N.txt would make the NEXT round die with a misattributed
+  # "no usable prior tree identity", blaming a round that was fine.
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_TREE_ID_BIN="$BATS_TEST_TMPDIR/definitely-not-git" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$stderr" "could not compute the working-tree identity for round 1"
+}
+
+@test "#1434 a failed PERSIST of the tree identity aborts the round, naming it" {
+  WD="$BATS_TEST_TMPDIR/wd-treeid-persist"
+  mkdir -p "$WD/tree-1.txt"   # a directory where the file must go
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$stderr" "could not persist the round 1 tree identity"
+}
+
+@test "#1434 an adjudication is INVALIDATED when the fix pass touches its file" {
+  WD="$BATS_TEST_TMPDIR/wd-adjudicated-invalidated"
+  # Same shape as above, except the fix pass edits app.py — the very file the
+  # waived suggestion is about. A suggestion re-raised there is plausibly a NEW
+  # observation about NEW code, so it must survive.
+  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  local r2='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d2","reviewer":"r2"}]'
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    R1="$r1" R2="$r2" SNAP="$WD" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
+    --review-cmd 'cp "$REVIEW_ADJUDICATED" "$SNAP/adj-seen-r$REVIEW_ROUND.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "print(99)" > "$REVIEW_REPO/app.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.adjudicated_dropped')" -eq 0 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 1 ]
+  # ...and the invalidation ran BEFORE the panel, not merely before the
+  # consolidator: the PANEL is what is told "do not re-raise these", so a
+  # suggestion it withholds never reaches the consolidator at all. Asserting
+  # only the consolidator's count passes under either placement.
+  [ "$(jq 'length' "$WD/adj-seen-r2.json")" -eq 0 ]
+}
+
+@test "#1434 a fresh run that cannot truncate history.jsonl aborts, rather than appending onto a foreign run" {
+  # A directory at the path, so the failure is uid-independent (#1360). Without
+  # the guard the "fresh" run appends onto the PREVIOUS run's lines: the status
+  # JSON reports a foreign run's rounds, and the next --resume reads the skew as
+  # the kill-window orphan and truncates a completed round's changelist.
+  local WDX="$BATS_TEST_TMPDIR/wd-frozen-hist"
+  mkdir -p "$WDX/history.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDX" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$output" "could not truncate"
+  contains "$output" "history.jsonl for a fresh run"
+  # the abort is BEFORE any round work
+  [ ! -e "$WDX/changelist-1.json" ]
+}
+
+@test "#1434 a fresh run that cannot truncate changelists.jsonl aborts too" {
+  local WDX="$BATS_TEST_TMPDIR/wd-frozen-clists"
+  mkdir -p "$WDX/changelists.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDX" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$output" "could not truncate"
+  contains "$output" "changelists.jsonl for a fresh run"
+  [ ! -e "$WDX/changelist-1.json" ]
+}
+
+@test "#1434 a fresh run that CANNOT clear the iteration state says so, and is not fatal" {
+  # The clear is deliberately non-fatal but never silent: leaving a previous
+  # run's verify-*.json in place is the exact condition it exists to prevent,
+  # and the round-2 fallback reads a foreign carry as present. `rm -f` refuses
+  # a directory whatever the uid, so no #1360 skip is needed.
+  local WDX="$BATS_TEST_TMPDIR/wd-unclearable"
+  mkdir -p "$WDX/.closing-sweep"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDX" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  # non-fatal is half the contract: the run still reaches a verdict
+  [ "$status" -eq 0 ]
+  contains "$stderr" "could not clear the previous run's iteration state"
+  # the arm-unique tail: the telemetry sidecar clear has its own diagnostic
+  contains "$stderr" "foreign fix-verification carry"
+}
+
+@test "#1434 a fresh run truncates the iteration state a previous run left behind" {
+  WD="$BATS_TEST_TMPDIR/wd-fresh-truncate"
+  mkdir -p "$WD"
+  # a previous run's leavings: a foreign tree identity (a delta against which is
+  # arbitrary), foreign waived suggestions, and a closing-sweep grant this run
+  # never earned
+  printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$WD/tree-1.txt"
+  printf '[{"file":"app.py","line":1,"dimension":"code_quality","title":"rename the temp variable"}]' > "$WD/adjudicated.json"
+  printf '[{"file":"x"}]' > "$WD/verify-2.json"
+  printf '9\n' > "$WD/.closing-sweep"
+  # a suggestion the STALE list would have suppressed must survive a fresh run
+  local r1='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    R1="$r1" \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
+    --review-cmd 'printf "%s" "$R1" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.adjudicated_dropped')" -eq 0 ]
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.low')" -eq 1 ]
+  [ ! -e "$WD/.closing-sweep" ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "false" ]
+  # the stale verify-2.json was truncated, and the one now on disk is THIS
+  # run's: round 1 writes the next round's carry at its own end, so the file
+  # exists again — with round 1's (empty) blocking array, not the planted stub
+  [ "$(jq -c '.' "$WD/verify-2.json")" = "[]" ]
+  # this run's OWN identity replaced the foreign one
+  [ "$(cat "$WD/tree-1.txt")" != "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" ]
 }
 
 @test "mid-loop dispatch ambiguity exits typed ESCALATE_AMBIGUOUS, not a bare exit 1 (#912)" {
@@ -1005,7 +1490,7 @@ seed_exhausted_wd() {
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
     --review-cmd 'true' --fix-cmd 'true'
   [ "$status" -eq 1 ]
-  run ! grep -q 'CONVERGED' <<< "$output"
+  run -1 grep -q 'CONVERGED' <<< "$output"
 }
 
 @test "--resume with history ahead of changelists is an internal error (exit 1), never silent repair (#913)" {
