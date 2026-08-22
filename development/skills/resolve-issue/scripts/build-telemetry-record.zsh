@@ -118,6 +118,9 @@ jq -c '
       # in lockstep with render-progress-block.zsh and build-escalation.zsh;
       # change all three together. build-dossier.zsh is NOT one of them — it
       # shares only the per-item `promoted` expression (see below).
+      # The #1435 `class` histogram below is a FOURTH member of that same
+      # three-way lockstep (progress block, escalation histogram, this): one
+      # derivation, three renderings, moved together or not at all.
       findings_by_round: [ range(0; ($rounds | length)) as $i | $rounds[$i] as $r
         | ($r.blocking // []) as $blk
         | ((($blk | length) == 0) or ([ $blk[] | has("non_converging") ] | all)) as $stamped
@@ -142,6 +145,24 @@ jq -c '
         promoted: ([ $blk[] | select(.promoted == true) ] | length),
         by_dimension: ( reduce ($blk + ($r.suggestions // []))[] as $f
                           ({}; .[($f.dimension // "")] = ((.[($f.dimension // "")] // 0) + 1)) ),
+        # residue class histogram (#1435): where the blockers of this round came
+        # from — new_defect (a file the previous fix pass never touched),
+        # incomplete_propagation (in a touched file), under_assertion (in a
+        # touched TEST file). It is what makes "would another round help?"
+        # answerable from the record rather than by reading the diff.
+        # (NB: no apostrophes in this block — the jq program is single-quoted.)
+        #
+        # null, NOT zeros, on a changelist whose blocking[] is not fully stamped
+        # — a pre-#1435 round, or one the loop had no fix-touched set for. Zeros
+        # would assert "no new defects here" about a round nobody classified.
+        # Detected exactly as the sibling fields are, so an empty blocking array
+        # reads as stamped (all three counts are determinately 0 with no
+        # per-item stamps to consult).
+        by_class: (if ([ $blk[] | has("class") ] | all)
+                   then { new_defect:             ([ $blk[] | select(.class == "new_defect") ] | length),
+                          incomplete_propagation: ([ $blk[] | select(.class == "incomplete_propagation") ] | length),
+                          under_assertion:        ([ $blk[] | select(.class == "under_assertion") ] | length) }
+                   else null end),
         # new/carried need the #913 per-item stamp; fixed_from_prev is derived
         # against the previous round from DISTINCT matched priors (null on
         # round 1 / stamp-less rounds — an honest gap, never a confident

@@ -6,6 +6,10 @@
 # four acceptance criteria — dedup, severity->blocking mapping, conflict
 # detection, and cross-round non-convergence — plus edges.
 
+# `run -1` (used by several refusal cases here) needs the 1.5.0 contract
+# declared, or bats warns BW02 on every one of them.
+bats_require_minimum_version 1.5.0
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/consolidate-findings.zsh"
@@ -1070,4 +1074,109 @@ EOF
     # ...and never blamed on the findings file, which is perfectly good
     run -1 grep -q 'invalid findings JSON' <<< "$output"
   done
+}
+
+# --- #1435: the residue class classifier ------------------------------------
+
+# Findings that differ on exactly the two axes the classifier reads — membership
+# in the fix-touched set, and whether the DIMENSION is `tests`.
+#
+# The last two rows exist to break a confound: with only `tests`+`.bats` and
+# `code_quality`+`.zsh`, the two axes move together, and a classifier keyed on
+# the FILENAME instead of the dimension would pass every assertion — while a
+# `tests` finding in a `.zsh` script (common in this repo) got the wrong class.
+# So the fixture also carries `tests` in a `.zsh` file and `bugs` in a `.bats`
+# file, each of which alone kills that mutation.
+residue_triple() {
+  cat > "$F" <<'EOF'
+[
+ {"severity":"WARNING","dimension":"bugs","file":"outside.zsh","line":1,"title":"unquoted expansion","description":"d","reviewer":"r"},
+ {"severity":"WARNING","dimension":"tests","file":"inside.bats","line":2,"title":"assertion never fails","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"code_quality","file":"inside.zsh","line":3,"title":"duplicated branch","description":"d","reviewer":"r"},
+ {"severity":"WARNING","dimension":"tests","file":"inside.zsh","line":40,"title":"helper asserts nothing","description":"d","reviewer":"r"},
+ {"severity":"WARNING","dimension":"bugs","file":"inside.bats","line":50,"title":"stale fixture path","description":"d","reviewer":"r"}
+]
+EOF
+}
+
+@test "#1435 tc-corner-class-triple: --fix-touched stamps each of the three classes" {
+  residue_triple
+  # `./inside.bats` proves the set is normalised on the way in, exactly as the
+  # findings side is — a `./` spelling on one side must never change membership
+  printf 'inside.zsh\n./inside.bats\n' > "$BATS_TEST_TMPDIR/touched.txt"
+  con --fix-touched "$BATS_TEST_TMPDIR/touched.txt"
+  [ "$status" -eq 0 ]
+  # outside the set => new_defect, whatever the dimension
+  [ "$(echo "$output" | jq -r '.blocking[] | select(.file == "outside.zsh") | .class')" = "new_defect" ]
+  # in the set AND dimension tests => the assertion has not caught up
+  [ "$(echo "$output" | jq -r '.blocking[] | select(.file == "inside.bats" and .line == 2) | .class')" = "under_assertion" ]
+  # in the set, any other dimension => the last fix did not propagate
+  [ "$(echo "$output" | jq -r '.blocking[] | select(.file == "inside.zsh" and .line == 3) | .class')" = "incomplete_propagation" ]
+  # the two confound-breakers: the axis is the DIMENSION, not the file suffix
+  [ "$(echo "$output" | jq -r '.blocking[] | select(.file == "inside.zsh" and .line == 40) | .class')" = "under_assertion" ]
+  [ "$(echo "$output" | jq -r '.blocking[] | select(.file == "inside.bats" and .line == 50) | .class')" = "incomplete_propagation" ]
+}
+
+@test "#1435 without --fix-touched NO item carries class at all" {
+  residue_triple
+  con
+  [ "$status" -eq 0 ]
+  # `has`, not a null check: an absent key is what lets every consumer tell
+  # "nobody classified this round" from "everything was a new defect"
+  echo "$output" | jq -e '[.blocking[] | has("class")] | any | not' >/dev/null
+}
+
+@test "#1435 an EMPTY --fix-touched file is a real set, not a refusal" {
+  residue_triple
+  # the `.review/`-only fix pass: nothing reviewable was touched, so every
+  # blocker is a new defect. Refusing the empty file would make the one state
+  # the flag has to represent unrepresentable.
+  : > "$BATS_TEST_TMPDIR/empty.txt"
+  con --fix-touched "$BATS_TEST_TMPDIR/empty.txt"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.blocking[] | .class] | all(. == "new_defect")' >/dev/null
+}
+
+@test "#1435 --fix-touched: a missing path is refused, and never blamed on the findings file" {
+  residue_triple
+  con --fix-touched "$BATS_TEST_TMPDIR/nope.txt"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q -- '--fix-touched must be a regular file'
+  # never blamed on the findings file, which is perfectly good
+  run -1 grep -q 'invalid findings JSON' <<< "$output"
+}
+
+@test "#1435 --fix-touched: a DIRECTORY is refused by the same arm, not relabelled a content problem" {
+  residue_triple
+  mkdir -p "$BATS_TEST_TMPDIR/adir"
+  con --fix-touched "$BATS_TEST_TMPDIR/adir"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q -- '--fix-touched must be a regular file'
+  run -1 grep -q 'invalid findings JSON' <<< "$output"
+}
+
+@test "#1435 --fix-touched: an empty VALUE is a usage error, where an empty FILE is not" {
+  residue_triple
+  # the unset-variable slip — exit 2 (usage), against exit 0 for a zero-byte
+  # file, which is a legitimate empty set
+  con --fix-touched ""
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--fix-touched requires a non-empty value'
+}
+
+@test "#1435 the class stamp reaches false_trips[] too, since they are a subset of blocking[]" {
+  # A prior round blocker in the same file+dimension, with a fully disjoint
+  # title, is identity-cleared as a false trip (#983) — and it is still a
+  # blocking item, so it must carry the class like every other one.
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"bugs","file":"inside.zsh","line":10,"title":"unquoted expansion breaks globbing","description":"d","reviewer":"r"}]
+EOF
+  cat > "$BATS_TEST_TMPDIR/prev.json" <<'EOF'
+{"round":1,"blocking":[{"file":"inside.zsh","dimension":"bugs","line":10,"title":"missing pipefail before download","priority":"High","blocking":true}]}
+EOF
+  printf 'inside.zsh\n' > "$BATS_TEST_TMPDIR/touched.txt"
+  con --round 2 --prev "$BATS_TEST_TMPDIR/prev.json" --fix-touched "$BATS_TEST_TMPDIR/touched.txt"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.summary.false_trips == 1' >/dev/null
+  [ "$(echo "$output" | jq -r '.false_trips[0].class')" = "incomplete_propagation" ]
 }

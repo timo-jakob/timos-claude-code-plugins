@@ -135,8 +135,13 @@ activity type — they do when `types:` is unset, GitHub's default. A workflow
 pinned to `types: [opened, synchronize]` would not re-run on the nudge.)
 
 **Review dossier (#563).** When the caller ran the local review loop (#562) and
-it exited `CONVERGED`, append the **Review dossier** to the PR body, after the
-Test plan — it is the durable audit record for why auto-merge happened. Build it
+it reached a **PR-opening terminal** — `CONVERGED` (exit 0) **or**
+`CONVERGED_WITH_RESIDUE` (exit 14, #1435); those two, and no escalation — append
+the **Review dossier** to the PR body, after the
+Test plan — it is the durable audit record for why auto-merge happened. A residue
+PR is exactly the one that must not lose it: its dossier carries the terminal and
+the per-dimension `open` counts, which is how the Approver learns those blockers
+were deliberately left open and filed as follow-ups rather than missed. Build it
 from the loop's status JSON, appending **exactly ONE** dossier — so decide the
 flags *before* you run anything: pass the promotion pair when the caller kept a
 promotion-phase status JSON (the condition is spelled out below), and the plain
@@ -189,7 +194,11 @@ stdout when it fails (2 = usage / broken pair, 1 = bad input), which is
 indistinguishable from the legitimate no-loop no-op — so an unchecked append
 opens a dossier-less PR and reads the silence as sanctioned. On non-zero, fix
 the input stderr names and re-run rather than opening the PR; and when the loop
-is known to have converged, treat empty output at exit 0 as the same error. If
+is known to have run a round — on **either** PR-opening terminal, `CONVERGED` or
+`CONVERGED_WITH_RESIDUE` — treat empty output at exit 0 as the same error. The
+second is named explicitly because this section now distinguishes the two by
+name, and "converged" read as exit 0 alone would let a residue PR ship
+dossier-less on the very silence this rule exists to catch. If
 the input cannot be restored, **stop and report to the caller instead of opening
 the PR** — never reconstruct the status JSON by hand to satisfy the command.
 

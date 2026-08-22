@@ -109,7 +109,7 @@ not — and either way the non-null test gives the right answer.)
 ```text
 Review scope: {the review scope}
 Fix verification (round >= 2): {fix_verification_path} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new, and re-raise any you cannot confirm at its ORIGINAL severity, citing the carried entry — even when its file is outside this round's scope. Say in your report how many of them you confirmed landed, whatever else you find.
-Already waived (round >= 2): {adjudicated_path} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a full/closing-sweep round no file qualifies, so withhold them). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
+Already waived (round >= 2): {adjudicated_path} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 
 Analyze all Go code in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 

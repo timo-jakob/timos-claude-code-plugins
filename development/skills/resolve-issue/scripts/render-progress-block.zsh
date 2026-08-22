@@ -17,7 +17,11 @@
 # `- adjudicated re-raises dropped: N` line whenever the consolidator suppressed
 # a re-raise of an already-waived suggestion — rendered only when N > 0, on the
 # same direct-read, no-stamp-gate rule, so a run with no adjudicated list is
-# byte-identical to before the count existed.
+# byte-identical to before the count existed. Since #1435 it also carries a
+# `- by class:` row — new_defect / incomplete_propagation / under_assertion —
+# whenever the round HAS blockers and every one of them carries the
+# consolidator's `class` stamp, so the human watching the tail can see whether a
+# round is finding fresh defects or re-reading the last fix pass's own edits.
 #
 # The new/carried split (and everything derived from it: fixed-since, the
 # escalating possible-false-trip lines) is rendered ONLY when every blocker
@@ -135,6 +139,15 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
   # and renders neither the term nor a line, keeping a no-promote run
   # byte-identical.
   | ([ $blk[] | select(.promoted == true) ]) as $promoted
+  # residue classes (#1435): where the blockers of this round came from.
+  # Rendered only when there ARE blockers AND every one carries the stamp — an
+  # unstamped (pre-#1435, or fix-touched-less) round gets NO row rather than
+  # three zeros, the same honest-gap convention the new/carried split follows.
+  # The empty-blocking case is excluded too: "new_defect 0,
+  # incomplete_propagation 0, under_assertion 0" on a clean round is noise, not
+  # information. NB: no apostrophes in this block — the program is
+  # single-quoted.
+  | (if (($blk | length) > 0) and ([ $blk[] | has("class") ] | all) then $blk else null end) as $classed
   | "## Round \($r) — \(if (.summary.blocking // 0) == 0 then "no blockers" else "blockers remain" end) (\($ts))",
     ("- blockers: \(.summary.blocking // 0)"
      + (if (.summary.blocking // 0) > 0 then " (critical: \(.summary.critical // 0), warning: \(.summary.high // 0)"
@@ -150,6 +163,11 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
      else empty end),
     (if ($blk | length) > 0 then
        "- by dimension: " + ($blk | group_by(.dimension // "") | map("\(.[0].dimension | dimlabel) \(length)") | join(", "))
+     else empty end),
+    (if $classed != null then
+       "- by class: new_defect \([ $classed[] | select(.class == "new_defect") ] | length)"
+       + ", incomplete_propagation \([ $classed[] | select(.class == "incomplete_propagation") ] | length)"
+       + ", under_assertion \([ $classed[] | select(.class == "under_assertion") ] | length)"
      else empty end),
     # adjudicated re-raises (#1434): suggestions an earlier round already
     # surfaced and the human already let go, dropped instead of re-logged.

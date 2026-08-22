@@ -81,7 +81,7 @@
 #     `objections_raised` -> refine-issue), else `unknown`.
 #   outcome: narrowed according to the ATTRIBUTED pipeline (mirroring the
 #     (b)/(c) retrofits' own narrowing) — for `review-loop`, its `status`:
-#     CONVERGED/SKIPPED -> success, every ESCALATE_*/BUDGET_EXHAUSTED ->
+#     CONVERGED/CONVERGED_WITH_RESIDUE/SKIPPED -> success, every ESCALATE_*/BUDGET_EXHAUSTED ->
 #     escalated, ERROR -> failed; for `refine-issue`, its `outcome`:
 #     refined-ready -> success, parked -> parked; anything else (including an
 #     `unknown`-pipeline record) -> failed, the same never-a-guess catch-all
@@ -174,7 +174,7 @@ command -v jq >/dev/null 2>&1 || {
 # behaviour for a stream mixing several pipelines (the default sink, and any
 # (d) shared file).
 
-typeset -a src_labels src_paths
+typeset -a src_labels=() src_paths=()
 
 # Branch on whether an operand was GIVEN (operand_seen), never on whether its
 # VALUE is empty: an explicit `rollup-telemetry.zsh ""` (e.g. a wrapper script
@@ -197,12 +197,12 @@ elif [[ -d "$operand" ]]; then
   # (exit 3, below), not a usage error about the named operand.
   [[ -r "$operand" && -x "$operand" ]] || {
     print -ru2 -- "rollup-telemetry: not readable: $operand"; exit 2 }
-  typeset -a dirfiles
+  typeset -a dirfiles=()
   # (N-.): nullglob (no error on zero matches) + resolve symlinks + plain
   # files only — a directory or dangling symlink named `*.jsonl` is ignored
   # exactly like any other non-stream entry, never fed to jq as a source.
   dirfiles=("$operand"/*.jsonl(N-.))
-  local f
+  local f=""
   for f in "${dirfiles[@]}"; do
     src_labels+=("${f:t}"); src_paths+=("$f")
   done
@@ -217,7 +217,7 @@ fi
 # --- per-source extraction: malformed/non-object lines warn to stderr and are
 # skipped; everything else is tagged with its source label and collected ------
 
-local records_tmp extract_tmp
+local records_tmp="" extract_tmp=""
 records_tmp=$(mktemp) || {
   print -ru2 -- "rollup-telemetry: failed to create a scratch file"; exit 3 }
 extract_tmp=$(mktemp) || {
@@ -254,7 +254,7 @@ local extract_prog='
         end
     )'
 
-local i label srcpath tag rest
+local i="" label="" srcpath="" tag="" rest=""
 local read_err=""
 for (( i = 1; i <= ${#src_paths[@]}; i++ )); do
   label="${src_labels[$i]}"
@@ -304,7 +304,8 @@ local agg_prog='
 
   def narrow_reviewloop($status):
     if ($status | type) != "string" then "failed"
-    elif ($status == "CONVERGED" or $status == "SKIPPED") then "success"
+    elif ($status == "CONVERGED" or $status == "CONVERGED_WITH_RESIDUE"
+          or $status == "SKIPPED") then "success"
     elif ($status == "ERROR") then "failed"
     elif ($status == "BUDGET_EXHAUSTED" or ($status | test("^ESCALATE_"))) then "escalated"
     else "failed" end;
@@ -400,14 +401,14 @@ local agg_prog='
         else ( $after_repo | group_by(.pipeline) | map(group(.[0].pipeline; .)) )
         end) }'
 
-local agg
+local agg=""
 agg=$(jq -c -s --arg repo_filter "$repo_filter" --arg pipeline_filter "$pipeline_filter" \
   "$agg_prog" "$records_tmp") || {
   print -ru2 -- "rollup-telemetry: failed to aggregate records"; exit 3 }
 
 # --- render -------------------------------------------------------------------
 
-local is_empty excluded_unknown
+local is_empty="" excluded_unknown=""
 is_empty=$(print -r -- "$agg" | jq -r '.empty')
 excluded_unknown=$(print -r -- "$agg" | jq -r '.excluded_unknown')
 

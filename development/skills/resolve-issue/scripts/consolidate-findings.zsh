@@ -15,7 +15,8 @@
 #                     adjudicated_dropped},
 #     blocking[], suggestions[], conflicts[], non_converging, false_trips[],
 #     escalation_reasons[] }  (each blocking[] item also carries false_trip:bool,
-#     and promoted:true when the overlay raised it — #995)
+#     promoted:true when the overlay raised it — #995, and class:"…" when
+#     --fix-touched was given — #1435)
 #
 # Rules (per #561):
 #   - Severity map: CRITICAL->Critical, WARNING->High, SUGGESTION->Low.
@@ -79,9 +80,26 @@
 #     `summary.adjudicated_dropped` is ALWAYS present (0 without the flag), so a
 #     consumer never has to tell "no drops" from "an older changelist".
 #
+#   - Residue class (#1435): with --fix-touched, every `blocking[]` item is
+#     stamped with a `class` derived from ONE question — is the finding's file
+#     an artifact the PREVIOUS round's fix pass touched?
+#       * `new_defect`             — `.file` is NOT in the fix-touched set;
+#       * `under_assertion`        — in the set, and `.dimension == "tests"`;
+#       * `incomplete_propagation` — in the set, any other dimension.
+#     It is DERIVED here, never emitted by a review agent, so the #558 findings
+#     schema is untouched. The stamp is a direct per-item field — the same shape
+#     `false_trip` (#983) and `promoted` (#995) already use — so a consumer
+#     detects an older, unstamped changelist with `[$blk[] | has("class")] | all`
+#     rather than reading a missing stamp as a class. Without the flag NO item
+#     carries `class` at all, which is what keeps a run that never passes it
+#     byte-identical to before the field existed. The class is reporting only:
+#     it feeds the loop's residue narration, the escalation histogram and the
+#     telemetry `by_class` counts, and it never changes which items block.
+#
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
 #                            [--promote FILE] [--adjudicated FILE]
+#                            [--fix-touched FILE]
 #     --findings  aggregate findings JSON for THIS round (required)
 #     --round     round number (default 1)
 #     --prev      previous round's changelist JSON (this script's own output);
@@ -94,13 +112,19 @@
 #                 empty (`[]`): an early round legitimately has nothing waived
 #                 yet, unlike --promote, where an empty selection is contracted
 #                 to skip the sub-loop entirely.
+#     --fix-touched  the PREVIOUS round's fix-touched set (#1435) — repo-relative
+#                 paths, one per line, as resolve-story-loop.zsh writes to
+#                 `<work-dir>/fix-touched-<N-1>.txt`. Unlike every other file
+#                 flag here an EMPTY file is accepted: "the fix pass touched
+#                 nothing reviewable" is a real state (a fix confined to
+#                 `.review/`), and it means every blocker is a `new_defect`.
 #
 # Exit codes: 0 ok · 2 usage error · 1 internal (unreadable / invalid JSON)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE]"
+local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE] [--fix-touched FILE]"
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake that this script used to turn into the wrong failure. Under `nounset`
@@ -125,7 +149,7 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
     print -u2 -- "consolidate-findings: $1 requires a non-empty value"; exit 2 }
 }
 
-local findings="" round=1 prev="" promote="" adjudicated=""
+local findings="" round=1 prev="" promote="" adjudicated="" fix_touched=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --findings) _need_val "$1" $# "${2:-}"; findings="$2"; shift 2 ;;
@@ -133,6 +157,10 @@ while [[ $# -gt 0 ]]; do
   --prev) _need_val "$1" $# "${2:-}"; prev="$2"; shift 2 ;;
   --promote) _need_val "$1" $# "${2:-}"; promote="$2"; shift 2 ;;
   --adjudicated) _need_val "$1" $# "${2:-}"; adjudicated="$2"; shift 2 ;;
+  # the PATH must still be non-empty (`--fix-touched ""` is the same unset-VAR
+  # slip _need_val exists for, and would silently drop the whole stamp); it is
+  # the file's CONTENTS that may legitimately be empty — see below
+  --fix-touched) _need_val "$1" $# "${2:-}"; fix_touched="$2"; shift 2 ;;
   -h|--help) print -r -- "$usage"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -250,6 +278,37 @@ if [[ -n "$adjudicated" ]]; then
     print -u2 -- "consolidate-findings: --adjudicated file must hold exactly ONE JSON array: $adjudicated"; exit 1 }
   [[ -n "$adjudicated_json" ]] || {
     print -u2 -- "consolidate-findings: --adjudicated file yielded no JSON value: $adjudicated"; exit 1 }
+fi
+
+# The fix-touched set (#1435): repo-relative paths, one per line. `has_touched`
+# is what gates the stamp, NOT the array's emptiness — the two are different
+# facts and conflating them would be the exact "no drops vs an older changelist"
+# ambiguity `adjudicated_dropped` exists to avoid. An EMPTY set means "the fix
+# pass touched nothing reviewable", so every blocker is a `new_defect`; an
+# ABSENT flag means "nobody asked", so no item is stamped at all.
+local fix_touched_json='[]' has_touched='false'
+if [[ -n "$fix_touched" ]]; then
+  # `-f`, deliberately not `-s`: a zero-byte file is a legitimate empty set (the
+  # `.review/`-only fix pass), so the usual non-empty guard would refuse the very
+  # state the flag has to represent. `-f` still excludes a DIRECTORY, which would
+  # otherwise reach jq as "Is a directory" and be relabelled a content problem;
+  # `-r` catches the unreadable file the same guard would have caught.
+  [[ -f "$fix_touched" ]] || {
+    print -u2 -- "consolidate-findings: --fix-touched must be a regular file: $fix_touched"; exit 1 }
+  [[ -r "$fix_touched" ]] || {
+    print -u2 -- "consolidate-findings: --fix-touched file is not readable: $fix_touched"; exit 1 }
+  # Normalised on the way IN, with the same `^\./` strip the findings side
+  # applies (`normfile`), so a `./a.zsh` on one side and `a.zsh` on the other can
+  # never disagree about membership — the drift that this repo has already paid
+  # for once between the promote and findings line rules. Blank lines are
+  # dropped (an empty path matches nothing and would only widen the set with
+  # noise); `unique` makes membership a set test rather than a list scan.
+  fix_touched_json=$(jq -R -s 'split("\n") | map(sub("^\\./"; "")) | map(select(length > 0)) | unique' \
+    -- "$fix_touched") || {
+    print -u2 -- "consolidate-findings: could not read the --fix-touched set: $fix_touched"; exit 1 }
+  [[ -n "$fix_touched_json" ]] || {
+    print -u2 -- "consolidate-findings: --fix-touched file yielded no JSON value: $fix_touched"; exit 1 }
+  has_touched='true'
 fi
 
 local -r PROG='
@@ -531,6 +590,28 @@ def nearest($c): sort_by(
 | ( [ $items[] | select(.priority=="High") ] ) as $high
 | ( [ $items[] | select(.priority=="Low") ] ) as $low
 | ( ($crit + $high) | sort_by(if .priority=="Critical" then 0 else 1 end) ) as $blocking
+# RESIDUE CLASS (#1435) — stamped here, on the assembled blocking list, so every
+# downstream reader of `blocking[]` (and of `false_trips[]`, which is a subset of
+# it) sees the same field. Deliberately AFTER the ordering above and after the
+# non-convergence verdict: the class answers "where did this finding come from",
+# never "does it block", so it must not sit anywhere it could perturb either.
+#
+# Gated on $has_touched, not on the set being non-empty: an absent flag leaves
+# every item WITHOUT the key, which is precisely what lets a consumer tell an
+# unstamped (older, or flagless) changelist from a genuine all-`new_defect`
+# round. NB: no apostrophes in this block — the jq program is single-quoted.
+# The item is bound FIRST for the membership test: inside `$fixtouched | index(g)`
+# the input to `g` is $fixtouched (the ARRAY), so a bare `.file` there would index
+# an array with an array and answer the wrong question entirely — the same trap
+# the adjudicated block above documents. `index` on a STRING argument is the
+# membership lookup we want; `$it.file` is already `normfile`d, and the set was
+# normalised the same way on the way in, so the two sides cannot disagree.
+| ( if $has_touched
+    then [ $blocking[] | . as $it
+           | $it + { class: (if (($fixtouched | index($it.file)) == null) then "new_defect"
+                             elif ($it.dimension == "tests") then "under_assertion"
+                             else "incomplete_propagation" end) } ]
+    else $blocking end ) as $blocking
 | ( [ $blocking[] | select(.non_converging) ] | length > 0 ) as $nonconv
 # verified false trips (#983): blockers proximity GATHERED as non-convergence
 # candidates but identity-cleared (disjoint titles) as genuinely different — they
@@ -567,6 +648,7 @@ def nearest($c): sort_by(
 
 jq -c --argjson round "$round" --argjson prev "$prev_json" --argjson promote "$promote_json" \
   --argjson adjudicated "$adjudicated_json" \
+  --argjson fixtouched "$fix_touched_json" --argjson has_touched "$has_touched" \
   "$PROG" -- "$findings" || {
   print -u2 -- "consolidate-findings: invalid findings JSON: $findings"; exit 1
 }

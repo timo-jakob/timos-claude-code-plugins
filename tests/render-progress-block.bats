@@ -547,3 +547,64 @@ EOF
   # the body lines rather than the whole block
   [ "$(echo "$output" | tail -n +2)" = "$(echo "$with_zero" | tail -n +2)" ]
 }
+
+# --- #1435: the per-round residue class row ----------------------------------
+
+@test "#1435 a fully class-stamped round renders the by-class row" {
+  # Deliberately UNEVEN counts (2 / 1 / 3). A 1/1/1 fixture is permutation-
+  # invariant: swapping two of the three `select(.class == ...)` expressions
+  # renders a byte-identical row, so the test would pass while every real round
+  # with an uneven split had its class row mislabelled in the one surface a human
+  # tails live. The three sibling renderings use uneven splits for the same
+  # reason.
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":6,"low":0,"blocking":6,"conflicts":0},
+ "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"x","non_converging":false,"class":"new_defect"},
+             {"file":"a.zsh","line":9,"dimension":"bugs","title":"x2","non_converging":false,"class":"new_defect"},
+             {"file":"b.zsh","line":2,"dimension":"bugs","title":"y","non_converging":false,"class":"incomplete_propagation"},
+             {"file":"c.bats","line":3,"dimension":"tests","title":"z","non_converging":false,"class":"under_assertion"},
+             {"file":"c.bats","line":30,"dimension":"tests","title":"z2","non_converging":false,"class":"under_assertion"},
+             {"file":"d.bats","line":4,"dimension":"tests","title":"z3","non_converging":false,"class":"under_assertion"}],
+ "suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  contains "$output" "- by class: new_defect 2, incomplete_propagation 1, under_assertion 3"
+}
+
+@test "#1435 tc-corner-class-unstamped-null: an unstamped round OMITS the row rather than printing zeros" {
+  # a pre-#1435 changelist, or one the loop had no fix-touched set for: three
+  # zeros here would assert a classification nobody made
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+ "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"x","non_converging":false}],
+ "suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  lacks "$output" "by class:"
+}
+
+@test "#1435 a PARTIALLY stamped round omits the row too — all or nothing" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0},
+ "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"x","non_converging":false,"class":"new_defect"},
+             {"file":"b.zsh","line":2,"dimension":"bugs","title":"y","non_converging":false}],
+ "suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  lacks "$output" "by class:"
+}
+
+@test "#1435 a converged (zero-blocker) round renders no class row" {
+  # counting three zeros on a clean round is noise, not information — and the
+  # empty array trivially satisfies the "every item is stamped" predicate
+  cat > "$CL" <<'EOF'
+{"round":3,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+ "blocking":[],"suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 3 --verdict "converged"
+  [ "$status" -eq 0 ]
+  lacks "$output" "by class:"
+}
