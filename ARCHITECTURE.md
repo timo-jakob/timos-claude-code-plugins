@@ -3462,6 +3462,13 @@ three-way lockstep the new/carried derivation lives in —
 likely buy), and `build-telemetry-record.zsh`
 (`findings_by_round[].by_class`).
 
+**The histogram also gates the FIX pass, skill-side (#1496).** The loop refuses
+no fix and never will — what a fix pass may add, and the class condition that
+turns collapsing from advisory into mandatory, is stated once in
+`development/skills/resolve-issue/SKILL.md` §3.5's round protocol step 3
+(*A fix pass subtracts*); `class` is how compliance is measured, not enforced,
+and nothing here restates the rule.
+
 **The CRITICAL count has exactly one source**: `<work-dir>/changelist-<N>.json`,
 which persists across `--resume` because the work-dir accumulators do.
 `history.jsonl`'s per-round line gains **no** residue-derived key — no `class`,

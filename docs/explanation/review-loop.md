@@ -20,6 +20,19 @@ resilience on the service languages, and Swift-6 compliance on Swift). The
 4. **Re-test** — the full test suite runs again; a fix that breaks anything
    aborts the loop rather than shipping.
 
+**A fix pass subtracts.** Step 3 is allowed to delete, narrow or collapse; it is
+not allowed to grow the change. A finding whose smallest fix would have to add
+new behaviour is parked as a follow-up issue instead — unless a human, or the
+story's own acceptance criteria, asked for that surface on purpose. The reason
+is mechanical rather than aesthetic: a pass that adds surface is writing the
+round after next's findings, and the loop then spends its budget reviewing its
+own edits instead of your change. When the round classes say that is already
+happening, collapsing a restatement rather than patching it stops being advisory
+and becomes required. The normative statement — the closed list of moves, and
+the exact condition that makes them mandatory — lives in
+`/development:resolve-issue` §3.5's round protocol, step 3, and nothing here
+restates it.
+
 ## What each round is scoped to
 
 Rounds after the first are an **iteration** on the previous one, not an
