@@ -829,22 +829,36 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
 
 @test "step mode drops findings on the work-dir's own files (#909/#911 parity)" {
   WDIN="$R/.loop-wd"
+  # An in-repo --status-file as well, so BOTH clauses of the scoped-findings
+  # filter are exercised: the work-dir PREFIX (the phantoms below) and the
+  # loop-internal FILE list (#1435). Only the prefix half had coverage, so
+  # deleting the `$internal` clause left the suite green while a blocker raised
+  # on a file the loop rewrites every round became unfixable — it re-appears
+  # each round and, since the capture drops the same path, fails residue
+  # condition 2 forever, ending the run on the loop's own bookkeeping.
+  SFIN="$R/loop-status.json"
   printf '%s' "$CRIT" > "$F"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F"
+    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F" \
+    --status-file "$SFIN"
   [ "$status" -eq 20 ]
+  [ -s "$SFIN" ]
   # the phantom finding is dropped, so round 2 sees zero blockers — but since
   # #1434 that clean DELTA round promotes the closing sweep rather than ending
   # the run, and round 3 is what converges. The claim under test (a finding on
   # the work-dir's own files never counts) is unchanged.
-  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":".loop-wd/progress.md","line":1,"title":"phantom","description":"d","reviewer":"r"}]' > "$F"
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":".loop-wd/progress.md","line":1,"title":"phantom","description":"d","reviewer":"r"},{"severity":"CRITICAL","dimension":"bugs","file":"loop-status.json","line":1,"title":"phantom three","description":"d","reviewer":"r"}]' > "$F"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F" --resume
+    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F" --resume \
+    --status-file "$SFIN"
   [ "$status" -eq 20 ]
+  # BOTH phantoms dropped — the work-dir one by the prefix clause, the
+  # status-file one by the loop-internal FILE list
   [ "$(echo "$output" | grep '^{' | jq -r '.final_changelist.summary.blocking')" -eq 0 ]
   printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":".loop-wd/history.jsonl","line":1,"title":"phantom two","description":"d","reviewer":"r"}]' > "$F"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F" --resume
+    zsh "$S" --repo "$R" --base main --work-dir "$WDIN" --findings-file "$F" --resume \
+    --status-file "$SFIN"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
 }
@@ -1993,4 +2007,765 @@ promote_file() {
   [ -s "$WD/tree-2.txt" ]
   [ -s "$WD/verify-2.json" ]
   [ "$(jq 'length' "$WD/verify-2.json")" -eq 1 ]
+}
+
+# --- #1435: residue and the step-mode fix-touched snapshot/diff pair ---------
+#
+# Step mode is the canonical wiring and the one where the capture is HARD: the
+# fix pass happens between invocations, where the loop never observes it. So the
+# set is stamped at AWAITING_FIX (`fix-base-<round>.txt`) and diffed at
+# `--resume` start. Every case below drives that pair for real.
+#
+# `touched.py` exists before round 1 so a round-1 finding in it survives
+# scope-findings (which scopes against the story diff); the in-session "fix" then
+# rewrites it, making it the fix-touched set.
+residue_findings() {  # $1 = round, $2 = file
+  printf '[{"severity":"WARNING","dimension":"bugs","file":"%s","line":%d,"title":"round %d unquoted expansion","description":"d%d","reviewer":"r"}]' \
+    "$2" "$(( $1 * 100 ))" "$1" "$1"
+}
+
+@test "#1435 tc-corner-fix-touched-step-mode: the AWAITING_FIX snapshot + --resume diff names only repo paths" {
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+  # the SNAPSHOT half — written when the round handed the fix pass back to the
+  # session, so the diff at --resume has something to diff against
+  [ -s "$WD/fix-base-1.txt" ]
+  [ ! -e "$WD/fix-touched-1.txt" ]
+
+  # the in-session fix: one real edit, plus a write under .review/ that must NOT
+  # be attributed to it
+  echo "v1" > "$R/touched.py"
+  mkdir -p "$R/.review"
+  echo '[]' > "$R/.review/scratch.json"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  # the DIFF half — exactly the session's edit, and nothing else
+  [ "$(cat "$WD/fix-touched-1.txt")" = "touched.py" ]
+}
+
+@test "#1435 AC19 step mode: a DELTA round satisfying residue promotes the closing sweep, never 14" {
+  # §9. Rounds 1 and 2 satisfy both residue conditions, and round 2 is the
+  # ceiling — under the pre-§9 rule it exited 14 right here. It must not: a delta
+  # round has seen only the slices its scope happened to cover, so a PR opened on
+  # it would carry a dossier asserting a review that never looked at most of the
+  # diff. Instead the round promotes the closing FULL sweep, on the same marker
+  # and the same one-round grant #1434 already uses, and hands the fix back.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  # the marker names round 3, and the grant was taken (3 > --max-rounds 2)
+  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  echo "$output" | jq -e '.closing_sweep_granted == true' >/dev/null
+  # no residue was declared and no plan is implied by this exit
+  [ "$(echo "$output" | jq -r '.status')" != "CONVERGED_WITH_RESIDUE" ]
+  # STEP mode is the canonical wiring, and its AWAITING_FIX verdict is the only
+  # thing telling the session residue was deferred rather than this being an
+  # ordinary fix turn. Deleting that arm of the verdict case left the suite green
+  # while the session was told plain "awaiting fix" with no mention of the sweep.
+  grep -q 'residue conditions hold, but on a DELTA round — promoting round 3' "$WD/progress.md"
+  grep -q 'apply blockers in-session' "$WD/progress.md"
+}
+
+@test "#1435 AC20 step mode: the closing SWEEP declares residue, and only it" {
+  # The continuation of the fixture above: round 3 runs as the promoted full
+  # sweep, and it is that round which exits 14 — against the whole story diff
+  # rather than a delta slice.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v2" > "$R/touched.py"
+  residue_findings 3 touched.py > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
+  [ "$(echo "$output" | jq -r '.rounds')" = "3" ]
+  echo "$output" | jq -e '.final_changelist.summary.blocking > 0' >/dev/null
+}
+
+@test "#1435 AC20 step mode: a sweep blocker OUTSIDE the fix-touched set escalates, never 14" {
+  # The other direction of the same rule, and the one the motivating run would
+  # have hit: the sweep reads files no delta scope ever contained, so a blocker
+  # it raises there is by definition not in the previous round fix-touched set —
+  # condition 2 fails and the run escalates instead of opening a PR.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  # the sweep raises its blocker in app.py — in scope for a FULL round, and
+  # never written by any fix pass
+  echo "v2" > "$R/touched.py"
+  residue_findings 3 app.py > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -ne 14 ]
+  [ "$(echo "$output" | jq -r '.status')" != "CONVERGED_WITH_RESIDUE" ]
+}
+
+@test "#1435 step mode AC3: blockers with budget left still exit AWAITING_FIX (20), not 14" {
+  # Round 2 satisfies BOTH residue conditions, but the ceiling is 3 — the loop
+  # keeps FIXING while it has budget, and residue only ever replaces an ENDING.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+}
+
+@test "#1435 tc-error-critical-in-window, step mode: a CRITICAL in the window exits 13, never 14" {
+  echo "v0" > "$R/touched.py"
+  printf '[{"severity":"CRITICAL","dimension":"bugs","file":"touched.py","line":100,"title":"round 1 null dereference","description":"d1","reviewer":"r"}]' > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+}
+
+@test "#1435 tc-error-critical-in-window, step mode: a CRITICAL in the FINAL round exits 13 too" {
+  # The other half of the window, in the other wiring: with the CRITICAL only
+  # ever in round 1, dropping the `c_cur == 0` half of the condition passes both
+  # modes' cases.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  printf '[{"severity":"CRITICAL","dimension":"bugs","file":"touched.py","line":200,"title":"round 2 null dereference","description":"d2","reviewer":"r"}]' > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  echo "$output" | jq -e '.final_changelist.summary.critical == 1' >/dev/null
+  # ...and the blocker really was fix-touched, so only the c_cur half refused it
+  [ "$(cat "$WD/fix-touched-1.txt")" = "touched.py" ]
+}
+
+@test "#1435 step mode: EVERY remaining blocker must be fix-touched — a mixed round exits 13" {
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  # one inside the set, one outside: relaxing the quantifier to "at least one is
+  # fix-touched" would let this open a PR and file the app.py defect as residue
+  printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":200,"title":"round 2 unquoted expansion","description":"d2","reviewer":"r"},{"severity":"WARNING","dimension":"bugs","file":"app.py","line":300,"title":"round 2 stale cache never invalidated","description":"d3","reviewer":"r"}]' > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  # the round really is MIXED, or this pins nothing the single-blocker case did not
+  [ "$(jq '.blocking | length' "$WD/changelist-2.json")" -eq 2 ]
+  [ "$(jq -r '[.blocking[].class] | sort | join(",")' "$WD/changelist-2.json")" = "incomplete_propagation,new_defect" ]
+}
+
+@test "#1435 tc-error-untouched-file, step mode: a blocker outside the set exits 13, never 14" {
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  # app.py is in the story diff but no fix pass ever wrote it
+  residue_findings 2 app.py > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$(jq -r '[.blocking[].class] | join(",")' "$WD/changelist-2.json")" = "new_defect" ]
+}
+
+@test "#1435 the fix-touched capture runs BEFORE --test-cmd, so a gate artifact is not the fix pass" {
+  # The loop takes the capture before running the gate ON PURPOSE: a suite that
+  # writes into the tree — a regenerated fixture, a formatter invoked from a
+  # test, a coverage report — would otherwise land in the set as though the
+  # session's fix pass had made the edit.
+  #
+  # No test combined `--test-cmd` with the residue fixtures, so the ordering was
+  # free: move the capture block after the gate block and the whole suite stays
+  # green, while every gate-written file joins fix-touched-N.txt. That is not
+  # cosmetic — a blocker in such a file is then classed `incomplete_propagation`
+  # rather than `new_defect`, which is precisely the input that can flip an
+  # escalation into a CONVERGED_WITH_RESIDUE PR.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3 --test-cmd 'true'
+  [ "$status" -eq 20 ]
+
+  # the in-session fix touches ONE file; the gate then writes a second one
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 3 --test-cmd 'echo gate > "'"$R"'/gate-artifact.txt"'
+  [ "$status" -eq 20 ]
+  # the gate really did write it, or the absence below proves nothing
+  [ -f "$R/gate-artifact.txt" ]
+  # ...and the set is exactly the fix pass's edit
+  [ "$(cat "$WD/fix-touched-1.txt")" = "touched.py" ]
+}
+
+@test "#1435 step mode: an ABSENT fix-base stamp clears a stale fix-touched set" {
+  # When --resume finds no `fix-base-<round>.txt`, the loop cannot compute what
+  # the fix pass touched, so residue must be unreachable. It deletes any
+  # `fix-touched-<round>.txt` sitting at that path to make that ABSOLUTE rather
+  # than merely likely. Hook mode pins this; step mode did not.
+  #
+  # Surviving mutation: drop the `rm -f`. A stale set — from an earlier run, or
+  # a reused scratch dir — is then consumed by both the residue check and
+  # `consolidate-findings --fix-touched`, so blockers are classed against a fix
+  # pass that never ran in this run and a PR can open on residue conditions
+  # that were never met.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+  [ -s "$WD/fix-base-1.txt" ]
+
+  # Simulate the lost stamp, and plant a stale set naming `app.py` — the story's
+  # own in-scope file, which NO fix pass in this run touched. The round-2 blocker
+  # below sits in that same file, so the planted set is exactly the evidence that
+  # would satisfy residue's second condition. Honour it and the run exits 14;
+  # clear it and the run has no fix-touched set at all and must escalate. That
+  # makes the assertion a real fork rather than a file-existence check.
+  #
+  # `app.py`, not an invented name: a blocker in a file outside the round's scope
+  # is dropped before the ladder is ever reached, so the run would end
+  # AWAITING_FIX with zero blockers and prove nothing about residue.
+  rm -f "$WD/fix-base-1.txt"
+  printf 'app.py\n' > "$WD/fix-touched-1.txt"
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 app.py > "$F"
+  step --resume --max-rounds 2
+  # the stale set is GONE, not merely ignored
+  [ ! -e "$WD/fix-touched-1.txt" ]
+  # ...and the run escalates at its ceiling rather than declaring residue on
+  # evidence it does not have
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  # it really did still have the blocker, so this is a refusal and not a zero
+  echo "$output" | jq -e '.final_changelist.summary.blocking > 0' >/dev/null
+}
+
+
+@test "#1435 step mode: a REPO-INTERNAL work-dir is not charged to the fix pass either" {
+  # The step-mode twin of the hook-mode AC5 variant. Step mode mints its pre-fix
+  # snapshot at the AWAITING_FIX exit, AFTER the round writes its own
+  # bookkeeping, for the same reason — and had no coverage: every #1435 step test
+  # puts the work-dir outside the repo, where the ordering cannot matter.
+  #
+  # Surviving mutation: hoist the step-mode `fix_base_tree` mint above the
+  # `append_progress_round` write. With a repo-internal work-dir the loop own
+  # progress.md then lands in the diff computed at --resume, inflating the very
+  # set that decides residue and stamps `class`. The `_tree_id` occurrence count
+  # is unchanged, so the structural pin does not see it.
+  # (NB: no stray apostrophes in these comments — the inert-assertion scanner
+  # tracks quote parity across lines and an odd one desyncs the whole scan.)
+  local IWD="$R/.loop-wd"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --max-rounds 3
+  [ "$status" -eq 20 ]
+  # the work-dir really is inside the repo, or this pins nothing
+  [ -f "$IWD/changelist-1.json" ]
+
+  # exactly ONE in-session edit
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  # the diff is the session edit and nothing the loop wrote about itself
+  [ "$(cat "$IWD/fix-touched-1.txt")" = "touched.py" ]
+  run ! grep -q 'loop-wd' "$IWD/fix-touched-1.txt"
+}
+
+
+@test "#1435 the work-dir exclusion is COMPUTED, not a hardcoded .loop-wd" {
+  # Both repo-internal fixtures so far name the work-dir `.loop-wd`, so nothing
+  # tells a computed prefix from a constant. Surviving mutation: assign the
+  # literal `.loop-wd`, or narrow the match to dot-prefixed names only. The whole
+  # suite stays green while a repo-internal work-dir with any other name goes
+  # back to leaking fix-base, history.jsonl and changelist-N.json into the set.
+  #
+  # So: a NESTED, NON-dot path, which no plausible hardcoding covers.
+  # (NB: no stray apostrophes in these comments — the inert-assertion scanner
+  # tracks quote parity across lines and an odd one desyncs the whole scan.)
+  local IWD="$R/state/loopwd"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ -f "$IWD/changelist-1.json" ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ "$(cat "$IWD/fix-touched-1.txt")" = "touched.py" ]
+  run ! grep -q 'state/' "$IWD/fix-touched-1.txt"
+}
+
+@test "#1435 the exclusion is about PATHS, not spellings: trailing slashes and dot segments" {
+  # The loop never normalises --work-dir or --repo, and the two are compared
+  # after `:A` resolution precisely so the caller can spell them however they
+  # like. Surviving mutations without this: drop the `:A` on either side, or
+  # drop the trailing-slash handling — a caller passing `--work-dir "$R/wd2/"`
+  # or `--repo "$R/"` then matches nothing and the full leak returns silently,
+  # with no diagnostic, because an empty prefix is indistinguishable from an
+  # out-of-repo work-dir.
+  local IWD="$R/./wd2/"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R/" --base main --work-dir "$IWD" --findings-file "$F" --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ -f "$R/wd2/changelist-1.json" ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R/" --base main --work-dir "$IWD" --findings-file "$F" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ "$(cat "$R/wd2/fix-touched-1.txt")" = "touched.py" ]
+  run ! grep -q 'wd2' "$R/wd2/fix-touched-1.txt"
+}
+
+@test "#1435 a repo-internal --findings-file is excluded too, not just the work-dir" {
+  # --status-file and --findings-file are caller-chosen and loop-written just
+  # like the work-dir, and both are written AFTER the pre-fix identity is minted
+  # — so an in-repo one lands in the resume diff as a file the session edited.
+  # The work-dir-only exclusion missed them, and the docs invite exactly this
+  # shape by telling callers where to put the work-dir and saying nothing about
+  # the other two.
+  local IF="$R/findings.json"
+  local WDO="$BATS_TEST_TMPDIR/wd-ff"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$IF"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$IF" --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  # the session edits ONE file; the loop then rewrites the in-repo findings file
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$IF"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$IF" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WDO/fix-touched-1.txt")" = "touched.py" ]
+  run ! grep -q 'findings.json' "$WDO/fix-touched-1.txt"
+}
+
+
+# --- #1435 §10: the cadence guard -------------------------------------------
+# A round's findings are only true about the tree its panel read. Step mode is
+# the wiring where that can go wrong, because the panel runs BETWEEN
+# invocations: a session that fixes first hands the loop findings describing a
+# tree that no longer exists, and the loop — which cannot see a fix pass it did
+# not invoke — would attribute every one of those blockers to it. The arithmetic
+# stays internally consistent while every input is false, which is the one
+# mistake a terminal that opens a PR without human review must not make.
+# (NB: no stray apostrophes in these comments — the inert-assertion scanner
+# tracks quote parity across lines and an odd one desyncs the whole scan.)
+
+# the identity the session attests its panel ran against
+_tree_now() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh" "$R"; }
+
+@test "#1435 AC21 step mode: findings produced against a stale tree are REFUSED, naming both" {
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  # the WRONG cadence: apply round 1 fix, run round 2 panel (attesting the tree
+  # it read), and THEN fix again before consolidating
+  echo "v1" > "$R/touched.py"
+  local T1; T1="$(_tree_now)"
+  residue_findings 2 touched.py > "$F"
+  echo "v1-extra" > "$R/touched.py"
+  local T2; T2="$(_tree_now)"
+  [ "$T1" != "$T2" ]
+
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" \
+    --resume --max-rounds 3 --findings-tree "$T1"
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | jq -r '.status')" = "STALE_FINDINGS" ]
+  # BOTH identities are named, so the operator can tell which tree is which.
+  # T1 is asserted by value — it is the attestation the session passed. The
+  # second is asserted by SHAPE, not by the $T2 computed above: the loop mints
+  # its own at consolidation time, by which point it has written this round
+  # dispatch sink, so the two are not required to be equal and pinning them
+  # would test the fixture rather than the guard.
+  echo "$stderr" | grep -qF "$T1"
+  echo "$stderr" | grep -qE 'but the working tree is now [0-9a-f]{40}'
+  # ...and the file that moved is named too, so the diagnosis is actionable
+  echo "$stderr" | grep -q 'touched.py'
+  # The early guard derives its OWN round (`round` is not in scope that early),
+  # and that value drives both the progress line and the completed-round count.
+  # Deriving it one lower left the suite green while the refusal named round 1
+  # and reported zero completed rounds for a run with one in history — the exact
+  # contract the sibling byte-identical arm pins explicitly.
+  echo "$stderr" | grep -q "round 2's findings were produced against tree"
+  [ "$(echo "$output" | jq -r '.rounds')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.status')" != "CONVERGED_WITH_RESIDUE" ]
+  # no fix-touched set was written from a false input
+  [ ! -e "$WD/fix-touched-1.txt" ]
+  grep -q '^\*\*Refused (round 2):\*\* stale findings' "$WD/progress.md"
+  # ...and they really are different identities, which is the whole claim.
+  # LAST, because `run` reassigns BOTH $output and $stderr — every assertion
+  # that reads either has to come first.
+  run ! grep -qE "but the working tree is now $T1" <<< "$stderr"
+}
+
+@test "#1435 AC21 the RIGHT cadence proceeds, with and without --gate-attest" {
+  # Non-vacuity for the refusal above: the identical fixture, with the panel run
+  # AFTER the fix, is not refused. Without this the guard could be refusing
+  # everything and the test above would still pass.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  local T1; T1="$(_tree_now)"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 3 --findings-tree "$T1"
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+}
+
+@test "#1435 AC21 --gate-attest neither causes nor suppresses the cadence refusal" {
+  # The two answer different questions — "may I skip the duplicate test run" vs
+  # "were these findings produced here" — so one must never stand in for the
+  # other. A matching --gate-attest on a stale-cadence round is still refused.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  local T1; T1="$(_tree_now)"
+  residue_findings 2 touched.py > "$F"
+  echo "v1-extra" > "$R/touched.py"
+  local T2; T2="$(_tree_now)"
+
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" \
+    --resume --max-rounds 3 --findings-tree "$T1" --gate-attest "$T2" --test-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | jq -r '.status')" = "STALE_FINDINGS" ]
+}
+
+@test "#1435 AC21 a run passing NO attestation is not refused — the guard fails quiet" {
+  # The guard detects a cadence MISTAKE; it is not a mandate. A session that
+  # attests nothing (an older driver, a hand-run round) loses the detection, not
+  # the run — the same fail-quiet rule every other missing-state path here takes.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  echo "v1-extra" > "$R/touched.py"
+  step --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+}
+
+
+@test "#1435 a repo-internal --status-file is excluded too, and its .bak sibling is NOT" {
+  # Two findings in one fixture, because they share a setup and each kills a
+  # different mutation.
+  #
+  # (a) --status-file is the FIRST name in the exclusion list and had no test at
+  #     all: every --status-file in this suite points outside the repo, so
+  #     dropping it from the loop left the whole suite green while an in-repo
+  #     status file — written by emit_and_exit AFTER the fix-base stamp — came
+  #     back in the resume diff as a file the session fix pass supposedly touched.
+  #
+  # (b) The list is matched EXACTLY, not by prefix, and the script says why:
+  #     `--status-file "$repo/loop.json"` must not also swallow `loop.json.bak`.
+  #     Turning the exact match into a prefix match passed every earlier fixture,
+  #     because none of them had a prefix-sibling in the diff. This one does, and
+  #     asserts BOTH directions — the sibling IS charged to the fix pass, the
+  #     status file is not.
+  # (NB: no stray apostrophes in these comments — the inert-assertion scanner
+  # tracks quote parity across lines and an odd one desyncs the whole scan.)
+  local SF="$R/loop-status.json"
+  local WDO="$BATS_TEST_TMPDIR/wd-sf"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$F" \
+    --status-file "$SF" --max-rounds 3
+  [ "$status" -eq 20 ]
+  # the status file really is in the repo, or the absence below proves nothing
+  [ -s "$SF" ]
+
+  # the session edits ONE story file and ALSO writes the prefix sibling
+  echo "v1" > "$R/touched.py"
+  echo backup > "$R/loop-status.json.bak"
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$F" \
+    --status-file "$SF" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  # (a) the loop own status file is NOT attributed to the fix pass
+  run ! grep -qxF 'loop-status.json' "$WDO/fix-touched-1.txt"
+  # (c) --telemetry-file is the THIRD member of that same exclusion list, and it
+  #     is pinned STRUCTURALLY rather than behaviourally on purpose: the sink is
+  #     written only at a TERMINAL exit, so the reachable shape is
+  #     escalate -> grant -> --resume, not this AWAITING_FIX pair. Asserting its
+  #     absence from a file this fixture never creates would be vacuous — the
+  #     trap this suite has had to fix twice. What is real, and what a deletion
+  #     would break, is its membership in the list all three consumers read.
+  grep -qF 'for _lp in "$status_file" "$findings_file" "$telemetry_file"' "$S"
+  # (b) ...but its prefix sibling IS — the match is exact, not a prefix
+  grep -qxF 'loop-status.json.bak' "$WDO/fix-touched-1.txt"
+  grep -qxF 'touched.py' "$WDO/fix-touched-1.txt"
+}
+
+@test "#1435 the exclusion matches LITERALLY: a glob metacharacter in the path still excludes" {
+  # The refactor replaced a sed regex splice with zsh literal matching precisely
+  # so a caller-chosen path stops being a PATTERN. Every fixture so far uses a
+  # metachar-free name, so deleting the `(b)` glob-quoting behaves identically
+  # and the whole suite stays green — while in production a supported work-dir
+  # like `wd[1]` stops matching and the loop own state files leak back into the
+  # set that decides residue. That is the fail-OPEN direction.
+  local IWD="$R/wd[1]"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ -f "$IWD/changelist-1.json" ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ "$(cat "$IWD/fix-touched-1.txt")" = "touched.py" ]
+  run ! grep -qF 'wd[1]' "$IWD/fix-touched-1.txt"
+}
+
+@test "#1435 the in-place rewrite preserves a path containing WHITESPACE" {
+  # The helper rewrites the fix-touched file whenever any exclusion is active, so
+  # it owns the file contents. Two mutations survive every existing fixture:
+  # reading with word-splitting instead of per-line, and dropping `-r` from the
+  # print. No test anywhere has a repo path with a space — the awkward-path
+  # fixture the suite carries is a non-ASCII name, which survives both.
+  #
+  # In production, with a repo-internal work-dir (supported and tested), an edit
+  # to `src/my file.py` would be rewritten as two bogus lines, so the blocker
+  # .file no longer matches the set: stamped new_defect, residue silently
+  # unreachable, and a wrong class histogram — the same spelling-agreement
+  # failure the quotePath flag exists to prevent, reached from the other end.
+  mkdir -p "$R/src"
+  echo "v0" > "$R/src/my file.py"
+  local IWD="$R/.loop-wd"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  echo "v1" > "$R/src/my file.py"
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$IWD" --findings-file "$F" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  # the whitespace path survives WHOLE...
+  grep -qxF 'src/my file.py' "$IWD/fix-touched-1.txt"
+  # ...and was not split into fragments: exactly two lines, not three
+  [ "$(grep -c . "$IWD/fix-touched-1.txt")" -eq 2 ]
+  run ! grep -qxF 'src/my' "$IWD/fix-touched-1.txt"
+}
+
+
+@test "#1435 the EXACT-match arm is literal too: a metachar in --findings-file still excludes" {
+  # The helper has TWO arms depending on the pattern-expansion flag: the work-dir
+  # prefix (already pinned by the `wd[1]` fixture) and the exact-match list for
+  # --status-file / --findings-file / --telemetry-file. Every fixture for that
+  # second arm uses a metachar-free name, so dropping the expansion there behaves
+  # identically and the suite stays green — while a supported repo-internal path
+  # like `state[1]/loop.json` stops being excluded and the loop own bookkeeping
+  # leaks back into the set that decides residue and into the review scope.
+  # (NB: no stray apostrophes in these comments — the inert-assertion scanner
+  # tracks quote parity across lines and an odd one desyncs the whole scan.)
+  mkdir -p "$R/state[1]"
+  local IF="$R/state[1]/findings.json"
+  local WDO="$BATS_TEST_TMPDIR/wd-meta"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$IF"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$IF" --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$IF"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$IF" --resume --max-rounds 3
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WDO/fix-touched-1.txt")" = "touched.py" ]
+  run ! grep -qF 'state[1]' "$WDO/fix-touched-1.txt"
+}
+
+@test "#1435 AC19 step mode: the NON-CONVERGENCE rung promotes the sweep too" {
+  # Section 9 gates BOTH residue rungs, and each repeats the step-mode
+  # AWAITING_FIX assignment. Every other step-mode residue fixture puts its
+  # finding far outside the proximity window, so nonconv never trips and they all
+  # land on the CEILING rung — leaving this one untested. Surviving mutation:
+  # delete the step-mode assignment from the non-convergence rung; loop_status
+  # stays empty, the round falls through into the hook-mode fix path with no fix
+  # command, loops again inside the same invocation, and dies on the
+  # byte-identical guard as exit 2 instead of exiting 20.
+  #
+  # The SAME title at a CONSTANT line is what makes round 2 non-converging.
+  echo "v0" > "$R/touched.py"
+  printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":10,"title":"unquoted expansion in the matcher","description":"d1","reviewer":"r"}]' > "$F"
+  step --max-rounds 5
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":10,"title":"unquoted expansion in the matcher","description":"d2","reviewer":"r"}]' > "$F"
+  step --resume --max-rounds 5
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  echo "$output" | jq -e '.final_changelist.non_converging == true' >/dev/null
+  # the sweep was promoted rather than the run ending on the delta round
+  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  # ...and the session is TOLD that, rather than being left to infer it
+  grep -q 'residue conditions hold, but on a DELTA round — promoting round 3' "$WD/progress.md"
+}
+
+
+@test "#1435 §10 an UNRESOLVABLE --findings-tree degrades LOUDLY, it does not refuse" {
+  # The rev-parse validation had no test: deleting it behaves identically at the
+  # exit level (diff-tree fails, pipefail fires, the failure arm returns 0), so
+  # the suite stayed green while the announcement vanished and a caller who
+  # mistyped or mis-minted the identity was left believing the rail was armed.
+  # (NB: no stray apostrophes in these comments — the inert-assertion scanner
+  # tracks quote parity across lines and an odd one desyncs the whole scan.)
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  residue_findings 2 touched.py > "$F"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" \
+    --resume --max-rounds 3 --findings-tree deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+  # DEGRADED, not refused — an unusable attestation must not cost the round
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  # ...but it says so, which is the whole difference from a silent pass
+  echo "$stderr" | grep -q 'does not resolve to a tree'
+  echo "$stderr" | grep -q 'cadence guard is OFF for round 2'
+}
+
+@test "#1435 §10 the attested check runs BEFORE --test-cmd, so a writing gate is not a cadence violation" {
+  # The ordering is documented and half-pinned (before the CAPTURE). This pins
+  # the other half. Surviving mutation: move the --test-cmd block above the
+  # cadence block. Every existing fixture stays green — the only one combining
+  # the two uses a no-op gate and expects a refusal anyway — while in production
+  # every honest round on a repo whose gate regenerates a fixture or runs a
+  # formatter is refused for a cadence mistake that never happened.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  # correct cadence: fix, THEN mint, THEN panel
+  echo "v1" > "$R/touched.py"
+  local T1; T1="$(_tree_now)"
+  residue_findings 2 touched.py > "$F"
+  step --resume --max-rounds 3 --findings-tree "$T1" \
+    --test-cmd 'echo regenerated > "'"$R"'/fixture.txt"'
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  # the gate really wrote into the repo, or this fixture proves nothing
+  [ -f "$R/fixture.txt" ]
+}
+
+@test "#1435 §10 an honest round carrying BOTH attestations proceeds" {
+  # The sibling test advertises "with and without --gate-attest" but passes only
+  # --findings-tree, so the with-half did not exist — and the only fixture
+  # carrying both expects a refusal. Surviving mutation: make the equal-identity
+  # short-circuit also require an empty gate_attest. The suite stays green while
+  # every session following the skill template — which passes both on each
+  # resume — is refused on a perfectly correct round: one flag suppressing the
+  # other, which the contract explicitly forbids.
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  step --max-rounds 3
+  [ "$status" -eq 20 ]
+
+  echo "v1" > "$R/touched.py"
+  local T1; T1="$(_tree_now)"
+  residue_findings 2 touched.py > "$F"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" \
+    --resume --max-rounds 3 --findings-tree "$T1" --gate-attest "$T1" --test-cmd 'true'
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  # ...and the gate attestation was CONSUMED, not merely tolerated
+  echo "$stderr" | grep -q 'matches the working tree'
+}
+
+@test "#1435 §10 the guard is armed on ROUND 1 too, where a false green opens the PR" {
+  # Round 1 is a FULL round, so zero blockers IS the CONVERGED condition. Gating
+  # the attested arm on --resume left exactly that uncovered: a session that ran
+  # the panel, then edited, then invoked would exit 0 and open a PR on a panel
+  # that read a tree which no longer exists — while the flag was accepted without
+  # complaint. Surviving mutation before the fix: re-add the resume conjunct.
+  echo "v0" > "$R/touched.py"
+  local T1; T1="$(_tree_now)"
+  printf '[]' > "$F"
+  # the session edits AFTER its panel ran — the wrong order
+  echo "v1-after-the-panel" > "$R/touched.py"
+
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" \
+    --max-rounds 3 --findings-tree "$T1"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q '"status":"STALE_FINDINGS"'
+  echo "$stderr" | grep -q "round 1's findings were produced against tree"
+  # the false green it prevents: an empty findings file on a FULL round is the
+  # CONVERGED condition, so without the guard this run would have exited 0
+  [ "$(echo "$output" | jq -r '.status')" != "CONVERGED" ]
 }

@@ -22,7 +22,8 @@ arithmetic in your head** (that is how an LLM miscounts). Run it:
 ```bash
 "<skill-base-dir>/../resolve-issue/scripts/consolidate-findings.zsh" \
   --findings <round-aggregate.json> --round <N> [--prev <prev-changelist.json>] \
-  [--promote <promoted.json>] [--adjudicated <adjudicated.json>]
+  [--promote <promoted.json>] [--adjudicated <adjudicated.json>] \
+  [--fix-touched <fix-touched-N-1.txt>]
 ```
 
 `--promote` (#994) carries a human-selected set of waived suggestions to raise to
@@ -47,9 +48,20 @@ to emit verbatim — so progress.md renders no drop line and the dossier's waive
 list disagrees with the loop's own changelist. **If your prompt names an
 adjudicated set but gives you no path, stop and say so.**
 
+`--fix-touched` (#1435) is a third flag of the same kind: it names the file
+listing what the PREVIOUS round's fix pass created or modified, and the engine
+uses it to stamp each blocking item with a derived `class`. **Forward it
+verbatim when your prompt gives you one, and never edit the file.** Unlike the
+two above, an EMPTY file is meaningful here — "the fix pass touched nothing
+reviewable", which makes every blocker a `new_defect` — so do not read an empty
+set as an absent flag. Without the flag no item carries `class` at all, which is
+what lets every downstream surface tell "nobody classified this round" from "it
+was all new defects"; so **never invent a class**, and never strip one the engine
+stamped.
+
 Your prompt gives you the round's aggregate findings path, the round number, and
-(for round ≥ 2) the previous round's changelist path and the adjudicated-set
-path. The engine returns the changelist with:
+(for round ≥ 2) the previous round's changelist path, the adjudicated-set path,
+and the fix-touched path. The engine returns the changelist with:
 
 - **severity mapping** — `CRITICAL→Critical`, `WARNING→High`, `SUGGESTION→Low`;
   **blocking = Critical + High**; Low is logged in `suggestions` and never
@@ -69,6 +81,15 @@ path. The engine returns the changelist with:
   leave that count alone: it records what the engine suppressed, not what your
   final `suggestions` array happens to hold. A re-raise at `WARNING`/`CRITICAL`
   is never dropped, so nothing blocking is ever hidden this way;
+- **residue class (#1435)** — with `--fix-touched`, every `blocking[]` item is
+  stamped `class`: `new_defect` (its file is NOT in the previous round's
+  fix-touched set), else `under_assertion` (`dimension == "tests"`), else
+  `incomplete_propagation`. It is reporting only — it never changes which items
+  block — and it is DERIVED here, never emitted by a reviewer, so the #558
+  findings schema is untouched. **Carry the stamp through verbatim** on every
+  item you keep: the loop's residue decision, the progress block, the grant
+  prompt's histogram and the telemetry `by_class` counts all read it, and all
+  four degrade to "unclassified" the moment ONE item loses its stamp;
 - **non-convergence (#983)** — candidates for "this blocked last round too" are
   gathered by fingerprint (file+dimension+line-proximity), but the verdict is
   title-identity: an **exact** normalized-title match => a genuine survivor
@@ -131,6 +152,19 @@ flagging, never inventing or dropping a real finding**:
    the two as separate blocking items (both get fixed either way) and note the
    relationship in their descriptions. Read the cited code (`Read`/`Grep`) when
    you need to confirm they are truly the same issue before merging.
+
+   **`class` (#1435) follows `file`/`line`, and is never OR-ed or re-derived.**
+   A merged item takes the `class` of the **same constituent** it takes
+   `file`/`line` from, so the stamp and the file it describes stay paired.
+   Constituents can legitimately disagree — a file inside the fix-touched set is
+   `incomplete_propagation` while one outside it is `new_defect`, and merging is
+   permitted across dimensions, where `tests` gives `under_assertion` — so
+   picking arbitrarily emits an item whose `class` contradicts its own
+   `file`/`dimension`. That wrong stamp then rides into the residue issue body,
+   the `by_class` telemetry, the `- by class:` progress row and the grant
+   prompt's histogram, all of which read it as fact. **If the constituents
+   disagree, prefer leaving them unmerged** — the stamp is evidence about where a
+   finding came from, and two origins are two findings.
 2. **Conflict confirmation.** The engine flags only co-located
    performance-vs-code_quality pairs. Promote a genuine opposing pair the
    heuristic missed (e.g. recommendations a few lines apart that cannot both be
@@ -153,7 +187,8 @@ your judgment edits applied on top:
     { "priority": "Critical", "severity": "CRITICAL", "dimension": "bugs",
       "file": "src/app/checkout.py", "line": 42, "title": "…", "description": "…",
       "suggested_fix": "…", "reviewers": ["python-bug-hunter","python-security-reviewer"],
-      "agreement": 2, "blocking": true, "non_converging": false, "false_trip": false }
+      "agreement": 2, "blocking": true, "non_converging": false, "false_trip": false,
+      "class": "incomplete_propagation" }
     /* a VERIFIED survivor additionally carries, verbatim from the engine:
        "non_converging": true, "false_trip": false, "matched_prior": { "line": 40,
        "title": "…" }, "possible_false_trip": false. An AMBIGUOUS survivor is
@@ -162,7 +197,11 @@ your judgment edits applied on top:
        "matched_prior": {…}, "possible_false_trip": true — it stays in blocking[]
        (still needs fixing) but never escalates. A HUMAN-PROMOTED item (#995)
        additionally carries "promoted": true, verbatim from the engine — it is
-       otherwise an ordinary High blocker. */
+       otherwise an ordinary High blocker. An item consolidated with
+       --fix-touched (#1435) additionally carries "class": "new_defect" |
+       "incomplete_propagation" | "under_assertion", verbatim from the engine;
+       items in a round consolidated WITHOUT that flag carry none at all, and you
+       must never add one. */
   ],
   "suggestions": [ /* Low items, logged, never loop */ ],
   "conflicts": [

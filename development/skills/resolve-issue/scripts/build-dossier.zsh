@@ -1,12 +1,26 @@
 #!/usr/bin/env zsh
-# build-dossier.zsh — turn a CONVERGED review-loop status JSON (from
+# build-dossier.zsh — turn a PR-OPENING review-loop status JSON (from
 # resolve-story-loop.zsh, #562) into the PR "Review dossier" section: the durable
 # audit record for why auto-merge happened (epic #557, issue #563).
+#
+# TWO terminal states open a PR and so reach this script: `CONVERGED` (exit 0)
+# and, since #1435, `CONVERGED_WITH_RESIDUE` (exit 14) — a run whose only
+# remaining blockers were non-critical and confined to the previous round own
+# fix pass, which opens the PR and files the remainder as follow-up issues. The
+# status is rendered as-is rather than gated on, so the dossier states which of
+# the two it was and a residue PR is auditable as exactly what it is: reviewed,
+# green, and carrying named follow-ups.
 #
 # It emits, on stdout:
 #   1. a human-readable "## Review dossier" markdown section — per-round blockers
 #      found/fixed, dimensions reviewed, waived Low suggestions, reviewers, and
-#      the final consolidator state; and
+#      the final consolidator state. Each dimension also carries `open` (#1435):
+#      the blockers still open in the BLOCKING phase's final changelist when the
+#      PR was opened — deliberately NOT "at the terminal", since `$terminal` is a
+#      bound name here meaning the PROMOTION status whenever the pair is passed,
+#      and the count must not come from it (see the in-body comment). It is 0
+#      everywhere but a residue run, whose dimensions read "N blocking found, K
+#      still open" rather than claiming a fix that did not happen; and
 #   2. a hidden JSON block  <!-- review-dossier: {…} -->  dimension-tagged with
 #      the #449 enum, so the Approver re-ingests reviewer verdicts into its risk
 #      register the same way maintenance re-ingests Approver findings today. An
@@ -25,8 +39,9 @@
 #
 # Usage:  build-dossier.zsh --status FILE [--promotion-status FILE --promoted FILE]
 # Exit codes: 0 ok (may be empty) · 2 usage · 1 bad input (not a regular
-#             non-empty file, or not exactly one JSON object / array). Every
-#             non-zero exit emits NOTHING on stdout.
+#             non-empty file, not exactly one JSON object / array, or a
+#             `--status` naming a non-PR-opening or non-terminal status — see
+#             the guard below). Every non-zero exit emits NOTHING on stdout.
 
 emulate -L zsh
 setopt nounset pipefail
@@ -97,11 +112,76 @@ _read_status() {  # $1 = file, $2 = flag label; echoes the compact JSON
   print -r -- "$json"
 }
 
-local status_json promotion_status_json="null" promoted_json="[]"
+local status_json="" promotion_status_json="null" promoted_json="[]"
 status_json=$(_read_status "$status_file" "--status") || exit $?
+
+# --- --status must be a PR-OPENING terminal ---------------------------------
+# The header says only two states reach this script; until #1435 that was merely
+# assumed, and an escalation status handed over by mistake rendered a slightly-off
+# round count. It cannot stay assumed now: an escalation's `final_changelist`
+# carries blockers by construction, so `open > 0` fires and the residue paragraph
+# below asserts — in the one document that exists to BE the audit record — that a
+# PR was opened, that the blockers were non-critical and fix-touched, and that
+# each was filed as a follow-up. Three claims nothing established.
+#
+# Refusing up front closes the whole class rather than one sentence, and it is
+# the same guard build-residue-issues.zsh applies to the same operand for the
+# same reason. Exit 1, not 2: this operand's other content failures are 1, and a
+# status file that exists and parses but describes the wrong run is an input
+# problem rather than a malformed command line.
+#
+# Stated as a DENY-list of the endings that open no PR, not an allow-list of the
+# two that do. `SKIPPED` (the `--no-review` fast path) and a zero-round status
+# both legitimately reach this script and correctly emit nothing, so an
+# allow-list would turn two working no-ops into hard failures — and it would
+# have to be revisited for every future terminal, whereas "an escalation never
+# opens a PR" is the invariant that actually motivates the guard.
+#
+# `AWAITING_FIX` is in the list and is the one that matters most in practice: it
+# is not an ending at all, and it is the status the loop writes MOST often —
+# every intermediate step-mode round overwrites `--status-file` with it, where an
+# escalation is written at most once per run. Its `final_changelist.blocking` is
+# non-empty by construction (that is what "awaiting a fix" means), so a stale one
+# renders the residue paragraph and contradicts itself inside one section
+# ("exited **AWAITING_FIX**" above "the loop ended **CONVERGED_WITH_RESIDUE**").
+_refuse_non_pr_terminal() {  # $1 = compact status JSON, $2 = flag label
+  local st=""
+  st=$(print -r -- "$1" | jq -r '.status // empty' 2>/dev/null) || st=""
+  case "$st" in
+    ESCALATE_*|BUDGET_EXHAUSTED|ERROR|STALE_FINDINGS|AWAITING_FIX)
+      print -r -u2 -- "build-dossier: $2 is a non-PR-opening or non-terminal status (${st}) — no escalation opens a PR and AWAITING_FIX is not an ending, so a dossier built from one would attest in the audit record to a merge that never happened. Pass the status of the run that opened this PR."
+      exit 1 ;;
+  esac
+}
+_refuse_non_pr_terminal "$status_json" "--status"
+
+# The promotion operand's narrower cousin: NON-ENDINGS only. See the call site
+# below for why the escalating endings deliberately stay renderable here.
+_refuse_non_ending_promotion() {  # $1 = compact promotion status JSON
+  local st=""
+  st=$(print -r -- "$1" | jq -r '.status // empty' 2>/dev/null) || st=""
+  case "$st" in
+    AWAITING_FIX|STALE_FINDINGS|ERROR)
+      print -r -u2 -- "build-dossier: --promotion-status is not an ending (${st}) — the dossier would report the run exited a status the loop never terminates on, and on a residue PR that line sits directly above 'the loop ended CONVERGED_WITH_RESIDUE'. Pass the promotion phase's terminal status."
+      exit 1 ;;
+  esac
+}
 
 if [[ -n "$promotion_status_file" ]]; then
   promotion_status_json=$(_read_status "$promotion_status_file" "--promotion-status") || exit $?
+  # Guarded NARROWLY, and the narrowness is the point. #1064 contracts this
+  # operand as renderable in a non-`CONVERGED` **ending** — the section says "and
+  # the phase exited **X**" precisely so a promotion phase that did not clear its
+  # picks is reported rather than hidden — so the escalating endings must stay
+  # through. Nothing in #1064 contracts a NON-ending, and one of those is the
+  # real hazard: `$terminal` is this operand whenever the pair is passed, so its
+  # status is what the opening sentence and the hidden block report. A stale
+  # `AWAITING_FIX` — the value the sub-loop overwrites its status file with every
+  # intermediate round, i.e. the most-written value here — would render "exited
+  # **AWAITING_FIX**" above "the loop ended **CONVERGED_WITH_RESIDUE**": the same
+  # self-contradiction the `--status` guard exists for, relocated to the sibling
+  # operand.
+  _refuse_non_ending_promotion "$promotion_status_json"
   # the SELECTION file, same element-shape discipline as consolidate-findings'
   # --promote: `["a title"]` or `[113]` pass a bare `type == "array"` test and
   # then abort deep inside the main jq, blaming the wrong input.
@@ -131,7 +211,7 @@ fi
 # --- nothing to render when NEITHER phase ran --------------------------------
 # Summed across phases (#1064): gating on the blocking phase alone discarded a
 # real promotion phase's record whenever the blocking phase had zero rounds.
-local nrounds
+local nrounds=""
 nrounds=$(jq -n --argjson s "$status_json" --argjson p "$promotion_status_json" \
   '(($s.round_changelists // []) | length) + ((($p // {}).round_changelists // []) | length)') || {
   print -r -u2 -- "build-dossier: could not count rounds"; exit 1 }
@@ -158,7 +238,7 @@ nrounds=$(jq -n --argjson s "$status_json" --argjson p "$promotion_status_json" 
 # merely shares a word, hiding real un-actioned work. The overlay can afford
 # leniency because it is line-windowed and one-to-one; the dossier reconstructs
 # neither bound.
-local dossier
+local dossier=""
 dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json" \
               --argjson sel "$promoted_json" '
   def normtitle: ((. // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
@@ -221,13 +301,51 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
                  else { seen: (if $x.priority == "Low" then (.seen + { ($k): true }) else .seen end),
                         out: (.out + [$x]) } end) | .out ) end ) as $uv
   | (($core + ($uv | map(.dimension))) | unique) as $dims
+  | (if $p == null then $s else $p end) as $terminal
+  # Blockers still OPEN, per dimension (#1435). Until residue existed this was
+  # zero by construction — the only PR-opening terminal was CONVERGED, whose
+  # final changelist has none — so the rendered line could say "found & fixed"
+  # unconditionally. A CONVERGED_WITH_RESIDUE run opens its PR with blockers
+  # still open and files them as follow-ups, and a dossier that called those
+  # fixed would be a confidently wrong number in the one document that exists to
+  # be the audit record.
+  #
+  # Read from the BLOCKING phase, and specifically NOT from `$terminal`.
+  # `$terminal` is the PROMOTION status whenever the pair is passed — and §3.5
+  # routes a residue run through the promotion offer before the residue branch,
+  # so that is the normal path, not a corner. Keyed on `$terminal` the promotion
+  # phase (which converges clean) would supply the counts, every dimension would
+  # read 0, and the body would pair a Summary naming the residue ending with a
+  # dossier asserting the same blockers were fixed.
+  #
+  # `$s` is the exactly-right source, not a narrowing: residue is single-phase
+  # (#1435 — the loop never declares it in a promotion sub-loop), so the blocking
+  # phase is the ONLY one whose leftover blockers can be "still open" on a PR,
+  # and the only one the residue branch files from. Summing `$p` in as well would
+  # let a promotion phase that is renderable-but-not-clean (#1064 keeps that
+  # shape) inflate a count the very next lines describe as filed. On every
+  # non-residue run the array is empty anyway, so CONVERGED output is unchanged.
+  #
+  # Gated on the residue status as well, so the MACHINE-READABLE `open` carries
+  # the same predicate as the prose that describes it. The two rendered arms are
+  # `$isresidue`-gated; leaving the JSON count on the raw array would let the
+  # hidden block report `open: N` while the line beside it says "found & fixed" —
+  # and the Approver reads the JSON half. No status the loop writes reaches that
+  # state today, but the guard above is deliberately a DENY-list, so a terminal
+  # added later passes by default: this makes `open` 0 off the residue path by
+  # construction rather than by luck.
+  | (if $s.status == "CONVERGED_WITH_RESIDUE"
+     then ($s.final_changelist.blocking // []) else [] end) as $openblk
+  | ( reduce $openblk[] as $b ({};
+        ((($b.dimension // "") | tostring)) as $bd
+        | . + { ($bd): ((.[$bd] // 0) + 1) }) ) as $openmap
   | ( reduce $dims[] as $d ({};
         . + { ($d): {
           blocking: ([ $uv[] | select(.dimension==$d and (.priority=="Critical" or .priority=="High")) ] | length),
           suggestions: ([ $uv[] | select(.dimension==$d and .priority=="Low") ] | length),
+          open: ($openmap[$d] // 0),
           clean: ([ $uv[] | select(.dimension==$d) ] | length == 0)
         }}) ) as $dimmap
-  | (if $p == null then $s else $p end) as $terminal
   | {
       status: $terminal.status,
       rounds: ((($s.rounds // ($brounds | length))) + (if $p == null then 0 else ($p.rounds // ($prounds | length)) end)),
@@ -274,7 +392,7 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
 # BUFFERED, then printed once (#1064). Streaming this block straight to stdout
 # meant a jq failure part-way through shipped a TRUNCATED dossier at exit 0 — a
 # PR body carrying half a section and no hidden block, with nothing to signal it.
-local section
+local section=""
 section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json" \
                  --argjson d "$dossier" '
   # the second of the two build-dossier stamp reads — same per-item expression
@@ -284,12 +402,39 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
        then " (\([ $r.blocking[]? | select(.promoted == true) ] | length) promoted)" else "" end)
     + (if ($r.summary.conflicts // 0) > 0 then ", \($r.summary.conflicts) conflict(s)" else "" end)
     + ", \($r.summary.low) suggestion(s) logged";
-  [ "## Review dossier",
+  # the residue predicate, bound ONCE so the paragraph and the per-dimension arm
+  # can never key on different things (#1435). It is the BLOCKING phase status:
+  # residue is single-phase by construction, so that is exactly the condition
+  # under which "still open" blockers exist and were filed.
+  ($s.status == "CONVERGED_WITH_RESIDUE") as $isresidue
+  | [ "## Review dossier",
     "",
     ("The local review loop ran **\($d.rounds) round(s)** and exited **\($d.status)** "
      + "before this PR was opened — CI is only spent on code the reviewer panel already converged on."),
     ""
   ]
+  # RESIDUE (#1435). `status` reports the TERMINAL phase by the #1064 rule, so on
+  # a residue run that also ran a promotion phase it reads `CONVERGED` and the
+  # residue ending would otherwise be invisible here — while the per-dimension
+  # lines below say "still open". Name it, so the section cannot contradict
+  # itself.
+  #
+  # Gated on the STATUS, not on the open count. The paragraph asserts a terminal
+  # and a filing, and neither is derivable from a count: any status whose final
+  # changelist still carries blockers makes a count-gate fire, so a stale one
+  # would have the audit record assert a terminal that never happened. The
+  # single-phase rule (#1435: residue is never declared in a promotion sub-loop)
+  # makes the status of the blocking phase the exactly-correct predicate, so the
+  # count survives only as the NUMBER the sentence reports.
+  # (NB: no apostrophes in this block — the jq program is single-quoted.)
+  + (if $isresidue then
+      [ ("**This PR carries residue** (#1435): the loop ended "
+         + "**CONVERGED_WITH_RESIDUE** with "
+         + "**\($d.dimensions | to_entries | map(.value.open // 0) | add // 0)** blocking finding(s) still open. "
+         + "Every one was non-critical and confined to the previous round own fix pass, and each was filed "
+         + "as a labelled follow-up issue — they were NOT fixed here. The per-dimension lines below say which."),
+        "" ]
+     else [] end)
   + (if $p == null then [] else
       [ ("A **suggestion-promotion phase** (#994) ran after convergence: the human selected "
          + "**\($d.promotion.selected)** waived suggestion(s), of which **\($d.promotion.promoted)** "
@@ -306,6 +451,22 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
   + [ "", "**Dimensions reviewed** (#449 lenses)", "" ]
   + [ ($d.dimensions | to_entries[] |
         if .value.clean then "- `\(.key)` — ✓ clean (reviewed, no findings)"
+        # "found & fixed" is only true when NOTHING is still open in this
+        # dimension at the terminal. A residue run (#1435) opens its PR with
+        # blockers outstanding, so it says how many and where they went instead
+        # of claiming a fix that did not happen. `open` is 0 on every other
+        # terminal, so this arm is unreachable off the residue path and the
+        # CONVERGED rendering is byte-identical.
+        # "filed" is unconditional because residue is single-phase by
+        # construction (the loop never declares it in a promotion sub-loop,
+        # #1435), so every open blocker on a residue run came from the blocking
+        # phase — the one the residue branch files from. That reasoning is about
+        # the STATUS, so the arm tests the status: gated on the count alone it
+        # would make the same claim for any run whose final changelist still
+        # carries blockers, which is the comment being true and the code not
+        # implementing it.
+        elif ($isresidue and ((.value.open // 0) > 0)) then
+          "- `\(.key)` — \(.value.blocking) blocking found, \(.value.open) still open (filed as follow-up issue(s)), \(.value.suggestions) suggestion(s)"
         else "- `\(.key)` — \(.value.blocking) blocking found & fixed, \(.value.suggestions) suggestion(s)" end) ]
   + [ "" ]
   + (if ($d.waived_low | length) > 0 then

@@ -463,7 +463,59 @@ CI and the per-type criteria still decide):
   otherwise raise in that lens as lower-probability, and do not manufacture one
   just to fill the register.
 - **A non-clean dimension is where to look hardest** — the panel found something
-  there; confirm the fix rather than assume it.
+  there; confirm the fix rather than assume it. **Unless it reports `open > 0`**
+  — see the residue rule below, where "confirm the fix" is the wrong question.
+- **`dimensions.<lens>.open > 0` means blockers were deliberately left open, not
+  missed.** The loop has one terminal that opens a PR with blockers still
+  outstanding: `CONVERGED_WITH_RESIDUE`. It fires only when the last two rounds
+  found **zero Criticals** and every remaining blocker sits in a file the loop's
+  own previous fix pass had just written — so what is open is the implementer
+  reviewing its own last edits, not shipped behaviour going wrong. Each one was
+  **filed as a labelled follow-up issue** (`review-residue` +
+  `needs-refinement`), which the PR Summary names.
+
+  Read it as **scoped, disclosed risk in that lens**, and weigh it like any other
+  disclosed limitation — not as a missing fix. Do **not** `REQUEST_CHANGES`
+  merely because `open > 0`: there is no fix to confirm, and demanding one asks
+  for work the run deliberately deferred and recorded. Do still raise a finding
+  if the diff shows the open item is **not** what the dossier says it is — a
+  Critical, or a change to behaviour outside the last fix pass — because those
+  are exactly the two conditions the terminal claims were checked. An older
+  dossier carries no `open` key at all; absent means 0.
+
+  **Read the Summary before extending that leniency — the dossier cannot vouch
+  for the filing.** The `open` count and the words "filed as follow-up issue(s)"
+  beside it are generated from the loop's **terminal alone**; the builder that
+  writes them has no way to learn whether the issues were actually created and
+  parented. The whole rule above rests on *tracked*, and only the Summary knows.
+  So check it, and treat two shapes as **untracked** risk rather than disclosed:
+
+  - The Summary says the remainder was **NOT filed on this run** (the PR author
+    is required to say so in those words when the filing failed). Then nothing
+    tracks those blockers: raise a finding naming them, and do not lower the
+    lens's residual-risk weight. This is not the diff-scoped exception above —
+    the open item may be exactly what the dossier says it is and still be
+    untracked.
+  - The Summary reconciles a **partial** filing — a count of blockers it can
+    account for as **tracked** that is below `open`, or issues created but not
+    parented (an unparented issue is matched by the idempotency key — label +
+    exact title, resolved repo-wide — so no re-run will duplicate it *or* re-file
+    it: it stays permanently orphaned and must be re-attached by hand). Weigh only the reconciled, tracked portion as
+    disclosed risk, and raise a finding for the rest.
+
+    **Count tracked, not filed-this-run.** A re-run legitimately files fewer
+    issues than `open`, because the idempotency read filters out the ones an
+    earlier run already filed — so a Summary whose this-run count is below `open`
+    but which **names pre-existing `review-residue` issues covering the
+    difference** is NOT this shape. It is the tracked case below, and treating it
+    as a partial filing raises a finding against issues that exist and are
+    parented.
+
+  A Summary that names the follow-up issue numbers, or reconciles pre-existing
+  ones from an earlier run against `open`, is the tracked case the leniency was
+  written for. A residue PR whose Summary says **nothing** about the filing does
+  not clear this bar either — the terminal promises the disclosure, so its
+  absence is itself the finding.
 - **`waived_low` is context, not a finding.** Those are Low suggestions the loop
   logged and deliberately did not act on; never turn a waived-Low into a
   `REQUEST_CHANGES` on its own. An item a human **promoted** and the loop then

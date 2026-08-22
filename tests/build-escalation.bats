@@ -518,3 +518,457 @@ EOF
   run zsh "$S" --status "$ST" --format bogus
   [ "$status" -eq 2 ]
 }
+
+# --- #1435: the last-two-rounds blocker-class histogram ----------------------
+
+# four rounds, the last two class-stamped: the histogram is a TREND READ at the
+# grant decision, so it deliberately shows only rounds 3 and 4 — the per-round
+# progress table above it already carries the whole run.
+classed_status() {
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":4,"max_rounds":4,
+ "history":[{"round":1,"blocking":2,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":2,"conflicts":0,"non_converging":false},
+            {"round":3,"blocking":2,"conflicts":0,"non_converging":false},
+            {"round":4,"blocking":3,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false},
+               {"file":"a.zsh","line":2,"dimension":"bugs","title":"q","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"r","priority":"High","non_converging":false},
+               {"file":"a.zsh","line":2,"dimension":"bugs","title":"s","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":3,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"t","priority":"High","non_converging":false,"class":"incomplete_propagation"},
+               {"file":"b.zsh","line":2,"dimension":"bugs","title":"u","priority":"High","non_converging":false,"class":"new_defect"}],
+   "suggestions":[]},
+  {"round":4,"summary":{"critical":0,"high":3,"low":0,"blocking":3,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"v","priority":"High","non_converging":false,"class":"incomplete_propagation"},
+               {"file":"a.zsh","line":5,"dimension":"bugs","title":"w","priority":"High","non_converging":false,"class":"incomplete_propagation"},
+               {"file":"a.bats","line":3,"dimension":"tests","title":"x","priority":"High","non_converging":false,"class":"under_assertion"}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+}
+
+@test "#1435 tc-corner-escalation-class-histogram: --format summary prints the last two rounds by class" {
+  classed_status
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Blocker classes (last two rounds)'
+  echo "$output" | grep -qF '| 3 | 1 | 1 | 0 |'
+  echo "$output" | grep -qF '| 4 | 0 | 2 | 1 |'
+  # the trend read is the LAST TWO, not the whole run: rounds 1 and 2 are
+  # unstamped and must not appear as rows of their own here
+  [ "$(echo "$output" | grep -cE '^\| [0-9]+ \| [0-9–]+ \| [0-9–]+ \| [0-9–]+ \|$')" -eq 2 ]
+}
+
+@test "#1435 --format comment prints the same histogram" {
+  classed_status
+  run zsh "$S" --status "$ST" --issue 1435
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Blocker classes (last two rounds)'
+  echo "$output" | grep -qF '| 4 | 0 | 2 | 1 |'
+}
+
+@test "#1435 an unstamped run renders NO class block at all (byte-identical to before)" {
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":2,"max_rounds":2,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"q","priority":"High","non_converging":false}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  run ! grep -q 'Blocker classes' <<< "$output"
+}
+
+@test "#1435 a HALF-stamped window still renders, with the unstamped round as dashes" {
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":2,"max_rounds":2,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"q","priority":"High","non_converging":false,"class":"new_defect"}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  # dashes, never zeros: round 1 was not classified, and saying "0 new defects"
+  # about it would be a claim nobody made
+  echo "$output" | grep -qF '| 1 | – | – | – |'
+  echo "$output" | grep -qF '| 2 | 1 | 0 | 0 |'
+}
+
+@test "#1435 the status case grows NO CONVERGED_WITH_RESIDUE arm — residue never escalates" {
+  # A grep on the script itself, because the observable is an ABSENCE: adding an
+  # arm would make a residue status render a purpose-built escalation for an
+  # ending that opens the PR.
+  run ! grep -q 'CONVERGED_WITH_RESIDUE)' "$S"
+  # ...and if a caller hands one over anyway, the default arm answers honestly
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED_WITH_RESIDUE","rounds":2,"max_rounds":2,"history":[],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'CONVERGED_WITH_RESIDUE'
+}
+
+@test "#1435 a histogram jq failure degrades LOUDLY and leaves the escalation whole" {
+  # The handler on the histogram assignment is fail-soft, and a fail-soft branch
+  # nobody exercises is a branch nobody knows works. Its whole reason to exist is
+  # that a silent failure is INDISTINGUISHABLE from the documented "neither of the
+  # last two rounds is stamped" no-op, which the test above asserts renders
+  # nothing — so without this, the two states share one observable and the warning
+  # could be deleted with the suite green.
+  #
+  # jq is invoked bare, so PATH is the seam. The stub fails ONLY the histogram
+  # program (matched on `new_defect`, which no other jq program in the script
+  # contains) and execs the real jq for every other call — otherwise the run would
+  # die at the `--status` read near the top and never reach the branch under test.
+  local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
+  local realjq; realjq="$(command -v jq)"
+  cat > "$bin/jq" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+  case "\$a" in *new_defect*) echo "stub: simulated jq failure" >&2; exit 5 ;; esac
+done
+exec "$realjq" "\$@"
+EOF
+  chmod +x "$bin/jq"
+
+  classed_status
+  run --separate-stderr env PATH="$bin:$PATH" zsh "$S" --status "$ST" --format summary --grants 1
+  # non-fatal: a missing histogram must never fail the escalation itself
+  [ "$status" -eq 0 ]
+  # the block is gone...
+  echo "$output" | grep -q 'Blocker classes' && { echo "table rendered despite the failure"; return 1; }
+  # ...and the escalation it lives inside is still whole, so the degradation is
+  # scoped to the table rather than truncating the document
+  echo "$output" | grep -q 'BUDGET_EXHAUSTED'
+  echo "$output" | grep -q 'Blocking findings by round:'
+  # the warning names the file and says the escalation is unaffected, which is
+  # what tells a reader this is a defect and not the documented no-op
+  echo "$stderr" | grep -q 'could not build the blocker-class histogram'
+  echo "$stderr" | grep -qF "$ST"
+  echo "$stderr" | grep -q 'the escalation is unaffected'
+}
+
+@test "#1435 non-vacuity: the same fixture WITHOUT the failing stub renders the table" {
+  # Pins the test above to the stub rather than to the fixture: if `classed_status`
+  # ever stopped producing a stamped window, the assertions there would pass for
+  # the wrong reason.
+  classed_status
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Blocker classes (last two rounds)'
+}
+
+# --- #1435 round-6: the histogram's gates, header, and BOTH render paths ------
+
+# a last-two window of [non-empty unstamped, EMPTY] — the shape the `$anystamped`
+# non-empty requirement exists for, and the one no earlier fixture produced
+empty_tail_status() {
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":2,"max_rounds":2,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":0,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+   "blocking":[],"suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+}
+
+@test "#1435 an EMPTY round in the window is not 'stamped': no table on a zero-blocker tail" {
+  # The `$anystamped` gate is `(length > 0) and all(has("class"))`, and only the
+  # `length > 0` half is at stake here: `all` over an EMPTY array is vacuously
+  # true, so an empty round satisfies the second half by itself. Drop the
+  # non-empty requirement and this fixture — the ordinary pre-#1435 shape of a run
+  # whose last round found nothing — starts rendering a class table whose only row
+  # is `| 2 | 0 | 0 | 0 |`: a classification nobody made, contradicting the
+  # script's own promise that an all-empty pair renders no table at all.
+  #
+  # Every other absence test in this file uses two NON-empty unstamped rounds,
+  # where the `all(has("class"))` half already returns false — so the mutation
+  # survives all of them.
+  empty_tail_status
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  run ! grep -q 'Blocker classes' <<< "$output"
+}
+
+@test "#1435 a window of TWO empty rounds renders no table either" {
+  # The degenerate end of the same gate, and the literal sentence the script
+  # comments claim ("an all-empty pair still renders no table at all"). Without
+  # it, a run that converged to zero blockers in both of its last two rounds would
+  # publish a two-row table of zeroes.
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":2,"max_rounds":2,
+ "history":[{"round":1,"blocking":0,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":0,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+   "blocking":[],"suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+   "blocking":[],"suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  run ! grep -q 'Blocker classes' <<< "$output"
+}
+
+@test "#1435 the histogram's column LABELS and separator are pinned, not just its digits" {
+  # Every other histogram assertion greps the bold section title and DATA rows,
+  # and the row-count regex matches numeric/dash cells only — so swapping the
+  # header labels to `| Round | under_assertion | incomplete_propagation |
+  # new_defect |` leaves the whole suite green while the published table reports
+  # under_assertion counts under the new_defect heading. That inverts the exact
+  # read the block exists for: new_defect trending up says the fix passes are
+  # introducing defects (stop), under_assertion says the tests are too weak
+  # (grant another round). A reader acting on the swapped table does the opposite
+  # of what the data says.
+  #
+  # The separator is pinned for a duller reason: drop a cell and the column count
+  # stops matching the header, which GitHub renders as literal text rather than a
+  # table — the block silently stops being a table at all.
+  classed_status
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF '| Round | new_defect | incomplete_propagation | under_assertion |'
+  echo "$output" | grep -qF '|---|---|---|---|'
+  # the same on the comment path, whose header is a separate literal
+  run zsh "$S" --status "$ST" --issue 1435
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF '| Round | new_defect | incomplete_propagation | under_assertion |'
+  echo "$output" | grep -qF '|---|---|---|---|'
+}
+
+@test "#1435 the COMMENT path omits the block too, on both ways of having none" {
+  # `[[ -n "$class_hist" ]]` is written twice — once per render path — and every
+  # absence assertion so far ran `--format summary`, so the comment path's copy is
+  # unpinned. Replace it with `if true` and each escalation COMMENT built from a
+  # pre-#1435 status JSON, and every run where the fail-soft handler fired, gains a
+  # bare `**Blocker classes (last two rounds)**` heading with nothing under it.
+  # Comments are the artifact a human actually reads at the grant decision, which
+  # is the one place a heading promising data and delivering none is worst.
+
+  # (a) nothing to render: an unstamped run
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":2,"max_rounds":2,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"q","priority":"High","non_converging":false}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 1435
+  [ "$status" -eq 0 ]
+  # the comment itself still rendered — otherwise the absence below proves nothing
+  echo "$output" | grep -q '<!-- review-loop-escalation: BUDGET_EXHAUSTED -->'
+  run ! grep -q 'Blocker classes' <<< "$output"
+
+  # (b) the fail-soft path: a stamped run whose histogram jq died
+  local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
+  local realjq; realjq="$(command -v jq)"
+  cat > "$bin/jq" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+  case "\$a" in *new_defect*) echo "stub: simulated jq failure" >&2; exit 5 ;; esac
+done
+exec "$realjq" "\$@"
+EOF
+  chmod +x "$bin/jq"
+  classed_status
+  run --separate-stderr env PATH="$bin:$PATH" zsh "$S" --status "$ST" --issue 1435
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '<!-- review-loop-escalation: BUDGET_EXHAUSTED -->'
+  echo "$stderr" | grep -q 'could not build the blocker-class histogram'
+  run ! grep -q 'Blocker classes' <<< "$output"
+}
+
+# --- #1435 round-7: the row gate's OTHER half, and the window's scoping -------
+
+@test "#1435 an empty round INSIDE a rendering window is 0/0/0, never dashes" {
+  # The round-6 tests pinned both shapes where an empty round means NO table.
+  # Neither puts an empty round inside a window that DOES render, so the per-row
+  # `$stamped` gate — `(length == 0) or all(has("class"))` — is unpinned on its
+  # `length == 0` half.
+  #
+  # Surviving mutation: make the per-row gate identical to `$anystamped`,
+  # `(length > 0) and all(has("class"))`. That is the single most plausible
+  # "make these two consistent" edit, and it silently inverts the strongest
+  # signal at the grant decision: since #1434 a zero-blocker DELTA round promotes
+  # a closing sweep rather than converging, so the window [found nothing,
+  # escalating sweep] is the informative one — and the mutated script prints
+  # `–` ("nobody classified this round") where the truth is `0 | 0 | 0` ("this
+  # round found nothing"). Every existing histogram fixture has NON-empty blocker
+  # arrays in the rendered window, so all 4233 tests survive it.
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":4,"max_rounds":4,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":3,"blocking":0,"conflicts":0,"non_converging":false},
+            {"round":4,"blocking":2,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"q","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":3,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+   "blocking":[],"suggestions":[]},
+  {"round":4,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"v","priority":"High","non_converging":false,"class":"new_defect"},
+               {"file":"b.zsh","line":2,"dimension":"tests","title":"w","priority":"High","non_converging":false,"class":"under_assertion"}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Blocker classes (last two rounds)'
+  # the empty round reports zeroes, in the documented column order...
+  echo "$output" | grep -qF '| 3 | 0 | 0 | 0 |'
+  # ...and specifically NOT the unclassified dash row, which is the mutation
+  run ! grep -qF '| 3 | – | – | – |' <<< "$output"
+  # the stamped round is unaffected, so the table is not simply blank
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  echo "$output" | grep -qF '| 4 | 1 | 0 | 1 |'
+}
+
+@test "#1435 \$anystamped reads the WINDOW, not the whole run" {
+  # Every fixture so far either stamps a round inside the last two or stamps
+  # nothing at all. Surviving mutation: widen the gate's source from `$last[]` to
+  # `$rs[]`, so it asks "was ANY round of the run stamped?" instead of "is either
+  # of the last two?". The suite stays green because no fixture has an early
+  # stamped round with an unstamped tail — yet that shape is reachable exactly as
+  # the loop describes it (a fix-touched capture that stops working mid-run stops
+  # stamping later rounds), and the mutated script then publishes the heading over
+  # a table of nothing but dashes: the "promises data, delivers none" failure the
+  # comment-path test cites as its own justification.
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":4,"max_rounds":4,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":3,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":4,"blocking":1,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false,"class":"new_defect"}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"q","priority":"High","non_converging":false,"class":"under_assertion"}],
+   "suggestions":[]},
+  {"round":3,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"r","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":4,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"s","priority":"High","non_converging":false}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  [ "$status" -eq 0 ]
+  run ! grep -q 'Blocker classes' <<< "$output"
+
+  # non-vacuity: the SAME four-round shape with the stamps moved to rounds 3-4
+  # renders, so the absence above is about the WINDOW and not about the fixture.
+  # Spelled out as its own heredoc rather than mutated with a multi-line jq: the
+  # repo's inert-assertion scanner desyncs on a quoted literal spanning more than
+  # two lines, and a fixture written whole is easier to diff against the one above
+  # anyway — the only difference is which two rounds carry `class`.
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":4,"max_rounds":4,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":3,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":4,"blocking":1,"conflicts":0,"non_converging":false}],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"q","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":3,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"r","priority":"High","non_converging":false,"class":"new_defect"}],
+   "suggestions":[]},
+  {"round":4,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"s","priority":"High","non_converging":false,"class":"under_assertion"}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Blocker classes (last two rounds)'
+  echo "$output" | grep -qF '| 3 | 1 | 0 | 0 |'
+  echo "$output" | grep -qF '| 4 | 0 | 0 | 1 |'
+}
+
+@test "#1435 the histogram block is BYTE-exact: framing, order and spacing pinned" {
+  # Every other assertion here is a line-grep, so the LINES are pinned and the
+  # space between them is not. Surviving mutation: delete the blank `print -r --`
+  # between the bold heading and the table. The lines are unchanged, every grep
+  # still matches — and markdown then folds the table into the bold paragraph, so
+  # GitHub renders the histogram as literal pipe-text. The same gap lets the whole
+  # block be MOVED after the convergence assessment, contradicting the documented
+  # order (progress table -> histogram -> assessment).
+  #
+  # The expectation is a HEREDOC compared with `diff`, not an inline
+  # `[ x = y ]` literal: the block under test contains a blank line, and a
+  # multi-line quoted literal containing one desyncs the repo inert-assertion
+  # scanner, which then refuses to scan the rest of this file. A heredoc body is
+  # payload to that scanner, and `diff -u` names the offending line rather than
+  # dumping both blocks.
+  classed_status
+  run zsh "$S" --status "$ST" --format summary --grants 1
+  [ "$status" -eq 0 ]
+  # a FIXED-LENGTH slice from the heading, not a range ending at the first blank
+  # line — the blank line IS the framing under test, so a `/^$/` terminator would
+  # end the slice on the very byte the mutation deletes and the assertion would
+  # compare one line against one line whatever happened.
+  printf '%s\n' "$output" \
+    | awk '/^\*\*Blocker classes \(last two rounds\)\*\*$/{n=6} n-->0' > "$BATS_TEST_TMPDIR/hist-got.txt"
+  cat > "$BATS_TEST_TMPDIR/hist-want.txt" <<'EOF'
+**Blocker classes (last two rounds)**
+
+| Round | new_defect | incomplete_propagation | under_assertion |
+|---|---|---|---|
+| 3 | 1 | 1 | 0 |
+| 4 | 0 | 2 | 1 |
+EOF
+  diff -u "$BATS_TEST_TMPDIR/hist-want.txt" "$BATS_TEST_TMPDIR/hist-got.txt"
+
+  # ...and it sits BETWEEN the round table and the convergence assessment, which
+  # is the order the skill documents. Line numbers, so a move is caught even
+  # though all three sections would still be present.
+  local ln_hist ln_assess
+  ln_hist="$(printf '%s\n' "$output" | grep -n '^\*\*Blocker classes (last two rounds)\*\*$' | head -1 | cut -d: -f1)"
+  ln_assess="$(printf '%s\n' "$output" | grep -n 'Blocking findings by round:' | head -1 | cut -d: -f1)"
+  [ -n "$ln_hist" ] && [ -n "$ln_assess" ] && [ "$ln_hist" -lt "$ln_assess" ]
+}

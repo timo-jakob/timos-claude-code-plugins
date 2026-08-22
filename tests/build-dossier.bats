@@ -951,3 +951,295 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(hidden_json | jq -r '.promotion.promoted')" = "0" ]
 }
+
+# --- #1435: a residue PR must not claim its open blockers were fixed ---------
+
+@test "#1435 a residue terminal reports blockers STILL OPEN, never 'found & fixed'" {
+  # The shape a CONVERGED_WITH_RESIDUE run leaves, built so it cannot pass under
+  # the two mutations a narrower fixture misses. TWO dimensions carry open
+  # blockers with DIFFERENT found counts (bugs: 3 found / 1 open, tests: 1/1), so
+  # neither "report the run-wide total for every dimension" nor "swap the found
+  # and open numbers" renders the same text.
+  jq '.status = "CONVERGED_WITH_RESIDUE"
+      | .round_changelists[0].blocking = [
+          {"priority":"Critical","dimension":"bugs","file":"app.py","line":1,"title":"None deref","reviewers":["python-bug-hunter"]},
+          {"priority":"High","dimension":"bugs","file":"app.py","line":5,"title":"second bug","reviewers":["python-bug-hunter"]},
+          {"priority":"High","dimension":"bugs","file":"app.py","line":9,"title":"third bug","reviewers":["python-bug-hunter"]},
+          {"priority":"High","dimension":"tests","file":"t.py","line":2,"title":"weak assertion","reviewers":["python-test-reviewer"]}]
+      | .final_changelist.summary = {critical:0,high:2,low:0,blocking:2,conflicts:0}
+      | .final_changelist.blocking = [
+          {"priority":"High","dimension":"bugs","file":"app.py","line":9,"title":"third bug","reviewers":["python-bug-hunter"]},
+          {"priority":"High","dimension":"tests","file":"t.py","line":2,"title":"weak assertion","reviewers":["python-test-reviewer"]}]' \
+    "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'exited \*\*CONVERGED_WITH_RESIDUE\*\*'
+  # the two numbers are different AND in the documented order, so swapping them
+  # cannot render the same line
+  echo "$output" | grep -q -- '- `bugs` — 3 blocking found, 1 still open (filed as follow-up issue(s))'
+  echo "$output" | grep -q -- '- `tests` — 1 blocking found, 1 still open (filed as follow-up issue(s))'
+  # the section says residue outright, so it cannot be read as an ordinary run
+  echo "$output" | grep -q 'This PR carries residue'
+  echo "$output" | grep -q '\*\*2\*\* blocking finding(s) still open'
+  # ...and the machine-readable half carries per-dimension counts, so a CLEAN
+  # lens is proven not to inherit the run-wide total. Asserted BEFORE the
+  # negative below, which uses `run` and would reset $output — the very variable
+  # hidden_json reads.
+  [ "$(hidden_json | jq -r '.dimensions.bugs.open')" = "1" ]
+  [ "$(hidden_json | jq -r '.dimensions.tests.open')" = "1" ]
+  [ "$(hidden_json | jq -r '.dimensions.security.open')" = "0" ]
+  # the false claim must be gone from those dimensions, not merely joined
+  run ! grep -qE -- '- `(bugs|tests)` — [0-9]+ blocking found & fixed' <<< "$output"
+}
+
+@test "#1435 open comes from the BLOCKING phase, so a promotion phase can neither zero nor inflate it" {
+  # §3.5 routes a residue run through the promotion offer BEFORE the residue
+  # branch, so a promotion status is the normal companion, not a corner. Keyed on
+  # the terminal phase alone, the promotion phase (which converges clean) would
+  # supply the counts, every dimension would read 0, and the body would pair a
+  # Summary naming the residue ending with a dossier asserting the blockers were
+  # fixed. The source is the BLOCKING phase specifically — residue is
+  # single-phase, so that is the only phase whose leftovers can be "still open"
+  # AND the only one the residue branch files from. Summing the promotion phase
+  # in would let a renderable-but-not-clean one (#1064 keeps that shape) inflate
+  # a count the very next line calls filed; the second half below pins that.
+  jq '.status = "CONVERGED_WITH_RESIDUE"
+      | .final_changelist.summary = {critical:0,high:1,low:0,blocking:1,conflicts:0}
+      | .final_changelist.blocking = [{"priority":"High","dimension":"bugs","file":"app.py","line":9,
+                                       "title":"still open","reviewers":["python-bug-hunter"]}]' \
+    "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  local PST="$BATS_TEST_TMPDIR/promo-status.json" SEL="$BATS_TEST_TMPDIR/promoted.json"
+  cat > "$PST" <<'EOF'
+{"status":"CONVERGED","rounds":1,"max_rounds":3,"repo_type":"python",
+ "round_changelists":[{"round":1,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+                       "blocking":[],"suggestions":[]}],
+ "final_changelist":{"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}}
+EOF
+  # a real selection — `--promoted` is contracted as a NON-EMPTY array, since a
+  # phase with nothing picked never runs the sub-loop at all
+  printf '[{"file":"app.py","line":9,"dimension":"code_quality","title":"rename var"}]' > "$SEL"
+  run zsh "$S" --status "$ST" --promotion-status "$PST" --promoted "$SEL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- `bugs` — 1 blocking found, 1 still open (filed as follow-up issue(s))'
+  # `status` still reports the terminal PHASE by the #1064 rule, so the residue
+  # paragraph is what keeps the section from contradicting its own dimension line
+  echo "$output" | grep -q 'This PR carries residue'
+  echo "$output" | grep -q 'CONVERGED_WITH_RESIDUE'
+  [ "$(hidden_json | jq -r '.dimensions.bugs.open')" = "1" ]
+
+  # ...and a promotion phase carrying its OWN leftover blockers does not inflate
+  # it. #1064 renders such a phase rather than hiding it, so this is supported
+  # input; summing it in would report 2 still open and call both filed.
+  jq '.status = "BUDGET_EXHAUSTED"
+      | .final_changelist.summary = {critical:0,high:1,low:0,blocking:1,conflicts:0}
+      | .final_changelist.blocking = [{"priority":"High","dimension":"code_quality","file":"app.py","line":3,
+                                       "title":"promotion leftover","reviewers":["python-code-quality"]}]' \
+    "$PST" > "$PST.x"
+  mv "$PST.x" "$PST"
+  run zsh "$S" --status "$ST" --promotion-status "$PST" --promoted "$SEL"
+  [ "$status" -eq 0 ]
+  [ "$(hidden_json | jq -r '.dimensions.bugs.open')" = "1" ]
+  [ "$(hidden_json | jq -r '.dimensions.code_quality.open')" = "0" ]
+  echo "$output" | grep -q '[*][*]1[*][*] blocking finding(s) still open'
+}
+
+@test "#1435 a PR-OPENING status is required: an escalation is refused, not rendered as residue" {
+  # An escalation's final_changelist carries blockers by construction, so `open`
+  # would fire and the residue paragraph would assert — in the audit record —
+  # that a PR was opened, that the blockers were non-critical and fix-touched,
+  # and that each was filed. Three claims nothing established. Refusing the
+  # operand closes the whole class rather than one sentence, and it is the same
+  # guard build-residue-issues.zsh applies to the same operand.
+  local st
+  for st in ESCALATE_NO_CONVERGENCE BUDGET_EXHAUSTED ESCALATE_CONFLICT ERROR STALE_FINDINGS AWAITING_FIX; do
+    jq --arg s "$st" '.status = $s
+        | .final_changelist.summary = {critical:0,high:1,low:0,blocking:1,conflicts:0}
+        | .final_changelist.blocking = [{"priority":"High","dimension":"bugs","file":"app.py","line":9,
+                                         "title":"still open","reviewers":["python-bug-hunter"]}]' \
+      "$ST" > "$ST.x"
+    mv "$ST.x" "$ST"
+    run --separate-stderr zsh "$S" --status "$ST"
+    [ "$st: $status" = "$st: 1" ]
+    # the diagnostic echoes what it got, so an arm printing a constant is excluded
+    echo "$stderr" | grep -q "($st)"
+    echo "$stderr" | grep -q 'non-PR-opening or non-terminal status'
+    # ...and NOTHING is emitted, so a half-rendered section can never reach a PR body
+    [ -z "$output" ]
+  done
+}
+
+@test "#1435 the guard is a DENY-list, so SKIPPED and a status-less file still no-op cleanly" {
+  # An allow-list of the two PR-opening terminals would turn two working no-ops
+  # into hard failures: `--no-review` leaves SKIPPED, and a zero-round status has
+  # nothing to render either way. The invariant that motivates the guard is "an
+  # escalation never opens a PR", so that is what it tests.
+  jq '.status = "SKIPPED" | .round_changelists = [] | .final_changelist = null' "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run --separate-stderr zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  jq 'del(.status) | .round_changelists = [] | .final_changelist = null' "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run --separate-stderr zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#1435 residue is single-phase, so 'filed' needs no per-phase qualifier" {
+  # The loop never declares residue in a promotion sub-loop (#1435), and every
+  # other non-clean promotion ending escalates and opens no PR — so every open
+  # blocker that reaches the dossier came from the blocking phase, the one the
+  # residue branch files from. This pins that the rendering says so plainly
+  # rather than hedging, which is what the Approver policy reads.
+  jq '.status = "CONVERGED_WITH_RESIDUE"
+      | .final_changelist.summary = {critical:0,high:1,low:0,blocking:1,conflicts:0}
+      | .final_changelist.blocking = [{"priority":"High","dimension":"bugs","file":"app.py","line":9,
+                                       "title":"blocking-phase residue","reviewers":["python-bug-hunter"]}]' \
+    "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  local PST="$BATS_TEST_TMPDIR/promo-status.json" SEL="$BATS_TEST_TMPDIR/promoted.json"
+  # a CONVERGED promotion phase — the only shape that can accompany a PR
+  cat > "$PST" <<'EOF'
+{"status":"CONVERGED","rounds":1,"max_rounds":3,"repo_type":"python",
+ "round_changelists":[{"round":1,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+                       "blocking":[],"suggestions":[]}],
+ "final_changelist":{"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}}
+EOF
+  printf '[{"file":"app.py","line":9,"dimension":"code_quality","title":"rename var"}]' > "$SEL"
+  run zsh "$S" --status "$ST" --promotion-status "$PST" --promoted "$SEL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'This PR carries residue'
+  echo "$output" | grep -q 'each was filed as a labelled follow-up issue'
+  echo "$output" | grep -q -- '- `bugs` — 1 blocking found, 1 still open (filed as follow-up issue(s))'
+  [ "$(hidden_json | jq -r '.dimensions.bugs.open')" = "1" ]
+  # ...and the rendering is the SAME whether or not a promotion phase ran — which
+  # is what "no per-phase qualifier" actually means. A tautological negative on a
+  # deleted phrase would pass regardless of behaviour; this reds on a qualifier
+  # of ANY spelling.
+  local two_phase_line; two_phase_line="$(echo "$output" | grep -- '- `bugs` —')"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -- '- `bugs` —')" = "$two_phase_line" ]
+}
+
+@test "#1435 a CONVERGED terminal is unchanged: open is 0 and the wording still says fixed" {
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- `bugs` — 1 blocking found & fixed, 0 suggestion(s)'
+  [ "$(hidden_json | jq -r '.dimensions.bugs.open')" = "0" ]
+  # every dimension, not just the one with findings — a clean lens must not
+  # acquire a spurious open count
+  hidden_json | jq -e '[.dimensions[].open] | all(. == 0)' >/dev/null
+  # ...and the residue paragraph is ABSENT. Without this negative the paragraph's
+  # gate is unpinned: opening it up would put "This PR carries residue … with 0
+  # blocking finding(s) still open … each was filed as a labelled follow-up
+  # issue" — three false claims — into the audit record of EVERY ordinary PR,
+  # with every positive assertion in this file still green.
+  run ! grep -q 'This PR carries residue' <<< "$output"
+}
+
+@test "#1435 the residue paragraph names a terminal, so it must never appear on a converged run" {
+  # The paragraph hardcodes the terminal name, so its presence IS a claim about
+  # the ending. Pinned separately from the wording above because the gate and the
+  # text are different mutations.
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  run ! grep -q 'CONVERGED_WITH_RESIDUE' <<< "$output"
+
+  # ...and the same on the two-phase shape, where `status` reports the promotion
+  # phase and a count-gated paragraph would key off the wrong thing
+  local PST="$BATS_TEST_TMPDIR/promo-clean.json" SEL="$BATS_TEST_TMPDIR/sel-clean.json"
+  cat > "$PST" <<'EOF'
+{"status":"CONVERGED","rounds":1,"max_rounds":3,"repo_type":"python",
+ "round_changelists":[{"round":1,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+                       "blocking":[],"suggestions":[]}],
+ "final_changelist":{"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}}
+EOF
+  printf '[{"file":"app.py","line":9,"dimension":"code_quality","title":"rename var"}]' > "$SEL"
+  run zsh "$S" --status "$ST" --promotion-status "$PST" --promoted "$SEL"
+  [ "$status" -eq 0 ]
+  run ! grep -q 'This PR carries residue' <<< "$output"
+}
+
+@test "#1435 a NON-residue terminal with leftover blockers still says 'found & fixed'" {
+  # The second `$isresidue` consumer — the per-dimension "still open" arm — pinned
+  # from the negative side. Its positive above fires on a residue status that also
+  # has leftover blockers, so both halves of `($isresidue and open > 0)` are true
+  # there and that test cannot tell which one carries the arm. This fixture makes
+  # them disagree: a status that is NOT the residue terminal whose final changelist
+  # nevertheless still carries two blocking findings.
+  #
+  # That is the exact input a count-gated arm gets wrong. Gated on the count alone
+  # it would tell the Approver that two findings are "still open (filed as
+  # follow-up issue(s))" on a run that filed nothing — a fabricated audit trail
+  # pointing at issues that do not exist. The `& fixed` assertions below are the
+  # positive half of the same pin: it is not enough that the false line be absent,
+  # the true line has to be what replaced it.
+  #
+  # Both `$isresidue` gates are in the blast radius: the arm's own, and the one on
+  # `$openblk` that keeps the machine-readable `open` at 0. Dropping EITHER is
+  # caught here — the second because `open` would then be 1 for two dimensions,
+  # which the hidden-block assertion reads directly.
+  jq '.round_changelists[0].blocking = [
+          {"priority":"Critical","dimension":"bugs","file":"app.py","line":1,"title":"None deref","reviewers":["python-bug-hunter"]},
+          {"priority":"High","dimension":"bugs","file":"app.py","line":9,"title":"third bug","reviewers":["python-bug-hunter"]},
+          {"priority":"High","dimension":"tests","file":"t.py","line":2,"title":"weak assertion","reviewers":["python-test-reviewer"]}]
+      | .final_changelist.summary = {critical:0,high:2,low:0,blocking:2,conflicts:0}
+      | .final_changelist.blocking = [
+          {"priority":"High","dimension":"bugs","file":"app.py","line":9,"title":"third bug","reviewers":["python-bug-hunter"]},
+          {"priority":"High","dimension":"tests","file":"t.py","line":2,"title":"weak assertion","reviewers":["python-test-reviewer"]}]' \
+    "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'exited \*\*CONVERGED\*\*'
+  echo "$output" | grep -q -- '- `bugs` — 2 blocking found & fixed'
+  echo "$output" | grep -q -- '- `tests` — 1 blocking found & fixed'
+  # the machine-readable half agrees — `open` is 0 despite a non-empty
+  # final_changelist.blocking. Read BEFORE the `run !` below, which reassigns the
+  # $output that hidden_json parses.
+  hidden_json | jq -e '[.dimensions[].open] | all(. == 0)' >/dev/null
+  # ...and the residue paragraph stays away too: it reports that same total, so a
+  # loosened gate would print "0 blocking finding(s) still open" beside two open
+  # ones.
+  run ! grep -q 'still open (filed as follow-up issue(s))' <<< "$output"
+}
+
+@test "#1435 a NON-ENDING --promotion-status is refused, and an escalating ENDING still renders" {
+  # `_refuse_non_ending_promotion` was invoked by no test at all. Surviving
+  # mutation: delete its call, or drop AWAITING_FIX from its case list. In
+  # production `$terminal` is the PROMOTION status whenever the pair is passed,
+  # and AWAITING_FIX is exactly what the sub-loop overwrites its status file with
+  # on every intermediate round — so a stale one renders `status: "AWAITING_FIX"`
+  # in the machine-readable dossier and prints "the phase exited **AWAITING_FIX**"
+  # directly above "the loop ended **CONVERGED_WITH_RESIDUE**": the same
+  # self-contradiction in the audit record the sibling --status guard prevents.
+  #
+  # The deny-list is NARROW on purpose (#1064): an escalating ENDING must still
+  # render, so the second half pins the carve-out. Without it the obvious "fix"
+  # — widening the list to every non-converged status — passes the first half
+  # while silently deleting the promotion dossier #1064 contracts.
+  promo_fixtures
+  local st
+  for st in AWAITING_FIX STALE_FINDINGS ERROR; do
+    jq --arg s "$st" '.status = $s' "$PST" > "$PST.x"
+    mv "$PST.x" "$PST"
+    run --separate-stderr zsh "$S" --status "$BST" --promotion-status "$PST" --promoted "$SEL"
+    [ "$st: $status" = "$st: 1" ]
+    # the diagnostic echoes what it got, so an arm printing a constant is excluded
+    echo "$stderr" | grep -q "($st)"
+    echo "$stderr" | grep -q 'is not an ending'
+    # ...and NOTHING is emitted, so a half-rendered section never reaches a PR body
+    [ -z "$output" ]
+  done
+
+  # the carve-out: an escalating ENDING is renderable, and says so
+  jq '.status = "BUDGET_EXHAUSTED"' "$PST" > "$PST.x"
+  mv "$PST.x" "$PST"
+  run zsh "$S" --status "$BST" --promotion-status "$PST" --promoted "$SEL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'BUDGET_EXHAUSTED'
+}

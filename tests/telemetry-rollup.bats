@@ -151,6 +151,13 @@ _jqfc() { echo "$1" | jq -c "$2"; }
     echo '{"status":"ERROR","findings_by_round":[],"rounds":1,"wall_s":1}'
     echo '{"status":"BUDGET_EXHAUSTED","findings_by_round":[],"rounds":1,"wall_s":1}'
     echo '{"status":"ESCALATE_NO_CONVERGENCE","findings_by_round":[],"rounds":1,"wall_s":1}'
+    # CONVERGED_WITH_RESIDUE (#1435) — the third success arm, and the one whose
+    # omission is silent: this narrowing's catch-all is deliberately `failed`,
+    # so a residue status that is not named here is not merely uncounted, it is
+    # reported as a FAILED run. That contradicts ARCHITECTURE.md's outcome
+    # mapping (both copies) and the loop's own, while every other test stays
+    # green — which is exactly why the roster below has to be closed.
+    echo '{"status":"CONVERGED_WITH_RESIDUE","findings_by_round":[],"rounds":1,"wall_s":1}'
     # …plus the two catch-all arms the named statuses never reach: an
     # UNRECOGNIZED status string, and a non-string status. Both must land on
     # the never-a-guess `failed`, not on some "unknown escalation states are
@@ -160,9 +167,10 @@ _jqfc() { echo "$1" | jq -c "$2"; }
   } > "$f"
   run zsh "$S" --json "$f"
   [ "$status" -eq 0 ]
-  # CONVERGED, SKIPPED -> success (2); ERROR + the two catch-alls -> failed (3);
+  # CONVERGED, CONVERGED_WITH_RESIDUE, SKIPPED -> success (3);
+  # ERROR + the two catch-alls -> failed (3);
   # BUDGET_EXHAUSTED, ESCALATE_NO_CONVERGENCE -> escalated (2)
-  contains "$output" '"outcome_mix":{"success":2,"parked":0,"escalated":2,"failed":3}'
+  contains "$output" '"outcome_mix":{"success":3,"parked":0,"escalated":2,"failed":3}'
 }
 
 @test "v0 refine-issue narrowing has the same never-a-guess catch-all for unknown and non-string outcomes" {

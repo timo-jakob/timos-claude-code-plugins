@@ -14,10 +14,15 @@
 #
 # Usage:
 #   build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL]
+#                        [--format comment|summary] [--grants N]
 #     --status       the loop's status JSON (required)
 #     --issue        issue number (for the header, optional)
 #     --branch       pushed branch holding the diff-so-far (optional, linked)
 #     --compare-url  a compare/tree URL for the branch (optional, linked)
+#     --format       `comment` (default) for the issue comment the skill posts,
+#                    or `summary` for the in-session grant prompt — same data,
+#                    minus the options list, branch note and marker. Both render
+#                    the #1435 blocker-class histogram.
 #     --grants       interactive-extension grants already consumed (optional;
 #                    rendered against the soft cap so the human sees the
 #                    context at the grant prompt, #969)
@@ -50,14 +55,21 @@ done
   print -u2 -- "build-escalation: --issue must be an issue number (got: $issue)"; exit 2 }
 [[ -s "$status_file" ]] || { print -u2 -- "build-escalation: status file missing or empty: $status_file"; exit 1 }
 
-local st rounds max_rounds
+local st="" rounds="" max_rounds=""
 st=$(jq -r '.status // "UNKNOWN"' "$status_file" 2>/dev/null) || { print -u2 -- "build-escalation: invalid status JSON"; exit 1 }
 rounds=$(jq -r '.rounds // 0' "$status_file")
 max_rounds=$(jq -r '.max_rounds // 0' "$status_file")
 
-# one-line human summary + the concrete options, per escalation type
-local summary
-local -a opts
+# One-line human summary + the concrete options, per escalation type.
+#
+# There is deliberately NO `CONVERGED_WITH_RESIDUE` arm here, and there must not
+# be one (#1435): residue is a CONVERGENCE — it opens the PR and files the
+# remainder — so it never escalates and never reaches this script through the
+# escalation path. Should a caller hand one over anyway, the default arm below
+# is the right answer: describe the status and ask, rather than pretend a
+# purpose-built escalation exists for an ending that is not one.
+local summary=""
+local -a opts=()
 case "$st" in
 ESCALATE_CONFLICT)
   summary="Reviewers gave opposing recommendations on the same code that the loop could not reconcile."
@@ -102,14 +114,14 @@ SKIPPED)
 esac
 
 # per-round history, one line each
-local history_lines
+local history_lines=""
 history_lines=$(jq -r '
   (.history // []) | if length == 0 then "_(no rounds ran)_"
   else (.[] | "- Round \(.round): \(.blocking) blocking, \(.conflicts) conflict(s)"
         + (if .non_converging then ", **non-converging**" else "" end)) end' "$status_file")
 
 # type-specific detail block from the final changelist
-local detail
+local detail=""
 case "$st" in
 ESCALATE_CONFLICT)
   detail=$(jq -r '
@@ -169,7 +181,7 @@ esac
 # Promoted column (#995) is a SUBSET of Warning, never added to it. NB: the
 # `(N promoted)` round suffix in build-dossier.zsh decides PER ROUND, unlike
 # this table-wide column — see ARCHITECTURE.md.
-local round_table assessment
+local round_table="" assessment=""
 round_table=$(jq -r '
   (.round_changelists // []) as $rs
   | if ($rs | length) == 0 then "" else
@@ -206,6 +218,66 @@ round_table=$(jq -r '
             + " \($new // "–") | \($carried // "–") | \($fixed // "–") |"
         ]
       | join("\n") ) end' "$status_file")
+# --- blocker-class histogram, last two rounds (#1435) ------------------------
+# The grant decision is "would another round buy anything?", and the class split
+# answers it more directly than any count of blockers can: a round of
+# `new_defect`s is finding fresh problems, while a round of
+# `incomplete_propagation` / `under_assertion` is re-reading the last fix pass's
+# own edits. The #687 run asked a human for rounds twice on a signal that
+# carried no such information.
+#
+# LAST TWO rounds only, deliberately: it is a trend read at the decision point,
+# not an audit trail — the per-round table above already carries the full run.
+# The derivation is the FOURTH copy of the round-classification logic kept in
+# lockstep with render-progress-block.zsh and build-telemetry-record.zsh; move
+# all of them together.
+#
+# An unstamped round (pre-#1435, or one the loop had no fix-touched set for)
+# renders "–" per cell — never zeros, which would assert a classification nobody
+# made. When NEITHER of the last two rounds is stamped the whole block is empty
+# and its caller omits it, so an older status JSON reads exactly as before.
+local class_hist=""
+class_hist=$(jq -r '
+  (.round_changelists // []) as $rs
+  | if ($rs | length) == 0 then "" else
+    ( $rs[-2:] ) as $last
+    | ( [ $last[] | (.blocking // []) as $b
+          | select((($b | length) > 0) and ([ $b[] | has("class") ] | all)) ] | length > 0 ) as $anystamped
+    | if ($anystamped | not) then "" else
+      ( [ "| Round | new_defect | incomplete_propagation | under_assertion |",
+          "|---|---|---|---|" ]
+        + [ range(0; $last | length) as $i | $last[$i] as $r
+            | ($r.blocking // []) as $b
+            # the whole conjunction is parenthesised before `as`: jq binds `as`
+            # to the LAST term only, so `A and B as $x` would bind $x to B and
+            # emit A as the row
+            # An EMPTY blocker array is trivially stamped — there is nothing to
+            # classify and 0/0/0 is the exact answer, where "–" means "nobody
+            # classified this round" by the convention of this table. The shape is
+            # reachable and it is the informative one: since #1434 a zero-blocker
+            # DELTA round promotes a closing sweep rather than converging, so if
+            # that sweep escalates the last two rounds ARE [found-nothing,
+            # escalating sweep] — and printing a dash for the round that found
+            # nothing hides the strongest signal at the grant decision. (The
+            # `$anystamped` gate above keeps requiring a round with real stamped
+            # blockers, so an all-empty pair still renders no table at all.)
+            # (NB: no apostrophes in this block — the program is single-quoted.)
+            | ((($b | length) == 0) or ([ $b[] | has("class") ] | all)) as $stamped
+            | "| \($r.round // "?") | "
+              + (if $stamped then "\([ $b[] | select(.class == "new_defect") ] | length)" else "–" end) + " | "
+              + (if $stamped then "\([ $b[] | select(.class == "incomplete_propagation") ] | length)" else "–" end) + " | "
+              + (if $stamped then "\([ $b[] | select(.class == "under_assertion") ] | length)" else "–" end) + " |"
+          ]
+        | join("\n") ) end end' "$status_file") || {
+  # Announce the degradation rather than going dark. Without this the assignment
+  # status is discarded, `class_hist` stays empty, and both render paths omit the
+  # block — which reads exactly like the documented "neither of the last two
+  # rounds is stamped" no-op. The histogram exists FOR the grant decision, so a
+  # silent disappearance is worst precisely when it is most wanted. Non-fatal by
+  # design: a missing histogram must never fail the escalation itself.
+  print -u2 -- "build-escalation: could not build the blocker-class histogram from $status_file — the escalation is unaffected, but its class table will be missing"
+  class_hist="" }
+
 # --arg st: the zero-blocker arm below reads very differently on a CONVERGED
 # status than on an escalation, and this block renders for EVERY status the
 # script accepts (see the case arms above), not just the escalating ones.
@@ -264,6 +336,12 @@ if [[ "$fmt" == "summary" ]]; then
       print -r --
       print -r -- "$round_table"
     fi
+    if [[ -n "$class_hist" ]]; then
+      print -r --
+      print -r -- "**Blocker classes (last two rounds)**"
+      print -r --
+      print -r -- "$class_hist"
+    fi
     if [[ -n "$assessment" ]]; then
       print -r --
       print -r -- "**Convergence assessment**"
@@ -300,6 +378,12 @@ fi
     print -r -- "$round_table"
     print -r --
   fi
+  if [[ -n "$class_hist" ]]; then
+    print -r -- "**Blocker classes (last two rounds)**"
+    print -r --
+    print -r -- "$class_hist"
+    print -r --
+  fi
   if [[ -n "$assessment" ]]; then
     print -r -- "**Convergence assessment**"
     print -r --
@@ -308,7 +392,7 @@ fi
   fi
   print -r -- "**How to proceed** — reply in this thread, then re-run \`/development:resolve-issue ${issue:-<N>}\` (the run re-reads this issue, including your comment, so your decision becomes implementation context):"
   print -r --
-  local i=1 opt
+  local i=1 opt=""
   for opt in "${opts[@]}"; do
     print -r -- "${i}. ${opt}"
     (( i++ ))

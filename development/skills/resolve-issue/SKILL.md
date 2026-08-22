@@ -13,7 +13,12 @@ description: >
   Go / Claude-plugin / Kubernetes). Composes git-branch-naming, commit, and open-pr; never pushes
   to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
   non-converging review-loop exit becomes an interactive extension (offer more
-  rounds, give guidance, ask questions) — see [The local review
+  rounds, give guidance, ask questions). A run whose only remaining blockers are
+  non-critical and confined to its own last fix pass ends
+  `CONVERGED_WITH_RESIDUE` (exit 14) instead — declarable only from the closing
+  full sweep, so a delta round that qualifies promotes that sweep first: it opens
+  the PR and files the remainder as labelled follow-up issues — see [The local
+  review
   loop](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/review-loop/).
 disable-model-invocation: false
 ---
@@ -936,9 +941,11 @@ Each round:
      in a file the PREVIOUS ROUND'S FIX PASS touched**, where new code has just
      been written and a same-titled observation may be genuinely new. Key it on
      the fix pass, not on the round's scope: on a **delta** round the two are
-     the same set, but on the **closing full sweep** the scope is the whole
-     story diff while the fix pass touched nothing — so there, withhold every
-     waived suggestion. That exemption is an *instruction*, not a footnote: in
+     the same set, and on a **closing full sweep that NO fix pass
+     preceded** (the zero-blocker promotion) the fix-touched set is empty — so
+     there, withhold every waived suggestion. On a sweep the RESIDUE promotion
+     earned, a fix pass did run, so the exemption applies as on any round.
+     That exemption is an *instruction*, not a footnote: in
      step mode the panel reads `adjudicated.json` as the previous round left it,
      before the loop drops the entries whose file the fix pass touched, so a
      reviewer that withholds one there kills a finding nothing downstream can
@@ -952,8 +959,42 @@ Each round:
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <work-dir> --status-file <status.json> --issue <N> \
      --findings-file <findings-round-R.json> \
-     --test-cmd '<full gate>' [--resume] [--gate-attest <tree>]
+     --test-cmd '<full gate>' [--resume] [--gate-attest <tree>] \
+     [--findings-tree <panel-tree>]
    ```
+
+   **`--findings-tree` on EVERY step-mode invocation — round 1 included.** It is
+   the identity your panel READ, and it is what arms the cadence guard (step 3
+   states the invariant and the failure it prevents). Omitting it is not an
+   error — the guard is fail-quiet — which is exactly why it has to be in the
+   template: a run that leaves it out has the rail silently off while looking
+   identical to one that does not.
+
+   **Round 1 is the round that needs it most, not least.** A fresh round is a
+   FULL round, where zero blockers *is* the `CONVERGED` condition — so a session
+   that runs the panel, edits, then invokes would exit 0 and open the PR on a
+   review of a tree that no longer exists. There is no `--resume` there to hang
+   the habit on, which is precisely why it is stated here:
+
+   ```bash
+   PANEL_TREE=$("<skill-base-dir>/scripts/git-tree-id.zsh" .)   # BEFORE the panel
+   # …run round 1's panel, write findings-round-1.json…
+   resolve-story-loop.zsh … --findings-file <…> --findings-tree "$PANEL_TREE"
+   ``` Re-pass the SAME value unchanged when recovering from a
+   **findings-file** refusal (missing/empty, byte-identical, alias): nothing
+   moved the tree there, so the held identity still matches. **On the CADENCE
+   refusal it depends which recovery you take**, because the tree is what moved:
+   if you **re-run the panel**, the held value can never clear it — mint a FRESH
+   identity before that panel runs. If instead you **discard the fix** that moved
+   the tree, the tree is back to what the panel read, so re-pass the SAME held
+   value and mint nothing (minting there would be the self-attestation banned
+   below). See that arm in the list below.
+
+   **Never mint it just before the `--resume`.** An identity computed after the
+   panel — or after a fix pass — matches the working tree trivially and turns the
+   guard into a self-attestation that certifies nothing, defeating it on the one
+   ordering it exists to catch. Mint it *before* the panel runs, and hold it. This
+   is the same trap `--gate-attest` names for the gate.
 
    `<full gate>` is the same whole-suite command as Step 3. On a **plugin repo**
    that is the blessed single-run parallel gate — `--test-cmd 'zsh
@@ -1015,12 +1056,14 @@ Each round:
 
    **Write each round's findings to its own path** (`findings-round-R.json` —
    hence the `R`), and pass that round's path. On a `--resume` round the loop
-   refuses **four** shapes of "this round was never really reviewed" as
-   **`STALE_FINDINGS` (exit 2, #974, #1434)** — a *recoverable* usage error, not
-   a verdict. Three are about the findings file you passed; the fourth is about
-   the tree. A **fifth** shape is not limited to `--resume` rounds at all — a
-   **full** round whose panel produced no findings file, stated below — and that
-   one and the fourth both also fire in hook mode:
+   refuses several shapes of "this round was never really reviewed" as
+   **`STALE_FINDINGS` (exit 2, #974, #1434, #1435)** — a *recoverable* usage
+   error, not a verdict. Named rather than counted, because this list has grown
+   twice and both times a tally elsewhere went stale: some are about the findings
+   **file** you passed, one about the tree the round is **scoped against**, one
+   about the tree your **panel read**, and one about a **full** round whose panel
+   produced no findings file. The empty-delta, full-round and cadence shapes are
+   not `--resume`-only — they fire in hook mode too:
 
    - the file is **missing or empty** — a panel that found nothing still writes
      `[]`, so silence is never read as a clean round (that would converge the
@@ -1052,6 +1095,15 @@ Each round:
      change just to move the tree.
      (An empty delta *with* a carry is **not** refused — it is a
      verification-only round; see step 1 for how to scope it.)
+   - the **`--findings-tree` you attested disagrees with the working tree** on a
+     reviewable file (#1435) — the panel read one tree and you are consolidating
+     against another, so these findings describe a tree that no longer exists.
+     This is the cadence invariant of step 3 being enforced rather than trusted,
+     and it is **not** a re-pass case: what moved is the tree, not the file.
+     **Recover by re-running this round's panel against the current tree** and
+     passing its aggregate with a freshly minted `--findings-tree`, or by
+     discarding the fix that moved the tree and re-consolidating what the panel
+     actually read. The stderr names both identities and the files that moved.
 
    **Recover by cause, then re-invoke** — the round is not lost. One arm below
    (the missing-confirmation-count one) is a **pre-invocation** check rather than a
@@ -1059,7 +1111,19 @@ Each round:
    it before you pass the file:
 
    - if round R's panel **did** run and its aggregate exists at its own path,
-     just re-invoke with the correct `--findings-file` (don't re-run the panel);
+     **and the refusal named the findings FILE rather than the tree**, just
+     re-invoke with the correct `--findings-file` (don't re-run the panel). The
+     qualifier is load-bearing: that antecedent is true on a **cadence** refusal
+     too — the panel ran, the aggregate is right where it should be — and taking
+     this arm there re-passes a file the loop has just told you describes the
+     wrong tree;
+   - on the **CADENCE** refusal (`--findings-tree` disagreed with the working
+     tree) → re-run round R's panel against the **current** tree, minting a fresh
+     `--findings-tree` **before** that panel runs, and pass its aggregate. Or
+     discard the fix that moved the tree and re-consolidate what the panel
+     actually read. **Never clear it by dropping `--findings-tree`** — the guard
+     is fail-quiet, so that consolidates the very round it just refused, which is
+     the fix-then-resume outcome the guard exists to prevent;
    - if round R's panel reported the round **FAILED** — a dimension that did
      not run, a render step that failed, or (on a round ≥ 2) a
      `fix_verification_path` that was **null or unreadable** — it deliberately
@@ -1183,9 +1247,12 @@ Each round:
    found **nothing** do serialise identically, of course, and that case is
    governed by the waiver above rather than by this rule. A blocker the reviewers keep re-finding is a real problem to
    **fix in-session**, not a reason to defeat the guard. That reasoning is
-   specific to that arm. The **empty-delta** refusal depends on the tree and the
-   **alias** refusal on the invocation, so re-passing different bytes does
-   nothing for either — take their own recoveries above.
+   specific to that arm. The **empty-delta** refusal depends on the tree, the
+   **cadence** refusal on the tree the panel READ, and the **alias** refusal on
+   the invocation, so re-passing different bytes does nothing for any of the
+   three — take their own recoveries above. (The cadence one is the only refusal
+   whose inputs are all well-formed: the panel ran, the file is right, and it is
+   the ORDERING that was wrong.)
 
    Exit 2 **writes** its own status JSON (`status: "STALE_FINDINGS"`) to
    stdout and `--status-file`, so the previous round's verdict is never left
@@ -1208,7 +1275,33 @@ Each round:
    half of the guard (and the alias guard — `--findings-file` must never be the
    dispatch `findings_path`) needs no digest tool and always applies.
 3. **On `AWAITING_FIX` (exit 20)** — the round is over and the run continues.
-   **First check `final_changelist.summary.blocking` (#1434): a ZERO there is
+
+   **The cadence, and it is an invariant, not a preference: a round's findings
+   reach the loop BEFORE that round's fix pass runs, always.** Panel first,
+   `--resume` second, fix third — never fix-then-resume. The loop cannot see a
+   fix pass it did not invoke, so a round consolidated after one snapshots a
+   post-fix tree and attributes that round's blockers to it: the fix-touched
+   set, every `class` derived from it, and the residue decision that reads both
+   are then computed from a tree the reviewers never saw. The arithmetic stays
+   internally consistent while every input is false, which is exactly how a
+   residue run files follow-up issues for findings already fixed in the same PR.
+   Attest it rather than remembering it — mint the identity your panel read and
+   pass it back:
+
+   ```bash
+   PANEL_TREE=$("<skill-base-dir>/scripts/git-tree-id.zsh" .)   # BEFORE the panel runs
+   # …run the panel, write findings-round-N.json…
+   resolve-story-loop.zsh … --resume --findings-file <…> --findings-tree "$PANEL_TREE"
+   ```
+
+   The loop refuses the round (`STALE_FINDINGS`, exit 2) when that identity
+   disagrees with the working tree, naming both and the files that moved. It is
+   a **refusal, not a repair** — the loop cannot know which of the two trees the
+   reviewers read, so it will not guess. `--findings-tree` is separate from
+   `--gate-attest` on purpose: that one answers *may I skip the duplicate test
+   run*, a claim about the suite, not about which tree was reviewed.
+
+   **Then check `final_changelist.summary.blocking` (#1434): a ZERO there is
    not a fix turn.** It is a delta round that found nothing, so the loop wrote
    `<work-dir>/.closing-sweep` and promoted the **next** round to a closing full
    sweep over the whole story diff. Say so, **apply no fix at all** (there is
@@ -1230,6 +1323,38 @@ Each round:
    `max_rounds` still reports what you passed, and the `--resume` is accepted —
    do **not** "fix" it by raising `--max-rounds` yourself.
 
+   **A second promotion trigger reaches this same exit (#1435 §9), and it is NOT
+   a zero-blocker round.** When a **delta** round's residue conditions hold, the
+   loop promotes the closing sweep rather than declaring `CONVERGED_WITH_RESIDUE`
+   on a slice — same `.closing-sweep` marker, same one-round grant. Tell the two
+   apart by `final_changelist.summary.blocking` **and the marker's CONTENT**:
+
+   - **zero blocking** → the #1434 case above; apply no fix.
+   - **non-zero blocking, and `<work-dir>/.closing-sweep` holds THIS round's
+     number + 1** → the residue promotion. Fix the blockers as on any ordinary
+     round, then run the next panel with `--final` and `--resume`.
+   - **non-zero blocking, and the marker is absent, UNREADABLE, or holds
+     anything other than this round's number + 1** → an ordinary fix turn. Fix,
+     re-run the gate, and plan the next round **without** `--final`. (An
+     unreadable or out-of-range marker is a reachable state — a partial write, a
+     kill mid-promotion — and the loop *ignores* it, saying so on stderr, and
+     plans that round as a delta. So the ordinary fix turn is exactly what
+     matches the loop's own behaviour; the arm is written to catch it rather than
+     leave you with no arm at all.)
+
+   **Read the content, never the mere existence** — the same rule step 1 states.
+   The marker persists for the rest of the run (a sweep that finds blockers does
+   not end it), so "the closing sweep ran, found blockers, exited AWAITING_FIX"
+   has non-zero blocking *and* a marker, and is an ordinary fix turn. Keying on
+   existence sends you back through `--final` on a round the loop is planning as
+   a delta: the panel re-reviews the whole diff (the independent repeat step 1
+   forbids) while you wait for an exit 14 that round cannot produce.
+
+   The progress line corroborates it (*residue conditions hold, but on a DELTA
+   round*), but corroboration is not the test. Only the sweep may exit 14, and it
+   declares it against the whole story diff — which is what makes the dossier's
+   claim true rather than merely well-formed.
+
    Otherwise blockers remain and budget is left:
    **narrate the round in the conversation** (round number; the
    Critical/Warning/Suggestion counts — plus, on a promotion sub-loop round, the
@@ -1239,7 +1364,10 @@ Each round:
    dimensions they came from; what you fix next — the same block the loop
    just appended to progress.md, which carries these where applicable, plus an
    `- adjudicated re-raises dropped: N` line when the consolidator suppressed a
-   re-raise of an already-waived suggestion, #1434). Two
+   re-raise of an already-waived suggestion, #1434, and a `- by class:` row —
+   new_defect / incomplete_propagation / under_assertion, #1435 — whenever the
+   round's blockers are class-stamped, which is what says whether the round found
+   fresh problems or re-read the last fix pass's own edits). Two
    false-trip shapes to narrate: an **escalating possible false trip** — a
    carried match with no shared (non-empty) prior title that is still
    ambiguous (#913/#969) — can only appear on an *escalating* round (an
@@ -1257,8 +1385,21 @@ Each round:
    loop — re-run the full gate (on a
    plugin repo, keep its green `tree` for the next `--resume`'s `--gate-attest`,
    #981; other stacks have none), and go to 1 for the next round's panel.
-4. **On a terminal status**, take its branch below (`CONVERGED` → step 4;
-   escalations → *Escalation*).
+
+   **The fix pass is captured for you (#1435), and it needs nothing from you.**
+   The loop stamped the pre-fix tree identity at this `AWAITING_FIX` and diffs it
+   at the next `--resume`, so whatever you edit in-session becomes that round's
+   fix-touched set — which is what the residue decision and the per-blocker
+   `class` are derived from. The one discipline it shares with `--gate-attest` is
+   already stated there: do not touch the tree between the green gate and the
+   `--resume`. A failure to compute the set is never fatal — it only makes a
+   residue ending unreachable for the round that follows, which is the
+   fail-closed direction.
+4. **On a terminal status**, take its bullet below — `CONVERGED` and
+   `CONVERGED_WITH_RESIDUE` each have one, and the residue bullet is where its
+   ordering relative to the promotion phase is stated; escalations →
+   *Escalation*. No ordering is restated here on purpose: a partial restatement
+   is how the two statements of it came to disagree once already.
 
 (Hook mode — `--review-cmd`/`--fix-cmd` — still exists as the bats test seam
 only. Never wire it to a headless `claude`.)
@@ -1301,17 +1442,39 @@ with a status JSON + code:
   dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
   suggestions, reviewers) lands in the PR body, with a hidden JSON block the
   Approver re-ingests (#563).
+- **`CONVERGED_WITH_RESIDUE`** (exit 14, #1435) → **also a convergence: it opens
+  the PR.** The loop reached an ending that would otherwise have been
+  `ESCALATE_NO_CONVERGENCE` or `BUDGET_EXHAUSTED`, and found all THREE residue
+  conditions met: its last two rounds were both zero-CRITICAL, every remaining
+  blocker sits in a file the previous round's own fix pass wrote, **and the
+  declaring round ran as a full sweep** (§9 — a delta round meeting the first two
+  promotes that sweep instead of ending here, so this exit always speaks for the
+  whole story diff). Rather than spend a human grant on
+  material the reviewers themselves called non-critical, the run ships and files
+  the remainder. Do **not** build an escalation comment, do **not** enter the
+  interactive extension, and do **not** re-run the loop: this is a terminal
+  success, and `build-escalation.zsh` has no arm for it by design. Continue
+  exactly as `CONVERGED` does — the suggestion-promotion offer (its gate is
+  unchanged) and the kept status JSON for the dossier — and then, **after that
+  phase has resolved and immediately before §4**, take the **residue branch**
+  below. Last, not first: it is the only step here that writes to GitHub before
+  the PR exists, and a promotion sub-loop can still escalate into a run that
+  opens none.
 - **`AWAITING_FIX` (20)** → not a verdict — the step-mode "narrate, fix
   in-session, `--resume`" turn of the round protocol above. Never build an
   escalation comment from it.
 - **`STALE_FINDINGS` (exit 2)** → neither a verdict nor an escalation — the
   round was never really reviewed (missing/empty on `--resume`, byte-identical
-  to the last round, `--findings-file` aliased the dispatch `findings_path`, or
+  to the last round, `--findings-file` aliased the dispatch `findings_path`,
   — #1434 — an empty delta with nothing carried to verify, or a **full** round
-  whose panel produced no findings file at all). Recover **by cause** per §3.5
-  step 2 before re-invoking: several causes are **not** cleared by re-running
-  the panel — an empty delta with nothing carried, an aliased `--findings-file`,
-  and a panel that reported NOT APPLICABLE on a full round. **Never** build an escalation comment or a
+  whose panel produced no findings file at all, or — #1435 — the
+  `--findings-tree` you attested disagrees with the working tree, so the panel
+  read one tree and you are consolidating against another). Recover **by cause**
+  per §3.5 step 2 before re-invoking: several causes are **not** cleared by
+  re-running the panel — an empty delta with nothing carried, an aliased
+  `--findings-file`, and a panel that reported NOT APPLICABLE on a full round —
+  while the cadence cause is cleared *only* by re-running it (against the current
+  tree) or by discarding the fix that moved the tree. **Never** build an escalation comment or a
   dossier from it.
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
@@ -1324,6 +1487,515 @@ with a status JSON + code:
 together with `--promote`** (exit 2), since nothing is consolidated for an
 overlay to reach. Today's fast path,
 for when you deliberately want no local review round.
+
+#### Residue branch — file the remainder, then ship (#1435)
+
+Runs **only** on `CONVERGED_WITH_RESIDUE` (exit 14). The loop has already
+decided; your job is to make the remainder visible.
+
+**Order it LAST — after the suggestion-promotion phase below has resolved, and
+immediately before §4.** This branch is the one place in the flow that writes to
+GitHub before the PR exists, and a promotion sub-loop can still **escalate**,
+which ends the run with no PR at all. Filing first would leave issues on the
+board for work that never shipped, and the next run would re-decide the whole
+blocking phase around them. Nothing is lost by waiting: the promotion phase is a
+separate sub-loop over waived Lows and never changes the blocking phase's
+residual set, which is what the plan below reads.
+
+**Ordering last shrinks that window; it does not close it.** Everything after
+this branch can still end the run with no PR — §5's commit (pre-commit can
+fail), §6's token mint or push, and open-pr's explicitly terminal *stop rather
+than open the PR* when a dossier input cannot be restored. By then the
+follow-up issues are already on GitHub. If the run ends after this branch
+without a PR:
+
+- **Do NOT delete them.** They record real remaining blockers, and the epic walk
+  has to see them rather than have them vanish.
+- **Comment on each filed issue and on the story** that the PR was never opened,
+  naming the branch and what stopped it, so the next reader is not looking for a
+  merged change that does not exist.
+- **Report it in the conversation** with the same detail.
+
+A re-run does not duplicate what this run filed — the idempotency read matches
+on label + exact title across the parent's sub-issues **and** the repo, so even
+an issue whose **attach** failed is filtered from the next plan. But that is
+exactly why a re-run is not a recovery for it: it stays **orphaned**, linked to
+no story, and the next run will not re-file it either. Re-attach it yourself
+(step 4's `sub_issues` POST, with the id it already has) and name it in the
+comments below. What is *not* safe is
+silence — a `review-residue` child parented to an epic will halt that epic's next
+walk, and a maintainer with no comment to read cannot tell a deliberate deferral
+from an abandoned run.
+
+**If the promotion sub-loop DOES escalate, this branch never runs and no PR
+opens.** File nothing — but do not let the remainder vanish with the run: name
+the blocking phase's residual blockers (from its `final_changelist.blocking`) in
+the escalation comment, so they survive somewhere. The next run re-decides the
+blocking phase from scratch and will re-derive them.
+
+1. **Build the plan.** Deterministic, and it creates nothing:
+
+   ```bash
+   "<skill-base-dir>/scripts/build-residue-issues.zsh" \
+     --status <blocking-status.json> \
+     --changelist <blocking-work-dir>/changelist-<final round>.json \
+     --issue <N> [--epic <E>] > <scratch>/residue-plan.json
+   ```
+
+   **Both inputs are the BLOCKING phase's**, and by the time you run this you are
+   holding two of each — the promotion phase left its own status and work-dir
+   (step 8 tells you to keep them). The promotion sub-loop can never end in
+   residue (step 7 says why), so its artifacts are never the right ones here;
+   passing them would file the human's promoted picks back to them as follow-ups.
+   The builder cannot catch that: a promotion status and its own changelist are
+   self-consistent, so both its guards pass.
+
+   `<scratch>` is the same outside-the-repo dir the work-dir and findings files
+   live in (§3.5) — a file written inside the worktree changes the tree identity,
+   defeats every `--gate-attest` match, and is one more thing §5 could commit.
+   The final round's changelist is `<work-dir>/changelist-<rounds>.json`, where
+   `rounds` is the status JSON's own `.rounds`. Get that right: the builder
+   refuses a changelist whose `.round` disagrees with the status (exit 2, naming
+   both numbers), because an off-by-one would otherwise file issues for an
+   earlier round's blockers — findings the fix pass already cleared, with titles
+   new enough that the idempotency read filters none of them.
+
+   **`--epic <E>` comes from the NATIVE parent, never from the body.** Parenthood
+   is native or it does not exist (#802) — this skill says so about epics and
+   must not make an exception here. An epic-driven run already holds the epic
+   number; otherwise read the native relationship with the **blessed reader**,
+   not an ad-hoc `gh` call — it is the same primitive E1 and §0a use, and it
+   returns the one field an ad-hoc read omits:
+
+   ```bash
+   "<skill-base-dir>/scripts/read-sub-issues.zsh" --repo "$REPO" --child <N>
+   #   { "child": N, "parent": { "number": P, "state": …, "open": …,
+   #                             "repo": "owner/name" } }
+   #   exit 3 = typed no-parent (JSON still emitted)
+   ```
+
+   **Never** infer it from prose: a story that IS natively a child but whose body
+   does not mention the epic would get `--epic` dropped, and the residue would be
+   parented to a story this same PR is about to close.
+
+   **Branch on the exit, and then on the parent's repo** — **four** arms: exit 3,
+   exit 0 in this repo, exit 0 in another repo, and any other non-zero. The last
+   is the one a two-way split loses, and losing it is not cosmetic: a transport
+   failure would read as "no native parent" and the residue would be parented to
+   the story this PR is about to close.
+   - **exit 3** → there genuinely is no native parent. Omit `--epic`, parent to
+     the story, and say so in the PR body.
+   - **exit 0, and `.parent.repo` equals `$REPO`** → that number is the epic.
+     Pass it as `--epic`.
+   - **exit 0, but `.parent.repo` is a DIFFERENT repository** → the parent is
+     real and is **not usable as `--epic`**. Both the builder's idempotency read
+     (`repos/{owner}/{repo}/issues/<E>/sub_issues`) and step 4's attach POST are
+     bound to the session repo, so a foreign number either attaches the residue
+     to whichever unrelated **local** issue happens to share it, or 404s into the
+     fail-open path. The issues then stay **unparented** — the idempotency key is
+     repo-wide, so a re-run will not duplicate them, but nothing will ever link
+     them to the story either. Omit `--epic`, parent to the story, and say in the PR body that the
+     native parent is cross-repo and was not used. This is §0a's foreign-blocker
+     rule — *never re-run on the bare number against this repo* — applied to
+     parenthood; a bare issue number means nothing outside its own repo.
+   - **any other non-zero exit** → nothing was read, and that is *not* "no
+     parent" (exit 3 is the only reading that means that). Re-run it. If it fails
+     again, do **not** guess: file nothing and take the builder-failure handling
+     below (name the remaining blockers in the PR body), rather than parenting
+     residue to a story this PR is about to close. **Exit 2 is your own
+     malformed invocation** — fix the command and re-run, the same rule E1 and
+     §0a apply to their scripts.
+
+   **Exit 2 is your own malformed invocation** — a bad flag, a `--status` that is
+   not a `CONVERGED_WITH_RESIDUE` run (an escalation opens no PR, so its blockers
+   must not be filed), or a `--changelist` from the wrong round. Fix the command
+   and re-run. **Exit 1** is an input failure (an unreadable or non-object status
+   / changelist, no `jq`); stderr names the file. Fix what it names and re-run —
+   and if you cannot, **which file it named decides what happens next**:
+
+   - it named the **`--changelist`**, or `jq` is missing → report it in the
+     conversation and **still open the PR**. The code is reviewed and green, and
+     a builder failure is not a reason to withhold it. Say plainly in the PR body
+     that the residue could not be filed, and name the remaining blockers from
+     the status JSON's `final_changelist.blocking` so they are not lost.
+   - it named the **`--status`** → **stop, with no PR.** That same kept
+     blocking-phase status JSON is `build-dossier.zsh`'s input, so §6 and
+     open-pr already govern it: a kept status lost or clobbered after
+     convergence is reported and the run stops. Opening anyway would ship a
+     residue PR with no dossier, no `open` counts and no follow-up issues — one
+     that reads as an ordinary converged PR and auto-merges on approval, which
+     is the single outcome this whole path exists to prevent. Nor could you
+     honour the fallback above: the blocker list it prescribes comes from the
+     very file you could not read.
+
+   **When the PR opens with the remainder UNFILED — no follow-up issue exists for
+   it, from this run or an earlier one — the Summary must contradict the dossier
+   in so many words.** The antecedent is the *remainder's* state, not this run's
+   activity: step 3's legitimate re-run case also creates nothing, and there the
+   issues **do** exist and are parented, so the dossier's "filed" claim is TRUE
+   and this disclaimer must **not** be written — doing so would report an
+   untracked remainder that is in fact tracked, and send a human hunting for a
+   failure that did not happen. This is not optional
+   belt-and-braces: `build-dossier.zsh` gates its residue wording on the
+   **status alone**, so §6 appends "each was filed as a labelled follow-up issue"
+   and a per-dimension "N still open (filed as follow-up issue(s))" to this very
+   PR — that is deliberate (residue is single-phase, so the terminal *is* the
+   predicate), and the script has no way to learn that the filing step failed.
+   Left alone, the body asserts tracking that does not exist, and the hidden
+   block's `open > 0` — which `approver-policy-core` is contracted to read as
+   scoped, disclosed, **tracked** risk — makes the Approver's leniency rest on
+   issues nobody opened. So write, above the dossier:
+
+   > **The dossier below reports these blockers as filed as follow-up issues.
+   > They were NOT filed on this run** (`<why>`). The open blockers are:
+   > `<list>`.
+
+   Never paraphrase it into something a reader could take as a formatting note:
+   the sentence exists to override a machine-generated claim.
+
+   <!-- the-remainder-rule -->
+   **THE REMAINDER RULE — one rule, stated once, and every arm below points
+   here.** "Filed" means **created AND parented**. An issue that exists but was
+   never attached links to nothing: the epic walk never meets it, and no `open`
+   count it is supposed to cover is really covered. (The builder's idempotency
+   key — label + exact title, resolved across the parent's sub-issues **and**
+   repo-wide — *does* match it, so a re-run will not duplicate it; the failure
+   mode is a permanently orphaned issue, not a pile of copies. Either way it is
+   not *filed*.) Counting a bare `create` as filed is what makes the arms look
+   complete when they are not.
+
+   Now count the remainder — the blockers in `final_changelist.blocking` — by how
+   many are filed **in that sense**, from this run *or* an earlier one:
+
+   | Filed | The Summary owes | Why |
+   |---|---|---|
+   | **none** | the verbatim sentence above | nothing tracks any of it |
+   | **some, not all** | the reconciliation: name the tracked numbers (this run's **and** the pre-existing ones step 2 recovered), name the blockers nothing tracks — flagging any created-but-unparented separately — and state both counts against `open` | the dossier's `open` exceeds what is tracked, and neither end describes it |
+   | **all** | every tracked issue number — this run's **and** the pre-existing ones step 2 recovered — plus one line stating that together they account for `open`; no disclaimer | the dossier's claim is true; the disclaimer would report tracked work as lost, and a bare this-run count below `open` reads as a partial filing |
+
+   **The antecedent is the remainder, never the arm you arrived by.** Every arm
+   below — the exit-1 handling above, the repeated-reader-failure arm, both
+   step-3 anomaly arms, and a step-4 run that filed zero entries — is a *route*
+   to one of those three rows, not a row itself. Each is reachable with part of
+   the remainder already tracked (a re-run whose plan the idempotency read
+   filtered to 3 of 5 whose remaining 3 then fail; a step-3 anomaly where some
+   candidates matched an existing sub-issue), and reading the arm instead of the
+   remainder is how a Summary comes to report issues that exist as never filed.
+
+   Two shapes worth naming because they read as the wrong row. **Every `create`
+   succeeded and no `attach` did** (one missing `sub_issues` permission fails
+   every POST identically) looks partial — the issues exist! — and is row one
+   **when the plan covered the whole remainder**, because an unparented issue
+   tracks nothing. Name the created-but-unparented numbers inside the verbatim
+   sentence so the next reader can attach them by hand.
+
+   If the **builder's** idempotency read (step 1) filtered part of the plan — a
+   fact step 2's `--dry-run` diff *reveals* rather than causes — then count those
+   filtered candidates by **parenthood, not by having been filtered**. The
+   builder matches `review-residue` issues repo-wide as well as the parent's
+   sub-issues, precisely so a created-but-unattached issue is not re-filed; so a
+   filtered candidate counts as **tracked** only when `residue-existing.json`
+   (the parent's sub-issues, step 2) contains its rendered title. One that is
+   filtered but absent from that read is **not tracked by this read** — classify
+   it with **step 3's arm 2**, which owns that state and resolves it four ways,
+   one of which must NOT be re-attached. Do not decide it here.
+
+   **That test presupposes step 2's `sub_issues` read exited 0.** On a non-zero
+   exit `residue-existing.json` is empty for *every* candidate, and absence there
+   is evidence of nothing — least of all of unparenthood. The two failures are
+   correlated, not independent: the builder's own parent-scoped read hits the
+   same endpoint, so when it fails the builder still filters the plan off its
+   repo-wide half, and you are left with an empty plan AND an empty
+   `residue-existing.json`. Read literally, the test then calls the whole
+   remainder untracked and writes the verbatim disclaimer over a remainder an
+   earlier run filed perfectly well. So: on a failed read take **step 3's
+   read-failed arm** — count the builder-filtered set as filed by an earlier run,
+   report step 2's named-numbers gap, and choose the row from what is left.
+   **Never write the verbatim sentence off a read that did not happen.** And **the
+   remainder's state cannot be determined at all** — no candidate list to match
+   against `residue-existing.json`, which is the case on step 3's empty-dry-run
+   arm and on a builder or repeated-reader failure — is *also* row one: take the
+   verbatim sentence and add one line saying pre-existing coverage could not be
+   checked. Fail-closed, because the alternative is leaving the dossier's "filed"
+   claim standing over a remainder nothing may be tracking.
+
+   The script is **fail-open on its GitHub reads**, and there are two of them, so
+   relay what stderr actually says: losing the **repo-wide** read narrows the key
+   back to the parent alone (announced — a residue issue an earlier run created
+   but failed to attach may then be re-filed); losing **both** emits an
+   unfiltered plan (announced — a re-run may duplicate anything); losing only the
+   **parent** read leaves the plan filtered on the repo-wide half. Whichever it
+   is, pass it on rather than paraphrasing it as "the read failed".
+
+2. **Always run `--dry-run` too, and diff the two lengths.** The real plan is
+   already filtered, so on its own it cannot tell you whether the idempotency
+   read dropped anything — and "how many did it drop" is what step 5 has to
+   report. `--dry-run` makes **no** GitHub call and emits every candidate
+   unfiltered, so the two lists differ by exactly the already-filed set:
+
+   ```bash
+   "<skill-base-dir>/scripts/build-residue-issues.zsh" --dry-run \
+     --status <blocking-status.json> --changelist <blocking-work-dir>/changelist-<final round>.json \
+     --issue <N> [--epic <E>] > <scratch>/residue-candidates.json
+
+   # the candidates the read filtered out, by their RENDERED title
+   jq -n --slurpfile all <scratch>/residue-candidates.json \
+         --slurpfile live <scratch>/residue-plan.json \
+     '($live[0] | map(.title)) as $l | $all[0] | map(select(.title as $t | ($l | index($t)) == null) | .title)' \
+     > <scratch>/residue-already-filed-titles.json
+   ```
+
+   **Then recover their NUMBERS**, which the plan does not carry — the builder's
+   read keeps `title` and `labels` and discards `.number`, so without this the
+   step-5 rule would ask for something no artifact holds.
+
+   `PARENT` is **the number step 1 resolved** — the epic when `--epic <E>` was
+   passed, the story `<N>` otherwise. Bind it from that decision, never from the
+   plan: on the legitimate re-run the plan is *empty*, so it carries no entry to
+   read a parent from, and an unbound `$PARENT` makes this an
+   `issues//sub_issues` request whose 404 sends you down the read-failed branch
+   on a run whose numbers were perfectly readable.
+
+   ```bash
+   PARENT=<E-if-passed-else-N>
+   gh api --paginate "repos/$REPO/issues/$PARENT/sub_issues" \
+     --jq '.[] | select((.labels // []) | map(.name) | index("review-residue")) | {number, title}' \
+     > <scratch>/residue-existing.json
+   ```
+
+   Match those on the filtered titles to get the pre-existing numbers. **Split
+   the empty result from the failure by EXIT STATUS**, not by an empty file — a
+   parent with no `review-residue` children reads successfully and emits nothing,
+   which is a fact, while a failed read is a gap:
+
+   - **exit 0** → the numbers you have are the numbers there are.
+   - **non-zero** → do not guess and do not drop the point: say in the Summary
+     that *N candidates were filtered as already filed, but their issue numbers
+     could not be read*. A named gap is fine; a bare filed-count below `open` is
+     the thing that reads as a failure.
+
+3. **An empty plan is a legitimate answer in exactly ONE case**: every candidate
+   is already filed **and parented** (an immediate re-run). The qualifier is
+   load-bearing — an issue created but never attached is matched by the key (which
+   spans the repo, not just the parent) yet is parented to nothing, so it tracks
+   no blocker (step 4).
+   Say so and go to step 5; create nothing. **The unfiled-remainder disclaimer
+   does NOT apply here** — the follow-ups exist and are parented, so the dossier's
+   "filed as follow-up issue(s)" is true. Name the pre-existing issue numbers in
+   the Summary instead; writing the disclaimer would report an untracked
+   remainder that is tracked.
+
+   **An empty plan for any other reason is a wrong-input anomaly, not a zero.**
+   Exit 14 fires only *with* remaining blocking findings, so a plan that is empty
+   because the **changelist carries no blockers** means you passed the wrong file
+   — and the builder cannot catch that one (it refuses a changelist whose
+   `.round` *disagrees*; a leftover with no `.round` at all passes every guard).
+
+   **Two of the arms below apply on EVERY run; the rest test an EMPTY plan.** The
+   *read-failed* and *created-but-unparented* arms are about the FILTERED
+   candidates, which exist whether or not the plan is empty — so with a NON-empty
+   plan, apply those two to the filtered set and then go to step 4; skip the
+   others. Running the empty-plan arms unconditionally is a live hazard rather
+   than a hypothetical — on the ordinary FIRST residue
+   run nothing has been filed yet, so *every* candidate is unmatched, and a model
+   applying arm 3 there takes the builder-failure handling, files nothing, and
+   ships a residue PR whose dossier says "filed as follow-up issue(s)" with no
+   issue ever created.
+
+   **Test it PER CANDIDATE, and against the RENDERED title.** The issue title is
+   a composite the builder assembles — `review residue: <finding title> — <file>[:line]
+   [<dimension>]`, sanitised and length-bounded — **never** the finding's own
+   `.title`, so comparing the raw title matches nothing even on a perfectly
+   healthy re-run. The `--dry-run` list from the step above is exactly that set
+   of rendered titles — reuse it rather than running the builder again or
+   reconstructing the titles by hand. The arms, in order — the first two apply on
+   every run, and the last is a genuine last resort:
+
+   - **(EVERY RUN) Step 2's `sub_issues` read exited non-zero** → you cannot
+     classify at all. Do **not** read "unmatched" as "untracked": no candidate
+     can match a read that did not happen, and the two failures are correlated
+     — the builder's own parent-scoped read hits the same endpoint. Report the
+     named gap step 2 specifies and treat the builder-filtered set as filed by an
+     earlier run. **Then follow the plan, not the failure**: if the plan is
+     NON-empty, go to step 4 and file every entry it holds — a failed
+     *classification* read never suppresses *filing*, and skipping step 4 here
+     would ship a residue PR whose dossier says the remainder was filed when
+     nothing was created. Only with an empty plan go straight to step 5. None of
+     the PER-CANDIDATE arms below apply either way — the empty-dry-run arm still
+     does, since it reads no GitHub state at all.
+   - **(EVERY RUN) A filtered candidate that `residue-existing.json` lacks** →
+     the builder suppressed it on the **repo-wide** half of its key, so an issue
+     with that exact title exists *somewhere*. Find it and read its parent before
+     concluding anything — the builder documents **two** producers of this state,
+     and they need opposite actions:
+
+     ```bash
+     # --arg, never interpolation: a rendered title is sanitised of newlines and
+     # backticks but NOT of double quotes, and one spliced into the jq program
+     # makes gh exit non-zero on a perfectly ordinary finding.
+     TITLE=$(jq -r ".[$i]" <scratch>/residue-already-filed-titles.json)
+     NUM=$(gh issue list --label review-residue --state all --limit 200 \
+             --json number,title \
+           | jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' | head -1)
+     [[ -n "$NUM" ]] && "<skill-base-dir>/scripts/read-sub-issues.zsh" --repo "$REPO" --child "$NUM"
+     ```
+
+     - **the lookup failed, or found no number** → you cannot classify this one.
+       Reachable without anything being wrong: a race against the builder's own
+       read, or a `gh` failure. Say so in the Summary as a named gap, count the
+       candidate **untracked**, and carry on with the rest — do **not** fall into
+       the read-failed arm, which is about the whole classification rather than
+       one candidate.
+     - **exit 0 whose parent IS this run's parent** → it is already attached;
+       step 2's read simply raced it. Count it **filed** and re-attach nothing.
+     - **exit 3 (no parent)** → **created-but-unparented**: an earlier run
+       created it and its attach failed. **Re-attach it** with step 4's
+       `sub_issues` POST, then count it filed. Not an anomaly, and no doubt about
+       the `--changelist`.
+     - **exit 0 with a DIFFERENT parent** → the builder's documented cross-parent
+       over-suppression: somebody else's residue happens to render the same
+       title. Do **not** re-attach — it is not yours. Count the candidate
+       **untracked** for the remainder rule and name the colliding issue number
+       in the Summary, so a human can see why this blocker has no follow-up.
+     - **any other non-zero** → unclassifiable for THIS candidate: say so as a
+       named gap, count it untracked, and carry on with the rest. Never the
+       read-failed arm — that one is about the whole classification.
+   - **The dry-run list is itself EMPTY** → the anomaly, always. Exit 14 fires
+     only *with* remaining blocking findings, so zero candidates proves the
+     `--changelist` is the wrong file. **First re-derive its path** from the
+     status JSON's own `.rounds` and re-run step 1 — that is usually the whole
+     fix. Only if the correct changelist still yields nothing, take the
+     builder-failure handling. Do **not** let this fall into the arm below: with
+     no candidates, "every candidate matched" is vacuously true, and the run
+     would report 0 follow-ups on a story that had real residual blockers.
+   - **At least one candidate, and EVERY one matched** a `review-residue`
+     sub-issue of the parent with that exact title → the legitimate re-run case.
+   - **Any candidate unmatched for none of the reasons above, the plan still empty** → the anomaly: take the **builder-failure
+     handling** above. Name the remaining blockers **from the status JSON's
+     `final_changelist.blocking`** — the set that handling specifies, and the
+     same set the dossier's `open` counts derive from, so the two **counts**
+     agree. For what the Summary owes beyond the counts, apply **the remainder
+     rule** — this arm is a route, not a row. It fires with the plan EMPTY and at
+     least one candidate unmatched. (A run where four of five matched leaves a
+     plan of one, which is not this arm at all — that is step 4.) Here
+     the candidate set is the only rendering you have, so it is what decides the
+     row: matched candidates count as tracked, unmatched as untracked. The
+     unmatched *candidate titles* go in as
+     **evidence of the anomaly**, never as the remainder: they come from the file
+     this mismatch puts in doubt (arm 1 is where a changelist is *established*
+     wrong; here it is only suspect). A question like "is
+   anything filed under the parent?" is the wrong test: on an epic parent an
+   earlier child's run routinely leaves `review-residue` children, so it answers
+   yes while none of *this* run's candidates is filed — and reporting "0 follow-up
+   issues filed" there is the silent loss this whole branch exists to prevent.
+
+4. **Create each issue, then attach it as a native sub-issue.** One `gh issue
+   create` per entry, with **both** labels, then the `sub_issues` POST
+   `backfill-sub-issues.zsh` already makes. Ensure the labels exist first, with
+   the repo's idempotent idiom:
+
+   ```bash
+   gh label create review-residue --color fbca04 \
+     --description "Filed by the review loop residue path — a remaining non-critical blocker" \
+     2>/dev/null || true
+   gh label create needs-refinement --color d4c5f9 \
+     --description "Sent back by the readiness gate — needs clarification before implementation" \
+     2>/dev/null || true
+
+   # per entry, indexed — the BODY goes via a file, never a --body argument: a
+   # finding body routinely contains backticks and $(...) that a double-quoted
+   # --body would hand to the shell to execute
+   TITLE=$(jq -r ".[$i].title" <scratch>/residue-plan.json)
+   PARENT=$(jq -r ".[$i].parent" <scratch>/residue-plan.json)
+   jq -r ".[$i].body" <scratch>/residue-plan.json > <scratch>/residue-body-$i.md
+   URL=$(gh issue create --title "$TITLE" --body-file <scratch>/residue-body-$i.md \
+           --label review-residue --label needs-refinement)
+   NUM="${URL##*/}"
+   CHILD_ID=$(gh api "repos/$REPO/issues/$NUM" --jq .id)
+   gh api -X POST "repos/$REPO/issues/$PARENT/sub_issues" -F sub_issue_id="$CHILD_ID"
+   ```
+
+   Take the labels from the entry rather than hardcoding them if you prefer —
+   but they must be **both**, on every issue, and `--label` is what the plan's
+   `labels` array is for. `parent` is per-entry too, so read it from the entry
+   rather than re-deriving the epic.
+
+   A failed **attach** is not a failed run: the issue exists and carries both
+   labels, so report which ones could not be parented and carry on. A failed
+   **create** is the same — report it, name the finding, and continue with the
+   rest. **Both feed the remainder rule in step 1** — count how much of the
+   remainder ends up filed (created AND parented) and take the row that matches.
+   Do not shortcut it from here: "every create failed" is a route, not a row, and
+   on a re-run whose plan the idempotency read had already filtered it lands on
+   the partly-tracked row, not the verbatim sentence. The dossier will say those
+   blockers were filed either way, which is why the row has to be counted rather
+   than inferred from what went wrong.
+
+   **An unparented issue IS matched by the idempotency key** — label + exact
+   title, resolved across the parent's sub-issues **and** repo-wide — so a re-run
+   will not duplicate it. It will silently **skip** it, which is worse for this
+   purpose: the issue stays permanently orphaned, linked to no story, and no
+   later run will ever re-file it. That is why the re-run is not the recovery.
+   Record its number in the PR body and **re-attach that one issue** (the
+   `sub_issues` POST above, with the id it already has); only then is it filed in
+   the sense step 3 means.
+
+5. **Say it in the PR body.** §6's Summary names the residue ending, how many
+   follow-up issues were filed (and their numbers), and their parent. A residue
+   PR that reads like an ordinary converged one is the one outcome this whole
+   path must not produce.
+
+   **When the idempotency read filtered part of the plan, name BOTH sets.** A
+   plan of 3 against a dossier reporting `open: 5` is the *normal* shape of a
+   re-run, not a failure: the read legitimately drops candidates an **earlier**
+   run already filed, and all five are tracked. But "3 follow-up issues filed"
+   beside `open: 5` is exactly what a partial-filing failure looks like, and
+   §6's count rule and the Approver's `open > 0` rule both read it that way — so
+   an honest run gets treated as an untracked one. Write the numbers filed on
+   **this** run *and* the pre-existing `review-residue` numbers the read matched,
+   and state that together they account for the dossier's `open` count. (**Step 2
+   is where both sets of numbers come from** — its `--dry-run` diff names what the
+   idempotency read filtered, and its `sub_issues` read turns those titles into
+   numbers. Step 3 handles only the *wholly*-empty plan; this mixed shape is the
+   one it does not reach.)
+
+**Known consequence — and it differs by linkage shape.** Step 0 treats native
+sub-issues as authoritative, so a parent that acquires them walks as an **epic**
+on its next `/development:resolve-issue` run, and E1b halts that walk on any
+child the readiness gate sends back — which an auto-generated finding always is.
+That halt is the *intended* prompt: residue must be refined before it is built,
+and the `needs-refinement` label is what makes it legible, so the human meets a
+child already carrying the reason it stopped the walk.
+
+**But the halt is only reachable on the EPIC shape**, and #1435's claim that it
+"applies to both linkage shapes" does not survive contact with this same flow:
+
+- **Epic-parented and the epic is OPEN** — it acquires open `needs-refinement`
+  children and halts at E1b next time. Its own E5 then **cannot** close it, which
+  is correct rather than a defect: the positive-evidence rule wants closed
+  children, and these are open. See the epic-flow note at E5.
+- **Epic-parented but the epic is already CLOSED** — a human may have closed it
+  early, or the story may have been attached to an already-closed epic. Step 0
+  then stops on a non-`OPEN` issue and no pre-flight ever runs, so this behaves
+  like the story shape below: the labels and the PR body are the whole surfacing
+  mechanism. **Read the parent's state, do not assume it** (`gh issue view <E>
+  --json state`) — the arm you pick decides what you tell the human, and
+  promising a pre-flight that will never run is worse than promising nothing.
+- **Story-parented** (no epic) — the halt **stops firing once the PR merges**,
+  because this run's own PR carries `Closes #<story>`, so the story closes and
+  Step 0 stops on a non-`OPEN` issue before E1b is ever reached. There the
+  residue is surfaced by its **labels** and by the **PR body**, which is why §6
+  requires the Summary to name the issue numbers — so tell the human *that*, not
+  that a pre-flight will meet them.
+
+  **Until then it is still open, and this branch runs BEFORE §5/§6.** In the
+  window between filing and merge — and permanently if the PR is never opened or
+  never merged, which in a human-approval repo is a real state — the story is
+  `OPEN` and now carries native sub-issues, so a `/development:resolve-issue` on
+  it walks it as an **epic** and halts at E1b on this run's own residue findings.
+  **That halt is the residue prompt, not a classification defect**: refine the
+  residue children (or close them), then re-run. Do not "fix" it by detaching
+  them, and do not read the story's own work as unstartable.
 
 #### Suggestion promotion on convergence — human-curated, opt-in (#994)
 
@@ -1544,7 +2216,8 @@ orphaned.
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <promotion-work-dir> --status-file <promotion-status.json> \
      --issue <N> --findings-file <findings-promo-round-R.json> \
-     --promote <promoted.json> --test-cmd '<full gate>' [--resume] [--gate-attest <tree>]
+     --promote <promoted.json> --test-cmd '<full gate>' [--resume] \
+     [--gate-attest <tree>] [--findings-tree <panel-tree>]
    ```
 
    The consolidator raises each matching Low to `WARNING`/`High` **before** the
@@ -1646,7 +2319,10 @@ orphaned.
    - **If some keys matched**, continue as step 7. **If NONE matched**, treat the
      run as converged **with nothing promoted**, say so plainly, note the split
      between unmatched and unverified in the Summary, and continue to **§4
-     (Version bump)**. Do not escalate and do not re-prompt — but never let a
+     (Version bump)** — via the **residue branch** first when the blocking phase
+     ended `CONVERGED_WITH_RESIDUE`, which is ordered immediately before §4 and
+     is the step that files the remainder §6 then requires you to name. Do not
+     escalate and do not re-prompt — but never let a
      bare `CONVERGED` imply work that never happened.
 
    **Re-pass `--promote` on EVERY invocation of the sub-loop** — each
@@ -1677,11 +2353,27 @@ orphaned.
    gate normally.
 
 7. **Terminal.** The sub-loop clearing the promoted set is the run's final
-   `CONVERGED` → continue to **§4 (Version bump)**. If the sub-loop **cannot**
+   `CONVERGED` → continue to **§4 (Version bump)**, taking the **residue branch**
+   first when the blocking phase ended `CONVERGED_WITH_RESIDUE` (it is ordered
+   immediately before §4). If the sub-loop **cannot**
    clear the promoted set — blockers still open when the budget runs out — it
    escalates through the existing taxonomy and the existing interactive
    extension: the human opted into making those items blocking, so they are
    treated as blocking, not quietly re-waived.
+
+   **`CONVERGED_WITH_RESIDUE` (exit 14) is UNREACHABLE here, by construction.**
+   The loop never declares residue while a promoted set is in effect (#1435):
+   these blockers are the human's own picks, raised from Low because they said
+   "actually, do that one", and #994 contracts them as *treated as blocking, not
+   quietly re-waived* — which is exactly what residue would do, filing the
+   human's explicit request back to them as a follow-up issue. So this phase ends
+   only in the arms above. If you somehow see exit 14 from the sub-loop, that is
+   a defect in the loop, not a verdict: report it and stop.
+
+   **Every exit the sub-loop can produce is covered**: 0 and 10-13 by the arms
+   above, 14 by the paragraph above, 20 by the §3.5 round protocol, and 1/2 by
+   the taxonomy below. **Any OTHER exit** is unhandled — report it in the
+   conversation and stop, rather than mapping it onto the nearest arm.
 
    **A round-1 `CONVERGED` with
    a non-empty matched set is not a verdict yet** — first check that round 1's
@@ -1703,7 +2395,11 @@ orphaned.
      **entire** matched set as not-reproducible — never just the one key you
      suspect — report every one of them in the Summary as
      promoted-but-not-reproducible, converge with **nothing** promoted, and
-     continue to §4.
+     continue to **§4 (Version bump)** — via the **residue branch** first when
+     the blocking phase ended `CONVERGED_WITH_RESIDUE`, exactly as the other two
+     terminals of this phase do. Every path out of this phase passes that branch
+     or the story ships with its remainder unfiled and §6 with no numbers to
+     name.
 
    **Neither exit 1 nor exit 2 is an escalation or a convergence here.** Both
    have several causes, so read the status file and stderr before acting —
@@ -1838,7 +2534,12 @@ issue comment and nothing else — **no PR, no auto-merge exposure**:
 **Only those statuses escalate.** Exit 1/2 are operational, never escalations:
 `STALE_FINDINGS` (exit 2) follows §3.5 step 2's recover-and-re-invoke, and any
 other exit 1/2 is reported in the conversation. Never build an escalation comment
-from a status file the failed invocation did not write.
+from a status file the failed invocation did not write. **`CONVERGED_WITH_RESIDUE`
+(exit 14) is not an escalation either** — it is the ending that *replaced* one,
+so it opens the PR: take its residue branch above, never this terminal.
+`build-escalation.zsh` deliberately has no arm for it, so a comment built from
+one would fall through to the generic "exited without converging" wording and
+tell the human the opposite of what happened.
 
 **Interactive extension (human present, `BUDGET_EXHAUSTED` /
 `ESCALATE_NO_CONVERGENCE` only, #562-resume).** When the run is
@@ -1872,9 +2573,14 @@ alongside the summary so the human still sees the story's full cost:
    with any **possible false trip** flagged), the round history, the
    **per-round progress table** (Critical/Warning/Suggestion, a **Promoted**
    column when any round has a promoted blocker (#995), new/carried,
-   fixed-since-prior), the **convergence assessment** — an explicit, honest
+   fixed-since-prior), the **blocker-class histogram for the last two rounds**
+   (#1435 — new_defect / incomplete_propagation / under_assertion, where a `–`
+   cell means that round was never class-stamped rather than that it scored
+   zero), the **convergence assessment** — an explicit, honest
    read of whether another round is likely to help — and the grants consumed
-   against the soft cap (#969). Show all of it *before* the `AskUserQuestion`
+   against the soft cap (#969). The histogram is the one that answers "what
+   would another round buy?": a round of `new_defect`s is finding fresh
+   problems, a round of the other two is re-reading the last fix pass. Show all of it *before* the `AskUserQuestion`
    in step 2, so the human can decide **and** supply direction from the
    summary alone. It is the same data the comment would carry, so nothing
    drifts — never compose an ad-hoc summary instead.
@@ -1945,13 +2651,19 @@ alongside the summary so the human still sees the story's full cost:
    On a plugin repo
    pass the green gate's `tree` as `--gate-attest` here too (#981, under the four
    rules above), so the resume skips the byte-identical re-run just as a normal
-   round does; omit it on any other stack:
+   round does; omit it on any other stack. **`--findings-tree` is not optional
+   here either** — §3.5 step 2's rule is every step-mode invocation, and a
+   granted resume is one: mint `PANEL_TREE` *before* the granted round's panel
+   runs (after the green gate) and pass it. The guard is fail-quiet, so leaving
+   it off silently disarms the cadence check on exactly the rounds residue is
+   declared from:
 
    ```bash
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <same-work-dir> --resume --max-rounds <prev_max + 3> \
      --findings-file <findings-round-R.json> --test-cmd '<full gate>' \
-     [--gate-attest <tree>] [--promote <promoted.json>] --issue <N> \
+     [--gate-attest <tree>] [--findings-tree <panel-tree>] \
+     [--promote <promoted.json>] --issue <N> \
      --status-file <status.json>
    ```
 
@@ -1965,9 +2677,23 @@ alongside the summary so the human still sees the story's full cost:
    On `CONVERGED` (exit 0) → leave this branch, offer the **suggestion-promotion
    phase** under its own gate (unless this loop *is* the promotion sub-loop —
    the phase runs once per story), then proceed to §4 (Version bump) / PR as
-   normal. **Every** path to `CONVERGED` passes that gate exactly once; an
+   normal — **via the residue branch first when the BLOCKING phase ended
+   `CONVERGED_WITH_RESIDUE`** (its ordering is stated once, at the exit-14
+   bullet). That combination is ordinary, not exotic: a residue blocking phase,
+   a promotion sub-loop that escalates, a granted +3, and the sub-loop then
+   exits 0 here — and without the pointer the run opens its PR with the
+   remainder unfiled. **Every** path to `CONVERGED` passes that gate exactly
+   once; an
    extended run is the one most likely to have accumulated waived suggestions,
-   so it is the last one that should skip the offer. On another `BUDGET_EXHAUSTED` /
+   so it is the last one that should skip the offer. On
+   `CONVERGED_WITH_RESIDUE` (exit 14, #1435) → leave this branch too, and take
+   the exit-14 bullet's ordering **verbatim**: the suggestion-promotion gate
+   first, then the **residue branch**, then §4. The ordering is stated once,
+   there — restating it here is how the two came to disagree, and the disagreement
+   is on the hot path, since residue replaces exactly the two exits this
+   extension exists for. It is a convergence, not another
+   escalation — do **not** re-summarize it, do **not** offer more rounds, and do
+   **not** consume a grant for it. On another `BUDGET_EXHAUSTED` /
    `ESCALATE_NO_CONVERGENCE` → go back to step 1 with the new status. On
    `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` → leave this branch and take the
    typed-comment terminal below (a resumed run can surface a different exit).
@@ -2072,7 +2798,9 @@ use and never echoing it), open the PR with
 then `GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge <n> --auto --squash
 --delete-branch`. The PR body follows the template (Type / Summary /
 Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
-loop ran and converged (§3.5), append the **Review dossier** via
+loop ran and reached a **PR-opening** terminal (§3.5) — `CONVERGED` **or**
+`CONVERGED_WITH_RESIDUE` (#1435); those two, and no escalation — append the
+**Review dossier** via
 `build-dossier.zsh` on the kept status JSON (#563) — appending its output
 **once**, whether or not the suggestion-promotion phase also ran. Two hidden
 blocks in one body would leave the Approver reading only the first. (Once-only
@@ -2088,6 +2816,42 @@ as "the phase ran": that phrase is true on *If NONE matched* and would send you
 hunting for a status file to pass, which is exactly how a reused-scratch leftover
 gets folded into the audit record. Passing one promotion flag without the other is a usage
 error, not a fallback.
+
+**Residue in the PR body (#1435).** When the **blocking phase** ended
+`CONVERGED_WITH_RESIDUE` — the only phase that can, since the loop never declares
+residue in a promotion sub-loop — the Summary **names the residue ending**, how many
+follow-up issues were filed **and their numbers**, and the parent they were
+attached to. A residue PR that reads like an ordinary converged one is the single
+outcome this path must not produce — it is the first ending that opens a PR
+without a human seeing an escalation, and the body is where that is disclosed.
+Report the honest shape when the filing did not fully succeed, too: an empty plan
+(everything was already filed — name those pre-existing numbers), a **partly
+filtered** plan (some candidates were filed by an earlier run: name both sets and
+account for `open`, per the residue branch step 5), a builder failure (name the remaining
+blockers from the status JSON's `final_changelist.blocking` so they are not
+lost), a fail-open warning (a re-run may duplicate), or issues created but not
+parented — an unparented issue is never *filed*, so it counts as untracked when
+you apply the remainder rule, which is keyed on `final_changelist.blocking` and
+not on the plan's entries.
+The dossier rendered in the same body carries the terminal and the per-dimension
+`open` counts, so the Summary must not contradict those **counts** by implying
+the remainder was fixed.
+
+**Agreeing counts are not the whole duty.** The dossier's *wording* — "each was
+filed as a labelled follow-up issue", and per dimension "N still open (filed as
+follow-up issue(s))" — is gated on the **status alone**, so it renders
+identically whether the filing succeeded or never happened; `build-dossier.zsh`
+has no way to learn which. What the Summary owes on top of the counts is decided
+by **§3.5's remainder rule** — count how much of `final_changelist.blocking` is
+filed (created AND parented, from this run or an earlier one) and take that row:
+none → the verbatim override sentence above the dossier; some → the
+reconciliation; all → the issue numbers.
+
+Read the rule there rather than a copy here, and never re-derive it from which
+arm the run took. A narrative mention of a filing failure does not discharge the
+verbatim sentence either: the machine-readable `open > 0` beside it is what
+`approver-policy-core` reads as scoped, disclosed, **tracked** risk, so only a
+sentence that contradicts the claim in words can override it.
 
 When the promotion **prompt was presented**, **name in the Summary** both
 counts — **how many suggestions the human picked, and how many the sub-loop
@@ -2498,8 +3262,18 @@ order, resolve each — not "next child, then stop". A child is halted only by a
 **typed escalation** (§#564), a §0a **dependency rejection**, or a precheck
 **tooling failure** — all three park just that child (see the triage below);
 the readiness pre-flight (E1b)
-already proved every child was `READY` before the first one starts, so nothing
-else needs a human mid-run.
+already proved every child **open at pre-flight** was `READY` before the first
+one starts, so nothing else needs a human mid-run.
+
+> **One thing DOES arrive mid-run, and it is not epic work (#1435).** A child
+> that ends `CONVERGED_WITH_RESIDUE` attaches its remainder to **this epic** as
+> native sub-issues labelled `review-residue` + `needs-refinement`. They are open
+> children from the moment they are filed, and they were never gated — so
+> **never walk them in this invocation**: they are findings, not stories, and
+> building code from a finding title is exactly what E1b exists to prevent. Do
+> not re-enumerate the epic's children mid-run and pick one up. Record them in
+> the end-of-run summary comment instead (below), and let E5's own note decide
+> what they mean for closure.
 
 - **Disjoint children** → **parallel sub-agents**, each in its own **worktree**
   (so edits can't collide), each running the Single-issue flow to its own
@@ -2585,6 +3359,13 @@ legible at a glance. Then:
   resolves an escalation (the decision lands in the child's comment thread, which
   the implement step re-reads) resumes the parked dependents and any remaining
   children. The flow is fully **resumable**.
+- **Residue children were filed this run (#1435)** → the epic stays **open with
+  residue**, and this bucket applies **even when every walked child merged** — so
+  read it before the first bucket, which would otherwise send you to E4 + E5 on a
+  `total != completed` epic that E5 must then refuse to close. List the residue
+  children in the summary comment, naming the child whose run filed each, and go
+  to **E5's residue note** rather than closing. The next run halting at E1b on
+  them is the intended prompt to refine them, not a defect in this one.
 
 ### E4. Comprehensive epic verification (after ALL children merge)
 
@@ -2626,6 +3407,29 @@ that it passed), and any `skipped_self_ref` line an E1 backfill reported —
 quoting the body **lines**, not the array entry — so the closed epic is a
 self-contained record. Only after this
 is the epic truly done — report it closed, with the PR/verification table.
+
+> **A child that ended in residue leaves the epic OPEN, and that is the correct
+> outcome (#1435).** A child resolving under this epic can end
+> `CONVERGED_WITH_RESIDUE`, and its residue branch attaches the remainder to
+> **this epic** as native sub-issues labelled `review-residue` +
+> `needs-refinement` (the same pair E3's note names). They are open
+> children the moment they are filed, so:
+>
+> - **E5 must not close the epic.** The positive-evidence rule wants
+>   `total == completed`, and it does not hold. Do **not** special-case them out
+>   to reach a closure — an auto-generated finding is real work nobody has
+>   specified yet, and closing over it is exactly the "close never-started work"
+>   hazard the rule exists for. Report the epic as **open with residue**, listing
+>   the residue children and the child whose run filed them.
+> - **The next run halts at E1b**, because `story-readiness` sends every one of
+>   them back. That halt is the *intended* prompt, not a deadlock to engineer
+>   around: it says the residue must be **refined** (`/development:refine-issue`)
+>   before the epic can proceed. E1b's own halt comment names them, and the
+>   `needs-refinement` label they carry is the reason.
+>
+> So do not read "some children are unready" here as a defect in the epic run
+> that filed them. It is the design: residue is deferred work, made visible as
+> work, and the epic waits for a human to specify it.
 
 ## Guardrails
 

@@ -3,7 +3,8 @@
 # (epic #557, issue #562). Ties the review panel (#560 dispatch) and the
 # consolidator (#561) into an autonomous implement→review→fix loop with a hard
 # round budget. Runs entirely in the worktree: nothing is pushed and no PR is
-# opened until this exits CONVERGED.
+# opened until this exits CONVERGED (0) or CONVERGED_WITH_RESIDUE (14, #1435) —
+# no ESCALATE_* / BUDGET_EXHAUSTED exit ever opens one.
 #
 # The agentic steps — running the review panel and applying the implementor's
 # fix pass — are model-driven. The canonical wiring is STEP MODE (#971): the
@@ -65,6 +66,17 @@
 #          non_converging — the loop auto-continues (records it, no escalation,
 #          no human grant), so only verified/ambiguous survivors escalate here.
 #     -> last round + blockers  => BUDGET_EXHAUSTED
+#     -> ...but EITHER of those two endings becomes CONVERGED_WITH_RESIDUE (14,
+#          #1435) when ALL THREE residue conditions hold: the last TWO rounds
+#          are both zero-CRITICAL, every remaining blocker's file is in the
+#          PREVIOUS round's fix-touched set, AND this round ran as a FULL SWEEP
+#          (§9 — a delta round meeting the first two promotes the closing sweep
+#          instead of ending here, so exit 14 always speaks for the whole diff). The run then opens the PR and files the
+#          remainder as follow-up issues instead of spending a human grant on
+#          material the reviewers themselves called non-critical and that lives
+#          only in the implementer's own last edits. Evaluated at those two rungs
+#          and NOWHERE else — never pre-empting CONVERGED, ESCALATE_CONFLICT,
+#          ESCALATE_AMBIGUOUS, or an AWAITING_FIX round that still has budget.
 #     -> else: step mode        => AWAITING_FIX (fix in-session, --resume)
 #              hook mode        => fix pass -> re-run tests -> next round
 #
@@ -82,7 +94,14 @@
 #                             test can drive the "failed payload build emits
 #                             nothing" branch (#1004). This one follows
 #                             review-dispatch.zsh's DETECT_STACK_BIN convention.
-#   Both are unset in production.
+#   GIT_TREE_ID_BIN           the git binary, read by the ONE git call this
+#                             script makes directly (the #1435 fix-touched
+#                             diff-tree). Deliberately the SAME name
+#                             git-tree-id.zsh reads rather than a second seam:
+#                             that script mints the two identities this diffs, so
+#                             two names would let stub-minted ids be compared by
+#                             real git, which compares nothing.
+#   All three are unset in production.
 #
 # Step mode:
 #   --findings-file  this round's aggregate findings JSON (issue #558 schema,
@@ -98,21 +117,33 @@
 #                    runs FIRST — it gates the previous round's in-session fix;
 #                    red exits ERROR (1).
 #
-#                    FIVE shapes are refused as STALE_FINDINGS (exit 2, #974,
-#                    #1434), on either of two grounds: the round's findings were
-#                    never produced (the panel is the driving session's job
-#                    BETWEEN invocations, so these are caller mistakes), or no
-#                    reviewer could have seen anything this round. TWO of the
-#                    five are wiring-independent — they fire in hook mode too,
-#                    where the panel is --review-cmd's job: the EMPTY-DELTA arm
-#                    and the FULL-ROUND arm below. They key on the round's own
-#                    state rather than on --findings-file, which is why. The
-#                    other three are step-mode-only by construction, since hook
-#                    mode has no --findings-file at all. (Named, not numbered:
-#                    an ordinal cross-reference goes stale the next time a shape
-#                    is added, and this one already did once.)
+#                    Several shapes are refused as STALE_FINDINGS (exit 2, #974,
+#                    #1434, #1435), most of them on one of these NAMED grounds —
+#                    named rather than numbered, because a count here has already
+#                    gone stale more than once. (The ALIAS arm is on none of them:
+#                    it is preventive, refusing BECAUSE real panel output exists,
+#                    before the sink is truncated.)
+#                      NEVER PRODUCED  the round's findings were never made (the
+#                                      panel is the driving session's job BETWEEN
+#                                      invocations, so these are caller mistakes)
+#                      NOTHING TO SEE  no reviewer could have seen anything this
+#                                      round
+#                      WRONG TREE      the findings describe a tree the loop is
+#                                      not looking at (#1435)
+#                    The EMPTY-DELTA, FULL-ROUND and CADENCE arms are
+#                    WIRING-INDEPENDENT — they fire in hook mode too, where the
+#                    panel is --review-cmd's job, because they key on the round's
+#                    own state rather than on --findings-file. The rest are
+#                    step-mode-only by construction, since hook mode has no
+#                    --findings-file at all.
 #
-#                    All five, with the two wiring-independent arms marked:
+#                    (NAMED, NOT NUMBERED, and the rule applies to this block
+#                    itself: an ordinal goes stale the next time a shape is
+#                    added, and this paragraph's own counts went stale twice
+#                    before the numerals were removed. Add a shape by adding a
+#                    bullet and a remedy — there is no tally to keep in step.)
+#
+#                    Every shape, with the wiring-independent arms marked:
 #                      * missing/empty on --resume — a panel that found nothing
 #                        must still write `[]`, so silence is not evidence;
 #                      * content byte-identical to the round just consumed — a
@@ -145,7 +176,14 @@
 #                      * --findings-file IS the round's own dispatch
 #                        findings_path — the caller aimed at the internal sink,
 #                        which this script truncates; refused up front so the
-#                        panel output is never destroyed.
+#                        panel output is never destroyed;
+#                      * (WIRING-INDEPENDENT) the CADENCE arm (#1435) — the
+#                        findings were produced against a different tree than the
+#                        one being consolidated, so they describe a repo state
+#                        that no longer exists. Step mode compares the session's
+#                        --findings-tree attestation; hook mode compares this
+#                        round's own dispatch stamp, catching a --review-cmd
+#                        that rewrites the tree mid-round.
 #                    Left unguarded, the MISSING/EMPTY and FULL-ROUND arms let
 #                    a round nobody reviewed be consumed — on a full round that
 #                    is the false CONVERGED that green-lights the PR — and the
@@ -154,9 +192,22 @@
 #                    ESCALATE_NO_CONVERGENCE that blames the fix pass for a
 #                    mistake made by the caller.
 #
+#                    The CADENCE arm is the one that fails in the other
+#                    direction: its inputs are perfectly well-formed, and it is
+#                    the ORDERING that was wrong — the fix pass ran before the
+#                    round it belongs to was consolidated, so the fix-touched
+#                    set, every `class` derived from it and the residue decision
+#                    would all be computed from a tree the reviewers never read.
+#
 #                    The remedy is per arm, not one rule: MISSING/EMPTY,
 #                    BYTE-IDENTICAL and FULL-ROUND are cleared by producing this
-#                    round's real aggregate and re-invoking; the ALIAS arm by
+#                    round's real aggregate and re-invoking; the CADENCE arm by
+#                    re-running this round's panel against the CURRENT tree and
+#                    passing a freshly minted --findings-tree (or by discarding
+#                    the fix that moved the tree), never by re-passing the same
+#                    attestation and never by dropping the flag — it is
+#                    fail-quiet, so dropping it consolidates the very round just
+#                    refused; the ALIAS arm by
 #                    pointing --findings-file at the panel's own file (its
 #                    output is intact); and the EMPTY-DELTA arm by restoring
 #                    the closing-sweep marker the previous round earned, or
@@ -220,7 +271,7 @@
 #       --findings-file FILE [--test-cmd CMD] [--resume] \
 #       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
 #       [--issue N] [--telemetry-file PATH] [--gate-attest TREE_ID] \
-#       [--promote FILE]                                          # step mode
+#       [--findings-tree TREE_ID] [--promote FILE]                # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
 #       [--promote FILE] ...                                      # hook mode
@@ -229,6 +280,11 @@
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
+#   14  CONVERGED_WITH_RESIDUE    (#1435: the run OPENS ITS PR, and the caller
+#                                  files one follow-up issue per remaining
+#                                  blocking finding. A distinct code rather than
+#                                  a second 0, because the follow-up work
+#                                  differs; `outcome: "success"` in telemetry.)
 #   20  AWAITING_FIX              (step mode only: blockers remain, budget
 #                                  left — fix in-session, then --resume)
 #   10  ESCALATE_AMBIGUOUS        (dispatch could not pick a panel — #560 —
@@ -242,11 +298,13 @@
 #       invocation's. It is a non-terminal refusal: no telemetry record and no
 #       progress.md `**Final:**` line, because the loop resumes once the caller
 #       supplies the round's real findings. Since #1434 the same refusal covers
-#       two further causes, BOTH of which also fire in hook mode, so exit 2
-#       mid-run is no longer step-mode-only: a delta round with an EMPTY scope
-#       and nothing carried to verify, and a FULL round whose panel produced no
-#       findings file at all. There is no reviewed round in either, and reading
-#       one as CONVERGED is the same false green.
+#       further causes, and the EMPTY-DELTA, FULL-ROUND and CADENCE arms also
+#       fire in hook mode, so exit 2 mid-run is no longer step-mode-only.
+#       EMPTY-DELTA (a delta round with an empty scope and nothing carried to
+#       verify) and FULL-ROUND (a full round whose panel produced no findings
+#       file) have no reviewed round at all, and reading either as CONVERGED is
+#       the same false green. CADENCE (#1435) HAS one — but of a repo state that
+#       no longer exists.
 #   1   internal/operational error (sub-script failed, hook failed, tests red)
 
 emulate -L zsh
@@ -269,7 +327,7 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
-local issue="" telemetry_file="" resume=0 gate_attest="" promote=""
+local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -320,6 +378,7 @@ while [[ $# -gt 0 ]]; do
   --fix-cmd) _need_val "$1" $# "${2:-}"; fix_cmd="$2"; shift 2 ;;
   --test-cmd) _need_val "$1" $# "${2:-}"; test_cmd="$2"; shift 2 ;;
   --gate-attest) _need_val_optional "$1" $# "${2:-}"; gate_attest="$2"; shift 2 ;;
+  --findings-tree) _need_val "$1" $# "${2:-}"; findings_tree="$2"; shift 2 ;;
   --findings-file) _need_val "$1" $# "${2:-}"; findings_file="$2"; shift 2 ;;
   # --promote (#994): pass-through in SUBSTANCE. The loop never *interprets* the
   # promoted set — but it does validate the file's shape up front
@@ -340,6 +399,9 @@ while [[ $# -gt 0 ]]; do
   -h|--help)
     print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
     print -r -- "  [--test-cmd CMD] [--gate-attest TREE_ID] [--base REF] [--max-rounds N] [--resume] [--issue N]"
+    print -r -- "  [--findings-tree TREE_ID]  # step mode: the tree the round's panel READ (git-tree-id.zsh),"
+    print -r -- "                             # minted BEFORE the panel ran. Omitting it disables the #1435"
+    print -r -- "                             # cadence check; it is not --gate-attest and neither implies the other."
     print -r -- "  [--promote FILE]"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH]"
     print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote"
@@ -430,6 +492,25 @@ emit_and_exit() {
   [[ -n "$changelists_file" && -s "$changelists_file" ]] && clists=$(jq -sc '.' "$changelists_file")
   local esc='[]'
   [[ "$final" != "null" ]] && esc=$(print -r -- "$final" | jq -c '.escalation_reasons // []')
+  # RESIDUE (#1435): the reasons are the changelist's, and on the non-convergence
+  # rung that changelist necessarily carries `non_converging_blocker` — that is
+  # WHY the rung was reached. Copied through unchanged, a run this state exists
+  # to call a SUCCESS would report `escalation_reasons: ["non_converging_blocker"]`
+  # and render `**Final:** CONVERGED_WITH_RESIDUE — non_converging_blocker` into
+  # progress.md: the ending that says "this did not escalate", saying it did. It
+  # would also make the two residue rungs report different shapes, since the
+  # budget rung usually has none.
+  #
+  # So `escalation_reasons` keeps its one meaning — THIS RUN ESCALATED — and the
+  # reasons move to `residue_replaced_reasons`, which records what residue took
+  # the place of. Always present (`[]` everywhere else), for the same reason
+  # `promotion_phase` and `closing_sweep_granted` are: a consumer must never have
+  # to tell "no reasons" from "a status file predating the key".
+  local residue_replaced='[]'
+  if [[ "$st" == "CONVERGED_WITH_RESIDUE" ]]; then
+    residue_replaced="$esc"
+    esc='[]'
+  fi
   local out
   # promotion_phase (#995) is ALWAYS present — a plain boolean, true exactly
   # when this invocation carried OR ADOPTED a promoted set, i.e. when it is the
@@ -456,12 +537,13 @@ emit_and_exit() {
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
     --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
-    --argjson granted "$granted_json" \
+    --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
       promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
       repo_type:(if $repo_type=="" then null else $repo_type end),
       review_skill:(if $review_skill=="" then null else $review_skill end),
-      escalation_reasons:$esc, history:$history, round_changelists:$clists,
+      escalation_reasons:$esc, residue_replaced_reasons:$residue_replaced,
+      history:$history, round_changelists:$clists,
       final_changelist:$final}')
   print -r -- "$out"
   [[ -n "$status_file" ]] && print -r -- "$out" > "$status_file"
@@ -473,6 +555,11 @@ emit_and_exit() {
   if [[ -n "$work_dir" && -d "$work_dir" && "$st" != "AWAITING_FIX" && "$st" != "STALE_FINDINGS" ]]; then
     local reasons=""
     [[ -n "$esc" && "$esc" != "[]" ]] && reasons=" — $(print -r -- "$esc" | jq -r 'join(", ")' 2>/dev/null)"
+    # ...and on a residue exit, say what residue REPLACED rather than leaving the
+    # line bare: the human tailing progress.md wants to know the run would
+    # otherwise have escalated, without being told that it did (#1435).
+    [[ -n "$residue_replaced" && "$residue_replaced" != "[]" ]] && \
+      reasons=" — residue replaced: $(print -r -- "$residue_replaced" | jq -r 'join(", ")' 2>/dev/null)"
     { print -r -- "**Final:** ${st}${reasons} ($(date +%H:%M:%S))" >> "$work_dir/progress.md" ; } 2>/dev/null || true
   fi
 
@@ -501,10 +588,15 @@ emit_and_exit() {
     # in the payload. The catch-all is `failed` (ERROR today) rather than a
     # guess, so a status added later is never silently counted as a success.
     local outcome
+    # CONVERGED_WITH_RESIDUE (#1435) is a SUCCESS, named explicitly rather than
+    # left to the catch-all: the run opened its PR. The catch-all is `failed` on
+    # purpose, so a status added later is never silently counted as a success —
+    # which is exactly why this one has to be added here and in ARCHITECTURE.md's
+    # two copies of the mapping, not merely assumed to land right.
     case "$st" in
-      CONVERGED|SKIPPED)           outcome="success" ;;
-      ESCALATE_*|BUDGET_EXHAUSTED) outcome="escalated" ;;
-      *)                           outcome="failed" ;;
+      CONVERGED|CONVERGED_WITH_RESIDUE|SKIPPED) outcome="success" ;;
+      ESCALATE_*|BUDGET_EXHAUSTED)              outcome="escalated" ;;
+      *)                                        outcome="failed" ;;
     esac
     # wall_s is REQUIRED and must be non-negative; the emitter rejects a
     # negative outright (exit 2), which `|| true` would swallow — costing the
@@ -634,16 +726,337 @@ write_round_scope() {  # $1 = descriptor JSON, $2 = round
   local desc="$1" r="$2"
   print -r -- "$desc" | jq -r '.changed_files[]?' > "$scope_file" || {
     print -u2 -- "resolve-story-loop: could not extract scope at round $r"; return 1 }
-  if [[ -n "$wd_rel" && -s "$scope_file" ]]; then
-    local -a lines
-    lines=("${(@f)$(<"$scope_file")}")
-    lines=(${lines:#${(b)wd_rel}*})
-    if (( ${#lines} )); then
-      print -rl -- "${lines[@]}" > "$scope_file"
-    else
-      : > "$scope_file"
-    fi
+  # ONE definition of "a path the loop wrote, not the story" — the same helper
+  # `_capture_fix_touched` uses. This function used to inline a work-dir-only
+  # copy of it, which was strictly weaker: an in-repo `--status-file` (written by
+  # `emit_and_exit` at every AWAITING_FIX, so an untracked changed file from
+  # round 2 on) stayed in the scope and was handed to the panel as story code to
+  # review, while the fix-touched set correctly dropped it. Two consumers of one
+  # fact, disagreeing about the same path, is exactly what this function's own
+  # header warns against.
+  _drop_loop_internal_paths "$scope_file"
+}
+
+# Mint a working-tree identity, with the git seam BRIDGED explicitly (#1435).
+#
+# `GIT_TREE_ID_BIN` is one name in two scopes, and that is the whole reason this
+# helper exists. `_capture_fix_touched` reads it as a parameter of THIS shell,
+# while `$TREE_ID` is a child process that sees it only if it was EXPORTED — so a
+# caller or test that sets it without exporting would get one binary minting the
+# identities and another diffing them, which compares nothing and degrades
+# SILENTLY (an unrelated tree pair diffs to some arbitrary set, so residue is
+# mis-decided rather than refused). Setting it on the invocation closes that,
+# exactly as review-dispatch.zsh's `_delta_files` does. EVERY identity in this
+# file goes through here, not just the #1435 ones: the #981 gate attestation and
+# the #1434 round identity are comparisons of the same kind.
+_tree_id() {  # $1 = repo
+  GIT_TREE_ID_BIN="${GIT_TREE_ID_BIN:-git}" "$TREE_ID" "$1"
+}
+
+# --- fix-touched capture (#1435) -------------------------------------------
+# The set of repo artifacts a round's FIX PASS created or modified, persisted as
+# `<work-dir>/fix-touched-<round>.txt` — repo-relative, one path per line. It is
+# what the residue decision below tests each remaining blocker's `.file` against,
+# and what `consolidate-findings.zsh --fix-touched` derives its `class` from.
+#
+# FILE-SET membership, not hunk-level: it matches the finding's own `.file`
+# granularity and stays robust to the line drift that the #983 proximity matcher
+# had to be rebuilt around.
+#
+# Normalisation and exclusions are review-dispatch.zsh's `_normalise_paths`,
+# deliberately identical: the loop's own artifacts under `.review/` and the
+# telemetry JSONL are never story code, so a fix pass that only wrote there
+# touched NOTHING reviewable — and an empty set means every blocker is a
+# `new_defect`, i.e. no residue. One rule for what counts as a repo path, or the
+# residue test and the review scope would disagree about the same file.
+#
+# Both ends are `git write-tree` identities (git-tree-id.zsh), so tracked edits,
+# deletions and untracked additions are compared by one uniform rule — the same
+# reason `_delta_files` uses `diff-tree` rather than `git diff <tree>`.
+_capture_fix_touched() {   # $1 = base tree id, $2 = round
+  local base_tree="$1" r="$2" cur="" out=""
+  out="$work_dir/fix-touched-$r.txt"
+  # Every failure below leaves NO file, which is deliberate: the residue
+  # decision requires membership in this set, so an absent set can only make
+  # residue unreachable — the fail-closed direction. Announce it, because the
+  # visible consequence (an escalation instead of a residue exit) is otherwise
+  # indistinguishable from a genuine non-residue run.
+  rm -f -- "$out"
+  [[ -n "$base_tree" ]] || {
+    print -u2 -- "resolve-story-loop: no pre-fix tree identity for round $r — the fix-touched set cannot be computed (#1435); residue is unreachable this round"
+    return 1 }
+  cur=$(_tree_id "$repo" 2>/dev/null) || cur=""
+  [[ -n "$cur" ]] || {
+    print -u2 -- "resolve-story-loop: could not compute the post-fix tree identity for round $r — the fix-touched set cannot be computed (#1435); residue is unreachable this round"
+    return 1 }
+  # `pipefail` is set, so a failing diff-tree fails the pipeline rather than
+  # yielding an empty set that would read as "the fix pass touched nothing" —
+  # which classifies every blocker `new_defect` and is a claim, not a gap.
+  # ONE seam for BOTH halves of the comparison. The two tree ids are minted by
+  # git-tree-id.zsh, which honours GIT_TREE_ID_BIN — so pinning a different
+  # variable here would let stub-minted ids be diffed by real git (or the
+  # reverse), which is not a comparison of anything. review-dispatch.zsh bridges
+  # the two the same way in `_delta_files`.
+  #
+  # `-c core.quotePath=false`: the default TRUE makes diff-tree emit a non-ASCII
+  # path as `"src/caf\303\251.zsh"` — quotes and octal escapes included — a
+  # spelling that can never equal the plain UTF-8 `.file` a reviewer reports. The
+  # blocker would then be stamped `new_defect` and counted outside the set: fail-
+  # closed for the VERDICT, but a confidently wrong number in the class histogram
+  # the grant decision reads. review-dispatch.zsh's own path listings carry the
+  # same flag for the same reason, so the two sets keep one spelling.
+  #
+  "${GIT_TREE_ID_BIN:-git}" -C "$repo" -c core.quotePath=false \
+    diff-tree -r --name-only "$base_tree" "$cur" \
+    | sed -E 's#^\./##' | sort -u \
+    | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d' > "$out" || {
+    print -u2 -- "resolve-story-loop: could not diff $base_tree..$cur for the round $r fix-touched set (#1435); residue is unreachable this round"
+    rm -f -- "$out"
+    return 1 }
+  # ...then drop the loop's OWN caller-chosen in-repo artifacts (#1435). Done
+  # here rather than as another `sed` address: these paths come from the command
+  # line, and splicing one into a regex makes the caller's directory name a
+  # PATTERN. `.loop-wd` would delete a genuine `xloop-wd/foo.py` (`.` is a
+  # wildcard), a `#` in the name would close sed's address early — and with
+  # `pipefail` set that kills the whole capture, so a supported work-dir silently
+  # makes residue unreachable. `${(b)…}` glob-quotes the prefix, so the match is
+  # literal, and it is the same idiom `write_round_scope` uses on the same fact.
+  _drop_loop_internal_paths "$out"
+  return 0
+}
+
+# Filter $1 IN PLACE, removing every line under the repo-internal work-dir and
+# every line naming a repo-internal --status-file / --findings-file. Both lists
+# are resolved once near the top of the run; when they are empty this is a no-op.
+_drop_loop_internal_paths() {  # $1 = file of repo-relative paths
+  local f="$1"
+  [[ -s "$f" ]] || return 0
+  (( ${#loop_internal_files} > 0 )) || [[ -n "$wd_rel" ]] || return 0
+  local -a lines
+  lines=("${(@f)$(<"$f")}")
+  # `${(b)…}` alone is NOT enough: it produces the escaped text, but a parameter
+  # expansion result is not re-read as a pattern, so the backslashes match
+  # literally and nothing is removed. The pattern has to go through `${~…}` to be
+  # interpreted. Invisible for a metachar-free name like `.loop-wd` — which is
+  # why it survived unnoticed — and wrong for any work-dir carrying `[`, `?`,
+  # `(`, `|` or `^`, where the loop's own state files then leak straight back
+  # into the set that decides residue.
+  local pat=""
+  if [[ -n "$wd_rel" ]]; then
+    pat="${(b)wd_rel}*"
+    lines=(${lines:#${~pat}})
   fi
+  local _f=""
+  for _f in "${loop_internal_files[@]}"; do
+    pat="${(b)_f}"
+    lines=(${lines:#${~pat}})
+  done
+  if (( ${#lines} )); then
+    print -rl -- "${lines[@]}" > "$f"
+  else
+    : > "$f"
+  fi
+}
+
+# Promote the NEXT round to the closing full sweep (#1434), granting the one
+# round beyond --max-rounds when the budget is already spent. ONE definition,
+# because #1435 §9 gave it a SECOND trigger: a delta round whose residue
+# conditions hold promotes the sweep exactly as a zero-blocker delta round does.
+# Two copies would let the two triggers drift on the grant arithmetic, which is
+# the part that decides whether the sweep runs at all.
+_promote_closing_sweep() {  # $1 = the round doing the promoting
+  # The parameter is named `round` — shadowing the caller's loop variable, which
+  # is harmless here (this function reads nothing else from it) and deliberate:
+  # the increment is pinned across code and prose by a tripwire that greps for
+  # the literal `closing_sweep_round=$(( round + N ))`, so spelling it any other
+  # way silently removes the guard that keeps every restatement of the one-round
+  # grant in lockstep (#993/#1434).
+  local round="$1"
+  closing_sweep_round=$(( round + 1 ))
+  print -r -- "$closing_sweep_round" > "$closing_sweep_file" || {
+    print -u2 -- "resolve-story-loop: could not record the closing sweep at $closing_sweep_file"; return 1 }
+  # The grant, once and by exactly one round: a run that spent its whole budget
+  # is precisely the run whose safety net matters most, so skipping the sweep
+  # there would remove it exactly when it is least affordable to. --max-rounds
+  # itself is untouched (see emit_and_exit).
+  if (( closing_sweep_round > max_rounds )); then
+    effective_max=$closing_sweep_round
+    closing_sweep_granted=1
+  fi
+  return 0
+}
+
+# The cadence guard (#1435 §10). Refuses the round when its findings were
+# produced against a different tree than the one about to be consolidated.
+#
+# Silent when it cannot tell — an absent stamp (an older work-dir, a hand-seeded
+# resume) or an unmintable identity. That is the same fail-quiet direction the
+# rest of this file takes for missing state: the guard catches a cadence
+# MISTAKE, and a toolless or half-migrated environment should lose the detection
+# rather than the run.
+_cadence_check() {   # $1 = round, $2 = source: "attested" | "stamp"
+  local r="$1" want="$2" recorded="" now="" moved="" n_moved=0 src=""
+  # TWO sources, one per wiring — see the `case` below for which runs when.
+  #
+  #   * `--findings-tree` — the identity the SESSION minted before it ran this
+  #     round's panel. In step mode the panel runs BETWEEN invocations, so the
+  #     loop's own stamp is taken after any fix the session applied first and
+  #     would agree with itself no matter what: the session has to attest what
+  #     its reviewers actually read. Same identity, same binary
+  #     (`git-tree-id.zsh`), so the two are directly comparable.
+  #   * the loop's own per-round stamp — covers HOOK mode, where the panel runs
+  #     inside the invocation and a `--review-cmd` that rewrites the tree is
+  #     caught without any cooperation.
+  #
+  # Deliberately NOT `--gate-attest`: that answers "may I skip the duplicate
+  # test run", which is a claim about the SUITE, not about which tree the
+  # reviewers read. Conflating them would let one flag suppress the other.
+  # The CALLER picks the source, because the two are checked at different
+  # moments and letting either stand in for the other refuses honest runs:
+  #
+  #   * `attested` runs ONCE, early, before the resume capture and before
+  #     `--test-cmd`. It must precede the gate — a suite that writes into the
+  #     tree (a regenerated fixture, a formatter invoked from a test) would
+  #     otherwise look like a cadence violation, and on the non-plugin stacks
+  #     the loop is told to run that gate itself.
+  #   * `stamp` runs at consolidation, and is hook mode's arm: there the panel
+  #     runs INSIDE the invocation, so a `--review-cmd` that rewrites the tree
+  #     is caught with no cooperation from the caller.
+  local stamp_file=""
+  case "$want" in
+    attested)
+      [[ -n "$findings_tree" ]] || return 0
+      recorded="${findings_tree//[[:space:]]/}"
+      src="--findings-tree" ;;
+    stamp)
+      stamp_file="$work_dir/dispatch-tree-$r.txt"
+      [[ -s "$stamp_file" ]] || return 0
+      recorded="${$(<"$stamp_file")//[[:space:]]/}"
+      src="this round's recorded dispatch tree" ;;
+    *) return 0 ;;
+  esac
+  [[ -n "$recorded" ]] || return 0
+  # A caller-supplied identity this repo cannot resolve is NOT the documented
+  # silent case: the caller believes the guard ran. Announce it and degrade,
+  # rather than letting the `diff-tree` below fail into a bare `return 0`.
+  if [[ "$want" == "attested" ]]; then
+    "${GIT_TREE_ID_BIN:-git}" -C "$repo" rev-parse --verify --quiet "${recorded}^{tree}" >/dev/null 2>&1 || {
+      print -u2 -- "resolve-story-loop: --findings-tree ($recorded) does not resolve to a tree in $repo — the #1435 cadence guard is OFF for round $r"
+      return 0 }
+  fi
+  now=$(_tree_id "$repo" 2>/dev/null) || now=""
+  [[ -n "$now" ]] || return 0
+  [[ "$recorded" == "$now" ]] && return 0
+  # The identities differ — but a bare inequality is NOT the question. The
+  # panel writes its findings sink, and the loop its own bookkeeping, inside the
+  # repo on perfectly healthy runs, and both move the tree id. Ask the question
+  # that matters instead: did any REVIEWABLE file change? Same normalisation and
+  # same exclusions as the fix-touched capture, because it is the same notion of
+  # "a file the story is about" — a second definition here would fire on runs the
+  # capture considers untouched.
+  moved="$work_dir/.cadence-$r.txt"
+  rm -f -- "$moved"
+  "${GIT_TREE_ID_BIN:-git}" -C "$repo" -c core.quotePath=false \
+    diff-tree -r --name-only "$recorded" "$now" \
+    | sed -E 's#^\./##' | sort -u \
+    | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d' > "$moved" || {
+    # cannot tell -> say nothing, like every other gap in this file
+    rm -f -- "$moved"; return 0 }
+  _drop_loop_internal_paths "$moved"
+  n_moved=$(grep -c . -- "$moved" 2>/dev/null) || n_moved=0
+  (( n_moved > 0 )) || { rm -f -- "$moved"; return 0 }
+  local listing=""
+  listing=$(head -n 10 -- "$moved" | sed 's/^/    /')
+  rm -f -- "$moved"
+  refuse_stale_findings "round $r's findings were produced against tree $recorded ($src), but the working tree is now $now, and $n_moved reviewable file(s) changed in between:
+$listing
+Those findings describe a tree that no longer exists. The cadence is: a round's findings reach the loop BEFORE that round's fix pass runs, always — otherwise the fix-touched set (and every \`class\` derived from it) attributes this round's blockers to a fix pass that had already happened. Re-run this round's panel against the current tree and pass its aggregate, or discard the fix and re-consolidate. (This is not --gate-attest, which answers a different question and neither causes nor suppresses this refusal.)"
+}
+
+# --- the residue condition (#1435) ------------------------------------------
+# TRUE when this round's ending may be `CONVERGED_WITH_RESIDUE` instead of an
+# escalation. THREE conditions, ALL required — and they are the safety rail, not
+# a formality, because this is the first path on which the loop opens a PR
+# without a human ever seeing an escalation:
+#
+#   1. the last TWO rounds' changelists both report `.summary.critical == 0` —
+#      nothing consumer-visible is broken, by the reviewers' own reads, and one
+#      clean round is not enough to say so;
+#   2. EVERY remaining blocking finding's `.file` is in the PREVIOUS round's
+#      fix-touched set — the residue lives in the implementer's own last edits,
+#      not in shipped behaviour nobody has just rewritten;
+#   3. the declaring round ran as a FULL SWEEP (§9). Enforced by the CALLER, at
+#      the two ladder rungs, not in here — because the answer on a delta round is
+#      not "escalate", it is "promote the closing sweep and come back", and this
+#      predicate has no way to say that.
+#
+# Condition 3 exists because 1 and 2 are satisfiable on any delta round with a
+# plateaued trend — the ordinary case. #1434 guarantees `CONVERGED` is only ever
+# reached from a full sweep, but it earns that sweep only on a ZERO-blocker delta
+# round; residue rounds never return zero, so the sweep would never be earned and
+# a PR would open having reviewed only the slices the deltas happened to cover.
+# The motivating run did exactly that: it declared residue off a delta round, and
+# the sweep that followed (only because an unrelated recovery forced one) found
+# ten blockers in files no delta scope had ever contained.
+#
+# The CRITICAL count has exactly ONE source: `<work-dir>/changelist-<N>.json`,
+# which persists across `--resume` because the work-dir accumulators do. Nothing
+# residue-derived is written to `history.jsonl` — a second source for one fact is
+# how two surfaces come to disagree.
+#
+# Every "cannot tell" answer returns FALSE (a missing changelist, an unreadable
+# count, an absent fix-touched set, a jq failure): the fallback is the escalation
+# the loop would have raised anyway, so the honest gap costs a human prompt,
+# where the other direction ships a PR nobody agreed to.
+_residue_holds() {   # $1 = round, $2 = this round's changelist
+  local r="$1" cl="$2" prev_cl="" touched="" set_json="" c_cur="" c_prev="" n_blocking="" n_outside=""
+  # NEVER in the promotion sub-loop (#994/#1435). Its blockers are the human's
+  # OWN promoted picks, raised from Low precisely because they said "actually, do
+  # that one" — and #994's contract is that they "are treated as blocking, not
+  # quietly re-waived". Residue would re-waive them, and file the human's
+  # explicit request back to them as a follow-up issue.
+  #
+  # It also keeps the residue story SINGLE-PHASE, which is what lets every
+  # downstream surface state one thing rather than two. Residue always comes from
+  # the blocking phase, so its blockers are always the ones the residue branch
+  # files — the dossier can say "filed" without a per-phase qualifier, the
+  # Approver policy can read `open > 0` as tracked disclosed risk without one,
+  # and §6's Summary always has issue numbers to name. Allowing a second,
+  # never-filed flavour cost four separate conditionals and got the both-residue
+  # case wrong in all of them.
+  [[ -z "$promote" ]] || return 1
+  # Round 1 can never qualify: there is no previous round's fix pass to
+  # attribute residue to, and no second changelist to prove the CRITICAL window.
+  # Both later tests would fail on their own; stating it here makes the boundary
+  # a rule rather than an accident of two other checks.
+  (( r >= 2 )) || return 1
+  prev_cl="$work_dir/changelist-$(( r - 1 )).json"
+  [[ -s "$cl" && -s "$prev_cl" ]] || return 1
+  c_cur=$(jq -r '.summary.critical // empty' -- "$cl" 2>/dev/null) || return 1
+  c_prev=$(jq -r '.summary.critical // empty' -- "$prev_cl" 2>/dev/null) || return 1
+  [[ "$c_cur" == 0 && "$c_prev" == 0 ]] || return 1
+  # `-f`, not `-s`: an EMPTY set is a real answer (the fix pass touched nothing
+  # reviewable), and it makes the membership test below fail for every blocker —
+  # which is the correct verdict, not a reason to refuse the file.
+  touched="$work_dir/fix-touched-$(( r - 1 )).txt"
+  [[ -f "$touched" ]] || return 1
+  # A round with NO blockers is not a residue round — it is the CONVERGED
+  # condition, decided before this is ever called. Guarded anyway, because the
+  # membership count below is vacuously 0 on an empty list and would otherwise
+  # answer TRUE to a question nobody should be asking here.
+  n_blocking=$(jq '(.blocking // []) | length' -- "$cl" 2>/dev/null) || return 1
+  [[ "$n_blocking" == <-> ]] && (( n_blocking > 0 )) || return 1
+  set_json=$(jq -R -s 'split("\n") | map(sub("^\\./"; "")) | map(select(length > 0)) | unique' \
+    -- "$touched" 2>/dev/null) || return 1
+  [[ -n "$set_json" ]] || return 1
+  # the path is bound BEFORE `index`, whose input is $t (the ARRAY): a bare `.`
+  # inside it would test the array against itself. Same trap, same fix, as the
+  # consolidator's own membership test.
+  n_outside=$(jq --argjson t "$set_json" \
+    '[ (.blocking // [])[] | ((.file // "") | tostring | sub("^\\./"; "")) as $f
+       | select(($t | index($f)) == null) ] | length' -- "$cl" 2>/dev/null) || return 1
+  [[ "$n_outside" == <-> ]] || return 1
+  (( n_outside == 0 ))
 }
 
 # refuse this round's findings as never-produced (#974) and exit 2. Typed, so
@@ -732,6 +1145,14 @@ local step_mode=0
 if (( step_mode )) && [[ -n "$review_cmd" || -n "$fix_cmd" ]]; then
   print -u2 -- "resolve-story-loop: --findings-file is mutually exclusive with --review-cmd/--fix-cmd"; exit 2
 fi
+# `--findings-tree` attests ONE round's panel, and hook mode runs many rounds in
+# a single invocation — so the value would be compared against round 2's, 3's, …
+# working tree, each of which the previous round's fix pass has legitimately
+# moved. That is a guaranteed false refusal, and it would also displace the
+# per-round stamp, which is hook mode's own (and sufficient) arm.
+if (( ! step_mode )) && [[ -n "$findings_tree" ]]; then
+  print -u2 -- "resolve-story-loop: --findings-tree is a step-mode flag (it attests ONE round's panel) — hook mode runs every round in one invocation and uses the per-round dispatch stamp instead"; exit 2
+fi
 if (( ! step_mode )); then
   [[ -n "$review_cmd" ]] || {
     print -u2 -- "resolve-story-loop: --review-cmd is required (or use --findings-file / --no-review)"; exit 2 }
@@ -742,6 +1163,49 @@ fi
 [[ -n "$work_dir" ]] || work_dir=$(mktemp -d)
 mkdir -p -- "$work_dir"
 local history_file="$work_dir/history.jsonl"
+
+# --- the loop's own in-repo artifacts, resolved ONCE (#1435) -----------------
+# Every path here is CALLER-CHOSEN and may legitimately sit inside the repo. All
+# of them are written by the loop itself, and all are written AFTER the pre-fix
+# tree identity is minted — `--status-file` from `emit_and_exit`, the work-dir
+# every round, `--findings-file` between step-mode invocations. So each one
+# shows up in the `--resume` diff as a file the SESSION's fix pass supposedly
+# touched, inflating the very set that decides residue and stamps `class`.
+#
+# Hook mode dodges this by minting the identity after the round's own writes.
+# Step mode cannot: `fix-base-<round>.txt` RECORDS that identity, so it is
+# necessarily written after it. Hence an explicit exclusion list rather than an
+# ordering rule.
+#
+# Computed with `:A` on BOTH sides, because the question is about paths and not
+# about spellings: `--repo .` with an absolute work-dir, an absolute repo with a
+# relative work-dir, a trailing slash, a `./` segment, or the macOS
+# `/tmp` -> `/private/tmp` symlink all name the same file and must all match.
+# `write_round_scope` already applies exactly this rule to the review scope, so
+# this is ONE definition with two consumers rather than two definitions that
+# drift.
+local wd_rel=""
+if [[ "${work_dir:A}" == "${repo:A}"/* ]]; then
+  wd_rel="${${work_dir:A}#"${repo:A}"/}/"
+fi
+# The work-dir is a DIRECTORY (prefix match, trailing slash); the other three are
+# single FILES (exact match). Keeping them in separate lists is what stops
+# `--status-file "$repo/loop.json"` from also swallowing `loop.json.bak`.
+#
+# `--telemetry-file` belongs here for a reason the static `.claude/telemetry/`
+# exclusion hides: that prefix matches the emitter's DEFAULT sink only, never an
+# explicit in-repo path — and the promotion flow tells the caller to re-pass "the
+# same file the loop was given", so an explicit value is the documented shape.
+# `emit_and_exit` appends to it AFTER the fix-base stamp, so on a granted
+# escalate -> resume it lands in the diff as a file the session's fix pass
+# supposedly touched: the fail-OPEN direction this whole list exists to close.
+local -a loop_internal_files=()
+local _lp=""
+for _lp in "$status_file" "$findings_file" "$telemetry_file"; do
+  [[ -n "$_lp" ]] || continue
+  [[ "${_lp:A}" == "${repo:A}"/* ]] || continue
+  loop_internal_files+=("${${_lp:A}#"${repo:A}"/}")
+done
 # --promote is an INPUT PATH, and the only one the loop used to forward blind.
 # Left unchecked, a typo survives parse and the run does a full round's setup —
 # per-round dispatch, scope refresh, truncating the round sink, consuming
@@ -969,8 +1433,12 @@ else
   # fallback (`! -s`), so a PREVIOUS run's blockers would be forwarded to this
   # run's panel as its fix-verification carry.
   local rm_state_err=""
-  rm_state_err=$(rm -f -- "$work_dir"/tree-*.txt(N) "$work_dir"/verify-*.json(N) "$closing_sweep_file" 2>&1) || \
-    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry or closing-sweep marker may be adopted (#1434)"
+  # fix-touched / fix-base (#1435) are per-run for the same reason: a previous
+  # run's set would attribute THIS run's blockers to a fix pass that never
+  # happened here, and residue's whole claim is "these edits are ours".
+  rm_state_err=$(rm -f -- "$work_dir"/tree-*.txt(N) "$work_dir"/dispatch-tree-*.txt(N) "$work_dir"/verify-*.json(N) "$closing_sweep_file" \
+    "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker or fix-touched set may be adopted (#1434, #1435)"
   print -r -- '[]' > "$adjudicated_file" || {
     print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
   # (the telemetry run-id sidecar is cleared far earlier — see the #995 note
@@ -1008,11 +1476,74 @@ fi
 # mismatch (tree changed since the attestation), an empty/absent value, or an
 # uncomputable current identity all fall through to running --test-cmd as before.
 # The gate never weakens — this removes only the duplicate, never the check.
+# STEP MODE's other half of the fix-touched capture (#1435) — the DIFF. The
+# session applied the previous round's fixes between invocations, so this is the
+# first moment the loop can see what they touched: diff the identity stamped at
+# that round's AWAITING_FIX against the tree as it stands now.
+#
+# It runs BEFORE the gate below, deliberately. --test-cmd is the repo's own
+# suite, and a suite that writes into the tree (a regenerated fixture, a
+# formatter run from a test) would otherwise land in the set as though the
+# session's fix pass had made the edit. Before the gate, the set is exactly the
+# session's edits and nothing else.
+#
+# Unconditional on --test-cmd, unlike the gate block: the capture is about the
+# fix pass, not about the gate, and a run without --test-cmd must still be able
+# to reach a residue ending.
+# The three names `refuse_stale_findings` reads, declared BEFORE the cadence
+# guard below so an early refusal emits a well-formed status JSON rather than
+# dying on an unset parameter. They are filled in from the dispatch plan further
+# down; empty here is the honest value — no plan has been parsed yet, and a
+# refusal at this point is about the INPUT, not about the stack.
+local repo_type="" review_skill="" prev_changelist=""
+prev_changelist="$resume_prev"
+
+# --- the cadence guard, BEFORE anything is captured (#1435 §10) --------------
+# Placed ahead of the capture, not beside the consolidation, because the capture
+# is the first thing that WRITES from the suspect input: it would stamp
+# `fix-touched-<resume_round>.txt` from a tree the reviewers never read, and that
+# file is what `class` and the residue decision are computed from. Refusing
+# afterwards would leave that artifact behind for the next `--resume` to adopt.
+#
+# `round` is not in scope yet (it is derived below), so the refusal is raised for
+# the round being resumed.
+#
+# NOT gated on `--resume`. Round 1 needs this most, not least: a fresh step-mode
+# round is a FULL round, where zero blockers IS the `CONVERGED` condition — so a
+# session that runs the panel, then edits, then invokes would exit 0 and open a
+# PR on a panel that read a tree which no longer exists. That is the false green
+# the guard exists for, and gating on `resume` left exactly it uncovered while
+# the flag was accepted without complaint. On a fresh run `resume_round` is 0, so
+# the derived round is 1 and the comparison is the right one; the block still
+# precedes the capture and the gate.
+if (( step_mode )) && [[ -n "$findings_tree" ]]; then
+  local round=$(( resume_round + 1 ))
+  _cadence_check "$round" attested
+  unset round
+fi
+
+if (( step_mode && resume )) && [[ -n "$work_dir" && -d "$work_dir" ]]; then
+  local fix_base_file="$work_dir/fix-base-$resume_round.txt" fix_base=""
+  [[ -s "$fix_base_file" ]] && fix_base="${$(<"$fix_base_file")//[[:space:]]/}"
+  if [[ -n "$fix_base" ]]; then
+    _capture_fix_touched "$fix_base" "$resume_round" || true
+  else
+    # An ABSENT stamp is the ordinary older-work-dir case (a run that started
+    # before #1435, or a hand-seeded resume), not an anomaly — so it is SILENT.
+    # The one shape that is worth saying out loud, a round that could not
+    # compute its own identity, already said so at its AWAITING_FIX exit; and
+    # the visible consequence either way is the same and fail-closed: no set, so
+    # residue is unreachable for the round that follows. Clearing anything left
+    # at the path keeps that promise absolute rather than merely likely.
+    rm -f -- "$work_dir/fix-touched-$resume_round.txt"
+  fi
+fi
+
 if (( step_mode && resume )) && [[ -n "$test_cmd" ]]; then
   local gate_skipped=0
   if [[ -n "$gate_attest" ]]; then
     local cur_tree=""
-    [[ -x "$TREE_ID" ]] && cur_tree="$("$TREE_ID" "$repo" 2>/dev/null)"
+    [[ -x "$TREE_ID" ]] && cur_tree="$(_tree_id "$repo" 2>/dev/null)"
     if [[ -n "$cur_tree" && "$cur_tree" == "$gate_attest" ]]; then
       gate_skipped=1
       print -u2 -- "resolve-story-loop: --gate-attest matches the working tree ($cur_tree) — skipping the duplicate --test-cmd run (#981)"
@@ -1043,7 +1574,7 @@ elif (( rc != 0 )); then
   print -u2 -- "resolve-story-loop: dispatch plan failed (rc=$rc)"; exit 1
 fi
 
-local repo_type="" review_skill="" scope_file="$work_dir/scope.txt"
+local scope_file="$work_dir/scope.txt"
 repo_type=$(print -r -- "$plan" | jq -r '.repo_type')
 review_skill=$(print -r -- "$plan" | jq -r '.review_skill')
 # scope_file is written per round inside the loop (#911) — no pre-loop write,
@@ -1051,18 +1582,16 @@ review_skill=$(print -r -- "$plan" | jq -r '.review_skill')
 # A --work-dir INSIDE the repo would sweep the loop's own state files
 # (scope.txt, changelist-N.json, history.jsonl, …) into the refreshed scope as
 # untracked files — the dispatch's #909 exclusion only covers the default
-# artifact prefixes. Compute the work-dir's repo-relative prefix once so every
-# refresh filters it.
-local wd_rel=""
-if [[ "${work_dir:A}" == "${repo:A}"/* ]]; then
-  wd_rel="${${work_dir:A}#"${repo:A}"/}/"
-fi
+# artifact prefixes. `wd_rel` is computed ONCE near the top of this function
+# (beside `loop_internal_files`), because the step-mode fix-touched capture runs
+# BEFORE this point and needs the same value; every refresh filters on it.
 
 # --- the loop ---------------------------------------------------------------
 # All loop-locals are declared ONCE here: re-running a bare `local NAME` on a
 # later iteration makes zsh PRINT the existing parameter to stdout, which would
 # corrupt the status JSON. Inside the loop we plain-assign only.
-local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_changelist="$resume_prev"
+local round=$(( resume_round + 1 )) loop_status="" final_changelist=""
+prev_changelist="$resume_prev"
 # EVERY declaration here carries an initialiser. At top level zsh opens no new
 # scope, so a bare `local NAME` for a name that already exists in the
 # environment PRINTS `NAME=value` on stdout — ahead of the status JSON, which is
@@ -1071,6 +1600,7 @@ local round=$(( resume_round + 1 )) loop_status="" final_changelist="" prev_chan
 # enough words to inherit from a caller's environment — so the rule now covers
 # the whole block rather than only the lines #1434 added.
 local rp="" findings_path="" scoped="" scoped_filtered="" changelist="" blockers=""
+local fix_base_tree=""
 local digest="" prev_digest_file=""
 local prev_findings_empty=0
 local blocking=0 conflict=0 nonconv=0 nconf=0 verdict="" ftrips=0
@@ -1079,14 +1609,14 @@ local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
 local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
 local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
 local round_scope_empty=0 round_findings_empty=0 rc_empty=0
-local skip_fix=0 adj_tmp=""
+local skip_fix=0 residue_promoted_sweep=0 adj_tmp=""
 local -a consolidate_args=() plan_args=()
 while (( round <= effective_max )); do
   # --- this round's working-tree identity (#1434) ---------------------------
   # Computed BEFORE anything else in the round, so it is exactly the tree the
   # round's reviewers see; the NEXT round diffs against it, which makes its delta
   # precisely what this round's fix pass changed.
-  cur_tree=$("$TREE_ID" "$repo" 2>/dev/null) || cur_tree=""
+  cur_tree=$(_tree_id "$repo" 2>/dev/null) || cur_tree=""
   [[ -n "$cur_tree" ]] || {
     print -u2 -- "resolve-story-loop: could not compute the working-tree identity for round $round in $repo — the next round would have nothing to iterate on"; exit 1 }
   print -r -- "$cur_tree" > "$work_dir/tree-$round.txt" || {
@@ -1171,6 +1701,20 @@ while (( round <= effective_max )); do
   elif (( rc != 0 )); then
     print -u2 -- "resolve-story-loop: dispatch plan failed at round $round (rc=$rc)"; exit 1
   fi
+  # --- the cadence guard (#1435 §10) ---------------------------------------
+  # Record the tree this round's dispatch plan was built against. The round's
+  # findings are only about THIS tree, and the fix-touched set — hence `class`,
+  # hence residue — is true only if the panel ran before the round's fix pass.
+  # A session that fixes first hands the loop findings describing a tree that no
+  # longer exists; the arithmetic then stays internally consistent while every
+  # input is false, which is the one failure a terminal that opens a PR without
+  # human review must not make.
+  #
+  # Written per round rather than kept in a variable so it survives the
+  # invocation boundary: in step mode the panel runs BETWEEN invocations, so the
+  # plan and the findings that answer it can be minted in different processes.
+  print -r -- "$cur_tree" > "$work_dir/dispatch-tree-$round.txt" || {
+    print -u2 -- "resolve-story-loop: could not persist the round $round dispatch tree identity to $work_dir/dispatch-tree-$round.txt"; exit 1 }
   # --- an EMPTY delta is never a reviewed round (#1434) ---------------------
   # A delta round whose scope is empty saw nothing. Consuming it as an ordinary
   # round would let it reach zero blockers and — via the closing-sweep
@@ -1303,8 +1847,10 @@ while (( round <= effective_max )); do
   # Every entry whose file appears in this round's delta_files goes, because a
   # suggestion re-raised in a file that was just edited is plausibly a NEW
   # observation about the new code, not a re-litigation of the old one.
-  # Computed from this story's own attested-tree delta — deliberately not from a
-  # fix-touched capture, which does not exist yet (#1435 lands after this).
+  # Computed from this story's own attested-tree delta — deliberately NOT from the
+  # fix-touched capture (#1435), which exists by this point but is the narrower
+  # set. Delta scoping errs toward keeping a suggestion visible, and that is the
+  # direction this rule wants.
   # File-granular on purpose: it errs toward keeping a suggestion visible, and
   # the cost of that is one logged Low where the cost of erring the other way is
   # a real finding silently deleted.
@@ -1554,11 +2100,25 @@ while (( round <= effective_max )); do
   scoped="$work_dir/scoped-$round.json"
   "$DISPATCH" scope-findings --repo "$repo" --base "$base" --findings "$findings_path" > "$scoped" || {
     print -u2 -- "resolve-story-loop: scope-findings failed at round $round"; exit 1 }
-  # a repo-internal work-dir's own files are loop state, never story findings —
-  # the #909/#911 exclusion must hold in step mode too (final-review fix, #971)
-  if [[ -n "$wd_rel" ]]; then
+  # A repo-internal work-dir's own files are loop state, never story findings —
+  # the #909/#911 exclusion must hold in step mode too (final-review fix, #971).
+  #
+  # The EXACT list (`--status-file` / `--findings-file` / `--telemetry-file`) is
+  # filtered here as well, not just the work-dir prefix (#1435). Leaving it out
+  # made this path strictly worse than before that change: the loop rewrites
+  # those files every round, so a blocker raised on one is unfixable and
+  # re-appears each round — and since the fix-touched capture now correctly drops
+  # them, residue condition 2 fails on it forever and the run ends in an
+  # escalation about the loop's own bookkeeping. Same fact, same three consumers,
+  # one definition.
+  if [[ -n "$wd_rel" ]] || (( ${#loop_internal_files} > 0 )); then
     scoped_filtered="$work_dir/.scoped-filtered-$round.json"
-    jq -c --arg wd "$wd_rel" '[ .[] | select(((.file // "") | sub("^\\./"; "")) | startswith($wd) | not) ]' \
+    local internal_json="[]"
+    internal_json=$(print -rl -- "${loop_internal_files[@]}" \
+      | jq -Rsc 'split("\n") | map(select(length > 0))') || internal_json="[]"
+    jq -c --arg wd "$wd_rel" --argjson internal "$internal_json" \
+      '[ .[] | ((.file // "") | sub("^\\./"; "")) as $p
+         | select( (($wd != "") and ($p | startswith($wd))) or (($internal | index($p)) != null) | not ) ]' \
       "$scoped" > "$scoped_filtered" || {
       print -u2 -- "resolve-story-loop: work-dir scope filter failed at round $round"; exit 1 }
     mv -- "$scoped_filtered" "$scoped" || {
@@ -1577,6 +2137,27 @@ while (( round <= effective_max )); do
   [[ -n "$prev_changelist" ]] && consolidate_args+=( --prev "$prev_changelist" )
   [[ -n "$promote" ]] && consolidate_args+=( --promote "$promote" )
   consolidate_args+=( --adjudicated "$adjudicated_file" )
+  # the PREVIOUS round's fix-touched set (#1435), so each blocker is stamped with
+  # where it came from. `-f` not `-s`: an empty set is a real answer (every
+  # blocker is then a `new_defect`), and an ABSENT one means the capture could
+  # not run — so the flag is omitted and NO item is stamped, which is exactly how
+  # every downstream reader tells "no fix-touched information" from "the fix pass
+  # touched nothing".
+  [[ -f "$work_dir/fix-touched-$(( round - 1 )).txt" ]] && \
+    consolidate_args+=( --fix-touched "$work_dir/fix-touched-$(( round - 1 )).txt" )
+  # --- the cadence guard fires HERE (#1435 §10) -----------------------------
+  # Last moment before the findings become a changelist. Compare the tree this
+  # round's plan was built against with the tree as it stands now: if they
+  # differ, something rewrote the repo between the panel being scoped and its
+  # findings being consumed, and those findings describe a tree that no longer
+  # exists.
+  #
+  # A REFUSAL, never a repair. The loop cannot know which of the two trees the
+  # reviewers actually read, so it cannot pick one — and a residue verdict
+  # computed from the wrong one is exactly the false audit record §9 and this
+  # guard exist to prevent. `--gate-attest` is a different question ("may I skip
+  # the duplicate test run"), so it neither causes nor suppresses this.
+  _cadence_check "$round" stamp
   "$CONSOLIDATE" "${consolidate_args[@]}" > "$changelist" || {
     print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
   final_changelist="$changelist"
@@ -1693,53 +2274,133 @@ while (( round <= effective_max )); do
   # the one thing delta scoping could hide: a defect that exists only in the
   # interaction between rounds.
   skip_fix=0
+  residue_promoted_sweep=0
   if (( blocking == 0 )); then
     if [[ "$scope_mode" == "full" ]]; then
       loop_status="CONVERGED"
     else
-      closing_sweep_round=$(( round + 1 ))
-      print -r -- "$closing_sweep_round" > "$closing_sweep_file" || {
-        print -u2 -- "resolve-story-loop: could not record the closing sweep at $closing_sweep_file"; exit 1 }
-      # The grant, once and by exactly one round: a run that spent its whole
-      # budget is precisely the run whose safety net matters most, so skipping
-      # the sweep there would remove it exactly when it is least affordable to.
-      # --max-rounds itself is untouched (see emit_and_exit).
-      if (( closing_sweep_round > max_rounds )); then
-        effective_max=$closing_sweep_round
-        closing_sweep_granted=1
-      fi
+      _promote_closing_sweep "$round" || exit 1
       # nothing to fix — the round found no blockers; the next round only
       # re-reviews, at full scope
       skip_fix=1
       (( step_mode )) && loop_status="AWAITING_FIX"
     fi
   elif (( conflict == 1 )); then loop_status="ESCALATE_CONFLICT"
-  elif (( nonconv == 1 )); then loop_status="ESCALATE_NO_CONVERGENCE"
-  elif (( round == effective_max )); then loop_status="BUDGET_EXHAUSTED"
+  # RESIDUE (#1435) is evaluated at EXACTLY the two rungs the loop would
+  # otherwise end on an escalation, and nowhere else. It never pre-empts
+  # CONVERGED (zero blockers still wins, above), never ESCALATE_CONFLICT (a
+  # human has to pick between opposed recommendations — no ending can guess it),
+  # never ESCALATE_AMBIGUOUS (raised long before this ladder, and about dispatch
+  # rather than findings), and never an AWAITING_FIX round that still has budget:
+  # the loop keeps FIXING while it can, and residue only replaces an ending.
+  #
+  # That placement is also what demotes identity-recurrence from sole trigger to
+  # one input: a `non_converging` blocker still ENDS the loop, it just no longer
+  # decides HOW it ends. Which matters precisely because that signal
+  # false-tripped its way through the #687 run — fixes cluster in the same few
+  # files, so each round's genuinely-new findings kept landing inside the
+  # previous round's proximity window.
+  elif (( nonconv == 1 )); then
+    if _residue_holds "$round" "$changelist"; then
+      if [[ "$scope_mode" == "full" ]]; then
+        loop_status="CONVERGED_WITH_RESIDUE"
+      else
+        _promote_closing_sweep "$round" || exit 1
+        residue_promoted_sweep=1
+        (( step_mode )) && loop_status="AWAITING_FIX"
+      fi
+    else
+      loop_status="ESCALATE_NO_CONVERGENCE"
+    fi
+  elif (( round == effective_max )); then
+    if _residue_holds "$round" "$changelist"; then
+      if [[ "$scope_mode" == "full" ]]; then
+        loop_status="CONVERGED_WITH_RESIDUE"
+      else
+        _promote_closing_sweep "$round" || exit 1
+        residue_promoted_sweep=1
+        (( step_mode )) && loop_status="AWAITING_FIX"
+      fi
+    else
+      loop_status="BUDGET_EXHAUSTED"
+    fi
   elif (( step_mode )); then loop_status="AWAITING_FIX"
   fi
   case "$loop_status" in
     CONVERGED) verdict="converged" ;;
+    CONVERGED_WITH_RESIDUE)
+      verdict="converged with residue — every remaining blocker is zero-CRITICAL and lives in the previous round's own fix-touched files; opening the PR and filing the rest as follow-ups (#1435)" ;;
     ESCALATE_CONFLICT) verdict="escalating (unresolved conflict)" ;;
     ESCALATE_NO_CONVERGENCE) verdict="escalating (non-converging blocker)" ;;
     BUDGET_EXHAUSTED) verdict="budget exhausted" ;;
     AWAITING_FIX)
       if (( skip_fix )); then
         verdict="no blockers in the delta — round $closing_sweep_round is the closing full sweep; apply no fix, just --resume"
+      elif (( residue_promoted_sweep )); then
+        verdict="residue conditions hold, but on a DELTA round — promoting round $closing_sweep_round to the closing full sweep, which is the only round that may declare residue (#1435); apply blockers in-session, then --resume"
       else
         verdict="awaiting fix — apply blockers in-session, then --resume"
       fi ;;
     *) if (( skip_fix )); then
          verdict="no blockers in the delta — promoting round $closing_sweep_round to the closing full sweep"
+       elif (( residue_promoted_sweep )); then
+         verdict="residue conditions hold, but on a DELTA round — promoting round $closing_sweep_round to the closing full sweep, which is the only round that may declare residue (#1435)"
        else
          verdict="fix pass (in-loop), continuing"
        fi ;;
   esac
   append_progress_round "$changelist" "$round" "$verdict" "$prev_changelist"
+  # STEP MODE's half of the fix-touched capture (#1435) — the SNAPSHOT. The fix
+  # pass happens BETWEEN invocations, where this script never observes it, so the
+  # pair is split: stamp the pre-fix identity here, diff against it at --resume
+  # start (beside the --gate-attest comparison, which reads the same kind of
+  # identity for the same reason). Taken after the round's own writes, so a
+  # repo-internal --work-dir cannot charge the loop's bookkeeping to the session's
+  # fix pass. Written on EVERY AWAITING_FIX, including a zero-blocker delta round
+  # that promotes the closing sweep and applies no fix at all: the resulting
+  # empty set is the honest answer there ("no fix ran, so nothing is residue"),
+  # and residue is correctly unreachable on that sweep.
+  # ...and on every GRANTABLE ESCALATING terminal too, not only AWAITING_FIX. An
+  # interactive run can be GRANTED more rounds there, and §3.5 step 5 requires a
+  # fix pass BEFORE the resume — so a fix pass really does follow those exits,
+  # and without a stamp its touched set is unrecoverable. The visible cost of
+  # omitting it is that the round after a grant carries no `class` at all: no
+  # `by_class`, no progress row, and no residue — i.e. the histogram #1435 adds
+  # for the grant decision goes dark exactly one round after a grant was spent,
+  # which is when it is most wanted. (Observed on this story's own round 3.)
+  # A run that stops instead simply leaves an unused stamp behind, which the next
+  # fresh run clears — so the cost of listing one terminal too many is nil, and
+  # the cost of listing one too few is a silently classless round.
+  #
+  # ESCALATE_CONFLICT is in the list for the same reason as the other two: the
+  # interactive extension covers it, a human picks the winner, and a fix pass
+  # follows the grant. ESCALATE_AMBIGUOUS is NOT — `emit_ambiguous` exits before
+  # the round produces any findings to classify, so there is nothing for a stamp
+  # to serve.
+  if [[ "$loop_status" == "AWAITING_FIX" || "$loop_status" == "ESCALATE_NO_CONVERGENCE" \
+        || "$loop_status" == "BUDGET_EXHAUSTED" || "$loop_status" == "ESCALATE_CONFLICT" ]]; then
+    fix_base_tree=$(_tree_id "$repo" 2>/dev/null) || fix_base_tree=""
+    if [[ -n "$fix_base_tree" ]]; then
+      print -r -- "$fix_base_tree" > "$work_dir/fix-base-$round.txt" || \
+        print -u2 -- "resolve-story-loop: could not persist the round $round pre-fix tree identity to $work_dir/fix-base-$round.txt — residue will be unreachable next round (#1435)"
+    else
+      print -u2 -- "resolve-story-loop: could not compute the round $round pre-fix tree identity — residue will be unreachable next round (#1435)"
+    fi
+  fi
   if [[ -n "$loop_status" ]]; then break; fi
   # a zero-blocker delta round has nothing for the fix hook; advancing straight
   # to the closing sweep is the whole point (hook mode)
   if (( skip_fix )); then
+    # ...but record the fix-touched fact FIRST (#1435). No fix pass ran, so the
+    # honest answer is an EMPTY set, and step mode already produces exactly that
+    # (its AWAITING_FIX snapshot diffs against an unmoved tree at the next
+    # --resume). Falling through without writing one would make hook mode omit
+    # `--fix-touched` on the closing sweep and stamp NO class at all, so the two
+    # wirings would disagree about the same state — and hook mode is the seam the
+    # bats suite drives, i.e. the one that would stop being able to exercise what
+    # production does.
+    : > "$work_dir/fix-touched-$round.txt" || \
+      print -u2 -- "resolve-story-loop: could not record the empty round $round fix-touched set (#1435); the closing sweep's blockers will carry no class"
     prev_changelist="$changelist"
     (( round++ ))
     continue
@@ -1749,9 +2410,18 @@ while (( round <= effective_max )); do
   blockers="$work_dir/blockers-$round.json"
   jq -c '{round, blocking, conflicts}' -- "$changelist" > "$blockers" || {
     print -u2 -- "resolve-story-loop: could not build the round $round blockers slice at $blockers"; exit 1 }
+  # HOOK MODE's half of the fix-touched capture (#1435): the identity is taken
+  # here, immediately before the hook, NOT reused from `tree-$round.txt`. The
+  # round has written its changelist, history line and progress block since that
+  # snapshot, and a repo-internal --work-dir puts all three inside the tree — so
+  # the round's own bookkeeping would otherwise be attributed to the fix pass.
+  # A failed identity is not fatal: it only costs this round's residue
+  # eligibility, and _capture_fix_touched says so on stderr.
+  fix_base_tree=$(_tree_id "$repo" 2>/dev/null) || fix_base_tree=""
   ( export REVIEW_ROUND="$round" REVIEW_REPO="$repo" \
            REVIEW_CHANGELIST="$changelist" REVIEW_BLOCKERS="$blockers"; eval "$fix_cmd" ) || {
     print -u2 -- "resolve-story-loop: --fix-cmd failed at round $round"; exit 1 }
+  _capture_fix_touched "$fix_base_tree" "$round" || true
 
   # 6. re-run the gate (optional); red after a fix is an operational abort
   if [[ -n "$test_cmd" ]]; then
@@ -1767,6 +2437,11 @@ done
 local code=1
 case "$loop_status" in
   CONVERGED) code=0 ;;
+  # 14, because 10-13 are taken and 20 is AWAITING_FIX. A distinct code, not a
+  # second 0: the caller must be able to tell "converged clean" from "converged
+  # with residue to file" WITHOUT parsing the status JSON, since the two ask for
+  # different follow-up work.
+  CONVERGED_WITH_RESIDUE) code=14 ;;
   AWAITING_FIX) code=20 ;;
   ESCALATE_CONFLICT) code=11 ;;
   ESCALATE_NO_CONVERGENCE) code=12 ;;

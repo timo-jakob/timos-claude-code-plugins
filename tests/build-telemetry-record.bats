@@ -529,3 +529,71 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "null" ]
 }
+
+# --- #1435: findings_by_round[].by_class -------------------------------------
+
+@test "#1435 by_class counts each residue class for a fully stamped round" {
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED_WITH_RESIDUE","rounds":2,"max_rounds":2,"repo_type":"claude-plugin",
+ "escalation_reasons":[],"history":[],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0,"false_trips":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"x","priority":"High","non_converging":false,"class":"new_defect"}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":3,"low":0,"blocking":3,"conflicts":0,"false_trips":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"y","priority":"High","non_converging":false,"class":"incomplete_propagation"},
+               {"file":"a.zsh","line":9,"dimension":"bugs","title":"z","priority":"High","non_converging":false,"class":"incomplete_propagation"},
+               {"file":"a.bats","line":4,"dimension":"tests","title":"w","priority":"High","non_converging":false,"class":"under_assertion"}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings_by_round[0].by_class == {new_defect:1,incomplete_propagation:0,under_assertion:0}' >/dev/null
+  echo "$output" | jq -e '.findings_by_round[1].by_class == {new_defect:0,incomplete_propagation:2,under_assertion:1}' >/dev/null
+  # residue is a SUCCESS status, so `escalation` (which tests ^ESCALATE_ /
+  # BUDGET_EXHAUSTED) must stay null rather than gaining an arm of its own
+  echo "$output" | jq -e '.status == "CONVERGED_WITH_RESIDUE" and .escalation == null' >/dev/null
+}
+
+@test "#1435 tc-corner-class-unstamped-null: by_class is null on an unstamped round, never zeros" {
+  # a pre-#1435 changelist. Zeros would read as "this round found no new
+  # defects", which is a claim nobody made — the same honest-gap convention
+  # new/carried and false_trips already follow.
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":2,"max_rounds":2,"repo_type":"claude-plugin",
+ "escalation_reasons":[],"history":[],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0,"false_trips":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"x","priority":"High","non_converging":false}],
+   "suggestions":[]},
+  {"round":2,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0,"false_trips":0},
+   "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"y","priority":"High","non_converging":false,"class":"incomplete_propagation"},
+               {"file":"b.zsh","line":2,"dimension":"bugs","title":"z","priority":"High","non_converging":false}],
+   "suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings_by_round[0].by_class == null' >/dev/null
+  # PARTIALLY stamped is unstamped: one classified item does not license a
+  # histogram over the round
+  echo "$output" | jq -e '.findings_by_round[1].by_class == null' >/dev/null
+}
+
+@test "#1435 a zero-blocker round reports by_class zeros, not null (determinately classified)" {
+  # the empty array satisfies "every item is stamped" vacuously, exactly as it
+  # does for the carried/new split — there are no per-item stamps to consult
+  # and the three counts are determinately 0
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":1,"max_rounds":3,"repo_type":"claude-plugin",
+ "escalation_reasons":[],"history":[],
+ "round_changelists":[
+  {"round":1,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0,"false_trips":0},
+   "blocking":[],"suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.findings_by_round[0].by_class == {new_defect:0,incomplete_propagation:0,under_assertion:0}' >/dev/null
+}

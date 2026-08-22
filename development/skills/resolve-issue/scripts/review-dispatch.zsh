@@ -172,9 +172,14 @@ _changed_files() {
   # 2>/dev/null swallow let an unresolvable base degrade to an empty/garbage
   # scope on which the loop happily CONVERGED. Base resolvability is validated
   # up front by _verify_base, so a failure here is a genuine git error.
+  # `-c core.quotePath=false` on both listings (#1435): the default TRUE emits a
+  # non-ASCII path as `"src/caf\303\251.zsh"`, quotes and octal escapes included,
+  # so such a file could never match the plain UTF-8 `.file` a reviewer reports —
+  # it would be silently absent from the scope, and absent from the fix-touched
+  # set that shares this normalisation.
   {
-    "$git_bin" -C "$repo" diff --name-only "$base" -- || return 1
-    "$git_bin" -C "$repo" ls-files --others --exclude-standard || return 1
+    "$git_bin" -C "$repo" -c core.quotePath=false diff --name-only "$base" -- || return 1
+    "$git_bin" -C "$repo" -c core.quotePath=false ls-files --others --exclude-standard || return 1
   } | _normalise_paths
 }
 
@@ -204,7 +209,9 @@ _delta_files() {
   # same normalisation + #909 exclusions as the full scope — `pipefail` is set,
   # so a failing diff-tree still fails the function rather than yielding an
   # empty delta
-  "$git_bin" -C "$repo" diff-tree -r --name-only "$prior" "$cur" | _normalise_paths
+  # same `core.quotePath=false` rule as _changed_files above (#1435)
+  "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r --name-only "$prior" "$cur" \
+    | _normalise_paths
 }
 
 # --- base ref must resolve before it scopes anything (#910) -----------------
