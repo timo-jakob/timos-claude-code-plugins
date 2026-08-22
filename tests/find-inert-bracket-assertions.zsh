@@ -67,15 +67,25 @@
 #
 # ADDING A HELPER therefore means editing, in order:
 #   1. tests/assertions.bash — the definition, plus the LITERAL-vs-REGEX
-#      paragraph, which owes every helper a verdict. Nothing checks that.
+#      paragraph, which owes every helper a verdict, AND the measured
+#      empty-needle table (#1507), which owes every helper a ROW and whose
+#      "three of the five fail open" count is read off it. That table's cells
+#      are measured, so a new helper means RUNNING it with the guard bypassed,
+#      not inferring the row. Nothing checks either of them.
 #   2. this `H`. The roster-sync test reds until you do.
 #   3. tests/README.md — the contributor-facing roster ARCHITECTURE.md
 #      designates the source of truth. A guard test reds until each name is
 #      named there.
-#   4. the PER-HELPER enumerations in tests/assertions.bats (the mismatch
-#      diagnostic and the success-path silence). These are deliberately NOT
-#      derived: each helper reaches the shared printer through a different
-#      construct, so only a human can write the case. A roster-size tripwire in
+#   4. the THREE PER-HELPER enumerations in tests/assertions.bats (the mismatch
+#      diagnostic, the success-path silence, and case-sensitivity — #1507).
+#      These are deliberately NOT
+#      derived: the helpers reach the shared printer by three distinct ROUTES
+#      (a `[[ ]]` with an `|| _assert_mismatch` tail; a `case` arm on the
+#      haystack; a `case` arm on a captured status), and a new helper may SHARE
+#      a route with an existing one — since #1507 `contains` and `lacks` do.
+#      Sharing a route does not make either redundant: a missed rewiring is per
+#      HELPER, not per construct, so each still needs its own case and only a
+#      human can write it. A roster-size tripwire in
 #      that file reds until you update its count — the red is the instruction,
 #      not a check that you wrote the cases.
 # Steps 2 and 3 are verified. Step 4 is prompted but not verified, and the
@@ -110,11 +120,17 @@
 #     offender (#1068), same as any other block line; a single-statement one-liner
 #     with no offender in it is unaffected either way.
 #   * a helper function defined OUTSIDE any scanned block (top-level) is NOT
-#     scanned. For `bracket` that is a sanctioned fix WHEN the `[[ ]]`'s status is
-#     what the function returns — its last command, or one carrying an explicit
-#     `|| return` — because the call site is then a simple command errexit
-#     catches; `contains() { [ … ]; }` and friends are the answer rather than the
-#     defect. A `[[ ]]` whose status the function DISCARDS is as inert as one in a
+#     scanned. For `bracket` that is a sanctioned fix WHEN the `[[ ]]`'s FAILURE
+#     becomes the function's non-zero status — it is the last command, or its
+#     `||` tail ITSELF returns non-zero (`|| return 1`, or a call that ends in
+#     one), or its status is captured and dispatched (`|| rc=$?` then a `case`)
+#     — because the call site is then a simple command errexit catches;
+#     `contains() { [[ "$1" == *"$2"* ]] || _assert_mismatch …; }` and friends
+#     are the answer rather than the defect (`_assert_mismatch` ends in
+#     `return 1`, which is what carries the failure — #1507 moved these two off
+#     a `[ ]`, and the criterion, not the construct, is what makes the shape
+#     safe). An `||` tail that SUCCEEDS discards the failure and the helper
+#     returns 0 always. A `[[ ]]` whose status the function DISCARDS is as inert as one in a
 #     test body and, being unscanned, is missed (FALSE NEGATIVES, below). For
 #     `and-tail` the unscanned-ness is a plain false negative in every case —
 #     wrapping `contains … && true` in a function does not rescue it, it only

@@ -120,11 +120,16 @@ extract() {
 }
 
 # FILE contains the literal (single-line) string $2. Used instead of
-# `run cat "$FILE"` + `contains` for WHOLE-file checks: `contains` is a
-# `${1#*"$2"}` parameter expansion, which is pathologically slow on a
-# 280 KB-plus ARCHITECTURE.md under the bash 3.2 macOS ships — slow enough to
-# hang the suite rather than fail it. `contains` stays correct (and fast) on the
-# small extracted sections above. Same helper as tests/identity-position.bats;
+# `run cat "$FILE"` + `contains` for WHOLE-file checks because `grep` reports
+# WHERE the string is and avoids slurping a 280 KB-plus file into `$output`,
+# which no assertion needs to hold.
+#
+# It used to be justified by cost as well — `contains` was a `${1#*"$2"}`
+# parameter expansion, quadratic on bash 3.2 and slow enough to hang the suite
+# rather than fail it. #1507 fixed that (`contains`/`lacks` are now
+# `[[ "$1" == *"$2"* ]]` / `!=`, 0.0205 s on a 380 KB haystack), so do NOT reach
+# for a bespoke grep helper on performance grounds any more. Same shape as
+# tests/identity-position.bats's helper, plus the readability guard below;
 # the explicit empty-needle guard matters because `grep -qF ''` matches every
 # non-empty file and would turn the assertion into an unconditional pass.
 file_has() {
