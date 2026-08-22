@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 #
 # Behavioural tests for tests/assertions.bash (#1011) — the shared assertion
-# helpers that the 285 swept assertions (across 41 suite files) now depend on.
+# helpers that the 285 assertions #1011 swept (across 41 suite files) first
+# depended on, and that ~4900 call sites depend on today. Where this file cites
+# 285 it means the historical sweep, never the current dependency count.
 #
 # WHY THIS FILE EXISTS: every call site in the suite is a TRUE assertion, so a
 # helper that regressed to "always succeed" would keep the whole suite green
@@ -75,8 +77,11 @@ bracket_errexit_here() {
 }
 
 @test "contains/lacks match LITERALLY, never as a glob (#1011)" {
-  # `[worktree]` would be a character class under `case`-glob matching — the
-  # exact semantic drift the literal implementation exists to prevent.
+  # `[worktree]` would be a character class if the `"$2"` in
+  # `[[ "$1" == *"$2"* ]]` were unquoted — the exact semantic drift the literal
+  # implementation exists to prevent. (Pre-#1507 the same risk was described
+  # against `case`-glob matching; `contains`/`lacks` use neither `case` nor the
+  # `${1#*"$2"}` form now.)
   contains "a [worktree] b" "[worktree]"
   lacks "a worktree b" "[worktree]"
   contains "a*b" "*"
@@ -84,6 +89,214 @@ bracket_errexit_here() {
   lacks "abc" "a?c"
   contains "a.c" "."
   lacks "abc" "."
+}
+
+@test "contains/lacks: every glob metacharacter is literal, hit AND miss (#1507)" {
+  # #1507 swapped `${1#*"$2"}` for `[[ "$1" == *"$2"* ]]`, where the literalness
+  # rests ENTIRELY on the quotes around `$2` — drop them and each needle below
+  # silently becomes a pattern. The old idiom could not glob at all, so a
+  # globbing implementation is a NEW failure mode that only a test can catch.
+  #
+  # DELTA against "contains/lacks match LITERALLY" above, so neither is mistaken
+  # for redundant: that test covers `*`, `?` and `.` in one direction each. This
+  # one adds the `[worktree]` and `\` metacharacters, both DIRECTIONS for every
+  # case, and both HELPERS — an unquoted `*` would make `contains "abc" "*"`
+  # pass (glob: matches anything) and `lacks "abc" "*"` fail, so the miss half
+  # is what actually catches it; a hit-only test stays green under a globbing
+  # implementation for `*` and `?`.
+
+  # `[worktree]` — a character class if unquoted, so it would match the single
+  # characters w/o/r/k/t/e, none of which is the literal string.
+  contains "a [worktree] b" "[worktree]"
+  run contains "a worktree b" "[worktree]"
+  [ "$status" -eq 1 ]
+  lacks "a worktree b" "[worktree]"
+  run lacks "a [worktree] b" "[worktree]"
+  [ "$status" -eq 1 ]
+
+  # `*` — matches EVERYTHING if unquoted, so the miss half is the real test.
+  contains "a*b" "*"
+  run contains "abc" "*"
+  [ "$status" -eq 1 ]
+  lacks "abc" "*"
+  run lacks "a*b" "*"
+  [ "$status" -eq 1 ]
+
+  # `?` — matches any single character if unquoted; "abc" has three, so an
+  # unquoted needle would make the miss half pass.
+  contains "a?b" "?"
+  run contains "abc" "?"
+  [ "$status" -eq 1 ]
+  lacks "abc" "?"
+  run lacks "a?b" "?"
+  [ "$status" -eq 1 ]
+
+  # `\` — the escape character, and the one whose behaviour inside a quoted
+  # `[[ ]]` pattern is least obvious. Verified on bash 3.2.57: quoted, it is a
+  # literal backslash.
+  #
+  # SPELT `"\\"`, NEVER `'\'`, though both are one backslash to the shell.
+  # tests/find-inert-bracket-assertions.zsh's quote-parity walker treats `\` as
+  # an escape even inside single quotes, so a line ending `'\'` reads to it as
+  # an unclosed literal: it then swallows the FOLLOWING line as string data and
+  # judges nothing on it. Verified — with `'\'` here, a planted inert
+  # `[[ "a" == "b" ]]` on the next line went unreported while the scan exited
+  # clean, which is the false-clean the repo-wide guard in
+  # tests/no-inert-bracket-assertions.bats exists to prevent (an ODD number of
+  # such lines is worse still: it desyncs the whole scan, exit 2). `"\\"` is
+  # balanced to that walker and identical to bash.
+  contains 'a\b' "\\"
+  run contains "abc" "\\"
+  [ "$status" -eq 1 ]
+  lacks "abc" "\\"
+  run lacks 'a\b' "\\"
+  [ "$status" -eq 1 ]
+}
+
+@test "contains/lacks are CASE-SENSITIVE — the property #1507 newly put at risk" {
+  # `[[ "$1" == *"$2"* ]]` honours `shopt -s nocasematch`; the `${1#*"$2"}` form
+  # it replaced does not. Verified on bash 3.2.57: with the option set,
+  # `[[ ABC == *a* ]]` matches while `${v#a}` on `ABC` returns `ABC` unchanged.
+  # So case-sensitivity went from structurally guaranteed to merely
+  # currently-true, and without this test nothing in this file would notice it
+  # changing: every other needle/haystack pair here is same-case, so the
+  # mutation `shopt -s nocasematch` inside `contains` leaves THIS FILE green.
+  # (Measured, not surveyed: with this test present that mutation reds it and
+  # only it.)
+  #
+  # What that would cost: ~4900 helper call sites across the suite (~4100 of
+  # them `contains`, in 86 files), many of them `contains "$output" "ERROR"`-
+  # shaped, would start matching lowercase prose — an assertion that a script
+  # emitted an uppercase marker would pass on text that never contained it.
+  # That is the vacuous-assertion class this library exists to remove, so it
+  # gets a pin of its own. (Counted with
+  # `grep -rhoE '\b(contains|lacks|starts_with|ends_with|matches)[[:space:]]+"'
+  # tests/*.bats | wc -l` — not to be confused with the 285 assertions the
+  # ORIGINAL #1011 sweep converted, which several comments in this file still
+  # cite as the historical figure it is.)
+  #
+  # `starts_with`/`ends_with`/`matches` share the exposure (`case` and `[[ =~ ]]`
+  # are both nocasematch-sensitive), so they are pinned here too.
+  run contains "HELLO WORLD" "hello"
+  [ "$status" -eq 1 ]
+  run contains "hello world" "HELLO"
+  [ "$status" -eq 1 ]
+  lacks "HELLO WORLD" "hello"
+  lacks "hello world" "HELLO"
+
+  # The positive controls: same case still matches, so the assertions above are
+  # pinning case-sensitivity rather than a helper that stopped matching at all.
+  contains "HELLO WORLD" "HELLO"
+  contains "hello world" "hello"
+  run lacks "hello world" "hello"
+  [ "$status" -eq 1 ]
+
+  run starts_with "HELLO world" "hello"
+  [ "$status" -eq 1 ]
+  starts_with "HELLO world" "HELLO"
+  run ends_with "hello WORLD" "world"
+  [ "$status" -eq 1 ]
+  ends_with "hello WORLD" "WORLD"
+  run matches "HELLO" '^hello$'
+  [ "$status" -eq 1 ]
+  matches "HELLO" '^HELLO$'
+}
+
+@test "contains/lacks do not go QUADRATIC on a large haystack — the #1507 perf pin" {
+  # THE REGRESSION THIS EXISTS FOR. `contains`/`lacks` used to test for a
+  # substring with `[ "${1#*"$2"}" != "$1" ]`, which on bash 3.2 — the bash this
+  # suite is guaranteed to run under, and what `#!/usr/bin/env bash` resolves to
+  # on macOS — is QUADRATIC in the haystack length.
+  #
+  # ALL FIGURES: bash 3.2.57 (`/bin/bash`, arm64-apple-darwin25), on an idle
+  # machine. The new form's per-call costs are AMORTISED over 100 calls, because
+  # a single timed call is dominated by measurement overhead — an earlier draft
+  # of this comment quoted 0.06 s from an unamortised run and then drew a
+  # headroom claim off it that was ~50x wrong. The old form's costs are single
+  # calls, where overhead is irrelevant at that scale.
+  #
+  #   380 KB `ARCHITECTURE.md`, slurped into a variable:
+  #     old  `${1#*"$2"}`      57      s (hit)  94 s (miss)   [single call]
+  #     new  `[[ == *"$2"* ]]`  0.0205 s        same (miss)   [100-call mean]
+  #
+  #   THIS test's own 512 KB haystack:
+  #     old  `${1#*"$2"}`     177      s (hit) 193 s (miss)   [single call]
+  #     new  the 20 calls below, END TO END:  0.607 s
+  #
+  # So the bound below is crossed by ONE old-idiom call and not by twenty new
+  # ones. A full quadratic regression would take ~62 minutes to run this test.
+  #
+  # This was the whole gate's wall-clock floor: five such calls on
+  # `ARCHITECTURE.md` in tests/kubernetes-topic-marker.bats cost 9 minutes
+  # (541 s -> 10 s after the fix), and `run-gate.zsh` runs files in parallel, so
+  # that one file bounded every review round of every story. Full gate:
+  # 1096 s -> ~350 s (post-fix runs measured 351-374 s; the gate's own
+  # wall-clock varies run to run, so treat it as ~6 min, not an exact figure).
+  #
+  # WHY THE BOUND IS 30 s AND NOT 2 s. Two effects put a tight bound inside its
+  # own noise, and a perf pin that reds spuriously gets deleted or `skip`ped —
+  # which is how the pin is really lost. (1) `SECONDS` is integer and truncated
+  # at both ends, so a genuine 0.6 s run can report 1, and a 1.2 s run 2.
+  # (2) `run-gate.zsh` runs this file under `--jobs <CPU count>`, so these calls
+  # compete with every other bats file on the box. 30 s is ~50x the measured
+  # 0.607 s and still ~6x BELOW one old-idiom call, so it separates the two
+  # implementations without being reachable by jitter.
+  local hay
+  hay="0123456789abcdef"
+  while [ "${#hay}" -lt 409600 ]; do hay="$hay$hay"; done
+  # The needle sits at the very END, so a matching call cannot short-circuit
+  # early — the worst case for `contains`, and the same work `lacks` does when
+  # it succeeds.
+  hay="${hay}NEEDLE-AT-THE-VERY-END"
+  # Pin the size the figures above were measured at, not merely the >= 400 KB
+  # the story asks for: the doubling loop lands on 524288 + 22 deterministically,
+  # so a future edit that shrank the haystack would quietly cut the pin's margin
+  # while a `-gt 409600` check stayed green.
+  [ "${#hay}" -eq 524310 ]
+
+  local bound=30
+  local start elapsed i
+  start=$SECONDS
+  i=0
+  while [ "$i" -lt 10 ]; do
+    contains "$hay" "NEEDLE-AT-THE-VERY-END"
+    lacks "$hay" "zz-definitely-absent-zz"
+    i=$(( i + 1 ))
+    # Bail once the bound is crossed, checked at the END of each iteration —
+    # so the granularity is one iteration (two calls), not one call. Under the
+    # regression this exists to catch that means ~370 s (177 + 193) before the
+    # bail fires, which is 12x the bound but still far better than running all
+    # twenty quadratic calls (~62 minutes) while holding a parallel job slot,
+    # where an outer timeout would kill the test before it could report.
+    elapsed=$(( SECONDS - start ))
+    if [ "$elapsed" -ge "$bound" ]; then break; fi
+  done
+  elapsed=$(( SECONDS - start ))
+
+  if [ "$elapsed" -ge "$bound" ]; then
+    # Report the calls ACTUALLY made. The loop bails early, so on the very
+    # failure this test exists for only 2 of the 20 calls have run — a message
+    # hardcoding "10 + 10" would understate the per-call cost by 10x and invite
+    # the reader to dismiss a real regression as jitter.
+    printf '%s contains + %s lacks over a %s-character haystack: %ss (bound %ss).\n' \
+      "$i" "$i" "${#hay}" "$elapsed" "$bound"                                    >&2
+    if [ "$i" -lt 10 ]; then
+      printf 'PARTIAL run: the loop bailed after %s of 10 iterations.\n' "$i"    >&2
+    fi
+    # Two decimals via integer math: a whole-second quotient would print "~1s"
+    # for anything from 1.00 to 1.99 s, which is exactly the band a loaded box
+    # produces and the band the readings below have to tell apart.
+    printf 'Per call that is ~%s.%02ds against ~0.03s on an idle machine (the\n' \
+      "$(( elapsed / (i * 2) ))" "$(( elapsed * 100 / (i * 2) % 100 ))"          >&2
+    printf 'full 20 calls measure 0.607s there). A per-call cost in the\n'        >&2
+    printf 'MINUTES means the quadratic `${1#*"$2"}` idiom is back in\n'          >&2
+    printf 'tests/assertions.bash — fix that. ANY per-call cost below the\n'      >&2
+    printf 'minutes range — near the idle figure or a few times it — means a\n'   >&2
+    printf 'loaded box or a sub-quadratic slowdown: re-run once on an idle\n'     >&2
+    printf 'machine, and if it still exceeds the bound there, bisect the\n'       >&2
+    printf 'helper. Raising the bound is never the fix (#1507).\n'                >&2
+    return 1
+  fi
 }
 
 @test "the literal helpers work on a MULTI-LINE haystack (#1011)" {
@@ -144,13 +357,18 @@ abc" '^abc$'
 # --- the roster tripwire ----------------------------------------------------
 
 @test "adding a helper reds THIS file until the count is updated (#1067)" {
-  # The misuse loops derive their roster, but the two diagnostic tests below —
-  # mismatch output and success-path silence — are deliberate per-helper
-  # ENUMERATIONS, because each helper reaches the shared printer through a
-  # different construct (a `[ ]`, a `case` arm, a `[[ ]]`) and a missed rewiring
+  # The misuse loops derive their roster, but THREE tests in this file —
+  # mismatch output, success-path silence, and case-sensitivity (#1507) — are
+  # deliberate per-helper
+  # ENUMERATIONS, because the helpers reach the shared printer by THREE distinct
+  # routes: a `[[ ]]` whose `|| _assert_mismatch` tail calls it (`contains`,
+  # `lacks`), a `case` arm on the HAYSTACK (`starts_with`, `ends_with`), and a
+  # `case` arm on a CAPTURED STATUS (`matches`, which must also keep misuse (2)
+  # distinct from a mismatch (1)). Two helpers sharing a route does NOT make
+  # either redundant — a missed rewiring is per HELPER, not per construct, and
   # would leave exactly one of them silently mute. A derivation cannot write
   # those cases; only a human can. So pin the COUNT: a sixth helper reds this
-  # test, and the red is the INSTRUCTION to go extend both enumerations — it
+  # test, and the red is the INSTRUCTION to go extend all three enumerations — it
   # cannot verify that you did, and bumping the number alone turns it green
   # again. Without it the detector-side sync test would force `H` to be updated
   # while this file, the one that actually pins behaviour, stayed green and
@@ -159,9 +377,10 @@ abc" '^abc$'
   n="$(printf '%s\n' $HELPERS | wc -w | tr -d ' ')"
   if [ "$n" -ne 5 ]; then
     printf 'The helper roster changed (%s helpers: %s).\n' "$n" "$HELPERS"        >&2
-    printf 'Extend the per-helper enumerations in this file — "every helper\n'    >&2
-    printf 'prints needle and haystack on a mismatch" and "a matching helper\n'   >&2
-    printf 'prints nothing at all" — then update this count.\n'                   >&2
+    printf 'Extend the THREE per-helper enumerations in this file — "every\n'     >&2
+    printf 'helper prints needle and haystack on a mismatch", "a matching\n'      >&2
+    printf 'helper prints nothing at all", and "contains/lacks are\n'             >&2
+    printf 'CASE-SENSITIVE" — then update this count.\n'                          >&2
     return 1
   fi
 }
@@ -169,8 +388,12 @@ abc" '^abc$'
 # --- misuse guards ----------------------------------------------------------
 
 @test "every helper rejects a one-argument call with exit 2 (#1011)" {
-  # Without this guard a dropped argument makes lacks/starts_with/ends_with/
-  # matches succeed unconditionally — a vacuous assertion.
+  # Without this guard a dropped argument makes THREE of the five helpers
+  # succeed unconditionally — a vacuous assertion. #1507 SWAPPED which member of
+  # the `contains`/`lacks` pair is on the unsafe side: `contains` joined it
+  # (`[[ "$1" == *""* ]]` matches everything) and `lacks` left it
+  # (`[[ "$1" != *""* ]]` is false, so it fails closed). The count did not grow;
+  # see the measured table in tests/assertions.bash.
   local h
   for h in $HELPERS; do
     run "$h" "haystack"
@@ -224,8 +447,10 @@ abc" '^abc$'
 
 @test "every helper prints needle and haystack on a mismatch (#1067)" {
   # All five, because the printer is shared but each helper has to actually
-  # route its failure through it — `starts_with`/`ends_with` do so from a `case`
-  # arm, `matches` from a `[[ ]]`, and a missed rewiring would leave that helper
+  # route its failure through it — `contains`/`lacks` from a `[[ ]]`'s `||` tail,
+  # `starts_with`/`ends_with` from a `case` arm on the haystack, and `matches`
+  # from a `case` arm on a CAPTURED status (not from its `[[ ]]`, which is
+  # consumed by `|| rc=$?`) — and a missed rewiring would leave that helper
   # silently mute while this file stayed green.
   run --separate-stderr contains "hello world" "zzz"
   [ "$status" -eq 1 ]
@@ -271,10 +496,13 @@ abc" '^abc$'
 }
 
 @test "a matching helper prints nothing at all (#1067)" {
-  # A diagnostic on the SUCCESS path would spam every green run — 285 call sites
-  # of noise — and would show up in `$output` for any `run <helper>` that passes.
-  # All five, for the same reason the mismatch test loops: the success paths are
-  # three different constructs (a `[ ]`, a `case` arm, a `[[ ]]`).
+  # A diagnostic on the SUCCESS path would spam every green run — ~4900 call
+  # sites of noise, today — and would show up in `$output` for any
+  # `run <helper>` that passes.
+  # All five, for the same reason the mismatch test loops: the success paths run
+  # through the same three routes (a `[[ ]]`, a `case` arm on the haystack, a
+  # `case` arm on a captured status), and a helper sharing a route with another
+  # is still its own rewiring.
   run --separate-stderr contains "hello world" "lo wo"
   [ "$status" -eq 0 ]
   [ -z "$output" ]

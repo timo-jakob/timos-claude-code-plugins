@@ -82,22 +82,75 @@
 #
 # Adding one also means updating the copies no derivation can reach: the
 # LITERAL-vs-REGEX paragraph just below, which owes every helper a verdict
-# (nothing checks it), and tests/README.md's roster (a guard test does check
-# that). tests/find-inert-bracket-assertions.zsh's header carries the full
-# checklist.
+# (nothing checks it); the measured EMPTY-NEEDLE table further down, which owes
+# every helper a ROW and whose "three of the five" count is read off it (#1507 —
+# and its cells are measured, so a new helper means running it, not guessing);
+# and tests/README.md's roster (a guard test does check that).
+# tests/find-inert-bracket-assertions.zsh's header carries the full checklist.
 #
 # LITERAL vs REGEX: `contains`, `lacks`, `starts_with` and `ends_with` match
-# LITERALLY — `${1#*"$2"}` and `case` with a quoted pattern both treat `$2` as
-# plain text. That is deliberate: a `case`-based glob would silently reinterpret
-# a literal like `[worktree]` as a character class, which is exactly the kind of
-# quiet semantic drift this file removes. `matches` is the sole exception and
-# takes an ERE — use it only when you actually want a regex.
+# LITERALLY, and in all four the literalness comes from the SAME thing — a
+# QUOTED `"$2"` in a pattern position: `[[ "$1" == *"$2"* ]]` for the first two
+# (#1507), a `case` arm with a quoted pattern for the other two. Both treat `$2`
+# as plain text. That is deliberate: an UNQUOTED `$2` in either construct would
+# silently reinterpret a literal like `[worktree]` as a character class, which is
+# exactly the kind of quiet semantic drift this file removes — so if you ever
+# touch these four, the quotes are the thing not to drop. `matches` is the sole
+# exception and takes an ERE — use it only when you actually want a regex.
+#
+# `contains`/`lacks` used to spell this `${1#*"$2"}`, which is equally literal
+# but QUADRATIC on bash 3.2 (#1507 — see the note on `contains` below for the
+# measured cost). The idiom changed; the literal guarantee did not.
+#
+# CASE-SENSITIVE too — and since #1507 that is a convention rather than a
+# structural guarantee for `contains`/`lacks`. `[[ ]]` and `case` both honour
+# `shopt -s nocasematch`, where parameter expansion does not. Verified on bash
+# 3.2.57: with the option set, `[[ ABC == *a* ]]` and `case ABC in *a*)` both
+# match, while `${v#a}` on `ABC` returns `ABC` unchanged. So a
+# `shopt -s nocasematch` in any calling file's `setup()` would make all five
+# helpers case-insensitive across that file, turning
+# `contains "$output" "ERROR"` into a match on lowercase prose.
+#
+# SO NO TESTS FILE MAY ENABLE IT — a convention today, NOT YET ENFORCED. #1508
+# carries the repo-wide invariant (a `git ls-files` sweep over the tracked
+# `tests/` files); until it lands, nothing reds if a suite file turns the option
+# on, so treat this paragraph as the rule and #1508 as the guard that will make
+# it real.
+#
+# There is no SCOPED exemption to reach for: a case-insensitive comparison needs
+# a `shopt -s` line, and that is exactly what makes every helper in the file
+# case-fold from that point on. If one comparison genuinely needs to ignore
+# case, use `matches` with an ERE that spells both cases, or `grep -i` — do not
+# reach for the option. tests/assertions.bats pins the library-side behaviour
+# (all five helpers, both directions).
 #
 # EVERY helper requires exactly TWO arguments and a NON-EMPTY `$2`, enforced
-# below. Without that guard a dropped argument would make `lacks`, `starts_with`,
-# `ends_with` and `matches` return true unconditionally (bats does not run test
-# bodies under `set -u`, so `$2` would quietly expand to empty) — a vacuous
-# assertion, which is the very defect class this file exists to eliminate.
+# below. Without that guard a dropped argument would make THREE of the five
+# return true unconditionally (bats does not run test bodies under `set -u`, so
+# `$2` would quietly expand to empty) — a vacuous assertion, which is the very
+# defect class this file exists to eliminate.
+#
+# WHICH three changed in #1507, and it is a SWAP, not a widening. Measured on
+# bash 3.2.57 with the guard bypassed — every cell run, none inferred:
+#
+#                empty `$2`   old idiom          new idiom
+#   contains                  1  fails CLOSED    0  fails OPEN
+#   lacks                     0  fails OPEN      1  fails CLOSED
+#   starts_with               0  fails OPEN      0  fails OPEN
+#   ends_with                 0  fails OPEN      0  fails OPEN
+#   matches                   1  fails CLOSED    1  fails CLOSED
+#
+# — because `${1#*""}` leaves `$1` unchanged (so the old `contains` compared
+# equal and failed, while the old `lacks` succeeded), whereas `*""*` matches
+# everything (so the new `contains` succeeds and the new `lacks` does not). The
+# COUNT is therefore three both before and after; `contains` simply took
+# `lacks`'s place on the unsafe side. `matches` is closed on this shell because
+# an empty ERE does not reach its `0)` arm — do not generalise that to other
+# bash versions without re-running the table.
+#
+# If you ever narrow `_assert_args`, `contains` is emphatically not the safe one
+# to exempt — and do not reach for this table to justify calling any helper with
+# an empty needle, since the guard rejects that first, by design.
 
 # Guard shared by every helper. Returns 2, distinct from a genuine mismatch (1),
 # so a caller that pins `$status` can tell misuse from a real failure.
@@ -151,15 +204,55 @@ _assert_mismatch() {
 }
 
 # `$1` contains the literal substring `$2`.
+#
+# WHY `[[ == *"$2"* ]]` AND NOT `${1#*"$2"}` (#1507): the prefix-removal form is
+# QUADRATIC in the haystack on bash 3.2 — the only bash this suite is guaranteed
+# to run under. Measured on bash 3.2.57 against the 380 KB `ARCHITECTURE.md`
+# slurped into a variable: 57 s for a hit and 94 s for a miss, against 0.0205 s
+# either way for the form below (mean of 100 calls — a single timed call is
+# dominated by measurement overhead, and quoting an unamortised figure here is
+# exactly how an earlier draft of tests/assertions.bats drew a headroom claim
+# that was ~50x wrong). That is not a micro-optimisation: five such
+# calls in tests/kubernetes-topic-marker.bats cost 9 minutes, which was the
+# WHOLE GATE's wall-clock floor, paid on every review round of every story.
+#
+# The literal guarantee is unchanged and comes from the QUOTES: `"$2"` inside a
+# `[[ ]]` pattern is matched as plain text, so a needle like `[worktree]` stays a
+# literal bracket expression rather than becoming a character class. Removing
+# those quotes would silently turn every needle into a glob — the exact drift the
+# LITERAL-vs-REGEX paragraph above exists to prevent. tests/assertions.bats pins
+# both halves: the literal semantics (`[worktree]`, `*`, `?`, `\`, hit and miss
+# each) and a perf pin that reds if the quadratic idiom ever comes back.
+#
+# The `[[ ]]` here is the sanctioned form, not a violation of this file's own
+# ban: the ban is about a `[[ ]]` whose status errexit never sees. The rule
+# (tests/find-inert-bracket-assertions.zsh) is ONE thing — the `[[ ]]`'s FAILURE
+# must become the function's non-zero status — and there are three ways to
+# satisfy it:
+#   1. the `[[ ]]` is the function's last command (its status IS the return);
+#   2. it carries an `||` tail that ITSELF returns non-zero — `|| return 1`, or
+#      `|| _assert_mismatch …`, which ends in `return 1`. This is `contains`;
+#   3. its status is CAPTURED and dispatched (`|| rc=$?` then a `case`). This is
+#      `matches`, which needs it to keep misuse (2) distinct from mismatch (1).
+# Case 2 is the one to get right, because it is the one that can be faked: an
+# `||` tail that SUCCEEDS discards the failure entirely, so
+# `has_prefix() { [[ "$1" == "$2"* ]] || printf 'no\n' >&2; }` returns 0 always —
+# a permanently-passing assertion. Nothing scans this file to catch that, so the
+# tail's own status is what you must check when adding a helper.
 contains() {
   _assert_args "$#" "${2-}" || return 2
-  [ "${1#*"$2"}" != "$1" ] || _assert_mismatch "$1" "$2"
+  [[ "$1" == *"$2"* ]] || _assert_mismatch "$1" "$2"
 }
 
 # `$1` does NOT contain the literal substring `$2`.
+#
+# Same idiom, same reason, same literal guarantee as `contains` above — and the
+# miss case is the one that was slowest of all (94 s on a 380 KB haystack),
+# because `lacks` SUCCEEDS precisely when the quadratic scan has to run to
+# completion without finding anything.
 lacks() {
   _assert_args "$#" "${2-}" || return 2
-  [ "${1#*"$2"}" = "$1" ] || _assert_mismatch "$1" "$2"
+  [[ "$1" != *"$2"* ]] || _assert_mismatch "$1" "$2"
 }
 
 # `$1` begins with the literal string `$2`.

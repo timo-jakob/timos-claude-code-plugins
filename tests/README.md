@@ -136,6 +136,7 @@ runs the whole suite once in parallel and exits with bats' real status.
 | `run-script-tests.bats` | Tests the runner's Docker wiring — the IaC toolchain cache mount, its precedence and its guards (#1199); the read-only git dir + git common dir mounts, in a plain clone and in a worktree (#1360) |
 | `no-inert-permission-barriers.bats` | Repo-wide suite lint (#1360) — bans an *unguarded* permission-barrier `chmod` (root bypasses it, so the denial path never runs) and a backticked `@test` description (bats evaluates descriptions) |
 | `assertions.bash` | Shared assertion helpers (`load assertions`) — the sanctioned way to assert (#1011) |
+| `assertions.bats` | Behavioural coverage of those five helpers — both directions, literal-not-glob matching, case-sensitivity, the misuse statuses, the mismatch diagnostic, and the #1507 perf pin |
 | `roster.bash` | Derives the helper roster from `assertions.bash` (`load roster`) — the single source both guards use (#1067) |
 | `prose-lockstep.bash` | Shared normalisation for **propagation invariants** (`load prose-lockstep`) — `prose_body`, `prose_window`, `prose_gate_lines`; strips comment markers and markdown emphasis so a clause wrapped across two `#` lines still matches, and fails closed (exit 2) on an unreadable site (#1432) |
 | `prose-lockstep.bats` | Unit coverage for the above — the normalisations no current sweep exercises (emphasis in a gate, `-F` literalness, the window's forward half, the `## Heading` carve-out) pinned against fixtures (#1432) |
@@ -181,10 +182,14 @@ negation at line start (#829) — so what you follow is the convention, not the
 guard.
 
 Two carve-outs: `[[ ]]` inside a **named helper function** is fine *when its
-status is what the function returns* — its last command, or one carrying an
-explicit `|| return` — because the call site is then a simple command errexit
-catches; a `[[ ]]` whose status the function discards is as inert as one in a
-test body. And `[[ ]]` used as an `if`/`while` **condition** is control flow, not
+failure becomes the function's non-zero status* — it is the last command, or its
+`||` tail itself returns non-zero (`|| return 1`, or a call ending in one, which
+is how `contains` reaches `_assert_mismatch`), or its status is captured and
+dispatched (`|| rc=$?` then a `case`, which is how `matches` keeps misuse
+distinct from a mismatch) — because the call site is then a simple command
+errexit catches; a `[[ ]]` whose status the function discards is as inert as one
+in a test body, and an `||` tail that *succeeds* discards it just as thoroughly.
+And `[[ ]]` used as an `if`/`while` **condition** is control flow, not
 an assertion, so leave it alone (converting it in a file without
 `load assertions` yields 127 and a silently false branch).
 
@@ -207,8 +212,19 @@ command's and bats does not run test bodies under `pipefail`.
 Each helper takes exactly two arguments with a non-empty second one, returns 2 on
 misuse (an uncompilable `matches` pattern included), and on a genuine mismatch
 prints the needle and a truncated haystack to **stderr** — so a CI failure shows
-what the value actually was, not just what it should have contained. More scripts
-(the bash gather, helpers) are follow-on increments of #263.
+what the value actually was, not just what it should have contained.
+
+**Never enable `nocasematch`.** All five helpers match case-sensitively, but
+`[[ ]]` and `case` both honour `shopt -s nocasematch`, so setting it anywhere in
+a test file case-folds every assertion in that file —
+`contains "$output" "ERROR"` would start matching lowercase prose. There is no
+scoped exemption to reach for, since the enabling line is what does the damage:
+if one comparison must ignore case, use `matches` with an ERE spelling both
+cases, or `grep -i`. `assertions.bats` pins the helpers' own case-sensitivity
+(#1507); the repo-wide invariant that no tracked `tests/` file enables it is
+issue #1508, so today this is a convention rather than an enforced rule.
+
+More scripts (the bash gather, helpers) are follow-on increments of #263.
 
 **Guard every permission-barrier `chmod`.** The Docker lane runs as **uid 0**,
 where `chmod` is not a barrier at all: root reads a `chmod 000` file and writes

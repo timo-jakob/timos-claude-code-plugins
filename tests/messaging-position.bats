@@ -86,12 +86,17 @@ extract() {
 # of the other two) plus the retired log-structured one. All three have zero
 # legitimate occurrences outside this file's allowlist.
 #
-# WHY grep AND NOT a collapsed-string `lacks`: the collapse-then-`lacks` idiom
-# the section tests use is fine for a section and pathological for a whole file.
-# `contains`/`lacks` are `${1#*"$2"}`, and bash's prefix removal over a
-# ~230 KB single-line haystack (ARCHITECTURE.md) is quadratic enough to cost
-# ~100 seconds — measured — for one assertion. `grep -i` is the same check in
-# under a second, and it reports WHERE, which the collapsed form cannot.
+# WHY grep AND NOT a collapsed-string `lacks`: `grep -i` reports WHERE the hit
+# is, which the collapsed form cannot, and it does not slurp the whole
+# ARCHITECTURE.md (~380 KB) into a shell variable to answer a yes/no question.
+# Those two reasons are what keep this helper here.
+#
+# The other half of this rationale is HISTORICAL and no longer true: when
+# `contains`/`lacks` were `${1#*"$2"}`, bash's prefix removal over that haystack
+# was quadratic enough to cost ~100 seconds for one assertion (the canonical
+# measurements in tests/assertions.bash put it at 57 s hit / 94 s miss over
+# 380 KB). #1507 replaced the idiom with `[[ "$1" == *"$2"* ]]` / `!=`
+# (0.0205 s on that haystack), so the cost argument is gone — do not cite it.
 #
 # `|| [ "$?" -eq 1 ]` rather than `|| true`: grep exits 1 on a clean no-match and
 # 2 on a REAL error (missing or unreadable file, empty `$1`). `|| true` folds the
