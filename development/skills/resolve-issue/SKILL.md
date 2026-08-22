@@ -1367,7 +1367,35 @@ Each round:
    re-raise of an already-waived suggestion, #1434, and a `- by class:` row —
    new_defect / incomplete_propagation / under_assertion, #1435 — whenever the
    round's blockers are class-stamped, which is what says whether the round found
-   fresh problems or re-read the last fix pass's own edits). Two
+   fresh problems or re-read the last fix pass's own edits).
+
+   **That row is this round's fix-pass trigger (#1496).** Sum the last two
+   rounds' `- by class:` cells — the **literal** last two, the same window
+   `build-escalation.zsh` renders, never reaching back past one to find a
+   stamped pair; summed, never compared per round, since a single round's split
+   is noise. When the totals give
+   `incomplete_propagation + under_assertion >= new_defect`, the loop is mostly
+   re-reading its own last edits, and **rule 2's collapse is MANDATORY for this
+   round's fix pass**: every restatement the round names at **more than two**
+   sites is collapsed to one normative site plus pointers, rather than patched
+   site by site. Rule 2's own threshold still decides which restatements those
+   are — a fact at two sites or fewer is corrected in place, because collapsing
+   it would rewrite prose no finding named.
+
+   **If either of those two rounds is absent, the histogram is absent** — round
+   1, an unstamped round, or a pre-#1435 work-dir — and then **only rule 2's
+   collapse relaxes to advisory**: a restatement at more than two sites may be
+   corrected in place instead. **Rules 1, 3 and 4, and the ban on adding
+   surface, bind every fix pass** whatever the histogram says — rule 3 in
+   particular is absolute, so a stale count is never fixed by updating the
+   numeral, on any round. A round is absent only when it **had**
+   blockers and none of them carries a `class` stamp: a **zero-blocker** round
+   counts as `0/0/0` and is present, even though `progress.md` omits its row
+   (`build-escalation.zsh` renders it as zeros in the summary table, where a
+   `–` cell — an en dash, as that script emits — is the stamp-less sentinel).
+   **Otherwise the histogram is present.**
+
+   Two
    false-trip shapes to narrate: an **escalating possible false trip** — a
    carried match with no shared (non-empty) prior title that is still
    ambiguous (#913/#969) — can only appear on an *escalating* round (an
@@ -1382,9 +1410,86 @@ Each round:
    step 2 implements — **sibling-sweeping each blocker's pattern across the whole
    diff and fixing every instance this round** (#982), so a repeating defect is
    cleared in one round, not dribbled across several — Low suggestions never
-   loop — re-run the full gate (on a
-   plugin repo, keep its green `tree` for the next `--resume`'s `--gate-attest`,
-   #981; other stacks have none), and go to 1 for the next round's panel.
+   loop — while **subtracting rather than adding**, per the rule stated
+   immediately below. Then re-run the full gate (on a plugin repo, keep its
+   green `tree` for the next `--resume`'s `--gate-attest`, #981; other stacks
+   have none), and go to 1 for the next round's panel.
+
+   **A fix pass subtracts (#1496) — it deletes, narrows or collapses; it never
+   adds arms, cases, flags, paragraphs or restatements.** #982 above says how
+   *wide* to fix (every sibling instance of the pattern); this says **what a fix
+   pass may add inside the files it already owns**, and the answer is nothing.
+   How far the file set may **spread** is bounded here too, because rule 2's
+   collapse necessarily edits files the blocker never named: a fix pass may edit
+   the sites of the facts this round's findings name — including, per #982
+   above, every sibling instance of a pattern a finding names — and no others.
+   A pass that grows surface is writing the next round's findings: across the
+   #1435 session's fresh cycle, the share of each round's blockers sitting in
+   text the previous fix pass had just written *rose* 0.77 -> 0.82 -> 0.86, and
+   roughly half of the cycle's findings were restatement or propagation drift.
+   Four rules, and the list is closed:
+
+   1. **New behaviour is parked, not applied.** A finding whose smallest fix
+      introduces a new flag, a new branch or arm, a new rule paragraph or a new
+      enumeration is **not** implemented in this fix pass. Park it (below) and
+      fix what is already there. **Three things override this, and all three
+      are somebody asking for the surface on purpose**: the story's own
+      acceptance criteria, a human's granted-round guidance, and a
+      human-promoted suggestion. Apply those and name them as such in the round
+      narration — parking what a human explicitly asked for is not restraint,
+      it is refusing the work.
+   2. **A stale restatement at more than two sites is fixed by removal plus a
+      pointer, never by correcting the copy in place** — keep **one** normative
+      site and make every other site point at it. Correcting the copy leaves N
+      sites to drift again next round, which is how one clause consumed rounds
+      7, 8 and 9 of the #687 run. **At two sites or fewer**, correct both copies
+      in this same pass and add no pointer: a pair is the shape #1432's
+      propagation invariants bless, and collapsing it would rewrite prose the
+      finding never named.
+   3. **A stale count is fixed by naming instead of counting, never by updating
+      the numeral.** "three arms", "five shapes", "both conditions" — replace
+      the tally with the names, or with nothing. The #1435 session's
+      counted-enumeration defect recurred in four consecutive rounds; the first
+      three fixes corrected the numeral, the fourth removed it, and only the
+      fourth ended it.
+   4. **A test-dimension finding is fixed with the ONE assertion the finding
+      names** — never a new helper, fixture family or counter, which is itself
+      reviewable next round. That is #1433's regress bar restated for the fix
+      side: the cheapest assertion that would have caught the defect, and
+      nothing more.
+
+   **Parking, concretely — and never silently. File it NOW, not at a terminal.**
+   The moment you park a finding, open its follow-up with `gh issue create`
+   (labelled `needs-refinement`, since a finding title is not a story) and
+   append a one-line `- parked: <title> -> #<issue>` note to
+   `<work-dir>/progress.md` yourself — the work-dir is outside the repo, so the
+   note cannot move the tree identity. No new artifact and no new script:
+   `render-progress-block.zsh` owns the round block above it, and
+   `fix-touched-<round>.txt` is a path list `consolidate-findings.zsh
+   --fix-touched` reads, so never write a note into either. **File it once.**
+   The finding is parked again on every later round, so reuse the number from
+   the earlier `- parked:` note instead of opening a second issue.
+
+   **Filing at a terminal would never happen**, which is why it is not the rule.
+   A parked blocker stays in the changelist and the next round re-raises it
+   unchanged, so the run trends toward `ESCALATE_NO_CONVERGENCE` — where no PR
+   opens and no terminal arm fires. Residue cannot rescue it either: a parked
+   blocker sits in a file the fix pass deliberately did **not** write, so it
+   fails the residue condition by construction. Narrate it as
+   parked-with-issue on every later round, and read a run whose only remaining
+   blockers are parked-with-issue items as escalating **by design** — the
+   escalation asks a human whether the surface should be added after all, which
+   is the decision rule 1 declined to make alone. The issue exists either way,
+   which is the whole point: a park nobody filed is a finding the run dropped.
+
+   **The rule binds this fix pass, not the story.** It is about what a *round*
+   may add while converging, so the surface rule 1's overrides license is
+   implemented and reviewed like any other code: a story's own criteria in §2,
+   a human's ask in **this** fix pass, each reviewed by the round that follows
+   rather than smuggled in unreviewed. The #1435 session's own
+   `--findings-tree` flag arrived in a fix pass with no review and cost eight
+   blockers in the next cycle's round 1;
+   that is the shape rule 1 refuses.
 
    **The fix pass is captured for you (#1435), and it needs nothing from you.**
    The loop stamped the pre-fix tree identity at this `AWAITING_FIX` and diffs it
@@ -2195,7 +2300,12 @@ orphaned.
    `--work-dir`** and a **`--status-file` path distinct from the blocking
    phase's kept status JSON** (the `rm -f` below deletes **the promotion status
    file**, and §6 still needs the blocking-phase one), the same `--test-cmd`,
-   the round protocol above — adding `--promote`.
+   the round protocol above — adding `--promote`. Its fix passes are bound by
+   *A fix pass subtracts* (§3.5's round protocol, step 3)
+   exactly like the blocking phase's — with the human's promoted picks among
+   the overrides rule 1 names, so a pick whose smallest fix really is a new arm
+   is applied rather than parked back to the person who asked for it. Read the
+   rule there; it is not restated here.
 
    **Do not run the command below yet.** Round 1's `--findings-file` is the
    **seeded** file built by the ordered procedure that follows, and a
@@ -2636,6 +2746,13 @@ alongside the summary so the human still sees the story's full cost:
    report) — run the next round's panel in-session (round protocol step 1) to
    produce its findings file, then resume the loop — same `--work-dir`,
    `--resume`, ceiling raised by 3 — and increment `grants`.
+   That fix pass is bound by
+   *A fix pass subtracts* (§3.5's round protocol, step 3)
+   like any other, and a granted round is where it is likeliest to be ignored.
+   The grant buys a fix pass, not a redesign, and the human's guidance is
+   direction for what to **remove** as readily as for what to correct — but
+   guidance that asks for surface is one of rule 1's overrides, so it is
+   applied, not parked. Read the rule there; it is not restated here.
    **The grant raises the *ceiling* by 3, not the remaining rounds**:
    after a `BUDGET_EXHAUSTED` (round == `max_rounds`) that is
    exactly three more rounds (ceiling 8 after the default budget, rounds 6-8),
