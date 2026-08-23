@@ -7,18 +7,35 @@ on work that still has open review blockers.
 
 ## What one round does
 
-1. **Review** — a language-appropriate reviewer panel inspects the change and
-   emits findings (bugs, security, performance, code quality, tests — plus
-resilience on the service languages, and Swift-6 compliance on Swift). The
-   panel runs as visible in-session agents, never as a hidden background
-   process.
-2. **Consolidate** — findings are de-duplicated and split into **blockers**
-   (Critical + Warning) and **Suggestions**. Only blockers drive the loop;
-   suggestions are logged and not looped on — unless a human explicitly
-   promotes one afterwards (see [Promoting a suggestion](#promoting-a-suggestion)).
-3. **Fix** — if there are blockers, an implementor pass fixes them.
-4. **Re-test** — the full test suite runs again; a fix that breaks anything
-   aborts the loop rather than shipping.
+1. **Review — and re-test, alongside it.** A language-appropriate reviewer panel
+   inspects the change and emits findings (bugs, security, performance, code
+   quality, tests — plus resilience on the service languages, and Swift-6
+   compliance on Swift), while the full test suite runs against the same tree at
+   the same time. The panel runs as visible in-session agents, never as a hidden
+   background process; the *suite* is the one thing that does run in the
+   background, because it is a deterministic test run rather than a model-driven
+   step.
+2. **Consolidate** — and this is what waits for the suite. Findings are
+   de-duplicated and split into **blockers** (Critical + Warning) and
+   **Suggestions**. Only blockers drive the loop; suggestions are logged and not
+   looped on — unless a human explicitly promotes one afterwards (see
+   [Promoting a suggestion](#promoting-a-suggestion)).
+3. **Fix** — if there are blockers, an implementor pass fixes them, and the next
+   round's boundary re-tests what it wrote. A suite that comes back red discards
+   that round's findings and restarts the boundary; a fix that cannot be made
+   green abandons the run rather than shipping.
+
+**The gate and the panel run concurrently.** Both only *read* the working tree,
+so a round boundary mints one tree identity, starts the full suite in the
+background and dispatches the panel against that same tree, instead of making
+the panel queue behind the suite. Nothing about the gate changes — the whole
+suite still runs on every round that applied a fix, and consolidation still
+waits for it to come back green — so what is saved is the shorter of the two,
+per round; §3.5 carries the measured figure. The one cost is that a **red** gate
+discards that round's panel findings, because they describe a tree the fix is
+about to supersede; the round restarts from a fresh mint.
+`/development:resolve-issue` §3.5's round protocol states the ordering and the
+red-gate arm, and nothing here restates them.
 
 **A fix pass subtracts.** Step 3 is allowed to delete, narrow or collapse; it is
 not allowed to grow the change. A finding whose smallest fix would have to add

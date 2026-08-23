@@ -25,11 +25,12 @@ disable-model-invocation: false
 
 You turn a filed **issue** into a merge-ready **PR** — or an **epic** into a
 sequence of them — with the story **gated for readiness up front** and the
-implementation **tested before it ever reaches review**. You **compose**
-existing skills rather than reinvent them: `story-readiness` for the readiness
-gate, `git-branch-naming` for the branch, the `commit` conventions for the
-message, and **`/development:open-pr`** for the bot-authored PR. The novel part
-is the gate → branch → implement → validate flow, plus the epic orchestration.
+implementation **tested before it is ever committed or pushed**. You
+**compose** existing skills rather than reinvent them: `story-readiness` for
+the readiness gate, `git-branch-naming` for the branch, the `commit`
+conventions for the message, and **`/development:open-pr`** for the
+bot-authored PR. The novel part is the gate → branch → implement → validate
+flow, plus the epic orchestration.
 
 **User input:** $ARGUMENTS — a single issue number / URL, or an epic's.
 
@@ -620,7 +621,16 @@ per round; your fix pass must clear all of them per round to match.
 
 ### 3. Validate — the per-issue gate (do NOT skip)
 
-Run the repo's own test + lint gate and **only proceed when green**. Detect what
+Run the repo's own test + lint gate and **only proceed when green**. Green
+gates **consolidating and committing**, not dispatching the panel: from §3.5's
+round boundary on, this gate runs while that round's reviewer panel is already
+working — *The round boundary is concurrent* (§3.5), which states the ordering.
+Round 1's boundary therefore **begins here**, and what it starts is the
+**whole-suite `<full gate>` alone**, not this whole list: run the checks below
+that **write** into the tree first — `pre-commit` with fixing hooks, any C4
+revisit, the docs build — then mint `T` (the round boundary's step 1) and start the
+suite. Where the *suite itself* writes, §3.5's *The `<full gate>` SUITE writes
+into the tree* bullet governs instead and the mint follows the gate. Detect what
 applies and run it:
 
 - pre-commit hooks (`pre-commit run --all-files`, or the staged subset),
@@ -643,7 +653,11 @@ applies and run it:
     so the loop skips a byte-identical re-run of the exact same tree it already
     proved green — the single biggest per-round duplicate the #976 session paid.
     It is a plain identity, not a verdict; `exit`/`ok` counts remain the pass
-    signal, and the loop re-runs the gate on any mismatch (fail-closed).
+    signal, and the loop re-runs the gate on any mismatch (fail-closed). From
+    §3.5's round boundary on, that identity is the `T` minted **before** this
+    gate was started, and the gate's `tree` field is what confirms it — see
+    *The round boundary is concurrent* (§3.5), which states the ordering; this
+    step restates none of it.
 - **relay a DEGRADED gate to the user, up front (#980).** `run-gate.zsh`'s
   stdout summary carries a `"mode"` field. When it is `"sequential-degraded"`
   (GNU `parallel` is not installed), the gate still ran the **whole** suite at
@@ -726,9 +740,11 @@ body.
 
 ### 3.5 Review loop — local, pre-push (do NOT skip unless `--no-review`)
 
-Once the gate is green, run the **local review loop** before committing or
-pushing anything, so a PR is only opened on code a reviewer panel has already
-converged on (no CI minutes spent on unconverged work). Drive
+Once §3's gate is **under way**, run the **local review loop** before
+committing or pushing anything, so a PR is only opened on code a reviewer panel
+has already converged on (no CI minutes spent on unconverged work). *Under way*,
+not *green*: the round boundary starts the gate and the panel together (below),
+and it is **consolidation** — never the panel — that waits for green. Drive
 `development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — the
 state machine (constants `MAX_REVIEW_ROUNDS=5`, `BLOCKING_SEVERITIES=(CRITICAL
 WARNING)`) — in **step mode** (#971): one invocation per round, with every
@@ -738,9 +754,214 @@ for any model-driven step, and **never** run the loop as a long-lived
 background task spanning rounds. The user must be able to see rounds happen:
 visible review agents, visible fix edits, a narrated summary per round.
 
+Both rules are about **model-driven** steps. The **gate** is not one — it is a
+deterministic test run that only reads the tree — which is why the round
+boundary below runs it in the background on purpose. The loop invocation, the
+panel and every fix pass stay in-session where the user can watch them.
+
 **At loop start, tell the user where to watch:** the loop appends one block per
 round to `<work-dir>/progress.md` — say so once, e.g. "follow along with
 `tail -f <work-dir>/progress.md`".
+
+**The round boundary is concurrent — one minted tree, two readers (#1497).**
+The full-suite gate and the reviewer panel are both **readers** of the working
+tree, so the boundary starts them together instead of making the panel queue
+behind the gate. Nothing about the gate changes: the whole suite still runs on
+every round that applied a fix, a red gate still blocks consolidation, and a
+round is still consolidated only against a tree a green gate proved. What
+changes is that the panel no longer waits for it — worth roughly
+`min(gate, panel)` per round, about ten minutes a round across the #1435
+session's fifteen rounds.
+
+The ordering, and it is the whole of it:
+
+1. **Mint the tree identity once**, before either activity starts. This one
+   value is what both attestations will name:
+
+   ```bash
+   T=$("<skill-base-dir>/scripts/git-tree-id.zsh" .) || T=
+   [ -n "$T" ] || { echo "could not mint a tree identity — report and stop" >&2; exit 1; }
+   ```
+
+   `git-tree-id.zsh` prints **nothing** and exits non-zero when it cannot
+   compute an identity, and its contract is that callers **fail closed** — hence
+   the `exit 1` rather than a bare `echo`, whose zero status would let the
+   boundary carry straight on. An unmintable `T` is a **report-and-stop**, never
+   a restart: it is neither a red gate nor a moved tree, and carrying the empty
+   value forward would silently disarm `--gate-attest` while aborting the loop
+   on `--findings-tree`.
+
+2. **Start the gate out of band**, so that it runs without blocking the panel —
+   the same `<full gate>` command §3 runs. **This step says what the launch must
+   guarantee, and deliberately not how to write one**: four properties, and the
+   shape to reproduce is the `--detach` block of
+   `development-claude-plugin:test`'s `run-headless.zsh` — **a shape reference,
+   never a runner you hand the gate to.** That script only ever launches
+   `claude -p`, which the gate must never be: passing `<full gate>` as its
+   `--prompt` would make the round's verdict a headless model run's exit status
+   rather than the suite's, and §3.5's own first hard rule forbids exactly that.
+   Reproduce the shape; do not invent a third one, and do not re-derive a recipe
+   here.
+
+   - it **survives the turn that started it**. A harness background command may
+     stand in, but only where it is documented to outlive the turn *and*
+     re-invoke the session when it exits — **verify that; never assume it**:
+     `development-claude-plugin:test` records the opposite for Claude Code's
+     Bash `run_in_background` (#811: killed the instant the turn ends,
+     SIGTERM-ing the child mid-run);
+   - it **signals completion only once the verdict is complete**, and the
+     signal is cleared before the launch. A payload that doubles as the signal
+     can be read half-written — the redirection creates the file before
+     anything is in it — and a signal that survives a boundary restart is last
+     round's answer to this round's question; both land on step 5 as a verdict
+     no gate gave. Either separate the two, or rename a fully-written payload
+     into place. The signal means *finished*, **never** *green*;
+   - it **records the verdict where step 5 can read it**: the gate's **exit
+     status** on every stack, plus `run-gate.zsh`'s JSON summary where
+     `<full gate>` **is** `run-gate.zsh` — the only stack that emits one, which
+     is why step 5's `tree` arms are scoped the way they are;
+   - it is **killable — by a handle that stops the SUITE, not merely whatever
+     launched it.** Record that handle beside the signal. A pid naming a
+     supervisor whose child keeps running does not satisfy this, and it is the
+     easy mistake: the reference shape prints its *wrapper's* pid, so a
+     reproduction has to make the recorded handle reach the process actually
+     running the suite. Step 3 has nothing else to work with, because deriving
+     anything from the handle is banned there.
+
+   Two of these the reference shape does **not** demonstrate, and reproducing it
+   naively reproduces the gaps: its marker doubles as the exit-status file, so
+   take from it the detach and the pre-launch clear, not the marker's dual role;
+   and its printed pid is the wrapper's, per the property above.
+
+   Everything it writes goes **outside the repo**, as the work-dir and findings
+   files already do: a byte landing under the worktree between step 1's mint and
+   the gate's own hashing is step 7's drift, every round.
+3. **Plan and dispatch the panel** (the *Each round* panel step below) against
+   that same tree, while the gate is still running. **If that step refuses or
+   aborts the round** — an unreadable carry, a non-zero `plan`, a FAILED panel,
+   an empty `"full"` scope — **stop the gate using the handle step 2 recorded**,
+   rather than waiting on it: a second gate started over a live one
+   oversubscribes the host, and a byte the abandoned suite writes lands after
+   the next mint. **Never derive something to kill from that handle** — on a
+   plain background detach the handle's process group is the driving session's
+   own, and killing it takes down the run. On a round where step 2 was skipped
+   there is no handle and nothing to stop. Do not reuse the gate's result. Then
+   take **that arm's own recovery**, which this step never overrides: several
+   are report-and-stop, and stopping is the whole recovery. Only where the
+   recovery **resumes** the round — a re-planned `plan`, a re-run panel after a
+   fixed FAILED cause, a return from §2 — resume at step 1 here, since the tree
+   may have moved meanwhile. **Unless step 2 was skipped and the recovery did
+   not move the tree**: there the round is still a no-fix round, so re-dispatch
+   against the same held `T` and mint nothing — a fresh mint would forfeit the
+   held `--gate-attest`, which is the self-attestation the invariant forbids.
+4. **Observe the gate's completion before consolidating** — wait for step 2's
+   signal, **with a generous bound** (a full suite runs minutes, not hours),
+   then read the verdict it recorded. What is banned is a poll that runs **while
+   the panel could have been running**: that spends the overlap this boundary
+   exists to buy. A gate whose signal **never arrives**, or whose recorded
+   verdict cannot be read, is neither green nor red: stop it with step 3's
+   handle, do **not** consolidate, and **report and stop** — never read a
+   missing verdict as step 5's empty-`tree` arm. Never consolidate a gate that
+   has not returned.
+5. **Green** → consolidate (the *Each round* loop-invocation step below),
+   passing `--findings-tree "$T"`. Whether `--gate-attest "$T"` rides along is
+   decided by what the gate **reported**, in four arms:
+   - a **plugin repo** whose `<full gate>` **is** `run-gate.zsh` and reported a
+     `tree` — the only stack that reports one — additionally requires that
+     `tree` to equal `T`, and passes `--gate-attest "$T"`;
+   - a plugin repo whose `<full gate>` is **compound** — `run-gate.zsh` plus
+     anything else as one command — consolidates on green with
+     `--findings-tree "$T"` and **omits `--gate-attest` entirely**, whatever
+     `tree` the embedded `run-gate.zsh` reported: the four rules' first rule
+     governs, and a match would skip the whole compound including the parts
+     that run never executed;
+   - a plugin repo whose reported `tree` is **empty** is `run-gate.zsh`'s
+     documented degradation, not drift (it blanks the field when it cannot
+     compute one). Consolidate on green, pass `--findings-tree "$T"`, **omit**
+     `--gate-attest` so the loop runs its own gate — #981's fail-closed
+     direction, unchanged — and relay its stderr note where it printed one;
+   - **every other stack emits no `tree` at all**, so green alone is the
+     condition and `--gate-attest` is **omitted entirely**, per the four rules
+     below.
+6. **Red** → the round is **not** consolidated and **neither** attest is passed.
+   Fix the red (§3's rule is unchanged: green is the precondition, and you
+   abandon and report if you cannot get there), which moves the tree, and
+   **restart this boundary from its step 1**: this round's panel findings
+   describe the superseded tree and are **discarded**. That discard is the one
+   cost of the overlap, and it is agent tokens rather than wall-clock — the red
+   had to be fixed either way, and the next round's panel reads the fixed tree.
+7. **Green on a REPORTED tree that is not `T`** — reachable on a plugin repo
+   only, and only when a `tree` was actually reported (an empty one is step 5's
+   documented-degradation arm, not this). Also **not** consolidated and no attest passed, but
+   there is no red to fix: something moved the tree between the mint and the
+   gate's own hashing. `git-tree-id.zsh` resolves `.` to whichever repo contains
+   the gate's cwd, so the usual causes are a gate started in a **different**
+   worktree or outside the repo entirely, a `--work-dir` or
+   `findings-round-R.json` written **inside** the repo, a gate that writes
+   (below), or a killed gate still flushing. Fix the cause and restart this
+   boundary **once**; a second drifted green is **reported, and you stop** —
+   never a third restart, which would spend the round budget on discarded panels
+   with nothing to fix.
+
+**Two kinds of round take a different boundary, and both are stated here rather
+than qualified into each step.**
+
+- **No fix pass ran since the last boundary** — the zero-blocker closing-sweep
+  promotion (the *Each round* `AWAITING_FIX` step below) and the
+  **findings-file** recovery re-invokes (missing/empty, byte-identical, alias).
+  The tree has not moved: mint nothing and **skip steps 2 and 4** — there is no
+  gate to start and none to wait for. **Step 3 still applies on the
+  closing-sweep promotion**: its full-diff panel is the whole point of that
+  promotion, and skipping it would consolidate a full round with no findings
+  file — which the loop refuses, or which tempts a session into authoring `[]`
+  and converging on a sweep nobody reviewed. Only the findings-file recovery
+  re-invokes skip it too — but only those whose aggregate really is intact (an
+  alias, a wrong path re-passed, a byte-identical file that exists). A
+  missing/empty refusal caused by a panel that **never ran** takes step 3 like
+  any other round, per that recovery's own arm. Then consolidate as at step 5,
+  passing `--findings-tree "$T"` **and**, on a plugin repo whose `<full gate>`
+  **is** `run-gate.zsh`, the held `--gate-attest "$T"` — the previous round's
+  green gate proved that exact `T`, which is the re-run #981's attest-skip
+  exists to remove. **Nothing is held unless that boundary actually passed one**:
+  a compound `<full gate>` omitted it (step 5's compound arm), and so did an
+  **empty reported `tree`** (step 5's documented-degradation arm) — in both
+  cases this round omits it too, since the four rules license `T` only once a
+  gate reported green on that same `T`, which a blanked field never did.
+  Step 5's reported-tree arms do not apply at all, because no gate ran this
+  round. **The CADENCE refusal is not one of these**: it
+  fires *because* the tree moved, so it re-mints `--findings-tree` and holds
+  `--gate-attest`, per the invariant below.
+- **The `<full gate>` SUITE writes into the tree** — a suite that regenerates a
+  fixture, or a compound `--test-cmd` with a fixing step inside it. Fixing
+  `pre-commit` hooks are **not** this case: §3 runs them before the mint, and
+  they are never part of `<full gate>`. A write *after* the mint moves the
+  tree out from under `T`, so run the gate **first** and mint `T` once it has
+  **settled** — on every stack, plugin repos included. Do **not** take
+  `run-gate.zsh`'s reported `tree` there: it is captured *before* the suite
+  runs, on the documented assumption that the suite is read-only, so on a
+  writing gate it names a pre-write tree the panel never sees, and every round
+  would be refused by the cadence guard. Dispatch the panel against the
+  post-settle mint. The serial boundary — correct, and merely slower. `T` is
+  still fixed before the panel reads anything, so the invariant holds; step 5's
+  equality check no longer **gates** consolidation and step 7 does not fire. On
+  a **compound**
+  `<full gate>` `--gate-attest` is **omitted entirely** — the four rules' first
+  rule governs, and a tree match would let the loop skip the whole compound
+  including the parts the attested run never executed. It rides along only where
+  `<full gate>` **is** `run-gate.zsh` and its reported `tree` happens to equal
+  that post-settle mint — omitted otherwise, #981's fail-closed direction.
+
+**At a round boundary the attestation pair is the invariant.** `--gate-attest`
+and `--findings-tree` name the **same minted tree, minted before both** the gate
+and the panel start. A value re-minted after either has run matches the working
+tree trivially and certifies nothing — the self-attestation #981 and #1435 §10
+each forbid. This needs no new flag and no new script: it is an ordering over
+the two flags that already exist. **Outside a boundary the two legitimately
+differ.** The cadence-refusal recovery re-mints only `--findings-tree`; there
+you re-pass the **held** `--gate-attest` (it mismatches, so the loop re-runs the
+gate, which is correct) or omit it — never pass the fresh mint as
+`--gate-attest`, which would skip a gate that never ran on the post-fix tree.
+That is the one recovery the *no fix pass ran* case above excludes.
 
 Each round:
 
@@ -860,8 +1081,10 @@ Each round:
    and it is a different problem.** The scope of a full round *is* the story
    diff, so an empty one means the implementation produced nothing. Do not spawn
    a panel, and do not write `[]` — go back to **§2 (Implement)** and write the
-   code, then re-run §3's gate before returning here; or, if the story genuinely
-   needs no code change, say so and stop. The loop will refuse
+   code, then take this round's boundary again — *The round boundary is
+   concurrent* (§3.5) — which mints `T`, starts the gate and re-dispatches this
+   round's panel together; do not gate to green first. Or, if the story
+   genuinely needs no code change, say so and stop. The loop will refuse
    such a round rather than converge it (`STALE_FINDINGS`, naming the full
    round), so there is nothing to recover by re-running the panel: this is the
    verdict all six panels emit as *the story diff itself is empty*, and its
@@ -959,8 +1182,8 @@ Each round:
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <work-dir> --status-file <status.json> --issue <N> \
      --findings-file <findings-round-R.json> \
-     --test-cmd '<full gate>' [--resume] [--gate-attest <tree>] \
-     [--findings-tree <panel-tree>]
+     --test-cmd '<full gate>' [--resume] [--gate-attest <T>] \
+     [--findings-tree <T>]
    ```
 
    **`--findings-tree` on EVERY step-mode invocation — round 1 included.** It is
@@ -977,10 +1200,15 @@ Each round:
    the habit on, which is precisely why it is stated here:
 
    ```bash
-   PANEL_TREE=$("<skill-base-dir>/scripts/git-tree-id.zsh" .)   # BEFORE the panel
-   # …run round 1's panel, write findings-round-1.json…
-   resolve-story-loop.zsh … --findings-file <…> --findings-tree "$PANEL_TREE"
-   ``` Re-pass the SAME value unchanged when recovering from a
+   T=<the round boundary's single guarded mint, §3.5 step 1>
+   # …start the gate, run round 1's panel, write findings-round-1.json…
+   resolve-story-loop.zsh … --findings-file <…> --findings-tree "$T" \
+     --gate-attest "$T"   # plugin repos only — omit on any other stack
+   ```
+
+   `T` is the round boundary's single mint (above), not a second one, and it
+   is minted through that step's fail-closed guard rather than bare. Re-pass
+   the SAME value unchanged when recovering from a
    **findings-file** refusal (missing/empty, byte-identical, alias): nothing
    moved the tree there, so the held identity still matches. **On the CADENCE
    refusal it depends which recovery you take**, because the tree is what moved:
@@ -993,8 +1221,9 @@ Each round:
    **Never mint it just before the `--resume`.** An identity computed after the
    panel — or after a fix pass — matches the working tree trivially and turns the
    guard into a self-attestation that certifies nothing, defeating it on the one
-   ordering it exists to catch. Mint it *before* the panel runs, and hold it. This
-   is the same trap `--gate-attest` names for the gate.
+   ordering it exists to catch. Mint it *before* the gate and the panel start,
+   and hold it. This is the same trap `--gate-attest` names for the gate, and the
+   reason both flags carry one `T`.
 
    `<full gate>` is the same whole-suite command as Step 3. On a **plugin repo**
    that is the blessed single-run parallel gate — `--test-cmd 'zsh
@@ -1011,7 +1240,7 @@ Each round:
    **`--gate-attest` — one full-gate run per round, not two (#981).** On a
    `--resume` the session has *just* run the full gate green in Step 3 (right
    after applying the previous round's fix). Passing the `tree` identity from
-   that green `run-gate.zsh` (Step 3, above) as `--gate-attest <tree>` lets the
+   that green `run-gate.zsh` (Step 3, above) as `--gate-attest <T>` lets the
    loop **skip** its own `--test-cmd` run **when — and only when — that identity
    still exactly matches the working tree**, killing the byte-identical
    duplicate that dominated the #976 session (~24 min). It is strictly
@@ -1031,7 +1260,10 @@ Each round:
      before `--resume`): a resume-time identity trivially matches the loop's
      resume-time computation, turning the check into a vacuous self-attestation
      that skips a gate that never ran. The attestation must come from the actual
-     green gate, or not at all. Likewise pass it only when `--test-cmd` runs the
+     green gate, or not at all. The round boundary's `T` is not synthesis: it is
+     minted *before* the gate starts and is passed only once that gate has
+     reported **green on that same `T`**, so it carries the gate's own verdict
+     rather than a resume-time recomputation. Likewise pass it only when `--test-cmd` runs the
      **same** `run-gate.zsh` you gated with — a broader/compound `--test-cmd`
      would be skipped whole on a tree match, including parts the attested run
      never executed.
@@ -1289,9 +1521,10 @@ Each round:
    pass it back:
 
    ```bash
-   PANEL_TREE=$("<skill-base-dir>/scripts/git-tree-id.zsh" .)   # BEFORE the panel runs
-   # …run the panel, write findings-round-N.json…
-   resolve-story-loop.zsh … --resume --findings-file <…> --findings-tree "$PANEL_TREE"
+   T=<the round boundary's single guarded mint, §3.5 step 1>
+   # …start the gate, run the panel, write findings-round-N.json…
+   resolve-story-loop.zsh … --resume --findings-file <…> --findings-tree "$T" \
+     --gate-attest "$T"   # plugin repos only — omit on any other stack
    ```
 
    The loop refuses the round (`STALE_FINDINGS`, exit 2) when that identity
@@ -1299,7 +1532,9 @@ Each round:
    a **refusal, not a repair** — the loop cannot know which of the two trees the
    reviewers read, so it will not guess. `--findings-tree` is separate from
    `--gate-attest` on purpose: that one answers *may I skip the duplicate test
-   run*, a claim about the suite, not about which tree was reviewed.
+   run*, a claim about the suite, not about which tree was reviewed. They carry
+   the same `T` because the round boundary minted one tree for both; what stays
+   separate is what each one claims, so neither may ever stand in for the other.
 
    **Then check `final_changelist.summary.blocking` (#1434): a ZERO there is
    not a fix turn.** It is a delta round that found nothing, so the loop wrote
@@ -1335,7 +1570,8 @@ Each round:
      round, then run the next panel with `--final` and `--resume`.
    - **non-zero blocking, and the marker is absent, UNREADABLE, or holds
      anything other than this round's number + 1** → an ordinary fix turn. Fix,
-     re-run the gate, and plan the next round **without** `--final`. (An
+     take the next round's boundary — *The round boundary is concurrent*
+     (§3.5) — and plan that round **without** `--final`. (An
      unreadable or out-of-range marker is a reachable state — a partial write, a
      kill mid-promotion — and the loop *ignores* it, saying so on stderr, and
      plans that round as a delta. So the ordinary fix turn is exactly what
@@ -1411,9 +1647,9 @@ Each round:
    diff and fixing every instance this round** (#982), so a repeating defect is
    cleared in one round, not dribbled across several — Low suggestions never
    loop — while **subtracting rather than adding**, per the rule stated
-   immediately below. Then re-run the full gate (on a plugin repo, keep its
-   green `tree` for the next `--resume`'s `--gate-attest`, #981; other stacks
-   have none), and go to 1 for the next round's panel.
+   immediately below. Then take the next round's boundary — *The round boundary
+   is concurrent* (§3.5) — which mints `T`, starts the full gate and dispatches
+   that round's panel together.
 
    **A fix pass subtracts (#1496) — it deletes, narrows or collapses; it never
    adds arms, cases, flags, paragraphs or restatements.** #982 above says how
@@ -1575,7 +1811,7 @@ with a status JSON + code:
   whose panel produced no findings file at all, or — #1435 — the
   `--findings-tree` you attested disagrees with the working tree, so the panel
   read one tree and you are consolidating against another). Recover **by cause**
-  per §3.5 step 2 before re-invoking: several causes are **not** cleared by
+  per §3.5's *Each round* step 2 before re-invoking: several causes are **not** cleared by
   re-running the panel — an empty delta with nothing carried, an aliased
   `--findings-file`, and a panel that reported NOT APPLICABLE on a full round —
   while the cadence cause is cleared *only* by re-running it (against the current
@@ -2327,7 +2563,7 @@ orphaned.
      --work-dir <promotion-work-dir> --status-file <promotion-status.json> \
      --issue <N> --findings-file <findings-promo-round-R.json> \
      --promote <promoted.json> --test-cmd '<full gate>' [--resume] \
-     [--gate-attest <tree>] [--findings-tree <panel-tree>]
+     [--gate-attest <T>] [--findings-tree <T>]
    ```
 
    The consolidator raises each matching Low to `WARNING`/`High` **before** the
@@ -2517,7 +2753,8 @@ orphaned.
    so "a status JSON exists afterwards" is an unambiguous signal rather than a
    guess about whether the file is this round's or the last one's.
 
-   - **exit 2, `status: "STALE_FINDINGS"`** → the §3.5 step-2 refusal: recover
+   - **exit 2, `status: "STALE_FINDINGS"`** → the §3.5 *Each round* step-2
+     refusal: recover
      by cause and re-invoke (re-passing `--promote`). Not a bad command line.
    - **exit 2, no status JSON written** → a genuine usage error in the
      invocation. **Stderr names the offending argument**: a missing, empty,
@@ -2642,7 +2879,7 @@ any `ESCALATE_*` / `BUDGET_EXHAUSTED` status, produce **one** decision-ready
 issue comment and nothing else — **no PR, no auto-merge exposure**:
 
 **Only those statuses escalate.** Exit 1/2 are operational, never escalations:
-`STALE_FINDINGS` (exit 2) follows §3.5 step 2's recover-and-re-invoke, and any
+`STALE_FINDINGS` (exit 2) follows §3.5's *Each round* step 2 recover-and-re-invoke, and any
 other exit 1/2 is reported in the conversation. Never build an escalation comment
 from a status file the failed invocation did not write. **`CONVERGED_WITH_RESIDUE`
 (exit 14) is not an escalation either** — it is the ending that *replaced* one,
@@ -2741,11 +2978,16 @@ alongside the summary so the human still sees the story's full cost:
    and instantly re-trip non-convergence against the carried prior round,
    burning the grant on a no-op. So: read the status JSON's
    `final_changelist.blocking` (plus the guidance comment, when one was posted)
-   and implement the fixes exactly as step 2 implements, re-run the step-3 gate
-   — resume only once it is green; red follows §3's rule (fix it, or abandon and
-   report) — run the next round's panel in-session (round protocol step 1) to
-   produce its findings file, then resume the loop — same `--work-dir`,
-   `--resume`, ceiling raised by 3 — and increment `grants`.
+   and implement the fixes exactly as step 2 implements, then take the granted
+   round's boundary — *The round boundary is concurrent* (§3.5) — which mints
+   `T`, starts the gate and dispatches that round's panel in-session together,
+   producing its findings file. Resume only once that gate is green; a **red**
+   gate takes the boundary's own step 6 — this round's panel findings are
+   discarded, neither attest is passed, and the boundary restarts from its step
+   1 once the red is fixed (or you abandon and report). The grant is not
+   consumed twice: the restarted boundary is the same granted round. Then
+   resume the loop — same
+   `--work-dir`, `--resume`, ceiling raised by 3 — and increment `grants`.
    That fix pass is bound by
    *A fix pass subtracts* (§3.5's round protocol, step 3)
    like any other, and a granted round is where it is likeliest to be ignored.
@@ -2769,9 +3011,9 @@ alongside the summary so the human still sees the story's full cost:
    pass the green gate's `tree` as `--gate-attest` here too (#981, under the four
    rules above), so the resume skips the byte-identical re-run just as a normal
    round does; omit it on any other stack. **`--findings-tree` is not optional
-   here either** — §3.5 step 2's rule is every step-mode invocation, and a
-   granted resume is one: mint `PANEL_TREE` *before* the granted round's panel
-   runs (after the green gate) and pass it. The guard is fail-quiet, so leaving
+   here either** — §3.5's *Each round* step 2 rule is every step-mode invocation, and a
+   granted resume is one: mint `T` at that round's boundary — before the gate and
+   the panel, per *The round boundary is concurrent* (§3.5) — and pass it. The guard is fail-quiet, so leaving
    it off silently disarms the cadence check on exactly the rounds residue is
    declared from:
 
@@ -2779,7 +3021,7 @@ alongside the summary so the human still sees the story's full cost:
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <same-work-dir> --resume --max-rounds <prev_max + 3> \
      --findings-file <findings-round-R.json> --test-cmd '<full gate>' \
-     [--gate-attest <tree>] [--findings-tree <panel-tree>] \
+     [--gate-attest <T>] [--findings-tree <T>] \
      [--promote <promoted.json>] --issue <N> \
      --status-file <status.json>
    ```
@@ -2815,10 +3057,11 @@ alongside the summary so the human still sees the story's full cost:
    `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` → leave this branch and take the
    typed-comment terminal below (a resumed run can surface a different exit).
    On `AWAITING_FIX` (20) → continue the §3.5 round protocol (narrate, fix
-   in-session, re-run the gate, run the next panel, `--resume` with the same
+   in-session, then the next round's boundary per *The round boundary is
+   concurrent* (§3.5), `--resume` with the same
    raised `--max-rounds`) — no grant bookkeeping; the grant was already
    counted. On `STALE_FINDINGS` (exit 2, #974) → **not terminal**: recover **by
-   cause** per §3.5 step 2 — for the findings-file causes that means re-invoking
+   cause** per §3.5's *Each round* step 2 — for the findings-file causes that means re-invoking
    with round R's real path, or running its panel first (re-passing the same
    `--gate-attest` per §3.5's recovery rule); the empty-delta, alias and
    not-applicable-on-a-full-round causes have their own recoveries there, none
@@ -3551,8 +3794,8 @@ is the epic truly done — report it closed, with the PR/verification table.
 ## Guardrails
 
 - **Never push to `main`** — always a feature branch off fresh `origin/main`.
-- **Never open a PR on a red gate** — green tests are the precondition for review
-  (the per-issue gate).
+- **Never open a PR on a red gate** — a red per-issue gate blocks consolidation
+  and the commit, so nothing reaches a PR.
 - **The PR is bot-authored** via `open-pr` so it can be approved and auto-merge;
   never self-author when the writer App is available.
 - **One issue per PR, one PR per issue** — squash merge, no stacking: each child

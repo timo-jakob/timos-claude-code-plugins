@@ -3520,6 +3520,14 @@ the detection rather than the run. And deliberately **separate from
 about the suite, not about which tree was reviewed; conflating them would let one
 flag suppress the other.
 
+Both flags nonetheless carry **one** identity per round **where both are
+passed** — a plugin repo — because the round boundary runs the gate and the
+panel **concurrently** over a single tree minted before either starts (#1497).
+Off plugin repos only `--findings-tree` is passed, exactly as above: the
+concurrency is an ordering, not a flag pair that exists everywhere. The ordering
+is the session's, stated in `development/skills/resolve-issue/SKILL.md` §3.5's
+round protocol and restated nowhere else; the loop itself is unchanged by it.
+
 **Filing the remainder** is `build-residue-issues.zsh`, on the same
 build-vs-post split `build-escalation.zsh` uses: it **builds** a JSON array of
 `{title, body, labels, parent}` (one entry per residual blocking finding, each
