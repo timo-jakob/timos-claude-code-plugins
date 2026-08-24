@@ -20,6 +20,7 @@ on:
       - "mkdocs.yml"
       - "requirements-docs.txt"
       - "scripts/docs-nav-to-chapters.zsh"
+      - "scripts/pandoc/**"
       - "Dockerfile.docs"
       - ".github/workflows/docs-publish.yml"
 
@@ -52,15 +53,21 @@ jobs:
         run: mkdocs build --strict
 
       - name: Build the PDF + ePub manuals
+        # Same invocation as the docs.yml PR gate — pandoc/extra for fvextra, and
+        # the PDF-only Lua filter + header that keep long paths, code lines and
+        # unmapped characters from breaking the page.
         run: |
           set -euo pipefail
           ./scripts/docs-nav-to-chapters.zsh > chapters.txt
           mapfile -t chapters < chapters.txt
-          common=(--pdf-engine=xelatex --toc --metadata title="{{PROJECT_NAME}}"
-                  --metadata author="{{PROJECT_SLUG}}")
-          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
-            "${common[@]}" -o manual.pdf "${chapters[@]}"
-          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+          docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+            --pdf-engine=xelatex --toc \
+            --metadata title="{{PROJECT_NAME}}" \
+            --metadata author="{{PROJECT_SLUG}}" \
+            --lua-filter=scripts/pandoc/break-long-tokens.lua \
+            --include-in-header=scripts/pandoc/manual-header.tex \
+            -o manual.pdf "${chapters[@]}"
+          docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
             --toc --metadata title="{{PROJECT_NAME}}" \
             --metadata author="{{PROJECT_SLUG}}" \
             -o manual.epub "${chapters[@]}"

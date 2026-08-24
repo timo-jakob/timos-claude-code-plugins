@@ -33,6 +33,8 @@ DOCS_BASE_SET=(
   common/Dockerfile.docs
   common/requirements-docs.txt
   common/scripts/docs-nav-to-chapters.zsh
+  common/scripts/pandoc/break-long-tokens.lua
+  common/scripts/pandoc/manual-header.tex
 )
 
 render_docs() { # render_docs <interfaces-csv-or-empty> [extra stub relpaths...]
@@ -149,6 +151,50 @@ assert_no_orphan_pages() {
 @test "docs templates: templated nav->chapters script is byte-identical to the repo's (no drift)" {
   diff "$REPO_ROOT/scripts/docs-nav-to-chapters.zsh" \
     "$TEMPLATES/common/scripts/docs-nav-to-chapters.zsh"
+}
+
+@test "docs templates: templated pandoc layout assets are byte-identical to the repo's (no drift)" {
+  # Same rule as the nav->chapters script above: this repo dogfoods the assets it
+  # ships, so a fix applied to one copy and not the other means every downstream
+  # manual keeps the defect the fix was for.
+  diff "$REPO_ROOT/scripts/pandoc/break-long-tokens.lua" \
+    "$TEMPLATES/common/scripts/pandoc/break-long-tokens.lua"
+  diff "$REPO_ROOT/scripts/pandoc/manual-header.tex" \
+    "$TEMPLATES/common/scripts/pandoc/manual-header.tex"
+}
+
+@test "docs templates: both shipped docs workflows pass the layout assets to the PDF build" {
+  # The assets are inert unless pandoc is told about them, so the seeded repo has
+  # the files AND the flags, or it has the glitch.
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  local wf
+  for wf in docs.yml docs-publish.yml; do
+    grep -q -- "--lua-filter=scripts/pandoc/break-long-tokens.lua" \
+      "$OUT/common/.github/workflows/$wf"
+    grep -q -- "--include-in-header=scripts/pandoc/manual-header.tex" \
+      "$OUT/common/.github/workflows/$wf"
+    # pandoc/latex carries no fvextra, which manual-header.tex needs
+    grep -q "pandoc/extra:" "$OUT/common/.github/workflows/$wf"
+    run ! grep -q "pandoc/latex:" "$OUT/common/.github/workflows/$wf"
+  done
+}
+
+@test "docs templates: the shipped PR gate fails on a character the PDF has no glyph for" {
+  # xelatex drops an unmapped character silently; the seeded gate must not.
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  grep -q "Missing character" "$OUT/common/.github/workflows/docs.yml"
+  grep -q "pandoc-pdf.log" "$OUT/common/.github/workflows/docs.yml"
+}
+
+@test "docs templates: the shipped docs workflows react to a change in the layout assets" {
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  local wf
+  for wf in docs.yml docs-publish.yml; do
+    grep -q '"scripts/pandoc/\*\*"' "$OUT/common/.github/workflows/$wf"
+  done
 }
 
 @test "docs templates: every workflow action ref is SHA-pinned (#779, target-repo semgrep policy)" {

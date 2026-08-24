@@ -1,0 +1,63 @@
+% Preamble additions for the pandoc/xelatex manual build (manual.pdf).
+% Included via --include-in-header from scripts/build-manuals.zsh; the PDF
+% manual only, never the ePub.
+
+% --- Code blocks ------------------------------------------------------------
+% fancyvrb, which pandoc's default template uses, prints an over-long code line
+% straight off the right edge of the page — silently, without even an overfull
+% warning. fvextra teaches both verbatim environments to wrap: at a space where
+% it can, mid-token when it must, with a hooked continuation marker so a reader
+% can see that the line was wrapped rather than written that way.
+%
+% `breaknonspaceingroup` is the option that matters for a syntax-highlighted
+% block: without it fvextra can only break BETWEEN pandoc's highlight macros,
+% so a single long token inside one of them (a URL, a sha256, a one-line JSON
+% array) still runs off the page.
+\usepackage{fvextra}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{%
+  commandchars=\\\{\},breaklines,breakanywhere,breaknonspaceingroup}
+\RecustomVerbatimEnvironment{verbatim}{Verbatim}{%
+  breaklines,breakanywhere,breaknonspaceingroup}
+
+% --- Tables -----------------------------------------------------------------
+% pandoc gives every column an equal share of the line, so the reference tables
+% with four columns (agent, model, tools, description) get roughly 4 cm each —
+% narrow enough that even a broken-up token lands past the column edge. A step
+% down in size buys about a fifth more room per column and is the usual
+% treatment for a dense reference table.
+\AtBeginEnvironment{longtable}{\small}
+
+% --- Characters the bundled fonts have no glyph for -------------------------
+% xelatex drops an unmapped character silently, so "≥90% new-code coverage"
+% prints as "90% new-code coverage" and "plugin.json ↔ marketplace.json" loses
+% its arrow. Map the ones the docs actually use onto glyphs Latin Modern and
+% amssymb do have. `newunicodechar` is not in the pandoc image's TeX Live set,
+% so declare the active characters directly.
+%
+% scripts/build-manuals.zsh fails the build on any REMAINING dropped character,
+% so a newly introduced one lands here rather than vanishing from the PDF.
+\makeatletter
+\newcommand{\DeclareUnicodeFallback}[2]{%
+  \begingroup\lccode`\~=#1\relax
+  \lowercase{\endgroup\protected\def~}{#2}%
+  \catcode#1=\active}
+\makeatother
+
+\DeclareUnicodeFallback{"2194}{\ensuremath{\leftrightarrow}}  % ↔
+\DeclareUnicodeFallback{"2260}{\ensuremath{\neq}}             % ≠
+\DeclareUnicodeFallback{"2265}{\ensuremath{\geq}}             % ≥
+\DeclareUnicodeFallback{"26A0}{\textbf{!}}                    % ⚠
+
+% U+FE0F only asks a renderer to draw the preceding character in colour. On
+% paper it carries nothing.
+\DeclareUnicodeFallback{"FE0F}{}
+
+% No font in the image has emoji, and a printed manual does not need the
+% decoration. Drop the character and the space behind it, so a heading written
+% "## 📚 Tutorials" sets as "Tutorials" rather than " Tutorials".
+\DeclareUnicodeFallback{"1F3D7}{\ignorespaces}  % 🏗
+\DeclareUnicodeFallback{"1F4A1}{\ignorespaces}  % 💡
+\DeclareUnicodeFallback{"1F4D6}{\ignorespaces}  % 📖
+\DeclareUnicodeFallback{"1F4DA}{\ignorespaces}  % 📚
+\DeclareUnicodeFallback{"1F527}{\ignorespaces}  % 🔧
+\DeclareUnicodeFallback{"1F916}{\ignorespaces}  % 🤖

@@ -388,7 +388,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    already-bootstrapped repo that predates the docs templates reports the
    whole §3h set in `missing_artifacts` (`mkdocs.yml`, `docs/…`, the three
    docs workflows, `Dockerfile.docs`, `requirements-docs.txt`,
-   `scripts/docs-nav-to-chapters.zsh`) — this is how existing repos adopt
+   `scripts/docs-nav-to-chapters.zsh`, `scripts/pandoc/…`) — this is how
+   existing repos adopt
    end-user docs on re-bootstrap. Render them per §3h: pass `--project-name`
    and `--project-slug` (both already known in State D) plus
    `--acceptance-interfaces` from the detected `interfaces` minus `library`
@@ -1680,7 +1681,9 @@ pages:
   common/.github/workflows/docs-publish.yml.tmpl \
   common/Dockerfile.docs \
   common/requirements-docs.txt \
-  common/scripts/docs-nav-to-chapters.zsh
+  common/scripts/docs-nav-to-chapters.zsh \
+  common/scripts/pandoc/break-long-tokens.lua \
+  common/scripts/pandoc/manual-header.tex
 ```
 
 - **Per-surface how-to stubs** — additionally render
@@ -1694,6 +1697,15 @@ pages:
 - `chmod +x scripts/docs-nav-to-chapters.zsh` after copying (like
   `update-claude-plugins.zsh`). Stamping preserves file modes (#783), so
   chmod-then-stamp and stamp-then-chmod both work.
+- **The two `scripts/pandoc/` assets are the PDF's layout fix** — a Lua filter
+  and a LaTeX header the `docs.yml` / `docs-publish.yml` PDF build passes to
+  pandoc. Without them xelatex prints a long path in a table cell over the
+  neighbouring column, runs a long code line off the page, and drops a character
+  it has no glyph for (`≥`, `↔`) silently. They are **data files, not scripts**:
+  no `chmod +x`, and no provenance marker — like the rest of the docs machinery
+  they are absent from Step 3.6's stamping table, and `stamp-marker.zsh` could
+  not stamp them anyway (it handles `#`-comment files only; Lua and TeX comment
+  with `--` and `%`).
 - The docs checks are **path-conditional** — never add them to branch
   protection's required contexts (Step 4b), or every non-docs PR wedges.
 - **Seed the C4 architecture diagrams** (#746 child (b), #791). After rendering

@@ -25,6 +25,8 @@ site/
 /manual.pdf
 /manual.epub
 /chapters.txt
+# pandoc's own stderr, kept so the gate can fail on a dropped character
+/pandoc-pdf.log
 
 # resolve-issue review loop dispatch sink (local, per-run state; telemetry
 # under .claude/ is already covered above)
