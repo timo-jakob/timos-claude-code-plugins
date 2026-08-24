@@ -134,10 +134,20 @@ ESCALATE_NO_CONVERGENCE)
   # DIFFERENT finding that merely landed inside the match window after a fix
   # pass shifted lines — is spottable. The consolidator now stamps
   # possible_false_trip (#969) when the titles differ; render the flag so the
-  # human never has to open the JSON. Deliberately option-agnostic: a false
-  # trip means the blocker is FRESH, not stuck — how to act on it (fix, grant
-  # rounds, or waive on its own merits) belongs to the surrounding options,
-  # which differ between the comment and the interactive summary.
+  # human never has to open the JSON. Deliberately option-agnostic: how to act
+  # on it (fix, grant rounds, or waive on its own merits) belongs to the
+  # surrounding options, which differ between the comment and the interactive
+  # summary.
+  #
+  # The two arms read differently on purpose. This list is filtered to
+  # `non_converging`, and the consolidator stamps `possible_false_trip` exactly
+  # when NO exact title matched — so within it, FLAGGED is the ambiguous case,
+  # where the loop cannot tell a reworded survivor from a new neighbour, and it
+  # carries the same instruction SKILL.md §3.5 gives that shape rather than the
+  # opposite one. UNFLAGGED is the VERIFIED survivor, an exact-title match, and
+  # the arm's hedge below covers only a pre-#969 status file carrying no stamp
+  # at all. A #983 identity-cleared match reaches neither arm: it is stamped
+  # `non_converging: false` and filtered out above.
   detail=$(jq -r '
     def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;
     def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
@@ -147,7 +157,7 @@ ESCALATE_NO_CONVERGENCE)
           "\n  - matched prior-round blocker "
           + (if ((.matched_prior.line | type) != "number" or (.line | type) != "number") then "(no line recorded on one side — matched file-wide)" else "at line \(.matched_prior.line)" end)
           + " (\"\(.matched_prior.title // "" | safe)\")"
-          + (if .possible_false_trip == true then " — **flagged possible false trip**: the titles differ, so this may be a NEW finding that only landed inside the match window; treat it as a fresh blocker on its own merits, not a stuck one"
+          + (if .possible_false_trip == true then " — **flagged possible false trip**: the titles differ, so the loop cannot tell a reworded survivor from a new neighbour; treat it on its own merits, and where the previous fix for the matched prior was incomplete, finish that rather than patch around it"
              else " — if this is a DIFFERENT finding that only landed inside the match window, the non-convergence flag is a false trip: treat this as a fresh blocker on its own merits, not a stuck one" end)
         else "" end)) end' "$status_file") ;;
 BUDGET_EXHAUSTED)
@@ -282,7 +292,12 @@ class_hist=$(jq -r '
 # status than on an escalation, and this block renders for EVERY status the
 # script accepts (see the case arms above), not just the escalating ones.
 assessment=$(jq -r --arg st "$st" '
-  (.round_changelists // []) as $rs
+  # #1498: how many automatic all-ambiguous continuations this run already
+  # spent. Read straight off the status JSON — the input to this program IS the
+  # status object — so there is no second source to drift. `// 0` keeps a status
+  # file predating the key reading exactly as it does today.
+  (.possible_false_trip_auto_continues // 0) as $pftc
+  | (.round_changelists // []) as $rs
   | if ($rs | length) == 0 then "" else
     ( [ $rs[] | ((.blocking // []) | length) ] ) as $series
     | ($rs[-1].blocking // []) as $lastblk
@@ -296,6 +311,18 @@ assessment=$(jq -r --arg st "$st" '
     | "Blocking findings by round: " + ($series | map(tostring) | join(" → ")) + "."
       + (if $ftrips > 0 then
            " \($ftrips) of the \($carried) non-convergence match(es) look like line-proximity false trips (the matched prior blocker has a different title) — those blockers may be new, not stuck."
+         else "" end)
+      # #1498: an all-ambiguous carried set no longer stops the run the FIRST
+      # time, so a run that reaches ANY ending may already have taken a free
+      # round on this signal. Saying so is what stops the human reading the
+      # false-trip sentence above as "so just grant a round" a second time. It
+      # states only what is true on every status this block renders for — the
+      # count, and the rule that ends the auto-continue — and never why THIS
+      # run ended, which the status itself already says. No grant was consumed,
+      # so the Grants-consumed line below is unaffected.
+      # (NB: no apostrophes in this block — the jq program is single-quoted.)
+      + (if $pftc > 0 then
+           " This run already auto-continued \($pftc) round(s) on an all-ambiguous carried set (#1498) without consuming a grant; an identity that is ambiguous-matched again escalates."
          else "" end)
       + (if ($series[-1] == 0) then
            (if $st == "CONVERGED"

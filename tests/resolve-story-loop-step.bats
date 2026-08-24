@@ -2769,3 +2769,119 @@ _tree_now() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-
   # CONVERGED condition, so without the guard this run would have exited 0
   [ "$(echo "$output" | jq -r '.status')" != "CONVERGED" ]
 }
+
+# --- #1498: the one-shot all-ambiguous auto-continue, in step mode -------------
+#
+# The same fixture shape as the hook-mode suite, written as findings FILES since
+# step mode is handed the aggregate directly: two WARNINGs 55 lines apart in
+# round 1 (further than LINEWIN, so neither can gather the other's prior), and in
+# round 2 two more, each three lines from its own prior and sharing significant
+# tokens with it without matching it exactly — the AMBIGUOUS verdict.
+#
+# What step mode adds over hook mode is that every round is its own INVOCATION,
+# so the marker is the only thing carrying the one-shot bound (and the reported
+# count) from one process to the next.
+pft_findings() {  # $1 = round
+  case "$1" in
+  # round 1's first title is deliberately NOT already normalised (mixed case, a
+  # double space, a tab), so the marker assertions below exercise `normtitle`
+  # rather than passing on a value that needed no normalising
+  1) printf '%s' '[{"severity":"WARNING","dimension":"tests","file":"app.py","line":5,"title":"Unquoted  Variable\tIn The Matcher","description":"d1","reviewer":"r"},{"severity":"WARNING","dimension":"tests","file":"app.py","line":60,"title":"missing timeout on the fetch helper","description":"d1","reviewer":"r"}]' ;;
+  2) printf '%s' '[{"severity":"WARNING","dimension":"tests","file":"app.py","line":8,"title":"unquoted variable in the dispatcher","description":"d2","reviewer":"r"},{"severity":"WARNING","dimension":"tests","file":"app.py","line":63,"title":"missing timeout on the upload helper","description":"d2","reviewer":"r"}]' ;;
+  esac
+}
+
+@test "#1498 tc-happy-auto-continue-step-mode: the round exits AWAITING_FIX (20), not 12" {
+  pft_findings 1 > "$F"
+  step
+  [ "$status" -eq 20 ]
+  pft_findings 2 > "$F"
+  step --resume
+  # the ladder reached the non-convergence rung and took the continue, so the
+  # round ends exactly as an ordinary continuing round does
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  # ...and it really was the state this rung is about, not merely a round with
+  # blockers left
+  echo "$output" | jq -e '.final_changelist.non_converging == true' >/dev/null
+  echo "$output" | jq -e '[.final_changelist.blocking[] | select(.non_converging == true)] | (length == 2) and all(.possible_false_trip == true)' >/dev/null
+  echo "$output" | jq -e '.final_changelist.summary.critical == 0' >/dev/null
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  [ -s "$WD/.possible-false-trip-continued" ]
+  # BOTH titles of every match, so a re-wording cannot buy a second continuation
+  [ "$(wc -l < "$WD/.possible-false-trip-continued" | tr -d ' ')" -eq 4 ]
+  grep -qF 'app.py	tests	unquoted variable in the dispatcher' "$WD/.possible-false-trip-continued"
+  grep -qF 'app.py	tests	unquoted variable in the matcher' "$WD/.possible-false-trip-continued"
+  # the session is told what to do next, in the round verdict it narrates
+  grep -q 'auto-continued once, no grant consumed (#1498)' "$WD/progress.md"
+}
+
+@test "#1498 the marker and its count survive --resume, and the second ambiguous match escalates" {
+  pft_findings 1 > "$F"
+  step
+  [ "$status" -eq 20 ]
+  pft_findings 2 > "$F"
+  step --resume
+  [ "$status" -eq 20 ]
+  local before
+  before="$(cat "$WD/.possible-false-trip-continued")"
+  # round 3 re-raises an identity the marker already holds, from a FRESH process
+  # that knows nothing but the work-dir
+  printf '%s' '[{"severity":"WARNING","dimension":"tests","file":"app.py","line":11,"title":"unquoted variable in the matcher","description":"d3","reviewer":"r"}]' > "$F"
+  step --resume
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  # round 3 really was another ambiguous carried match — the marker is the ONLY
+  # thing that refused it
+  echo "$output" | jq -e '[.final_changelist.blocking[] | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
+  # the count came back across the process boundary rather than restarting at 0,
+  # and the marker did not grow
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  [ "$(cat "$WD/.possible-false-trip-continued")" = "$before" ]
+}
+
+@test "#1498 a marker the loop cannot write ESCALATES rather than continuing on an unrecorded identity" {
+  # The fail-closed direction the rung's header states: continuing on a lost
+  # record spends the one-shot bound invisibly and lets the same identity
+  # continue again next round. Untested, `return 1` could become `return 0` with
+  # the whole suite green.
+  [ "$(id -u)" -ne 0 ] || skip "running as root — chmod 000 would not bite"
+  pft_findings 1 > "$F"
+  step
+  [ "$status" -eq 20 ]
+  : > "$WD/.possible-false-trip-continued"
+  chmod 000 "$WD/.possible-false-trip-continued"
+  pft_findings 2 > "$F"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
+  contains "$stderr" "could not record the round 2 possible-false-trip auto-continue"
+  chmod 644 "$WD/.possible-false-trip-continued"
+  # nothing was recorded, so the bound was not silently spent
+  [ ! -s "$WD/.possible-false-trip-continued" ]
+}
+
+@test "#1498 an unreadable marker is ANNOUNCED, not silently counted as zero" {
+  # `_pft_count` reports 0 for a marker it cannot parse — but says so, the same
+  # treatment the closing-sweep adoption gives a garbage sidecar. Untested, the
+  # stderr line could be deleted and the run would report
+  # possible_false_trip_auto_continues: 0 off a corrupt marker with no signal at
+  # all, feeding a confident wrong number to the escalation summary and the
+  # telemetry payload.
+  pft_findings 1 > "$F"
+  step
+  [ "$status" -eq 20 ]
+  printf 'garbage line with no round field\n' > "$WD/.possible-false-trip-continued"
+  pft_findings 2 > "$F"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  contains "$stderr" "ignoring an unreadable possible-false-trip marker"
+  # ...and the degradation is BOUNDED: the round still runs to its documented
+  # terminal, and the garbage line is ignored by the count rather than poisoning
+  # it — this round appended its own records, so the derivation is 1
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+}

@@ -6,6 +6,7 @@
 # human interruption costs two minutes, not an afternoon (epic #557).
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -43,7 +44,11 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'matched prior-round blocker at line 42'
   echo "$output" | grep -q 'Race on shared counter'
-  echo "$output" | grep -qi 'false trip'
+  # This fixture carries NO `possible_false_trip` key at all — a pre-#969 status
+  # file — so it must take the else arm. The needle is unique to that arm: a
+  # case-insensitive `false trip` also matches the flagged arm's "**flagged
+  # possible false trip**", so it would pass on the branch it exists to exclude.
+  echo "$output" | grep -q 'the non-convergence flag is a false trip'
   # the summary render carries it too — the interactive extension shows this one
   run zsh "$S" --status "$ST" --format summary
   [ "$status" -eq 0 ]
@@ -258,8 +263,54 @@ EOF
 EOF
   run zsh "$S" --status "$ST" --issue 601
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q 'flagged possible false trip'
-  echo "$output" | grep -q 'titles differ'
+  local out="$output"
+  echo "$out" | grep -q 'flagged possible false trip'
+  echo "$out" | grep -q 'titles differ'
+  # #1498: the FLAGGED arm is the ambiguous case, and its instruction must match
+  # SKILL.md §3.5's narration of the same shape. The two needles above are
+  # substrings of the pre-#1498 wording too, so on their own a revert to
+  # "treat it as a fresh blocker on its own merits, not a stuck one" — the exact
+  # contradiction this story removed — stays green.
+  echo "$out" | grep -q 'cannot tell a reworded survivor from a new neighbour'
+  echo "$out" | grep -q 'finish that rather than patch around it'
+  lacks "$out" 'treat it as a fresh blocker on its own merits'
+}
+
+@test "#1498 the UNflagged arm keeps its own wording — the two arms must not converge" {
+  # Within this non_converging-filtered list an UNflagged match is the VERIFIED
+  # survivor (an exact title match), and its hedge covers a stamp-less status
+  # file. Pinning only the flagged arm would let a later edit collapse both into
+  # one sentence, which is how the contradiction #1498 removed got there.
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_NO_CONVERGENCE","rounds":2,"max_rounds":3,
+ "history":[{"round":2,"blocking":1,"conflicts":0,"non_converging":true}],
+ "final_changelist":{"blocking":[{"priority":"Critical","dimension":"bugs","file":"app.py","line":43,"title":"Race on shared counter","non_converging":true,"possible_false_trip":false,"matched_prior":{"line":42,"title":"Race on shared counter"}}]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 601
+  [ "$status" -eq 0 ]
+  local out="$output"
+  echo "$out" | grep -q 'treat this as a fresh blocker on its own merits, not a stuck one'
+  lacks "$out" 'flagged possible false trip'
+  lacks "$out" 'reworded survivor'
+}
+
+@test "#1498 an ABSENT possible_false_trip stamp takes the else arm, not the flagged one" {
+  # The third input shape, and the one the block comment reserves the else arm
+  # for: a pre-#969 status file that carries no stamp at all. Pinning only true
+  # and false leaves `.possible_false_trip == true` free to become
+  # `(.possible_false_trip // true) == true`, which would render the ambiguous
+  # instruction for exactly the case the hedge exists to cover.
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_NO_CONVERGENCE","rounds":2,"max_rounds":3,
+ "history":[{"round":2,"blocking":1,"conflicts":0,"non_converging":true}],
+ "final_changelist":{"blocking":[{"priority":"Critical","dimension":"bugs","file":"app.py","line":43,"title":"Race on shared counter","non_converging":true,"matched_prior":{"line":42,"title":"Race on shared counter"}}]}}
+EOF
+  run zsh "$S" --status "$ST" --issue 601
+  [ "$status" -eq 0 ]
+  local out="$output"
+  echo "$out" | grep -q 'the non-convergence flag is a false trip: treat this as a fresh blocker on its own merits, not a stuck one'
+  lacks "$out" 'flagged possible false trip'
+  lacks "$out" 'reworded survivor'
 }
 
 @test "per-round progress table + convergence assessment render from round_changelists (#969)" {
@@ -971,4 +1022,98 @@ EOF
   ln_hist="$(printf '%s\n' "$output" | grep -n '^\*\*Blocker classes (last two rounds)\*\*$' | head -1 | cut -d: -f1)"
   ln_assess="$(printf '%s\n' "$output" | grep -n 'Blocking findings by round:' | head -1 | cut -d: -f1)"
   [ -n "$ln_hist" ] && [ -n "$ln_assess" ] && [ "$ln_hist" -lt "$ln_assess" ]
+}
+
+# --- #1498: the consumed auto-continue in the convergence assessment ----------
+#
+# Since #1498 an all-ambiguous carried set does not reach a human the first
+# time — the loop takes that round itself. So an escalation a human IS reading
+# may already have spent one, and the assessment has to say so: without it the
+# false-trip sentence beside it ("those blockers may be new, not stuck") reads
+# as "so just grant a round", which is exactly the advice the repeat ambiguous
+# match has already falsified.
+pft_status() {   # $1 = the auto-continue count, $2 = the status (default: no-convergence)
+  cat > "$ST" <<EOF
+{"status":"${2:-ESCALATE_NO_CONVERGENCE}","rounds":3,"max_rounds":5,
+ "possible_false_trip_auto_continues":$1,
+ "history":[{"round":1,"blocking":1,"conflicts":0,"non_converging":false},
+            {"round":2,"blocking":1,"conflicts":0,"non_converging":true},
+            {"round":3,"blocking":1,"conflicts":0,"non_converging":true}],
+ "round_changelists":[
+   {"round":1,"summary":{"critical":0,"high":1,"low":0},"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":5,"title":"unquoted variable in the matcher","non_converging":false}]},
+   {"round":2,"summary":{"critical":0,"high":1,"low":0},"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":8,"title":"unquoted variable in the dispatcher","non_converging":true,"possible_false_trip":true,"matched_prior":{"line":5,"title":"unquoted variable in the matcher"}}]},
+   {"round":3,"summary":{"critical":0,"high":1,"low":0},"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":11,"title":"unquoted variable in the resolver","non_converging":true,"possible_false_trip":true,"matched_prior":{"line":8,"title":"unquoted variable in the dispatcher"}}]}],
+ "final_changelist":{"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":11,"title":"unquoted variable in the resolver","non_converging":true,"possible_false_trip":true,"matched_prior":{"line":8,"title":"unquoted variable in the dispatcher"}}]}}
+EOF
+}
+
+@test "#1498 tc-corner-escalation-names-consumed-auto-continue: the assessment names it, the grant figure is unchanged" {
+  pft_status 1
+  run zsh "$S" --status "$ST" --format summary --grants 2
+  [ "$status" -eq 0 ]
+  local out="$output"
+  echo "$out" | grep -q 'already auto-continued 1 round(s) on an all-ambiguous carried set (#1498)'
+  echo "$out" | grep -q 'without consuming a grant'
+  # ...and it states the RULE that ends the auto-continue
+  echo "$out" | grep -q 'ambiguous-matched again escalates'
+  # an auto-continue is NOT a grant: the soft-cap figure reports only --grants
+  echo "$out" | grep -q 'Grants consumed: 2 (soft cap 5)'
+  run ! grep -q 'Grants consumed: 3' <<< "$out"
+}
+
+@test "#1498 the sentence never asserts WHY this run ended — it renders on every status" {
+  # The assessment block renders for every status the script accepts, and the
+  # counter is per-RUN, so a run that auto-continued at round 2 and then
+  # exhausted its budget carries the count into BUDGET_EXHAUSTED. A causal claim
+  # there ("...which is what happened here") would tell the human at the grant
+  # prompt that a blocker recurred ambiguously when the budget simply ran out.
+  pft_status 1 BUDGET_EXHAUSTED
+  run zsh "$S" --status "$ST" --format summary --grants 2
+  [ "$status" -eq 0 ]
+  local out="$output"
+  echo "$out" | grep -q 'already auto-continued 1 round(s) on an all-ambiguous carried set (#1498)'
+  echo "$out" | grep -q 'Grants consumed: 2 (soft cap 5)'
+  run ! grep -q 'which is what happened here' <<< "$out"
+  # ...and the same on a CONVERGED status, which the block also renders for
+  pft_status 1 CONVERGED
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  out="$output"
+  echo "$out" | grep -q 'already auto-continued 1 round(s) on an all-ambiguous carried set (#1498)'
+  run ! grep -q 'which is what happened here' <<< "$out"
+}
+
+@test "#1498 a run that never auto-continued says nothing about it" {
+  pft_status 0
+  run zsh "$S" --status "$ST" --format summary --grants 2
+  [ "$status" -eq 0 ]
+  # the pre-existing possible-false-trip sentence is still there, so this is a
+  # test of the NEW sentence being conditional, not of the block going dark
+  local out="$output"
+  echo "$out" | grep -q 'look like line-proximity false trips'
+  run ! grep -q '1498' <<< "$out"
+  run ! grep -q 'auto-continued' <<< "$out"
+}
+
+@test "#1498 a status file predating the key reads as a run that never auto-continued" {
+  # Always-present is the loop's contract, but the escalation is also run over
+  # kept status files from earlier runs — `// 0` is what keeps those readable.
+  pft_status 1
+  jq 'del(.possible_false_trip_auto_continues)' "$ST" > "$ST.old" && mv "$ST.old" "$ST"
+  run zsh "$S" --status "$ST" --format summary --grants 2
+  [ "$status" -eq 0 ]
+  # captured before the `run !` below, which replaces $output with grep's
+  local out="$output"
+  echo "$out" | grep -q 'Grants consumed: 2 (soft cap 5)'
+  run ! grep -q '1498' <<< "$out"
+}
+
+@test "#1498 the comment form carries the sentence too, not just the summary" {
+  # The assessment block is shared by both renders, and the autonomous path only
+  # ever produces the comment — so a human reading THAT must see the same fact.
+  pft_status 2
+  run zsh "$S" --status "$ST" --issue 1498
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'already auto-continued 2 round(s) on an all-ambiguous carried set (#1498)'
+  echo "$output" | grep -q '<!-- review-loop-escalation: ESCALATE_NO_CONVERGENCE -->'
 }

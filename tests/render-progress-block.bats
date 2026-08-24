@@ -608,3 +608,98 @@ EOF
   [ "$status" -eq 0 ]
   lacks "$output" "by class:"
 }
+
+# --- #1498: --possible-false-trip-continued -----------------------------------
+#
+# The renderer is a pure function of the changelist, and the changelist carries
+# no record of which way the ladder went — an escalating all-ambiguous round and
+# an auto-continued one are byte-identical documents. So the LOOP supplies the
+# fact, and these pin both halves: the flag changes the line, and its absence
+# leaves the output exactly as it was before the flag existed.
+pft_changelist() {   # $1 = target file
+  cat > "$1" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+ "blocking":[{"file":"a.py","line":50,"dimension":"bugs","title":"Off-by-one in the retry counter",
+              "non_converging":true,"false_trip":false,"possible_false_trip":true,
+              "matched_prior":{"line":42,"title":"Off-by-one in the backoff counter"}}],
+ "suggestions":[],"conflicts":[],"non_converging":true}
+EOF
+}
+
+@test "#1498 --possible-false-trip-continued renders the auto-continued line" {
+  pft_changelist "$CL"
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v" --possible-false-trip-continued
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- possible false trip auto-continued (#1498): `a.py:50` \[bugs\] matched prior-round blocker at line 42'
+  # the evidence a human needs to judge it is still there...
+  echo "$output" | grep -q 'Off-by-one in the backoff counter'
+  echo "$output" | grep -q 'may be a NEW finding'
+  # ...plus what the flag exists to say: the run did not stop, and it gets one
+  # such round per identity
+  echo "$output" | grep -q 'continued once without a human grant, and a second ambiguous match on this identity escalates'
+}
+
+@test "#1498 without the flag the output is byte-identical to before the flag existed" {
+  pft_changelist "$CL"
+  # `--verdict` is fixed and the only other varying input is the timestamp, so
+  # the two runs are compared with it stripped — an unflagged run must not
+  # differ from the flagged one by anything BUT the marked line.
+  local plain flagged
+  plain="$(zsh "$S" --changelist "$CL" --round 2 --verdict "v" | sed 's/([0-9][0-9]:[0-9][0-9]:[0-9][0-9])/(TS)/')"
+  flagged="$(zsh "$S" --changelist "$CL" --round 2 --verdict "v" --possible-false-trip-continued | sed 's/([0-9][0-9]:[0-9][0-9]:[0-9][0-9])/(TS)/')"
+  # the unflagged render is exactly today's wording
+  grep -q -- '- possible false trip: `a.py:50` \[bugs\] matched prior-round blocker at line 42' <<< "$plain"
+  run ! grep -q '1498' <<< "$plain"
+  run ! grep -q 'auto-continued' <<< "$plain"
+  # ...and the ONLY difference between the two is that one line
+  [ "$(diff <(printf '%s\n' "$plain") <(printf '%s\n' "$flagged") | grep -c '^[<>]')" -eq 2 ]
+}
+
+@test "#1498 the auto-continued line stays distinct from #983's verified false-trip line" {
+  # A round can legitimately carry BOTH: one identity-cleared disjoint match
+  # (#983, non_converging false) and one ambiguous match the loop continued on
+  # (#1498, non_converging true). Collapsing them would tell the human the wrong
+  # thing about half the round.
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0,"false_trips":1},
+ "blocking":[{"file":"a.py","line":50,"dimension":"bugs","title":"Off-by-one in the retry counter",
+              "non_converging":true,"false_trip":false,"possible_false_trip":true,
+              "matched_prior":{"line":42,"title":"Off-by-one in the backoff counter"}},
+             {"file":"m.zsh","line":103,"dimension":"correctness","title":"missing pipefail on the download pipeline",
+              "non_converging":false,"false_trip":true,"possible_false_trip":true,
+              "matched_prior":{"line":100,"title":"unquoted variable in the matcher loop"}}],
+ "suggestions":[],"conflicts":[],"non_converging":true,"false_trips":[{"file":"m.zsh"}]}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v" --possible-false-trip-continued
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- possible false trip auto-continued (#1498): `a.py:50`'
+  echo "$output" | grep -q -- '- false trip auto-continued (#983): `m.zsh:103`'
+  # exactly one of each — neither line rendered for the other one's blocker
+  [ "$(grep -c -- '(#1498)' <<< "$output")" -eq 1 ]
+  [ "$(grep -c -- '(#983)' <<< "$output")" -eq 1 ]
+}
+
+@test "#1498 the flag renders NOTHING on a round with no escalating possible-false-trip set" {
+  # The flag is a fact about the ladder, not a line to print unconditionally: a
+  # round the loop could never have auto-continued must look the same either way.
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
+ "blocking":[{"file":"a.py","line":43,"dimension":"bugs","title":"Race on shared counter",
+              "non_converging":true,"false_trip":false,"possible_false_trip":false,
+              "matched_prior":{"line":42,"title":"Race on shared counter"}}],
+ "suggestions":[],"conflicts":[],"non_converging":true}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v" --possible-false-trip-continued
+  [ "$status" -eq 0 ]
+  run ! grep -q 'false trip' <<< "$output"
+}
+
+@test "#1498 the flag takes no value, and an unknown flag is still a usage error" {
+  pft_changelist "$CL"
+  # it is a BOOLEAN: the next argument must still be parsed as a flag, not eaten
+  run zsh "$S" --changelist "$CL" --possible-false-trip-continued --round 2 --verdict "v"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '^## Round 2'
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "v" --possible-false-trip
+  [ "$status" -eq 2 ]
+}

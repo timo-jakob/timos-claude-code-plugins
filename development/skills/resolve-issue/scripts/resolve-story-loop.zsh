@@ -35,6 +35,15 @@
 #     suggestion legitimately re-raised because the fix was incomplete is never
 #     suppressed;
 #   * `<work-dir>/.closing-sweep` — the round number of the CLOSING FULL SWEEP.
+# A fourth per-run work-dir file, `<work-dir>/.possible-false-trip-continued`
+# (#1498), records the identities this run has already spent its one automatic
+# all-ambiguous continuation on. One line per identity, tab-separated:
+#   <round><TAB><file><TAB><dimension><TAB><normtitle>
+# The IDENTITY is everything after the first tab; the leading round is what makes
+# the number of CONTINUATIONS (distinct rounds) derivable from the same file that
+# holds the identities, so a counter can never desynchronise from its records.
+# `normtitle` collapses all whitespace, so no reviewer-authored title can forge
+# the separator.
 # Delta scoping buys convergence but could hide a defect that only exists in the
 # interaction between rounds, so no run may END on a delta round: `CONVERGED` is
 # declarable only on a `scope_mode: "full"` round. A delta round that reaches
@@ -65,6 +74,15 @@
 #          CLEARS it as a genuinely different finding is a false_trip, NOT
 #          non_converging — the loop auto-continues (records it, no escalation,
 #          no human grant), so only verified/ambiguous survivors escalate here.
+#          ...and an AMBIGUOUS survivor (#1498) buys ONE automatic continuation
+#          per identity: when EVERY carried match of the round is
+#          `possible_false_trip`, none is Critical, the round is below the
+#          ceiling and no identity has continued before, the loop records the
+#          identities in `<work-dir>/.possible-false-trip-continued` and takes
+#          the round it already had. A second ambiguous match on a recorded
+#          identity escalates as before — that is evidence of a stuck blocker,
+#          not of a proximity artifact. It is a CONTINUE, not a grant: nothing
+#          about the budget moves.
 #     -> last round + blockers  => BUDGET_EXHAUSTED
 #     -> ...but EITHER of those two endings becomes CONVERGED_WITH_RESIDUE (14,
 #          #1435) when ALL THREE residue conditions hold: the last TWO rounds
@@ -421,6 +439,12 @@ closing_sweep_granted=0
 # the round number of the closing full sweep, 0 until a zero-blocker delta round
 # promotes one (or a --resume adopts one from <work-dir>/.closing-sweep)
 closing_sweep_round=0
+# How many automatic all-ambiguous continuations this RUN has spent (#1498),
+# read by emit_and_exit on EVERY exit for the same reason closing_sweep_granted
+# is — so it must exist before the first one (the --no-review fast path). Seeded
+# from the marker on --resume, since step mode runs each round as its own
+# invocation. A plain assignment, not `local`: see the note above.
+pft_continues=0
 
 # Clear a stale telemetry run-id sidecar (#995) as EARLY as the run is known to
 # be fresh — here, right after argument parsing, where `work_dir` and `resume`
@@ -532,14 +556,24 @@ emit_and_exit() {
   # command line that produced it.
   local granted_json='false'
   (( closing_sweep_granted )) && granted_json='true'
+  # possible_false_trip_auto_continues (#1498) is ALWAYS present — an integer,
+  # 0 on every run that never auto-continued — for the same reason
+  # promotion_phase and closing_sweep_granted are: a consumer must never have to
+  # tell 0 from "a status file that predates the key". It counts CONTINUATIONS,
+  # not identities, so a round that continues on three ambiguous matches adds 1.
+  # It is deliberately NOT a budget field: `max_rounds` still reports the
+  # caller's value and `closing_sweep_granted` keeps its meaning, because an
+  # auto-continue takes the round the run already had rather than granting one.
   out=$(jq -nc \
     --arg status "$st" --argjson rounds "$rounds" --argjson max "$max_rounds" \
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
     --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
     --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
+    --argjson pftc "$pft_continues" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
       promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
+      possible_false_trip_auto_continues:$pftc,
       repo_type:(if $repo_type=="" then null else $repo_type end),
       review_skill:(if $review_skill=="" then null else $review_skill end),
       escalation_reasons:$esc, residue_replaced_reasons:$residue_replaced,
@@ -697,7 +731,7 @@ emit_ambiguous() {
 # is render-progress-block.zsh (a testable pure function); transparency must
 # never abort a run, so every failure here is swallowed.
 append_progress_round() {
-  local cl="$1" r="$2" v="$3" prev_cl="${4:-}"
+  local cl="$1" r="$2" v="$3" prev_cl="${4:-}" pftc="${5:-0}"
   [[ -n "$work_dir" ]] || return 0
   # judgment-grade per-round counts (#969): the previous round changelist
   # enables fixed-since, the history (which already holds this round — it is
@@ -705,6 +739,10 @@ append_progress_round() {
   local -a extra
   [[ -n "$prev_cl" && -s "$prev_cl" ]] && extra+=(--prev "$prev_cl")
   [[ -s "$history_file" ]] && extra+=(--history "$history_file")
+  # #1498: the renderer is a pure function of the changelist, which carries no
+  # record of which way the ladder went — so the loop has to tell it that THIS
+  # round's ambiguous carried set was auto-continued rather than escalated.
+  (( pftc )) && extra+=(--possible-false-trip-continued)
   # the append target's OWN open failure (e.g. a directory sits at the path)
   # is a shell-level redirection error, reported on the CURRENT stderr before
   # the trailing `2>/dev/null` would apply to it — brace-group it so the
@@ -1059,6 +1097,140 @@ _residue_holds() {   # $1 = round, $2 = this round's changelist
   (( n_outside == 0 ))
 }
 
+# --- the one-shot all-ambiguous auto-continue (#1498) ------------------------
+# #983 already auto-continues a VERIFIED false trip — a carried match whose title
+# is fully disjoint from its matched prior's, so the finding is demonstrably a
+# different one that merely landed inside the proximity window. A POSSIBLE false
+# trip (#913/#969) is the case in between: the titles differ but are not
+# disjoint, so the loop cannot tell a reworded survivor from a new neighbour. It
+# still ends the run today, and twice in one #1435 session it did so on a round
+# where EVERY carried match was one and the assessment said as much — 41 minutes
+# of a human's wall clock spent confirming what the loop had already reported.
+#
+# The rung below buys exactly one round in that state, and nothing else. It is
+# NOT a bar lowered: the matches stay carried blockers the next round must
+# verify, one Critical anywhere in the carried set vetoes, an exact-title match
+# beside them vetoes, the ceiling is untouched, and an identity gets one
+# continuation for the whole run — a second ambiguous match on it is evidence of
+# a stuck blocker, which is what the escalation is for.
+
+# The identities of this round's carried set, one per line, deduplicated.
+# BOTH titles of each match are recorded — the item's own and its matched
+# prior's — because the ambiguity being continued is precisely a rewording, and
+# recording only the current title would let the next round's fresh wording buy
+# a second continuation for the same defect.
+#
+# `normtitle` is the CONSOLIDATOR's own normalisation, transcribed rather than
+# invented: one definition, two readers. Because it collapses every whitespace
+# run to a single space, a reviewer-authored title can hold no tab and no
+# newline, so it can neither forge a field separator nor forge a record.
+_pft_identities() {   # $1 = changelist -> identity lines on stdout
+  jq -r '
+    def normtitle: ((. // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
+      | sub("^ +"; "") | sub(" +$"; ""));
+    def normfile: ((. // "") | tostring | sub("^\\./"; ""));
+    [ (.blocking // [])[] | select(.non_converging == true)
+      | (.file | normfile) as $f
+      | ((.dimension // "") | tostring) as $d
+      | ( [$f, $d, (.title | normtitle)] | join("\t") ),
+        ( [$f, $d, (.matched_prior.title | normtitle)] | join("\t") ) ]
+    | unique | .[]' -- "$1"
+}
+
+# Does this round's carried set meet the FINDINGS half of the rung? The ceiling
+# and marker halves are the caller's, so this stays a pure read of one file.
+#
+# `$stamped` is the same predicate the four sibling surfaces use (progress
+# block, escalation table, escalation assessment, telemetry payload): an
+# unstamped changelist escalates as it does today, and an ABSENT flag is never
+# read as a pass. The empty-carried-set guard runs before the `all` tests
+# because `[] | all` is true, and a vacuous yes here would auto-continue a round
+# that has no ambiguity at all.
+_pft_findings_qualify() {   # $1 = changelist
+  local v=""
+  v=$(jq -r '
+    (.blocking // []) as $blk
+    | ((($blk | length) == 0) or ([ $blk[] | has("non_converging") ] | all)) as $stamped
+    | ([ $blk[] | select(.non_converging == true) ]) as $carried
+    | if ($stamped | not) then "no"
+      elif ($carried | length) == 0 then "no"
+      elif ([ $carried[] | .possible_false_trip == true ] | all | not) then "no"
+      elif ([ $carried[] | select(.priority == "Critical") ] | length) > 0 then "no"
+      else "yes" end' -- "$1" 2>/dev/null) || return 1
+  [[ "$v" == "yes" ]]
+}
+
+# How many continuations the marker records: distinct leading round fields.
+# Derived from the same file that holds the identities, so there is no second
+# artifact for a partial write to desynchronise.
+# An absent or empty marker is a real 0. A marker that EXISTS but yields no
+# numeric round field is a degradation, not a fact, and it is announced —
+# the same treatment the closing-sweep adoption gives a garbage sidecar, and
+# what keeps a reported number either reliable or visibly withheld.
+_pft_count() {
+  [[ -s "$pft_marker" ]] || { print -r -- 0; return 0 }
+  local n=""
+  n=$(cut -f1 -- "$pft_marker" 2>/dev/null | sort -u | grep -c '^[0-9][0-9]*$') || n=""
+  [[ "$n" == <-> ]] && (( n > 0 )) || {
+    print -u2 -- "resolve-story-loop: ignoring an unreadable possible-false-trip marker in $pft_marker — this run's spent continuations will report as 0 (#1498)"
+    n=0 }
+  print -r -- "$n"
+}
+
+# The rung itself: 0 (and the marker appended, the count incremented) when the
+# round auto-continues, non-zero when it must escalate.
+#
+# Every refusal BEFORE the append leaves the marker untouched, which is what
+# lets the vetoes be asserted on an absent file. A failed append refuses too,
+# and the records it did write only make the bound STRICTER — never looser — so
+# the failure direction is the safe one: continuing on a lost record would spend
+# the one-shot bound invisibly and let the same identity continue again next
+# round, which is the one thing this rung must never do.
+_pft_auto_continue() {   # $1 = round, $2 = this round's changelist
+  local r="$1" cl="$2" ids="" recorded="" rc=0
+  local -a recs
+  # The ceiling bound is load-bearing, not decorative: the `while (( round <=
+  # effective_max ))` loop exited with an EMPTY loop_status falls through to the
+  # `*)` arm of the exit `case` and emits a bare-status exit 1 — an operational
+  # failure, not a terminal. At the ceiling the existing paths stand as they are.
+  (( r < effective_max )) || return 1
+  [[ -n "$work_dir" && -n "$pft_marker" ]] || return 1
+  _pft_findings_qualify "$cl" || return 1
+  ids=$(_pft_identities "$cl") || return 1
+  [[ -n "$ids" ]] || return 1
+  # ...and the one-shot bound. A hit on EITHER recorded title counts, which is
+  # what stops the rewording that made the match ambiguous from buying a second
+  # continuation. The comparison is against everything after the marker's first
+  # tab, so a path holding a tab cannot shift the fields apart.
+  # ...matched by ONE grep over the whole identity list rather than a grep per
+  # identity, so a grep ERROR (exit 2) is distinguishable from "no match"
+  # (exit 1). Treating the two alike would make this the one fail-OPEN path in a
+  # helper whose every other failure escalates — and the state it would fail
+  # open into, spending the one-shot bound while believing nothing was recorded,
+  # is the one the rung must never reach.
+  if [[ -s "$pft_marker" ]]; then
+    recorded=$(cut -f2- -- "$pft_marker" 2>/dev/null) || return 1
+    rc=0
+    print -r -- "$recorded" | grep -qxF -f <(print -r -- "$ids") || rc=$?
+    (( rc == 0 )) && return 1
+    (( rc == 1 )) || {
+      print -u2 -- "resolve-story-loop: could not test the recorded possible-false-trip identities in $pft_marker — escalating instead (#1498)"
+      return 1 }
+  fi
+  # ONE append, not one per identity. A partial write would leave the marker
+  # holding this round while `pft_continues` had never moved — and since the
+  # count is DERIVED from the marker on the next --resume, the two would then
+  # disagree about the same run, which is exactly what deriving it from one file
+  # exists to prevent. Derived here too, for the same reason: after the write
+  # the marker is the answer, so nothing is incremented alongside it.
+  recs=("${(@f)ids}")
+  print -rl -- "${(@)recs/#/$r	}" >> "$pft_marker" || {
+    print -u2 -- "resolve-story-loop: could not record the round $r possible-false-trip auto-continue at $pft_marker — escalating instead (#1498)"
+    return 1 }
+  pft_continues=$(_pft_count)
+  return 0
+}
+
 # refuse this round's findings as never-produced (#974) and exit 2. Typed, so
 # --status-file can never keep the PREVIOUS invocation's AWAITING_FIX and read
 # as this one's verdict (the #912 lesson) — but NOT terminal: emit_and_exit
@@ -1278,6 +1450,10 @@ local resume_round=0 resume_prev=""
 # Per-round iteration state (#1434), all of it per-RUN: truncated on a fresh
 # start beside .findings-digest-* / .promote, adopted on --resume.
 local closing_sweep_file="$work_dir/.closing-sweep"
+# the identities this run has already spent its one all-ambiguous continuation
+# on (#1498) — per-run like the two above, truncated on a fresh start and
+# adopted on --resume, because step mode runs each round as its own invocation
+local pft_marker="$work_dir/.possible-false-trip-continued"
 local adjudicated_file="$work_dir/adjudicated.json"
 # The ceiling the WHILE loop and the BUDGET_EXHAUSTED test actually use. It
 # equals --max-rounds except on a run whose closing sweep was granted the one
@@ -1359,6 +1535,14 @@ if (( resume )); then
       closing_sweep_round=0
     fi
   fi
+  # Adopt this run's spent all-ambiguous continuations (#1498). Step mode runs
+  # each round as its own invocation, so without this the escalating round after
+  # an auto-continue would report 0 and the escalation summary would claim no
+  # continuation was ever spent. Derived from the marker rather than a separate
+  # counter, so the two can never disagree; an absent or unreadable marker
+  # simply reads 0, the same fail-quiet direction the closing-sweep adoption
+  # takes for a garbage sidecar.
+  pft_continues=$(_pft_count)
   # a ceiling at or below the resumed round would run zero rounds and fall out
   # of the loop with an empty status — refuse it as a usage error instead
   (( resume_round + 1 <= effective_max )) || {
@@ -1436,9 +1620,12 @@ else
   # fix-touched / fix-base (#1435) are per-run for the same reason: a previous
   # run's set would attribute THIS run's blockers to a fix pass that never
   # happened here, and residue's whole claim is "these edits are ours".
+  # ...and the possible-false-trip marker (#1498) for the same reason: a
+  # previous run's identities would silently deny THIS run the continuation it
+  # has not spent, and its rounds would inflate this run's reported count.
   rm_state_err=$(rm -f -- "$work_dir"/tree-*.txt(N) "$work_dir"/dispatch-tree-*.txt(N) "$work_dir"/verify-*.json(N) "$closing_sweep_file" \
-    "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) 2>&1) || \
-    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker or fix-touched set may be adopted (#1434, #1435)"
+    "$pft_marker" "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker or fix-touched set may be adopted (#1434, #1435, #1498)"
   print -r -- '[]' > "$adjudicated_file" || {
     print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
   # (the telemetry run-id sidecar is cleared far earlier — see the #995 note
@@ -1609,7 +1796,7 @@ local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
 local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
 local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
 local round_scope_empty=0 round_findings_empty=0 rc_empty=0
-local skip_fix=0 residue_promoted_sweep=0 adj_tmp=""
+local skip_fix=0 residue_promoted_sweep=0 pft_continued_round=0 adj_tmp=""
 local -a consolidate_args=() plan_args=()
 while (( round <= effective_max )); do
   # --- this round's working-tree identity (#1434) ---------------------------
@@ -2275,6 +2462,7 @@ while (( round <= effective_max )); do
   # interaction between rounds.
   skip_fix=0
   residue_promoted_sweep=0
+  pft_continued_round=0
   if (( blocking == 0 )); then
     if [[ "$scope_mode" == "full" ]]; then
       loop_status="CONVERGED"
@@ -2309,6 +2497,20 @@ while (( round <= effective_max )); do
         residue_promoted_sweep=1
         (( step_mode )) && loop_status="AWAITING_FIX"
       fi
+    elif _pft_auto_continue "$round" "$changelist"; then
+      # #1498: every carried match of this round is a POSSIBLE false trip, none
+      # is Critical, the round is below the ceiling, and no identity has
+      # continued before — so take the round this run already had rather than
+      # spend a human's attention confirming what the assessment just reported.
+      # Strictly BELOW the residue rung above, which keeps #1435's placement
+      # rule ("evaluated only where the loop would otherwise choose
+      # ESCALATE_NO_CONVERGENCE or BUDGET_EXHAUSTED") intact: residue still wins.
+      # An auto-continue is not a grant — nothing here touches effective_max,
+      # max_rounds or closing_sweep_granted — so the round falls through exactly
+      # as an ordinary continuing round does: empty loop_status in hook mode
+      # (the fix hook runs, then the next round), AWAITING_FIX in step mode.
+      pft_continued_round=1
+      (( step_mode )) && loop_status="AWAITING_FIX"
     else
       loop_status="ESCALATE_NO_CONVERGENCE"
     fi
@@ -2338,6 +2540,8 @@ while (( round <= effective_max )); do
         verdict="no blockers in the delta — round $closing_sweep_round is the closing full sweep; apply no fix, just --resume"
       elif (( residue_promoted_sweep )); then
         verdict="residue conditions hold, but on a DELTA round — promoting round $closing_sweep_round to the closing full sweep, which is the only round that may declare residue (#1435); apply blockers in-session, then --resume"
+      elif (( pft_continued_round )); then
+        verdict="every non-convergence match is a possible false trip and none has continued before — auto-continued once, no grant consumed (#1498); apply blockers in-session, then --resume"
       else
         verdict="awaiting fix — apply blockers in-session, then --resume"
       fi ;;
@@ -2345,11 +2549,13 @@ while (( round <= effective_max )); do
          verdict="no blockers in the delta — promoting round $closing_sweep_round to the closing full sweep"
        elif (( residue_promoted_sweep )); then
          verdict="residue conditions hold, but on a DELTA round — promoting round $closing_sweep_round to the closing full sweep, which is the only round that may declare residue (#1435)"
+       elif (( pft_continued_round )); then
+         verdict="every non-convergence match is a possible false trip and none has continued before — auto-continued once, no grant consumed (#1498); fix pass (in-loop), continuing"
        else
          verdict="fix pass (in-loop), continuing"
        fi ;;
   esac
-  append_progress_round "$changelist" "$round" "$verdict" "$prev_changelist"
+  append_progress_round "$changelist" "$round" "$verdict" "$prev_changelist" "$pft_continued_round"
   # STEP MODE's half of the fix-touched capture (#1435) — the SNAPSHOT. The fix
   # pass happens BETWEEN invocations, where this script never observes it, so the
   # pair is split: stamp the pre-fix identity here, diff against it at --resume
