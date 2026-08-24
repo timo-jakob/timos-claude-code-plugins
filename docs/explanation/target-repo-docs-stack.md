@@ -29,6 +29,7 @@ toolchain around it:
 | `.github/workflows/docs-deploy.yml` | GitHub Pages deploy on the default branch |
 | `.github/workflows/docs-publish.yml` | Rolling `docs-latest` pre-release (PDF/ePub) + OCI docs image on the default branch |
 | `Dockerfile.docs`, `requirements-docs.txt`, `scripts/docs-nav-to-chapters.zsh` | The image recipe, the pinned CI-only toolchain, and the nav→chapters converter the manuals build with |
+| `scripts/pandoc/break-long-tokens.lua`, `scripts/pandoc/manual-header.tex` | The PDF's layout fix — LaTeX wraps neither a long path nor a long code line, and drops a character it has no glyph for without saying so; these give it break points, wrap code blocks, and map the missing characters |
 
 Two properties are deliberate:
 

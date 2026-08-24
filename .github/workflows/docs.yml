@@ -19,6 +19,7 @@ on:
       - "mkdocs.yml"
       - "requirements-docs.txt"
       - "scripts/docs-nav-to-chapters.zsh"
+      - "scripts/pandoc/**"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
@@ -27,6 +28,7 @@ on:
       - "mkdocs.yml"
       - "requirements-docs.txt"
       - "scripts/docs-nav-to-chapters.zsh"
+      - "scripts/pandoc/**"
       - ".github/workflows/docs.yml"
 
 permissions:
@@ -55,7 +57,7 @@ jobs:
 
   pdf-epub:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -68,20 +70,41 @@ jobs:
         run: ./scripts/docs-nav-to-chapters.zsh > chapters.txt
 
       - name: Build manual.pdf + manual.epub with pandoc
-        # Pinned official pandoc/latex container (bundles xelatex). Renovate's
-        # docker manager keeps the tag current. xelatex handles the docs' Unicode;
-        # glyphs with no font (e.g. emoji) are dropped with a warning, not fatal.
+        # Pinned official pandoc/extra container (xelatex plus the wider TeX Live
+        # set — fvextra, which scripts/pandoc/manual-header.tex needs to wrap long
+        # code lines; pandoc/latex does not carry it). Renovate's docker manager
+        # keeps the tag current.
+        #
+        # The PDF adds two layout fixes the ePub does not need, because HTML wraps
+        # what LaTeX will not: a Lua filter that gives long paths and
+        # identifiers somewhere to break, and a header that wraps code blocks and
+        # maps the characters Latin Modern has no glyph for.
         run: |
           set -euo pipefail
           mapfile -t chapters < chapters.txt
-          common=(--pdf-engine=xelatex --toc --metadata title="Claude Code Plugins"
-                  --metadata author="timos-claude-code-plugins")
-          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
-            "${common[@]}" -o manual.pdf "${chapters[@]}"
-          docker run --rm -v "$PWD:/data" -w /data pandoc/latex:3.5 \
+          docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+            --pdf-engine=xelatex --toc \
+            --metadata title="Claude Code Plugins" \
+            --metadata author="timos-claude-code-plugins" \
+            --lua-filter=scripts/pandoc/break-long-tokens.lua \
+            --include-in-header=scripts/pandoc/manual-header.tex \
+            -o manual.pdf "${chapters[@]}" 2>&1 | tee pandoc-pdf.log
+          docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
             --toc --metadata title="Claude Code Plugins" \
             --metadata author="timos-claude-code-plugins" \
             -o manual.epub "${chapters[@]}"
 
       - name: Confirm both manuals were produced
         run: test -s manual.pdf && test -s manual.epub
+
+      - name: Fail on characters the PDF has no glyph for
+        # xelatex drops an unmapped character SILENTLY — "≥90% coverage" would
+        # print as "90% coverage". Without this gate that loss is a warning
+        # nobody reads.
+        run: |
+          set -euo pipefail
+          if grep "Missing character" pandoc-pdf.log; then
+            echo "::error::xelatex dropped the characters above from manual.pdf."
+            echo "Add a \\DeclareUnicodeFallback for each one to scripts/pandoc/manual-header.tex."
+            exit 1
+          fi
