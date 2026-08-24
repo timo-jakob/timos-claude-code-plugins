@@ -37,7 +37,7 @@ Nothing else changes **for the pin swap itself**: `contracts-lint` references
 `.spectral.yaml` **by path**, so replacing the ruleset content never touches the
 pipeline. (Your workflow may still need a separate, unrelated refresh — next.)
 
-### Check your own `contracts-lint.yml` first
+### Check your own `contracts-lint.yml` first {#check-your-own-contracts-lintyml-first}
 
 A workflow is a copy, not a
 subscription: the same template-vs-copy rule that means no bot bumps your pin

@@ -188,6 +188,80 @@ assert_no_orphan_pages() {
   grep -q "pandoc-pdf.log" "$OUT/common/.github/workflows/docs.yml"
 }
 
+@test "docs templates: the shipped PR gate's reference step matches the repo's byte for byte" {
+  # #1542: the site and the manual slugify a heading differently, so an in-page
+  # link can resolve on one and dangle in the other while both builds exit 0.
+  # Same parity rule as the layout assets — a gate this repo has and the shipped
+  # stack lacks means every seeded repo keeps the defect.
+  #
+  # Held as byte-identity rather than a needle list: the step carries no
+  # placeholders, so whatever tests/manual-pdf-anchors.bats pins about the repo's
+  # copy (the trigger, the positive control, the missing-log precondition, the
+  # verdict's own exit) holds for the shipped one too — in this round and in
+  # every later one. Two hand-written assertion sets would drift; this cannot.
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  local q='.jobs.pdf-epub.steps[] | select(.name == "Fail on references the PDF cannot resolve") | .run'
+  yq -r "$q" "$OUT/common/.github/workflows/docs.yml" > "$BATS_TEST_TMPDIR/gate-shipped.txt"
+  yq -r "$q" "$REPO_ROOT/.github/workflows/docs.yml" > "$BATS_TEST_TMPDIR/gate-repo.txt"
+  # a renamed or deleted step yields an empty body, which must not pass as a match
+  [ -s "$BATS_TEST_TMPDIR/gate-shipped.txt" ]
+  diff "$BATS_TEST_TMPDIR/gate-repo.txt" "$BATS_TEST_TMPDIR/gate-shipped.txt"
+}
+
+@test "docs templates: the shipped build step captures pandoc's diagnostics into the log" {
+  # Both shipped log gates read pandoc-pdf.log; drop the 2>&1 and it holds stdout
+  # alone, so the glyph gate and the reference gate become permanent no-ops in
+  # every seeded repo. The build step DOES carry placeholders, so it is pinned by
+  # needle rather than by identity.
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  local body="$BATS_TEST_TMPDIR/build-step.txt"
+  yq -r '.jobs.pdf-epub.steps[] | select(.name == "Build manual.pdf + manual.epub with pandoc") | .run' \
+    "$OUT/common/.github/workflows/docs.yml" > "$body"
+  grep -qF '2>&1 | tee pandoc-pdf.log' "$body"
+}
+
+@test "docs templates: the shipped workflows name exactly one pandoc image" {
+  # The positive control is only a control while it runs the image that builds
+  # the manual, and the tag is a hand-maintained pin repeated in each workflow.
+  # Collapsed across BOTH files, as tests/manual-pdf-layout.bats does for this
+  # repo's copies: a per-file check passes when docs.yml is bumped and
+  # docs-publish.yml is not, leaving every seeded repo gating PRs on one image
+  # while publishing a manual built by another.
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  local images
+  images="$(grep -ho 'pandoc/[a-z]*:[0-9.]*' \
+    "$OUT/common/.github/workflows/docs.yml" \
+    "$OUT/common/.github/workflows/docs-publish.yml" | sort -u)"
+  [ -n "$images" ]
+  [ "$(printf '%s\n' "$images" | wc -l | tr -d ' ')" = "1" ]
+}
+
+@test "docs templates: the target-repo how-to names all three registration points" {
+  # The seeded stack has three (the nav, the MOC, the bucket's own index) and
+  # only the nav is enforced — a page missing from the other two builds green.
+  # So this page's prose IS the mechanism: `mkdocs build --strict` validates the
+  # nav, never what a page says about the nav, and nothing else in the suite
+  # reads this file. Reverting it to "both", or dropping the sentence that says
+  # which one is enforced, would otherwise be a silent regression.
+  local page="$REPO_ROOT/docs/how-to/write-docs-in-a-target-repo.md"
+  grep -Fq 'must appear in **all three**' "$page"
+  grep -Fq "the bucket's own \`index.md\`" "$page"
+  grep -Fq '**Only the first is enforced.**' "$page"
+}
+
+@test "docs templates: the shipped mkdocs config reads explicit heading ids" {
+  # attr_list is what makes the {#id} remedy work on the site; without it the id
+  # renders as literal text in the heading and the anchor reverts to the slug.
+  run render_docs ""
+  [ "$status" -eq 0 ]
+  local found
+  found="$(yq -r '.markdown_extensions[] | select(. == "attr_list")' "$OUT/common/mkdocs.yml")"
+  [ "$found" = "attr_list" ]
+}
+
 @test "docs templates: the shipped docs workflows react to a change in the layout assets" {
   run render_docs ""
   [ "$status" -eq 0 ]

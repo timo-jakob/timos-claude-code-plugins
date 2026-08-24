@@ -48,6 +48,11 @@ plugins:
 
 markdown_extensions:
   - admonition
+  # Explicit heading ids ({#some-id}), which the site and manual.pdf must agree
+  # on — the rule and the remedy are in docs/how-to/authoring-guide.md, "Every
+  # heading an in-page (`#…`) link targets needs an explicit id" (#1542). pandoc reads
+  # {#…} natively; mkdocs-material does not enable attr_list on its own.
+  - attr_list
   - tables
   - toc:
       permalink: true

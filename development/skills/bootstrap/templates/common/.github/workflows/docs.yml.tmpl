@@ -113,3 +113,47 @@ jobs:
             echo "Add a \\DeclareUnicodeFallback for each one to scripts/pandoc/manual-header.tex."
             exit 1
           fi
+
+      - name: Fail on references the PDF cannot resolve
+        # An in-page link whose target heading the site and the manual spell
+        # differently resolves on the site and dangles in the PDF (#1542) —
+        # pandoc reports it and still exits 0, so without this gate the dead
+        # link ships.
+        #
+        # The verdict is a NEGATIVE test: on a clean manual pandoc prints
+        # nothing, so "no dangling link" and "the warning never reached the log"
+        # look identical. The probe is the positive control — it builds a
+        # two-line document whose only link dangles and requires the warning to
+        # appear, so a pandoc image that stops relaying the LaTeX log reds here
+        # instead of leaving the gate silently blind. It writes nothing into the
+        # workspace.
+        run: |
+          set -euo pipefail
+          probe_log="$(docker run --rm --entrypoint sh pandoc/extra:3.5 -c \
+            'printf "# Probe\n\nA [dangling](#no-such-anchor) link.\n" > /tmp/probe.md
+             pandoc --pdf-engine=xelatex -o /tmp/probe.pdf /tmp/probe.md' 2>&1)" || {
+            printf '%s\n' "$probe_log"
+            echo "::error::the pandoc probe container failed (above) — that is infrastructure, not a"
+            echo "pandoc behaviour change. Re-run the job; do NOT re-key this gate."
+            exit 1
+          }
+          if ! printf '%s\n' "$probe_log" | grep -q "There were undefined references"; then
+            printf '%s\n' "$probe_log"
+            echo "::error::pandoc ran but no longer reports undefined references, so this gate cannot fail."
+            echo "Re-key it on what the current pandoc image emits before trusting a green run."
+            exit 1
+          fi
+          test -s pandoc-pdf.log || {
+            echo "::error::pandoc-pdf.log is missing or empty — the manual was never judged."
+            exit 1
+          }
+          if grep -q "There were undefined references" pandoc-pdf.log; then
+            grep -B2 -A2 "undefined" pandoc-pdf.log
+            echo "::error::manual.pdf has unresolved references — the links above work on the site only."
+            echo "If the anchor names a heading that exists, give that heading an explicit {#id} —"
+            echo "the id that heading ALREADY publishes on the default branch, pasted verbatim."
+            echo "Never guess the slug: a guessed id greens this gate while moving the published"
+            echo "anchor, which breaks every bookmark and inbound link to that heading."
+            echo "If it names no heading in the page (renamed, deleted or a typo), fix the link."
+            exit 1
+          fi
