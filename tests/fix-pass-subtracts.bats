@@ -352,15 +352,28 @@ _roster_hits() {
   local ln body
   ln="$(prose_gate_lines "$EXPLAIN" 'A fix pass subtracts.')"
   [ -n "$ln" ]
-  body="$(prose_window "$EXPLAIN" "$ln" 14)"
+  # FORWARD-ONLY and paragraph-tight, the idiom tests/round-boundary-wait.bats
+  # uses for its pins on this page. Both neighbours are BEHIND the gate line —
+  # #1513's turn-boundary paragraph immediately above, the concurrency one above
+  # that — so a centred span overruns backwards, and every needle below becomes
+  # a claim about "somewhere in three paragraphs" rather than about this one:
+  # the overrides clause could be moved into a neighbouring paragraph with this
+  # sweep still green, which is the drift this pin exists to red on. Forward
+  # there is only the next section heading, so the span buys nothing that way.
+  body="$(prose_window "$EXPLAIN" "$((ln + 6))" 6)"
   # what the rule IS — without this the page names it and points at §3.5 while
   # saying nothing about what it does
   contains "$body" 'allowed to delete, narrow or collapse; it is not allowed to grow the change'
   contains "$body" 'parked as a follow-up'
   # …and the class trigger, which is the half this story exists to add
   contains "$body" 'stops being advisory and becomes required'
-  contains "$body" "§3.5's round protocol, step 3"
-  contains "$body" 'nothing here restates it'
+  # ONE compound needle, not two adjacent ones: #1513 added a paragraph to this
+  # same page that also ends "… and nothing here restates it", so a bare
+  # 'nothing here restates it' would be satisfied by THAT paragraph the moment
+  # this window widened — and the disclaimer could then be deleted from this one
+  # with the suite still green. Only the pointer text makes the needle unique to
+  # this rule; the forward-only span above is the second guard, not the only one.
+  contains "$body" "§3.5's round protocol, step 3, and nothing here restates it"
   # and rule 1's overrides are not silently dropped from the summary, which is
   # what made an earlier draft's paraphrase say the opposite of §3.5
   contains "$body" "unless a human, or the story's own acceptance criteria, asked for that surface on purpose"
