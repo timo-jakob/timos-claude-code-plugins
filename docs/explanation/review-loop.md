@@ -37,6 +37,18 @@ about to supersede; the round restarts from a fresh mint.
 `/development:resolve-issue` §3.5's round protocol states the ordering and the
 red-gate arm, and nothing here restates them.
 
+**The wait between the two is a turn boundary, not a poll.** Having started the
+gate and dispatched the panel, the driver ends its turn: every reviewer's result
+comes back as a harness notification that re-invokes it. The background suite is
+the one thing nothing announces, so it is collected once, in a single blocking
+call, rather than watched. This is
+a cost rule as much as a style one — a run that polls instead spends a third of
+its turns and a third of its input tokens on answers it was going to be handed
+anyway. The normative statement — what a waiting turn may not do, and the single
+bounded blocking call reserved for signals the harness does not deliver — is
+`/development:resolve-issue` §3.5's **How to wait**, and nothing here restates
+it.
+
 **A fix pass subtracts.** Step 3 is allowed to delete, narrow or collapse; it is
 not allowed to grow the change. A finding whose smallest fix would have to add
 new behaviour is parked as a follow-up issue instead — unless a human, or the

@@ -836,6 +836,9 @@ The ordering, and it is the whole of it:
    Everything it writes goes **outside the repo**, as the work-dir and findings
    files already do: a byte landing under the worktree between step 1's mint and
    the gate's own hashing is step 7's drift, every round.
+
+   The wait itself begins after step 3, not here.
+   **How to wait** (this section) governs the wait — it is not restated here.
 3. **Plan and dispatch the panel** (the *Each round* panel step below) against
    that same tree, while the gate is still running. **If that step refuses or
    aborts the round** — an unreadable carry, a non-zero `plan`, a FAILED panel,
@@ -963,6 +966,26 @@ gate, which is correct) or omit it — never pass the fresh mint as
 `--gate-attest`, which would skip a gate that never ran on the post-fix tree.
 That is the one recovery the *no fix pass ran* case above excludes.
 
+**How to wait — end the turn (#1513).** Once the boundary has dispatched — the
+gate started out of band, the panel's agents spawned — there is nothing left for
+this turn to do, so **end it**. Every reviewer's result arrives as a harness
+notification that re-invokes you, and the harness queues them, so the boundary
+resumes when the last one lands. **The gate is not one of these**: step 2 puts
+it out of band, so its completion is the file case below, collected by the one
+bounded call where the boundary says to observe it. A turn that has
+dispatched and has nothing else to do **ends**: it does not run `date`, `sleep`,
+`echo`, `git status` or any other heartbeat to hold itself open, and it does not
+schedule short wake-ups to poll work the harness already tracks. That
+busy-poll is not hypothetical — on the #1497 session it took **366 of 1 159
+assistant turns and 235M of 658M input tokens**, a third of each, spent
+learning nothing, and the run then hit the weekly limit mid-round. The one
+sanctioned in-turn wait is for a signal the harness does **not** deliver — the
+gate's own marker, or another file a process writes — and it is **one bounded
+blocking call**: `Monitor`, with a timeout generous enough for the wait the
+step that ordered it describes. One call, never one probe per turn. **A call that returns without its signal is not a retry**:
+judge by re-testing the condition, never by the call's exit status, and take the
+boundary's own signal-never-arrived arm instead of blocking again.
+
 Each round:
 
 1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh
@@ -971,6 +994,8 @@ Each round:
    the user), scoped to the plan's `changed_files` — minus anything under the
    loop's `--work-dir`, which is loop state, never story code. Aggregate their
    findings into one #558-schema JSON array file — the round's findings file.
+
+   **How to wait** (this section) governs the wait — it is not restated here.
 
    **From round 2 on, `plan` needs flags — and it refuses a round ≥ 2 that
    names neither `--prior-tree` nor `--final` (#1434).** The two carry flags are
