@@ -52,6 +52,12 @@ plugins:
 
 markdown_extensions:
   - admonition
+  # Explicit heading ids ({#some-id}). The site and manual.pdf slugify headings
+  # differently, so a heading that an in-page (#…) link targets needs an id both
+  # renderers read — otherwise the link resolves on the site and dangles in the
+  # PDF. pandoc reads {#…} natively; mkdocs-material does not enable attr_list
+  # on its own.
+  - attr_list
   - tables
   - toc:
       permalink: true

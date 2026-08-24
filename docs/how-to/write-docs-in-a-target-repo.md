@@ -33,12 +33,19 @@ job when it deserves its own "How do I …?".
 
 ## 3. Register the page — the strict build insists
 
-Every page must appear in **both**:
+Every page must appear in **all three**:
 
 - `mkdocs.yml` → `nav:` — `mkdocs build --strict` fails on an unlisted page
   (and on a nav entry whose file doesn't exist), and the PDF/ePub chapter
   order derives from this list;
-- `docs/index.md` — the MOC that keeps every page reachable from one place.
+- `docs/index.md` — the MOC that keeps every page reachable from one place;
+- the bucket's own `index.md` (`docs/how-to/index.md`, `docs/reference/index.md`,
+  …) — the landing page readers arrive on, which bootstrap seeded listing every
+  page it created.
+
+**Only the first is enforced.** A page missing from the MOC or from its bucket
+index builds green, so nothing will remind you — add all three when you create
+the page.
 
 ## 4. Verify locally before pushing
 
@@ -47,11 +54,17 @@ dependencies):
 
 ```bash
 python3 -m venv .venv-docs && .venv-docs/bin/pip install -r requirements-docs.txt
-.venv-docs/bin/mkdocs build --strict   # the exact PR-gate check
+.venv-docs/bin/mkdocs build --strict   # the PR gate's site half
 .venv-docs/bin/mkdocs serve            # live preview at http://127.0.0.1:8000
 ```
 
-A green `--strict` build locally is the same bar the `docs` PR check applies.
+A green `--strict` build locally clears the **site** half of the `docs` check.
+The `pdf-epub` job applies two more bars the site build cannot see: it reds on a
+character the PDF has no glyph for, and on an in-page link the PDF cannot
+resolve. The second is why a heading that an in-page (`#…`) link targets needs
+an explicit `{#id}`; the rule, and how to obtain the id without moving the
+heading's published anchor, are in
+[the authoring guide](authoring-guide.md#mechanics-specific-to-this-repo).
 
 ## 5. Ship it with the change it documents
 

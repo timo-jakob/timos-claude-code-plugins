@@ -90,6 +90,33 @@ for the why and [Amend a C4 diagram](amend-a-c4-diagram.md) for the how.
   are written as **absolute repo URLs**, not relative paths — relative links
   that escape `docs/` don't resolve in the built site. Links *within* `docs/`
   stay relative.
+- **Every heading an in-page (`#…`) link targets needs an explicit id.** The
+  site and `manual.pdf` slugify headings differently — python-markdown's `toc`
+  strips a `.`, pandoc's `auto_identifiers` keeps it, and pandoc additionally
+  drops everything before the first letter — so a link written for one renderer
+  can dangle in the other. Don't try to predict which headings diverge: put the
+  anchor MkDocs **already publishes** on the heading itself.
+
+  ```markdown
+  ### Check your own `contracts-lint.yml` first {#check-your-own-contracts-lintyml-first}
+  ```
+
+  **Read that anchor before you write the id, never guess it.** Read it from the
+  page *as published* — the live site's ¶ permalink beside the heading, or a
+  build of the page as it stands on `main`:
+
+  ```bash
+  mkdocs build
+  grep -o 'id="[^"]*"' site/how-to/adopt-the-api-styleguide/index.html | grep -v '"__'
+  ```
+
+  Paste it verbatim. Reading it *after* you have added your guess just shows the
+  guess back to you, and an id that differs from the published one keeps the site
+  build green while quietly breaking every existing bookmark and inbound link —
+  the one outcome writing the id explicitly is meant to avoid. A heading that
+  does not exist on `main` yet has no anchor to preserve, so any id is safe
+  there. The pandoc job fails on an unresolved reference, so a missing id shows
+  up as a red `docs` check.
 - **Line length is 120** (markdownlint MD013); tables and code blocks are
   exempt. A long URL only passes if it sits at the **end of the line** with no
   trailing text.
