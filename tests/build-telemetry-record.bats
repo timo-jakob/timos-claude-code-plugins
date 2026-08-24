@@ -70,7 +70,7 @@ EOF
   done
   # ...and exactly the payload keys it does own
   [ "$(echo "$output" | jq -c 'keys_unsorted | sort')" = \
-    '["convergence_assessment","escalation","findings_by_round","fixed","max_rounds","promotion_phase","rounds","status","waived"]' ]
+    '["convergence_assessment","escalation","findings_by_round","fixed","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","status","waived"]' ]
 }
 
 @test "the payload embeds into a telemetry/v1 record the validator accepts (#1004)" {
@@ -596,4 +596,61 @@ EOF
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.findings_by_round[0].by_class == {new_defect:0,incomplete_propagation:0,under_assertion:0}' >/dev/null
+}
+
+# --- #1498: the auto-continue count in the payload -----------------------------
+
+@test "#1498 tc-corner-telemetry-count: the payload carries the auto-continue count" {
+  # It sits beside convergence_assessment.possible_false_trips deliberately:
+  # that field says how many ambiguous matches the FINAL round carried, this one
+  # says how often the loop acted on that state — so "how often does the
+  # all-ambiguous signal fire, and how often does it hold up?" is answerable
+  # from one record.
+  cat > "$ST" <<'EOF'
+{"status":"ESCALATE_NO_CONVERGENCE","rounds":3,"max_rounds":5,"repo_type":"python",
+ "possible_false_trip_auto_continues":2,
+ "escalation_reasons":["non_converging_blocker"],
+ "round_changelists":[
+  {"round":1,"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":5,"title":"unquoted variable in the matcher","non_converging":false}],"suggestions":[]},
+  {"round":2,"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":8,"title":"unquoted variable in the dispatcher","non_converging":true,"possible_false_trip":true,"matched_prior":{"line":5,"title":"unquoted variable in the matcher"}}],"suggestions":[]},
+  {"round":3,"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":11,"title":"unquoted variable in the resolver","non_converging":true,"possible_false_trip":true,"matched_prior":{"line":8,"title":"unquoted variable in the dispatcher"}}],"suggestions":[]}],
+ "final_changelist":{"blocking":[{"priority":"High","dimension":"tests","file":"a.py","line":11,"title":"unquoted variable in the resolver","non_converging":true,"possible_false_trip":true,"matched_prior":{"line":8,"title":"unquoted variable in the dispatcher"}}]}}
+EOF
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 2 ]
+  # the sibling field is the FINAL round's ambiguous carry, and the two are
+  # different numbers on purpose — a test that let them coincide would not show
+  # that the record answers two questions
+  [ "$(echo "$output" | jq '.convergence_assessment.possible_false_trips')" -eq 1 ]
+  # ...and the budget fields are untouched: an auto-continue is not a grant
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+}
+
+@test "#1498 the count is 0 (never null) on a run that never auto-continued, and on an older status" {
+  # setup()'s status has no such key at all — the same shape a status file
+  # written before #1498 has — so `// 0` is what keeps an archived record
+  # readable rather than turning the field into a tri-state.
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.possible_false_trip_auto_continues == 0' >/dev/null
+  echo "$output" | jq -e '(.possible_false_trip_auto_continues | type) == "number"' >/dev/null
+}
+
+@test "#1498 rollup-telemetry.zsh is unaffected by the new payload key" {
+  # The rollup narrows on `status`, so a new payload field must not change what
+  # it reports — asserted by rolling up two records that differ ONLY in the key.
+  local ROLL="$REPO_ROOT/development/scripts/telemetry/rollup-telemetry.zsh"
+  [ -x "$ROLL" ] || skip "rollup-telemetry.zsh not present"
+  local a="$BATS_TEST_TMPDIR/roll-a.jsonl" b="$BATS_TEST_TMPDIR/roll-b.jsonl"
+  jq -nc '{schema:"telemetry/v1", kind:"run", run_id:"r1", ts:"2026-08-24T00:00:00Z",
+           repo:"o/r", pipeline:"review-loop", issue:1498, outcome:"success",
+           payload:{status:"CONVERGED", rounds:2, max_rounds:5,
+                    possible_false_trip_auto_continues:0}}' > "$a"
+  jq -nc '{schema:"telemetry/v1", kind:"run", run_id:"r1", ts:"2026-08-24T00:00:00Z",
+           repo:"o/r", pipeline:"review-loop", issue:1498, outcome:"success",
+           payload:{status:"CONVERGED", rounds:2, max_rounds:5,
+                    possible_false_trip_auto_continues:3}}' > "$b"
+  diff <(zsh "$ROLL" "$a" 2>&1) <(zsh "$ROLL" "$b" 2>&1)
 }

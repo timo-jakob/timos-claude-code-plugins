@@ -2742,3 +2742,442 @@ EOF
   grep -q 'fix pass (in-loop), continuing' <<< "$r3"
   run ! grep -q 'residue conditions hold' <<< "$r3"
 }
+
+# --- #1498: the one-shot all-ambiguous auto-continue ---------------------------
+#
+# ONE fixture shape, defined once, so a half-applied edit cannot make the
+# positive and the veto cases exercise different things. Round 1 raises two
+# WARNINGs 55 lines apart — further than LINEWIN (10), so neither can ever
+# gather the other's prior and the one-to-one attribution is unambiguous. Round 2
+# raises two more, each three lines from its OWN prior and each sharing
+# significant (>= 4-char) tokens with it without matching it exactly. That is
+# precisely the AMBIGUOUS verdict: not a verified survivor (no exact title), not
+# a #983 disjoint false trip (tokens are shared).
+#
+# WARNING, never CRITICAL: a Critical anywhere in the carried set vetoes the
+# rung, which the veto test below drives on purpose.
+#
+# Round 1's first title is deliberately NOT already normalised — mixed case, a
+# double space, and a literal tab. The marker records `normtitle`, so the
+# expected content below stays lower-cased and single-spaced, which is what
+# makes the `diff` kill a lost `ascii_downcase`, a lost `gsub("\\s+"; " ")`, and
+# a tab reaching the marker (where it would forge a fourth field and break the
+# `cut -f2-` round-trip the one-shot bound depends on). With every fixture title
+# pre-normalised, all three of those deletions passed the suite.
+pft_round1='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":5,\"title\":\"Unquoted  Variable\\tIn The Matcher\",\"description\":\"d1\",\"reviewer\":\"r\"},{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":60,\"title\":\"missing timeout on the fetch helper\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
+pft_round2='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"},{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":63,\"title\":\"missing timeout on the upload helper\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
+
+# The marker this run should write, in full. Asserted as CONTENT rather than as
+# a line count: the identity rule (#1498) records BOTH titles of every match —
+# the item's own and its matched prior's — so a per-item count would pass on an
+# implementation that recorded only one of them, which is exactly the hole a
+# re-wording would then walk through. `unique` inside the loop sorts them, so
+# the expected order is lexicographic.
+pft_expected_marker() {   # $1 = the round that continued
+  printf '%s\tapp.py\ttests\tmissing timeout on the fetch helper\n' "$1"
+  printf '%s\tapp.py\ttests\tmissing timeout on the upload helper\n' "$1"
+  printf '%s\tapp.py\ttests\tunquoted variable in the dispatcher\n' "$1"
+  printf '%s\tapp.py\ttests\tunquoted variable in the matcher\n' "$1"
+}
+
+# `$1` is the round-3 findings document (escaped for the printf inside the hook);
+# rounds 4+ are always clean, so a run that gets past round 3 converges rather
+# than drifting into the budget and reporting the wrong terminal for the wrong
+# reason.
+pft_review() {  # $1 = round-3 findings (default: none)
+  local r3="${1:-[]}"
+  printf '%s' 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$pft_round1"'" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "'"$pft_round2"'" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 3 ]; then printf "%s" "'"$r3"'" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi'
+}
+
+@test "#1498 tc-happy-possible-false-trip-auto-continue: an all-ambiguous carried set continues instead of exiting 12" {
+  loop --review-cmd "$(pft_review)" --fix-cmd 'true'
+  # the run did NOT stop at round 2 — it took the round it already had and then
+  # converged on the clean round 3
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  # ...and round 2 really was the state this rung is about: two carried matches,
+  # both ambiguous, no Critical. Without this the test would pass on a run that
+  # never reached the rung at all.
+  echo "$output" | jq -e '.round_changelists[1].non_converging == true' >/dev/null
+  echo "$output" | jq -e '[.round_changelists[1].blocking[]
+      | select(.non_converging == true)] | length == 2' >/dev/null
+  echo "$output" | jq -e '[.round_changelists[1].blocking[]
+      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+  echo "$output" | jq -e '.round_changelists[1].summary.critical == 0' >/dev/null
+  # the count is of CONTINUATIONS, not identities: four records, one round
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  diff <(pft_expected_marker 2) "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+  # ...and exactly four records. A lost whitespace collapse would split round 1's
+  # tab-bearing title into an extra field rather than adding a line, so the diff
+  # above is what catches that; this catches the reverse — a normalisation that
+  # merges or drops one of the four identities.
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" | tr -d ' ')" -eq 4 ]
+}
+
+@test "#1498 the continued round says so in progress.md, distinctly from #983's line" {
+  loop --review-cmd "$(pft_review)" --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  local r2
+  r2="$(awk '/^## Round 2 /{f=1} f{print} /^## Round 3 /{exit}' "$BATS_TEST_TMPDIR/wd/progress.md")"
+  # the per-blocker line carries the marker, on BOTH carried matches
+  [ "$(grep -c -- '- possible false trip auto-continued (#1498):' <<< "$r2")" -eq 2 ]
+  # ...and the round verdict says the run continued without a grant
+  grep -q 'auto-continued once, no grant consumed (#1498)' <<< "$r2"
+  # #983's line is for a DISJOINT-title match, which this round has none of —
+  # so the two must not be collapsible into one another
+  run ! grep -q -- '- false trip auto-continued (#983):' <<< "$r2"
+}
+
+@test "#1498 tc-error-second-ambiguous-match-escalates: a recorded identity escalates, marker unchanged" {
+  # Round 3 re-raises a title the marker already holds. Its own normalised title
+  # IS recorded, so the one-shot bound refuses and the ladder falls through to
+  # the escalation it would have taken at round 2.
+  local r3='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":11,\"title\":\"unquoted variable in the matcher\",\"description\":\"d3\",\"reviewer\":\"r\"}]'
+  loop --review-cmd "$(pft_review "$r3")" --fix-cmd 'true'
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  # round 3 really was another ambiguous carried match — otherwise this pins the
+  # wrong thing entirely
+  echo "$output" | jq -e '[.round_changelists[2].blocking[]
+      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+  # the count did not move, and neither did the marker
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  diff <(pft_expected_marker 2) "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+  # ...and the ESCALATING round renders the PLAIN line. Without this the loop's
+  # `(( pftc )) &&` flag guard is only tested positively: pass the flag
+  # unconditionally and every other assertion here still holds, while progress.md
+  # tells the human the run continued on a round that in fact stopped.
+  local r3
+  r3="$(awk '/^## Round 3 /{f=1} f{print}' "$BATS_TEST_TMPDIR/wd/progress.md")"
+  grep -q -- '- possible false trip: `app.py:11`' <<< "$r3"
+  lacks "$r3" 'possible false trip auto-continued (#1498)'
+  lacks "$r3" 'continued once without a human grant'
+}
+
+@test "#1498 tc-corner-marker-identity-matched-prior-title: a rewording buys no second continuation" {
+  # Round 3's OWN title is fresh — nothing in the marker matches it — but the
+  # prior it matched is recorded. Recording only the current title would let the
+  # very re-wording that makes a match ambiguous earn an unbounded run of free
+  # rounds, one new synonym at a time.
+  local r3='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":11,\"title\":\"unquoted variable in the resolver\",\"description\":\"d3\",\"reviewer\":\"r\"}]'
+  loop --review-cmd "$(pft_review "$r3")" --fix-cmd 'true'
+  [ "$status" -eq 12 ]
+  # ...and it really was the matched_prior half that refused: round 3 matched
+  # the prior the marker holds. Read BEFORE the `run !` below, which replaces
+  # $output with grep's.
+  echo "$output" | jq -e '.round_changelists[2].blocking[0].matched_prior.title == "unquoted variable in the dispatcher"' >/dev/null
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  grep -qF 'app.py	tests	unquoted variable in the dispatcher' \
+    "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+  # the round-3 title itself is absent from the marker, so nothing but the
+  # matched_prior half can have produced the refusal
+  run ! grep -qF 'unquoted variable in the resolver' \
+    "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+}
+
+@test "#1498 tc-error-mixed-carried-set-escalates: one exact-title match beside the ambiguous ones vetoes" {
+  # Round 2 re-raises the second blocker VERBATIM at its own line: an exact
+  # normalised-title match, which is a verified survivor (possible_false_trip
+  # false). "Every carried match is ambiguous" is then false, and the rung must
+  # not fire — a genuinely stuck blocker is exactly what the escalation is for.
+  local r2='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"},{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":60,\"title\":\"missing timeout on the fetch helper\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
+  loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$pft_round1"'" > "$REVIEW_FINDINGS"; else printf "%s" "'"$r2"'" > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'true'
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  # the mix really is a mix: one ambiguous, one verified
+  echo "$output" | jq -e '[.round_changelists[1].blocking[]
+      | select(.non_converging == true) | .possible_false_trip] | sort == [false, true]' >/dev/null
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
+}
+
+@test "#1498 tc-error-critical-in-carried-set-escalates: a Critical among the ambiguous matches vetoes" {
+  local one='[{\"severity\":\"CRITICAL\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":5,\"title\":\"unquoted variable in the matcher\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
+  local two='[{\"severity\":\"CRITICAL\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
+  loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$one"'" > "$REVIEW_FINDINGS"; else printf "%s" "'"$two"'" > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'true'
+  [ "$status" -eq 12 ]
+  # the carried match IS ambiguous — the ONLY thing separating this from the
+  # happy case is the severity, which is what makes it a test of the veto
+  echo "$output" | jq -e '[.round_changelists[1].blocking[]
+      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+  echo "$output" | jq -e '.round_changelists[1].summary.critical == 1' >/dev/null
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
+}
+
+@test "#1498 tc-corner-critical-outside-carried-set-auto-continues: the veto is per-match, not round-wide" {
+  # A fresh Critical that is NOT part of the ambiguity (non_converging false) has
+  # nothing to do with whether the cross-round match is a proximity artifact, so
+  # it must not veto. `other.py` exists before the loop starts, so a finding in
+  # it survives scope-findings (which scopes against the story diff).
+  echo "print(2)" > "$R/other.py"
+  local r2='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"},{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"other.py\",\"line\":200,\"title\":\"brand new unrelated defect here\",\"description\":\"d2\",\"reviewer\":\"q\"}]'
+  local one='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":5,\"title\":\"unquoted variable in the matcher\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
+  loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$one"'" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "'"$r2"'" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  # the Critical really was there, and really was outside the carried set
+  echo "$output" | jq -e '.round_changelists[1].summary.critical == 1' >/dev/null
+  echo "$output" | jq -e '[.round_changelists[1].blocking[]
+      | select(.priority == "Critical")] | all(.non_converging == false)' >/dev/null
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  # The marker's CONTENT, not merely its existence — which is the other half of
+  # this test's thesis. The out-of-set Critical must not be given a bound
+  # either: `_pft_identities` enumerates the carried set, so dropping its
+  # `select(.non_converging == true)` would record `other.py` too, and a bare
+  # `-s` cannot see that. The cost of missing it is the rung silently ceasing to
+  # fire on any run that also carries unrelated fresh findings.
+  local M="$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+  diff <(printf '2\tapp.py\ttests\tunquoted variable in the dispatcher\n2\tapp.py\ttests\tunquoted variable in the matcher\n') "$M"
+  run ! grep -qF 'other.py' "$M"
+}
+
+@test "#1498 tc-corner-at-ceiling-no-auto-continue: the ceiling stands, and never as a bare-status exit 1" {
+  # `round < effective_max` is load-bearing rather than decorative: the while
+  # loop exited with an EMPTY loop_status falls through to the exit case's
+  # catch-all and emits a bare-status exit 1 — an operational failure, not a
+  # terminal. So this asserts the CODE as much as the absence of the marker.
+  loop --max-rounds 2 --review-cmd "$(pft_review)" --fix-cmd 'true'
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+  # the round really did carry an all-ambiguous set — the ceiling is the ONLY
+  # thing that refused it
+  echo "$output" | jq -e '[.round_changelists[1].blocking[]
+      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
+  # ...and the round renders the PLAIN line: a ceiling refusal is still a
+  # refusal, so progress.md must not claim a continuation happened
+  local r2
+  r2="$(awk '/^## Round 2 /{f=1} f{print}' "$BATS_TEST_TMPDIR/wd/progress.md")"
+  grep -q -- '- possible false trip: `app.py:8`' <<< "$r2"
+  lacks "$r2" 'possible false trip auto-continued (#1498)'
+}
+
+@test "#1498 tc-corner-ceiling-unmutated: an auto-continue is not a grant" {
+  loop --max-rounds 4 --review-cmd "$(pft_review)" --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  # the ceiling the caller passed is what gets reported, the closing-sweep grant
+  # is untouched, and the run ended no later than that ceiling
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 4 ]
+  [ "$(echo "$output" | jq -r '.closing_sweep_granted')" = "false" ]
+  echo "$output" | jq -e '.rounds <= .max_rounds' >/dev/null
+}
+
+@test "#1498 an auto-continued run still runs OUT of budget on time — the ceiling is observed, not assumed" {
+  # The reported `max_rounds` is the caller's value by construction, so asserting
+  # it can never see `effective_max`. This drives a run to the ceiling instead:
+  # round 2 auto-continues, round 3 IS the ceiling and exhausts the budget. Add
+  # `(( effective_max++ ))` beside the auto-continue and the run reaches round 4,
+  # so the exact round count and the terminal both red — which is what makes
+  # "a CONTINUE, not a grant" a tested claim rather than a stated one.
+  echo "print(2)" > "$R/other.py"
+  local one='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":5,\"title\":\"unquoted variable in the matcher\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
+  local two='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
+  # a genuinely different blocker: another file, and no shared significant token
+  local three='[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"other.py\",\"line\":200,\"title\":\"stale cache never invalidated\",\"description\":\"d3\",\"reviewer\":\"q\"}]'
+  loop --max-rounds 3 \
+    --review-cmd 'case "$REVIEW_ROUND" in 1) printf "%s" "'"$one"'" > "$REVIEW_FINDINGS" ;; 2) printf "%s" "'"$two"'" > "$REVIEW_FINDINGS" ;; *) printf "%s" "'"$three"'" > "$REVIEW_FINDINGS" ;; esac' \
+    --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  # EXACTLY the ceiling, not merely within it
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq -r '.closing_sweep_granted')" = "false" ]
+  # ...and the auto-continue really did happen on the way, so the run reached the
+  # ceiling THROUGH the rung rather than never touching it
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+}
+
+@test "#1498 tc-corner-residue-wins-over-auto-continue: the rung sits BELOW the residue rung" {
+  # #1435's placement rule is that residue is evaluated exactly where the loop
+  # would otherwise escalate. The new rung sits strictly below it, so a round
+  # that satisfies BOTH must still end in residue — otherwise a run that could
+  # have shipped would spend rounds instead.
+  residue_setup
+  local one='[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":5,\"title\":\"unquoted variable in the matcher\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
+  local two='[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
+  loop --max-rounds 5 \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$one"'" > "$REVIEW_FINDINGS"; else printf "%s" "'"$two"'" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd "$residue_fix"
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
+  # ROUND 2 is the round both rungs were live on: its carried set is entirely
+  # ambiguous AND its residue conditions hold, so residue promoting the closing
+  # sweep there — rather than the auto-continue taking the round — is the whole
+  # assertion. (Round 3, the sweep, re-raises the same title verbatim, which is a
+  # verified survivor and never ambiguous; asserting on the final changelist
+  # would therefore test nothing about the ordering.)
+  echo "$output" | jq -e '[.round_changelists[1].blocking[] | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
+  [ "$(cat "$BATS_TEST_TMPDIR/wd/.closing-sweep")" = "3" ]
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
+}
+
+@test "#1498 tc-corner-null-line-file-wide-match: a file-wide match auto-continues on a line-independent identity" {
+  # `line: null` is the documented file-wide wildcard: it gathers against every
+  # candidate in its file+dimension. The identity is file/dimension/normtitle, so
+  # it carries no line either — which is what keeps the one-shot bound working
+  # for a match that has no line to be near.
+  local one='[{\"severity\":\"WARNING\",\"dimension\":\"resilience\",\"file\":\"app.py\",\"line\":null,\"title\":\"outbound call has no breaker\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
+  local two='[{\"severity\":\"WARNING\",\"dimension\":\"resilience\",\"file\":\"app.py\",\"line\":null,\"title\":\"outbound call has no timeout\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
+  local three='[{\"severity\":\"WARNING\",\"dimension\":\"resilience\",\"file\":\"app.py\",\"line\":null,\"title\":\"outbound call has no fallback\",\"description\":\"d3\",\"reviewer\":\"r\"}]'
+  loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$one"'" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "'"$two"'" > "$REVIEW_FINDINGS"; else printf "%s" "'"$three"'" > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'true'
+  # round 2 auto-continued; round 3 matched a RECORDED identity (round 2's own
+  # title, which is round 3's matched prior) and escalated
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  echo "$output" | jq -e '.round_changelists[1].blocking[0].line == null' >/dev/null
+  echo "$output" | jq -e '[.round_changelists[1].blocking[]
+      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+  grep -qF 'app.py	resilience	outbound call has no timeout' \
+    "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+}
+
+@test "#1498 tc-corner-status-key-always-present: an integer on every terminal, 0 when nothing continued" {
+  clean_loop
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.possible_false_trip_auto_continues == 0' >/dev/null
+  budget_loop
+  [ "$status" -eq 13 ]
+  echo "$output" | jq -e '.possible_false_trip_auto_continues == 0' >/dev/null
+  # ...and it is an INTEGER, not a string or a null, so a consumer never has to
+  # tell 0 from a status file predating the key
+  echo "$output" | jq -e '(.possible_false_trip_auto_continues | type) == "number"' >/dev/null
+  stuck_loop
+  [ "$status" -eq 12 ]
+  echo "$output" | jq -e '.possible_false_trip_auto_continues == 0' >/dev/null
+}
+
+@test "#1498 tc-corner-history-no-new-key: the per-round history line gains NO auto-continue key" {
+  loop --review-cmd "$(pft_review)" --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  H="$BATS_TEST_TMPDIR/wd/history.jsonl"
+  # the six legitimate keys are all still there...
+  jq -es 'all(.[]; has("round") and has("blocking") and has("conflicts")
+                   and has("non_converging") and has("false_trips")
+                   and has("adjudicated_dropped"))' "$H" >/dev/null
+  # ...and nothing #1498-derived joined them. A REGEX FAMILY over the key names
+  # rather than a guess-list of literals, for the reason #1435 records: a fifth
+  # spelling would slip straight through a closed list. Still not a closed KEY
+  # SET (#1463) — a sibling may legitimately add its own key.
+  jq -es 'all(.[]; [keys[] | select(test("continu|auto|possible"))] | length == 0)' "$H" >/dev/null
+}
+
+@test "#1498 the history-line regex family really catches an auto-continue-derived key" {
+  # Non-vacuity for the negative above: a regex nobody can trip passes forever.
+  local probe="$BATS_TEST_TMPDIR/history-probe-1498.jsonl"
+  local k
+  for k in possible_false_trip_auto_continues auto_continued continued possible_false_trips; do
+    jq -nc --arg k "$k" '{round:1, blocking:0, conflicts:0, non_converging:false,
+                          false_trips:0, adjudicated_dropped:0} + {($k): 1}' > "$probe"
+    jq -es 'all(.[]; [keys[] | select(test("continu|auto|possible"))] | length == 0)' \
+      "$probe" >/dev/null && { echo "family missed the key: $k"; return 1; }
+  done
+  # ...and it does not red on the six legitimate keys, so it filters rather than
+  # refusing everything
+  jq -nc '{round:1, blocking:0, conflicts:0, non_converging:false,
+           false_trips:0, adjudicated_dropped:0}' > "$probe"
+  jq -es 'all(.[]; [keys[] | select(test("continu|auto|possible"))] | length == 0)' "$probe" >/dev/null
+}
+
+@test "#1498 tc-error-unstamped-changelist-escalates: an absent per-item flag is never read as a pass" {
+  # The rung reuses the `$stamped` predicate its four sibling surfaces use, and
+  # the reason it must is that an UNSTAMPED changelist cannot be distinguished
+  # from an all-ambiguous one by reading `.possible_false_trip` alone: both
+  # answer "not true" for every item. Reading absence as a pass would
+  # auto-continue a round nothing classified.
+  #
+  # The current consolidator always stamps, so the state is reachable only from
+  # an older or a foreign producer. Driven here by running the loop out of a COPY
+  # of its scripts directory whose consolidator strips the per-item stamp — no
+  # production seam, and `${0:A:h}` resolves to the copy, so every sibling the
+  # loop calls comes from it too.
+  local dir="$BATS_TEST_TMPDIR/unstamped-scripts"
+  cp -R "$REPO_ROOT/development/skills/resolve-issue/scripts" "$dir"
+  cat > "$dir/consolidate-findings.zsh" <<EOF
+#!/usr/bin/env zsh
+"$REPO_ROOT/development/skills/resolve-issue/scripts/consolidate-findings.zsh" "\$@" \\
+  | jq -c '.blocking |= map(del(.non_converging))'
+EOF
+  chmod +x "$dir/consolidate-findings.zsh"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$dir/resolve-story-loop.zsh" --repo "$R" --base main \
+    --work-dir "$BATS_TEST_TMPDIR/wdu" \
+    --review-cmd "$(pft_review)" --fix-cmd 'true'
+  [ "$status" -eq 12 ]
+  # The copy sits at a different depth, so the loop cannot reach the telemetry
+  # emitter by its relative path and says so on stderr — best-effort, swallowed,
+  # and the run is unaffected. `grep '^{'` isolates the status JSON from that
+  # note, the same idiom the #1434 hook-mode tests above use.
+  local st
+  st="$(echo "$output" | grep '^{')"
+  [ "$(echo "$st" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  # the stripping really happened — otherwise this is just the happy path
+  # asserting the wrong thing
+  echo "$st" | jq -e '[.round_changelists[1].blocking[] | has("non_converging")] | any | not' >/dev/null
+  # ...and the round WAS the all-ambiguous shape underneath: the surviving
+  # per-item flag still says so, which is exactly why the stamp gate has to be
+  # what decides
+  echo "$st" | jq -e '[.round_changelists[1].blocking[] | .possible_false_trip] | all' >/dev/null
+  [ "$(echo "$st" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/wdu/.possible-false-trip-continued" ]
+}
+
+@test "#1498 a fresh run clears a previous run's marker rather than inheriting its bound" {
+  # The marker is per-RUN state, like .closing-sweep and .promote: a re-used
+  # work-dir must not let a previous run's identities deny THIS run the
+  # continuation it has not spent, nor let its rounds inflate the reported count.
+  mkdir -p "$BATS_TEST_TMPDIR/wd"
+  printf '9\tapp.py\ttests\tunquoted variable in the dispatcher\n' \
+    > "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+  loop --review-cmd "$(pft_review)" --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  # the planted record would have refused round 2 had it survived
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  diff <(pft_expected_marker 2) "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+}
+
+@test "#1498 the bound is per IDENTITY, not per run: a second, disjoint all-ambiguous carry continues too" {
+  # Without this, once-per-identity and once-per-RUN are indistinguishable —
+  # `(( pft_continues == 0 )) || return 1` at the top of _pft_auto_continue, or a
+  # `pft_continues=1` in place of the derivation, would pass every other test
+  # here. Two ambiguous pairs in DIFFERENT files, far apart in the run: rounds
+  # 1->2 continue on app.py, rounds 3->4 continue on other.py, round 5 is clean.
+  echo "print(2)" > "$R/other.py"
+  local a1='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":5,\"title\":\"unquoted variable in the matcher\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
+  local a2='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
+  local b3='[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"other.py\",\"line\":40,\"title\":\"retry budget never decremented\",\"description\":\"d3\",\"reviewer\":\"q\"}]'
+  local b4='[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"other.py\",\"line\":43,\"title\":\"retry budget never inspected\",\"description\":\"d4\",\"reviewer\":\"q\"}]'
+  loop --max-rounds 6 \
+    --review-cmd 'case "$REVIEW_ROUND" in 1) printf "%s" "'"$a1"'" > "$REVIEW_FINDINGS" ;; 2) printf "%s" "'"$a2"'" > "$REVIEW_FINDINGS" ;; 3) printf "%s" "'"$b3"'" > "$REVIEW_FINDINGS" ;; 4) printf "%s" "'"$b4"'" > "$REVIEW_FINDINGS" ;; *) printf "[]" > "$REVIEW_FINDINGS" ;; esac' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 5 ]
+  # BOTH ambiguous rounds really were the rung's state — round 3 is a fresh
+  # blocker in another file, so it carries nothing
+  echo "$output" | jq -e '[.round_changelists[1].blocking[] | select(.non_converging == true)] | (length == 1) and all(.possible_false_trip == true)' >/dev/null
+  echo "$output" | jq -e '.round_changelists[2].non_converging == false' >/dev/null
+  echo "$output" | jq -e '[.round_changelists[3].blocking[] | select(.non_converging == true)] | (length == 1) and all(.possible_false_trip == true)' >/dev/null
+  # TWO continuations, on two distinct rounds — the count is of continuations
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 2 ]
+  local M="$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
+  [ "$(cut -f1 "$M" | sort -u | tr '\n' ' ')" = "2 4 " ]
+  # ...and all four identities are recorded, both titles of each match
+  grep -qF 'app.py	tests	unquoted variable in the matcher' "$M"
+  grep -qF 'app.py	tests	unquoted variable in the dispatcher' "$M"
+  grep -qF 'other.py	bugs	retry budget never decremented' "$M"
+  grep -qF 'other.py	bugs	retry budget never inspected' "$M"
+}

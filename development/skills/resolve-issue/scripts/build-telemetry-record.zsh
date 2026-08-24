@@ -206,6 +206,19 @@ jq -c '
                 else null end)
             }
         end),
+      # #1498: how many rounds this run took automatically because EVERY
+      # non-convergence match was a possible false trip and none had continued
+      # before. It sits beside convergence_assessment.possible_false_trips
+      # deliberately — that field says how many ambiguous matches the FINAL
+      # round carried, this one says how often the loop acted on that state — so
+      # a query can ask how often the all-ambiguous signal fires, and how often
+      # it holds up, from one record. It counts CONTINUATIONS, not identities,
+      # and is NOT a budget field: `max_rounds` above still reports the value
+      # the caller passed. `// 0` keeps a status file predating the key reading
+      # as a run that never auto-continued, the same always-present convention
+      # promotion_phase carries.
+      # (No apostrophes in this block: the jq program is single-quoted.)
+      possible_false_trip_auto_continues: ($s.possible_false_trip_auto_continues // 0),
       fixed:  ( [ $seen[]
                   | select(.priority=="Critical" or .priority=="High")
                   | ("\(.file)|\(.line)|\(.dimension)|\(.title)") as $k

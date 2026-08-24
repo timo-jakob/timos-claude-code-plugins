@@ -1656,17 +1656,27 @@ Each round:
    `–` cell — an en dash, as that script emits — is the stamp-less sentinel).
    **Otherwise the histogram is present.**
 
-   Two
-   false-trip shapes to narrate: an **escalating possible false trip** — a
-   carried match with no shared (non-empty) prior title that is still
-   ambiguous (#913/#969) — can only appear on an *escalating* round (an
-   `ESCALATE_NO_CONVERGENCE`, never `AWAITING_FIX`); narrate it there, per the
-   escalation branch below. A **verified false trip auto-continue** (#983),
-   though, *does* appear on an `AWAITING_FIX` round: a carried match whose title
-   is fully disjoint from its prior is identity-cleared as a genuinely different
-   finding, so the loop kept going (no escalation, no human grant) — progress.md
-   renders it as a `false trip auto-continued` line; narrate it here (the blocker
-   is fresh, not stuck) and fix it as a normal new blocker. Then implement the
+   Three
+   false-trip shapes to narrate, and progress.md names each one so you never
+   have to infer which you have. A **verified false trip auto-continue**
+   (#983) renders as `false trip auto-continued (#983)`: a carried match whose
+   title is fully disjoint from its prior is identity-cleared as a genuinely
+   different finding, so the loop kept going (no escalation, no human grant) —
+   narrate it here (the blocker is fresh, not stuck) and fix it as a normal new
+   blocker. A **possible-false-trip auto-continue** (#1498) renders as
+   `possible false trip auto-continued (#1498)`: the round met every condition
+   the rung requires (ARCHITECTURE.md, *Review-loop state machine*), so the loop
+   took the round it already had rather than escalating. #983's "the blocker is fresh, not stuck" does **not** hold here
+   — ambiguous means the loop cannot tell a reworded survivor from a new
+   neighbour — so **treat it on its own merits, and where the previous round's
+   fix for the matched prior was incomplete, finish that rather than patch
+   around it.** That is what the round buys: an identity gets exactly one such
+   continuation, so a second ambiguous match on it escalates. A **possible
+   false trip with no auto-continue marker** renders as `possible false trip`
+   and means only that the loop did not take the rung this round; what to do
+   with it follows from the round's exit, not from the line — the escalation
+   branch below on an escalating exit, and those exits' own arms on an
+   `AWAITING_FIX` or a residue ending. Then implement the
    blockers from the status JSON's `final_changelist.blocking` exactly as
    step 2 implements — **sibling-sweeping each blocker's pattern across the whole
    diff and fixing every instance this round** (#982), so a repeating defect is
@@ -2965,10 +2975,13 @@ alongside the summary so the human still sees the story's full cost:
      **Stop**.
    - `ESCALATE_NO_CONVERGENCE`: **Give guidance & retry (+3)** — the primary
      lever, since more rounds alone will not move a stuck blocker — · **Stop**.
-     When the step-1 assessment reports **every** carried match as a possible
-     false trip (the blockers may be fresh, not stuck), also offer a plain
-     **Grant +3 rounds** option — the guidance-only framing would contradict
-     the assessment shown moments earlier.
+     Since #1498 an all-ambiguous carried set no longer reaches this extension
+     the first time **unless the rung refused it** — a Critical among the
+     matches, the round already at the ceiling, an unstamped changelist, or a
+     failed marker write. So arriving here is not proof a continuation was
+     spent. Read the step-1 assessment before framing the blocker as stuck: it
+     reports the count only when one was spent, and flags a possibly-new
+     carried match only on a stamped round.
 
 3. **If they asked a question** (Other → a question, not guidance): answer it
    from the changelist / dossier, then **re-present step 2**. A question never

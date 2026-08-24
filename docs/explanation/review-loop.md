@@ -122,7 +122,11 @@ the session where you can see it.
   the cumulative blocking trend, and what it fixes next. When a "carried" blocker
   looks like a false alarm — the cross-round match hit a *different* finding that
   merely landed near the old one after edits shifted lines — the summary says so
-  explicitly, so you never have to dig into JSON to spot it.
+  explicitly, so you never have to dig into JSON to spot it. Where it cannot
+  tell — the titles differ but overlap — and *every* carried blocker of the
+  round is that ambiguous, the loop does not stop to ask: it takes the round on
+  its own and says so in the same summary (see
+  [the round budget](#the-round-budget-and-how-it-can-end)).
 - **A tail-able progress file** — the loop appends the same summary to a
   `progress.md` in its work directory (the run tells you the exact path when
   the loop starts); `tail -f` it from another terminal to follow a long run.
@@ -163,12 +167,43 @@ only to bound the hard tail. A round can end the loop in one of a few ways:
   blocker in a file nobody had just touched.
 - **Not converging** — the *same* blocker survived two rounds unchanged; more
   automated fixing clearly is not moving it. Same rule: this is the ending only
-  when the residue conditions do not hold.
+  when the residue conditions do not hold — **and** only when the loop could not
+  take the free round below.
 - **Conflict / ambiguous** — two reviewers gave opposing recommendations, or the
   repository type could not be resolved to a review panel. Neither is ever
   replaced by residue: no automated ending can pick between two opposed
   recommendations, and an unresolvable repo type is about dispatch rather than
   findings.
+
+### The free round on an all-ambiguous carry
+
+"The same blocker survived two rounds" is a judgement the loop makes from
+*titles*, because line numbers move as fixes land. Three verdicts are possible.
+When the two titles are identical the blocker really is the same one, and the run
+stops. When they share no significant word at all, the loop already treats the
+new one as a genuinely different finding that merely landed near the old one, and
+carries on without asking. In between sits the ambiguous case — the titles differ
+but overlap — where the loop honestly cannot tell a reworded survivor from a new
+neighbour.
+
+Stopping the run there costs you a question you cannot answer any better than the
+loop can, and in one observed session it cost forty-one minutes of waiting across
+two occurrences, both of which ended with the human choosing exactly what the
+loop's own assessment had already recommended. So the loop now takes that round
+itself, once, under four conditions: **every** carried blocker of the round is
+ambiguous (one identical-title match among them and the run stops), **none** of
+them is Critical, the round is **below** the ceiling, and **none** of the
+identities involved has already used its free round. It records what it
+continued on, says so in the round summary and in `progress.md`, and moves on.
+
+It costs no grant, but it does cost a round: the loop takes the round it already
+had rather than an extra one, so the budget you set is neither raised nor
+exceeded, and nothing is added to the grant count or the soft cap. That is also
+why it cannot fire on the last round — the rung requires the round to be
+strictly below the ceiling. And it is once per identity — including the title
+the match was against, so re-wording a finding cannot buy a second one. If an
+identity comes back ambiguous again, that repetition is itself the evidence, and
+the run stops as it always did.
 
 ### What "residue" costs you, and what it buys
 
@@ -253,10 +288,13 @@ converging** — do not dead-end. Instead the run pauses and talks to you:
    is likely to help, or whether direction or a split is needed — and how many
    extension grants you have already spent.
 2. It **offers you a choice**:
-   - **Grant three more rounds** (on budget exhausted — or on a not-converging
-     exit where every carried blocker is flagged as a suspected false alarm,
-     meaning the blockers may be fresh rather than stuck) — the remaining
-     blockers get one fix pass first, then the loop continues.
+   - **Grant three more rounds** (on budget exhausted) — the remaining
+     blockers get one fix pass first, then the loop continues. There is no such
+     option on a *not-converging* exit any more: the case that used to justify
+     it — every carried blocker flagged as a suspected false alarm — is now
+     handled by the loop itself, one round, no question asked, so a
+     not-converging exit that does reach you is one the loop could not take that
+     way.
    - **Give guidance, then retry** — tell it something it is missing ("that auth
      check is intentional, don't flag it"; "try a documented fast-path helper for
      the retry logic"). Your note is posted to the issue and folded into the next

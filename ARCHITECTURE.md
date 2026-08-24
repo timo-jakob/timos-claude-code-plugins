@@ -3600,7 +3600,18 @@ Per round: run panel (scoped per `scope_mode`) → `scope-findings` (always agai
 the **full** story diff) → `consolidate-findings`.
 No blockers on a **full** round ⇒ `CONVERGED`. Otherwise the early-exit escalations fire *before* the
 budget is spent — a surviving conflict ⇒ `ESCALATE_CONFLICT`, a `non_converging`
-blocker (same fingerprint two rounds running) ⇒ `ESCALATE_NO_CONVERGENCE` — else
+blocker (same fingerprint two rounds running) ⇒ `ESCALATE_NO_CONVERGENCE`, save
+for one exception (#1498): when **every** carried match of the round is a
+`possible_false_trip` (the titles differ but are not disjoint, so the loop cannot
+tell a reworded survivor from a new neighbour), none is `Critical`, the round is
+below the ceiling, and no identity involved has continued before, the loop
+records the identities in `<work-dir>/.possible-false-trip-continued` and
+**auto-continues once** instead. A second ambiguous match on a recorded identity
+escalates as before — that is evidence of a stuck blocker, not of a proximity
+artifact. The rung sits strictly **below** the residue rung, so residue still
+wins; it is a *continue*, not a grant, so `effective_max`, `max_rounds` and
+`closing_sweep_granted` are all untouched and
+`_promote_closing_sweep` remains the only budget-mutating grant — else
 feed the blockers-only slice to the fix hook, re-run the gate, and loop. Reaching
 the last round with blockers still open ⇒ `BUDGET_EXHAUSTED`; an unpickable repo
 type from dispatch ⇒ `ESCALATE_AMBIGUOUS`. Each state is a distinct exit code
@@ -3610,9 +3621,12 @@ mode's non-terminal
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
 status JSON (`{status, rounds, max_rounds, promotion_phase,
-closing_sweep_granted, repo_type,
+closing_sweep_granted, possible_false_trip_auto_continues, repo_type,
 review_skill, escalation_reasons, residue_replaced_reasons, history, round_changelists,
-final_changelist}`), where `promotion_phase` (#995) is an **always-present**
+final_changelist}`), where `possible_false_trip_auto_continues` (#1498) is an
+**always-present** integer — how many rounds the run took on the all-ambiguous
+auto-continue above, `0` on every run that never did, counting *continuations*
+rather than identities — and `promotion_phase` (#995) is an **always-present**
 boolean — `true` exactly when the invocation **carried or adopted** a promoted
 set, i.e. when it is the promotion sub-loop (a `--resume` that omits `--promote`
 and re-adopts the work-dir's `.promote` records `true` too) — that
@@ -3768,6 +3782,14 @@ run, `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first enter the in-session
 interactive extension (#902): the skill summarizes via `--format summary`,
 offers +3 to the round ceiling / guidance, and resumes the loop via `--resume`;
 only a Stop/decline falls back to the typed comment.
+Since #1498 an **all-ambiguous** carried set no longer enters the extension on
+its **first** occurrence — the loop auto-continues that round itself — so an
+`ESCALATE_NO_CONVERGENCE` reaching a human is one the auto-continue could not
+take (an exact-title match beside the ambiguous ones, a `Critical` among them,
+the ceiling, an unstamped changelist, a failed marker write) or an identity that
+has already spent its one continuation. The `--format summary` assessment
+reports whether this run has spent one — not which veto fired — and the
+`Grants consumed` figure is unaffected, because no grant was consumed for it.
 A grant raises `--max-rounds` by 3 — exactly three more rounds after a
 `BUDGET_EXHAUSTED` at the ceiling, more after an early
 `ESCALATE_NO_CONVERGENCE`, and **only two** after a `BUDGET_EXHAUSTED` on a
@@ -4293,8 +4315,11 @@ there now). The payload holds `status`, `escalation`
 later; so a `null` here means "not an escalation", **not** "succeeded", and the
 `escalation` breakdown's null bucket silently contains failed `ERROR` runs —
 read `outcome` when you want success/failure), `rounds`, `max_rounds`,
-`promotion_phase`, `findings_by_round`, `convergence_assessment`, and `fixed`
+`promotion_phase`, `possible_false_trip_auto_continues`, `findings_by_round`,
+`convergence_assessment`, and `fixed`
 (blockers found and cleared) vs `waived` (Low suggestions logged).
+`possible_false_trip_auto_continues` (#1498) is copied from the status JSON with
+the same always-present reading stated there.
 `promotion_phase` (#995) is an always-present boolean copied from the status
 JSON — `true` exactly when the invocation carried **or adopted** a promoted set,
 i.e. when it is the promotion sub-loop (an adopting `--resume` counts) — and it is what the two documented rate metrics below

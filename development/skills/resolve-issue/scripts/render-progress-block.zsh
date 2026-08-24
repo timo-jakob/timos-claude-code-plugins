@@ -37,17 +37,23 @@
 # --promote byte-identical to before the label existed.
 #
 # Usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT
-#          [--prev FILE] [--history FILE]
+#          [--prev FILE] [--history FILE] [--possible-false-trip-continued]
 #   --prev     the PREVIOUS round changelist (same schema) — enables the
 #              "fixed since round N-1" count
 #   --history  the loop history.jsonl INCLUDING this round — enables the
 #              cumulative blocking trend line
+#   --possible-false-trip-continued
+#              (#1498) this round's escalating possible-false-trip set was
+#              AUTO-CONTINUED rather than escalated. A boolean the LOOP supplies,
+#              because this renderer is a pure function of the changelist and the
+#              changelist carries no record of which way the ladder went. Without
+#              it the output is byte-identical to before the flag existed.
 # Exit: 0 ok · 2 usage · 1 missing/empty/invalid changelist, prev, or history
 
 emulate -L zsh
 setopt nounset pipefail
 
-local changelist="" round="" verdict="" prev="" hist=""
+local changelist="" round="" verdict="" prev="" hist="" pftc=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --changelist) changelist="$2"; shift 2 ;;
@@ -55,13 +61,14 @@ while [[ $# -gt 0 ]]; do
   --verdict) verdict="$2"; shift 2 ;;
   --prev) prev="$2"; shift 2 ;;
   --history) hist="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT [--prev FILE] [--history FILE]"; exit 0 ;;
+  --possible-false-trip-continued) pftc=1; shift ;;
+  -h|--help) print -r -- "usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT [--prev FILE] [--history FILE] [--possible-false-trip-continued]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
 [[ -n "$changelist" && -n "$round" && -n "$verdict" ]] || {
-  print -u2 -- "usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT [--prev FILE] [--history FILE]"; exit 2 }
+  print -u2 -- "usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT [--prev FILE] [--history FILE] [--possible-false-trip-continued]"; exit 2 }
 [[ "$round" == <-> && "$round" != 0* ]] && (( round >= 1 )) || {
   print -u2 -- "render-progress-block: --round must be a positive integer (got: $round)"; exit 2 }
 [[ -s "$changelist" ]] || {
@@ -92,7 +99,7 @@ fi
 # per-round table) and build-telemetry-record.zsh (findings_by_round); change
 # all three together (#969).
 jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
-   --argjson prev "$prev_json" --argjson trend "$trend_json" '
+   --argjson prev "$prev_json" --argjson trend "$trend_json" --argjson pftc "$pftc" '
   # untrusted reviewer-produced text must not be able to forge progress lines
   # or break out of its markdown span — neutralize newlines and backticks
   def safe: tostring | gsub("[\r\n`]"; " ") | .[0:200];
@@ -180,10 +187,24 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
      else empty end),
     ($promoted[] | "- promoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
        + " — raised from Suggestion by the human at convergence; blocking until cleared"),
-    ($ftrips[] | "- possible false trip: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] matched prior-round blocker"
+    # ...and since #1498 the SAME set renders one of two ways, decided by the
+    # loop rather than by the changelist: a round whose escalating set was
+    # AUTO-CONTINUED (every match ambiguous, none Critical, none continued
+    # before) says so, because "may be a NEW finding" alone would leave the
+    # human wondering why the run did not stop. The flag is how the loop tells
+    # the renderer which way the ladder went; without it the output is
+    # byte-identical to before the flag existed. The separate
+    # `- false trip auto-continued (#983): ...` line below is untouched and
+    # stays visibly distinct — that one renders off the direct `false_trip`
+    # flag, on a set this one can never contain (a false trip is
+    # `non_converging: false`).
+    # (NB: no apostrophes in this block — the program is single-quoted.)
+    ($ftrips[] | (if $pftc == 1 then "- possible false trip auto-continued (#1498): " else "- possible false trip: " end)
+       + "`\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] matched prior-round blocker"
        + (if ((.matched_prior.line | type) == "number") and ((.line | type) == "number")
           then " at line \(.matched_prior.line)" else " file-wide" end)
-       + " (\"\(.matched_prior.title // "" | safe)\") but the titles differ — may be a NEW finding inside the match window, not a stuck one"),
+       + " (\"\(.matched_prior.title // "" | safe)\") but the titles differ — may be a NEW finding inside the match window, not a stuck one"
+       + (if $pftc == 1 then "; continued once without a human grant, and a second ambiguous match on this identity escalates" else "" end)),
     ($auto_ftrips[] | "- false trip auto-continued (#983): `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] landed in the match window of prior-round blocker"
        + (if ((.matched_prior.line | type) == "number") then " at line \(.matched_prior.line)" else " (file-wide)" end)
        + " (\"\(.matched_prior.title // "" | safe)\") but shares no title terms — treated as a NEW blocker, not a stuck one; no escalation, no human grant consumed"),
