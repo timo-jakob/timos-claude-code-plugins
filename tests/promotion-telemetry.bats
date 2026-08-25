@@ -21,8 +21,16 @@
 bats_require_minimum_version 1.5.0
 load assertions
 
+load resolve-issue-corpus
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  # #1503 split this skill into a conductor plus reference/*.md. A sweep that
+  # counts or reads ACROSS the skill takes the corpus; one that pins WHERE a
+  # sentence lives takes the single file. See resolve-issue-corpus.bash.
+  CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  RI_REF="$REPO_ROOT/development/skills/resolve-issue/reference"
+  SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   EMIT="$REPO_ROOT/development/scripts/telemetry/emit-telemetry.zsh"
   VALIDATE="$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh"
   BTR="$REPO_ROOT/development/skills/resolve-issue/scripts/build-telemetry-record.zsh"
@@ -87,17 +95,21 @@ emit_promotion() {   # $1 = run_id · $2 = offered · $3 = promoted
 # silently never joined. Same doc/executable guard the refine-issue suite
 # applies to its Step 7 fence.
 skill_promotion_emit_fence() {
-  local sk="$REPO_ROOT/development/skills/resolve-issue/SKILL.md" section out
+  # #1503 moved the promotion phase into reference/promotion.md, byte-for-byte.
+  # Read it THERE rather than through the corpus: this helper narrows to one
+  # fence, and a file-wide scan of the whole skill would return whichever
+  # indented fence came first.
+  local sk="$REPO_ROOT/development/skills/resolve-issue/reference/promotion.md" section out
   # narrow to the step-3 record block first — SKILL.md has many indented fences,
   # and a file-wide fence scan would return whichever came first
   section="$(sed -n '/Record the offered-vs-promoted pair/,/^4\. \*\*Write the promote file/p' "$sk")"
   [ -n "$section" ] || {
-    echo "promotion-phase step-3 record block not found in SKILL.md" >&2; return 1; }
+    echo "promotion-phase step-3 record block not found in reference/promotion.md" >&2; return 1; }
   [ "$(printf '%s\n' "$section" | grep -c '^   ```bash')" -eq 1 ] || {
     echo "the step-3 record block must contain exactly one bash fence" >&2; return 1; }
   out="$(printf '%s\n' "$section" | sed -n '/^   ```bash/,/^   ```$/p')"
   # a renamed step or a moved fence must REDDEN, never pass vacuously
-  [ -n "$out" ] || { echo "promotion-phase emit fence not found in SKILL.md" >&2; return 1; }
+  [ -n "$out" ] || { echo "promotion-phase emit fence not found in reference/promotion.md" >&2; return 1; }
   printf '%s\n' "$out"
 }
 
@@ -365,7 +377,7 @@ substitute_fence() {   # $1 = work-dir holding .telemetry-run-id · $2 = promote
   # enrichment code path at all, so no script regression could add one. The rule
   # that actually gates it lives in SKILL.md; pin it there.
   local skill_flat
-  skill_flat=$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" | tr -s ' ')
+  skill_flat=$(tr '\n' ' ' < "$SKILL" | tr -s ' ')
   contains "$skill_flat" "A headless run, or one with nothing to offer, never reaches here and gets **no record at all**"
   [ "$(jq '.payload.waived' "$HT")" -eq 1 ]
   run zsh "$VALIDATE" "$HT" --require-records
@@ -416,7 +428,7 @@ substitute_fence() {   # $1 = work-dir holding .telemetry-run-id · $2 = promote
   # line-oriented grep would redden on a pure reflow while a genuine deletion of
   # the guard slipped past a looser pattern.
   local skill_flat
-  skill_flat=$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" | tr -s ' ')
+  skill_flat=$(tr '\n' ' ' < "$SKILL" | tr -s ' ')
   contains "$skill_flat" "Absent or empty is not an error"
   contains "$skill_flat" 'Never mint or invent a `run_id`'
   # ...and the two ways of losing the join the skill explicitly forbids: holding

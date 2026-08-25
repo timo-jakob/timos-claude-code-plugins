@@ -51,9 +51,16 @@ bats_require_minimum_version 1.5.0
 load assertions
 load prose-lockstep
 
+load resolve-issue-corpus
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-  SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # #1503 split this skill into a conductor plus reference/*.md. Sweeps that
+  # COUNT sites across the skill read the corpus; sweeps that pin WHERE a
+  # sentence lives read the one file it lives in. See resolve-issue-corpus.bash.
+  CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
 
@@ -297,16 +304,23 @@ _roster_hits() {
   # The rule is inert if the fix step never reaches it. This pins the reference
   # ON the branch where the session decides what to do next — the sibling sweep
   # treats the same shape as first-class.
+  # Located in $PROTO, not the corpus (#1503). The corpus concatenates six files,
+  # so `banner > ln` there says nothing about which file the banner is in: moving
+  # the rule block into a LATER member would keep the comparison true while step
+  # 3's "immediately below" pointed at a rule that is not in the file the session
+  # is reading. And "immediately below" is a proximity claim, so assert proximity
+  # rather than mere ordering — the ordering alone survives the whole block being
+  # pushed hundreds of lines away.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "sibling-sweeping each blocker's pattern across the whole")"
+  ln="$(prose_gate_lines "$PROTO" "sibling-sweeping each blocker's pattern across the whole")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 6)"
+  body="$(prose_window "$PROTO" "$ln" 6)"
   contains "$body" 'subtracting rather than adding, per the rule stated immediately below'
-  # …and "immediately below" stays true: the banner really is after this line
   local banner
-  banner="$(prose_gate_lines "$SKILL" "$RULE_HEADING")"
+  banner="$(prose_gate_lines "$PROTO" "$RULE_HEADING")"
   [ -n "$banner" ]
   [ "$banner" -gt "$ln" ]
+  [ "$(( banner - ln ))" -lt 12 ]
 }
 
 @test "#1496 the trigger is stated ONCE, so it cannot drift against itself" {
@@ -411,7 +425,10 @@ _roster_hits() {
   [ -n "$ln" ]
   body="$(prose_window "$ARCH" "$ln" 10)"
   contains "$body" 'A fix pass subtracts'
-  contains "$body" "§3.5's round protocol step 3"
+  # #1503 re-homed this citation from "SKILL.md §3.5's round protocol step 3" to
+  # the file the rule now lives in. The claim — ARCHITECTURE points AT the rule
+  # rather than restating it — is unchanged.
+  contains "$body" "development/skills/resolve-issue/reference/review-loop.md § The round protocol, step 3"
   # The load-bearing half: `class` is reporting-only, so the loop MEASURES
   # compliance and never enforces it. A doc that said otherwise would licence a
   # reader to stop applying the rule by hand.
@@ -421,7 +438,7 @@ _roster_hits() {
 
 # --- roster tripwire --------------------------------------------------------
 
-@test "#1496 exactly three tracked markdown sites name the rule" {
+@test "#1496 exactly five tracked markdown sites name the rule" {
   # Derived, not transcribed. `docs/superpowers/` is vendored and restates
   # nothing of ours — the same exclusion the sibling sweeps use. SHIPPED
   # TEMPLATES are in scope: `approver-policy-core.md.tmpl` already restates
@@ -452,13 +469,19 @@ _roster_hits() {
   case "$n" in ''|*[!0-9]*)
     printf 'roster tripwire: grep produced no count\n' >&2; return 1 ;;
   esac
-  if [ "$n" -ne 3 ]; then
-    printf 'expected 3 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
+  if [ "$n" -ne 5 ]; then
+    printf 'expected 5 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
     return 1
   fi
   # …and they are the roster the story named, so a swap reds here too. -F
   # because an unanchored `.` in a path is a regex wildcard.
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/SKILL.md'
+  # #1503 moved the review-loop procedure into reference/*.md, so the roster
+  # names those files where the text now lives — the same sites, re-homed. The
+  # conductor keeps the exit-code table and a pointer, neither of which states
+  # the rule, so SKILL.md is legitimately no longer on it.
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/promotion.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'ARCHITECTURE.md'
 }
@@ -554,7 +577,7 @@ _roster_hits() {
   lacks "$body" 'how compliance is measured, not enforced'
 }
 
-@test "#1496 non-vacuity: the roster tripwire counts a fourth site" {
+@test "#1496 non-vacuity: the roster tripwire counts a sixth site" {
   # Drives the SAME derivation over a synthetic roster, so the count really is
   # what the tripwire reads — not a restatement of the number 3. The fourth
   # site spells the rule with the emphasis INSIDE the phrase and the fifth is a

@@ -5,6 +5,13 @@ pre-push review loop** on the change. The point is simple: a PR is only opened o
 code a reviewer panel has already converged on, so no CI minutes are ever spent
 on work that still has open review blockers.
 
+The procedure the skill follows is split for context economy: `SKILL.md` is a
+conductor holding each step's invocation contract and a pointer, while the
+branches described on this page — the round protocol, the residue ending, the
+suggestion-promotion phase, escalation and the interactive extension — live in
+`development/skills/resolve-issue/reference/*.md` and are read only when the run
+actually reaches them.
+
 ## What one round does
 
 1. **Review — and re-test, alongside it.** A language-appropriate reviewer panel

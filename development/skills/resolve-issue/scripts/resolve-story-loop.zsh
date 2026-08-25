@@ -691,8 +691,9 @@ emit_and_exit() {
             local rid=""
             rid=$(print -r -- "$rec" | jq -r '.run_id // empty' 2>/dev/null) || rid=""
             # only a non-empty id is worth persisting: an empty file would read
-            # as "there is an id" to a naive consumer, and the SKILL.md guard
-            # treats absent and empty identically for exactly that reason.
+            # as "there is an id" to a naive consumer, and the
+            # `reference/promotion.md` step 3 guard treats absent and empty
+            # identically for exactly that reason.
             # brace-group the redirection so a failure to OPEN the sidecar path
             # (a read-only work-dir, a directory at that path) is swallowed too
             # — zsh installs redirections left to right, so `print … > f
@@ -1983,8 +1984,8 @@ while (( round <= effective_max )); do
       # BOTH wirings re-plan and re-derive the SCOPE, because in both the round
       # is reviewed against the whole story diff: hook mode's `--review-cmd`
       # runs below, after this, and step mode's session-side panel was told the
-      # same by SKILL.md ("re-plan with --final and review the whole story
-      # diff"). Recording the delta's empty scope here would contradict what was
+      # same by `reference/review-loop.md` ("re-plan with `--final` and review the
+      # whole story diff"). Recording the delta's empty scope here would contradict what was
       # actually reviewed: the loop's own record of the round would say the
       # panel saw nothing when it saw everything, and every downstream reader of
       # that record — the empty-findings marker, the progress tail, a
@@ -2067,9 +2068,10 @@ while (( round <= effective_max )); do
   # (#974) refuse the alias BEFORE truncating: findings_path is the round's
   # internal sink, and the very next line zero-bytes it. A session that passed
   # the dispatch plan's findings_path as --findings-file (instead of its own
-  # findings-round-R.json, per SKILL.md) would have its real panel output
-  # destroyed here, then be told "the panel never ran" — a confidently wrong
-  # verdict, and the cp below would fail on identical files anyway. Name the
+  # findings-round-R.json, per `reference/review-loop.md` *Each round* step 2)
+  # would have its real panel output destroyed here, then be told "the panel
+  # never ran" — a confidently wrong verdict, and the cp below would fail on
+  # identical files anyway. Name the
   # mistake instead, while the bytes are still intact. Compare canonical paths
   # (catches symlinks and ./-prefixed spellings) AND device+inode via -ef
   # (catches a hardlink to the same file, which canonicalizes differently).
@@ -2567,7 +2569,8 @@ while (( round <= effective_max )); do
   # empty set is the honest answer there ("no fix ran, so nothing is residue"),
   # and residue is correctly unreachable on that sweep.
   # ...and on every GRANTABLE ESCALATING terminal too, not only AWAITING_FIX. An
-  # interactive run can be GRANTED more rounds there, and §3.5 step 5 requires a
+  # interactive run can be GRANTED more rounds there, and the interactive
+  # extension's step 5 (`reference/interactive.md`) requires a
   # fix pass BEFORE the resume — so a fix pass really does follow those exits,
   # and without a stamp its touched set is unrecoverable. The visible cost of
   # omitting it is that the round after a grant carries no `class` at all: no

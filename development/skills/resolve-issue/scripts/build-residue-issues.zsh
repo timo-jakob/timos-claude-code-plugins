@@ -5,7 +5,7 @@
 # Why: a residue ending opens the PR with blockers still open, so the remainder
 # has to land somewhere a human will meet it. This script BUILDS that plan and
 # nothing else — deterministic, testable, and incapable of creating an issue.
-# `resolve-issue/SKILL.md` §3.5 makes the `gh issue create` calls and attaches
+# `resolve-issue/reference/residue.md` step 4 makes the `gh issue create` calls and attaches
 # each result as a native sub-issue. That is the same build-vs-post split
 # `build-escalation.zsh` already uses, for the same reason: the decision of what
 # to file is worth a bats case, and the act of filing is not something a script
@@ -77,11 +77,11 @@
 # (parent-scoped only) reopens the unattached hole above.
 #
 # Consumers that classify a candidate by matching it against the PARENT's
-# sub-issues alone (`resolve-issue`'s SKILL.md §3.5 step 3) therefore see a
+# sub-issues alone (`resolve-issue`'s `reference/residue.md` step 3) therefore see a
 # builder-filtered candidate as unmatched. That is never a wrong `--changelist`
 # — it means the key matched OUTSIDE the parent, which is either of the two
-# producers above. §3.5 step 3 is NORMATIVE for telling them apart and for what
-# to do; either way the answer is never to re-file.
+# producers above. `reference/residue.md` step 3 is NORMATIVE for telling them
+# apart and for what to do; either way the answer is never to re-file.
 #
 # FAIL-OPEN: when BOTH idempotency reads fail (no `gh`, no network, no auth),
 # the script warns LOUDLY on stderr and emits the full plan, exit 0. A parent
@@ -175,7 +175,7 @@ _need_json_object --changelist "$changelist"
 # The status must be the RESIDUE ending, and this is the first guard because it
 # is the likeliest caller mistake here: residue replaces exactly
 # `ESCALATE_NO_CONVERGENCE` and `BUDGET_EXHAUSTED`, whose branches sit beside the
-# residue branch in SKILL.md §3.5, and the model hand-picks which status file to
+# residue branch in `reference/residue.md`, and the model hand-picks which status file to
 # pass. An escalation status paired with its own final-round changelist is
 # self-consistent — it satisfies the round cross-check below — so nothing else
 # would catch it, and the plan would go on to file `review-residue` follow-ups,
@@ -193,8 +193,8 @@ st_status=$(jq -r '.status // empty' -- "$status_file" 2>/dev/null) || st_status
 # The two operands are two sources for ONE fact, so their agreement is checked
 # rather than assumed. The status JSON already inlines the run's final changelist
 # (`resolve-story-loop.zsh` sets `final_changelist` every round), so
-# `--changelist` can only ever ADD a disagreement — and SKILL.md asks a model to
-# compute `changelist-<final round>.json` by hand. An off-by-one, or a leftover
+# `--changelist` can only ever ADD a disagreement — and `reference/residue.md`
+# step 1 asks a model to compute `changelist-<final round>.json` by hand. An off-by-one, or a leftover
 # file in a re-used work-dir, passes every guard above (it is one JSON object)
 # and produces a plan built from an EARLIER round's blockers: GitHub issues filed
 # for findings the fix pass already cleared, each body narrating the real round
@@ -361,8 +361,9 @@ if existing_raw=$("$gh_bin" api --paginate "repos/{owner}/{repo}/issues/${parent
 fi
 
 # ...and the SAME key across the whole repo, unioned in. The sub-issue list
-# alone leaves a hole exactly where the filing is least atomic: SKILL.md creates
-# each entry and THEN attaches it, two API calls, so a create that succeeds
+# alone leaves a hole exactly where the filing is least atomic:
+# `reference/residue.md` step 4 creates each entry and THEN attaches it, two API
+# calls, so a create that succeeds
 # before a failed (or interrupted) attach leaves a real `review-residue` issue
 # this parent-scoped read cannot see. The re-run files it again — and the
 # duplicate carries `needs-refinement`, so once attached it halts the parent's

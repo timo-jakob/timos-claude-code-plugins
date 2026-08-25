@@ -71,9 +71,16 @@ bats_require_minimum_version 1.5.0
 load assertions
 load prose-lockstep
 
+load resolve-issue-corpus
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-  SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # #1503 split this skill into a conductor plus reference/*.md. Sweeps that
+  # COUNT sites across the skill read the corpus; sweeps that pin WHERE a
+  # sentence lives read the one file it lives in. See resolve-issue-corpus.bash.
+  CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
 
@@ -471,9 +478,9 @@ _roster_hits() {
   # seven-step block still exists and every content pin still matches while
   # round 1's panel queues behind the full suite — the saving never realised.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "Once §3's gate is under way, run the local review loop before")"
+  ln="$(prose_gate_lines "$CONDUCTOR" "Once §3's gate is under way, run the local review loop before")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 8)"
+  body="$(prose_window "$CONDUCTOR" "$ln" 8)"
   contains "$body" 'Under way, not green: the round boundary starts the gate and the panel together'
   contains "$body" 'it is consolidation — never the panel — that waits for green'
 }
@@ -483,9 +490,9 @@ _roster_hits() {
   # GATE in the background, so without this carve-out the section contradicts
   # itself and a session is licensed to refuse step 2.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" 'Both rules are about model-driven steps. The gate is not one — it is a')"
+  ln="$(prose_gate_lines "$CONDUCTOR" 'Both rules are about model-driven steps. The gate is not one — it is a')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 6)"
+  body="$(prose_window "$CONDUCTOR" "$ln" 6)"
   contains "$body" 'which is why the round boundary below runs it in the background on purpose'
   contains "$body" 'The loop invocation, the panel and every fix pass stay in-session'
 }
@@ -495,9 +502,9 @@ _roster_hits() {
   # as a bare "only proceed when green", it waits out the full suite and only
   # then enters the loop — the serial shape, on every run.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "Run the repo's own test + lint gate and only proceed when green. Green")"
+  ln="$(prose_gate_lines "$CONDUCTOR" "Run the repo's own test + lint gate and only proceed when green. Green")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 12)"
+  body="$(prose_window "$CONDUCTOR" "$ln" 12)"
   contains "$body" 'Green gates consolidating and committing, not dispatching the panel'
   contains "$body" "$POINTER"
   # the round-6 mint-ordering fix: what the boundary starts, and the order of
@@ -517,9 +524,9 @@ _roster_hits() {
   # exists for the reader, with every §3.5 pin still matching. Gated on the
   # UNCHANGED clause beside it, so the needle cannot follow the revert.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" 'sequence of them — with the story gated for readiness up front and the')"
+  ln="$(prose_gate_lines "$CONDUCTOR" 'sequence of them — with the story gated for readiness up front and the')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 4)"
+  body="$(prose_window "$CONDUCTOR" "$ln" 4)"
   contains "$body" 'tested before it is ever committed or pushed'
 }
 
@@ -530,9 +537,9 @@ _roster_hits() {
   # green — the serial boundary this story removes — while the seven-step block
   # above still reads correctly. Gated on the bullet's unchanged opening.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" 'Never open a PR on a red gate')"
+  ln="$(prose_gate_lines "$CONDUCTOR" 'Never open a PR on a red gate')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 4)"
+  body="$(prose_window "$CONDUCTOR" "$ln" 4)"
   contains "$body" 'a red per-issue gate blocks consolidation and the commit, so nothing reaches a PR'
 }
 
@@ -666,7 +673,7 @@ _roster_hits() {
   # --gate-attest two pages earlier
   contains "$body" 'Off plugin repos only --findings-tree is passed'
   contains "$body" 'the concurrency is an ordering, not a flag pair that exists everywhere'
-  contains "$body" "development/skills/resolve-issue/SKILL.md §3.5's round protocol"
+  contains "$body" "development/skills/resolve-issue/reference/review-loop.md § The round protocol"
   # The load-bearing half: the ordering is the SESSION's, so the loop enforces
   # nothing here. A doc that said otherwise would licence a reader to assume a
   # mechanical guard that does not exist.
@@ -715,7 +722,7 @@ _roster_hits() {
 
 # --- roster tripwire --------------------------------------------------------
 
-@test "#1497 exactly three tracked markdown sites state the cadence" {
+@test "#1497 exactly five tracked markdown sites state the cadence" {
   # Derived, not transcribed. `docs/superpowers/` is vendored and restates
   # nothing of ours — the same exclusion the sibling sweeps use. SHIPPED
   # TEMPLATES are in scope: `approver-policy-core.md.tmpl` already restates
@@ -744,13 +751,17 @@ _roster_hits() {
   case "$n" in ''|*[!0-9]*)
     printf 'roster tripwire: grep produced no count\n' >&2; return 1 ;;
   esac
-  if [ "$n" -ne 3 ]; then
-    printf 'expected 3 markdown sites stating the cadence, found %s:\n%s\n' "$n" "$hits" >&2
+  if [ "$n" -ne 5 ]; then
+    printf 'expected 5 markdown sites stating the cadence, found %s:\n%s\n' "$n" "$hits" >&2
     return 1
   fi
   # …and they are the roster the story named, so a swap reds here too. -F
   # because an unanchored `.` in a path is a regex wildcard.
+  # #1503 moved the review-loop procedure into reference/*.md, so the roster
+  # names those files where the text now lives — the same sites, re-homed.
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/SKILL.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'ARCHITECTURE.md'
 }
@@ -880,9 +891,9 @@ _roster_hits() {
   # flipped to a mint AFTER the gate, which is the self-attestation the
   # invariant forbids — with the count intact.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "§3.5's round boundary on, that identity is the T minted before this")"
+  ln="$(prose_gate_lines "$CONDUCTOR" "§3.5's round boundary on, that identity is the T minted before this")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 6)"
+  body="$(prose_window "$CONDUCTOR" "$ln" 6)"
   contains "$body" 'that identity is the T minted before this gate was started'
   contains "$body" 'this step restates none of it'
 
@@ -1089,14 +1100,14 @@ _roster_hits() {
 
 @test "#1497 non-vacuity: reverting the entry condition to GREEN reds its pin" {
   local F="$BATS_TEST_TMPDIR/skill-green-entry.md" ln
-  sed "s/Once §3's gate is \*\*under way\*\*/Once §3's gate is **green**/" "$SKILL" > "$F"
+  sed "s/Once §3's gate is \*\*under way\*\*/Once §3's gate is **green**/" "$CONDUCTOR" > "$F"
   ln="$(prose_gate_lines "$F" "Once §3's gate is under way, run the local review loop before")"
   [ -z "$ln" ]
 }
 
 @test "#1497 non-vacuity: deleting the background-task carve-out reds its pin" {
   local F="$BATS_TEST_TMPDIR/skill-no-carveout.md" ln
-  sed '/^Both rules are about \*\*model-driven\*\* steps\./d' "$SKILL" > "$F"
+  sed '/^Both rules are about \*\*model-driven\*\* steps\./d' "$CONDUCTOR" > "$F"
   ln="$(prose_gate_lines "$F" 'Both rules are about model-driven steps. The gate is not one — it is a')"
   [ -z "$ln" ]
 }
@@ -1323,7 +1334,7 @@ _roster_hits() {
   # self-attestation the invariant exists to forbid.
   local F="$BATS_TEST_TMPDIR/skill-post-gate-mint.md" ln body
   sed 's/that identity is the `T` minted \*\*before\*\* this/that identity is the `T` minted **after** this/' \
-    "$SKILL" > "$F"
+    "$CONDUCTOR" > "$F"
   ln="$(prose_gate_lines "$F" "§3.5's round boundary on, that identity is the T minted after this")"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 6)"

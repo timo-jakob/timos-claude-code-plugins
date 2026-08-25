@@ -1,15 +1,17 @@
 #!/usr/bin/env bats
 #
 # The review loop's budget numbers (issue #993) are restated across several live
-# artifacts, and only two of them are executable: MAX_REVIEW_ROUNDS in
-# resolve-story-loop.zsh (the default round cap) and the grant soft cap rendered
-# by build-escalation.zsh. The human-approved extension increment (+3) is pure
-# prose — the session implements it by following SKILL.md — so nothing but these
-# tests can catch a site drifting back to the old 3 / +2 spellings, or a retune
-# that moves a constant without moving its transcriptions.
+# artifacts, and only THREE of them are executable: MAX_REVIEW_ROUNDS in
+# resolve-story-loop.zsh (the default round cap), the grant soft cap rendered by
+# build-escalation.zsh, and the closing sweep's one-round grant, derived from
+# `closing_sweep_round=$(( round + 1 ))` in resolve-story-loop.zsh (#1434). The
+# human-approved extension increment (+3) is pure prose — the session implements
+# it by following SKILL.md — so nothing but these tests can catch a site drifting
+# back to the old 3 / +2 spellings, or a retune that moves a constant without
+# moving its transcriptions.
 #
-# Both executable numbers are READ from their source, and every DIGIT-form site
-# is checked against them, so a retune fails here instead of silently
+# All three executable numbers are READ from their source, and every DIGIT-form
+# site is checked against them, so a retune fails here instead of silently
 # disagreeing. The WORD forms ("five rounds", "three more rounds") are spelled
 # out by hand — they cannot be derived — so a retune must re-spell them here;
 # the value assertions at the top of the file are what force that to happen.
@@ -42,11 +44,26 @@
 
 bats_require_minimum_version 1.5.0
 
+load resolve-issue-corpus
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   LOOP="$REPO_ROOT/development/skills/resolve-issue/scripts/resolve-story-loop.zsh"
   ESCALATE="$REPO_ROOT/development/skills/resolve-issue/scripts/build-escalation.zsh"
-  SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # #1503 split the resolve-issue skill into a conductor (SKILL.md — each step's
+  # invocation contract, exit-code table and a pointer) plus on-demand
+  # reference/*.md carrying the procedure behind each branch. Every budget
+  # statement this file sweeps moved with its procedure, byte-for-byte:
+  #   - the closing full sweep's one-round grant → reference/review-loop.md
+  #     (the AWAITING_FIX branch it is decided on);
+  #   - the +3 increment, the worked ceiling and the soft-cap nudge →
+  #     reference/interactive.md (the interactive extension).
+  # So the sweeps below name THOSE files. Naming the conductor instead would
+  # leave every needle unfindable — or, worse, findable in a corpus while
+  # nothing pinned which file it landed in.
+  CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  SKILL="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   # The panel-duties block of ARCHITECTURE.md, extracted ONCE and asserted
   # against instead of the whole file (#1434). Every ARCH needle in the
@@ -118,7 +135,44 @@ setup() {
     return 1
   }
   # every live prose site, for the sweeps that must cover all of them at once
-  ALL_SITES=("$SKILL" "$ARCH" "$EXPLAIN" "$MOTIV" "$GATE" "$PROSE" "$TELEM" \
+  # DERIVED over the skill, transcribed only for the non-skill sites (#1503).
+  # The move turned one skill file into six, and the two negative sweeps
+  # ALL_SITES feeds are the ones that must cover ALL of them — a transcribed
+  # list that gained three of the six would leave reference/{residue,promotion,
+  # escalation}.md unswept, and reference/promotion.md already discusses
+  # --max-rounds, so it is a plausible carrier of a stale spelling. Deriving is
+  # also what makes a SEVENTH skill file join automatically.
+  #
+  # The producer's STATUS is observed, never read through `< <(...)`:
+  # `resolve_issue_files` returns 1 and prints nothing when `reference/` and its
+  # roster disagree — exactly the case the derivation was added for — and both
+  # consumers of ALL_SITES are NEGATIVE sweeps (`run -1 grep -Eq …`). Read
+  # blindly, that path would drop all six skill files and make both sweeps PASS
+  # while covering none of the skill: the vacuity deriving is supposed to
+  # prevent. No count guard follows it: any figure derived from the same
+  # producer is equal by construction and could never fire.
+  local _f _listing
+  _listing="$(resolve_issue_files "$REPO_ROOT")" || {
+    printf 'the resolve-issue roster failed; ALL_SITES would be missing every skill file\n' >&2
+    return 1
+  }
+  ALL_SITES=()
+  while IFS= read -r _f; do [ -n "$_f" ] || continue; ALL_SITES+=("$_f"); done <<< "$_listing"
+  # The NEGATIVE counterpart of SWEEP_SITES, built BEFORE the non-skill sites
+  # are appended so it is the skill plus the two budget documentation pages —
+  # not the panel agents and the motivation page, which have no business being
+  # swept for a grant spelling.
+  #
+  # The two lists are deliberately different. A POSITIVE sweep asks "does every
+  # site that must state the grant state it?", so it names only the sites that
+  # carry it — after #1503 the conductor does not. A NEGATIVE sweep asks "has a
+  # wrong spelling landed anywhere?", which must cover every file a drifted
+  # restatement could land in, the conductor most of all: it is the one file
+  # every run loads on every round. Retargeting the two TOGETHER is what left
+  # the negative half sweeping a file with zero occurrences.
+  NEG_SITES=("${ALL_SITES[@]}" "$EXPLAIN" "$ARCH")
+
+  ALL_SITES+=("$ARCH" "$EXPLAIN" "$MOTIV" "$GATE" "$PROSE" "$TELEM" \
     "$BAR_TESTS" "$BAR_CONTRACT")
 
   # the executable copies — every prose site is checked AGAINST these
@@ -175,10 +229,19 @@ grep_site() {  # grep_site <file> <fixed-string>
 }
 
 @test "SKILL.md and ARCHITECTURE.md transcribe the script's constant verbatim (#993)" {
-  grep_num "$SKILL" "MAX_REVIEW_ROUNDS=$MAXR"
+  grep_num "$CONDUCTOR" "MAX_REVIEW_ROUNDS=$MAXR"
   grep_num "$ARCH" "MAX_REVIEW_ROUNDS=$MAXR"
-  # and no OTHER value of the constant survives anywhere in the live prose
-  run grep -Eho 'MAX_REVIEW_ROUNDS=[0-9]+' "$SKILL" "$ARCH"
+  # ...and no OTHER value of the constant survives anywhere in the live prose.
+  #
+  # Swept over NEG_SITES — the DERIVED skill file set plus the two doc pages —
+  # not a transcribed operand list. #1503 turned one skill file into six, and a
+  # transcribed list is how the skill half of a negative sweep goes quiet: naming
+  # only reference/review-loop.md read a file with ZERO occurrences of the
+  # constant and passed on ARCHITECTURE.md's copy alone, and naming it plus the
+  # conductor still left reference/promotion.md — which discusses the
+  # MAX_REVIEW_ROUNDS default — unswept. Deriving is what makes a seventh skill
+  # file join without an edit here.
+  run grep -Eho 'MAX_REVIEW_ROUNDS=[0-9]+' "${NEG_SITES[@]}"
   [ "$status" -eq 0 ]
   while IFS= read -r hit; do
     [ "$hit" = "MAX_REVIEW_ROUNDS=$MAXR" ]
@@ -188,7 +251,7 @@ grep_site() {  # grep_site <file> <fixed-string>
 @test "the user-facing docs spell the default cap as five rounds (#993)" {
   grep -Fq 'five rounds by default' "$EXPLAIN"
   grep -Fq 'up to five rounds' "$MOTIV"
-  grep -Fq 'five review rounds' "$SKILL"
+  grep -Fq 'five review rounds' "$CONDUCTOR"
   grep -Fq 'five review rounds' "$GATE"
 }
 
@@ -198,8 +261,9 @@ grep_site() {  # grep_site <file> <fixed-string>
   # number, so both are anchored
   grep_num "$PROSE" "escalates after $MAXR rounds"
   grep_num "$ARCH" "$MAXR-round default"
-  # no other numeral claims to be the default cap
-  run grep -Eho '[0-9]+-round default' "$ARCH"
+  # No other numeral claims to be the default cap — over NEG_SITES, so a drifted
+  # cap in ANY skill file reds. $ARCH alone swept no skill file at all.
+  run grep -Eho '[0-9]+-round default' "${NEG_SITES[@]}"
   [ "$status" -eq 0 ]
   while IFS= read -r hit; do
     [ "$hit" = "$MAXR-round default" ]
@@ -332,16 +396,21 @@ grep_site() {  # grep_site <file> <fixed-string>
   grep_site "$SKILL" 'still reports what you passed'
   grep_site "$ARCH" 'keeps reporting what the caller passed'
   grep_site "$EXPLAIN" 'is still what gets reported'
-  # ban the REPEATABLE shape outright, in either spelling
+  # Ban the REPEATABLE shape outright, in either spelling — over NEG_SITES, not
+  # SWEEP_SITES. The two lists differ on purpose: SWEEP_SITES is where the grant
+  # IS stated (the conductor legitimately no longer states it, so the positive
+  # loop above must not read it), while a NEGATIVE sweep must cover every file a
+  # drifted restatement could land in — the conductor most of all, since it is
+  # the one file every run loads on every round.
   run -1 grep -Eqi 'rounds? beyond [^.]*(each|every) time|granted (again|repeatedly)' \
-    "${SWEEP_SITES[@]}"
+    "${NEG_SITES[@]}"
   # Ban the SHAPE, not three sentences: any OTHER count of rounds "beyond" the
   # ceiling, in either spelling, including a digit form of the correct value —
   # the canonical spelling is the word form, and a digit twin is a second site
   # the next retune would not read. "one round beyond" is deliberately not
   # matched: neither the word alternation nor `[0-9]+` can reach it.
   run -1 grep -Eqi '(exactly )?(two|three|four|five|six|seven|eight|nine|ten|[0-9]+) (more |extra |additional )?rounds? beyond' \
-    "${SWEEP_SITES[@]}"
+    "${NEG_SITES[@]}"
 }
 
 @test "every review panel carries all FOUR loop obligations, and the roster is exactly six (#1434)" {
@@ -598,18 +667,20 @@ grep_site() {  # grep_site <file> <fixed-string>
   # Digit-terminal needles go through grep_num (both boundaries), so a drift to
   # "+30" / "by 30" cannot satisfy them; the rest are plain fixed strings.
   #
-  # SKILL.md — the offer texts, the bookkeeping note, the ceiling semantics and
-  # the invocation that implements them
-  grep_num "$SKILL" "Grant \+$INCREMENT rounds"
-  grep_num "$SKILL" "Grant \+$INCREMENT with guidance"
-  grep_num "$SKILL" "retry \(\+$INCREMENT\)"
-  grep_num "$SKILL" "\+$INCREMENT/.grants. bookkeeping"
-  grep -Fq 'exactly three more rounds' "$SKILL"
-  grep -Fq 'grant "three more rounds"' "$SKILL"
-  grep_num "$SKILL" "ceiling raised by $INCREMENT"
-  grep_num "$SKILL" "raises the \*ceiling\* by $INCREMENT"
-  grep -Fq 'leaves more than three' "$SKILL"
-  grep_num "$SKILL" "prev_max \+ $INCREMENT"
+  # reference/interactive.md — the offer texts, the bookkeeping note, the
+  # ceiling semantics and the invocation that implements them (#1503 moved the
+  # interactive extension there byte-for-byte; the conductor keeps the exit-code
+  # table and a pointer, neither of which states a number)
+  grep_num "$EXTENSION" "Grant \+$INCREMENT rounds"
+  grep_num "$EXTENSION" "Grant \+$INCREMENT with guidance"
+  grep_num "$EXTENSION" "retry \(\+$INCREMENT\)"
+  grep_num "$EXTENSION" "\+$INCREMENT/.grants. bookkeeping"
+  grep -Fq 'exactly three more rounds' "$EXTENSION"
+  grep -Fq 'grant "three more rounds"' "$EXTENSION"
+  grep_num "$EXTENSION" "ceiling raised by $INCREMENT"
+  grep_num "$EXTENSION" "raises the \*ceiling\* by $INCREMENT"
+  grep -Fq 'leaves more than three' "$EXTENSION"
+  grep_num "$EXTENSION" "prev_max \+ $INCREMENT"
   # ARCHITECTURE.md — the contract restatement, in both spellings
   grep_num "$ARCH" "offers \+$INCREMENT to the round ceiling"
   grep_num "$ARCH" "raises .--max-rounds. by $INCREMENT"
@@ -628,8 +699,8 @@ grep_site() {  # grep_site <file> <fixed-string>
   # SKILL.md illustrates both exits with concrete numbers; recompute them so a
   # retune of the cap or the increment cannot leave a stale example behind
   local first_ceiling=$(( MAXR + INCREMENT ))
-  grep_num "$SKILL" "ceiling $first_ceiling after the default budget, rounds $(( MAXR + 1 ))-$first_ceiling"
-  grep_num "$SKILL" "ceiling $first_ceiling after a round-2 exit = $(( first_ceiling - 2 )) rounds left"
+  grep_num "$EXTENSION" "ceiling $first_ceiling after the default budget, rounds $(( MAXR + 1 ))-$first_ceiling"
+  grep_num "$EXTENSION" "ceiling $first_ceiling after a round-2 exit = $(( first_ceiling - 2 )) rounds left"
 }
 
 @test "no stale +2 increment spelling survives in the live instructions (#993)" {
@@ -650,27 +721,27 @@ grep_site() {  # grep_site <file> <fixed-string>
   # first byte of '×' into an unbraced variable name.
   local ceiling=$(( MAXR + SOFTCAP * INCREMENT ))
   local site
-  for site in "$EXPLAIN" "$SKILL" "$ARCH"; do
+  for site in "$EXPLAIN" "$EXTENSION" "$ARCH"; do
     grep_num "$site" "$MAXR \+ ${SOFTCAP}×$INCREMENT = $ceiling"
   done
   # SKILL.md also restates the derived number on its own; recompute it too
-  grep_num "$SKILL" "$ceiling-round figure"
+  grep_num "$EXTENSION" "$ceiling-round figure"
 }
 
 @test "the soft cap is a nudge at every site that states it (#993)" {
   local site
-  for site in "$SKILL" "$ARCH" "$EXPLAIN"; do
+  for site in "$EXTENSION" "$ARCH" "$EXPLAIN"; do
     grep_site "$site" 'not a hard stop'
   done
   # and the cap's own value agrees with what build-escalation.zsh renders,
   # in the digit form...
-  grep_num "$SKILL" "grants >= $SOFTCAP"
+  grep_num "$EXTENSION" "grants >= $SOFTCAP"
   grep_num "$ARCH" "$SOFTCAP-grant soft cap"
   # ...and in the word form the human-facing prose uses. Both spellings, or the
   # unguarded one drifts (the whole point of this file).
   [ "$SOFTCAP" -eq 5 ]   # the word forms below are spelled for this value
   grep -Fq 'five grants' "$EXPLAIN"
   grep -Fq 'five-grant point' "$EXPLAIN"
-  grep -Fq 'by the fifth grant' "$SKILL"
+  grep -Fq 'by the fifth grant' "$EXTENSION"
   grep -Fq 'by the fifth grant' "$ARCH"
 }
