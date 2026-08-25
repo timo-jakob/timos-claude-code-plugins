@@ -50,6 +50,42 @@ setup() {
   contains "$gate_images" "pandoc/extra:"
 }
 
+@test "manual layout: the header sets the page to A4 with printed-manual margins" {
+  # pandoc's template sets neither papersize nor geometry, so without this line
+  # the manual silently reverts to the article class's US-letter default: a
+  # 121 mm column on 216 mm paper. The margins ARE the manual's page design —
+  # pin them, so a reformat is a deliberate edit to this test rather than a
+  # side effect of an unrelated header change.
+  local header
+  header="$(cat "$REPO_ROOT/$HEADER")"
+  contains "$header" "{geometry}"
+  contains "$header" "a4paper"
+  contains "$header" "left=25mm"
+  contains "$header" "right=25mm"
+  contains "$header" "top=25mm"
+  contains "$header" "bottom=30mm"
+}
+
+@test "manual layout: both workflows set the 11pt body size" {
+  # fontsize is a document-class option, so it cannot live in the header with
+  # the rest of the page setup. It pairs WITH the geometry above: 25 mm margins
+  # on A4 leave a 160 mm column, which runs to ~100 characters a line at the
+  # class's 10 pt default. Lose this flag and the page above turns unreadable
+  # without anything failing.
+  contains "$(cat "$GATE")" "-V fontsize=11pt"
+  contains "$(cat "$PUBLISH")" "-V fontsize=11pt"
+}
+
+@test "manual layout: the bootstrap templates ship the same pandoc assets" {
+  # A bootstrapped repo builds its manual with ITS copy of these files, so a fix
+  # applied here and not there ships a manual this repo has already outgrown.
+  local template_dir
+  template_dir="$REPO_ROOT/development/skills/bootstrap/templates/common/scripts/pandoc"
+  [ -d "$template_dir" ]
+  diff "$REPO_ROOT/$HEADER" "$template_dir/manual-header.tex"
+  diff "$REPO_ROOT/$FILTER" "$template_dir/break-long-tokens.lua"
+}
+
 @test "manual layout: the PR gate fails on a character the PDF has no glyph for" {
   # The drop is silent in xelatex; without this step it stays silent in CI too.
   contains "$(cat "$GATE")" "Missing character"

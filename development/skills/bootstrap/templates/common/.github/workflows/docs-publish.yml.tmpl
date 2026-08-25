@@ -53,15 +53,19 @@ jobs:
         run: mkdocs build --strict
 
       - name: Build the PDF + ePub manuals
-        # Same invocation as the docs.yml PR gate — pandoc/extra for fvextra, and
-        # the PDF-only Lua filter + header that keep long paths, code lines and
-        # unmapped characters from breaking the page.
+        # Same invocation as the docs.yml PR gate — pandoc/extra for fvextra, the
+        # PDF-only Lua filter + header that set the page (A4, 25 mm margins) and
+        # keep long paths, code lines and unmapped characters from breaking it,
+        # and the 11 pt body size the header's column width is chosen for.
+        # Both must stay in step with the gate, or what publishes is not what the
+        # gate judged.
         run: |
           set -euo pipefail
           ./scripts/docs-nav-to-chapters.zsh > chapters.txt
           mapfile -t chapters < chapters.txt
           docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
             --pdf-engine=xelatex --toc \
+            -V fontsize=11pt \
             --metadata title="{{PROJECT_NAME}}" \
             --metadata author="{{PROJECT_SLUG}}" \
             --lua-filter=scripts/pandoc/break-long-tokens.lua \

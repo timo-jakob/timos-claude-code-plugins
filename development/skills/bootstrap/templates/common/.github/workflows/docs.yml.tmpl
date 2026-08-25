@@ -80,15 +80,24 @@ jobs:
         #
         # The PDF adds two layout fixes the ePub does not need, because HTML wraps
         # what LaTeX will not: a Lua filter that gives long paths and identifiers
-        # somewhere to break, and a header that wraps code blocks and maps the
-        # characters Latin Modern has no glyph for. Without them a long path in a
-        # table cell prints over the neighbouring column, a long code line runs off
-        # the page, and a character with no glyph is dropped silently.
+        # somewhere to break, and a header that sets the page (A4, 25 mm margins),
+        # wraps code blocks and maps the characters Latin Modern has no glyph for.
+        # Without them a long path in a table cell prints over the neighbouring
+        # column, a long code line runs off the page, a character with no glyph is
+        # dropped silently, and the manual sets on US letter with the article
+        # class's ~47 mm margins — a page of white with a manual in the middle.
+        #
+        # `fontsize` is a document-class option, so it cannot live in the header
+        # with the rest of the page setup — it has to be set here. 11 pt is what
+        # makes that page readable: the header's A4 geometry gives a 160 mm column,
+        # which runs to ~100 characters a line at the class's 10 pt default and
+        # ~85 at 11 pt. Change one of the two and re-read a page.
         run: |
           set -euo pipefail
           mapfile -t chapters < chapters.txt
           docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
             --pdf-engine=xelatex --toc \
+            -V fontsize=11pt \
             --metadata title="{{PROJECT_NAME}}" \
             --metadata author="{{PROJECT_SLUG}}" \
             --lua-filter=scripts/pandoc/break-long-tokens.lua \
