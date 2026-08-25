@@ -1,6 +1,18 @@
 % Preamble additions for the pandoc/xelatex manual build (manual.pdf).
-% Included via --include-in-header from scripts/build-manuals.zsh; the PDF
-% manual only, never the ePub.
+% Included via --include-in-header from the PDF build in .github/workflows/
+% docs.yml and docs-publish.yml; the PDF manual only, never the ePub.
+
+% --- Page -------------------------------------------------------------------
+% pandoc's LaTeX template sets neither a paper size nor a geometry, so the
+% manual inherited the article class's US-letter defaults: a 121 mm text column
+% on 216 mm paper, with ~47 mm of white down each side and ~42 mm top and
+% bottom. That is a page of margin with a manual in the middle of it.
+%
+% A4 with the margins a printed manual normally carries: 25 mm on three sides,
+% a deeper 30 mm foot so the folio sits in air rather than under the last line.
+% geometry loads AFTER the class options, so it — not the letterpaper default —
+% decides the PDF's page size.
+\usepackage[a4paper,left=25mm,right=25mm,top=25mm,bottom=30mm,footskip=14mm]{geometry}
 
 % --- Code blocks ------------------------------------------------------------
 % fancyvrb, which pandoc's default template uses, prints an over-long code line
@@ -34,7 +46,7 @@
 % amssymb do have. `newunicodechar` is not in the pandoc image's TeX Live set,
 % so declare the active characters directly.
 %
-% scripts/build-manuals.zsh fails the build on any REMAINING dropped character,
+% The docs workflows fail the build on any REMAINING dropped character,
 % so a newly introduced one lands here rather than vanishing from the PDF.
 \makeatletter
 \newcommand{\DeclareUnicodeFallback}[2]{%

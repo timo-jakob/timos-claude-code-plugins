@@ -1697,11 +1697,16 @@ pages:
 - `chmod +x scripts/docs-nav-to-chapters.zsh` after copying (like
   `update-claude-plugins.zsh`). Stamping preserves file modes (#783), so
   chmod-then-stamp and stamp-then-chmod both work.
-- **The two `scripts/pandoc/` assets are the PDF's layout fix** — a Lua filter
-  and a LaTeX header the `docs.yml` / `docs-publish.yml` PDF build passes to
-  pandoc. Without them xelatex prints a long path in a table cell over the
-  neighbouring column, runs a long code line off the page, and drops a character
-  it has no glyph for (`≥`, `↔`) silently. They are **data files, not scripts**:
+- **The two `scripts/pandoc/` assets are the PDF's page setup and layout fix** —
+  a Lua filter and a LaTeX header the `docs.yml` / `docs-publish.yml` PDF build
+  passes to pandoc. The header sets the page: A4, 25 mm margins, 30 mm foot,
+  because pandoc sets neither papersize nor geometry and the article class's
+  US-letter default leaves ~47 mm of white down each side. Without the rest of
+  it xelatex prints a long path in a table cell over the neighbouring column,
+  runs a long code line off the page, and drops a character it has no glyph for
+  (`≥`, `↔`) silently. The `-V fontsize=11pt` that page is sized for lives on
+  the pandoc invocation in both workflows, not here — `fontsize` is a
+  document-class option, which a header include is too late to set. They are **data files, not scripts**:
   no `chmod +x`, and no provenance marker — like the rest of the docs machinery
   they are absent from Step 3.6's stamping table, and `stamp-marker.zsh` could
   not stamp them anyway (it handles `#`-comment files only; Lua and TeX comment
