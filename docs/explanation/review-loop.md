@@ -12,6 +12,15 @@ suggestion-promotion phase, escalation and the interactive extension — live in
 `development/skills/resolve-issue/reference/*.md` and are read only when the run
 actually reaches them.
 
+One more split runs alongside that one. Rules that are true of a *single* repo
+type — which test command is blessed, what a version bump means there, which
+panel reviews it — live in that type's own plugin as a `resolve-profile` skill,
+which the conductor detects and loads by name at its §1b step, before it
+implements anything. A repo type with no profile keeps the conductor's generic
+behaviour after a one-line notice, so the seam adds no refusal; see the
+*Resolve profile contract* in ARCHITECTURE.md for the six headings a profile
+carries.
+
 ## What one round does
 
 1. **Review — and re-test, alongside it.** A language-appropriate reviewer panel

@@ -12,6 +12,7 @@
 # repos so the diff-scoping is exercised for real.
 
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -1008,7 +1009,10 @@ EOF
     DETECT_LANGS_JSON='{"languages":[],"is_kubernetes":true}' \
     zsh "$S" plan --repo "$R" --base main
   [ "$status" -eq 1 ]
-  echo "$output" | grep -q 'could not compute the detected-language count'
+  # the `plan: ` PREFIX, not just the message body (#1504): `_repo_type` is
+  # shared, and its diagnostics take the caller's name from `ctx`. Asserting the
+  # body alone leaves that parameter free to be dropped or mis-passed.
+  echo "$output" | grep -q 'plan: could not compute the detected-language count'
   run ! grep -q 'kubernetes' <<< "$output"
 }
 
@@ -1284,3 +1288,296 @@ EOF
 # in the family does; the numeric check stands as defence-in-depth for it and
 # for a jq that succeeds while emitting nothing. The case above covers the
 # reachable failure.
+
+# ---- detect: plan's repo-type half, with the diff work removed (#1504) ------
+#
+# The resolve-issue conductor calls this at its §1b step to load
+# `development-<repo_type>:resolve-profile`, where the branch is still empty and
+# a diff would be pure waste. The contract that matters is that it can never
+# disagree with `plan` — same detector, same fallback ordering, same exit codes —
+# so the agreement property below is the load-bearing test here, not the shape.
+
+detect() {  # $1 = languages json ; rest = extra flags
+  local langs="$1"; shift
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON="$langs" \
+    zsh "$S" detect --repo "$R" "$@"
+}
+
+@test "detect: #1504 emits ONLY repo_type, and nothing else" {
+  detect '{"languages":["python"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "python" ]
+  # the whole document, not merely a document containing the key: a detect that
+  # quietly echoed plan's descriptor would satisfy a repo_type check alone.
+  [ "$(echo "$output" | jq -r 'keys | join(",")')" = "repo_type" ]
+}
+
+@test "detect: #1504 the claude-plugin fallback reaches it too" {
+  detect '{"languages":[],"is_claude_plugin":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+}
+
+@test "detect: #1504 agrees with plan on the same repo — one detector, not two" {
+  # THE property. `plan` (§3.5) and `detect` (§1b) run at different points of one
+  # run, so a second detector would let a story be profiled as one type and
+  # reviewed as another, with nothing to say so. Exercised across the fallback
+  # branches, not just the single-language happy path.
+  local langs from_plan from_detect
+  for langs in '{"languages":["python"]}' \
+               '{"languages":["go"]}' \
+               '{"languages":[],"is_claude_plugin":true}' \
+               '{"languages":[],"is_kubernetes":true}'; do
+    plan "$langs"
+    [ "$status" -eq 0 ] || { echo "plan failed for $langs: $output"; return 1; }
+    from_plan="$(echo "$output" | jq -r .repo_type)"
+    detect "$langs"
+    [ "$status" -eq 0 ] || { echo "detect failed for $langs: $output"; return 1; }
+    from_detect="$(echo "$output" | jq -r .repo_type)"
+    [ "$from_plan" = "$from_detect" ] || {
+      echo "$langs: plan says $from_plan, detect says $from_detect"; return 1; }
+  done
+}
+
+@test "detect: #1504 an unsupported repo type is plan's TYPED error, exit 3" {
+  detect '{"languages":["rust"]}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+  [ "$(echo "$output" | jq -r '.languages | join(",")')" = "rust" ]
+}
+
+@test "detect: #1504 an ambiguous repo type is plan's TYPED error, exit 3" {
+  detect '{"languages":["python","go"]}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+}
+
+@test "detect: #1504 a dangling --repo is a usage error (exit 2), not a crash" {
+  run zsh "$S" detect --repo
+  [ "$status" -eq 2 ]
+  contains "$output" "detect: --repo requires a value"
+}
+
+@test "detect: #1504 --repo is required (usage error, exit 2)" {
+  run zsh "$S" detect
+  [ "$status" -eq 2 ]
+  contains "$output" "detect: --repo is required"
+}
+
+@test "detect: #1504 --base is REFUSED — there is no diff surface here" {
+  # Not a stylistic assertion: accepting and ignoring --base would let a caller
+  # believe it had scoped something. A flag this subcommand does not have is a
+  # usage error like any other.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" detect --repo "$R" --base main
+  [ "$status" -eq 2 ]
+  contains "$output" "detect: unknown flag: --base"
+}
+
+@test "detect: #1504 a --repo naming nothing is exit 1, not a silent type" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" detect --repo "$BATS_TEST_TMPDIR/no-such-dir"
+  [ "$status" -eq 1 ]
+  contains "$output" "detect: --repo not a directory"
+}
+
+@test "detect: #1504 _repo_type's OWN diagnostics take the caller's name" {
+  # THE `ctx` seam. `_repo_type` was lifted out of cmd_plan and is shared, and
+  # its header states the reason for the parameter: "every diagnostic RAISED
+  # HERE still says which invocation failed — the one thing lifting this out of
+  # cmd_plan could lose." Nothing asserted it until #1504's closing sweep.
+  #
+  # The fixture matters. An unparseable detect-stack fails inside `_detect_json`,
+  # whose three messages deliberately keep the script-wide `review-dispatch:`
+  # prefix and never touch `ctx` — so a `lacks "…" "plan:"` on THAT path is
+  # tautological: no mutation of `ctx` could make it fire. Reach a `${ctx}:`
+  # message instead, through the jq shim, and assert the prefix POSITIVELY.
+  #
+  # Mutations this now catches, both of which left the whole suite green:
+  #   * `_repo_type "$repo" plan` in cmd_detect — every detect failure blaming a
+  #     subcommand that was never invoked;
+  #   * deleting the `ctx` parameter and hard-coding the script-wide prefix,
+  #     which is the entire rationale for the parameter.
+  local shim; shim="$(jq_failing_on '.languages')"
+  run --separate-stderr env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" detect --repo "$R"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'detect: could not read .languages'
+  lacks "$stderr" "plan:"
+}
+
+@test "detect: #1504 a failing emitter is exit 1, not jq's 5" {
+  # plan's identical guard is covered above; detect's was not. Without it a
+  # failed emit leaks jq's exit 5 — a code outside the {0,1,2,3} set both the
+  # script header and §1b's four-arm exit table document, leaving the session
+  # with no branch for what it sees.
+  local shim; shim="$(jq_failing_on 'repo_type')"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' PATH="${shim}:$PATH" \
+    zsh "$S" detect --repo "$R"
+  [ "$status" -eq 1 ]
+  # the exit-1 contract is a stderr diagnostic AND an empty stdout — without
+  # this, a guard that printed a placeholder document before exiting would pass.
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'could not emit the repo-type document'
+}
+
+@test "detect: #1504 is advertised in the usage string" {
+  run zsh "$S" bogus-subcommand
+  [ "$status" -eq 2 ]
+  contains "$output" "expected plan|detect|scope-findings"
+}
+
+# ---- detect: the gaps round 1's test reviewer named (#1504) ----------------
+
+@test "detect: #1504 an UNREADABLE --repo is named as such, not blamed on detect-stack" {
+  # The sibling of the plan/scope-findings tests above. Without the `-r`/`-x`
+  # gate, `cd` fails inside _detect_json and the operator is told
+  # "detect-stack failed" — naming a script that never ran, with no stderr to
+  # relay. Stream-separated, so the exit-1 contract (a stderr diagnostic, an
+  # EMPTY stdout) is asserted rather than assumed: a `detect` that printed its
+  # diagnostic on stdout would leave a caller parsing a non-document.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  local locked="$BATS_TEST_TMPDIR/locked-detect"
+  mkdir -p "$locked"
+  chmod 000 "$locked"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" detect --repo "$locked"
+  chmod 755 "$locked"   # restore BEFORE asserting
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'not a readable directory'
+  # `lacks`, NOT `grep -qv`: the latter passes whenever ANY line lacks the
+  # needle, so it means "absent" only while stderr is exactly one line —
+  # and the mutation this guards (degrading the gate to a warning that
+  # continues) makes stderr two lines, one of which matches.
+  lacks "$stderr" "detect-stack failed"
+}
+
+@test "detect: #1504 a READABLE-but-not-traversable --repo is caught by the -x half" {
+  # Every other fixture is chmod 000, which falsifies BOTH operands — so
+  # narrowing the conjunction to `[[ -r ]]` (the plausible "drop the redundant
+  # test" edit) would keep the suite green while a mode-444 directory went back
+  # to failing inside `cd`.
+  if [ "$(id -u)" -eq 0 ]; then skip "root traverses any directory"; fi
+  local ro="$BATS_TEST_TMPDIR/detect-readable-not-traversable"
+  mkdir -p "$ro"
+  chmod 444 "$ro"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" detect --repo "$ro"
+  chmod 755 "$ro"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'not a readable directory'
+}
+
+@test "detect: #1504 a --repo beginning with a dash is detected, not misattributed" {
+  # `cmd_detect` carries `if [[ "$repo" == -* ]]; then repo="./$repo"; fi`. Both
+  # siblings gained a regression test for their copy precisely because deleting
+  # it left the suite green. Without it a `--repo -weird` reaches `_primary`,
+  # whose `grep -E … "$repo/.maintenance.yml"` reads the path as an option
+  # bundle: the tiebreak silently vanishes and detect escalates exit 3 where
+  # plan returns a type — breaking the one property this block calls
+  # load-bearing.
+  local dash="$BATS_TEST_TMPDIR/-detect-dash"
+  mkdir -p "$dash"
+  printf 'primary: go\n' > "$dash/.maintenance.yml"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python","go"]}' \
+    zsh "$S" detect --repo "$dash"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+}
+
+@test "detect: #1504 agrees with plan on a DASH-named repo too" {
+  # The agreement property above only ever exercises \$R, so it cannot see the
+  # normalisation gap. This closes it on the fixture that has one.
+  local dash="$BATS_TEST_TMPDIR/-agree-dash"
+  mkdir -p "$dash"
+  git -C "$dash" init -q
+  git -C "$dash" config user.email t@example.com
+  git -C "$dash" config user.name tester
+  printf 'primary: java\n' > "$dash/.maintenance.yml"
+  git -C "$dash" add -A
+  git -C "$dash" commit -qm base
+  git -C "$dash" branch -M main
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    zsh "$S" plan --repo "$dash" --base main
+  [ "$status" -eq 0 ]
+  local from_plan; from_plan="$(echo "$output" | jq -r .repo_type)"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    zsh "$S" detect --repo "$dash"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "$from_plan" ]
+  [ "$from_plan" = "java" ]
+}
+
+@test "detect: #1504 a positional argument is a usage error (exit 2)" {
+  # The parse loop's second rejection arm. Only the `-*` arm was covered, so
+  # changing `*)` to `*) shift ;;` would make `detect --repo . stray` silently
+  # ignore the operand and exit 0 with the suite green.
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" detect --repo "$R" stray
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'detect: unexpected argument: stray'
+}
+
+@test "detect: #1504 the typed exit-3 object is on STDOUT, where the orchestrator reads it" {
+  # `run` alone merges the streams, so every typed-error assertion above would
+  # survive the emitters being redirected to stderr — leaving the orchestrator
+  # an empty stdout and nothing to relay. Assert the stream, not just the text.
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["rust"]}' \
+    zsh "$S" detect --repo "$R"
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+}
+
+@test "detect: #1504 a usage error prints NOTHING on stdout" {
+  # The converse: exit 2 is a stderr diagnostic, so a caller that parses stdout
+  # first must find an empty document rather than a half-message.
+  run --separate-stderr zsh "$S" detect --repo
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'detect: --repo requires a value'
+}
+
+@test "detect: #1504 a FLAG-SHAPED --repo value is refused, not consumed" {
+  # `need_value`'s second shape. Realistic as an unquoted `--repo $VAR` with VAR
+  # unset, which swallows the next flag as the value.
+  run --separate-stderr zsh "$S" detect --repo --base
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'detect: --repo requires a value (got the flag --base)'
+}
+
+@test "detect: #1504 an explicitly EMPTY --repo value is refused, not read as omitted" {
+  # `need_value`'s third shape: `--repo ""` would otherwise be indistinguishable
+  # from the flag being absent, and reach the "--repo is required" arm with a
+  # message naming the wrong problem.
+  run --separate-stderr zsh "$S" detect --repo ""
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'detect: --repo requires a non-empty value'
+}
+
+@test "detect: #1504 the no-arg usage string advertises it too" {
+  # Three usage strings emit the subcommand list; only the unknown-subcommand
+  # one was asserted. §1b tells a session to call `detect`, so a `-h` or no-arg
+  # invocation that still advertises `plan|scope-findings` sends it to a
+  # subcommand that does not exist.
+  run --separate-stderr zsh "$S"
+  [ "$status" -eq 2 ]
+  echo "$stderr" | grep -q 'plan|detect|scope-findings'
+}
+
+@test "detect: #1504 --help advertises it as well, at exit 0" {
+  run zsh "$S" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "plan|detect|scope-findings"
+}

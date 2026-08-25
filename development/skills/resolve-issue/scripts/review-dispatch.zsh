@@ -26,6 +26,14 @@
 # only the one descriptor value that decides the scope.
 #
 # Subcommands:
+#   detect --repo PATH
+#       Emit ONLY the repo type: { repo_type }. No diff, no --base, no
+#       changed_files — the resolve-issue conductor calls this at its §1b step
+#       to load `development-<repo_type>:resolve-profile`, where the branch is
+#       empty and a diff would be wasted work (#1504). It shares `plan`'s
+#       detector (`_repo_type`) and its exit codes exactly, so the two can
+#       never disagree about a repo.
+#
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
 #        [--final] [--prior-tree TREE_ID] [--fix-verification PATH]
 #        [--adjudicated PATH]
@@ -89,7 +97,9 @@
 #                     delta is computed, so ONE override covers every git call.
 #
 # Exit codes:
-#   0  success — descriptor (plan) or filtered array (scope-findings) on stdout
+#   0  success — the repo type (detect), the descriptor (plan) or the
+#      filtered array (scope-findings) on stdout; or, for -h/--help, the
+#      usage string, which is the one exit-0 stdout that is NOT a document
 #   2  usage error — an unknown flag or subcommand, a value-taking flag with no
 #      value, a `--round` that is not a non-negative integer, or a `--round > 1`
 #      carrying neither `--final` nor `--prior-tree` (there is no silent fallback
@@ -293,6 +303,142 @@ _primary() {
     | sed -E 's/^[[:space:]]*primary:[[:space:]]*//; s/[[:space:]]*(#.*)?$//; s/^["'\'']//; s/["'\'']$//'
 }
 
+# --- THE repo-type detector, shared by `plan` and `detect` (#1504) ---------
+# Sets the global REPO_TYPE. Deliberately NOT a command substitution: an
+# unsupported/ambiguous repo emits its TYPED object on stdout and exits 3, and
+# an internal failure exits 1 — inside `$( … )` both the document and the exit
+# would be captured by a subshell, so the caller would read an empty repo_type
+# at exit 0 and dispatch a panel for a repo whose type was never determined.
+# $2 is the caller's subcommand name, so every diagnostic RAISED HERE still says
+# which invocation failed — the one thing lifting this out of cmd_plan could
+# lose. `_detect_json`'s own three messages keep the script-wide
+# `review-dispatch:` prefix, deliberately: they name a failure of the detector
+# itself rather than of either subcommand's invocation.
+typeset -g +x _RD_REPO_TYPE=""
+_repo_type() {
+  local repo="$1" ctx="$2"
+  local detect_json; detect_json=$(_detect_json "$repo") || exit 1
+  # All three reads CHECK jq's status (#1177), like the `lang_count` read below.
+  # They already failed closed — an empty value matches neither "true" nor a
+  # language — so no misroute was reachable; what was wrong is the STATUS. The
+  # header contract promises exit 1 (internal error) for a jq failure, and an
+  # unchecked read delivered exit 3 instead, telling the orchestrator to escalate
+  # an "unsupported repo type" it never determined. A typed escalation is a
+  # verdict about the repo; a dead jq is a verdict about the machine.
+  local langs_json; langs_json=$(print -r -- "$detect_json" | jq -c '.languages // []') || {
+    print -u2 -- "${ctx}: could not read .languages from the detect-stack output"; exit 1
+  }
+  # `// false` default: an older detect-stack without the key falls through to
+  # the clean typed error below rather than crashing (#809).
+  local is_plugin; is_plugin=$(print -r -- "$detect_json" | jq -r '.is_claude_plugin // false') || {
+    print -u2 -- "${ctx}: could not read .is_claude_plugin from the detect-stack output"; exit 1
+  }
+  # same `// false` default, same reason (#1153): an older detect-stack without
+  # the key falls through to the typed error rather than crashing.
+  local is_k8s; is_k8s=$(print -r -- "$detect_json" | jq -r '.is_kubernetes // false') || {
+    print -u2 -- "${ctx}: could not read .is_kubernetes from the detect-stack output"; exit 1
+  }
+
+  # supported review languages present, preserving nothing but membership
+  local -a supported
+  local l
+  # the last jq whose failure was read as a VERDICT (#1177): `jq -e` exits 1 for
+  # false/null but 5 for a program error, and treating both as "this language is
+  # absent" turns four jq errors into an `unsupported_repo_type` claim about the
+  # repo. Same rule as every other read here — a dead jq is a fact about the
+  # machine, not about the repo.
+  local probe_rc
+  for l in swift python java go; do
+    print -r -- "$langs_json" | jq -e --arg l "$l" 'index($l) != null' >/dev/null 2>&1
+    probe_rc=$?
+    (( probe_rc <= 1 )) || {
+      print -u2 -- "${ctx}: could not test the detected-language set for $l"; exit 1
+    }
+    (( probe_rc == 0 )) && supported+=("$l")
+  done
+
+  local repo_type=""
+  if (( ${#supported} == 0 )); then
+    # Fallbacks ONLY (#809, #1153): these repos detect no language — a plugin
+    # repo's content is prose, agent definitions, zsh scripts and JSON
+    # manifests; a GitOps repo's is charts, overlays and Argo CD resources.
+    # A detected language always wins, and neither joins the `.maintenance.yml`
+    # primary tiebreak (which lives in the multi-language `else` branch below).
+    #
+    # ORDER IS LOAD-BEARING: both markers fire on a plugin repo that ALSO
+    # carries Kubernetes content, and such a repo's content is plugin prose, so
+    # it must be reviewed by the plugin panel. This repo becomes exactly that
+    # case once #1155 lands its Kubernetes fixtures under tests/fixtures/ —
+    # reversing these two would then point its own review loop at a manifest
+    # panel. (Today is_kubernetes is false here, so only one marker fires.)
+    # The kubernetes fallback additionally requires NO detected language at all,
+    # not merely no SUPPORTED one. `supported` is the intersection with the four
+    # panel languages, so it is empty both for a language-less GitOps repo and
+    # for, say, a JavaScript service — and `is_kubernetes` is a topic marker that
+    # composes with any language, so a JS/TS service that ships its own Helm
+    # chart (a very ordinary shape) would otherwise be handed to the manifest
+    # panel for a story whose diff is JS. That panel has no competence there: it
+    # would converge finding-free and the loop would record a clean review that
+    # never happened. Such a repo keeps the typed `unsupported_repo_type`
+    # escalation, which names the languages so a human can route it.
+    #
+    # claude-plugin deliberately does NOT carry that extra condition (#809): a
+    # `.claude-plugin/plugin.json` is definitional for what the repo *is*, and
+    # a plugin repo carrying one unsupported-language file is still a plugin
+    # repo. A `Chart.yaml` is routinely incidental to an application repo.
+    # NOT `local -i`, and the status IS checked — both deliberate. zsh
+    # arithmetic-evaluates an empty string assigned to an integer-attributed
+    # parameter to **0**, and 0 is precisely the value that OPENS this gate. So
+    # an unchecked `-i` read would fail OPEN: a jq that died, or an empty
+    # `$langs_json` from a failed earlier read, would hand a language-bearing
+    # repo to the manifest panel — reproducing on the error path the exact
+    # misrouting this guard exists to prevent. Fail closed instead, with the
+    # exit-1 internal-error status the header contract promises.
+    local lang_count
+    lang_count=$(print -r -- "$langs_json" | jq 'length') || {
+      print -u2 -- "${ctx}: could not compute the detected-language count"; exit 1
+    }
+    [[ "$lang_count" == <-> ]] || {
+      print -u2 -- "${ctx}: non-numeric language count: ${lang_count:-<empty>}"; exit 1
+    }
+    if [[ "$is_plugin" == "true" ]]; then
+      repo_type="claude-plugin"
+    elif [[ "$is_k8s" == "true" ]] && (( lang_count == 0 )); then
+      repo_type="kubernetes"
+    else
+      jq -nc --argjson langs "$langs_json" \
+        '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java","go"],
+          detail:"no review panel exists for the detected languages"}'
+      exit 3
+    fi
+  elif (( ${#supported} == 1 )); then
+    repo_type="${supported[1]}"
+  else
+    local primary; primary=$(_primary "$repo")
+    if [[ -n "$primary" ]] && (( ${supported[(Ie)$primary]} )); then
+      repo_type="$primary"
+    else
+      # the candidate list is CHECKED before it is passed (#1177): an unchecked
+      # inner substitution that failed would leave `--argjson cand ''`, jq would
+      # reject it, and the `exit 3` below would still run — telling the
+      # orchestrator to escalate while handing it nothing to relay.
+      local cand_json
+      cand_json=$(printf '%s\n' "${supported[@]}" | jq -R . | jq -sc .) || {
+        print -u2 -- "${ctx}: could not encode the candidate list"; exit 1
+      }
+      jq -nc --argjson cand "$cand_json" \
+             --arg primary "$primary" \
+        '{error:"ambiguous_repo_type", candidates:$cand,
+          primary:(if $primary=="" then null else $primary end),
+          detail:"multiple review panels apply; set .maintenance.yml primary to one of the candidates"}' || {
+        print -u2 -- "${ctx}: could not emit the ambiguous-repo-type error"; exit 1
+      }
+      exit 3
+    fi
+  fi
+  _RD_REPO_TYPE="$repo_type"
+}
+
 cmd_plan() {
   local repo="" base="origin/main" round=1 findings_path=""
   # `prior_tree_given` tracks PRESENCE, separately from the value. The blank
@@ -393,125 +539,16 @@ cmd_plan() {
   # an unresolvable identity never reaches a scope computation
   [[ -z "$prior_tree" ]] || _verify_prior_tree "$repo" "$prior_tree" || exit 1
 
-  local detect_json; detect_json=$(_detect_json "$repo") || exit 1
-  # All three reads CHECK jq's status (#1177), like the `lang_count` read below.
-  # They already failed closed — an empty value matches neither "true" nor a
-  # language — so no misroute was reachable; what was wrong is the STATUS. The
-  # header contract promises exit 1 (internal error) for a jq failure, and an
-  # unchecked read delivered exit 3 instead, telling the orchestrator to escalate
-  # an "unsupported repo type" it never determined. A typed escalation is a
-  # verdict about the repo; a dead jq is a verdict about the machine.
-  local langs_json; langs_json=$(print -r -- "$detect_json" | jq -c '.languages // []') || {
-    print -u2 -- "plan: could not read .languages from the detect-stack output"; exit 1
+  _repo_type "$repo" plan || exit $?
+  # The value now crosses a function boundary in a global rather than being
+  # produced inline three lines above its use, so assert it landed. Every
+  # branch of `_repo_type` today either assigns or exits; this is what keeps
+  # a future branch that falls through from emitting `development-:review`
+  # at exit 0 — a panel dispatched for a repo whose type was never determined.
+  [[ -n "$_RD_REPO_TYPE" ]] || {
+    print -u2 -- "plan: internal error: the repo type was not determined"; exit 1
   }
-  # `// false` default: an older detect-stack without the key falls through to
-  # the clean typed error below rather than crashing (#809).
-  local is_plugin; is_plugin=$(print -r -- "$detect_json" | jq -r '.is_claude_plugin // false') || {
-    print -u2 -- "plan: could not read .is_claude_plugin from the detect-stack output"; exit 1
-  }
-  # same `// false` default, same reason (#1153): an older detect-stack without
-  # the key falls through to the typed error rather than crashing.
-  local is_k8s; is_k8s=$(print -r -- "$detect_json" | jq -r '.is_kubernetes // false') || {
-    print -u2 -- "plan: could not read .is_kubernetes from the detect-stack output"; exit 1
-  }
-
-  # supported review languages present, preserving nothing but membership
-  local -a supported
-  local l
-  # the last jq whose failure was read as a VERDICT (#1177): `jq -e` exits 1 for
-  # false/null but 5 for a program error, and treating both as "this language is
-  # absent" turns four jq errors into an `unsupported_repo_type` claim about the
-  # repo. Same rule as every other read here — a dead jq is a fact about the
-  # machine, not about the repo.
-  local probe_rc
-  for l in swift python java go; do
-    print -r -- "$langs_json" | jq -e --arg l "$l" 'index($l) != null' >/dev/null 2>&1
-    probe_rc=$?
-    (( probe_rc <= 1 )) || {
-      print -u2 -- "plan: could not test the detected-language set for $l"; exit 1
-    }
-    (( probe_rc == 0 )) && supported+=("$l")
-  done
-
-  local repo_type=""
-  if (( ${#supported} == 0 )); then
-    # Fallbacks ONLY (#809, #1153): these repos detect no language — a plugin
-    # repo's content is prose, agent definitions, zsh scripts and JSON
-    # manifests; a GitOps repo's is charts, overlays and Argo CD resources.
-    # A detected language always wins, and neither joins the `.maintenance.yml`
-    # primary tiebreak (which lives in the multi-language `else` branch below).
-    #
-    # ORDER IS LOAD-BEARING: both markers fire on a plugin repo that ALSO
-    # carries Kubernetes content, and such a repo's content is plugin prose, so
-    # it must be reviewed by the plugin panel. This repo becomes exactly that
-    # case once #1155 lands its Kubernetes fixtures under tests/fixtures/ —
-    # reversing these two would then point its own review loop at a manifest
-    # panel. (Today is_kubernetes is false here, so only one marker fires.)
-    # The kubernetes fallback additionally requires NO detected language at all,
-    # not merely no SUPPORTED one. `supported` is the intersection with the four
-    # panel languages, so it is empty both for a language-less GitOps repo and
-    # for, say, a JavaScript service — and `is_kubernetes` is a topic marker that
-    # composes with any language, so a JS/TS service that ships its own Helm
-    # chart (a very ordinary shape) would otherwise be handed to the manifest
-    # panel for a story whose diff is JS. That panel has no competence there: it
-    # would converge finding-free and the loop would record a clean review that
-    # never happened. Such a repo keeps the typed `unsupported_repo_type`
-    # escalation, which names the languages so a human can route it.
-    #
-    # claude-plugin deliberately does NOT carry that extra condition (#809): a
-    # `.claude-plugin/plugin.json` is definitional for what the repo *is*, and
-    # a plugin repo carrying one unsupported-language file is still a plugin
-    # repo. A `Chart.yaml` is routinely incidental to an application repo.
-    # NOT `local -i`, and the status IS checked — both deliberate. zsh
-    # arithmetic-evaluates an empty string assigned to an integer-attributed
-    # parameter to **0**, and 0 is precisely the value that OPENS this gate. So
-    # an unchecked `-i` read would fail OPEN: a jq that died, or an empty
-    # `$langs_json` from a failed earlier read, would hand a language-bearing
-    # repo to the manifest panel — reproducing on the error path the exact
-    # misrouting this guard exists to prevent. Fail closed instead, with the
-    # exit-1 internal-error status the header contract promises.
-    local lang_count
-    lang_count=$(print -r -- "$langs_json" | jq 'length') || {
-      print -u2 -- "plan: could not compute the detected-language count"; exit 1
-    }
-    [[ "$lang_count" == <-> ]] || {
-      print -u2 -- "plan: non-numeric language count: ${lang_count:-<empty>}"; exit 1
-    }
-    if [[ "$is_plugin" == "true" ]]; then
-      repo_type="claude-plugin"
-    elif [[ "$is_k8s" == "true" ]] && (( lang_count == 0 )); then
-      repo_type="kubernetes"
-    else
-      jq -nc --argjson langs "$langs_json" \
-        '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java","go"],
-          detail:"no review panel exists for the detected languages"}'
-      exit 3
-    fi
-  elif (( ${#supported} == 1 )); then
-    repo_type="${supported[1]}"
-  else
-    local primary; primary=$(_primary "$repo")
-    if [[ -n "$primary" ]] && (( ${supported[(Ie)$primary]} )); then
-      repo_type="$primary"
-    else
-      # the candidate list is CHECKED before it is passed (#1177): an unchecked
-      # inner substitution that failed would leave `--argjson cand ''`, jq would
-      # reject it, and the `exit 3` below would still run — telling the
-      # orchestrator to escalate while handing it nothing to relay.
-      local cand_json
-      cand_json=$(printf '%s\n' "${supported[@]}" | jq -R . | jq -sc .) || {
-        print -u2 -- "plan: could not encode the candidate list"; exit 1
-      }
-      jq -nc --argjson cand "$cand_json" \
-             --arg primary "$primary" \
-        '{error:"ambiguous_repo_type", candidates:$cand,
-          primary:(if $primary=="" then null else $primary end),
-          detail:"multiple review panels apply; set .maintenance.yml primary to one of the candidates"}' || {
-        print -u2 -- "plan: could not emit the ambiguous-repo-type error"; exit 1
-      }
-      exit 3
-    fi
-  fi
+  local repo_type="$_RD_REPO_TYPE"
 
   [[ -n "$findings_path" ]] || findings_path="${repo%/}/.review/findings-round-${round}.json"
 
@@ -573,6 +610,41 @@ cmd_plan() {
   }
 }
 
+cmd_detect() {
+  # `plan`'s repo-type half with the diff work removed (#1504). The conductor
+  # calls this at §1b, where the branch is still empty and a diff would be pure
+  # waste. No --base, no changed_files, no findings path: one key, one document.
+  local repo=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --repo) need_value "detect" "$@"; repo="$2"; shift 2 ;;
+    -*) die_usage "detect: unknown flag: $1" ;;
+    *) die_usage "detect: unexpected argument: $1" ;;
+    esac
+  done
+  [[ -n "$repo" ]] || die_usage "detect: --repo is required"
+  # Same split plan draws between 2 and 1: a MISSING --repo is your invocation
+  # (2), a --repo naming nothing is a fact about the machine (1).
+  [[ -d "$repo" ]] || { print -u2 -- "detect: --repo not a directory: $repo"; exit 1 }
+  # The SECOND gate, and it is not decoration (#1177): without it an existing
+  # but untraversable --repo falls into `_detect_json`, whose `cd` fails, and
+  # the operator is told "detect-stack failed" — naming a script that never
+  # ran, with no stderr to relay. Both siblings carry it; so does this one.
+  [[ -r "$repo" && -x "$repo" ]] || {
+    print -u2 -- "detect: --repo is not a readable directory: $repo"; exit 1
+  }
+  if [[ "$repo" == -* ]]; then repo="./$repo"; fi
+  _repo_type "$repo" detect || exit $?
+  [[ -n "$_RD_REPO_TYPE" ]] || {
+    print -u2 -- "detect: internal error: the repo type was not determined"; exit 1
+  }
+  # `--arg`, so a repo_type is emitted as a JSON string whatever it holds, and
+  # the status is CHECKED — an unwritable stdout must not read as a detection.
+  jq -nc --arg t "$_RD_REPO_TYPE" '{repo_type:$t}' || {
+    print -u2 -- "detect: could not emit the repo-type document"; exit 1
+  }
+}
+
 cmd_scope_findings() {
   local repo="" base="origin/main" findings=""
   while [[ $# -gt 0 ]]; do
@@ -591,7 +663,7 @@ cmd_scope_findings() {
   # and the same two directory gates, for the same reason: without them an
   # unreadable --repo is reported by _verify_base as "not a git repository" — a
   # confidently wrong claim about a directory that may be a perfectly good repo
-  # this process simply cannot traverse. Both subcommands must name one cause
+  # this process simply cannot traverse. Every subcommand must name one cause
   # with one wording.
   [[ -d "$repo" ]] || { print -u2 -- "scope-findings: --repo not a directory: $repo"; exit 1 }
   [[ -r "$repo" && -x "$repo" ]] || {
@@ -619,11 +691,12 @@ cmd_scope_findings() {
   }
 }
 
-[[ $# -ge 1 ]] || die_usage "usage: review-dispatch.zsh <plan|scope-findings> [flags]"
+[[ $# -ge 1 ]] || die_usage "usage: review-dispatch.zsh <plan|detect|scope-findings> [flags]"
 local sub="$1"; shift
 case "$sub" in
   plan) cmd_plan "$@" ;;
+  detect) cmd_detect "$@" ;;
   scope-findings) cmd_scope_findings "$@" ;;
-  -h|--help) print -r -- "usage: review-dispatch.zsh <plan|scope-findings> [flags]"; exit 0 ;;
-  *) die_usage "unknown subcommand: $sub (expected plan|scope-findings)" ;;
+  -h|--help) print -r -- "usage: review-dispatch.zsh <plan|detect|scope-findings> [flags]"; exit 0 ;;
+  *) die_usage "unknown subcommand: $sub (expected plan|detect|scope-findings)" ;;
 esac

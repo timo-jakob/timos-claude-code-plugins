@@ -2940,6 +2940,65 @@ The consolidator (#561) consumes this aggregate; the severity→blocking mapping
 (`CRITICAL→Critical`, `WARNING→High`, `SUGGESTION→Low`; Critical + High block)
 lives with it, not here.
 
+## Resolve profile contract (`resolve-profile`, #1504)
+
+`/development:resolve-issue` is **one** conductor read by every repo type, so a
+rule true of a single type is a tax on all the others — and a collision point,
+since plugin-side and loop-side edits land in the same file. The **profile** is
+the seam that fixes both: a skill named `resolve-profile` in plugin
+`development-<repo_type>`, holding exactly the driver rules that are true of that
+type. Ownership and load point the same way — the plugin that owns a type's
+review panel owns that type's driver rules.
+
+A profile is:
+
+- a skill at `development-<repo_type>/skills/resolve-profile/SKILL.md`;
+- whose frontmatter `description` **begins** `Loaded by /development:resolve-issue
+  — not for direct use`, so it reads correctly in `docs/reference/commands.md`
+  and nobody invokes it by hand expecting a workflow;
+- whose frontmatter `name` is `resolve-profile`, because §1b invokes it by that
+  name — a mismatch makes the load silently take the missing-profile fallback;
+- whose body carries **exactly these six `##` headings, in this order** —
+  **Gate**, **Version bump**, **Panel**, **Fix-pass rules**,
+  **Documentation expectations**, **Residue**.
+
+A heading with nothing to say says **none** — it is never dropped. The roster is
+the contract, so readers key on it rather than on presence, and a type that
+acquires a rule later has a place to put it that no reader has to learn about.
+
+**The load point is §1b**, between the conductor's §1 (branch) and §2
+(implement): `review-dispatch.zsh detect --repo .` reports the repo type, and the
+conductor invokes `development-<repo_type>:resolve-profile` **by name**, the same
+composition `/development:maintenance` already uses for
+`development-<lang>:maintenance`. Detection reuses `plan`'s detector exactly (one
+`_repo_type` function, one `detect-stack.sh` call, one fallback ordering), so the
+§1b profile and the §3.5 review panel can never be chosen for different types.
+
+**A missing profile is a fallback, never a refusal.** Most repo types ship no
+profile yet (#1505); the conductor emits one line naming the absent skill and
+**continues** with its generic rules. `unsupported_repo_type` is **not** reused
+for this — that name stays exclusively `review-dispatch.zsh`'s exit-3 condition,
+which is a repo whose *type* could not be determined at all. Whether the fallback
+should ever become a hard refusal is deliberately undecided until every shipped
+type has a real profile.
+
+**New type-specific prose goes in the profile, not the conductor.** That is the
+rule the seam exists to make enforceable: `tests/resolve-profile-contract.bats`
+sweeps `git ls-files 'development-*/skills/resolve-profile/SKILL.md'` for the
+contract, and `tests/resolve-issue-conductor-budget.bats` holds the conductor to
+a line ceiling, so type-specific text added to `SKILL.md` costs a budget that
+text added to a profile does not.
+
+A profile's **Panel** heading *records* the panel that
+`review-dispatch.zsh plan` computes as `review_skill`; it never overrides it,
+because §3.5 dispatches the descriptor's value and one fact needs one owner.
+
+Profiles populated today: **1** — **claude-plugin** (its blessed
+`run-gate.zsh` gate and attestation capture, its degraded-mode relay, its epic
+verification command, §4's version-bump rule, and the **Panel** pointer above). The plugin-only rules that sit
+inside `development/skills/resolve-issue/reference/*.md` byte-frozen sentinel
+spans are **not** in it: extracting those is #1506.
+
 ## Review-panel invocation contract (#560)
 
 The autonomous review loop's orchestrator (#562) must invoke the right language
@@ -2947,7 +3006,16 @@ review panel **without knowing language specifics** — the same principle as th
 `/development:maintenance` dispatch contract, where adding a language requires
 zero orchestrator edits. The seam is
 `development/skills/resolve-issue/scripts/review-dispatch.zsh`, a pure function
-of the worktree with two subcommands.
+of the worktree with three subcommands.
+
+**`detect --repo PATH`** emits the repo type and nothing else —
+`{"repo_type": "claude-plugin"}`. No `--base`, no diff, no `changed_files`: the
+resolve-issue conductor calls it at §1b to pick a profile, where the branch is
+still empty and a diff would be wasted work (#1504). It shares `plan`'s detector
+(`_repo_type`) and `plan`'s exit codes exactly — `0` success, `2` usage, `1`
+internal, `3` the typed unsupported/ambiguous object on stdout — so the two
+subcommands can never disagree about a repo, and `--base` is refused rather than
+accepted-and-ignored.
 
 **`plan --repo PATH [--base REF] [--round N] [--findings-path PATH] [--final]
 [--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]`** emits the

@@ -83,6 +83,27 @@ setup() {
   SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
+  # #1504 moved §3's plugin-repo gate rules — the attestation bullet among them —
+  # out of the conductor and into `development-<repo_type>:resolve-profile`. The
+  # cadence's CONSUMING SITES therefore span the conductor corpus and every
+  # shipped profile, so the sweeps that COUNT them read both; the sweeps that pin
+  # WHERE a sentence lives read the one file it lives in, which for that bullet
+  # is now the profile below.
+  PROFILE="$REPO_ROOT/development-claude-plugin/skills/resolve-profile/SKILL.md"
+  # DERIVED from the index, never a transcribed roster: a second profile that
+  # cites the cadence must raise the count rather than slip past a closed list.
+  CADENCE="$BATS_TEST_TMPDIR/cadence-corpus.md"
+  cat "$SKILL" > "$CADENCE"
+  PROFILE_PATHS=()
+  while IFS= read -r _p; do
+    [ -n "$_p" ] || continue
+    PROFILE_PATHS+=("$REPO_ROOT/$_p")
+    printf '\n' >> "$CADENCE"
+    cat "$REPO_ROOT/$_p" >> "$CADENCE"
+  done < <(git -C "$REPO_ROOT" ls-files 'development-*/skills/resolve-profile/SKILL.md')
+  # The roster is real — every negative pin below iterates it, so an empty one
+  # would make them pass having examined nothing.
+  [ "${#PROFILE_PATHS[@]}" -ge 1 ]
 
   # The content-anchored heading of the one normative statement. It carries the
   # issue number, so it can never collide with the pointers, which name the
@@ -692,8 +713,12 @@ _roster_hits() {
   # Assign, never `if [ "$(_body_hits …)" -ne 0 ]`: a command substitution inside
   # a condition swallows the helper's typed 2 AND `[`'s own "integer expression
   # expected", so a dead pin would read as a clean bill of health.
+  # The profiles are a file class this pin never knew about (#1504). They now
+  # CITE the cadence (the attestation bullet moved into one), which is exactly
+  # the shape that grows into a restatement — and the roster tripwire below
+  # cannot see it, because its needle appears in none of the STEP_GATES.
   local f needle n
-  for f in "$EXPLAIN" "$ARCH"; do
+  for f in "$EXPLAIN" "$ARCH" "${PROFILE_PATHS[@]}"; do
     for needle in "$BANNER" "${STEP_GATES[@]}"; do
       n="$(_body_hits "$f" "$needle")" || return 1
       if [ "$n" -ne 0 ]; then
@@ -704,7 +729,7 @@ _roster_hits() {
   done
 }
 
-@test "#1497 exactly eight SKILL.md sites point at the cadence" {
+@test "#1497 exactly eight consuming sites point at the cadence" {
   # Every place a session reaches for the boundary from outside it: §3's gate
   # step and its attestation bullet, the panel step's empty-full-scope recovery,
   # the ordinary fix turn, the fix-pass tail, the granted-rounds fix pass, the
@@ -712,10 +737,32 @@ _roster_hits() {
   # Counted, so a pointer lost to a rewrite reds — and so does one that grows
   # back into a restatement, since the ordering pins above would then find a
   # second copy.
-  local n
-  n="$(_body_hits "$SKILL" "$POINTER")"
-  if [ "$n" -ne 8 ]; then
-    printf 'expected 8 pointers at the cadence, found %s\n' "$n" >&2
+  #
+  # Read over the conductor corpus PLUS the shipped profiles (#1504): the
+  # attestation bullet is a claude-plugin rule and now lives in that type's
+  # profile, so a sweep scoped to the conductor alone would count 7 and read a
+  # rule that MOVED as a rule that was LOST.
+  # Split per SIDE, not one union total: the invariant #1504 has to protect is
+  # that the attestation bullet MOVED rather than was lost, and a union sum
+  # cannot see a pointer sliding from one side to the other. The total falls out
+  # of the two, and the failure message says which side changed.
+  local in_skill in_profiles=0 p n
+  in_skill="$(_body_hits "$SKILL" "$POINTER")"
+  for p in "${PROFILE_PATHS[@]}"; do
+    n="$(_body_hits "$p" "$POINTER")" || return 1
+    in_profiles=$(( in_profiles + n ))
+  done
+  if [ "$in_skill" -ne 7 ]; then
+    printf 'expected 7 cadence pointers in the conductor corpus, found %s\n' "$in_skill" >&2
+    return 1
+  fi
+  if [ "$in_profiles" -ne 1 ]; then
+    printf 'expected 1 cadence pointer across the shipped profiles, found %s\n' "$in_profiles" >&2
+    return 1
+  fi
+  if [ "$(( in_skill + in_profiles ))" -ne 8 ]; then
+    printf 'expected 8 pointers at the cadence in total, found %s\n' \
+      "$(( in_skill + in_profiles ))" >&2
     return 1
   fi
 }
@@ -793,20 +840,40 @@ _roster_hits() {
   fi
 }
 
-@test "#1497 AC1 each ordering step appears exactly ONCE in SKILL.md" {
+@test "#1497 AC1 each ordering step appears exactly ONCE across everything a session reads" {
   # Uniqueness is asserted for the banner and non-restatement for the two doc
   # files, but nothing bounded how many times the steps themselves appear HERE.
   # A second copy pasted into a consuming site — banner omitted — leaves the
   # banner count 1, the ordering pin's first occurrences unchanged and the
   # pointer count intact, with two copies free to drift against each other.
+  # Over $CADENCE — the conductor corpus AND the shipped profiles (#1504) — so
+  # "exactly once" means once across everything a session reads, not once per
+  # file class. A second copy in a profile is the same drift as a second copy in
+  # the conductor.
   local needle n
   for needle in "${STEP_GATES[@]}"; do
-    n="$(_body_hits "$SKILL" "$needle")" || return 1
+    n="$(_body_hits "$CADENCE" "$needle")" || return 1
     if [ "$n" -ne 1 ]; then
       printf 'expected exactly 1 occurrence of "%s", found %s\n' "$needle" "$n" >&2
       return 1
     fi
   done
+}
+
+@test "#1497 non-vacuity: an ordering step pasted into a PROFILE reds the uniqueness pin" {
+  # The mutation #1504 opened and nothing else would catch: the pointer count
+  # stays 8 (the paste adds no pointer), the banner count stays 1, and the doc
+  # pin's own fixtures are untouched. Drive the SAME haystack the real pin uses,
+  # so the control measures that pin rather than a paraphrase of it.
+  local F="$BATS_TEST_TMPDIR/cadence-with-planted-step.md" n
+  cp "$CADENCE" "$F"
+  printf '\n%s\n' "${STEP_GATES[1]}" >> "$F"
+  n="$(_body_hits "$F" "${STEP_GATES[1]}")" || return 1
+  [ "$n" -eq 2 ]
+  # ...and the unmutated haystack still reads 1, so the control is measuring the
+  # paste rather than a detector that counts everything twice
+  n="$(_body_hits "$CADENCE" "${STEP_GATES[1]}")" || return 1
+  [ "$n" -eq 1 ]
 }
 
 @test "#1497 AC1 step 2 names the mechanism, and step 4 the wait it implies" {
@@ -891,11 +958,13 @@ _roster_hits() {
   # flipped to a mint AFTER the gate, which is the self-attestation the
   # invariant forbids — with the count intact.
   local ln body
-  ln="$(prose_gate_lines "$CONDUCTOR" "§3.5's round boundary on, that identity is the T minted before this")"
+  # §3's attestation bullet moved to the claude-plugin profile (#1504); the pin
+  # names the file that holds the sentence, which is the point of pinning WHERE.
+  ln="$(prose_gate_lines "$PROFILE" "§3.5's round boundary on, that identity is the T minted before this")"
   [ -n "$ln" ]
-  body="$(prose_window "$CONDUCTOR" "$ln" 6)"
+  body="$(prose_window "$PROFILE" "$ln" 6)"
   contains "$body" 'that identity is the T minted before this gate was started'
-  contains "$body" 'this step restates none of it'
+  contains "$body" 'this profile restates none of it'
 
   ln="$(prose_gate_lines "$SKILL" 'is concurrent (§3.5) — which mints T, starts the full gate and dispatches')"
   [ -n "$ln" ]
@@ -1210,7 +1279,7 @@ _roster_hits() {
        }
        { print }
        END { if (!dropped) { print "control: no pointer matched" > "/dev/stderr"; exit 1 } }' \
-    "$SKILL" > "$F"
+    "$CADENCE" > "$F"
   n="$(_body_hits "$F" "$POINTER")"
   [ "$n" -eq 7 ]
 }
@@ -1334,7 +1403,7 @@ _roster_hits() {
   # self-attestation the invariant exists to forbid.
   local F="$BATS_TEST_TMPDIR/skill-post-gate-mint.md" ln body
   sed 's/that identity is the `T` minted \*\*before\*\* this/that identity is the `T` minted **after** this/' \
-    "$CONDUCTOR" > "$F"
+    "$PROFILE" > "$F"
   ln="$(prose_gate_lines "$F" "§3.5's round boundary on, that identity is the T minted after this")"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 6)"
@@ -1346,7 +1415,7 @@ _roster_hits() {
   # ordering round 1 blocked on.
   local F="$BATS_TEST_TMPDIR/skill-scope-serial.md" ln body n
   sed "s/starts the gate and re-dispatches this/re-runs §3's gate to green, then re-dispatches this/" \
-    "$SKILL" > "$F"
+    "$CADENCE" > "$F"
   ln="$(prose_gate_lines "$F" "concurrent (§3.5) — which mints T, re-runs §3's gate to green, then re-dispatches this")"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 4)"

@@ -12,6 +12,12 @@ against.
 > belongs (the Diátaxis buckets) and the repo-specific docs mechanics — nav
 > registration, strict link checking, and the generated command/agent reference
 > (don't hand-edit `docs/reference/commands.md` or `agents.md`).
+>
+> **Adding a repo type?** It needs a `resolve-profile` skill in its plugin —
+> `development-<repo_type>/skills/resolve-profile/SKILL.md`, carrying the six
+> contract headings — so `/development:resolve-issue` loads that type's driver
+> rules at §1b instead of accreting them in the shared conductor (ARCHITECTURE.md,
+> *Resolve profile contract*).
 
 ## Per-merge: bump plugin versions whenever you change a plugin
 
@@ -531,9 +537,10 @@ to yourself before "fixing" the test.
 | **#1206 direct-to-cluster gate** — the v1 command set and the three exemptions, including the guarded-creator narrowing (#1432) | `templates/common/scripts/check-no-cluster-deploy.zsh` header | `tests/no-cluster-deploy.bats` | `grep -rln 'no-cluster-deploy'` over `development/skills/bootstrap docs MAINTAINING.md ARCHITECTURE.md`, minus wiring, index and authoritative sites — 6 restatements plus the authoritative header, 5 enumerating the ephemeral exemption (gated on `ctlptl`), 5 ephemeral-exemption statements |
 | **IaC selection rule** — at most one IaC workflow per repo; the condition is the marker, not merely the absence of a language (the dual-marker halt is a #1162 specification, not current behaviour) (#1432) | `ARCHITECTURE.md` | `tests/iac-selection-rule.bats` | `grep -rlE 'iac[-_]only'` over `development docs ARCHITECTURE.md`, minus the authoritative site and `docs/superpowers/` — 6 roster files, 4 stating the selection, 8 selection statements |
 | **Closing-sweep grant** — the review loop's closing full sweep gets a one-round grant past the ceiling, once (#1434). *(Summarised, not restated: carrying the pinned clause here would make this registry a fourth governed site.)* | `development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — `closing_sweep_round=$(( round + 1 ))`, the line the sweep derives its increment from rather than transcribing it. The one-round bound is *also* enforced by the `--resume` adoption clamp (`closing_sweep_round > max_rounds + 1`), which the sweep does not derive from — see residue 4 | `tests/review-loop-budget-consistency.bats` | `git ls-files '*.md'` minus `docs/superpowers/**`, kept to the sites carrying the literal grant clause — 3 roster files (`development/skills/resolve-issue/reference/review-loop.md` — the grant moved there with the AWAITING_FIX branch in #1503, `docs/explanation/review-loop.md`, `ARCHITECTURE.md`), each gated on exactly 1 statement, so gated == roster == 3 |
+| **Resolve profile contract** — every `development-<repo_type>:resolve-profile` skill matches the contract stated at the authoritative site: its `##` heading roster in the declared order, each heading carrying a body (one with nothing to say says `none`), a `name: resolve-profile`, and a description beginning `Loaded by /development:resolve-issue — not for direct use` (#1504). *(Summarised, not restated: the heading strings live in the authoritative site, in every shipped profile, and in this sweep's own `HEADINGS` array. Naming them here would add one more governed site, which is the drift this column exists to avoid.)* | `ARCHITECTURE.md` — *Resolve profile contract* | `tests/resolve-profile-contract.bats` | `git ls-files 'development-*/skills/resolve-profile/SKILL.md'` — 1 profile today (`development-claude-plugin`), gated on every clause above, so gated == roster == 1. The sweep reads that figure back **out of this row** and compares it to the derived count — and does the same for `ARCHITECTURE.md`'s `Profiles populated today: **N**` sentence, so **three** figures move together or the PR reds: the test's own count, this row, and that sentence |
 | **Review-panel loop duties** — every review panel states that an EMPTY scope from the loop is never a licence to widen, and that on a **delta** round **carrying nothing** it must still write `[]` — never on a full round, and never against a non-empty (or, on a round >= 2, null) carry — and that it reports how many carried entries it confirmed on any round whose carry is non-empty, whatever it writes to the findings file, and that from round 2 on it forwards the plan's two carry paths into every agent's prompt (#1434). *(The invariant is the two duties, not the wording: each panel spells them in its own scope vocabulary.)* | `ARCHITECTURE.md` — *the emission directive lives in one place* | `tests/review-loop-budget-consistency.bats` | `git ls-files 'development-*/skills/review/SKILL.md'` — 6 panels, each gated on both duties, so gated == roster == 6 |
 
-**All four rosters are deliberately scoped, and no scope is an accident.** The
+**Every roster is deliberately scoped, and no scope is an accident.** The
 closing-sweep roster (#1434) is the widest and the simplest: every tracked
 `*.md` outside `docs/superpowers/**`, narrowed to the sites that carry the
 literal grant clause. It can afford that width because the clause is a distinct
@@ -545,6 +552,12 @@ proxy at all: its members are identified by *path* — every
 `development-*/skills/review/SKILL.md` — so the roster cannot drift from the
 population, and the needles it then applies are load-bearing fragments rather
 than whole sentences, because the two duties are deliberately worded per panel.
+The profile roster (#1504) is the same path-identified shape, one directory
+over: every `development-*/skills/resolve-profile/SKILL.md`. It is the only one
+whose population is expected to *grow on a schedule* — #1505 adds five profiles
+at once — which is why its count is recorded here and asserted exactly rather
+than as a floor: the growth has to be a deliberate edit to this row, not a
+silent widening.
 The other two are narrower than the closing sweep's, for the reasons below. The
 gate's own roster (#1206) sweeps `development/skills/bootstrap`, `docs/`, this file and
 `ARCHITECTURE.md`; a restatement of the gate's rules landing in the root
