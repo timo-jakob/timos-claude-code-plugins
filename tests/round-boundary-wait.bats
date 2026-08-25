@@ -50,9 +50,16 @@ bats_require_minimum_version 1.5.0
 load assertions
 load prose-lockstep
 
+load resolve-issue-corpus
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-  SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # #1503 split this skill into a conductor plus reference/*.md. Sweeps that
+  # COUNT sites across the skill read the corpus; sweeps that pin WHERE a
+  # sentence lives read the one file it lives in. See resolve-issue-corpus.bash.
+  CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
 
   # The banner of the one normative statement. It carries the issue number, so
@@ -178,9 +185,13 @@ _roster_hits() {
   fi
 }
 
-@test "#1513 AC1 the paragraph lives INSIDE 3.5, between its two pointers" {
+@test "#1513 AC1 the paragraph lives INSIDE the round protocol, between its two pointers" {
   # AC1 says "in 3.5", and both pointers say "(this section)" — a claim that is
-  # true only while the paragraph sits between them. Nothing else here asserts
+  # true only while the paragraph sits between them. Since #1503 the section
+  # itself lives in reference/review-loop.md, so the bound is that file's
+  # `## The round protocol` heading rather than §3.5's own; the conductor keeps
+  # only the invocation contract and a pointer, and the corpus would let the
+  # paragraph drift between the two files without reddening anything. Nothing else here asserts
   # POSITION: every locator re-finds the banner wherever it landed, so the whole
   # paragraph could be cut out of 3.5 and pasted under a later heading with every
   # other pin still green — both pointers then aiming at a section that does not
@@ -189,9 +200,11 @@ _roster_hits() {
   # Needles carry no leading marker: prose_gate_lines strips one comment marker,
   # so a needle spelled with the heading's hashes could never match.
   local sec next banner ptr first last _v
-  sec="$(prose_gate_lines "$SKILL" '3.5 Review loop — local, pre-push')"
-  next="$(prose_gate_lines "$SKILL" '4. Version bump (plugin content only)')"
-  banner="$(prose_gate_lines "$SKILL" "$BANNER")"
+  sec="$(prose_gate_lines "$PROTO" 'The round protocol')"
+  # The section runs to the end of the reference file, so the upper bound is one
+  # past its last line — derived, never a transcribed number.
+  next="$(( $(grep -c '' "$PROTO") + 1 ))"
+  banner="$(prose_gate_lines "$PROTO" "$BANNER")"
   # One assertion per line, never an `&&` chain: bash's errexit exempts every
   # command in an AND list but the last, so a chained guard whose FIRST operand
   # fails merely returns 1 and the body runs on. The comparisons below then get
@@ -209,14 +222,14 @@ _roster_hits() {
     esac
   done
   if [ "$banner" -le "$sec" ] || [ "$banner" -ge "$next" ]; then
-    printf 'the paragraph is at line %s, outside 3.5 (%s..%s)\n' \
+    printf 'the paragraph is at line %s, outside the round protocol (%s..%s)\n' \
       "$banner" "$sec" "$next" >&2
     return 1
   fi
   # …and BETWEEN the two pointers, which is the precise claim "(this section)"
   # makes: a paragraph that drifted above the gate-launch step, or below the
   # panel step, would still be inside 3.5 and still read as pointed-at.
-  ptr="$(prose_gate_lines "$SKILL" "$POINTER")"
+  ptr="$(prose_gate_lines "$PROTO" "$POINTER")"
   first="$(printf '%s\n' "$ptr" | head -1)"
   last="$(printf '%s\n' "$ptr" | tail -1)"
   for _v in "$first" "$last"; do
@@ -457,7 +470,9 @@ _roster_hits() {
   fi
   # …and they are the roster the story named, so a swap reds here too. -F
   # because an unanchored `.` in a path is a regex wildcard.
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/SKILL.md'
+  # #1503 moved the review-loop procedure into reference/*.md, so the roster
+  # names those files where the text now lives — the same sites, re-homed.
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
 }
 

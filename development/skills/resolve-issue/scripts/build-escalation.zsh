@@ -143,10 +143,11 @@ ESCALATE_NO_CONVERGENCE)
   # `non_converging`, and the consolidator stamps `possible_false_trip` exactly
   # when NO exact title matched — so within it, FLAGGED is the ambiguous case,
   # where the loop cannot tell a reworded survivor from a new neighbour, and it
-  # carries the same instruction SKILL.md §3.5 gives that shape rather than the
-  # opposite one. UNFLAGGED is the VERIFIED survivor, an exact-title match, and
-  # the arm's hedge below covers only a pre-#969 status file carrying no stamp
-  # at all. A #983 identity-cleared match reaches neither arm: it is stamped
+  # carries the same instruction `reference/review-loop.md` § The round protocol
+  # gives that shape rather than the opposite one. UNFLAGGED is the VERIFIED
+  # survivor, an exact-title match, and the arm's hedge below covers only a
+  # pre-#969 status file carrying no stamp at all. A #983 identity-cleared
+  # match reaches neither arm: it is stamped
   # `non_converging: false` and filtered out above.
   detail=$(jq -r '
     def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;

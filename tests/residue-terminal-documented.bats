@@ -24,8 +24,15 @@
 bats_require_minimum_version 1.5.0
 load assertions
 
+load resolve-issue-corpus
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  # #1503 split this skill into a conductor plus reference/*.md. A sweep that
+  # counts or reads ACROSS the skill takes the corpus; one that pins WHERE a
+  # sentence lives takes the single file. See resolve-issue-corpus.bash.
+  RI_REF="$REPO_ROOT/development/skills/resolve-issue/reference"
+  SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
   # the story's Scope §8 site list, as paths
   ROSTER=(
@@ -59,6 +66,55 @@ all_markdown() {
 # claim
 flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 
+# Does $1 state the cadence invariant INSIDE the AWAITING_FIX branch, near its
+# top? Prints a diagnostic and returns 1 otherwise.
+#
+# ONE ASSERTION PER LINE, never an `&&` chain. bash exempts every command of an
+# AND-list EXCEPT THE LAST from errexit, so
+#   [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
+# swallows a failure of the first two operands. Measured on the shape this
+# replaced: with the second locator EMPTY (a rewrap split its needle) the chain
+# short-circuited at the exempt operand and the body ran on, and the proximity
+# check then read the empty value as 0 and compared a NEGATIVE span, so it
+# passed — the reflow mutation was invisible. The wrong-order input DID red,
+# because the ordering compare is the command following the final `&&` and so is
+# not exempt; the hazard was narrower than a chain-is-always-inert reading
+# suggests, and `claude-plugin-test-reviewer.md` forbids flagging that converse.
+# `find-inert-bracket-assertions.zsh` catches this shape with neither rule
+# (#1067), so convention rather than lint is what keeps it out.
+#
+# Position is asserted over a flattened WINDOW anchored to the branch heading,
+# not by comparing two line numbers. That pins "inside the branch, near its top"
+# in one step and is reflow-proof: locating the sentence on a RAW line while
+# matching it on FLATTENED text is what made the old code red on a cosmetic
+# rewrap while missing the real mutation.
+_invariant_in_awaiting_fix_branch() {
+  local f="$1" ln window
+  # No `head -1`: a duplicated heading yields two lines, which the numeric guard
+  # below then refuses — the "or ambiguous" half only means something if the
+  # multiplicity survives long enough to be seen.
+  ln="$(grep -n '^3\. \*\*On `AWAITING_FIX` (exit 20)\*\*' "$f" | cut -d: -f1)"
+  case "$ln" in ''|*[!0-9]*)
+    printf 'AWAITING_FIX branch heading missing or ambiguous in %s: "%s"\n' "$f" "$ln" >&2
+    return 1 ;;
+  esac
+  window="$(sed -n "${ln},$(( ln + 30 ))p" "$f" | tr '\n' ' ' | tr -s ' ')"
+  grep -q 'a round.s findings reach the loop BEFORE that round.s fix pass runs, always' \
+    <<< "$window" || {
+    printf 'the cadence invariant is not in the first 30 lines of the AWAITING_FIX branch of %s\n' "$f" >&2
+    return 1
+  }
+}
+
+# The §9 precondition, tied to the terminal it qualifies rather than matched
+# anywhere in the file. A file-wide topic match was not a check at all: three of
+# the required sites mention "full sweep" many times for unrelated reasons, so
+# the precondition could be deleted from the exit-table entry beside
+# CONVERGED_WITH_RESIDUE and the sweep would still pass on a leftover mention
+# hundreds of lines away. Either order, because sites state it both ways.
+# `{0,250}` and not more: BSD grep caps an interval at 255 repetitions.
+SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(full sweep|closing sweep).{0,250}CONVERGED_WITH_RESIDUE'
+
 @test "#1435 every site in the story's roster names CONVERGED_WITH_RESIDUE" {
   local f
   for f in "${ROSTER[@]}"; do
@@ -91,9 +147,16 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   # deciding whether to append the dossier. Omitting it would let
   # "(exit 14, #1435)" be deleted from the delegated procedure with the whole
   # suite green.
+  # residue.md and promotion.md joined this list with #1503: each INTRODUCES the
+  # terminal (residue.md's whole subject is it), so each owes the exit code
+  # beside it. review-loop.md deliberately does not — it names the terminal only
+  # as a hand-off from the AWAITING_FIX branch, and the conductor's exit table is
+  # what introduces it with its code.
   local f
   for f in "$SCRIPTS/resolve-story-loop.zsh" \
            "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" \
+           "$REPO_ROOT/development/skills/resolve-issue/reference/residue.md" \
+           "$REPO_ROOT/development/skills/resolve-issue/reference/promotion.md" \
            "$REPO_ROOT/development/skills/open-pr/SKILL.md" \
            "$REPO_ROOT/ARCHITECTURE.md" \
            "$REPO_ROOT/docs/explanation/review-loop.md" \
@@ -103,7 +166,21 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   done
 }
 
-@test "#1435 roster tripwire: exactly six markdown sites name the terminal" {
+@test "#1435 non-vacuity: a distant 'full sweep' does not satisfy the §9 detector" {
+  # The detector's whole point is PROXIMITY. Prove it: a file that names the
+  # terminal and also says "full sweep" — but hundreds of characters away, which
+  # is exactly the shape a file-wide topic match accepted — must NOT satisfy it,
+  # while the same two phrases adjacent must.
+  local far="$BATS_TEST_TMPDIR/far.md" near="$BATS_TEST_TMPDIR/near.md" pad
+  pad="$(head -c 600 < /dev/zero | tr '\0' 'x')"
+  printf 'the loop may exit CONVERGED_WITH_RESIDUE here.\n%s\nand only a full sweep may declare it.\n' \
+    "$pad" > "$far"
+  run -1 grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$far")"
+  printf 'CONVERGED_WITH_RESIDUE is declarable only from the closing full sweep.\n' > "$near"
+  grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$near")"
+}
+
+@test "#1435 roster tripwire: exactly eleven markdown sites name the terminal" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
   # vanish?" — so the count is recorded here and a seventh (or fifth) restatement
   # reds until this file is updated in the same PR.
@@ -123,13 +200,22 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   found="$(all_markdown | sed "s#^#$REPO_ROOT/#" \
            | xargs grep -l 'CONVERGED_WITH_RESIDUE' 2>/dev/null \
            | sed "s#^$REPO_ROOT/##" | sort)"
+  # #1503 moved the review-loop procedure into reference/*.md, so five of these
+  # are the same sites re-homed: the conductor keeps the exit-code table (hence
+  # SKILL.md stays on the roster) while residue.md, promotion.md, escalation.md,
+  # interactive.md and review-loop.md carry the procedure behind each branch.
   [ "$found" = "ARCHITECTURE.md
 development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl
 development/skills/open-pr/SKILL.md
 development/skills/resolve-issue/SKILL.md
+development/skills/resolve-issue/reference/escalation.md
+development/skills/resolve-issue/reference/interactive.md
+development/skills/resolve-issue/reference/promotion.md
+development/skills/resolve-issue/reference/residue.md
+development/skills/resolve-issue/reference/review-loop.md
 docs/explanation/review-loop.md
 docs/reference/commands.md" ] || {
-    echo "markdown roster changed; expected the six known sites, got:"
+    echo "markdown roster changed; expected the eleven known sites, got:"
     echo "$found"; return 1; }
 }
 
@@ -219,12 +305,15 @@ docs/reference/commands.md" ] || {
   grep -qE '^#   14  CONVERGED_WITH_RESIDUE' "$code_probe"
 }
 
-@test "#1435 SKILL.md 3.5 actually invokes the builder, with both labels" {
-  # build-residue-issues.zsh has NO caller inside the repo's scripts — SKILL.md
+@test "#1435 the residue reference actually invokes the builder, with both labels" {
+  # build-residue-issues.zsh has NO caller inside the repo's scripts — the skill
   # is the only thing that runs it and the only thing that turns its plan into
-  # real issues. Without this, deleting the §3.5 code block leaves the suite
-  # green while a shipped script becomes dead code and residue runs file nothing.
-  local S="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # real issues. Without this, deleting the residue branch's code block leaves
+  # the suite green while a shipped script becomes dead code and residue runs
+  # file nothing. #1503 moved that branch, byte-for-byte, into
+  # reference/residue.md — read it THERE rather than through the corpus, so the
+  # invocation cannot drift back into the conductor unnoticed.
+  local S="$RI_REF/residue.md"
   grep -q 'scripts/build-residue-issues.zsh' "$S"
   # the label pair the builder EMITS and the pair the skill APPLIES must not
   # drift apart — they are two halves of the same idempotency key
@@ -361,12 +450,16 @@ docs/reference/commands.md" ] || {
   grep -q 'CONVERGED_WITH_RESIDUE' <<< "$tm"
 }
 
-@test "#1435 AC22 SKILL.md states the cadence invariant on the AWAITING_FIX branch" {
+@test "#1435 AC22 the round protocol states the cadence invariant on the AWAITING_FIX branch" {
   # §10's stated half. It has to live ON the branch where the session decides
   # what to do next — not in a preamble it will have scrolled past — because the
   # mistake it prevents is made exactly there: panel, then fix, then resume.
   # Pinned like the §8 documentation sites, since the sentence IS the deliverable.
-  local F="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # #1503 moved the AWAITING_FIX branch into reference/review-loop.md, so that is
+  # the file the invariant must live in; reading the corpus instead would let it
+  # drift into the conductor, which a session reaching AWAITING_FIX has already
+  # left behind for the reference.
+  local F="$RI_REF/review-loop.md"
   local t; t="$(flat "$F")"
   grep -q 'a round.s findings reach the loop BEFORE that round.s fix pass runs, always' <<< "$t"
   # ...and it names the mechanical half, or the invariant is advice with no teeth
@@ -376,15 +469,45 @@ docs/reference/commands.md" ] || {
   # is most likely to conflate
   grep -q 'separate from `--gate-attest`' <<< "$t"
 
-  # the sentence sits INSIDE the AWAITING_FIX branch, not somewhere earlier: the
-  # branch heading must precede it, and the next numbered branch must follow it
-  local ln_branch ln_rule
-  ln_branch="$(grep -n '^3\. \*\*On `AWAITING_FIX` (exit 20)\*\*' "$F" | head -1 | cut -d: -f1)"
-  ln_rule="$(grep -n 'reach the loop BEFORE that round' "$F" | head -1 | cut -d: -f1)"
-  [ -n "$ln_branch" ] && [ -n "$ln_rule" ] && [ "$ln_branch" -lt "$ln_rule" ]
-  # within ~30 lines of the heading — the point is that it is the FIRST thing the
-  # branch says, not merely somewhere in it
-  [ "$(( ln_rule - ln_branch ))" -lt 30 ]
+  # ...and it sits INSIDE the AWAITING_FIX branch, near its top — not in a
+  # preamble the session has already scrolled past. That is a POSITION claim,
+  # and it is asserted by the helper above this test, so the non-vacuity control
+  # below can drive the same code rather than re-deriving it.
+  _invariant_in_awaiting_fix_branch "$F"
+}
+
+@test "#1435 non-vacuity: AC22's position pin reds when the invariant leaves its branch" {
+  # A position claim that cannot fail is worse than none — it reports the
+  # invariant is on the branch while it sits somewhere the session never reads.
+  # Both halves drive the SHIPPED helper, so deleting the helper's guard reds
+  # here rather than leaving a control that only re-measures grep.
+  local F="$BATS_TEST_TMPDIR/moved-invariant.md"
+
+  # (a) hoisted ABOVE the branch heading — the mutation AC22 exists to catch
+  {
+    printf 'a round%ss findings reach the loop BEFORE that round%ss fix pass runs, always.\n' "'" "'"
+    printf 'filler\n'
+    printf '3. **On `AWAITING_FIX` (exit 20)** — the round is over.\n'
+  } > "$F"
+  run -1 _invariant_in_awaiting_fix_branch "$F"
+
+  # (b) present and correctly placed, but REFLOWED across two source lines. This
+  #     must still PASS: the window is flattened before matching, so a cosmetic
+  #     rewrap is not a defect and must not red. The pre-repair code got this
+  #     backwards — it matched the sentence on flattened text but located it on a
+  #     raw line, so a rewrap emptied the locator.
+  {
+    printf '3. **On `AWAITING_FIX` (exit 20)** — the round is over.\n'
+    printf 'a round%ss findings reach the loop BEFORE that\n' "'"
+    printf "round%ss fix pass runs, always.\n" "'"
+  } > "$F"
+  _invariant_in_awaiting_fix_branch "$F"
+
+  # (c) the branch heading itself missing — the helper must refuse, not compute
+  {
+    printf 'a round%ss findings reach the loop BEFORE that round%ss fix pass runs, always.\n' "'" "'"
+  } > "$F"
+  run -1 _invariant_in_awaiting_fix_branch "$F"
 }
 
 @test "#1435 §9 every site that names exit 14 also states the full-sweep precondition" {
@@ -392,19 +515,88 @@ docs/reference/commands.md" ] || {
   # separate rule filed beside it — so it belongs at the same sites, and a site
   # that names the terminal while omitting the precondition tells a reader the
   # loop can open a PR off a delta round, which is the defect being fixed.
-  local f t
+  #
+  # DERIVED since #1503, not transcribed. The old closed list did not grow when
+  # the move added five files that name the terminal, so the property had quietly
+  # stopped covering them — a roster that reds only when someone remembers to
+  # edit it. Candidates are now every markdown site naming the terminal, minus an
+  # exclusion set that is STATED and pinned rather than left to omission:
+  #
+  #   - open-pr/SKILL.md and approver-policy-core.md.tmpl are CONSUMERS — they
+  #     react to a residue PR; they never tell anyone when residue may be
+  #     declared, so the precondition is not theirs to state (both were excluded
+  #     by omission before, with no reason recorded);
+  #   - reference/{residue,promotion,escalation,interactive}.md carry PROCEDURE
+  #     moved byte-for-byte by #1503 and frozen by verify-reference-move.zsh. The
+  #     conductor's exit table introduces the terminal and states the
+  #     precondition, and reference/review-loop.md — where the declaring round
+  #     lives — is REQUIRED below rather than excluded.
+  #
+  # The exclusion set is itself asserted, so a NEW site naming the terminal
+  # without the precondition reds here instead of quietly joining the excluded.
+  local f t exp got
+  exp="$(printf '%s\n' \
+    'development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl' \
+    'development/skills/open-pr/SKILL.md' \
+    'development/skills/resolve-issue/reference/escalation.md' \
+    'development/skills/resolve-issue/reference/interactive.md' \
+    'development/skills/resolve-issue/reference/promotion.md' \
+    'development/skills/resolve-issue/reference/residue.md' | sort)"
+  got=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/$f" || continue
+    t="$(flat "$REPO_ROOT/$f")"
+    if grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$t"; then
+      continue
+    fi
+    got="$got$f"$'\n'
+  done < <(all_markdown)
+  got="$(printf '%s' "$got" | sort)"
+  if [ "$got" != "$exp" ]; then
+    echo "the set of exit-14 sites WITHOUT the sweep precondition changed."
+    echo "expected (the stated consumers + the frozen procedure files):"
+    printf '%s\n' "$exp"
+    echo "got:"
+    printf '%s\n' "$got"
+    return 1
+  fi
+  # ...and every site that is NOT excluded really does state it, including the
+  # loop itself and the round protocol the declaring round lives in.
   for f in "$SCRIPTS/resolve-story-loop.zsh" \
            "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" \
+           "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md" \
            "$REPO_ROOT/ARCHITECTURE.md" \
            "$REPO_ROOT/docs/explanation/review-loop.md" \
            "$REPO_ROOT/docs/reference/commands.md"; do
     t="$(flat "$f")"
-    grep -qiE '(full sweep|closing full sweep|closing sweep)' <<< "$t" || {
-      echo "site names exit 14 but never the sweep precondition: $f"; return 1; }
+    grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$t" || {
+      echo "site names exit 14 but never the sweep precondition NEAR the terminal: $f"; return 1; }
   done
   # the two normative sites say it in the strong form
   grep -q 'THREE conditions, ALL required' <<< "$(flat "$SCRIPTS/resolve-story-loop.zsh")"
   grep -q 'Three conditions, ALL required' <<< "$(flat "$REPO_ROOT/ARCHITECTURE.md")"
+
+  # PER-SITE CONTENT PINS for the two PROSE sites, because proximity alone is
+  # satisfied there by an ACCIDENT. In both files the only pair inside the
+  # ±250-char window is a neighbouring bullet about a DIFFERENT rule — the #1434
+  # one-round grant abutting the terminal's own heading — while the real
+  # precondition sits ~600-1000 flattened chars away and satisfies nothing. So
+  # the derived sweep above would stay green with the actual sentence deleted.
+  # It remains the tripwire for a NEW site; these pins hold the sentence that
+  # matters at the sites that have one.
+  grep -q 'the declaring round ran as a \*\*full sweep\*\*' \
+    <<< "$(flat "$REPO_ROOT/ARCHITECTURE.md")" || {
+    echo "ARCHITECTURE.md no longer states condition 3 (the declaring round ran as a full sweep)"
+    return 1; }
+  grep -q 'only that sweep may declare residue' \
+    <<< "$(flat "$REPO_ROOT/docs/explanation/review-loop.md")" || {
+    echo "the explanation page no longer says only the closing sweep may declare residue"
+    return 1; }
+  grep -q 'reached only from a full sweep' \
+    <<< "$(flat "$REPO_ROOT/docs/explanation/review-loop.md")" || {
+    echo "the explanation page no longer says the terminal is reached only from a full sweep"
+    return 1; }
 }
 
 @test "#1435 §9 non-vacuity: the two-condition wording is gone everywhere" {
@@ -429,7 +621,12 @@ docs/reference/commands.md" ] || {
   # So the pin is a COUNT, not a wording check. A future edit that "helpfully"
   # re-explains the three rows at a consumer site reds here, which is the whole
   # point — the sites disagreed precisely because each carried its own copy.
-  local F="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  #
+  # Counted across the whole skill (#1503), not the conductor alone: the rule
+  # itself moved to reference/residue.md while §6's pointer stayed in SKILL.md,
+  # so a conductor-only count would read 0 canonical statements and a
+  # reference-only count would miss a copy planted back in the conductor.
+  local F="$SKILL"
 
   # exactly one canonical statement, carrying the decision table
   [ "$(grep -c 'THE REMAINDER RULE' "$F")" -eq 1 ]
@@ -446,7 +643,10 @@ docs/reference/commands.md" ] || {
   # the consumers POINT rather than restate
   grep -q 'apply \*\*the remainder rule\*\*' <<< "$t"
   grep -q 'Both feed the remainder rule in step 1' <<< "$t"
-  grep -q 'decided by \*\*§3.5.s remainder rule\*\*' <<< "$t"
+  # #1503 re-homed §6's pointer from "§3.5's remainder rule" to the file the rule
+  # now lives in; the claim it makes — §6 POINTS rather than restating — is
+  # unchanged.
+  grep -q 'decided by \*\*.reference/residue.md..s remainder rule\*\*' <<< "$t"
 }
 
 @test "#1435 the arm-vs-remainder distinction is stated where the mistake is made" {
@@ -454,7 +654,14 @@ docs/reference/commands.md" ] || {
   # arrived by instead of the remainder's state. The rule says so outright, and
   # the two sites most likely to shortcut it repeat the warning locally — that is
   # a pointer with a reason attached, not a restatement of the rows.
-  local F="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  #
+  # Read from reference/residue.md, NOT the corpus (#1503): the test's whole
+  # claim is WHERE the warning sits, and residue.md is the only file a session
+  # reaching CONVERGED_WITH_RESIDUE opens. On the corpus these three sentences
+  # could migrate into the conductor with the suite still green, leaving the
+  # residue branch without the warning at the two arms where both prior
+  # CRITICALs were made.
+  local F="$RI_REF/residue.md"
   local t; t="$(flat "$F")"
   grep -q 'The antecedent is the remainder, never the arm you arrived by' <<< "$t"
   # step 4's create/attach prose, the site that restated it wrongly last round
@@ -466,8 +673,8 @@ docs/reference/commands.md" ] || {
 @test "#1435 non-vacuity: a second copy of the rule reds the count pin" {
   # Proves the count is doing work. Plant a duplicate heading and the pin fails;
   # without this the `-eq 1` could be passing because the string is rare rather
-  # than because it is unique.
-  local F="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # than because it is unique. Mutates the corpus, matching the pin above.
+  local F="$SKILL"
   local m="$BATS_TEST_TMPDIR/dup.md"
   cat "$F" > "$m"
   printf '\n**THE REMAINDER RULE — restated helpfully somewhere else.**\n' >> "$m"

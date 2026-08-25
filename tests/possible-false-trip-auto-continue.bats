@@ -26,15 +26,23 @@
 bats_require_minimum_version 1.5.0
 load assertions
 
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
-  SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # #1503 split this skill into a conductor plus reference/*.md. Every pin in
+  # this file asks WHERE a sentence lives, so all of them read a single file and
+  # none reads the corpus — hence no corpus build here.
+  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   EXPL="$REPO_ROOT/docs/explanation/review-loop.md"
-  # AC 19's site list, as paths
+  # AC 19's site list, as paths. REAL paths, never the corpus: the per-site
+  # diagnostics below name `$f`, and a $BATS_TEST_TMPDIR corpus path tells a
+  # reader nothing about which site drifted.
   ROSTER=(
-    "$SKILL"
+    "$PROTO"
+    "$EXTENSION"
     "$ARCH"
     "$EXPL"
   )
@@ -135,38 +143,48 @@ meaning the blockers may be fresh rather than stuck).'
 
 # --- the POSITIVE half: what every site must now say ---------------------------
 
-@test "#1498 AC18 SKILL.md tells the fix pass what an ambiguous match owes it" {
+@test "#1498 AC18 the round protocol tells the fix pass what an ambiguous match owes it" {
   # #983's "the blocker is fresh, not stuck" is exactly what does NOT hold for an
   # ambiguous match, so the narration has to say what to do instead — otherwise
   # the round the auto-continue buys is spent patching around an incomplete fix.
+  #
+  # Read from $PROTO, not the corpus (#1503): the sentence has to be in the file
+  # a session doing the fix pass has open, which is reference/review-loop.md.
   grep -qF "treat it on its own merits, and where the previous round's fix for the matched prior was incomplete, finish that rather than patch around it" \
-    <<< "$(flat "$SKILL")" || {
-    echo "SKILL.md §3.5 does not say what the fix pass owes an ambiguous match"; return 1; }
+    <<< "$(flat "$PROTO")" || {
+    echo "the round protocol does not say what the fix pass owes an ambiguous match"; return 1; }
 }
 
-@test "#1498 AC18 SKILL.md names the auto-continue as a narratable AWAITING_FIX shape" {
+@test "#1498 AC18 the round protocol names the auto-continue as a narratable AWAITING_FIX shape" {
   # The line the loop actually renders, so the session can recognise it in
   # progress.md rather than inferring which of the three shapes it has.
-  local t; t="$(flat "$SKILL")"
-  grep -qF 'possible false trip auto-continued (#1498)' <<< "$t" || {
-    echo "SKILL.md does not name the rendered auto-continue line"; return 1; }
-  # ...and the extension arm explains why the exit a human DOES see is different.
-  # A needle unique to THAT arm, not a substring of the one above: `#1498` alone
-  # is implied by the line already proved present, so it would pass with the
-  # whole extension-arm sentence deleted.
+  grep -qF 'possible false trip auto-continued (#1498)' <<< "$(flat "$PROTO")" || {
+    echo "the round protocol does not name the rendered auto-continue line"; return 1; }
+}
+
+@test "#1498 AC18 the interactive extension explains why the exit a human sees differs" {
+  # Split from the round-protocol test above (#1503): these needles live in
+  # reference/interactive.md, and a session that reaches the extension loads THAT
+  # file and nothing else. Asserting both halves against one flattened corpus
+  # would let the extension arm migrate into review-loop.md — where the reader
+  # never sees it — with the suite still green.
+  local t; t="$(flat "$EXTENSION")"
+  # A needle unique to THIS arm, not a substring of the rendered line: `#1498`
+  # alone is implied by that line, so it would pass with the whole extension-arm
+  # sentence deleted.
   grep -qF 'no longer reaches this extension the first time' <<< "$t" || {
-    echo "SKILL.md's extension arm does not explain the #1498 exception"; return 1; }
+    echo "the extension arm does not explain the #1498 exception"; return 1; }
   # ...and it QUALIFIES that exception. The needle above matched the unqualified
   # claim verbatim, so on its own it certifies nothing: an arm saying only "no
   # longer reaches this extension the first time" tells the model that arriving
   # here proves a continuation was spent, which is false on every refusal the
   # rung can take.
   grep -qF 'unless the rung refused it' <<< "$t" || {
-    echo "SKILL.md's extension arm states the #1498 exception as absolute"; return 1; }
+    echo "the extension arm states the #1498 exception as absolute"; return 1; }
   grep -qF 'arriving here is not proof a continuation was spent' <<< "$t"
   # the four refusals are the load-bearing enumeration behind that qualifier
   grep -qE 'Critical among the matches.{0,120}ceiling.{0,120}unstamped changelist.{0,120}failed marker write' <<< "$t" || {
-    echo "SKILL.md's extension arm does not name the rung's refusals"; return 1; }
+    echo "the extension arm does not name the rung's refusals"; return 1; }
 }
 
 @test "#1498 AC19 ARCHITECTURE.md states the ladder exception, the status key and the extension change" {
@@ -219,7 +237,7 @@ meaning the blockers may be fresh rather than stuck).'
     echo "the escalation does not read the key"; return 1; }
 }
 
-@test "#1498 roster tripwire: exactly three markdown sites name the auto-continue" {
+@test "#1498 roster tripwire: exactly four markdown sites name the auto-continue" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
   # vanish?" — so the count is recorded here and a fourth (or second)
   # restatement reds until this file is updated in the same PR.
@@ -230,8 +248,11 @@ meaning the blockers may be fresh rather than stuck).'
   found="$(all_markdown | sed "s#^#$REPO_ROOT/#" \
            | xargs grep -l 'possible_false_trip_auto_continues\|possible false trip auto-continued\|all-ambiguous' 2>/dev/null \
            | sed "s#^$REPO_ROOT/##" | sort)"
+  # #1503 moved the review-loop procedure into reference/*.md, so the roster
+  # names those files where the text now lives — the same sites, re-homed.
   [ "$found" = "ARCHITECTURE.md
-development/skills/resolve-issue/SKILL.md
+development/skills/resolve-issue/reference/interactive.md
+development/skills/resolve-issue/reference/review-loop.md
 docs/explanation/review-loop.md" ] || {
     echo "roster drift — the sites naming the #1498 auto-continue are now:"
     printf '%s\n' "$found"

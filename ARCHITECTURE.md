@@ -3128,7 +3128,7 @@ reliable but the merging needs semantics:
   finding ever blocks. `FILE` holds a JSON **array of identity keys**
   `{file, line, dimension, title}` — a human's explicit selection from the
   waived suggestions, made at convergence; the scripts stay non-interactive and
-  the interaction lives in `resolve-issue`'s `SKILL.md`. The overlay is applied
+  the interaction lives in `resolve-issue`'s `reference/promotion.md`. The overlay is applied
   **after dedup and before** the conflict / non-convergence classification, so a
   promoted item is raised `SUGGESTION→WARNING` (priority `High`, `blocking:
   true`) and then flows through every downstream rule **exactly like a
@@ -3176,7 +3176,7 @@ reliable but the merging needs semantics:
   at its current line; seeding a duplicate from the blocking phase's stale line
   would survive dedup and raise the same defect twice). Each key is classified
   against the fresh panel's **pre-seed** aggregate — never against the seeded
-  round, which matches by construction (resolve-issue SKILL.md, "Suggestion promotion", step 4). Without
+  round, which matches by construction (resolve-issue `reference/promotion.md`, "Suggestion promotion", step 4). Without
   `--promote`, or with an empty array, the emitted changelist is **byte-identical**
   to a run without the flag — which is what keeps autonomous/headless runs
   provably unchanged. Bad input is typed, and every refusal names the PROMOTE file rather
@@ -3263,6 +3263,27 @@ converged on. Constants live at the top: `MAX_REVIEW_ROUNDS=5`,
 converges in one round nothing, and only gives the hard tail a longer leash
 before escalating. `--max-rounds N` still overrides it.
 
+**Where the procedure lives (#1503).** `resolve-issue`'s `SKILL.md` is a
+**conductor**: for the review loop it carries the exit-code table, the one-line
+branch per exit and a pointer — not the procedure, and not the loop's own
+command block, which moved with it into `reference/review-loop.md`. (Step 0's
+classification and the Epic flow still carry their
+own procedure inline; carving those out is separate work.) The
+procedure behind each branch lives in
+`development/skills/resolve-issue/reference/{review-loop,residue,promotion,escalation,interactive}.md`
+and is read only when that branch is reached — the same file layout
+`development/skills/maintenance/reference/*.md` uses, but with the opposite
+load-bearing-ness: there the reference holds rationale and the happy path never
+depends on reading one, whereas here the reference holds the PROCEDURE, so the
+pointer is load-bearing and a missed read does break the step. A pointer takes
+one fixed form — ``see `reference/<file>.md` § <heading>``, with the heading
+running to the **end of the line** so the sweep in
+`tests/resolve-issue-conductor-budget.bats` can extract it — and a pointer never
+paraphrases what it points at. That file is also where the conductor's line
+ceiling and the no-restated-heading rule are enforced;
+`scripts/verify-reference-move.zsh` proves the moved text is byte-identical to
+the pre-move `SKILL.md`.
+
 **The agentic steps run in-session — step mode is canonical (#971).** Running
 the panel and applying the fix pass are model-driven, so the driving session
 does both *between* invocations: it passes the round's aggregate findings via
@@ -3340,7 +3361,7 @@ verification-only round, and **both** wirings re-plan it with `--final` and
 record the **full story diff** as its scope — because in both the round really
 is reviewed against that diff: hook mode's `--review-cmd` runs *after* the
 re-plan, and step mode's session-side panel was told the same by
-`resolve-issue`'s SKILL.md. Recording the delta's empty scope instead would
+`resolve-issue`'s `reference/review-loop.md`. Recording the delta's empty scope instead would
 contradict what was reviewed and mark the round **blind** — the loop's own
 record would say the panel saw nothing when it saw everything, and every
 downstream reader of that record (the empty-findings marker below, the progress
@@ -3434,7 +3455,8 @@ matcher to be rebuilt around title identity. The capture is wired per wiring —
 happens *between* invocations and the loop never observes it, stamps the pre-fix
 identity (`fix-base-<round>.txt`) at `AWAITING_FIX` **and at the two escalating
 terminals a grant can resume from** — `ESCALATE_NO_CONVERGENCE` and
-`BUDGET_EXHAUSTED`, because §3.5 step 5 requires a fix pass *before* the resume a
+`BUDGET_EXHAUSTED`, because the interactive extension's step 5
+(`reference/interactive.md`) requires a fix pass *before* the resume a
 grant buys, so a fix pass really does follow those exits; without the stamp the
 round after the grant carries no `class` at all, i.e. the histogram the grant
 decision reads goes dark one round after the grant was spent. It then diffs at
@@ -3465,7 +3487,7 @@ likely buy), and `build-telemetry-record.zsh`
 **The histogram also gates the FIX pass, skill-side (#1496).** The loop refuses
 no fix and never will — what a fix pass may add, and the class condition that
 turns collapsing from advisory into mandatory, is stated once in
-`development/skills/resolve-issue/SKILL.md` §3.5's round protocol step 3
+`development/skills/resolve-issue/reference/review-loop.md` § The round protocol, step 3
 (*A fix pass subtracts*); `class` is how compliance is measured, not enforced,
 and nothing here restates the rule.
 
@@ -3525,14 +3547,14 @@ passed** — a plugin repo — because the round boundary runs the gate and the
 panel **concurrently** over a single tree minted before either starts (#1497).
 Off plugin repos only `--findings-tree` is passed, exactly as above: the
 concurrency is an ordering, not a flag pair that exists everywhere. The ordering
-is the session's, stated in `development/skills/resolve-issue/SKILL.md` §3.5's
-round protocol and restated nowhere else; the loop itself is unchanged by it.
+is the session's, stated in `development/skills/resolve-issue/reference/review-loop.md`
+§ The round protocol, and restated nowhere else; the loop itself is unchanged by it.
 
 **Filing the remainder** is `build-residue-issues.zsh`, on the same
 build-vs-post split `build-escalation.zsh` uses: it **builds** a JSON array of
 `{title, body, labels, parent}` (one entry per residual blocking finding, each
 body naming the file, line, dimension, severity and derived class) and
-`resolve-issue`'s SKILL.md §3.5 makes the `gh issue create` calls. Linkage is a
+`resolve-issue`'s `reference/residue.md` step 4 makes the `gh issue create` calls. Linkage is a
 **native sub-issue** — of the story's **epic** when it has one, of the **story**
 otherwise — and every residue issue carries **both** `review-residue` and
 `needs-refinement`. Idempotency is pinned on **label + exact title**: a candidate
@@ -3550,7 +3572,7 @@ finding. The union admits one deliberate over-suppression in exchange: a
 labelled issue under a **different** parent whose rendered title collides exactly
 (the title carries file, line and dimension, so a collision means the same
 finding in the same place). Consumers that classify a candidate against the
-parent-scoped read **alone** — `resolve-issue`'s §3.5 step 3 does — therefore see
+parent-scoped read **alone** — `resolve-issue`'s `reference/residue.md` step 3 does — therefore see
 a builder-filtered candidate as *unmatched*; that means created-but-unparented
 (re-attach it) or the cross-parent collision (do not), never a wrong
 `--changelist`. Those two reads are the script's only network use — `--dry-run`
@@ -4440,7 +4462,7 @@ The cross-pipeline cut needs no payload at all — that is what the 4-value
 `waived` answers *how many Low findings did the loop log?* — it can never answer
 *did a human act on them?*, because the phase-1 run record is on disk before the
 prompt is ever shown. That fact is recorded as an **append-only enrichment**
-joined to the run, emitted by `resolve-issue`'s `SKILL.md` once the human's
+joined to the run, emitted by `resolve-issue`'s `reference/promotion.md` step 3 once the human's
 multi-select answer is known:
 
 ```json
