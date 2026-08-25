@@ -296,6 +296,82 @@ git fetch origin -q
 git switch -c "<type>/<N>-<slug>" origin/main
 ```
 
+### 1b. Detect the repo type and load the profile
+
+The conductor is repo-type-agnostic; the rules true of **one** repo type live in
+that type's own plugin, as a `resolve-profile` skill. Load this repo's before you
+implement, so §3's gate command and §4's version bump are the ones this type
+actually uses:
+
+```bash
+"<skill-base-dir>/scripts/review-dispatch.zsh" detect --repo .
+# {"repo_type":"claude-plugin"}   ← the whole document; no diff, no --base
+#   0 → use .repo_type below
+#   2 → your OWN malformed invocation: fix the command and re-run
+#   1 → internal failure: report the script's stderr and stop. The same
+#       detector runs again at §3.5, so there is nothing here to salvage by
+#       continuing — this arm is fail-closed on purpose.
+#   3 → a repo whose TYPE could not be determined: the typed unsupported/
+#       ambiguous object is on stdout — the same condition §3.5's `plan` raises,
+#       from the same detector. Relay that object verbatim, load NO profile,
+#       then add exactly ONE narration line — `repo type could not be determined
+#       (<the object's error>); continuing with the conductor's generic rules` —
+#       and CONTINUE. That line is NOT the missing-profile notice below: that
+#       notice names a type, and this arm has none to name. The two conditions
+#       are never narrated as each other, in EITHER direction — which is the
+#       same rule the `unsupported_repo_type` guardrail below states from the
+#       other side.
+#       Stopping here would be the new typed refusal this step deliberately does
+#       not introduce; if the run reaches §3.5, `plan` raises the same object
+#       again and the loop escalates it as `ESCALATE_AMBIGUOUS` — which is where
+#       that decision belongs.
+```
+
+Then invoke **`development-<repo_type>:resolve-profile`** by name (the Skill
+tool), exactly as the maintenance orchestrator loads
+`development-<lang>:maintenance`. Its `##` heading roster **is** the contract,
+and it is stated in ARCHITECTURE.md's *Resolve profile contract* and in each
+profile — **and nowhere else**. Read the roster there; naming it here too would
+be one more copy to drift.
+
+**Only the first two headings in that declared order have a dereference site
+today** — §3 and E4 point at the first, §4 at the second. The **third** merely
+*records* the panel `review-dispatch.zsh plan` already computes, and is never
+dereferenced (ARCHITECTURE.md states that). The remaining three have no
+dereference site at all; **#1506 decides which of them acquire one** (the
+claude-plugin profile already records that at least one of them has nothing to
+extract). Until then, a profile that populates one of them carries a rule no
+step is told to consult — so:
+
+- **A heading in one of those last three positions is `none` when its body
+  BEGINS with `none`.** Qualifying prose after that word — a pointer, a reason,
+  a `none beyond X` — does **not** make it non-`none`. The shipped claude-plugin
+  profile writes exactly that shape.
+- **A heading in one of those three positions that is non-`none` by that test:**
+  do not apply its rule (no step is contracted to consult it), **file an issue
+  against #1506** naming the profile and the heading, and continue. *File* means
+  open an issue — never add the dereference to this conductor yourself, which is
+  both out of scope and a charge against its line budget.
+- **The first three positions are never filed against #1506** and their rules
+  are always applied: two are dereferenced by §3, §4 and E4, and the third is
+  deliberately a record. Nothing above licenses skipping them.
+
+The headings are referred to here by POSITION rather than by name on purpose —
+naming them would be the extra copy this section just said not to make.
+
+**A missing profile is a fallback, never a refusal.** Most repo types have no
+profile yet (#1505). When the skill does not exist, emit **one line** naming it
+— `no resolve-profile for repo type <repo_type>
+(development-<repo_type>:resolve-profile); continuing with the conductor's
+generic rules` — and **continue**. Nothing is blocked, nothing is escalated, and
+no PR is withheld over a missing profile.
+
+**`unsupported_repo_type` is not reused here.** That name remains exclusively
+`review-dispatch.zsh`'s exit-3 condition — a repo whose *type* could not be
+determined — and a missing profile is a different fact about a type that **was**
+determined. Keeping the two apart is what stops a later reader collapsing the
+fallback above into a typed refusal.
+
 ### 2. Implement
 
 **First — consume the `story-spec/v1` block if the issue carries one (#577).** A
@@ -438,37 +514,21 @@ the launch properties and the four `--gate-attest` rules, is on-demand reading:
 see `reference/review-loop.md` § The round protocol
 
 - pre-commit hooks (`pre-commit run --all-files`, or the staged subset),
-- tests for the stack — the **whole suite**, never a subset. For **plugin
-  repos**, run the blessed single-run parallel gate rather than bare `bats`:
-  `<skill-base-dir>/scripts/run-gate.zsh --tests-dir tests` (#980) — it runs the
-  whole `bats tests` suite **exactly once**, parallelised via `--jobs` = CPU
-  count on a multi-core host with GNU `parallel`, and run sequentially otherwise
-  — loudly (a degraded warning) only on a multi-core host missing GNU `parallel`,
-  quietly on a single-core host where there is nothing to parallelise — prints
-  the ok/not-ok counts plus bats' **real** exit code (a JSON
-  summary on stdout), and exits with that code, so it drops in as the gate
-  command. A run that reports **zero** tests is forced to a non-zero (red) exit
-  — never a false green. Never hand-roll a `bats … | grep -c` that runs the
-  suite twice to count. For other stacks: `pytest` (Python — the whole suite,
-  **not** `pytest tests/unit`), `./gradlew test` / `build` (Java/Gradle), etc.,
-  - **Capture the gate attestation (#981).** On a **green** `run-gate.zsh`,
-    keep its stdout `"tree"` field — the working-tree identity it just gated. On
-    the **next** review round's `--resume` you pass it as `--gate-attest` (§3.5)
-    so the loop skips a byte-identical re-run of the exact same tree it already
-    proved green — the single biggest per-round duplicate the #976 session paid.
-    It is a plain identity, not a verdict; `exit`/`ok` counts remain the pass
-    signal, and the loop re-runs the gate on any mismatch (fail-closed). From
-    §3.5's round boundary on, that identity is the `T` minted **before** this
-    gate was started, and the gate's `tree` field is what confirms it — see
-    *The round boundary is concurrent* (§3.5), which states the ordering; this
-    step restates none of it.
-- **relay a DEGRADED gate to the user, up front (#980).** `run-gate.zsh`'s
-  stdout summary carries a `"mode"` field. When it is `"sequential-degraded"`
-  (GNU `parallel` is not installed), the gate still ran the **whole** suite at
-  full rigor — but sequentially, so every review round's gate takes multiple
-  times longer. Tell the user **clearly and immediately**: that parallelization
-  is unavailable, that each round's gate will be several times slower, and that
-  the fix is `brew install parallel`. Never quietly absorb the slowdown.
+- tests for the stack — the **whole suite**, never a subset. The blessed gate
+  command for this repo's type — what to capture from it, and any degraded mode
+  it must relay to the user — is the profile's:
+  profile: `development-<repo_type>:resolve-profile` § Gate
+  **If you reached this step without having run §1b at all, run its `detect` +
+  load NOW** and use whatever that yields — the floor below applies only if that
+  leaves you with no profile, and a LOADED profile's command is never
+  substituted for.
+  **With no profile loaded** — §1b's missing-profile fallback, **or its exit-3
+  arm** (a type that could not be determined has no profile to name either) —
+  use the stack's usual whole-suite command:
+  `pytest` (Python — the whole suite, **not** `pytest tests/unit`),
+  `./gradlew test` / `build` (Java/Gradle), etc.; for a repo type whose blessed
+  command is stated in the round protocol rather than in a profile, take it from
+  there rather than inventing one,
 - any repo-specific check named in `CLAUDE.md`,
 - **the same-PR C4 currency check (#746 child (c), #792)**: if the change
   altered the system's **structure**, `docs/architecture/c4-container.md` must be
@@ -672,10 +732,20 @@ through the file that comes after it:
 
 ### 4. Version bump (plugin content only)
 
-If you changed any plugin's installable content (`<plugin>/…`), bump that
-plugin's `plugin.json` **and** its matching `.claude-plugin/marketplace.json`
-entry (per the version-bump convention) — otherwise installs never see the
-change. A patch for a fix, a minor for a feature. Skip for root-only docs.
+The rule is the repo type's; the heading stays here as the anchor the reference
+files' `§4 (Version bump)` cross-references resolve to:
+profile: `development-<repo_type>:resolve-profile` § Version bump
+
+**With no profile loaded**, however you got here — §1b's missing-profile
+fallback and **its exit-3 arm** are the two ordinary ways, and a resumed session
+re-entering here is a third — this step is still not skipped: a change to
+installable plugin content (`<plugin>/…`) bumps that plugin's
+`plugin.json` **and** its matching `.claude-plugin/marketplace.json` entry in the
+same PR, per the version-bump convention. This is a **floor, not a second
+owner**: when a profile IS loaded its Version bump heading supersedes this
+paragraph entirely — including the sizing tiers and any type-specific exception,
+which this floor deliberately does not state. MAINTAINING.md remains the
+authoritative statement of the tiers themselves.
 
 ### 5. Commit
 
@@ -1270,17 +1340,42 @@ legible at a glance. Then:
 
 The per-child gates tested each change in isolation, but can't see the
 children's **combined** effect. Once the whole epic is on `main`, run a
-**holistic end-to-end test of the epic's domain** and report:
+**holistic end-to-end test of the epic's domain** and report.
+
+**First, before choosing a bullet below: the Epic flow never ran §1b**, so
+nothing has bound `<repo_type>` or loaded a profile — E3 delegates the
+Single-issue flow to the *children*, in their own sub-agents or worktrees, and a
+re-run that finds zero open children arrives here having run none of them. Run
+§1b's `detect` and load the profile **now**. It sits here rather than inside one
+bullet because the bullets are chosen *by* repo type, which is the very thing
+`detect` reports.
+
+**Read `detect`'s two non-zero arms the Epic flow's way, not §1b's.** Both of
+§1b's are argued from §3.5 — "the same detector runs again there" — and the Epic
+flow never reaches §3.5, so neither promise can be kept here. At E4: **exit 1**
+→ report the stderr and **halt E4 without closing the epic**; **exit 3** → relay
+the typed object, **halt E4**, and report it as the epic's own
+`ESCALATE_AMBIGUOUS`: post the typed object as a comment **on the epic** with
+the `needs-human-decision` label, and stop. Do **not** run the escalation
+terminal's own steps here — they push a story branch and build from a loop
+status JSON, and at E4 there is
+neither. Continuing past either would close an epic on verification that never
+ran. **Exits 0 and 2, and a merely missing profile, are unchanged** — those
+still follow §1b, so a usage error is still yours to fix and re-run.
+
+**Never substitute your own command for a LOADED profile's.** With no profile,
+run the repo's whole suite as §3's fallback directs, and say in the E4 report
+that no profile-blessed gate was available — so the guarantees such a gate
+carries (a single run, a forced-red zero-test exit, a degraded-mode relay) are
+visibly absent rather than silently assumed. An improvised command whose green
+nobody can account for is not E4 evidence.
 
 - **Java / Python app** (most critical) — the full build + test suite, plus a
   real end-to-end exercise of the affected behaviour (run the relevant pipeline
   / the app itself), so integration regressions surface here.
-- **Claude-plugin** — the full `bats` suite via the blessed single-run gate
-  `<skill-base-dir>/scripts/run-gate.zsh --tests-dir tests` (#980 — same
-  parallel, single-run, real-exit command as Step 3; never a bare `bats … |
-  grep -c` that runs the suite twice) **and** `/development-claude-plugin:test`
-  driving the affected skills/agents end-to-end (the same pattern used to verify
-  slices by hand).
+- **Claude-plugin** — the repo type's own holistic command and end-to-end
+  driver:
+  profile: `development-<repo_type>:resolve-profile` § Gate
 
 If the holistic test surfaces a regression the per-issue runs missed, **file it**
 (and resolve it if it fits) rather than silently marking the epic done — the

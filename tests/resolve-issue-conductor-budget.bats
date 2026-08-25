@@ -35,11 +35,15 @@ setup() {
   CONDUCTOR="$SKILL_DIR/SKILL.md"
   REF_DIR="$SKILL_DIR/reference"
 
-  # The ceiling. Set from the post-move size (1 382 lines) with ~10% headroom,
-  # which is room for a genuinely new step's invocation contract and not much
-  # else. Raising it is a deliberate act that belongs in a PR with a reason —
-  # that is the point of a stated number rather than a ratio nobody notices.
-  CEILING=1520
+  # The ceiling. Set by ONE stated rule — the smallest multiple of 5 at or above
+  # the measured size x 1.10 — so it is room for a genuinely new step's
+  # invocation contract and not much else. Raising it is a deliberate act that
+  # belongs in a PR that states the new measurement; that is the point of a
+  # stated number rather than a ratio nobody notices. #1503 set it from 1 382
+  # lines; #1504 re-measured 1 484 after moving the plugin-only rules into
+  # `development-claude-plugin:resolve-profile`, adding the §1b load step, and
+  # adding the no-profile floors §3, §4 and E4 need for the fallback path.
+  CEILING=1635
 
   VERIFY="$SKILL_DIR/scripts/verify-reference-move.zsh"
   # The pre-move commit, READ OUT OF THE SCRIPT rather than transcribed here.

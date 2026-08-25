@@ -268,7 +268,9 @@ repo that is also Python gets both dispatchers).
 **What's built:** the test harness, the review panel
 (`/development-claude-plugin:review` — five read-only agents, the step-3.5 panel
 for plugin repos, epic
-[#810](https://github.com/timo-jakob/timos-claude-code-plugins/issues/810)), plus
+[#810](https://github.com/timo-jakob/timos-claude-code-plugins/issues/810)), the
+resolve profile (the claude-plugin driver rules `/development:resolve-issue`
+loads by name at its §1b step), plus
 the maintenance dispatcher with its five
 validators — `claude-plugin-version-sync` (`plugin.json` ↔ `marketplace.json`
 version drift), `claude-plugin-skill-validator` (SKILL.md / agent frontmatter
@@ -284,6 +286,7 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 | ------- | --------- | ------------- |
 | Test harness | `/development-claude-plugin:test [--target <path>] [--task "<prompt>"] [--expect "<text>"]` | Exercises a plugin's real behaviour end-to-end. A fresh-context judge subagent drives a *separate* headless `claude` session — local plugins loaded via `--plugin-dir`, run against an isolated clone of the target repo — and returns a structured `PASS`/`FAIL` verdict plus a transcript digest, without flooding the authoring context. See [`docs/test-harness.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-claude-plugin/docs/test-harness.md). |
 | Review panel | `/development-claude-plugin:review [scope]` | Comprehensive plugin-content review with 5 parallel read-only agents (prose logic, contract integrity, script quality, tests, manifests). The step-3.5 review panel for claude-plugin repos (dispatched once the fallback `repo_type` lands, epic [#810](https://github.com/timo-jakob/timos-claude-code-plugins/issues/810)); also invocable standalone. Emits #558-schema findings to a machine-readable findings file alongside the prose report; measured against the #798 golden fixture. |
+| Resolve profile | (loaded by name by `/development:resolve-issue` at its §1b step) | The claude-plugin repo type's driver rules for the resolve-issue conductor — six contract headings (named once in the *Resolve profile contract* in ARCHITECTURE.md, not restated here) holding the blessed `run-gate.zsh` gate and its attestation capture, the degraded-mode relay, the epic verification command, §4's version-bump rule, and the Panel pointer. Not for direct use; see the *Resolve profile contract* in [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md). |
 | Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher. Validates plugin conventions and returns a plan routing each finding group to a validator agent. No language coverage gate (a script-quality gate is planned, [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issues/263)). Validates version sync, SKILL.md/agent frontmatter, orphaned references, directory layout, and shell-script quality. |
 
 **Agents:**
