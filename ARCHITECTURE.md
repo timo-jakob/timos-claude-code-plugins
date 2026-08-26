@@ -2958,6 +2958,9 @@ A profile is:
   and nobody invokes it by hand expecting a workflow;
 - whose frontmatter `name` is `resolve-profile`, because §1b invokes it by that
   name — a mismatch makes the load silently take the missing-profile fallback;
+- whose frontmatter carries `disable-model-invocation: false`, since §1b loads it
+  by name and disabling that silently degrades every run of the type to the
+  conductor's generic rules behind a one-line notice;
 - whose body carries **exactly these six `##` headings, in this order** —
   **Gate**, **Version bump**, **Panel**, **Fix-pass rules**,
   **Documentation expectations**, **Residue**.
@@ -2965,6 +2968,40 @@ A profile is:
 A heading with nothing to say says **none** — it is never dropped. The roster is
 the contract, so readers key on it rather than on presence, and a type that
 acquires a rule later has a place to put it that no reader has to learn about.
+
+**Six further clauses became normative with #1505**, when the roster grew past
+its first member. They are stated here because this is the site
+`tests/resolve-profile-contract.bats` gates and the site MAINTAINING.md's
+registry row points at — a profile written to the list above alone would red:
+
+- a `none` heading carries a **reason**, not the bare word, so the next author
+  can tell a heading that is empty by decision from one that is empty by
+  accident;
+- in a profile with no attestable runner, each of the three trailing `none`
+  headings names the **evidence source** that would produce a rule for it
+  (#1502 today);
+- such a profile's **Gate** states `--gate-attest: not applicable` explicitly —
+  the flag is fail-closed only on a *mismatch*, so silence invites a caller to
+  pass a value no gate ever produced;
+- its Gate is **pinned by two tables in that sweep**, not one. `_gate_pairs`
+  holds the blessed *command* on both sides, so the profile and the artifact
+  that already runs it cannot drift apart — a ci-fixer agent, or the plugin's
+  maintenance skill where no ci-fixer ships (kubernetes). `_gate_clauses` holds
+  the Gate's *rules*: at least one row per runner-less type, naming each clause
+  whose loss would put a run back on an action a reviewer already called wrong.
+  A profile that ships only the first reds on the second;
+- its **Panel** records the pointer, and states **no dimension list and no
+  severity bar**. Both already have exactly one home, with the agent that
+  applies them, and a roster or a bar restated here is the second statement that
+  drifts (#1432). This is the clause most likely to surprise: summarising a
+  panel's dimensions reads like helpful documentation, and `docs/reference/`
+  does carry such a summary — but a profile is not that page;
+- and its **Version bump** is a *conditional* `none`: it names §4's floor on
+  **both** manifests and says it **narrows** that floor rather than superseding
+  it, because a detected language beats the `claude-plugin` fallback and such a
+  repo would otherwise lose the bump entirely. A type that genuinely cannot
+  carry plugin content — `kubernetes`, which the fallback ordering reaches only
+  when `is_claude_plugin` is false — states that reason instead.
 
 **The load point is §1b**, between the conductor's §1 (branch) and §2
 (implement): `review-dispatch.zsh detect --repo .` reports the repo type, and the
@@ -2974,13 +3011,22 @@ composition `/development:maintenance` already uses for
 `_repo_type` function, one `detect-stack.sh` call, one fallback ordering), so the
 §1b profile and the §3.5 review panel can never be chosen for different types.
 
-**A missing profile is a fallback, never a refusal.** Most repo types ship no
-profile yet (#1505); the conductor emits one line naming the absent skill and
-**continues** with its generic rules. `unsupported_repo_type` is **not** reused
-for this — that name stays exclusively `review-dispatch.zsh`'s exit-3 condition,
-which is a repo whose *type* could not be determined at all. Whether the fallback
-should ever become a hard refusal is deliberately undecided until every shipped
-type has a real profile.
+**A missing profile is a fallback, never a refusal.** The conductor emits one
+line naming the absent skill and **continues** with its generic rules.
+`unsupported_repo_type` is **not** reused for this — that name stays exclusively
+`review-dispatch.zsh`'s exit-3 condition, which is a repo whose *type* could not
+be determined at all.
+
+**Since #1505 every emitted `repo_type` ships a profile**, so the fallback no
+longer covers the ordinary case it was written for. What remains reachable is a
+**runtime** absence — the plugin for that type is not installed in the session —
+rather than a type that has no profile in the repo, which the set-equality below
+now reds at build time. The question of whether the fallback should ever become a
+**hard refusal** was deliberately parked "until every shipped type has a real
+profile"; that condition is now met, so the question is decidable and remains
+**open on purpose** — deciding it is a behaviour change to §1b, which #1505
+explicitly did not make. Nothing here licenses turning the fallback into a
+refusal.
 
 **New type-specific prose goes in the profile, not the conductor.** That is the
 rule the seam exists to make enforceable: `tests/resolve-profile-contract.bats`
@@ -2993,11 +3039,29 @@ A profile's **Panel** heading *records* the panel that
 `review-dispatch.zsh plan` computes as `review_skill`; it never overrides it,
 because §3.5 dispatches the descriptor's value and one fact needs one owner.
 
-Profiles populated today: **1** — **claude-plugin** (its blessed
+Profiles populated today: **6** — **claude-plugin** (its blessed
 `run-gate.zsh` gate and attestation capture, its degraded-mode relay, its epic
-verification command, §4's version-bump rule, and the **Panel** pointer above). The plugin-only rules that sit
+verification command, §4's version-bump rule, and the **Panel** pointer above),
+plus **python**, **java**, **go**, **swift** and **kubernetes** (#1505 — each
+naming the whole-suite command its own plugin's ci-fixer already runs, or for
+kubernetes the validation tools its maintenance skill names, since that plugin
+ships no ci-fixer; each stating `--gate-attest: not applicable` and the **Panel**
+pointer with no dimension list). Their **Version bump** is a *conditional*
+`none`, not an unconditional one: the four language profiles bump nothing
+**unless the repo also ships a `<plugin>/` tree**, because a detected language
+beats the `claude-plugin` fallback, so a language repo that ships plugin content
+loads *its* profile and would otherwise lose §4's floor entirely; the kubernetes
+profile's `none` rests on a cluster-definition repo, not an app one. The
+plugin-only rules that sit
 inside `development/skills/resolve-issue/reference/*.md` byte-frozen sentinel
 spans are **not** in it: extracting those is #1506.
+
+With every `repo_type` the dispatcher can emit now carrying a profile, the
+profile→type check `tests/resolve-profile-contract.bats` has always made is
+paired with its converse: the two sets are equal, so **adding a `repo_type`
+without shipping its profile reds the suite** (#1505). That is a **build-time**
+requirement only — §1b's runtime behaviour is untouched, and a missing profile
+there remains notice-and-continue.
 
 ## Review-panel invocation contract (#560)
 

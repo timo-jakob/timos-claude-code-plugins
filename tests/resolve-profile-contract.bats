@@ -63,15 +63,320 @@ _profile_headings() {
   grep '^## ' "$1" | sed 's/^## //'
 }
 
+# The repo types review-dispatch.zsh DOCUMENTS in its header line, one per line
+# ($1 overrides the file, for the non-vacuity controls). The same expression both
+# directions of the set-equality use, so they cannot disagree about what the
+# documented set is (#1505).
+_dispatch_types() {
+  sed -n 's/^#  *repo_type ∈ {\(.*\)};.*/\1/p' "${1:-$DISPATCH}" | tr -d ' ' | tr ',' '\n'
+}
+
+# The repo types review-dispatch.zsh ACTUALLY EMITS, derived from the code that
+# assigns them: the supported-language loop plus every literal `repo_type="…"`
+# assignment (the fallbacks). Sorted and de-duplicated.
+#
+# Why both this and `_dispatch_types`: the header line is a COMMENT, and a
+# comment cannot gate anything. Adding a third fallback arm — an `is_terraform`
+# marker assigning `repo_type="terraform"` — while leaving the header untouched
+# would keep every comment-derived check green, and the story's whole deliverable
+# ("adding a repo type without shipping its profile reds the suite") would be
+# false. The pairing test below is what forbids that: the documented set and the
+# emitted set must be equal, and the profile roster is then gated against BOTH.
+_emitted_types() {
+  local f="${1:-$DISPATCH}"
+  {
+    sed -n 's/^  for l in \(.*\); do$/\1/p' "$f" | tr ' ' '\n'
+    # Optional quoting on purpose: `repo_type=terraform` and
+    # `repo_type='terraform'` are both valid zsh, and a derivation that saw only
+    # the double-quoted spelling would let a new arm ship with no profile while
+    # every check here stayed green — falsifying the guarantee this file exists
+    # to enforce. No regex closes the set, which is why the assignment-site
+    # tripwire below counts the sites as well.
+    sed -n 's/.*repo_type=["'"'"']\{0,1\}\([a-z][a-z0-9_-]*\)["'"'"']\{0,1\}.*/\1/p' "$f"
+  } | grep -v '^$' | sort -u
+}
+
+# Every `repo_type=` assignment site in the dispatcher, however spelled. Counted
+# rather than parsed: `_emitted_types` can only recognise the shapes it was
+# taught, so a NEW shape has to red here and send its author to that helper.
+_repo_type_assignment_sites() {
+  grep -o 'repo_type=' "${1:-$DISPATCH}" | grep -c . || true
+}
+
+# The review dimensions this repo's panels declare, one per line, DERIVED from
+# each review skill's own table rather than transcribed. Two table shapes ship —
+# `| Agent | Model | Dimension |` and kubernetes' `| Dimension | Agent |` — so
+# the column is located by its HEADER rather than by a fixed index, and a panel
+# that reorders its columns cannot silently drop out of the roster.
+_review_dimensions() {
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    _review_dimensions_of "$REPO_ROOT/$f"
+  done < <(git -C "$REPO_ROOT" ls-files 'development-*/skills/review/SKILL.md') | sort -u
+}
+
+# The dimensions ONE review skill declares. Split out so the roster check can
+# assert per-file that every panel contributes — an aggregate count cannot tell
+# "this panel declares none" from "the awk stopped parsing this table".
+_review_dimensions_of() {
+    awk -F'|' '
+      # the header row: remember which field is the Dimension column
+      !col && /\|/ {
+        for (i = 1; i <= NF; i++) {
+          v = $i; gsub(/^[ \t]+|[ \t]+$/, "", v)
+          if (tolower(v) == "dimension") { col = i }
+        }
+        if (col) next
+      }
+      col && /^\|/ {
+        v = $col; gsub(/^[ \t]+|[ \t]+$/, "", v)
+        gsub(/`/, "", v)
+        if (v ~ /^-+$/ || v == "") next
+        print v
+      }
+    ' "$1"
+}
+
+# Every Panel restatement violation, one per line. $1 overrides the repo root so
+# the non-vacuity control can drive THIS function over a planted tree.
+# NOTE the `if`s rather than `cmd && printf`. A trailing `&&` whose left side
+# does not match returns non-zero, and "does not match" is the GOOD case here —
+# as the last statement of a loop body it makes the whole function exit 1, which
+# under bats' errexit aborts the caller on a CLEAN tree. Every violation
+# accumulator in this file has to stay status-clean for the same reason.
+_panel_restatements() {
+  local root="${1:-$REPO_ROOT}" p d sec
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    [ -r "$root/$p" ] || continue
+    sec="$(_profile_section "$root/$p" "Panel")"
+    while IFS= read -r d; do
+      [ -n "$d" ] || continue
+      if printf '%s' "$sec" | grep -qiwF -- "$d"; then
+        printf "%s: Panel names the dimension '%s'\n" "$p" "$d"
+      fi
+    done < <(_review_dimensions)
+    # the other half of what every profile promises: no severity bar either
+    if printf '%s' "$sec" | grep -qwE -- 'CRITICAL|WARNING|SUGGESTION'; then
+      printf '%s: Panel restates a severity bar\n' "$p"
+    fi
+  done < <(_profiles)
+  return 0
+}
+
+# The Gate clauses whose REVERSION would silently reinstate a finding this
+# story already raised as blocking. `type|needle`, one row per clause, matched
+# inside that profile's `## Gate` section.
+#
+# Deliberately NOT one row per sentence: these profiles are contracted to be
+# short, and pinning every clause would both freeze prose that should stay
+# editable and mint review surface of its own. The bar is the one the #1505
+# guidance sets — a clause earns a row when losing it puts a model back on an
+# action a reviewer already called wrong.
+#
+# A needle must be both UNIQUE and DISCRIMINATING, which are different tests and
+# both were failed here once:
+#
+#   - UNIQUE — it occurs exactly once in that profile's Gate. `kustomize` did
+#     not: it also appears in the render bullet and in "component
+#     kustomizations", so reverting the absent-tool enumeration left the row
+#     matching an untouched line. The sweep below now enforces this
+#     mechanically, so the rule is not review-only.
+#   - DISCRIMINATING — it appears in the CORRECTED text and not in the defective
+#     text it replaced. `Epic verification (§E4)` was a substring of the
+#     defective round-2 sentence, and `coverage-floor-go`/`-swift` sit in their
+#     bullet's premise sentence, which the defective version also carried. A
+#     unique needle in a paragraph the mutation does not touch pins nothing.
+#     No sweep can check this one — it is a claim about text that no longer
+#     exists — so it is the reviewer's job, and the reason each row below names
+#     the corrective clause rather than the surrounding explanation.
+_gate_clauses() {
+  printf '%s\n' \
+    'python|git rev-parse --git-common-dir' \
+    'python|Epic verification (§E4)' \
+    'python|end-to-end exercise of the affected behaviour' \
+    'java|Epic verification (§E4)' \
+    'java|end-to-end exercise of the affected behaviour' \
+    'go|unconditionally' \
+    'go|abandon-and-report' \
+    'go|Do not produce it here' \
+    'go|Epic verification (§E4)' \
+    'go|end-to-end exercise of the affected behaviour' \
+    'swift|report the unresolved scheme/destination and stop' \
+    'swift|do not run it here' \
+    'swift|-enableCodeCoverage YES build test' \
+    'swift|Epic verification (§E4)' \
+    'swift|end-to-end exercise of the affected behaviour' \
+    'kubernetes|read the set there' \
+    'kubernetes|Attribute a finding' \
+    'kubernetes|the renderers as much as the validators' \
+    'kubernetes|Epic verification (§E4)'
+}
+
+# Every missing Gate clause, one per line. $1 overrides the repo root so the
+# control can drive THIS accumulator over a planted tree.
+_gate_clause_violations() {
+  local root="${1:-$REPO_ROOT}" rows="${2:-_gate_clauses}" row type needle profile
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    type="${row%%|*}"
+    # `${row#*|}` is a NO-OP on a row with no separator, so a row mistyped as
+    # `go` would yield needle=go and grep the go Gate for "go" — always a match,
+    # asserting nothing while still counting toward the tripwire. The sibling
+    # `_gate_pair_violations` names this degeneration; so does this one.
+    case "$row" in
+      *'|'*) needle="${row#*|}" ;;
+      *) printf '%s: row names no needle\n' "$row"; continue ;;
+    esac
+    [ -n "$needle" ] || { printf '%s: empty needle in its _gate_clauses row\n' "$type"; continue; }
+    profile="$root/development-$type/skills/resolve-profile/SKILL.md"
+    [ -f "$profile" ] || { printf '%s: no profile at %s\n' "$type" "$profile"; continue; }
+    _profile_section "$profile" "Gate" | grep -qF -- "$needle" \
+      || printf '%s: Gate lost <<%s>>\n' "$type" "$needle"
+  done < <("$rows")
+  return 0   # status-clean on a clean tree — see _panel_restatements
+}
+
+# Every Version-bump violation, one per line. $1 overrides the repo root so the
+# non-vacuity control can drive THIS accumulator over a planted tree.
+#
+# The RULE is taken as the first **bold** line, not merely the first line
+# matching `**none` anywhere. Every section opens with the same two-line plain
+# preamble (which is why "first non-blank line" is the wrong test here), and a
+# section that PREPENDS a contradictory bold directive above a surviving
+# conditional paragraph would satisfy a bare presence test — while §4's reader,
+# going top-down, meets the bump first.
+_version_bump_violations() {
+  local root="${1:-$REPO_ROOT}" p sec first
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    [ -r "$root/$p" ] || continue
+    sec="$(_profile_section "$root/$p" "Version bump")"
+    first="$(printf '%s\n' "$sec" | grep -m1 -- '^\*\*' || true)"
+    case "$first" in
+      '**none'*) : ;;
+      *) printf '%s: Version bump does not OPEN with **none (got: %s)\n' \
+           "$p" "${first:-<no bold rule at all>}"; continue ;;
+    esac
+    # The bold test alone sees only a BOLD prepend. The mutation the carried
+    # blocker literally named is plain prose — an unbolded "Bump plugin.json …"
+    # line above the rule — which leaves the first bold line untouched while
+    # §4's top-down reader meets the bump first. Every section's preamble is the
+    # same two plain lines, so anything directive-shaped above the rule is the
+    # mutation.
+    # `/^\*\*/q` stops BEFORE the rule line; a `1,/^\*\*/p` range would include
+    # it, and the rule's own words ("nothing to bump") would trip this arm.
+    # `([^[:alnum:]]|$)` rather than `\b`: the boundary escape is a GNU
+    # extension, a stock BSD grep reads it as a literal `b`, and this repo is
+    # macOS-only — so `bump\b` would quietly match nothing on the likely host
+    # and let a plain-prose prepend ship green. The same substitution, for the
+    # same reason, is why tests/go-docs-parity.bats spells its own needle this
+    # way.
+    if printf '%s\n' "$sec" | sed -n '/^\*\*/q;p' \
+         | grep -qiE -- '^[[:space:]]*bump([^[:alnum:]]|$)|plugin\.json|marketplace\.json'; then
+      printf '%s: Version bump states a directive ABOVE its **none rule\n' "$p"
+      continue
+    fi
+    case "$p" in
+      development-kubernetes/*)
+        printf '%s' "$sec" | grep -qF -- 'cluster-definition repo' \
+          || printf '%s: Version bump does not say WHY none holds here\n' "$p" ;;
+      *)
+        printf '%s' "$sec" | grep -qF -- 'unless this repo also ships installable plugin content' \
+          || printf '%s: Version bump is not the CONDITIONAL none\n' "$p"
+        printf '%s' "$sec" | grep -qF -- '.claude-plugin/marketplace.json' \
+          || printf "%s: Version bump does not name the floor's marketplace half\n" "$p"
+        printf '%s' "$sec" | grep -qF -- 'supersede' \
+          || printf '%s: Version bump does not say it must not supersede the floor\n' "$p" ;;
+    esac
+  done < <(_profiles_without_runner)
+  return 0   # status-clean on a clean tree — see _panel_restatements
+}
+
+# The profile at repo-relative path $1 with its whole Version bump body replaced
+# by $2. Replacing the BODY rather than deleting a line is what keeps each
+# planted mutation surgical: the conditional clause, the marketplace half and
+# the `supersede` rule all live on the same line as the `**none` opener, so a
+# `grep -v` of any one of them removes the opener too and the accumulator then
+# reports "does not OPEN with **none" — a true statement about the plant, but
+# not the branch the control meant to exercise.
+_plant_vb() {
+  awk -v body="$2" '
+    /^## Version bump$/ { print; print ""; print body; skip = 1; next }
+    /^## / { skip = 0 }
+    !skip { print }
+  ' "$REPO_ROOT/$1"
+}
+
+# Every emitted repo type with no profile in the roster, one per line, annotated
+# with the path that is missing. $1 overrides the dispatch script, so the
+# non-vacuity control can drive THIS function over a planted one rather than
+# re-implementing its loop — the shape `_order_violation` and `_roster_sites`
+# already use.
+_types_without_profile() {
+  local t have
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    # `|| true`: a count of ZERO is the very condition this loop exists to
+    # detect, and `grep -c` exits 1 on no match — under bats' errexit the bare
+    # form aborts the caller before it can report the missing profile.
+    have="$(_profiles | grep -cxF -- "development-$t/skills/resolve-profile/SKILL.md" || true)"
+    [ "$have" -eq 1 ] \
+      || printf '%s (no development-%s/skills/resolve-profile/SKILL.md)\n' "$t" "$t"
+  done < <(_emitted_types "${1:-$DISPATCH}")
+  return 0   # status-clean on a clean tree — see _panel_restatements
+}
+
+# The body of profile $1's `## `-heading $2, exclusive of the heading lines.
+_profile_section() {
+  awk -v want="$2" '
+    /^## / { inside = (substr($0, 4) == want); next }
+    inside { print }
+  ' "$1"
+}
+
+# The profiles with NO attestable single-run runner — derived from the Gate's
+# own content, never a hand-written list. That is the real reason the rule
+# splits: `--gate-attest` (#981) carries a tree identity a runner produced, so a
+# type with no such runner has nothing to attest and must say so. A type that
+# later grows one drops out of this set by editing its own Gate, which is
+# exactly when its `not applicable` line should stop being required.
+#
+# The needle is the runner INVOKED — `run-gate.zsh --tests-dir` — not the bare
+# script name. Every profile without a runner names `run-gate.zsh` in prose, to
+# say which shape it lacks, so a bare-name test matches all six and the set
+# comes back EMPTY. That is not a harmless miss: the callers below then iterate
+# nothing and report clean, which is the vacuity this file's header warns about
+# — and the partition tripwire is what turns it back into a red.
+_profiles_without_runner() {
+  local p
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    _profile_section "$REPO_ROOT/$p" "Gate" | grep -qF -- 'run-gate.zsh --tests-dir' \
+      || printf '%s\n' "$p"
+  done < <(_profiles)
+  return 0   # status-clean on a clean tree — see _panel_restatements
+}
+
 # Print nothing when $1 carries EXACTLY the six contract headings in the
 # declared order; otherwise print what it actually carries. The real assertion
 # and its non-vacuity control both go through this, so the control proves this
 # detector rather than a paraphrase of it.
 _order_violation() {
   local got want
+  # An unreadable path is a violation, not a clean sweep: `_profiles` derives
+  # from `git ls-files`, so a profile deleted from the worktree without being
+  # staged is still in the roster.
+  [ -r "$1" ] || { printf '<unreadable: %s>\n' "$1"; return 0; }
   got="$(_profile_headings "$1")"
   want="$(printf '%s\n' "${HEADINGS[@]}")"
-  [ "$got" = "$want" ] || printf '%s\n' "$got"
+  # `${got:-<…>}` because the pipeline in `_profile_headings` swallows grep's
+  # no-match status, so a file with NO `## ` heading at all — the loudest
+  # mutation this detector exists to catch, and the one a heading demoted to
+  # `###` produces — yields an empty `got`, and printing that emits a lone
+  # newline the caller's command substitution strips back to "" (i.e. clean).
+  [ "$got" = "$want" ] || printf '%s\n' "${got:-<no \`## \` headings at all>}"
 }
 
 # Print any `## ` heading of $1 with no non-blank line before the next one. The
@@ -175,9 +480,9 @@ _arch_order_violation() {
   # and a profile ADDED without updating MAINTAINING.md's registry reds here, in
   # the same PR, which is what a derived sweep alone can never see.
   local n
-  n="$(_profiles | grep -c .)"
-  [ "$n" -eq 1 ] || {
-    printf 'the repo ships %s profile(s), expected 1.\n' "$n" >&2
+  n="$(_profiles | grep -c . || true)"
+  [ "$n" -eq 6 ] || {
+    printf 'the repo ships %s profile(s), expected 6.\n' "$n" >&2
     printf 'Adding one? THREE figures move together, in the same PR: this count,\n' >&2
     printf "the Resolve profile contract row in MAINTAINING.md's Invariants in force,\n" >&2
     printf "and ARCHITECTURE.md's 'Profiles populated today: **N**' sentence.\n" >&2
@@ -198,14 +503,17 @@ _arch_order_violation() {
   # profile at `development-spring/` or `development-react/` would satisfy every
   # contract check here and could never be loaded. The valid set is DERIVED from
   # the script's own header line, so the two cannot drift.
+  # Both directions go through `_emitted_types` (#1505), so neither can be
+  # dodged by editing the header comment alone — the pairing test below holds
+  # the comment and the code equal.
   local types p seg bad=""
-  types="$(sed -n 's/^#  *repo_type ∈ {\(.*\)};.*/\1/p' "$DISPATCH" | tr -d ' ')"
+  types="$(_emitted_types)"
   [ -n "$types" ] || { echo "could not read the repo_type set out of $DISPATCH" >&2; return 1; }
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     seg="${p%%/*}"
     seg="${seg#development-}"
-    printf '%s\n' "$types" | tr ',' '\n' | grep -qxF -- "$seg" \
+    printf '%s\n' "$types" | grep -qxF -- "$seg" \
       || bad+="$p (repo type '$seg')"$'\n'
   done < <(_profiles)
   [ -z "$bad" ] || {
@@ -213,6 +521,146 @@ _arch_order_violation() {
       "$types" "$bad" >&2
     return 1
   }
+}
+
+@test "#1505 the header line documents exactly the repo types the code emits" {
+  # The set-equality below is only as good as the set it reads, and one side of
+  # it comes from a COMMENT. Pair the comment against the code that assigns
+  # `repo_type` — the supported-language loop plus the fallback assignments — so
+  # a new arm added without touching the header cannot slip past every
+  # comment-derived check while the story's guarantee ("adding a repo type
+  # without shipping its profile reds the suite") quietly becomes false.
+  local documented emitted
+  documented="$(_dispatch_types | sort -u)"
+  emitted="$(_emitted_types)"
+  [ -n "$documented" ] || { echo "could not read the repo_type set out of $DISPATCH" >&2; return 1; }
+  [ -n "$emitted" ] || { echo "could not derive the emitted repo_type set from $DISPATCH" >&2; return 1; }
+  [ "$documented" = "$emitted" ] || {
+    printf 'the header line and the code disagree about repo_type.\n' >&2
+    printf 'documented:\n%s\n\nemitted by the code:\n%s\n' "$documented" "$emitted" >&2
+    return 1
+  }
+}
+
+@test "#1505 the repo_type assignment sites are the ones _emitted_types was taught" {
+  # `_emitted_types` recognises the shapes it was written for. No regex closes
+  # the set, so a NEW assignment shape would slip past it silently — and the
+  # story's whole guarantee ("adding a repo_type without shipping its profile
+  # reds the suite") would quietly become false. A count is what turns that into
+  # a red that names its own remedy.
+  local n
+  n="$(_repo_type_assignment_sites)"
+  [ "$n" -eq 6 ] || {
+    printf 'review-dispatch.zsh has %s `repo_type=` site(s), expected 6.\n' "$n" >&2
+    printf 'Today: the `local repo_type=""` declaration, the two fallback\n' >&2
+    printf 'literals, ${supported[1]}, $primary, and `local repo_type="$_RD_REPO_TYPE"`.\n' >&2
+    printf 'A NEW site must be taught to _emitted_types in the same PR, or the\n' >&2
+    printf 'set-equality below stops seeing the type it emits.\n' >&2
+    return 1
+  }
+}
+
+@test "#1505 non-vacuity: an UNQUOTED repo_type arm is still derived" {
+  # The spelling that defeated the first cut of this derivation. Drives the real
+  # helper over a planted script, and plants with awk — BSD sed emits a literal
+  # `n` for `\n` in a replacement, which would collapse the plant onto one line
+  # and silently drop `kubernetes` from the derived set.
+  local planted="$BATS_TEST_TMPDIR/dispatch-unquoted.zsh" emitted
+  awk '
+    { print }
+    /^      repo_type="kubernetes"$/ {
+      print "    elif [[ \"$is_tf\" == true ]]; then"
+      print "      repo_type=terraform"
+    }
+  ' "$DISPATCH" > "$planted"
+  emitted="$(_emitted_types "$planted")"
+  printf '%s\n' "$emitted" | grep -qxF terraform || {
+    echo "an unquoted repo_type= arm was not derived" >&2; return 1; }
+  # ...and the plant ADDED an arm rather than replacing one
+  printf '%s\n' "$emitted" | grep -qxF kubernetes || {
+    echo "the plant dropped kubernetes — the fixture is not an ADDED arm" >&2; return 1; }
+}
+
+@test "#1505 non-vacuity: an emitted type missing from the header reds the pairing" {
+  # Drives the REAL derivations over a planted script, so a narrowed sed is
+  # caught rather than re-implemented — this file's own control convention.
+  local planted="$BATS_TEST_TMPDIR/dispatch-extra-arm.zsh" documented emitted
+  # Add a fallback arm WITHOUT touching the header comment: the exact drift.
+  # awk, not sed: BSD sed emits a literal `n` for `\n` in a replacement, which
+  # collapses the plant onto one line — and `_emitted_types`' greedy match then
+  # yields ONLY terraform, silently dropping kubernetes, so the control would
+  # pass over a fixture that is not the shape this comment describes.
+  awk '
+    { print }
+    /^      repo_type="kubernetes"$/ {
+      print "    elif [[ \"$is_tf\" == true ]]; then"
+      print "      repo_type=\"terraform\""
+    }
+  ' "$DISPATCH" > "$planted"
+  emitted="$(_emitted_types "$planted")"
+  printf '%s\n' "$emitted" | grep -qxF terraform || {
+    echo "the plant did not take — _emitted_types found no terraform arm" >&2
+    return 1
+  }
+  printf '%s\n' "$emitted" | grep -qxF kubernetes || {
+    echo "the plant dropped kubernetes — the fixture is not an ADDED arm" >&2
+    return 1
+  }
+  documented="$(_dispatch_types "$planted" | sort -u)"
+  [ "$documented" != "$emitted" ]
+  # ...and the real script still pairs cleanly through the same helpers
+  [ "$(_dispatch_types | sort -u)" = "$(_emitted_types)" ]
+}
+
+@test "#1505 every repo type review-dispatch.zsh can emit HAS a profile" {
+  # The converse of the check above, and the half #1504 deliberately left out
+  # while only one type had a profile. Together the two are a SET EQUALITY.
+  #
+  # This is a BUILD-TIME requirement, adopted on purpose: from #1505 on, adding
+  # a repo_type to review-dispatch.zsh without shipping its profile reds the
+  # suite. It changes no RUNTIME behaviour — §1b's missing-profile arm is still
+  # notice-and-continue, and nothing here licenses turning that into a refusal.
+  #
+  # Driven from the set the CODE emits, not the header comment — the pairing
+  # test above holds the two equal, so this gate cannot be dodged by adding an
+  # arm and leaving the comment alone.
+  [ "$(_emitted_types | grep -c . || true)" -ge 1 ] \
+    || { echo "could not derive the emitted repo_type set from $DISPATCH" >&2; return 1; }
+  local bad
+  bad="$(_types_without_profile)"
+  [ -z "$bad" ] || {
+    printf 'repo type(s) review-dispatch.zsh can emit with no profile:\n%s\n' "$bad" >&2
+    printf 'Ship development-<type>/skills/resolve-profile/SKILL.md in the same PR,\n' >&2
+    printf 'or the run silently takes the conductor generic floor for that type.\n' >&2
+    return 1
+  }
+}
+
+@test "#1505 non-vacuity: a seventh repo type with no profile reds the converse" {
+  # Drives the REAL detector over a planted script rather than re-implementing
+  # its loop — this file's own control convention, and the only shape that can
+  # see the detector being narrowed.
+  local planted="$BATS_TEST_TMPDIR/dispatch-seventh.zsh"
+  # awk, not sed — see the sibling control above for why.
+  awk '
+    { print }
+    /^      repo_type="kubernetes"$/ {
+      print "    elif [[ \"$is_rust\" == true ]]; then"
+      print "      repo_type=\"rust\""
+    }
+  ' "$DISPATCH" > "$planted"
+  # the plant really took, measured through the same helper the detector uses
+  _emitted_types "$planted" | grep -qxF rust || {
+    echo "the plant did not take — _emitted_types found no rust arm" >&2
+    return 1
+  }
+  _emitted_types "$planted" | grep -qxF kubernetes || {
+    echo "the plant dropped kubernetes — the fixture is not an ADDED arm" >&2
+    return 1
+  }
+  _types_without_profile "$planted" | grep -qxF -- 'rust (no development-rust/skills/resolve-profile/SKILL.md)'
+  # ...and the REAL script still passes the same detector
+  [ -z "$(_types_without_profile)" ]
 }
 
 # --- the contract -----------------------------------------------------------
@@ -230,6 +678,19 @@ _arch_order_violation() {
       "$(printf '%s\n' "${HEADINGS[@]}")" "$bad" >&2
     return 1
   }
+}
+
+@test "#1505 non-vacuity: a profile stripped of every heading reds the order check" {
+  # The SWAP control below keeps the heading set non-empty by construction, so
+  # it cannot see the emptiness case — which is the one that used to read clean.
+  local planted="$BATS_TEST_TMPDIR/no-headings.md"
+  grep -v '^## ' "$PROFILE" > "$planted"
+  [ "$(_profile_headings "$planted" | grep -c . || true)" -eq 0 ]
+  _order_violation "$planted" | grep -qF -- 'no `## ` headings at all'
+  # ...and an unreadable path is a violation too, not a clean sweep
+  _order_violation "$BATS_TEST_TMPDIR/definitely-absent.md" | grep -qF -- '<unreadable:'
+  # ...while the real profile still passes the same detector
+  [ -z "$(_order_violation "$PROFILE")" ]
 }
 
 @test "#1504 non-vacuity: an out-of-order heading reds the order check" {
@@ -289,7 +750,7 @@ _arch_order_violation() {
     !drop { print }
   ' "$PROFILE" > "$planted"
   # the mutation really happened
-  [ "$(_profile_headings "$planted" | grep -c .)" -eq 6 ]
+  [ "$(_profile_headings "$planted" | grep -c . || true)" -eq 6 ]
   local empty
   empty="$(_empty_headings "$planted")"
   printf '%s\n' "$empty" | grep -qxF 'Fix-pass rules'
@@ -394,6 +855,75 @@ _arch_order_violation() {
   done
 }
 
+@test "#1505 the contract section states every clause the sweep gates" {
+  # MAINTAINING.md sends a new profile's author here, and this file gates five
+  # clauses the "A profile is:" list did not originally carry. Unpinned, the
+  # block can be deleted while every clause stays gated — and the author of the
+  # seventh profile then writes to the documented contract and reds tests whose
+  # requirements the contract never stated.
+  local flat n needle bad="" needles
+  flat="$(_arch_contract_flat "$ARCH")"
+  [ -n "$flat" ] || { echo "no Resolve profile contract section in $ARCH" >&2; return 1; }
+  # One needle per gated clause, INCLUDING the `none`-carries-a-reason clause
+  # (gated by the trailing-headings sweep) and the Panel ban (gated by
+  # `_panel_restatements`) — both of which the list once stated without any
+  # needle holding them there.
+  needles="$(printf '%s\n' \
+    'disable-model-invocation: false' \
+    'carries a **reason**' \
+    '#1502' \
+    '--gate-attest: not applicable' \
+    '_gate_pairs' \
+    '_gate_clauses' \
+    'no dimension list and' \
+    'narrows')"
+  [ "$(printf '%s\n' "$needles" | grep -c . || true)" -eq 8 ] || {
+    echo "the arch-clause needle list changed size. It covers the six clause bullets, the frontmatter disable-model-invocation clause above them, and clause 4's SECOND table (_gate_clauses) — which is why it is larger than the bullet count." >&2
+    return 1
+  }
+  while IFS= read -r needle; do
+    [ -n "$needle" ] || continue
+    case "$flat" in *"$needle"*) : ;; *) bad+="$needle"$'\n' ;; esac
+  done <<< "$needles"
+  [ -z "$bad" ] || {
+    printf 'clause(s) the sweep gates but the contract section no longer states:\n%s\n' \
+      "$bad" >&2
+    return 1
+  }
+  # ...and the spelled count tracks the BULLETS, derived rather than trusted, so
+  # deleting a clause cannot leave the sentence claiming one more than it lists.
+  local bullets
+  bullets="$(awk '
+    /further clauses became normative with #1505/ { inside = 1; next }
+    inside && /^## / { exit }   # never leave the contract section
+    inside && /^\*\*/ { exit }
+    inside && /^- / { n++ }
+    END { print n + 0 }
+  ' "$ARCH")"
+  [ "$bullets" -eq 6 ] || {
+    printf 'the clause list holds %s bullet(s), expected 6.\n' "$bullets" >&2
+    return 1
+  }
+  n="$(sed -n 's/^\*\*\([A-Za-z]*\) further clauses became normative with #1505\*\*.*/\1/p' "$ARCH")"
+  [ "$n" = "Six" ] || {
+    printf 'the contract section says "%s further clauses" over %s bullets.\n' \
+      "$n" "$bullets" >&2
+    return 1
+  }
+}
+
+@test "#1505 non-vacuity: a clause stripped from the contract section reds the sweep" {
+  local planted="$BATS_TEST_TMPDIR/arch-no-clause.md" flat
+  grep -vF -- 'disable-model-invocation: false' "$ARCH" > "$planted"
+  flat="$(_arch_contract_flat "$planted")"
+  [ -n "$flat" ] || { echo "the planted contract section is empty" >&2; return 1; }
+  case "$flat" in *'disable-model-invocation: false'*)
+    echo "the strip did not take" >&2; return 1 ;; esac
+  # ...and the real file still carries it, through the same extractor
+  case "$(_arch_contract_flat "$ARCH")" in *'disable-model-invocation: false'*) : ;;
+    *) echo "ARCHITECTURE.md no longer states the clause" >&2; return 1 ;; esac
+}
+
 @test "#1504 non-vacuity: a heading dropped from the contract section reds the pairing" {
   # The mutation a whole-file `grep -qF Gate` waves through, because `Gate`
   # also appears in ARCHITECTURE.md's quality-gate and gate-attestation prose.
@@ -404,6 +934,514 @@ _arch_order_violation() {
   [ -n "$bad" ] || { echo "dropping **Gate** from the contract section did not red" >&2; return 1; }
   # ...and the word is still in the file, which is why a whole-file check fails
   grep -qF 'Gate' "$planted"
+}
+
+# --- #1505: each Gate is pinned to the file that already runs the command ----
+#
+# A profile's Gate is only worth having if it names what the plugin's own tooling
+# actually runs. Each pair below is asserted on BOTH sides — in the profile and
+# in its anchor file — so the two cannot drift apart: change the agent's command
+# without the profile (or the reverse) and this reds.
+#
+# The needles are TOKENS, not whole command strings. The anchor lines are
+# reproduction invocations carrying shell noise the profile must not repeat
+# (`2>&1 | tail -80`, `> /tmp/go-test.log`), so a whole-string needle would
+# either force that noise into the profile or rot on the first cosmetic edit.
+
+# type | anchor file | token…  — one row per repo type with an app-style gate.
+_gate_pairs() {
+  printf '%s\n' \
+    'python|development-python/agents/python-ci-fixer.md|pytest --cov|.venv/bin/python -m pytest' \
+    'java|development-java/agents/java-ci-fixer.md|./gradlew build test jacocoTestReport' \
+    'go|development-go/agents/go-ci-fixer.md|go test ./...|-race' \
+    'swift|development-swift/agents/swift-ci-fixer.md|swift test|--enable-code-coverage' \
+    'kubernetes|development-kubernetes/skills/maintenance/SKILL.md|kubeconform|kube-linter|kyverno test'
+}
+
+# Planted row sets for the non-vacuity control below. Each is a `_gate_pairs`
+# stand-in carrying exactly one malformed row, so the control drives the real
+# parser instead of a paraphrase of it.
+_planted_missing_token_row() {
+  # a token present in the anchor's neighbourhood but NOT in the profile
+  printf '%s\n' \
+    'python|development-python/agents/python-ci-fixer.md|--tb=short --cov-fail-under=101'
+}
+_planted_empty_token_row() {
+  printf '%s\n' 'python|development-python/agents/python-ci-fixer.md||pytest --cov'
+}
+_planted_tokenless_row() {
+  printf '%s\n' 'python|development-python/agents/python-ci-fixer.md'
+}
+
+# Every gate/anchor violation, one per line. $1 overrides the row source so the
+# control can drive THIS parser over a planted set.
+#
+# The `|`-walk has two silent-degeneration modes, and both are named rather than
+# tolerated: an EMPTY token would make `grep -qF -- ""` match any non-empty file
+# (so the row asserts nothing while still counting), and a row with no token
+# fields would leave `${row#*|}` a no-op, turning the anchor PATH into the sole
+# needle — which several profiles contain verbatim, making the check a tautology.
+_gate_pair_violations() {
+  local rows="${1:-_gate_pairs}" row type anchor tok profile
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    type="${row%%|*}"; row="${row#*|}"
+    anchor="${row%%|*}"
+    case "$row" in
+      *'|'*) row="${row#*|}" ;;
+      *) printf '%s: row names no token\n' "$type"; continue ;;
+    esac
+    profile="$REPO_ROOT/development-$type/skills/resolve-profile/SKILL.md"
+    [ -r "$profile" ] || { printf '%s: no profile at %s\n' "$type" "$profile"; continue; }
+    [ -r "$REPO_ROOT/$anchor" ] || { printf '%s: no anchor at %s\n' "$type" "$anchor"; continue; }
+    while :; do
+      tok="${row%%|*}"
+      if [ -z "$tok" ]; then
+        printf '%s: empty token in its _gate_pairs row\n' "$type"
+      else
+        grep -qF -- "$tok" "$profile" || printf '%s: profile lacks <<%s>>\n' "$type" "$tok"
+        grep -qF -- "$tok" "$REPO_ROOT/$anchor" \
+          || printf '%s: %s lacks <<%s>>\n' "$type" "$anchor" "$tok"
+      fi
+      [ "$row" = "$tok" ] && break
+      row="${row#*|}"
+    done
+  done < <("$rows")
+  return 0   # status-clean on a clean tree — see _panel_restatements
+}
+
+@test "#1505 the gate-pair list covers every profile that has no attestable runner" {
+  # The tripwire the roster count is to the sweep. Both needle tests below
+  # iterate this list and report clean on a short one, so a session resolving a
+  # red pair could delete the row and go green with no other signal.
+  local n_pairs n_app
+  # `|| true` on both: an empty set is exactly what this tripwire must REPORT
+  # (a discriminator that matches nothing makes every caller vacuous), and the
+  # bare `grep -c` would abort under errexit before the message could print.
+  n_pairs="$(_gate_pairs | grep -c . || true)"
+  n_app="$(_profiles_without_runner | grep -c . || true)"
+  [ "$n_pairs" -eq "$n_app" ] || {
+    printf '%s gate pair(s) for %s profile(s) with no attestable runner.\n' \
+      "$n_pairs" "$n_app" >&2
+    printf 'Every such profile needs a row in _gate_pairs, or its Gate is unpinned.\n' >&2
+    _profiles_without_runner >&2
+    return 1
+  }
+  # ...and the split is real: the exemplar HAS a runner, so it is not in the set
+  _profiles_without_runner \
+    | grep -qxF 'development-claude-plugin/skills/resolve-profile/SKILL.md' && {
+      echo "the claude-plugin profile's Gate no longer names run-gate.zsh" >&2
+      return 1
+    }
+  return 0
+}
+
+@test "#1505 every gate token appears in BOTH the profile and its anchor file" {
+  local bad
+  bad="$(_gate_pair_violations)"
+  [ -z "$bad" ] || { printf 'gate/anchor drift:\n%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#1505 non-vacuity: a token missing from the profile reds the pair check" {
+  # Drives the REAL parser over a planted row set, so the failure mode this
+  # control names — "the row parsing silently produced no tokens" — is actually
+  # exercised. A control that only greps a stripped file proves nothing about
+  # the `|`-walk that decides the verdict.
+  local out
+  # a token that is in the anchor but NOT in the profile
+  out="$(_gate_pair_violations _planted_missing_token_row)"
+  printf '%s\n' "$out" | grep -qF -- 'python: profile lacks <<--tb=short --cov-fail-under=101>>'
+  # an EMPTY token must be named, not silently matched by `grep -qF -- ""`
+  out="$(_gate_pair_violations _planted_empty_token_row)"
+  printf '%s\n' "$out" | grep -qF -- 'python: empty token in its _gate_pairs row'
+  # a row naming NO token at all must be named, not degenerate into grepping
+  # the anchor path (which several profiles contain verbatim)
+  out="$(_gate_pair_violations _planted_tokenless_row)"
+  printf '%s\n' "$out" | grep -qF -- 'python: row names no token'
+  # ...and the real rows still pass the same parser
+  [ -z "$(_gate_pair_violations)" ]
+}
+
+@test "#1505 the gate-pair rows carry the exact token count recorded" {
+  # The per-row twin of the row-count tripwire: without it a session resolving a
+  # red pair can delete the offending TOKEN from its row and go green, since the
+  # row itself survives and the row count is unchanged.
+  local row n=0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    n=$(( n + $(printf '%s' "$row" | tr -cd '|' | wc -c) - 1 ))
+  done < <(_gate_pairs)
+  [ "$n" -eq 10 ] || {
+    printf 'the gate rows carry %s token(s), expected 10.\n' "$n" >&2
+    printf 'python 2, java 1, go 2, swift 2, kubernetes 3. Removing one unpins\n' >&2
+    printf 'that half of its Gate from the anchor that runs the command.\n' >&2
+    return 1
+  }
+}
+
+@test "#1505 a profile with no attestable runner says --gate-attest is not applicable" {
+  # `--gate-attest` (#981) carries a tree identity a run-gate.zsh-shaped runner
+  # produced. A type with no such runner has nothing to attest — and the flag is
+  # fail-closed on a MISMATCH, not on a fabricated value, so a profile that
+  # stays silent here invites a caller to pass one anyway and skip a re-run it
+  # never earned. Derived from the Gate's own content, so a type that later
+  # grows a runner stops being required to say this by editing that Gate.
+  local p bad=""
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    _profile_section "$REPO_ROOT/$p" "Gate" \
+      | grep -qF -- '--gate-attest' \
+      || { bad+="$p: Gate never mentions --gate-attest"$'\n'; continue; }
+    _profile_section "$REPO_ROOT/$p" "Gate" \
+      | grep -qF -- 'not applicable' \
+      || bad+="$p: Gate mentions --gate-attest but not that it is not applicable"$'\n'
+  done < <(_profiles_without_runner)
+  [ -z "$bad" ] || { printf 'attestation statement missing:\n%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#1505 the kubernetes profile explains why its anchor is not a ci-fixer" {
+  # The one anchor that differs in KIND, and the one a later reader is most
+  # likely to "fix" into line with the other four. development-kubernetes ships
+  # no ci-fixer agent at all — assert that, so the explanation cannot outlive
+  # the fact, and the explanation itself, so the fact cannot outlive its reason.
+  local dir="$REPO_ROOT/development-kubernetes/agents"
+  [ -d "$dir" ] || { echo "no development-kubernetes/agents directory" >&2; return 1; }
+  run ls "$dir"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -q 'ci-fixer' && {
+    echo "development-kubernetes now ships a ci-fixer — re-anchor its Gate" >&2
+    return 1
+  }
+  local gate
+  gate="$(_profile_section "$REPO_ROOT/development-kubernetes/skills/resolve-profile/SKILL.md" "Gate")"
+  printf '%s' "$gate" | grep -qF -- 'ships **no** ci-fixer agent' || {
+    echo "the kubernetes Gate no longer says WHY its anchor differs" >&2
+    return 1
+  }
+}
+
+# --- #1505: the Panel records a pointer and nothing more --------------------
+
+@test "#1505 the derived dimension roster is real, so the Panel ban is not vacuous" {
+  # The ban below is only as strong as the needle set it derives, and the
+  # derivation is silent about failure: a review skill whose Dimension column
+  # the awk cannot locate contributes NOTHING and says nothing. So assert it
+  # PER FILE — an aggregate floor lets a whole panel drop out unnoticed, taking
+  # its dimensions off the ban with it.
+  local f n bad=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    n="$(_review_dimensions_of "$REPO_ROOT/$f" | grep -c . || true)"
+    [ "$n" -ge 1 ] || bad+="$f: no dimension column could be parsed"$'\n'
+  done < <(git -C "$REPO_ROOT" ls-files 'development-*/skills/review/SKILL.md')
+  [ -z "$bad" ] || { printf 'review panel(s) contributing no dimensions:\n%s\n' "$bad" >&2; return 1; }
+
+  # ...and the total is a COUNT, not a floor — this file's own doctrine (a floor
+  # moves WITH a deletion rather than against it).
+  local dims total
+  dims="$(_review_dimensions)"
+  total="$(printf '%s\n' "$dims" | grep -c . || true)"
+  [ "$total" -eq 13 ] || {
+    printf 'the derived dimension roster holds %s entries, expected 13:\n%s\n' \
+      "$total" "$dims" >&2
+    printf 'A panel gaining or losing a dimension moves this figure in the same PR.\n' >&2
+    return 1
+  }
+  # spot-check both table shapes: `| Agent | Model | Dimension |` and the
+  # kubernetes `| Dimension | Agent |`
+  printf '%s\n' "$dims" | grep -qxF code_quality
+  printf '%s\n' "$dims" | grep -qxF argocd
+}
+
+@test "#1505 no profile's Panel enumerates a review dimension or a severity bar" {
+  # ARCHITECTURE.md: the Panel RECORDS the review_skill and never overrides it,
+  # and every profile states in as many words that it carries no dimension list
+  # AND no bar (#1432 — each of those rules already has one home, with the agent
+  # that applies it). Both halves are gated: a dimension roster here drifts from
+  # the review skill's table, and a severity bar here drifts from the agents'.
+  local bad
+  bad="$(_panel_restatements)"
+  [ -z "$bad" ] || {
+    printf 'Panel restatement (the second statement that drifts, #1432):\n%s\n' "$bad" >&2
+    return 1
+  }
+}
+
+@test "#1505 non-vacuity: a planted dimension and a planted bar each red the ban" {
+  # Drives the REAL detector over planted profiles rather than re-implementing
+  # its loop, and exercises BOTH halves — a control covering only dimensions
+  # would leave the bar half unproven.
+  local dir="$BATS_TEST_TMPDIR/panel-probe"
+  mkdir -p "$dir/development-python/skills/resolve-profile"
+  local planted="$dir/development-python/skills/resolve-profile/SKILL.md"
+
+  # Plant INSIDE the Panel section — appending at end-of-file would land under
+  # `## Residue`, where the detector correctly ignores it, and the control would
+  # then "fail" for a reason that says nothing about the ban.
+  _plant_in_panel() {  # $1 = line to insert
+    awk -v ins="$1" '
+      { print }
+      /^## Panel$/ { print ""; print ins }
+    ' "$REPO_ROOT/development-python/skills/resolve-profile/SKILL.md" > "$planted"
+  }
+
+  _plant_in_panel 'Dimensions reviewed: bugs, security.'
+  _profile_section "$planted" "Panel" | grep -qF -- 'Dimensions reviewed' \
+    || { echo "the dimension plant did not land inside the Panel section" >&2; return 1; }
+  _panel_restatements "$dir" | grep -qF -- "Panel names the dimension 'bugs'"
+
+  _plant_in_panel 'Bar: a WARNING and above blocks the round.'
+  _profile_section "$planted" "Panel" | grep -qF -- 'Bar:' \
+    || { echo "the bar plant did not land inside the Panel section" >&2; return 1; }
+  _panel_restatements "$dir" | grep -qF -- 'Panel restates a severity bar'
+
+  # ...and the real profiles pass the same detector
+  [ -z "$(_panel_restatements)" ]
+}
+
+@test "#1505 every profile's three trailing headings say none, with a reason" {
+  # #1504 asserted this for the exemplar only. Swept, it is what stops #1505's
+  # five copies quietly acquiring a rule in a position NO step is contracted to
+  # dereference (§1b: those positions are #1506's to decide). A bare `**none**`
+  # is not enough either — the reason is what tells the next author whether the
+  # heading is empty by accident or by decision.
+  local p h first sec bad=""
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    for h in "Fix-pass rules" "Documentation expectations" "Residue"; do
+      sec="$(_profile_section "$REPO_ROOT/$p" "$h")"
+      # `|| true`: a DROPPED or emptied heading is exactly what this reports,
+      # and `grep -m1 .` exits 1 on empty input — the bare form aborts under
+      # errexit, making the `<empty>` diagnostic below unreachable.
+      first="$(printf '%s\n' "$sec" | grep -m1 . || true)"
+      case "$first" in
+        '**none**'*) : ;;
+        *) bad+="$p / $h: does not open with **none** (got: ${first:-<empty>})"$'\n'; continue ;;
+      esac
+      # ...and it says more than the bare word. Asserted as a SECOND non-blank
+      # line rather than a character count: `**none**` is 9 characters, so a
+      # length threshold is satisfied by `**none** yet.` — which tells the next
+      # author nothing about whether the heading is empty by accident or by
+      # decision, the very thing the reason exists to record.
+      [ "$(printf '%s\n' "$sec" | grep -c . || true)" -ge 2 ] \
+        || bad+="$p / $h: **none** with no reason"$'\n'
+    done
+  done < <(_profiles)
+  [ -z "$bad" ] || { printf 'trailing-heading contract:\n%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#1505 the Gate clause table covers every runner-less profile" {
+  # The tripwire the roster count is to the sweep: the accumulator below reports
+  # clean on an empty table, so a session resolving a red clause could delete
+  # its row and go green with no other signal.
+  local n types
+  n="$(_gate_clauses | grep -c . || true)"
+  [ "$n" -eq 19 ] || {
+    printf 'the Gate clause table holds %s row(s), expected 19.\n' "$n" >&2
+    printf 'A clause earns a row when losing it reinstates a finding already\n' >&2
+    printf 'raised as blocking. Removing one needs that argument, in the PR.\n' >&2
+    return 1
+  }
+  # ...and every runner-less profile is represented, so a whole type cannot
+  # silently fall out of the table. The required set is DERIVED, not the closed
+  # hand-written list this file's header forbids (#936): a seventh runner-less
+  # type must red here rather than pass on a tripwire that moved for an
+  # unrelated reason.
+  types="$(_gate_clauses | cut -d'|' -f1 | sort -u)"
+  local p t
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    t="${p%%/*}"; t="${t#development-}"
+    printf '%s\n' "$types" | grep -qxF -- "$t" \
+      || { printf 'no Gate clause row for %s\n' "$t" >&2; return 1; }
+  done < <(_profiles_without_runner)
+}
+
+@test "#1505 every Gate clause needle occurs exactly once in the Gate it guards" {
+  # Mechanises the UNIQUE half of the rule the table's header states. A needle
+  # matching twice is a needle that can go on matching an untouched neighbour
+  # after the clause it guards is reverted — the `kustomize` failure, which took
+  # two rounds to spot by eye. (The DISCRIMINATING half cannot be mechanised:
+  # it is a claim about defective text that no longer exists.)
+  local row type needle profile n bad=""
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    type="${row%%|*}"
+    # Same arity guard both sibling accumulators carry: `${row#*|}` is a no-op
+    # on a separator-less row, which would grep the Gate for the type's own name.
+    case "$row" in
+      *'|'*) needle="${row#*|}" ;;
+      *) bad+="$row: row names no needle"$'\n'; continue ;;
+    esac
+    profile="$REPO_ROOT/development-$type/skills/resolve-profile/SKILL.md"
+    [ -f "$profile" ] || continue
+    # OCCURRENCES, not lines: `grep -c` counts matching LINES, so a short needle
+    # recurring twice inside one wrapped markdown line — the exact shape the
+    # `kustomize` failure had — would count as 1 and pass, leaving the very
+    # survivable needle this sweep exists to forbid.
+    n="$(_profile_section "$profile" "Gate" | grep -oF -- "$needle" | grep -c . || true)"
+    [ "$n" -eq 1 ] || bad+="$type: <<$needle>> occurs $n time(s) in its Gate"$'\n'
+  done < <(_gate_clauses)
+  [ -z "$bad" ] || {
+    printf 'non-unique Gate clause needle(s):\n%s\n' "$bad" >&2
+    printf 'A needle matching more than once survives the reversion it guards.\n' >&2
+    return 1
+  }
+}
+
+@test "#1505 every pinned Gate clause is still in its profile" {
+  local bad
+  bad="$(_gate_clause_violations)"
+  [ -z "$bad" ] || {
+    printf 'Gate clause(s) lost — each reinstates a finding raised as blocking:\n%s\n' "$bad" >&2
+    return 1
+  }
+}
+
+@test "#1505 non-vacuity: a stripped Gate clause reds the sweep" {
+  # Drives the REAL accumulator over a planted tree, and over a planted ROW
+  # SET, so both halves — the needle check and the table walk — are shown to
+  # discriminate.
+  # Captured into a variable rather than piped into `grep -q`: a `-q` grep exits
+  # as soon as it matches, and the still-writing accumulator upstream then takes
+  # SIGPIPE and reports a write error — noise that reads like a real failure.
+  local dir="$BATS_TEST_TMPDIR/clause-probe" out
+  local rel="development-go/skills/resolve-profile/SKILL.md"
+  mkdir -p "$dir/development-go/skills/resolve-profile"
+  grep -vF -- 'unconditionally' "$REPO_ROOT/$rel" > "$dir/$rel"
+  out="$(_gate_clause_violations "$dir")"
+  printf '%s\n' "$out" | grep -qF -- 'go: Gate lost <<unconditionally>>'
+  # an empty needle is named rather than matching everything
+  _planted_empty_clause_row() { printf '%s\n' 'go|'; }
+  out="$(_gate_clause_violations "$REPO_ROOT" _planted_empty_clause_row)"
+  printf '%s\n' "$out" | grep -qF -- 'empty needle in its _gate_clauses row'
+  # ...and a row that lost its separator entirely is named too, rather than
+  # degenerating into grepping the Gate for the type's own name (always a match)
+  _planted_tokenless_clause_row() { printf '%s\n' 'go'; }
+  out="$(_gate_clause_violations "$REPO_ROOT" _planted_tokenless_clause_row)"
+  printf '%s\n' "$out" | grep -qF -- 'go: row names no needle'
+  # ...and the real tree passes the real table
+  [ -z "$(_gate_clause_violations)" ]
+}
+
+@test "#1505 the kubernetes render delegation resolves at the file it points at" {
+  # The round-1 CRITICAL's remedy is a POINTER, so it has two failure modes and
+  # the clause table only covers one. This is the other: the referenced file
+  # keeping the set the profile tells a model to read there.
+  local review="$REPO_ROOT/development-kubernetes/skills/review/SKILL.md"
+  local gate
+  gate="$(_profile_section \
+    "$REPO_ROOT/development-kubernetes/skills/resolve-profile/SKILL.md" "Gate")"
+  printf '%s' "$gate" | grep -qF -- 'development-kubernetes/skills/review/SKILL.md' \
+    || { echo "the kubernetes Gate no longer names the file it defers to" >&2; return 1; }
+  [ -f "$review" ] || { echo "the referenced review skill is gone" >&2; return 1; }
+  grep -qF -- 'Skip what the CI render job skips' "$review" || {
+    echo "the review skill lost the skip set the kubernetes Gate defers to —" >&2
+    echo "a model told to 'read the set there' now finds none and renders" >&2
+    echo "everything, which is the #1505 round-1 CRITICAL verbatim." >&2
+    return 1
+  }
+}
+
+@test "#1505 every runner-less profile's Version bump opens with none, and keeps its floor" {
+  # §4 DEREFERENCES this heading, and nothing read its body for any profile but
+  # the exemplar — so replacing a body with "bump on every change" left the
+  # suite green while every run of that type performed a §4 bump on a repo with
+  # no <plugin>/ subject. The four language profiles additionally carry a
+  # CONDITIONAL none, because a detected language beats the claude-plugin
+  # fallback: a language repo that also ships plugin content loads this profile,
+  # and an unconditional none would supersede §4's floor rather than narrow it.
+  local bad
+  bad="$(_version_bump_violations)"
+  [ -z "$bad" ] || { printf 'Version bump contract:\n%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#1505 non-vacuity: each Version bump branch reds on its own mutation" {
+  # Drives the REAL accumulator over planted trees rather than re-greping a
+  # copied needle — the shape `_profile_is_tracked` was extracted for, and this
+  # file's stated convention. A control holding its own copy of the needle
+  # cannot see the check's needle weakened, which is the mutation that matters.
+  # Captured rather than piped into `grep -q` — see the sibling control for why.
+  local dir="$BATS_TEST_TMPDIR/vb-probe" out
+  local rel="development-python/skills/resolve-profile/SKILL.md"
+  local real="$REPO_ROOT/$rel"
+  mkdir -p "$dir/development-python/skills/resolve-profile"
+
+  # Replace the body wholesale: a bold directive, not a **none rule at all.
+  _plant_vb "$rel" '**Bump this plugin manifest on every change.**' > "$dir/$rel"
+  out="$(_version_bump_violations "$dir")"
+  printf '%s\n' "$out" | grep -qF -- 'does not OPEN with **none'
+
+  # PREPEND a contradictory directive, leaving the conditional paragraphs
+  # below. A check that only asked whether a `**none` line EXISTS somewhere
+  # passes this, while §4's reader — who reads top-down — meets the bump first.
+  awk '
+    /^## Version bump$/ { print; print ""; print "**Bump the plugin manifests on every change.**"; next }
+    { print }
+  ' "$real" > "$dir/$rel"
+  out="$(_version_bump_violations "$dir")"
+  printf '%s\n' "$out" | grep -qF -- 'does not OPEN with **none'
+
+  # A PLAIN-PROSE prepend — the shape the carried blocker literally named. It is
+  # not bold, so the first-bold-line rule alone cannot see it.
+  awk '
+    /^## Version bump$/ { print; print ""; print "Bump plugin.json and marketplace.json on every change."; next }
+    { print }
+  ' "$real" > "$dir/$rel"
+  out="$(_version_bump_violations "$dir")"
+  printf '%s\n' "$out" | grep -qF -- 'states a directive ABOVE its **none rule'
+
+  # ...and one carrying NO manifest filename, so only the anchored `bump`
+  # alternative can catch it. Without this the plant above satisfies all three
+  # alternatives at once, and the anchored one could be deleted unnoticed.
+  awk '
+    /^## Version bump$/ { print; print ""; print "Bump the plugin manifests on every change."; next }
+    { print }
+  ' "$real" > "$dir/$rel"
+  out="$(_version_bump_violations "$dir")"
+  printf '%s\n' "$out" | grep -qF -- 'states a directive ABOVE its **none rule'
+
+  # An UNCONDITIONAL none: it opens correctly, so the opener arm passes and the
+  # three conditional needles are what must fire. This is the mutation the
+  # carried blocker was filed against, and the reason the check exists.
+  _plant_vb "$rel" '**none** — nothing to bump in a repo of this type.' > "$dir/$rel"
+  out="$(_version_bump_violations "$dir")"
+  printf '%s\n' "$out" | grep -qF -- 'is not the CONDITIONAL none'
+  printf '%s\n' "$out" | grep -qF -- "the floor's marketplace half"
+  printf '%s\n' "$out" | grep -qF -- 'must not supersede the floor'
+
+  # ...and the kubernetes arm's own reason, which is a different needle
+  local krel="development-kubernetes/skills/resolve-profile/SKILL.md"
+  mkdir -p "$dir/development-kubernetes/skills/resolve-profile"
+  _plant_vb "$krel" '**none** — nothing to bump.' > "$dir/$krel"
+  out="$(_version_bump_violations "$dir")"
+  printf '%s\n' "$out" | grep -qF -- 'does not say WHY none holds here'
+
+  # ...and the real tree passes the same accumulator
+  [ -z "$(_version_bump_violations)" ]
+}
+
+@test "#1505 every app-type profile names where a type-specific rule would come from" {
+  # The five #1505 profiles defer their three `none` headings to #1502's
+  # read-out. Pinning the pointer keeps "none" a DECISION with a named trigger
+  # rather than an omission — the exemplar defers to #1506 instead, which is why
+  # this is scoped to the profiles with no attestable runner.
+  #
+  # Scoped PER HEADING, not per file: a whole-file grep passes on one surviving
+  # mention, so the pointer could be deleted from two of the three headings with
+  # the check still clean.
+  local p h bad=""
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    for h in "Fix-pass rules" "Documentation expectations" "Residue"; do
+      _profile_section "$REPO_ROOT/$p" "$h" | grep -qF -- '#1502' \
+        || bad+="$p / $h: names no evidence source"$'\n'
+    done
+  done < <(_profiles_without_runner)
+  [ -z "$bad" ] || {
+    printf 'heading(s) whose `none` names no evidence source:\n%s\n' "$bad" >&2
+    return 1
+  }
 }
 
 # --- the move: present in the profile, ABSENT from the conductor CORPUS ------
@@ -427,7 +1465,7 @@ _moved_needles() {
   # iterate this list and report clean on an empty one, so a session resolving a
   # red "still in the conductor" failure could delete the offending needle and
   # both go green with no other signal.
-  [ "$(_moved_needles | grep -c .)" -eq 5 ]
+  [ "$(_moved_needles | grep -c . || true)" -eq 5 ]
 }
 
 @test "#1504 every moved rule is present in the claude-plugin profile" {
@@ -503,7 +1541,7 @@ _moved_needles() {
 
 @test "#1504 each of the three vacated sites carries a profile pointer" {
   local n
-  n="$(grep -oF -- "$POINTER" "$CONDUCTOR" | grep -c .)"
+  n="$(grep -oF -- "$POINTER" "$CONDUCTOR" | grep -c . || true)"
   [ "$n" -eq 3 ] || {
     printf 'the conductor carries %s profile pointer(s), expected 3 (§3, §4, §E4).\n' "$n" >&2
     return 1
@@ -896,7 +1934,7 @@ _roster_sites() {
     *) echo "the row does not name its authoritative site" >&2; return 1 ;; esac
   recorded="$(sed -n 's/.*gated == roster == \([0-9][0-9]*\).*/\1/p' <<< "$row")"
   [ -n "$recorded" ] || { echo "the row records no gated == roster == N figure" >&2; return 1; }
-  derived="$(_profiles | grep -c .)"
+  derived="$(_profiles | grep -c . || true)"
   [ "$recorded" -eq "$derived" ] || {
     printf 'MAINTAINING.md records %s profile(s); the derived roster holds %s.\n' \
       "$recorded" "$derived" >&2
@@ -910,7 +1948,7 @@ _roster_sites() {
   # gated: #1505 moves the test constant and MAINTAINING.md's row together, and
   # this is the one that would otherwise be left behind saying "1".
   local derived arch_count
-  derived="$(_profiles | grep -c .)"
+  derived="$(_profiles | grep -c . || true)"
   arch_count="$(sed -n 's/^Profiles populated today: \*\*\([0-9][0-9]*\)\*\*.*/\1/p' "$ARCH")"
   [ -n "$arch_count" ] || {
     echo "ARCHITECTURE.md records no 'Profiles populated today: **N**' figure" >&2

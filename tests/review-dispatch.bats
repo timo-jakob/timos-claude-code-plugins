@@ -1486,8 +1486,12 @@ detect() {  # $1 = languages json ; rest = extra flags
   local dash="$BATS_TEST_TMPDIR/-detect-dash"
   mkdir -p "$dash"
   printf 'primary: go\n' > "$dash/.maintenance.yml"
+  # RELATIVE, from inside the tmpdir: an absolute path never enters the
+  # `[[ "$repo" == -* ]]` arm, so an absolute fixture leaves the normalisation
+  # deletable with this test still green. The plan sibling above builds it this
+  # way for exactly that reason.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python","go"]}' \
-    zsh "$S" detect --repo "$dash"
+    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' detect --repo -detect-dash"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
 }
@@ -1504,12 +1508,15 @@ detect() {  # $1 = languages json ; rest = extra flags
   git -C "$dash" add -A
   git -C "$dash" commit -qm base
   git -C "$dash" branch -M main
+  # Both invocations RELATIVE, from inside the tmpdir — with an absolute path
+  # neither subcommand's dash arm is entered, and this degenerates into a
+  # duplicate of the plain agreement property above.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["java","python"]}' \
-    zsh "$S" plan --repo "$dash" --base main
+    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' plan --repo -agree-dash --base main"
   [ "$status" -eq 0 ]
   local from_plan; from_plan="$(echo "$output" | jq -r .repo_type)"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["java","python"]}' \
-    zsh "$S" detect --repo "$dash"
+    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' detect --repo -agree-dash"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .repo_type)" = "$from_plan" ]
   [ "$from_plan" = "java" ]
@@ -1580,4 +1587,60 @@ detect() {  # $1 = languages json ; rest = extra flags
   run zsh "$S" --help
   [ "$status" -eq 0 ]
   contains "$output" "plan|detect|scope-findings"
+}
+
+# ---- detect ∘ the profile roster: §1b's composition, end to end (#1505) -----
+#
+# §1b does two things: read `detect`'s repo_type, then load
+# `development-<that value>:resolve-profile` by name. Each half is covered
+# above and in tests/resolve-profile-contract.bats — but nothing joined them, so
+# `detect` could emit a value no profile is named for and both suites stay
+# green while every run of that type silently takes the conductor's generic
+# floor. This drives the JOIN.
+#
+# §1b renders only the generic `development-<repo_type>:resolve-profile`
+# template — it never emits a per-type literal — so there is no rendering to
+# needle. Substituting detect's real output into that template is the closest
+# thing to what §1b actually does, and it is what this asserts.
+
+# Is $1 (a repo-relative path) tracked? `ls-files` alone exits 0 with EMPTY
+# output for an untracked path, so the `grep -qxF` is what makes this decide
+# anything. Extracted so the join and its non-vaciuty control drive the SAME
+# code — a control holding its own copy of the pipeline cannot see that copy
+# and the real one diverge.
+_profile_is_tracked() {
+  git -C "$REPO_ROOT" ls-files -- "$1" | grep -qxF -- "$1"
+}
+
+@test "detect: #1505 every emitted repo_type resolves to a shipped profile" {
+  local langs type path
+  for langs in '{"languages":["python"]}' \
+               '{"languages":["java"]}' \
+               '{"languages":["go"]}' \
+               '{"languages":["swift"]}' \
+               '{"languages":[],"is_kubernetes":true}' \
+               '{"languages":[],"is_claude_plugin":true}'; do
+    detect "$langs"
+    [ "$status" -eq 0 ] || { echo "detect failed for $langs: $output"; return 1; }
+    # the whole document, so a descriptor leaking extra keys is caught here too
+    [ "$(echo "$output" | jq -r 'keys | join(",")')" = "repo_type" ] \
+      || { echo "$langs: detect emitted more than repo_type: $output"; return 1; }
+    type="$(echo "$output" | jq -r .repo_type)"
+    path="development-$type/skills/resolve-profile/SKILL.md"
+    _profile_is_tracked "$path" \
+      || { echo "$langs -> repo_type '$type', but $path is not tracked"; return 1; }
+  done
+}
+
+@test "detect: #1505 non-vacuity: an unshipped repo_type fails the same join" {
+  # Proves the join above discriminates rather than passing because `ls-files`
+  # returns something for anything. `rust` is not a repo type this script emits,
+  # so no profile exists for it — the exact shape a new type without a profile
+  # would have. Drives the join's OWN helper, so dropping the `| grep -qxF`
+  # from it reds here too.
+  run _profile_is_tracked "development-rust/skills/resolve-profile/SKILL.md"
+  [ "$status" -ne 0 ]
+  # ...and the same helper DOES resolve for a type that ships one
+  run _profile_is_tracked "development-python/skills/resolve-profile/SKILL.md"
+  [ "$status" -eq 0 ]
 }
