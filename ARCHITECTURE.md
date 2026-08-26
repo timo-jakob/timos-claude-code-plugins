@@ -3473,7 +3473,7 @@ independent of `--gate-attest`, which is optional, session-supplied and produced
 only by `run-gate.zsh` on plugin repos — leaning on it would make "no prior
 tree" the normal case off plugin repos. A missing or blank `tree-<N-1>.txt` on a
 round ≥ 2, or a failure to compute or persist this round's identity, is a named
-stderr line and **exit 1**, never a silent fall back to the full diff. Three
+stderr line and **exit 1**, never a silent fall back to the full diff. Four
 carries ride along, all per-**run** work-dir state (truncated on a fresh start
 beside `.findings-digest-*`, `.findings-empty-*` and `.promote`, adopted on
 `--resume`, and deliberately
@@ -3488,7 +3488,52 @@ round-start build survives only as the fallback for an older work-dir),
 `adjudicated.json` (the waived Lows, passed as `--adjudicated`, exported as
 `REVIEW_ADJUDICATED`, invalidated per round against `delta_files`, and appended
 to only **after** the round consolidates so a round can never drop its own
-findings), and `.closing-sweep`. The review hook also sees `REVIEW_SCOPE_MODE`.
+findings), `.closing-sweep`, and `.max-rounds` (plus, transiently,
+`.max-rounds.tmp.*` — `record-grant.zsh`'s atomic-rename staging, swept by the
+same fresh-run clear) (#1576 — the ceiling a **human**
+grant bought, written by `record-grant.zsh` at the interactive extension's step
+5 and adopted on the next `--resume`, so the grant reaches the loop mechanically
+rather than living in the conductor's memory across a context that compacts).
+The review hook also sees `REVIEW_SCOPE_MODE`.
+
+`.max-rounds` is validated and adopted **before** the `.closing-sweep`
+adoption, so that both the sweep's clamp and its own grant test read the ONE
+ceiling this run is really working under (`effective_max`). Judging the sweep
+against the bare `--max-rounds` instead would refuse a *legitimate* sweep
+promoted during granted rounds — and a refused marker makes that round a delta
+round, which §9 forbids from declaring `CONVERGED`, so the run could only ever
+end `BUDGET_EXHAUSTED` however clean it was; at the ceiling it also bricks the
+`--resume` guard into a permanent exit 2. Stale-marker protection is unaffected:
+a foreign `99` is still far beyond `effective_max + 1`. Neither adoption can
+lower the other — both only ever raise `effective_max`, which is why
+`_promote_closing_sweep` raises rather than assigns. The reader is fail-open in
+four arms, none fatal: (a) leading/trailing whitespace stripped (internal
+whitespace is NOT collapsed, so a multi-token file falls into the loud arm
+rather than being repaired into a number nobody wrote); (b) refused unless a
+bounded integer; (c) **CLAMPED** — not dropped — to
+`--max-rounds + MAX_ROUNDS_SIDECAR_SLACK`
+(**16** — the interactive extension's own budget, a soft cap of 5 grants × the
++3 increment, **plus** the one #1434 closing-sweep round `record-grant.zsh`
+folds into its base; a 15 would clamp one round short at exactly the fifth
+sanctioned grant of a sweep-granted run);
+and (d) simply outranked when at or below the passed flag, which is what makes
+"a passed value above the file wins" one rule rather than two.
+
+Arms (b) and (c) are the two that speak, each loud on stderr, and they end
+differently on purpose. **(b) falls back to the flag**: the bytes are not a
+number, so there is nothing to honour. **(c) adopts the cap** and reports
+`max_rounds_source: "work-dir"`: the value is merely too large, and *dropping*
+it would collapse the ceiling all the way back to `--max-rounds` — on a run
+already past that round the resume guard would then refuse every later
+`--resume` with exit 2, stranding a granted, in-progress run whose only escape
+is the manual raise the docs forbid. Bounding the number keeps the budget honest
+AND the run resumable; losing a grant costs one re-grant, while dying costs the
+whole resumable run.
+(a) and (d) are deliberately **silent** — a padded file and a file the caller
+has outranked are both ordinary, so a diagnostic there would train the reader to
+ignore the two that matter. Being per-**run**, it is cleared on a fresh
+start like its siblings — a grant sidecar surviving into a re-used work-dir
+would silently *fund* rounds that run never earned.
 
 **No run may END on a delta round.** Delta scoping buys convergence but could
 hide a defect that exists only in the *interaction* between rounds, so
@@ -3498,7 +3543,7 @@ that reaches zero blockers instead writes `<work-dir>/.closing-sweep` and
 `AWAITING_FIX` (20) with `final_changelist.summary.blocking == 0` (the session
 applies **no** fix and just resumes), hook mode advances without invoking
 `--fix-cmd`. If that zero-blocker delta round was already at the ceiling, the
-sweep is granted exactly one round beyond `--max-rounds`, once — the safety
+sweep is granted exactly one round beyond the ceiling in force, once — the safety
 net must not be skipped precisely when the run has been longest. The grant is a
 fact about the run, not a retune of the budget: `max_rounds` in the status JSON
 keeps reporting what the caller passed, a new always-present boolean
@@ -3790,7 +3835,10 @@ escalates as before — that is evidence of a stuck blocker, not of a proximity
 artifact. The rung sits strictly **below** the residue rung, so residue still
 wins; it is a *continue*, not a grant, so `effective_max`, `max_rounds` and
 `closing_sweep_granted` are all untouched and
-`_promote_closing_sweep` remains the only budget-mutating grant — else
+`_promote_closing_sweep` remains the only **in-loop** budget-mutating grant —
+the one other thing that moves the ceiling is a **human** grant, recorded out of
+band by `record-grant.zsh` into `<work-dir>/.max-rounds` and adopted on the next
+`--resume` (#1576); an auto-continue mints neither — else
 feed the blockers-only slice to the fix hook, re-run the gate, and loop. Reaching
 the last round with blockers still open ⇒ `BUDGET_EXHAUSTED`; an unpickable repo
 type from dispatch ⇒ `ESCALATE_AMBIGUOUS`. Each state is a distinct exit code
@@ -3799,10 +3847,18 @@ mode's non-terminal
 "blockers remain, budget left, fix in-session then `--resume`"; 10 ambiguous;
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
-status JSON (`{status, rounds, max_rounds, promotion_phase,
+status JSON (`{status, rounds, max_rounds, effective_max_rounds,
+max_rounds_source, promotion_phase,
 closing_sweep_granted, possible_false_trip_auto_continues, repo_type,
 review_skill, escalation_reasons, residue_replaced_reasons, history, round_changelists,
-final_changelist}`), where `possible_false_trip_auto_continues` (#1498) is an
+final_changelist}`), where `effective_max_rounds` (an integer — the ceiling
+actually in force) and `max_rounds_source` (`"flag"` or `"work-dir"`) are
+**always-present** too (#1576): they report a human grant adopted from
+`<work-dir>/.max-rounds` **without** touching `max_rounds`, which keeps
+reporting the value the caller passed, exactly as it does under a granted
+closing sweep. On a run with no grant the two agree, so every existing
+`max_rounds` consumer reads what it always did — and
+`possible_false_trip_auto_continues` (#1498) is an
 **always-present** integer — how many rounds the run took on the all-ambiguous
 auto-continue above, `0` on every run that never did, counting *continuations*
 rather than identities — and `promotion_phase` (#995) is an **always-present**
@@ -3969,12 +4025,17 @@ the ceiling, an unstamped changelist, a failed marker write) or an identity that
 has already spent its one continuation. The `--format summary` assessment
 reports whether this run has spent one — not which veto fired — and the
 `Grants consumed` figure is unaffected, because no grant was consumed for it.
-A grant raises `--max-rounds` by 3 — exactly three more rounds after a
-`BUDGET_EXHAUSTED` at the ceiling, more after an early
-`ESCALATE_NO_CONVERGENCE`, and **only two** after a `BUDGET_EXHAUSTED` on a
-granted closing sweep (#1434), which already ran one round past `max_rounds`.
-What a grant *buys* is therefore `new ceiling − rounds already run`: compute
-that remainder and say it, rather than promising a flat three.
+A grant raises the ceiling in force by 3 (`--max-rounds` itself is never
+mutated) — exactly three more rounds after a
+`BUDGET_EXHAUSTED` at the ceiling, and more after an early
+`ESCALATE_NO_CONVERGENCE`. Since #1576 that is **three after a granted closing
+sweep (#1434) too**, not two: `record-grant.zsh` adds the increment to the
+ceiling actually in force (`effective_max_rounds`, which already counts the
+sweep's extra round) rather than to the flag, so the round that ran past
+`max_rounds` is no longer silently deducted from what the human was promised.
+What a grant *buys* is still `new ceiling − rounds already run` — read the new
+ceiling from `effective_max_rounds` (or `record-grant.zsh`'s echoed value) and
+say that remainder, rather than promising a flat three.
 The 5-grant soft cap stays a
 **nudge**, not a hard stop: by the fifth grant the ceiling already stands at
 5 + 5×3 = 20 rounds.

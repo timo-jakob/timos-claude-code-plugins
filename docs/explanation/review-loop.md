@@ -328,7 +328,8 @@ converging** — do not dead-end. Instead the run pauses and talks to you:
    on how far the run already got. When the budget ran out at the ceiling it is
    exactly three more rounds; when the run stopped early for not converging, it
    can be more; and when the run had already been granted its closing sweep — a
-   round past the ceiling — it is two. The run tells you what it actually
+   round past the ceiling — it is three as well, because the recorded ceiling
+   already counts that extra round. The run tells you what it actually
    bought, rather than promising a flat three.
 4. You can extend repeatedly, +3 to the ceiling each time.
    After about five grants, or any round that removes no blockers, the run will

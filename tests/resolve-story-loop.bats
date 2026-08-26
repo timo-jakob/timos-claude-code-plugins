@@ -3181,3 +3181,463 @@ EOF
   grep -qF 'other.py	bugs	retry budget never decremented' "$M"
   grep -qF 'other.py	bugs	retry budget never inspected' "$M"
 }
+
+# ---- the human-grant ceiling sidecar, `<work-dir>/.max-rounds` (#1576) -------
+#
+# The WRITER (record-grant.zsh) has its own file, tests/record-grant.bats. What
+# follows is the READER: adoption, its refusal and clamp arms, the fresh-run clear,
+# the adoption order against #1434's closing sweep, and one end-to-end case that
+# actually runs the writer and then resumes — the write-then-read seam is
+# precisely what #1558 lost, so it is proven rather than assumed.
+#
+# These live here rather than in resolve-story-loop-step.bats on purpose: that
+# file is the gate's wall-clock floor (~297 s), and every case below is
+# expressible against the hook-mode seam this file already uses.
+
+# Drive one round to BUDGET_EXHAUSTED so the work-dir holds a resumable history,
+# then hand the caller a work-dir to seed. `--max-rounds 1` keeps it to a single
+# round; the blocker is what makes it exhaust rather than converge.
+seed_resumable() {   # seed_resumable <work-dir>
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$1" --max-rounds 1 \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+}
+
+# The loop's own sidecar slack, read from source so a retune moves every
+# fixture with it. Fails loudly rather than yielding an empty string, which
+# would silently turn `$(( 5 + slack ))` into 5 and red a neighbouring test
+# with a message about the wrong thing.
+sidecar_slack() {
+  local v
+  v=$(sed -n 's/^typeset -gr MAX_ROUNDS_SIDECAR_SLACK=\([0-9]*\)$/\1/p' "$S")
+  [ -n "$v" ] || { echo "could not read MAX_ROUNDS_SIDECAR_SLACK from $S" >&2; return 1; }
+  printf '%s' "$v"
+}
+
+# Resume that work-dir with a clean round, at the given --max-rounds.
+resume_clean() {   # resume_clean <work-dir> <max-rounds>
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$1" --resume --max-rounds "$2" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+}
+
+@test "#1576 a .max-rounds sidecar raises the EFFECTIVE ceiling, never max_rounds itself" {
+  # AC 4. The invariant #1434 established stands: max_rounds keeps reporting
+  # what the caller passed, so build-escalation.zsh's header, its
+  # BUDGET_EXHAUSTED line and build-telemetry-record.zsh's payload all keep
+  # reading the number the command line actually carried.
+  WD="$BATS_TEST_TMPDIR/wd-adopt"
+  seed_resumable "$WD"
+  printf '8\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 8 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+}
+
+@test "#1576 with NO sidecar the two agree and the source is the flag" {
+  WD="$BATS_TEST_TMPDIR/wd-nosidecar"
+  seed_resumable "$WD"
+  [ ! -e "$WD/.max-rounds" ]
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+}
+
+@test "#1576 both keys are ALWAYS present — on a resumed run and on the --no-review fast path" {
+  # Same argument promotion_phase and closing_sweep_granted carry: a consumer
+  # must never have to tell a value from "a status file that predates the key".
+  # The fast path is the one that would silently drop them, because it emits
+  # without ever entering the --resume block that adopts the sidecar.
+  loop --no-review
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'has("effective_max_rounds") and has("max_rounds_source")' >/dev/null
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+
+  WD="$BATS_TEST_TMPDIR/wd-present"
+  seed_resumable "$WD"
+  printf '8\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  echo "$output" | jq -e 'has("effective_max_rounds") and has("max_rounds_source")' >/dev/null
+}
+
+@test "#1576 reader arm (a): a whitespace-padded sidecar is stripped and adopted, silently" {
+  WD="$BATS_TEST_TMPDIR/wd-ws"
+  seed_resumable "$WD"
+  printf '  8\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 8 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+  # a legitimate value is not a diagnostic
+  lacks "$stderr" "max-rounds sidecar"
+}
+
+@test "#1576 reader arm (a): internal whitespace is NOT collapsed — a multi-token file is refused" {
+  # The strip is leading/trailing ONLY. Collapsing internal whitespace would
+  # repair `1\n2` into a ceiling of 12 that nobody wrote. 12 sits INSIDE the
+  # soft cap, so if the collapse regressed it would be silently ADOPTED rather
+  # than tripping arm (c) — which is why the fixture is chosen this way.
+  WD="$BATS_TEST_TMPDIR/wd-multitoken"
+  seed_resumable "$WD"
+  printf '1\n2\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  contains "$stderr" "ignoring an unreadable max-rounds sidecar"
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+}
+
+@test "#1576 a ZERO-BYTE sidecar is treated as absent by the reader, with no diagnostic" {
+  # Both ends gate on `-s`. An `-e` would emit 'unreadable sidecar (got:
+  # <empty>)' on every resume of a work-dir where a truncated write left the
+  # file, sending the operator after a corruption that does not exist.
+  WD="$BATS_TEST_TMPDIR/wd-zerobyte"
+  seed_resumable "$WD"
+  : > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  lacks "$stderr" "max-rounds sidecar"
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+}
+
+@test "#1576 reader arm (b): a non-numeric sidecar is refused loudly and falls back to the flag" {
+  WD="$BATS_TEST_TMPDIR/wd-garbage"
+  seed_resumable "$WD"
+  printf 'eight\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  contains "$stderr" "ignoring an unreadable max-rounds sidecar"
+  contains "$stderr" "$WD/.max-rounds"
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+}
+
+@test "#1576 reader arm (b): an OVER-WIDE (19-digit) sidecar is refused too" {
+  # The guard is two-part (`<->` AND an 18-digit cap); the non-numeric case
+  # above exercises only the first conjunct. All-digits-but-enormous is the
+  # same corrupt-sidecar class the loop already guards for --max-rounds, .t0
+  # and .closing-sweep.
+  WD="$BATS_TEST_TMPDIR/wd-wide"
+  seed_resumable "$WD"
+  printf '9999999999999999999\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  contains "$stderr" "ignoring an unreadable max-rounds sidecar"
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+}
+
+@test "#1576 reader arm (c): a sidecar beyond the soft cap is CLAMPED and adopted, naming the cap" {
+  # A WELL-FORMED but wrong number is the road that actually defeats a budget —
+  # exactly what #1434's clamp learned. The cap is derived, never transcribed,
+  # so a retune of MAX_ROUNDS_SIDECAR_SLACK moves the fixture with it.
+  local slack cap over
+  slack=$(sidecar_slack)
+  cap=$(( 5 + slack ))
+  over=$(( cap + 1 ))
+  WD="$BATS_TEST_TMPDIR/wd-overcap"
+  seed_resumable "$WD"
+  printf '%s\n' "$over" > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  contains "$stderr" "beyond the soft cap"
+  contains "$stderr" "$WD/.max-rounds"
+  contains "$stderr" "cap $cap"
+  # CLAMPED to the cap, not discarded. Dropping it would collapse the ceiling
+  # back to --max-rounds and, on a run already past that round, brick every
+  # later --resume with exit 2 — stranding a granted, in-progress run.
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq "$cap" ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+}
+
+@test "#1576 an over-cap sidecar does NOT strand a run already past --max-rounds" {
+  # The concrete harm of discarding: with the ceiling collapsed back to the
+  # flag, the resume guard refuses every subsequent invocation and the human's
+  # granted run is unrunnable without hand-editing the sidecar, which the
+  # docs forbid.
+  local slack over
+  slack=$(sidecar_slack)
+  over=$(( 1 + slack + 5 ))
+  WD="$BATS_TEST_TMPDIR/wd-overcap-strand"
+  seed_resumable "$WD"          # exhausted at --max-rounds 1, so round 2 is next
+  printf '%s\n' "$over" > "$WD/.max-rounds"
+  resume_clean "$WD" 1
+  # clamped, so round 2 is admitted rather than refused with exit 2
+  [ "$status" -ne 2 ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq $(( 1 + slack )) ]
+}
+
+@test "#1576 reader arm (c) non-vacuity: the value AT the cap is still adopted" {
+  # Without this the clamp could be off by one (or reject everything) and the
+  # refusal test above would stay green.
+  local slack cap
+  slack=$(sidecar_slack)
+  cap=$(( 5 + slack ))
+  WD="$BATS_TEST_TMPDIR/wd-atcap"
+  seed_resumable "$WD"
+  printf '%s\n' "$cap" > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  lacks "$stderr" "beyond the soft cap"
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq "$cap" ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+}
+
+@test "#1576 the slack constant covers the sanctioned grant sequence, incl. the #1434 round" {
+  # The derivation is 5 grants x +3 PLUS the one closing-sweep round
+  # record-grant.zsh folds into its base. A slack of 15 would clamp away exactly
+  # the round the fifth sanctioned grant of a sweep-granted run bought.
+  local slack softcap increment
+  slack=$(sidecar_slack)
+  softcap=5
+  increment=3
+  [ "$slack" -eq $(( softcap * increment + 1 )) ]
+}
+
+@test "#1576 reader arm (d): a sidecar at or below the passed flag simply loses to it" {
+  # This is what makes "a passed value ABOVE the file wins" a special case of
+  # one rule rather than a second rule to keep in sync: a human raising
+  # --max-rounds further needs no sidecar edit.
+  WD="$BATS_TEST_TMPDIR/wd-below"
+  seed_resumable "$WD"
+  printf '4\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+  # arm (d) is not a refusal — nothing is wrong with the file
+  lacks "$stderr" "max-rounds sidecar"
+}
+
+@test "#1576 reader arm (d): a sidecar EQUAL to the passed flag also loses to it" {
+  # The realistic shape: the conductor passes `prev_max + 3`, which is exactly
+  # the value the sidecar holds. A `<` instead of `<=` would stamp
+  # max_rounds_source: "work-dir" on a run where no grant is in force, so the
+  # two keys would disagree about the same run.
+  WD="$BATS_TEST_TMPDIR/wd-atflag"
+  seed_resumable "$WD"
+  printf '8\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 8
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 8 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+  lacks "$stderr" "max-rounds sidecar"
+}
+
+@test "#1576 the sidecar SURVIVES an adopting resume and is re-adopted by the next one" {
+  # Step mode runs every round as its own --resume, so a sidecar consumed once
+  # would fund exactly ONE round and the next resume would be refused by the
+  # ceiling guard — sending the conductor back to the human for rounds already
+  # granted. The file is per-RUN, cleared on a fresh start, NOT on a resume.
+  WD="$BATS_TEST_TMPDIR/wd-survive"
+  seed_resumable "$WD"
+  printf '3\n' > "$WD/.max-rounds"
+  # An ADOPTING resume: the sidecar is what lets round 2 run at all (the flag
+  # is still 1). The terminal is deliberately not asserted — this case is about
+  # the file's lifetime, and pinning a terminal here would couple it to the
+  # non-convergence rung's fingerprint rules.
+  resume_clean "$WD" 1
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+  # THE assertion: still on disk, unchanged, for the NEXT invocation. In step
+  # mode every round is its own --resume, so a sidecar consumed once would fund
+  # exactly one round and the next resume would be refused by the ceiling guard.
+  [ -e "$WD/.max-rounds" ]
+  [ "$(cat "$WD/.max-rounds")" = "3" ]
+}
+
+@test "#1576 non-vacuity: the fresh-run clear DOES remove it, so survival is a resume property" {
+  # Without this pair, a reader could not tell "survives a resume" from "is
+  # never cleared at all" — and the per-run contract depends on both halves.
+  WD="$BATS_TEST_TMPDIR/wd-survive-neg"
+  seed_resumable "$WD"
+  printf '3\n' > "$WD/.max-rounds"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 2 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ ! -e "$WD/.max-rounds" ]
+}
+
+@test "#1576 no refusal arm is fatal: every one exits exactly as the no-sidecar run does" {
+  # The whole reader is fail-open by design — losing a grant costs one re-grant,
+  # dying costs the resumable run. Compare each arm against the control rather
+  # than hard-coding 0, so a change to the fixture's terminal moves both.
+  WD="$BATS_TEST_TMPDIR/wd-ctl"
+  seed_resumable "$WD"
+  resume_clean "$WD" 5
+  local control="$status"
+  # validate the control itself: without this, a regression that broke EVERY
+  # resume would move all four values together and the test would pass while
+  # proving nothing
+  [ "$control" -eq 0 ]
+
+  local slack over
+  slack=$(sidecar_slack)
+  over=$(( 5 + slack + 1 ))
+  local bad
+  for bad in eight 9999999999999999999 "$over"; do
+    WD="$BATS_TEST_TMPDIR/wd-fatal-$bad"
+    seed_resumable "$WD"
+    printf '%s\n' "$bad" > "$WD/.max-rounds"
+    resume_clean "$WD" 5
+    [ "$status" -eq "$control" ]
+  done
+}
+
+@test "#1576 a fresh (non---resume) run CLEARS a stale .max-rounds rather than inheriting it" {
+  # The largest blast radius of the per-run set: a previous story's granted
+  # ceiling would silently FUND rounds this run never earned.
+  WD="$BATS_TEST_TMPDIR/wd-fresh"
+  mkdir -p "$WD"
+  printf '99\n' > "$WD/.max-rounds"
+  # ...and the writer's atomic-rename debris, which record-grant.zsh's own trap
+  # comment promises this same clear sweeps
+  printf '9\n' > "$WD/.max-rounds.tmp.99"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 5 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  # assert on the loop's own output BEFORE any further `run` overwrites it
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 5 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+  [ ! -e "$WD/.max-rounds" ]
+  [ ! -e "$WD/.max-rounds.tmp.99" ]
+}
+
+@test "#1576 the fresh-run clear NAMES the sidecar, in the rm diagnostic and the header inventory" {
+  # A clear whose failure diagnostic does not name the file it failed to remove
+  # leaves the operator guessing which foreign state was adopted.
+  run grep -c 'max-rounds sidecar (\.max-rounds, \.max-rounds\.tmp\.\*)' "$S"
+  [ "$output" = "1" ]
+  # ...and the file is inventoried in the header beside its siblings
+  run grep -c '`<work-dir>/\.max-rounds`' "$S"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "#1576 adoption order: a STALE .closing-sweep is still refused against the granted ceiling" {
+  # THE order test. The clamp measures one round beyond the ceiling IN FORCE,
+  # so the grant must be VALIDATED before the sweep is judged. A foreign marker
+  # is still refused — here 99 against a granted ceiling of 8.
+  WD="$BATS_TEST_TMPDIR/wd-order"
+  seed_resumable "$WD"
+  printf '99\n' > "$WD/.closing-sweep"
+  printf '8\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  contains "$stderr" "beyond the one-round grant"
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "false" ]
+  # ...while the grant itself is adopted normally
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 8 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+}
+
+@test "#1576 adoption order: a sweep promoted DURING granted rounds is accepted, not refused" {
+  # The defect this ordering exists to prevent. With the clamp measured against
+  # the bare flag, a legitimate sweep at round 7 under a granted ceiling of 8
+  # is 7 > 5+1 and would be REFUSED — which makes the promoted round a delta
+  # round, and §9 forbids a delta round from declaring CONVERGED, so the run
+  # could only ever end BUDGET_EXHAUSTED however clean it was.
+  WD="$BATS_TEST_TMPDIR/wd-order-during"
+  seed_resumable "$WD"
+  printf '7\n' > "$WD/.closing-sweep"
+  printf '8\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  lacks "$stderr" "beyond the one-round grant"
+  # 7 is within the granted ceiling of 8, so it is not a GRANT of an extra round
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "false" ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 8 ]
+}
+
+@test "#1576 a closing sweep may NOT lower a grant-raised ceiling" {
+  # _promote_closing_sweep raises rather than assigns. Keyed on the passed flag
+  # it would pull a granted ceiling of 8 down to the sweep's own 7, throwing
+  # away the human's last granted round and reporting BUDGET_EXHAUSTED for
+  # rounds they had already given.
+  WD="$BATS_TEST_TMPDIR/wd-nolower"
+  seed_resumable "$WD"
+  printf '6\n' > "$WD/.closing-sweep"
+  printf '9\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  # the sweep sits BELOW the granted ceiling, so the ceiling is untouched
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 9 ]
+}
+
+@test "#1576 max_rounds_source stays 'flag' when only the #1434 sweep raised the ceiling" {
+  # The field distinguishes a HUMAN grant from the loop's own safety net. With
+  # no sidecar at all, a sweep-raised ceiling must not claim a grant it never
+  # got — the one thing this key exists to tell apart.
+  WD="$BATS_TEST_TMPDIR/wd-sweeponly"
+  seed_resumable "$WD"
+  printf '6\n' > "$WD/.closing-sweep"
+  [ ! -e "$WD/.max-rounds" ]
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 6 ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+}
+
+@test "#1576 a sweep one past the GRANTED ceiling is itself granted, and raises it again" {
+  # The grant is "one round beyond the ceiling in force", and since #1576 that
+  # ceiling can be a human grant. A sweep at 9 against a granted 8 is exactly
+  # one past, so it is granted and the ceiling becomes 9 — the safety net still
+  # works at the top of an extended run, which is when it matters most.
+  WD="$BATS_TEST_TMPDIR/wd-order-ok"
+  seed_resumable "$WD"
+  printf '9\n' > "$WD/.closing-sweep"
+  printf '8\n' > "$WD/.max-rounds"
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 9 ]
+  # ...and max_rounds still reports what the caller passed
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 5 ]
+}
+
+@test "#1576 END-TO-END: record-grant.zsh writes the ceiling and the very next --resume runs under it" {
+  # The seam #1558 actually lost. Every other case here hand-seeds the file,
+  # which proves the reader but would stay green if the two ends disagreed on
+  # the format. This one runs the real writer against the real status JSON and
+  # asserts the resume adopts exactly the ceiling it echoed.
+  WD="$BATS_TEST_TMPDIR/wd-e2e"
+  local ST="$BATS_TEST_TMPDIR/e2e-status.json"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 --status-file "$ST" \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+
+  local RG="$REPO_ROOT/development/skills/resolve-issue/scripts/record-grant.zsh"
+  run zsh "$RG" --work-dir "$WD" --status "$ST" --add 3
+  [ "$status" -eq 0 ]
+  local echoed="$output"
+  [ "$echoed" = "4" ]   # base 1 (max_rounds, no sweep grant) + 3
+
+  # ...and the resume, still passing the ORIGINAL ceiling, runs under the grant
+  resume_clean "$WD" 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq "$echoed" ]
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+  [ "$(echo "$output" | jq '.max_rounds')" -eq 1 ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
+}
+
+@test "#1576 non-vacuity: without the grant, that same resume is REFUSED by the ceiling guard" {
+  # Proves the end-to-end case is really exercising the grant: the identical
+  # resume at --max-rounds 1 with no sidecar cannot start round 2 at all.
+  WD="$BATS_TEST_TMPDIR/wd-e2e-neg"
+  seed_resumable "$WD"
+  [ ! -e "$WD/.max-rounds" ]
+  resume_clean "$WD" 1
+  [ "$status" -eq 2 ]
+  contains "$stderr" "raise --max-rounds"
+}

@@ -24,7 +24,7 @@
 # scoped to exactly what the last fix pass changed. This is deliberately
 # INDEPENDENT of `--gate-attest` — that flag is optional, session-supplied and
 # produced only by run-gate.zsh on plugin repos, so leaning on it would make
-# "no prior tree" the normal case off plugin repos. Three carries ride along:
+# "no prior tree" the normal case off plugin repos. Four carries ride along:
 #   * `<work-dir>/verify-<N>.json` — the previous round's `.blocking` array,
 #     i.e. exactly what the fix pass was told to fix, passed as
 #     `--fix-verification` and exported as REVIEW_FIX_VERIFICATION;
@@ -34,8 +34,15 @@
 #     last fix pass touched is REMOVED before the round consolidates, so a
 #     suggestion legitimately re-raised because the fix was incomplete is never
 #     suppressed;
-#   * `<work-dir>/.closing-sweep` — the round number of the CLOSING FULL SWEEP.
-# A fourth per-run work-dir file, `<work-dir>/.possible-false-trip-continued`
+#   * `<work-dir>/.closing-sweep` — the round number of the CLOSING FULL SWEEP;
+#   * `<work-dir>/.max-rounds` (plus, transiently, `.max-rounds.tmp.*` — the
+#     writer's atomic-rename staging, swept by the same fresh-run clear)
+#     — the ceiling a human GRANT bought (#1576),
+#     written by `record-grant.zsh` at the interactive extension's step 5 and
+#     adopted by `--resume` below, so a grant reaches the loop mechanically
+#     instead of living in the conductor's memory across a context that
+#     compacts. Like its siblings it is per-RUN and cleared on a fresh start.
+# A fifth per-run work-dir file, `<work-dir>/.possible-false-trip-continued`
 # (#1498), records the identities this run has already spent its one automatic
 # all-ambiguous continuation on. One line per identity, tab-separated:
 #   <round><TAB><file><TAB><dimension><TAB><normtitle>
@@ -336,6 +343,19 @@ setopt nounset pipefail
 # surface new problems), so a longer leash avoids escalating runs that self-resolve.
 typeset -gr MAX_REVIEW_ROUNDS=5
 typeset -gra BLOCKING_SEVERITIES=(CRITICAL WARNING)   # == Critical + High
+# How far above the PASSED --max-rounds a `.max-rounds` grant sidecar (#1576)
+# may raise the ceiling before it is refused as stale/foreign. Derived from the
+# interactive extension's own budget: a soft cap of 5 grants x the +3 increment,
+# PLUS the one #1434 closing-sweep round record-grant.zsh folds into its base
+# (5 * 3 + 1 = 16). The +1 is not slop: a run that was granted its closing sweep
+# before its first grant reaches exactly max_rounds + 16 after the fifth, and
+# the interactive extension still sanctions that fifth grant ("the cap is a
+# nudge by design, not a hard stop"), so a 15 would clamp away exactly the round
+# that fifth grant bought, precisely at the sanctioned limit. It is a named
+# constant
+# because the bare number reads as arbitrary and would drift the moment any of
+# those three figures is retuned.
+typeset -gr MAX_ROUNDS_SIDECAR_SLACK=16
 
 local self_dir="${0:A:h}"
 local DISPATCH="${self_dir}/review-dispatch.zsh"
@@ -564,14 +584,26 @@ emit_and_exit() {
   # It is deliberately NOT a budget field: `max_rounds` still reports the
   # caller's value and `closing_sweep_granted` keeps its meaning, because an
   # auto-continue takes the round the run already had rather than granting one.
+  # effective_max_rounds / max_rounds_source (#1576) are ALWAYS present, for the
+  # same reason promotion_phase and closing_sweep_granted are. They report the
+  # ceiling actually in force and where it came from — `flag` or `work-dir` —
+  # WITHOUT touching `max_rounds`, which keeps reporting the caller's value.
+  # That split is deliberate and mirrors #1434: a mutated `max_rounds` would put
+  # the status JSON at odds with the command line that produced it, and every
+  # downstream budget reader (build-escalation.zsh's header and its
+  # BUDGET_EXHAUSTED line, build-telemetry-record.zsh's payload) would silently
+  # change meaning. On a run with no grant the two agree, which is why a
+  # consumer can read `max_rounds` exactly as before.
   out=$(jq -nc \
     --arg status "$st" --argjson rounds "$rounds" --argjson max "$max_rounds" \
+    --argjson effmax "$effective_max" --arg maxsrc "$max_rounds_source" \
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
     --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
     --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
     --argjson pftc "$pft_continues" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
+      effective_max_rounds:$effmax, max_rounds_source:$maxsrc,
       promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
       possible_false_trip_auto_continues:$pftc,
       repo_type:(if $repo_type=="" then null else $repo_type end),
@@ -918,7 +950,13 @@ _promote_closing_sweep() {  # $1 = the round doing the promoting
   # is precisely the run whose safety net matters most, so skipping the sweep
   # there would remove it exactly when it is least affordable to. --max-rounds
   # itself is untouched (see emit_and_exit).
-  if (( closing_sweep_round > max_rounds )); then
+  # Compare and assign against the ceiling IN FORCE, never the passed flag.
+  # Since #1576 `effective_max` can already sit above `max_rounds` on a human
+  # grant, and a plain assignment keyed on the flag would pull it back DOWN —
+  # throwing away granted rounds and reporting BUDGET_EXHAUSTED for rounds the
+  # human had already given. `closing_sweep_granted` therefore means what it
+  # says: the sweep needed a round beyond the ceiling in force.
+  if (( closing_sweep_round > effective_max )); then
     effective_max=$closing_sweep_round
     closing_sweep_granted=1
   fi
@@ -1294,6 +1332,19 @@ findings_digest() {
 # claimed a verdict. Normalize, exactly as the shared emitter does.
 max_rounds=$(( 10#$max_rounds ))
 
+# The ceiling the WHILE loop and the BUDGET_EXHAUSTED test actually use, and
+# where it came from (#1434 closing sweep, #1576 grant sidecar). Both are
+# declared HERE, above the --no-review fast path, for the same reason
+# --max-rounds is validated here: that path reaches emit_and_exit without ever
+# entering the --resume block below, and `effective_max_rounds` /
+# `max_rounds_source` are contracted as ALWAYS-PRESENT — a consumer must never
+# have to tell a value from "a status file that predates the key". Declared any
+# lower, a SKIPPED record would carry neither.
+# `--max-rounds` itself is never mutated (see emit_and_exit): the raised ceiling
+# is reported alongside it, never in place of it.
+local effective_max=$max_rounds
+local max_rounds_source="flag"
+
 # --promote with --no-review is a contradiction, not a fallback: nothing is
 # consolidated, so there is no overlay to apply — and the fast path reaches
 # emit_and_exit ABOVE _validate_promote, so the combination would stamp
@@ -1456,10 +1507,12 @@ local closing_sweep_file="$work_dir/.closing-sweep"
 # adopted on --resume, because step mode runs each round as its own invocation
 local pft_marker="$work_dir/.possible-false-trip-continued"
 local adjudicated_file="$work_dir/adjudicated.json"
-# The ceiling the WHILE loop and the BUDGET_EXHAUSTED test actually use. It
-# equals --max-rounds except on a run whose closing sweep was granted the one
-# extra round; --max-rounds itself is never mutated (see emit_and_exit).
-local effective_max=$max_rounds
+# the ceiling a human grant bought (#1576), written by record-grant.zsh at the
+# interactive extension's step 5 and adopted below — per-run like the markers
+# above, so a re-used work-dir cannot fund a run that never earned the rounds
+local max_rounds_file="$work_dir/.max-rounds"
+# `effective_max` / `max_rounds_source` are declared far above, beside the
+# --max-rounds validation, so the --no-review fast path emits them too.
 if (( resume )); then
   [[ -s "$history_file" ]] || {
     print -u2 -- "resolve-story-loop: --resume needs an existing non-empty history in --work-dir"; exit 2 }
@@ -1499,6 +1552,86 @@ if (( resume )); then
   resume_prev="$work_dir/changelist-$resume_round.json"
   [[ -s "$resume_prev" ]] || {
     print -u2 -- "resolve-story-loop: --resume cannot find prior changelist $resume_prev"; exit 1 }
+  # VALIDATE the human grant's ceiling (#1576) before the closing-sweep block,
+  # but do NOT publish it yet — the two adoptions are applied together further
+  # down. The split exists because the sweep's clamp needs to know the ceiling
+  # this run is really working under: with the grant adopted only afterwards,
+  # the clamp would measure a legitimate sweep promoted DURING granted rounds
+  # against the un-raised flag and refuse it as stale. That refusal is not
+  # cosmetic — a refused marker means the promoted round runs as a delta round,
+  # and §9 forbids a delta round from declaring CONVERGED, so the run could
+  # only ever end BUDGET_EXHAUSTED however clean it was; at the ceiling it also
+  # bricks the resume guard below into a permanent exit 2.
+  #
+  # Four arms, none of them fatal. A grant sidecar outranks the command line,
+  # so it is the file where a WELL-FORMED but wrong number does the damage —
+  # the same lesson `.closing-sweep` already learned. The two loud arms end
+  # DIFFERENTLY: (b) cannot read a number, so it falls back to the flag; (c)
+  # reads one that is merely too large, so it CLAMPS and adopts the cap (see
+  # its own note). Either way nothing dies — losing a grant costs one re-grant
+  # while dying costs the whole resumable run.
+  local sidecar_ceiling=0
+  if [[ -s "$max_rounds_file" ]]; then
+    # `local mr_val=""`, never a bare `local mr_val`: at TOP LEVEL there is no
+    # new scope, so a bare typeset whose name already exists in the environment
+    # PRINTS `mr_val=value` — on stdout, ahead of the status JSON. Same hazard
+    # the closing-sweep adoption documents just below.
+    local mr_val=""
+    mr_val=$(<"$max_rounds_file")
+    # (a) strip only LEADING and TRAILING whitespace. Collapsing internal
+    # whitespace too would repair a multi-token file into a number nobody
+    # wrote — `8\n3` reading as `83` — where the point of the shape check is to
+    # send anything that is not one integer into the loud arm below.
+    # (the `${x#"${x%%[![:space:]]*}"}` idiom rather than `[[:space:]]##`,
+    # which needs EXTENDED_GLOB — not set in this file, so the `##` would be
+    # taken literally and strip nothing)
+    mr_val="${mr_val#"${mr_val%%[![:space:]]*}"}"
+    mr_val="${mr_val%"${mr_val##*[![:space:]]}"}"
+    if [[ "$mr_val" == <-> ]] && (( ${#mr_val} <= 18 )); then
+      local mr_num=$(( 10#$mr_val ))
+      # (c) The semantic clamp — it CLAMPS, it does not discard. Beyond
+      # MAX_ROUNDS_SIDECAR_SLACK above the flag the file is stale, foreign or
+      # corrupt (a `99` must not buy 94 rounds of agent time), but *dropping*
+      # it would collapse the ceiling all the way back to `--max-rounds` — and
+      # on a run already past that round the resume guard below would then
+      # refuse EVERY subsequent `--resume` with exit 2, stranding a granted,
+      # in-progress run whose only escape is hand-editing `.max-rounds`, which
+      # the docs forbid (raising `--max-rounds` stays sanctioned — the higher of
+      # the two wins — and is exactly what the diagnostic points at). The sweep grant is repeatable, so a long legitimate
+      # run can reach the cap honestly. Bounding the value keeps the budget
+      # honest AND the run resumable; the diagnostic is what makes the
+      # difference visible.
+      local mr_cap=$(( max_rounds + MAX_ROUNDS_SIDECAR_SLACK ))
+      if (( mr_num > mr_cap )); then
+        print -u2 -- "resolve-story-loop: clamping a max-rounds sidecar beyond the soft cap (got $mr_num, --max-rounds $max_rounds, cap $mr_cap) in $max_rounds_file — using $mr_cap; raise --max-rounds if the run genuinely earned more"
+        mr_num=$mr_cap
+      fi
+      # (d) At or below the passed flag the flag simply wins, silently — nothing
+      # is wrong with the file. This is what makes "a passed value ABOVE the
+      # file wins" a special case of one rule rather than a second rule to keep
+      # in sync: a human raising --max-rounds further needs no sidecar edit.
+      if (( mr_num > max_rounds )); then
+        sidecar_ceiling=$mr_num
+      fi
+    else
+      # (b) not a bounded integer — say so and keep the flag
+      print -u2 -- "resolve-story-loop: ignoring an unreadable max-rounds sidecar in $max_rounds_file (got: ${mr_val:-<empty>}) — using --max-rounds $max_rounds"
+    fi
+  fi
+  # APPLY the grant here, before the sweep is judged, so there is exactly ONE
+  # ceiling in force for the block below to clamp against AND to measure its
+  # own grant against. Keeping them as two variables is what let the sweep be
+  # clamped against the raised ceiling while still being *stamped* a grant
+  # against the un-raised one. `max_rounds` itself is still never mutated.
+  if (( sidecar_ceiling > effective_max )); then
+    effective_max=$sidecar_ceiling
+    # The source is stamped where the value is actually ADOPTED, never merely
+    # where a sidecar was found: a sidecar that lost to an already-higher
+    # ceiling did not produce `effective_max_rounds`, and claiming it did would
+    # make the two keys disagree about the same run.
+    max_rounds_source="work-dir"
+  fi
+
   # Adopt a granted closing sweep BEFORE the ceiling guard (#1434). Without
   # this, the one case the grant exists for — a zero-blocker delta round at the
   # ceiling — would be refused by the very next --resume, so the safety net
@@ -1524,10 +1657,18 @@ if (( resume )); then
       # closing_sweep_granted on a sweep that was never a grant. The promotion
       # path cannot produce this (it always writes round + 1); only adoption
       # can, so only adoption needs the clamp.
-      if (( closing_sweep_round > max_rounds + 1 )); then
-        print -u2 -- "resolve-story-loop: ignoring a closing-sweep marker beyond the one-round grant (got $closing_sweep_round, --max-rounds $max_rounds, so the highest grantable sweep is $(( max_rounds + 1 ))) in $closing_sweep_file"
+      # `effective_max`, not `max_rounds`: the sweep is granted ONE round beyond
+      # the ceiling this run is really working under, and since #1576 a human
+      # grant can raise that. Measuring against the bare flag would refuse a
+      # LEGITIMATE sweep promoted during granted rounds — and a refused marker
+      # makes the promoted round a delta round, which §9 forbids from declaring
+      # CONVERGED, so the run could only ever end BUDGET_EXHAUSTED however clean
+      # it was. The stale-marker protection is untouched: a foreign `99` is
+      # still far beyond `effective_max + 1`.
+      if (( closing_sweep_round > effective_max + 1 )); then
+        print -u2 -- "resolve-story-loop: ignoring a closing-sweep marker beyond the one-round grant (got $closing_sweep_round, ceiling in force $effective_max, so the highest grantable sweep is $(( effective_max + 1 ))) in $closing_sweep_file"
         closing_sweep_round=0
-      elif (( closing_sweep_round > max_rounds )); then
+      elif (( closing_sweep_round > effective_max )); then
         effective_max=$closing_sweep_round
         closing_sweep_granted=1
       fi
@@ -1547,7 +1688,7 @@ if (( resume )); then
   # a ceiling at or below the resumed round would run zero rounds and fall out
   # of the loop with an empty status — refuse it as a usage error instead
   (( resume_round + 1 <= effective_max )) || {
-    print -u2 -- "resolve-story-loop: --resume would start at round $(( resume_round + 1 )) but --max-rounds is $max_rounds — raise --max-rounds"; exit 2 }
+    print -u2 -- "resolve-story-loop: --resume would start at round $(( resume_round + 1 )) but the ceiling in force is $effective_max (--max-rounds $max_rounds, source $max_rounds_source) — raise --max-rounds above $effective_max"; exit 2 }
   # an older work-dir (or one whose file was cleaned up) simply starts empty
   [[ -f "$adjudicated_file" && -s "$adjudicated_file" ]] || print -r -- '[]' > "$adjudicated_file" || {
     print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
@@ -1624,9 +1765,12 @@ else
   # ...and the possible-false-trip marker (#1498) for the same reason: a
   # previous run's identities would silently deny THIS run the continuation it
   # has not spent, and its rounds would inflate this run's reported count.
+  # ...and the max-rounds grant sidecar (#1576), which is the largest blast
+  # radius of the set: a previous story's granted ceiling would silently FUND
+  # rounds this run never earned, and nothing downstream would notice.
   rm_state_err=$(rm -f -- "$work_dir"/tree-*.txt(N) "$work_dir"/dispatch-tree-*.txt(N) "$work_dir"/verify-*.json(N) "$closing_sweep_file" \
-    "$pft_marker" "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) 2>&1) || \
-    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker or fix-touched set may be adopted (#1434, #1435, #1498)"
+    "$pft_marker" "$max_rounds_file" "$work_dir"/.max-rounds.tmp.*(N) "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker, max-rounds sidecar (.max-rounds, .max-rounds.tmp.*) or fix-touched set may be adopted (#1434, #1435, #1498, #1576)"
   print -r -- '[]' > "$adjudicated_file" || {
     print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
   # (the telemetry run-id sidecar is cleared far earlier — see the #995 note
