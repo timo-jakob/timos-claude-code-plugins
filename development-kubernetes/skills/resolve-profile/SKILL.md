@@ -295,31 +295,187 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   attribution is decided against the epic's **pre-epic baseline** and
   **never against `origin/main`, which by E4 already carries every child's
   diff**. Spell that baseline as the commit on `main` immediately **before the
-  epic's first child merged** (`git rev-parse <first-child-merge>^`) — not as a
-  merge-base against that child's branch, which this family's squash merge
-  deleted, leaving `git merge-base` no second argument and a model no baseline
-  but the one this sentence bans.
+  epic's first child merged** (`git rev-parse <first-child-merge>^`) —
+  **not as a merge-base against that child's branch**, which this family's
+  squash merge deleted, leaving `git merge-base` no second argument and a model
+  no baseline
+  but the one this sentence bans. Were attribution read against
+  `origin/main` instead, a `kube-linter` red on a `securityContext` a child
+  dropped would be written off as nobody's, E4 would surface no regression,
+  and E5 would close the epic on the very regression it introduced.
+
+  **That does not discard the union — it stops being the test and becomes an
+  input.** The union survives as the **changed-file list** that `belongs to`
+  reads in attribution case 2 below, which is the shape that relation is
+  defined over. Dropping it along with the path test would leave `belongs to`
+  nothing to be relative to, and case 2 no readable condition at all.
 
   **Attribution has three outcomes here, not two**, because `main` moves under a
-  long epic. Decide it by the **union**, and read the baseline only to separate
-  the other two:
-  - **In the union** — the epic's **own** regression:
-    **halt E4, file an issue for it, and do NOT close the epic**, the same shape
-    as the absent-tool halt's E4 terminal above and the arms' below.
-  - **Not in the union, and present on the pre-epic baseline** — genuinely
-    pre-existing: report it, and let E5 close.
-  - **Not in the union, and absent from the pre-epic baseline** — it arrived on
-    `main` from work outside this epic while the epic ran. **Report it and let
-    E5 close**; it is no more the epic's than the pre-existing one is. Closing
-    this arm is what keeps a delivered epic from sitting permanently open on a
-    stranger's regression, the done-but-open miss this heading refuses below.
+  long epic — and they are decided **in the order written**, stated rather than
+  implied because a three-outcome list whose order a reader must infer is the
+  defect this heading is repairing. **Read the baseline first, and consult
+  `belongs to` only for a finding the baseline did not already place.** They
+  are **attribution cases**, never "arms": this heading numbers two **empty-set
+  arms** above — repo-wide and change-relative — and every later *unqualified*
+  mention of an arm means those two. (The qualified ones above — §3.5's
+  NOT-APPLICABLE arm, the policy arm, §3's abandon-the-PR arm — name themselves.)
 
-  Read against `origin/main` instead, a `kube-linter` red on a `securityContext`
-  a child dropped is written off as nobody's, E4 surfaces no regression, and E5
-  closes the epic on the very regression it introduced.
+  **Derive `<first-child-merge>` before anything else, because every case reads
+  it.** Take each child's merge commit (`gh pr view <child-pr> --json
+  mergeCommit`), order them by **commit date**, and use the **earliest** — first
+  by merge time, never the lowest issue number, which on an out-of-order epic
+  yields a baseline that already carries other children's diffs.
 
-  Getting either of the first two wrong fails in a different direction, which is why both
-  are named: arm 2 read against an identical tree fires every time and halts
+  **Every child must yield a merge commit.** If any child's `mergeCommit` is
+  null, or its PR cannot be identified, the earliest of the *rest* is not a
+  pre-epic baseline — it may already carry the unresolved child's diff, so every
+  regression that child introduced would read as pre-existing. That is an
+  unresolvable baseline: take the halt below, naming the child that did not
+  resolve, and never derive the baseline from the children that did.
+
+  **One gate run yields many findings, and they sort into different cases.**
+  Sort every one of them, and keep the two halves apart. **Every finding's own
+  filing action is performed whatever the others reached** — case 2's issue
+  against the epic, and an independent issue per case-3 finding. **Only the
+  run's OUTCOME takes the strictest terminal:** a single case-2 or
+  unattributable finding halts E4 and leaves the epic open, however many others
+  sort to case 1 or 3, and the E4 report lists all three groups. Collapsing the
+  two would drop case 3's filing on every mixed run — the unfiled report that
+  case 3 exists to refuse.
+
+  Decide *present on the baseline* with §3's own verb: **re-run this
+  render-then-validate gate at the pre-epic baseline commit**, in a scratch
+  worktree rather than by checking that commit out in the epic's tree. A
+  finding that **reproduces** there is present on the baseline; one that does
+  not is absent from it. Nothing here turns on whether a *file* existed.
+
+  **The baseline run is a REPRODUCTION PROBE, not a verdict**: its
+  preconditions, its two empty-set arms and their E4 terminals do **not** fire
+  there — only reproduction is read off it. A baseline whose gateable tree is
+  empty after the skips — the ordinary shape when the epic's children added the
+  repo's **first** chart, overlay or manifest set — produced **no findings**, so
+  every finding of the E4 run is absent from it. That is neither a fired arm nor
+  an unresolvable baseline; read either way, a fully delivered epic is halted
+  and left permanently open. Only a baseline run that cannot be **run to
+  completion** is unresolvable, per the closed condition below.
+
+  **Two findings are the same finding when the same tool reports the same check
+  against the same rendered object** — kind, namespace and name — **produced
+  from the same SOURCE ROOT**, which you resolve through `render-map.json`
+  rather than read off the rendered path. Never match on the rendered path
+  itself: a child renaming a template, a chart directory or an overlay changes
+  it without changing the finding, so where the union shows a root was renamed,
+  the old and new names are the same root. Matched by path, a pre-existing
+  finding looks absent from the baseline the moment a child renames anything,
+  and then sorts to case 2: an epic halted and blamed for a lint failure it
+  inherited. **The source root is what keeps two roots apart**, too — a repo
+  rendering the same kind, namespace and name from `clusters/a/` and
+  `clusters/b/` has two distinct findings, and identity blind to the root would
+  read a child's new one on the second as the first's pre-existing twin.
+
+  1. **Present on the pre-epic baseline** — genuinely pre-existing: report it and let E5 close,
+     **whether or not a child touched what it fires on**. That
+     trailing clause is the whole reason the baseline is read first: a child
+     editing one line of a Deployment does not thereby adopt every finding that
+     Deployment already carried.
+  2. **Absent from the baseline, and it `belongs to` a source a child changed** —
+     the epic's **own** regression:
+     **halt E4, file an issue for it, and do NOT close the epic**, the same shape
+     as the absent-tool halt's E4 terminal above and the arms' below.
+  3. **Absent from the baseline, and belonging to nothing the epic changed** — it
+     arrived on `main` from work outside this epic while the epic ran.
+     **File it as an INDEPENDENT issue, name that issue in the E4 report, and let E5 close** —
+     never as the epic's own and never with the epic's residue
+     labelling. *Report it* has no other destination at E4: there is no PR and
+     no §3.5, so an unfiled report ends the run with a real regression on
+     `main` and no owner. Closing here is what keeps a delivered epic from
+     sitting permanently open on a stranger's regression, the done-but-open
+     miss this heading refuses below.
+
+  **Cases 1 and 3 NARROW the conductor's E4 rule, and say so here because the
+  conductor states it unqualified.** Its *file it — the epic stays open until
+  that regression is handled* governs the epic's **own** combined effect, which
+  is case 2. A finding the baseline places **outside** the epic is **reported
+  (case 1) or filed as an independent issue (case 3)**, and the epic closes;
+  holding it open would strand delivered work on a regression no child caused,
+  which nothing in the flow ever clears.
+
+  **They narrow E5's *only after E4 is green* the same way**, since a case-1 or
+  case-3 run reaches E5 with a finding reported and the gate not green on any
+  plain reading. **E4 is green FOR CLOSURE PURPOSES when every finding it
+  surfaced sorts to case 1 or case 3 and each case-3 finding has been filed.**
+  Only a case-2 finding, an unattributable one, or a fired arm makes it
+  not-green. Without that, a model consulting E5's precondition declines to
+  close and produces the done-but-open epic both documents call the flow's most
+  common miss.
+
+  **`belongs to` in attribution case 2 is the panel's relation — read it there
+  rather than restating it here**, exactly as the change-relative arm above
+  delegates it, and with that relation's transitive reading intact: narrowing
+  it to a shared chart or root here would be the second copy this Gate
+  refuses, and would drop the consumed-base case the panel calls load-bearing.
+  Read the **relation** there, and not the panel's neighbouring
+  *deletion-widens-the-whole-tree* clause: that one binds `{SCOPE}` for a
+  dispatch, never belonging for a finding, and imported here it would put every
+  finding on any epic where a child deleted a manifest into case 2.
+
+  What is E4-specific is a **resolution step, not a belonging test**, and it is
+  **not universal**. A finding from `helm template` / `kustomize build` output,
+  or from the copied standalone tree, names a path in the **render tree** rather
+  than the repo: resolve it through `render-map.json` to its source before
+  applying the relation. **Run the E4 render in the panel's own render-step
+  layout so that map exists** — at E4 no panel is dispatched, so nothing else
+  writes it. A `kyverno test` finding is the exception that proves the scope:
+  the declared policy tree never enters the render set, so such a finding
+  **already names its repo path** and the relation applies to it directly.
+  **A finding the baseline placed as ABSENT that resolves neither way is
+  unattributable: it takes the halt below, and NEVER case 3** — whose closing
+  terminal would otherwise absorb every finding the map failed to explain. (A
+  finding case 1 already placed is closed there; this never reaches back for
+  it.) The one belonging question the panel
+  does not answer is the
+  **cross-object red** — `dangling-service`, `dangling-ingress`,
+  `non-existent-service-account` — which belongs to a child that changed
+  **either endpoint**: the object it dangles from, *or* the referring object's
+  own file, where a child may have authored the reference itself. Only where a
+  child changed **neither** endpoint does such a red fall to case 3.
+
+  **Two distinct things take this halt: a baseline that cannot be resolved, and
+  a finding that resolves neither through the map nor by naming its own repo
+  path.** Both are unattributable, and neither takes the report — **but only
+  where there is a finding to attribute at all.** A **green** E4 gate has none,
+  **so an unresolvable baseline is no halt there and that epic closes**; keying this
+  on the baseline alone would strand a fully delivered epic that produced no
+  finding. Where there IS one:
+  **halt E4, report the unattributable finding and whichever of the two fired
+  — why the baseline could not be resolved, or why its path resolved to no
+  source — and do NOT close the epic**; do not file an issue against a finding
+  you could not attribute. Only the halt is recoverable: a human resolves the
+  baseline and re-runs, while an epic closed on its own regression is reopened
+  by nothing this flow does.
+
+  **Unresolvable is a closed condition, not a list of two.** No first child
+  merge is identifiable; the history was rewritten under it; **or the gate
+  cannot be run to completion at that commit** — a renderer error, chart
+  dependencies that no longer resolve, a policy set `kyverno` rejects at that
+  revision. **Any state in which reproduction at the baseline cannot be DECIDED
+  is an unresolvable baseline**, and
+  **a baseline run that errors out is NEVER read as producing no findings**:
+  read that way, every pre-existing finding looks
+  absent from the baseline, and one firing on a path a child touched takes case
+  2 — halting a delivered epic and filing an issue that blames it for a finding
+  it did not introduce.
+
+  **Like the absent-tool halt, this one is reached only once the union carried
+  a deploy-relevant path** — the reciprocal of the precondition above, stated
+  here because a reader can enter at this paragraph without passing through
+  it. On an epic whose children touched nothing this gate validates there is
+  nothing to attribute at all, so an unresolvable baseline is no halt there
+  either: that epic closes by the precondition's own rule below.
+
+  Getting either of those first two diff-shaped tests wrong fails in a
+  different direction, which is why both are named: the change-relative arm
+  read against an identical tree fires every time and halts
   every epic (noisy but safe), while the **deploy-relevant-path precondition
   read against it concludes nothing deployable changed and says *proceed*** —
   on an epic whose children may have rewritten every manifest in the repo, so

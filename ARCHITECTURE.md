@@ -3012,6 +3012,22 @@ registry row points at — a profile written to the list above alone would red:
   carry plugin content — `kubernetes`, which the fallback ordering reaches only
   when `is_claude_plugin` is false — states that reason instead.
 
+**A profile's Gate may NARROW the conductor's E4 disposition rule, by the same
+mechanism and under the same disclosure duty** (#1561). The conductor
+dereferences the Gate by name at E4 and tells the reader never to substitute
+their own command for a loaded profile's, so the profile is the more specific
+rule where the two speak to one event. What it may narrow is the conductor's
+unqualified *file it — the epic stays open until that regression is handled*,
+and E5's *only after E4 is green* with it: a profile that attributes findings
+may rule that a finding its **pre-epic baseline places OUTSIDE the epic** is
+reported or filed independently and the epic still closes, since holding it open
+would strand delivered work on a regression no child caused. The narrowing is
+legitimate only when the profile **says so in the open and gives the reason**,
+exactly as Version bump does — a silent divergence between a profile and the
+step that loads it is drift, not a narrowing. The conductor's own sentence stays
+unqualified for now; the reciprocal edit belongs to whichever story next has
+`development/skills/resolve-issue/SKILL.md` in scope.
+
 **The load point is §1b**, between the conductor's §1 (branch) and §2
 (implement): `review-dispatch.zsh detect --repo .` reports the repo type, and the
 conductor invokes `development-<repo_type>:resolve-profile` **by name**, the same
