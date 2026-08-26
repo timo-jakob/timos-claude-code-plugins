@@ -1,7 +1,7 @@
 {
   "name": "development-go",
   "description": "Go maintenance + review plugin. Review panel: /development-go:review runs 6 specialist agents, with go-resilience-reviewer anchored to the bootstrap sony/gobreaker payload as its reference implementation (#1144). Maintenance dispatches findings from /development:maintenance to go-format-lint-fixer (golangci-lint v2), the static-analysis triage agents go-sonar-triage + go-code-scanning-triage + go-semgrep-triage, go-maintenance-planner, and go-ci-fixer, with a per-package coverage pre-flight (go test -coverprofile) that spawns go-coverage-improver in a worktree when affected code sits below Required. The go-approver synthesis layer posts merge verdicts via /development-go:approve, fed by the 6 review dimensions the Approver walks as risk-register lenses — the panel's own dimension table, resilience included (#1147). The proto-first advisors go-grpc-advisor (buf codegen) and go-api-contract-advisor (grpc-gateway REST facade + 2.0→3.0 OpenAPI pipeline) audit the API-contract wiring. Blessed toolchain: Go modules, Taskfile, golangci-lint v2, go test -coverprofile, buf + grpc-gateway, ko.",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "author": {
     "name": "Timo Jakob"
   },

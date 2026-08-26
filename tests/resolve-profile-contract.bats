@@ -165,15 +165,16 @@ _panel_restatements() {
   return 0
 }
 
-# The Gate clauses whose REVERSION would silently reinstate a finding this
-# story already raised as blocking. `type|needle`, one row per clause, matched
-# inside that profile's `## Gate` section.
+# The Gate clauses whose REVERSION would put a run back on an action a review
+# round raised as wrong — whether or not that round blocked on it, the bar
+# ARCHITECTURE.md states. `type|needle`, one row per clause, matched inside
+# that profile's `## Gate` section.
 #
 # Deliberately NOT one row per sentence: these profiles are contracted to be
 # short, and pinning every clause would both freeze prose that should stay
 # editable and mint review surface of its own. The bar is the one the #1505
 # guidance sets — a clause earns a row when losing it puts a model back on an
-# action a reviewer already called wrong.
+# action a review round raised as wrong, whether or not it blocked on it.
 #
 # A needle must be both UNIQUE and DISCRIMINATING, which are different tests and
 # both were failed here once:
@@ -191,6 +192,30 @@ _panel_restatements() {
 #     No sweep can check this one — it is a claim about text that no longer
 #     exists — so it is the reviewer's job, and the reason each row below names
 #     the corrective clause rather than the surrounding explanation.
+#
+# The #1558 rows meet the same bar by a slightly different route: #1505's
+# closing round raised each seam as a finding and recorded it rather than
+# blocking on it, so the action a reader was left on was wrong in each case even
+# though no round called it wrong loudly enough to hold the PR — and #1558's own
+# rounds then raised the same shapes as blocking. Reverting any one of them puts
+# a model back on it: a vacuously green kubernetes gate over zero rendered
+# documents (or over documents the change never touched), a halt on a tool that
+# repo never selects, an E4 verdict resting on the inference its go/swift
+# siblings reject, a go E4 arm that reads two ways on a `cmd/` binary, and a §6
+# halt that fires where the coverage guard itself owes nothing. #1558's own
+# rounds then added further seams to that list — a docs-only story held up by a
+# renderer it never needed, a delivered docs-only epic left permanently open at
+# E4, a green criterion whose subject narrows back to render output on a repo
+# that renders nothing, and the deleted-path relation read from the panel's
+# bolded headline rather than from the rule that closes it. That list is open,
+# not closed: every row below is pinned by the sentence carrying its own
+# corrective instruction, so a seam pinned later belongs in the table whether or
+# not this paragraph names it.
+#
+# Each seam is pinned by the sentence that CARRIES the corrective instruction,
+# not by the premise that motivates it — the DISCRIMINATING half above, applied.
+# A row on the premise alone survives a rewrite that keeps the premise and drops
+# the directive, which is the whole failure mode this table exists to catch.
 _gate_clauses() {
   printf '%s\n' \
     'python|git rev-parse --git-common-dir' \
@@ -211,7 +236,73 @@ _gate_clauses() {
     'kubernetes|read the set there' \
     'kubernetes|Attribute a finding' \
     'kubernetes|the renderers as much as the validators' \
-    'kubernetes|Epic verification (§E4)'
+    'kubernetes|Epic verification (§E4)' \
+    'kubernetes|An EMPTY set of gateable documents is not green' \
+    'kubernetes|The population is the panel' \
+    'kubernetes|Repo-wide — the tree is empty' \
+    'kubernetes|with **no commit and no PR**' \
+    'kubernetes|Take that halt, never an arm' \
+    'kubernetes|neither arm applies:** a README' \
+    'kubernetes|declared policy tree is in the population too' \
+    'kubernetes|own result stands** — this Gate is not claiming a red' \
+    'kubernetes|Change-relative — the tree is non-empty' \
+    'kubernetes|NOT-APPLICABLE-on-a-full-round** arm and take the' \
+    'kubernetes|not map-value equality' \
+    'kubernetes|and **proceed** — the panel will report its own' \
+    'kubernetes|zero applicable tools over an **empty tree**' \
+    'kubernetes|standalone manifests validated directly' \
+    'kubernetes|when the diff carried a deploy-relevant path' \
+    'kubernetes|qualifier is the **deploy-relevant-path precondition' \
+    'kubernetes|every diff-shaped test in this heading asks' \
+    'kubernetes|For the ARMS specifically' \
+    'kubernetes|does not halt it' \
+    'kubernetes|not held up by a renderer it never needed' \
+    'kubernetes|found something deployable in the diff' \
+    'kubernetes|Once it is read against the union' \
+    'kubernetes|let E5 close the epic' \
+    'kubernetes|Neither arm is cleared by re-running' \
+    'kubernetes|is not a missing tool' \
+    'kubernetes|A chart or root inside the skip set never selects its' \
+    'kubernetes|never against the repo' \
+    'kubernetes|unless the renderer' \
+    'kubernetes|The reason is positive, not an inference from E4' \
+    'kubernetes|for #1206 here** — that gate reads an *application* repo' \
+    'kubernetes|which those types do not share' \
+    'kubernetes|union of the epic' \
+    'kubernetes|never against `origin/main`, which by E4 already carries' \
+    'kubernetes|**finding-attribution** bullet' \
+    'kubernetes|halt E4, file an issue for it, and do NOT close the epic' \
+    'kubernetes|Attribution has three outcomes here, not two' \
+    'kubernetes|absent from the pre-epic baseline' \
+    'kubernetes|So at E4 **either arm** means' \
+    'kubernetes|halt E4, report which arm fired, and do NOT close the epic' \
+    'kubernetes|halt E4, report the absent tool(s) by name' \
+    'kubernetes|from the panel'"'"'s rule, not from its headline' \
+    'kubernetes|belongs to no rendered document' \
+    'kubernetes|lived under one — is always in scope' \
+    'kubernetes|paths are policies belongs by the same' \
+    'go|decides only what to exercise through it' \
+    'go|still on the deployable arm' \
+    'go|being importable exempts nothing' \
+    'go|left on disk for E4 to' \
+    'go|Close the enumeration rather than assuming the common case' \
+    'go|name them in the' \
+    'go|the exercise was **partial**' \
+    'go|is a usage error,' \
+    'go|**not a licence**' \
+    'swift|**not a licence**' \
+    'java|0 — nothing owed' \
+    'java|read all **three** of its exits' \
+    'java|only exit that halts WITHOUT further checking' \
+    'java|never read *not 1* as *push*' \
+    'java|came from THIS tree' \
+    'java|its **own entry guard**' \
+    'python|only one of them is *nothing owed*' \
+    'python|read all **three** of its exits' \
+    'python|only exit that halts WITHOUT further checking' \
+    'python|never read *not 1* as *push*' \
+    'python|its **own entry guard**' \
+    'python|from **this** tree'
 }
 
 # Every missing Gate clause, one per line. $1 overrides the repo root so the
@@ -876,9 +967,12 @@ _arch_order_violation() {
     '_gate_pairs' \
     '_gate_clauses' \
     'no dimension list and' \
-    'narrows')"
-  [ "$(printf '%s\n' "$needles" | grep -c . || true)" -eq 8 ] || {
-    echo "the arch-clause needle list changed size. It covers the six clause bullets, the frontmatter disable-model-invocation clause above them, and clause 4's SECOND table (_gate_clauses) — which is why it is larger than the bullet count." >&2
+    'narrows' \
+    'whether or not that round blocked on it' \
+    'carries the corrective instruction' \
+    'per-type row split')"
+  [ "$(printf '%s\n' "$needles" | grep -c . || true)" -eq 11 ] || {
+    echo "the arch-clause needle list changed size. It covers the six clause bullets, the frontmatter disable-model-invocation clause above them, and clause 4's SECOND table (_gate_clauses) — which is why it is larger than the bullet count. #1558 added three more, all gated by the same sweep: the widened admission bar, the corrective-clause rule, and the per-type row split the tripwire now records." >&2
     return 1
   }
   while IFS= read -r needle; do
@@ -1236,10 +1330,39 @@ _gate_pair_violations() {
   # its row and go green with no other signal.
   local n types
   n="$(_gate_clauses | grep -c . || true)"
-  [ "$n" -eq 19 ] || {
-    printf 'the Gate clause table holds %s row(s), expected 19.\n' "$n" >&2
-    printf 'A clause earns a row when losing it reinstates a finding already\n' >&2
-    printf 'raised as blocking. Removing one needs that argument, in the PR.\n' >&2
+  [ "$n" -eq 85 ] || {
+    printf 'the Gate clause table holds %s row(s), expected 85.\n' "$n" >&2
+    printf 'A clause earns a row when losing it puts a run back on an action a\n' >&2
+    printf 'review round raised as wrong — whether or not that round blocked on\n' >&2
+    printf 'it. Removing one needs that argument, in the PR.\n' >&2
+    return 1
+  }
+  # ...and the PER-TYPE distribution, not just the total (#1558). The total
+  # alone is satisfied by a SWAP: drop a row that guards a corrective clause,
+  # add one naming an untouched paragraph of a DIFFERENT profile, and the count,
+  # the per-type coverage loop below and the uniqueness sweep are all still
+  # green — without the argument this table's header demands. Recorded the way
+  # `#1505 the gate-pair rows carry the exact token count recorded` records its
+  # own figure, and DERIVED from the table rather than counted by hand.
+  local want row t got bad=""
+  local -a expect=( 'python 9' 'java 8' 'go 14' 'swift 6' 'kubernetes 48' )
+  for row in "${expect[@]}"; do
+    t="${row%% *}"; want="${row##* }"
+    got="$(_gate_clauses | cut -d'|' -f1 | grep -cxF -- "$t" || true)"
+    [ "$got" -eq "$want" ] \
+      || bad+="$t: $got row(s), expected $want"$'\n'
+  done
+  [ -z "$bad" ] || {
+    printf 'Gate clause rows per type changed:\n%s\n' "$bad" >&2
+    printf 'Moving a row between types keeps the total; record the new split.\n' >&2
+    return 1
+  }
+  # the recorded split must ACCOUNT for every row, or a type could be added to
+  # the table while this list quietly ignores it
+  local summed=0
+  for row in "${expect[@]}"; do summed=$(( summed + ${row##* } )); done
+  [ "$summed" -eq "$n" ] || {
+    printf 'the recorded per-type split sums to %s over %s rows.\n' "$summed" "$n" >&2
     return 1
   }
   # ...and every runner-less profile is represented, so a whole type cannot
@@ -1293,7 +1416,7 @@ _gate_pair_violations() {
   local bad
   bad="$(_gate_clause_violations)"
   [ -z "$bad" ] || {
-    printf 'Gate clause(s) lost — each reinstates a finding raised as blocking:\n%s\n' "$bad" >&2
+    printf 'Gate clause(s) lost — each puts a run back on an action a review\nround raised as wrong (blocking or not):\n%s\n' "$bad" >&2
     return 1
   }
 }
@@ -1339,6 +1462,233 @@ _gate_pair_violations() {
     echo "the review skill lost the skip set the kubernetes Gate defers to —" >&2
     echo "a model told to 'read the set there' now finds none and renders" >&2
     echo "everything, which is the #1505 round-1 CRITICAL verbatim." >&2
+    return 1
+  }
+  # #1558 added a SECOND delegation to the same file, with the same two failure
+  # modes: the empty-render bullet claims the panel reports both of these as not
+  # applicable, and names each of its own arms after the panel's wording. Reword
+  # them there and the Gate cites a reading that no longer exists — the vacuous
+  # green, back by a different door. The clause table cannot see this half,
+  # because every one of its rows only ever reads the profile.
+  # Bare phrase presence is too weak a needle: both phrases also appear in the
+  # panel's FAILED arm's neighbourhood, so moving them there would keep this
+  # green while the Gate cites a verdict the panel no longer gives. Assert the
+  # ATTRIBUTION — the not-applicable sentence itself, with both phrases inside
+  # it — which is the only form that can drift.
+  # Read the sentence FLATTENED, not line-wise: it wraps mid-parenthetical in
+  # the shipped file, so a `grep` of single lines can never hold both phrases
+  # and would fail on correct text. Flatten, then take the window that follows
+  # the verdict marker.
+  local flat na
+  flat="$(tr '\n' ' ' < "$review" | tr -s ' ')"
+  case "$flat" in
+    *'explicitly **not applicable**'*) na="${flat#*explicitly \*\*not applicable\*\*}" ;;
+    *) echo "the review skill no longer states a not-applicable verdict at all," >&2
+       echo "which the kubernetes Gate's empty-set bullet cites as the panel's" >&2
+       echo "own reading of the same input (#1558)." >&2
+       return 1 ;;
+  esac
+  # the attribution is the parenthetical the marker introduces, so bound the
+  # window rather than searching the rest of the file — otherwise the phrases
+  # could satisfy this from the FAILED arm further down, which is the very
+  # mutation this assertion exists to catch.
+  #
+  # ANCHORED ON THE ADJACENT PARENTHESIS, not on the first one anywhere
+  # downstream. `na` is the flattened remainder of the WHOLE file, which always
+  # holds another `)` further on — so a bare `*')'*` guard can never fail, and
+  # `${na%%)*}` does not no-op on a reword either: it silently retargets to that
+  # farther parenthesis and widens the window from one clause to a dozen lines,
+  # letting the FAILED-arm-adjacency mutation back in. Both halves have to be
+  # adjacency-anchored for the refusal arm to be reachable at all.
+  case "$na" in
+    ' ('*) na="${na#*(}"; na="${na%%)*}" ;;
+    *) echo "the review skill's not-applicable verdict no longer carries an" >&2
+       echo "ADJACENT parenthetical attribution, so the one-clause window this" >&2
+       echo "assertion depends on cannot be bounded — re-anchor it rather than" >&2
+       echo "letting the check widen silently (#1558)." >&2
+       return 1 ;;
+  esac
+  local phrase
+  for phrase in 'nothing to render at all' 'nothing in scope rendered'; do
+    case "$na" in *"$phrase"*) : ;; *)
+      printf 'the review skill no longer attributes <<%s>> to its\n' "$phrase" >&2
+      echo "NOT-APPLICABLE verdict — the Gate cites a reading the panel has" >&2
+      echo "stopped making, so the two diverge on exactly the input the" >&2
+      echo "empty-set bullet is about (#1558)." >&2
+      return 1 ;;
+    esac
+    printf '%s' "$gate" | grep -qF -- "$phrase" || {
+      printf 'the kubernetes Gate no longer cites <<%s>>, so the\n' "$phrase" >&2
+      echo "delegation this test guards was dropped rather than moved." >&2
+      return 1
+    }
+  done
+  # #1558 added two MORE pointers at the same file, and a pointer's second
+  # failure mode is the target moving. The loop walks FOUR pairs, and they are
+  # not all the same strength. The first two far sides are additionally pinned
+  # by tests/kubernetes-plugin-skeleton.bats (the review skill's own suite), so
+  # those assertions are co-location rather than the only guard: a break should
+  # name the Gate that delegates, not leave a reader to connect a skeleton
+  # assertion three files away to an arm misfiring on a values.yaml-only edit.
+  # Pairs 3 and 4 are DIFFERENT. The panel's dispatch enumeration and the
+  # carve-out that closes it are asserted nowhere else in this repo, so these
+  # two ARE the only guard on them and must not be pruned as redundant.
+  local pointer target
+  for pointer in \
+    'read the composition there|copied in alongside it' \
+    'not map-value equality|membership plus consumption' \
+    'a **deleted** path that *was* a manifest|was a manifest, a chart root, or a kustomize root' \
+    'a deleted path that was **none** of those|lived under none'; do
+    printf '%s' "$gate" | grep -qF -- "${pointer%%|*}" || {
+      printf 'the kubernetes Gate no longer delegates via <<%s>>\n' "${pointer%%|*}" >&2
+      return 1
+    }
+    target="${pointer#*|}"
+    grep -qF -- "$target" "$review" || {
+      printf 'the review skill no longer supplies <<%s>>, which the\n' "$target" >&2
+      echo "kubernetes Gate defers to rather than restating. A model told to" >&2
+      echo "'read it there' finds nothing, falls back on map-value equality," >&2
+      echo "and the change-relative arm misfires on a values.yaml-only edit" >&2
+      echo "or a deletion-only diff (#1558)." >&2
+      return 1
+    }
+  done
+}
+
+@test "#1558 the kubernetes E4 condemnation sits in the ARMS paragraph, not the exemption" {
+  # Round 4's third blocker was fixed by MOVING a sentence, and _gate_clauses is
+  # structurally blind to placement: every row greps the whole Gate, so the
+  # sentence can be moved back to the end of the exemption paragraph with all
+  # rows still matching. Moved back, a model reading the exemption top-down
+  # finishes on a sentence condemning the very close it was just ordered to
+  # allow, halts E4 on a fully delivered docs-only epic, and strands it open
+  # with no remedy. Position is the only thing that can catch that.
+  local profile arms exemption
+  profile="$REPO_ROOT/development-kubernetes/skills/resolve-profile/SKILL.md"
+  [ -f "$profile" ] || { echo "no kubernetes profile at $profile" >&2; return 1; }
+  arms="$(grep -n -m1 -F -- 'For the ARMS specifically' "$profile" | cut -d: -f1)"
+  exemption="$(grep -n -m1 -F -- 'is deliberately NOT swept into that' "$profile" | cut -d: -f1)"
+  # Guard each anchor: a deleted one yields an empty string, and `-lt` on empties
+  # is a syntax error rather than a named failure — the same arity discipline the
+  # clause accumulators carry.
+  [ -n "$arms" ] || {
+    echo "the ARMS paragraph no longer carries its explicit subject, so the" >&2
+    echo "vacuous-green condemnation has no stated owner (#1558)." >&2
+    return 1
+  }
+  [ -n "$exemption" ] || {
+    echo "the E4 exemption paragraph is gone — a docs-only epic has no arm" >&2
+    echo "that lets E5 close it (#1558)." >&2
+    return 1
+  }
+  [ "$arms" -lt "$exemption" ] || {
+    printf 'the condemnation (line %s) now follows the exemption (line %s):\n' \
+      "$arms" "$exemption" >&2
+    echo "a reader finishing the exemption top-down meets a sentence calling" >&2
+    echo "its own prescribed close the vacuous green the heading refuses, and" >&2
+    echo "strands a delivered docs-only epic permanently open (#1558)." >&2
+    return 1
+  }
+}
+
+@test "#1558 the kubernetes preconditions are ordered, and both precede the arms" {
+  # The profile calls this order load-bearing in as many words — "both before
+  # either arm, and IN THIS ORDER" — because the two preconditions END
+  # DIFFERENTLY: the deploy-relevant-path test proceeds, the tool-availability
+  # test halts. Every clause row greps the whole Gate, so all of them survive a
+  # swap of the two numbered items; only position can catch it.
+  local profile deploy tools block arms
+  profile="$REPO_ROOT/development-kubernetes/skills/resolve-profile/SKILL.md"
+  [ -f "$profile" ] || { echo "no kubernetes profile at $profile" >&2; return 1; }
+  deploy="$(grep -n -m1 -F -- 'Ask whether the diff carries a deploy-relevant path at all' \
+    "$profile" | cut -d: -f1)"
+  tools="$(grep -n -m1 -F -- 'Establish the applicable tool set and whether it is installed' \
+    "$profile" | cut -d: -f1)"
+  block="$(grep -n -m1 -F -- 'Two preconditions first' "$profile" | cut -d: -f1)"
+  arms="$(grep -n -m1 -F -- 'Then the two arms' "$profile" | cut -d: -f1)"
+  # Guard every anchor before comparing: an empty capture makes `-lt` a syntax
+  # error rather than a named failure, the arity discipline the clause
+  # accumulators carry. Spelled out rather than looped over variable NAMES —
+  # bats runs under bash, where zsh's `${(P)name}` indirection is a hard error.
+  local bad=""
+  [ -n "$deploy" ] || bad+="the deploy-relevant-path precondition"$'\n'
+  [ -n "$tools" ]  || bad+="the tool-availability precondition"$'\n'
+  [ -n "$block" ]  || bad+="the 'Two preconditions first' block opener"$'\n'
+  [ -n "$arms" ]   || bad+="the 'Then the two arms' opener"$'\n'
+  [ -z "$bad" ] || {
+    printf 'the kubernetes Gate lost these anchors, so the precondition order\n' >&2
+    printf 'cannot be checked — re-anchor them rather than dropping the\n' >&2
+    printf 'assertion (#1558):\n%s\n' "$bad" >&2
+    return 1
+  }
+  [ "$deploy" -lt "$tools" ] || {
+    printf 'the tool-availability precondition (line %s) now precedes the\n' "$tools" >&2
+    printf 'deploy-relevant-path one (line %s).\n' "$deploy" >&2
+    echo "A model reading the list top-down then establishes the tool set" >&2
+    echo "first and takes its halt on a docs-only diff in a repo with no" >&2
+    echo "helm installed — the docs-only story held up by a renderer it never" >&2
+    echo "needed, which is the seam #1558 fixed." >&2
+    return 1
+  }
+  [ "$block" -lt "$arms" ] || {
+    printf 'the precondition block (line %s) no longer precedes the arms\n' "$block" >&2
+    printf '(line %s), which the Gate requires with "both before either arm":\n' "$arms" >&2
+    echo "an arm reached on a false premise ends a story that should ship." >&2
+    return 1
+  }
+}
+
+@test "#1558 the java/python coverage-guard claims resolve at the script itself" {
+  # The §6 carry-forward paragraphs make FALSIFIABLE claims about a script no
+  # _gate_pairs row covers: those rows anchor each Gate to its ci-fixer agent,
+  # and this is a different file. A --lang the script does not accept, or an exit
+  # code it does not return, sends a model down an arm that cannot fire — on
+  # `--lang jvm` it gets exit 2, which the profile's own "only on exit 1" wording
+  # then turns into a push with no coverage report.
+  local guard="$REPO_ROOT/development/skills/bootstrap/scripts/ensure-coverage-precondition.zsh"
+  [ -f "$guard" ] || { echo "the coverage guard the profiles cite is gone" >&2; return 1; }
+  local bad="" lang sec profile
+  # LOOP-INVARIANT, so it is asserted once: inside the loop a changed usage line
+  # would accumulate the identical diagnostic twice and read as two defects.
+  grep -qF -- '--lang <python|java|swift>' "$guard" \
+    || bad+="the guard's usage line no longer spells the accepted --lang set"$'\n'
+  for lang in python java; do
+    profile="$REPO_ROOT/development-$lang/skills/resolve-profile/SKILL.md"
+    # the same [ -f ] guard both sibling accumulators carry: without it a
+    # deleted profile aborts this test under errexit instead of being NAMED.
+    [ -f "$profile" ] || { bad+="$lang: no profile at $profile"$'\n'; continue; }
+    sec="$(_profile_section "$profile" "Gate")"
+    # The SCRIPT NAME and the flag together, not the flag alone — that is what
+    # makes this a pairing. Renaming the script in the profile (to one that does
+    # not exist) leaves a bare `--lang java` grep matching, and §6 then invokes
+    # nothing and gets no verdict at all, which is the unconditional halt seam 5
+    # removed wearing a new coat.
+    printf '%s' "$sec" \
+      | grep -qF -- "ensure-coverage-precondition.zsh --lang $lang" \
+      || bad+="$lang: its Gate no longer names ensure-coverage-precondition.zsh --lang $lang"$'\n'
+  done
+  # the three exit codes the profiles now branch on are the three it documents
+  grep -qF -- '#   0  no report needed' "$guard" \
+    || bad+="the guard no longer documents exit 0 as no-report-needed"$'\n'
+  grep -qF -- '#   1  covered-language files present' "$guard" \
+    || bad+="the guard no longer documents exit 1 as report-missing"$'\n'
+  grep -qF -- '#   2  usage error' "$guard" \
+    || bad+="the guard no longer documents exit 2 as a usage error"$'\n'
+  # exit 0's SECOND cause, which the python profile branches on explicitly
+  grep -qF -- 'OR report already present' "$guard" \
+    || bad+="the guard no longer documents exit 0's report-already-present cause"$'\n'
+  # the go profile's claim that `--lang go` is a usage error rather than a
+  # verdict, asserted from the other side: a `go)` arm added to the selector
+  # would falsify it with every other check still green.
+  # An alternation is the natural way to add a language sharing another's globs,
+  # and a bare `^go\)` misses it — leaving the check named for the go claim
+  # unable to falsify it. Match `go` in ANY position: requiring it last would
+  # still miss `go|swift)`, which is just as natural a spelling.
+  if grep -qE -- '^[[:space:]]*([a-z]+\|)*go(\||\))' "$guard"; then
+    bad+="the guard now accepts --lang go, so the go profile's claim is false"$'\n'
+  fi
+  [ -z "$bad" ] || {
+    printf 'coverage-guard claim drift:\n%s\n' "$bad" >&2
     return 1
   }
 }

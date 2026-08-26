@@ -84,12 +84,44 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   end-to-end exercise of the affected behaviour" on top of the suite is the
   **shape** of the repo — a deployable thing whose children can integrate badly
   — and a Go service is that shape. So where this repo ships a runnable artifact
-  — a service, or a CLI whose subcommands the epic's children touched — run that
-  exercise too, against the built binary. Only a repo consumed **solely** as a
-  library is exempt, and **a repo that is both takes the deployable arm**: a
-  module with a `cmd/` binary is not exempted by also being importable. A green
+  — a service, or any `cmd/` binary — run that exercise too, against a binary you
+  **build for it**: `go build -o <scratch>/<name> <main-package>`, outside the
+  repo, since this Gate's own `go build ./...` compiles every package and writes
+  **no** executable, so there is no "the built binary" left on disk for E4 to
+  pick up.
+
+  **Close the enumeration rather than assuming the common case.**
+  `<main-package>` is `./cmd/<name>` in the usual layout and plain `.` where
+  `package main` sits at the module root, which is ordinary for a single-binary
+  service — the trigger says *a service, or any `cmd/` binary*, so a recipe that
+  only spells `./cmd/<name>` fails on half of what it triggers on. And **a module
+  may ship several**: build and exercise **every** `cmd/` binary whose package
+  graph includes a package the epic's children touched, and **name them in the
+  E4 report**. Exercising one of three and reporting E4 green leaves the other
+  two's integration untested while the report implies otherwise; where that set
+  is too large to drive fully, exercise what you can and record which were
+  smoke-run only, per the partial-exercise rule below. A module with **no**
+  `package main` anywhere is the library-only exemption, stated observably.
+
+  **The repo's shape decides whether the arm applies; what the epic's
+  children touched decides only what to exercise through it.** One rule, so
+  there is nothing to reconcile on the case that would otherwise read two ways:
+  a module with a `cmd/` binary whose children touched only internal packages is
+  still on the deployable arm — that code is compiled into the binary — so drive
+  the binary down the subcommands that reach the changed behaviour, rather than
+  reading "no subcommand was edited" as an exemption. Only a repo consumed
+  **solely** as a library is exempt, and **a repo that is both takes the
+  deployable arm**: being importable exempts nothing. A green
   suite alone is not E4 evidence for a deployable, and closing an epic on one
   would be the very integration blindness E4 exists to prevent.
+
+  **And say so when no subcommand reaches the change** — the case this very
+  rule creates, on a repo that is both: children touched internal packages the
+  *library* half consumes and no command path exercises. Do not invent an
+  exercise to fill the gap, and do not silently fall back to the suite. Smoke-run
+  the binary (it still proves the module builds and starts with the change in
+  it), and record in the E4 report that the exercise was **partial** and why, so
+  the epic closes on evidence that is named for what it is.
 
 ## Version bump
 

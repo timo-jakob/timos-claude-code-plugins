@@ -49,11 +49,42 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
 
   **Carry that forward to §6, because §6 will not work it out for itself.**
   open-pr's coverage precondition decides on the *diff* and the *report's
-  absence*; it never checks whether the toolchain could produce one, so it will
-  ask for a report this repo cannot generate. Do **not** satisfy it by
-  installing `pytest-cov` — that is the separate change above, now smuggled in —
-  and do **not** push with `--no-verify`, which walks past the coverage floor.
-  Report the missing coverage tooling and stop.
+  absence*; it never checks whether the toolchain could produce one, so where it
+  asks at all it asks for a report this repo cannot generate. Do **not** satisfy
+  it by installing `pytest-cov` — that is the separate change above, now
+  smuggled in — and do **not** push with `--no-verify`, which walks past the
+  coverage floor.
+
+  **Halt on the guard's own verdict, not on the absent tooling alone**, and
+  read all **three** of its exits rather than the one you expect.
+  `ensure-coverage-precondition.zsh --lang python` exits **0** for **two
+  different reasons**, and only one of them is *nothing owed*: the branch's diff
+  carries no covered-language files — exactly the docs-or-config story a
+  `pytest-cov`-less repo most often ships, where the `coverage-floor` hook keys
+  on that same `origin/<default>...HEAD` diff and no-ops when it carries no
+  `*.py` (its **own entry guard**, not pre-commit's `files:` filter, which #713
+  replaced because it over-fires on a brand-new branch push) — **or**
+  `coverage.xml` is already on disk.
+  The second is reachable here even without `pytest-cov` (plain `coverage.py`, a
+  committed report, a CI artifact), so **read the guard's message rather than
+  assuming which zero you got**: on *no covered-language files*, push normally;
+  on *report already present* with `*.py` in the diff, confirm that report came
+  from **this** tree's run before treating the push as covered — a stale one
+  measures this branch's new lines against a run that never saw them, walking
+  past the same coverage floor `--no-verify` would. If you cannot confirm it,
+  treat it as the missing-tooling case: report and stop.
+
+  **Exit 1 is the only exit that halts WITHOUT further checking** — that is what
+  the exclusivity is about, not the action. Covered-language files present and
+  no report: report the missing coverage tooling and stop, with nothing left to
+  establish. Exit 0's unconfirmable-report branch above reaches the same halt,
+  but only *after* the confirmation it demands; reading the exclusivity as a
+  claim about the *action* would discard that branch and push on a stale report.
+  Exit **2** is your own bad invocation (a bad `--lang`, an unresolvable
+  `--compare-branch`): it is neither verdict, so fix the command and re-run
+  before deciding anything — never read *not 1* as *push*.
+  Reading the halt as unconditional abandons stories that never owed a coverage
+  report at all.
 - **`--gate-attest`: not applicable.** No attestable single-run runner of the
   `run-gate.zsh` shape (#981) ships for this type, so there is no `tree`
   identity to carry into the next round's `--resume`, and the loop re-runs the

@@ -2988,7 +2988,16 @@ registry row points at — a profile written to the list above alone would red:
   that already runs it cannot drift apart — a ci-fixer agent, or the plugin's
   maintenance skill where no ci-fixer ships (kubernetes). `_gate_clauses` holds
   the Gate's *rules*: at least one row per runner-less type, naming each clause
-  whose loss would put a run back on an action a reviewer already called wrong.
+  whose loss would put a run back on an action a review round raised as wrong —
+  **whether or not that round blocked on it** (#1558 widened this from
+  *already called wrong*, which read as blocking-only: #1505's closing round
+  recorded five seams rather than holding the PR for them, and every one of them
+  was a wrong action a reader was left on). The row names the sentence that
+  **carries the corrective instruction**, never the premise that motivates it —
+  a premise survives the rewrite that drops the directive, which is the
+  DISCRIMINATING half the sweep cannot mechanise. The table additionally records
+  its **per-type row split**, not only its total, since a swap between types
+  leaves the total intact.
   A profile that ships only the first reds on the second;
 - its **Panel** records the pointer, and states **no dimension list and no
   severity bar**. Both already have exactly one home, with the agent that
