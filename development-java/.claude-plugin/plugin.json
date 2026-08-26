@@ -1,7 +1,7 @@
 {
   "name": "development-java",
   "description": "Java/Gradle development plugin — full-maintenance tier mirroring development-python. The maintenance skill dispatches per-tool agents (Spotless format/lint, SonarCloud, CodeQL/Scorecard code-scanning, semgrep, Dependabot/Snyk vendor PRs, Gradle major upgrades) in worktrees to triage or fix findings from the toolchain installed by /development:bootstrap, with a JaCoCo coverage pre-flight. Ships the java-approver synthesis reviewer + the /development-java:approve local approve skill. Pure function of its JSON input per ARCHITECTURE.md. JDK runtime upgrades are a separate slice (#308).",
-  "version": "1.17.1",
+  "version": "1.18.0",
   "author": {
     "name": "Timo Jakob"
   },
