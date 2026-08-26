@@ -90,6 +90,140 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   **no** executable, so there is no "the built binary" left on disk for E4 to
   pick up.
 
+  **The race rule above is correct at §3 and misfires here unless it is
+  re-based.** It calls a race **pre-existing** when it also reproduces on
+  `origin/main` — sound at §3, where the story branch is cut from `main` and the
+  story's own change is not on it. At E4 that same test inverts, because
+  `origin/main` by then **carries every child's merged diff**: a race a child
+  introduced reproduces there **by construction**, reads as pre-existing, and is
+  reported instead of halting — so the epic closes on the very race it added.
+  **At E4, attribute the race against the epic's pre-epic baseline instead**,
+  spelled as the commit on `main` immediately **before the epic's first child
+  merged** (`git rev-parse <first-child-merge>^`) — never a merge-base against
+  that child's branch, which this family's squash merge deleted.
+
+  **Derive `<first-child-merge>` here, not by consulting another repo type's
+  profile** — §1b loads exactly one profile by name, so a Go run never reads
+  the kubernetes one and need not have that plugin installed at all. Take each
+  child's merge commit (`gh pr view <child-pr> --json mergeCommit`), order them
+  by **commit date**, and use the **earliest** — first by merge time, never the
+  lowest issue number, which on an out-of-order epic yields a baseline already
+  carrying other children's diffs.
+
+  **Every child must yield a merge commit.** If any child's `mergeCommit` is
+  null, or its PR cannot be identified, the earliest of the *rest* is not a
+  pre-epic baseline — it may already carry the unresolved child's diff, so every
+  regression that child introduced would read as pre-existing. That is an
+  unresolvable baseline: take the halt below, naming the child that did not
+  resolve, and never derive the baseline from the children that did.
+
+  **Decide *present on the baseline* with §3's own verb, not from file
+  history**: re-run `go test -race ./...` **at the baseline commit in a scratch
+  worktree**, never by checking that commit out in the epic's tree. Nothing here
+  turns on when a file was last edited — a race a child merely **exposed** in a
+  file no child touched is still present on the baseline if it reproduces there.
+  And **one green baseline run is not absence**: a race is nondeterministic, so
+  re-run under **`-count=20`, never `-count=1`** — that one is the cache-buster
+  and runs each test exactly once, which is the single clean pass this sentence
+  just refused — and call **that race** absent only when it appears in **no
+  iteration** of the run. Treat one clean pass as undecided rather than as
+  proof.
+
+  **Absence is a property of the RACE, never of the run.** Other races the
+  baseline run reports, and any non-race failure it reports, do **not** make the
+  race under attribution present: on a module already carrying an unrelated
+  pre-existing race, no baseline run is ever wholly clean, and reading that as
+  presence sorts the epic's own new race to case 1 and closes the epic on it.
+
+  **Two race reports are the same race when the detector names the same pair of
+  conflicting accesses** — the same variable or field, reached through the same
+  two goroutine roots — **and never by the package path the report prints**,
+  which a child moving or renaming a package changes without changing the race.
+  Matched by path, an inherited race looks absent from the baseline and sorts to
+  case 2, halting a delivered epic for a race it did not introduce.
+
+  **A baseline run that does not COMPLETE is never read as producing no race**:
+  a build failure, an unresolvable module graph, a panic before the tests run.
+  That is an unestablishable baseline and takes the halt below — read as
+  absence instead, every pre-existing race looks new and sorts to case 2,
+  halting a delivered epic and blaming it for a race it inherited.
+
+  **That baseline sorts a race into three, not two**, because `main` moves
+  under a long epic just as it does under a kubernetes one.
+
+  **Derive the changed-package set in IMPORT paths, or it can never intersect
+  anything.** The union of the children's merged diffs — what this heading's
+  other diff-shaped tests read at E4 — yields repo-relative **file** paths
+  (`internal/db/db.go`), while `go list -deps` below emits **import** paths
+  (`github.com/x/server/internal/db`). The two domains never meet. So take the
+  set as the **packages containing those `*.go` files**, expressed as import
+  paths — `go list ./<dir>` once per directory holding a changed `*.go` file,
+  and **never `go list ./...`, which is recursive** and pulls in nested
+  packages no child touched, so a stranger's race in one of them satisfies case
+  2 and halts a delivered epic. Then intersect *that*. Compared raw, the
+  intersection is empty by construction for every failing package, and every
+  race a child introduced sorts to case 3 and closes the epic.
+
+  **Two ordinary inputs need closing, or `go list` simply errors.** A directory
+  a child **deleted**, and a changed directory holding **no Go package** at all
+  (`docs/`, testdata): neither contributes a package, and neither is a failure —
+  skip both. **Any other `go list` failure means the set could not be derived**,
+  which is not an empty set: treat it exactly as an unestablishable baseline and
+  take the halt below, rather than intersecting against a partial set and
+  calling the misses case 3.
+
+  1. **Present on the baseline** — genuinely pre-existing: **report it and let E5 close**,
+     on the same reasoning §3 gives for a race it will not own.
+  2. **Absent from the baseline, and the failing package is IN or transitively
+     IMPORTS the changed-package set** — the epic's own:
+     **halt E4, file it, and do NOT close the epic**.
+  3. **Absent from the baseline, and the failing package neither is in nor
+     imports that set** — it arrived on `main` from work outside this epic
+     while the epic ran:
+     **file it as an INDEPENDENT issue, name it in the E4 report, and let E5 close**,
+     never as the epic's own. Halting here
+     would strand a fully delivered epic on a stranger's race, which no re-run
+     clears.
+
+  **A run reports several races, and they sort into different cases.** Keep the
+  halves apart exactly as the kubernetes sibling does: **every race's own filing
+  action is performed whatever the others reached**, and **only the run's
+  outcome takes the strictest terminal** — a single case-2 race halts E4 and
+  leaves the epic open however many others sort to case 1 or 3, with the E4
+  report naming each group. Take case 1's close on the first race you sort and
+  you never reach case 2's halt for the second.
+
+  **Read the direction from what `go test` actually prints.** It reports a
+  failure under the **test binary's** package (`FAIL github.com/x/server`), and
+  the ordinary E4 shape is a child changing a leaf package whose race surfaces
+  in an unchanged consumer. So ask whether the **failing** package reaches the
+  changed set — `go list -deps <failing package>` intersected with it — and not
+  whether a changed package reaches the failure, which is the same edge read
+  backwards and sorts that ordinary case to 3, closing the epic on its own race.
+  A failing package that is **itself** in the changed set satisfies case 2
+  trivially.
+
+  **Cases 1 and 3 narrow the conductor's E4 rule** — its *file it, the epic
+  stays open* governs the epic's own combined effect, which is case 2; a race
+  the baseline places outside the epic is **reported (case 1) or filed as an
+  independent issue (case 3)**, and the epic closes. **They narrow E5's *only
+  after E4 is green* with it**: E4 is green **for closure purposes** when every
+  race it reported sorts to case 1 or 3 and each case-3 race has been filed.
+
+  **Only where there is a race to attribute.** A green `-race` run has none,
+  **so a baseline that cannot be established is no halt and that epic closes**.
+  Where
+  there IS one, and no pre-epic baseline can be established at all — no first
+  child merge is identifiable, the history was rewritten under it, **or `go test
+  -race` cannot
+  be run to completion at that commit** — **halt E4, report the race AND that no
+  baseline could be established, and do NOT close the epic. Do not file it as
+  the epic's own**, on evidence you have just said you lack, and
+  **never fall back to `origin/main`**, whose whole defect at E4 is the
+  paragraph above. The
+  §3 sentence is left exactly as it stands — it is right where it runs, and only
+  its reading at E4 is corrected here.
+
   **Close the enumeration rather than assuming the common case.**
   `<main-package>` is `./cmd/<name>` in the usual layout and plain `.` where
   `package main` sits at the module root, which is ordinary for a single-binary

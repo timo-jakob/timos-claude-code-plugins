@@ -210,7 +210,12 @@ _panel_restatements() {
 # bolded headline rather than from the rule that closes it. That list is open,
 # not closed: every row below is pinned by the sentence carrying its own
 # corrective instruction, so a seam pinned later belongs in the table whether or
-# not this paragraph names it.
+# not this paragraph names it. #1561 is the first to arrive that way: an E4
+# attribution list whose three outcomes had no stated ORDER, decided on path
+# membership where the panel's `belongs to` relation was owed, silent on the
+# baseline it could not resolve, and — in the go profile — inheriting a §3
+# `origin/main` reproduction test at an E4 where `origin/main` already carries
+# every child's diff.
 #
 # Each seam is pinned by the sentence that CARRIES the corrective instruction,
 # not by the premise that motivates it — the DISCRIMINATING half above, applied.
@@ -273,7 +278,21 @@ _gate_clauses() {
     'kubernetes|**finding-attribution** bullet' \
     'kubernetes|halt E4, file an issue for it, and do NOT close the epic' \
     'kubernetes|Attribution has three outcomes here, not two' \
-    'kubernetes|absent from the pre-epic baseline' \
+    'kubernetes|only for a finding the baseline did not already place' \
+    'kubernetes|are **attribution cases**, never "arms"' \
+    'kubernetes|render-then-validate gate at the pre-epic baseline commit' \
+    'kubernetes|Absent from the baseline, and it `belongs to` a source a child changed' \
+    'kubernetes|File it as an INDEPENDENT issue, name that issue in the E4 report, and let E5 close' \
+    'kubernetes|resolve it through `render-map.json` to its source before' \
+    'kubernetes|report the unattributable finding and whichever of the two fired' \
+    'kubernetes|this one is reached only once the union carried' \
+    'kubernetes|whether or not a child touched what it fires on' \
+    'kubernetes|survives as the **changed-file list** that `belongs to`' \
+    'kubernetes|in attribution case 2 is the panel'"'"'s relation' \
+    'kubernetes|would be the second copy this Gate' \
+    'kubernetes|**either endpoint**: the object it dangles from' \
+    'kubernetes|Two distinct things take this halt: a baseline that cannot be resolved' \
+    'kubernetes|belonging to nothing the epic changed' \
     'kubernetes|So at E4 **either arm** means' \
     'kubernetes|halt E4, report which arm fired, and do NOT close the epic' \
     'kubernetes|halt E4, report the absent tool(s) by name' \
@@ -281,15 +300,78 @@ _gate_clauses() {
     'kubernetes|belongs to no rendered document' \
     'kubernetes|lived under one — is always in scope' \
     'kubernetes|paths are policies belongs by the same' \
+    'kubernetes|E4 terminals do **not** fire' \
+    'kubernetes|That is neither a fired arm nor' \
+    'kubernetes|reproduces** there is present on the baseline' \
+    'kubernetes|first child merged** (`git rev-parse <first-child-merge>^`)' \
+    'kubernetes|The baseline run is a REPRODUCTION PROBE, not a verdict' \
+    'kubernetes|never derive the baseline from the children that did' \
+    'kubernetes|The source root is what keeps two roots apart' \
+    'kubernetes|filing action is performed whatever the others reached' \
+    'kubernetes|same tool reports the same check' \
+    'kubernetes|rather than read off the rendered path. Never match on the rendered path' \
+    'kubernetes|green FOR CLOSURE PURPOSES when every finding it' \
+    'kubernetes|(case 1) or filed as an independent issue (case 3)**' \
+    'kubernetes|and do NOT close the epic**; do not file an issue against a finding' \
+    'kubernetes|genuinely pre-existing: report it and let E5 close,' \
+    'kubernetes|not as a merge-base against that child'"'"'s branch' \
+    'kubernetes|order them by **commit date**, and use the **earliest**' \
+    'kubernetes|run'"'"'s OUTCOME takes the strictest terminal:' \
+    'kubernetes|worktree rather than by checking that commit out in the epic'"'"'s tree' \
+    'kubernetes|Cases 1 and 3 NARROW the conductor'"'"'s E4 rule' \
+    'kubernetes|clause: that one binds `{SCOPE}` for a' \
+    'kubernetes|Run the E4 render in the panel'"'"'s own render-step' \
+    'kubernetes|already names its repo path** and the relation applies to it directly' \
+    'kubernetes|unattributable: it takes the halt below, and NEVER case 3' \
+    'kubernetes|so an unresolvable baseline is no halt there and that epic closes' \
+    'kubernetes|Unresolvable is a closed condition, not a list of two' \
+    'kubernetes|a baseline run that errors out is NEVER read as producing no findings' \
     'go|decides only what to exercise through it' \
     'go|still on the deployable arm' \
     'go|being importable exempts nothing' \
     'go|left on disk for E4 to' \
+    'go|At E4, attribute the race against the epic'"'"'s pre-epic baseline instead' \
+    'go|halt E4, file it, and do NOT close the epic**.' \
+    'go|§3 sentence is left exactly as it stands' \
+    'go|the failing package neither is in nor' \
+    'go|on the same reasoning §3 gives for a race it will not own' \
+    'go|report the race AND that no' \
     'go|Close the enumeration rather than assuming the common case' \
     'go|name them in the' \
     'go|the exercise was **partial**' \
     'go|is a usage error,' \
     'go|**not a licence**' \
+    'go|never by checking that commit out in the epic'"'"'s tree' \
+    'go|never fall back to `origin/main`**, whose whole defect at E4' \
+    'go|is still present on the baseline if it reproduces there' \
+    'go|merged** (`git rev-parse <first-child-merge>^`)' \
+    'go|outcome takes the strictest terminal** — a single case-2 race halts E4' \
+    'go|never `go list ./...`, which is recursive' \
+    'go|skip both. **Any other `go list` failure means the set could not be derived**' \
+    'go|Absence is a property of the RACE, never of the run' \
+    'go|the detector names the same pair of' \
+    'go|never derive the baseline from the children that did' \
+    'go|Derive the changed-package set in IMPORT paths' \
+    'go|set as the **packages containing those' \
+    'go|never `-count=1`' \
+    'go|That is an unestablishable baseline and takes the halt below' \
+    'go|A run reports several races, and they sort into different cases' \
+    'go|action is performed whatever the others reached' \
+    'go|reported (case 1) or filed as an' \
+    'go|E4 is green **for closure purposes** when every' \
+    'go|so a baseline that cannot be established is no halt and that epic closes' \
+    'go|not by consulting another repo type'"'"'s' \
+    'go|genuinely pre-existing: **report it and let E5 close**' \
+    'go|name it in the E4 report, and let E5 close**' \
+    'go|re-run `go test -race ./...` **at the baseline commit in a scratch' \
+    'go|one green baseline run is not absence' \
+    'go|So ask whether the **failing** package reaches the' \
+    'go|`go list -deps <failing package>` intersected with it' \
+    'go|never a merge-base against' \
+    'go|Cases 1 and 3 narrow the conductor'"'"'s E4 rule' \
+    'go|Do not file it as' \
+    'go|be run to completion at that commit**' \
+    'go|by **commit date**, and use the **earliest**' \
     'swift|**not a licence**' \
     'java|0 — nothing owed' \
     'java|read all **three** of its exits' \
@@ -970,9 +1052,10 @@ _arch_order_violation() {
     'narrows' \
     'whether or not that round blocked on it' \
     'carries the corrective instruction' \
-    'per-type row split')"
-  [ "$(printf '%s\n' "$needles" | grep -c . || true)" -eq 11 ] || {
-    echo "the arch-clause needle list changed size. It covers the six clause bullets, the frontmatter disable-model-invocation clause above them, and clause 4's SECOND table (_gate_clauses) — which is why it is larger than the bullet count. #1558 added three more, all gated by the same sweep: the widened admission bar, the corrective-clause rule, and the per-type row split the tripwire now records." >&2
+    'per-type row split' \
+    'says so in the open and gives the reason')"
+  [ "$(printf '%s\n' "$needles" | grep -c . || true)" -eq 12 ] || {
+    echo "the arch-clause needle list changed size. It covers the six clause bullets, the frontmatter disable-model-invocation clause above them, and clause 4's SECOND table (_gate_clauses) — which is why it is larger than the bullet count. #1558 added three more, all gated by the same sweep: the widened admission bar, the corrective-clause rule, and the per-type row split the tripwire now records. #1561 added the twelfth: the E4-narrowing licence, pinned on its DISCLOSURE DUTY rather than its headline, because that clause is the only written sanction for the two Gates that narrow the conductor and nothing else in the suite reads it." >&2
     return 1
   }
   while IFS= read -r needle; do
@@ -1329,9 +1412,25 @@ _gate_pair_violations() {
   # clean on an empty table, so a session resolving a red clause could delete
   # its row and go green with no other signal.
   local n types
+  # ONE source for the figure: the assertion and its diagnostic drifted
+  # apart once already (#1561), and the message is the only thing carrying
+  # the table's admission argument to whoever trips it.
+  local -r want_rows=162
   n="$(_gate_clauses | grep -c . || true)"
-  [ "$n" -eq 85 ] || {
-    printf 'the Gate clause table holds %s row(s), expected 85.\n' "$n" >&2
+  local uniq
+  uniq="$(_gate_clauses | LC_ALL=C sort -u | grep -c . || true)"
+  [ "$uniq" -eq "$n" ] || {
+    printf 'the Gate clause table holds %s row(s) but only %s distinct one(s):\n' \
+      "$n" "$uniq" >&2
+    _gate_clauses | LC_ALL=C sort | LC_ALL=C uniq -d >&2
+    printf 'A duplicated row keeps BOTH the total and the per-type split while\n' >&2
+    printf 'pinning one fewer clause, and each copy independently finds exactly\n' >&2
+    printf 'one occurrence — so the uniqueness sweep does not see it either.\n' >&2
+    printf 'That is the silent row deletion this tripwire exists to refuse.\n' >&2
+    return 1
+  }
+  [ "$n" -eq "$want_rows" ] || {
+    printf 'the Gate clause table holds %s row(s), expected %s.\n' "$n" "$want_rows" >&2
     printf 'A clause earns a row when losing it puts a run back on an action a\n' >&2
     printf 'review round raised as wrong — whether or not that round blocked on\n' >&2
     printf 'it. Removing one needs that argument, in the PR.\n' >&2
@@ -1345,7 +1444,7 @@ _gate_pair_violations() {
   # `#1505 the gate-pair rows carry the exact token count recorded` records its
   # own figure, and DERIVED from the table rather than counted by hand.
   local want row t got bad=""
-  local -a expect=( 'python 9' 'java 8' 'go 14' 'swift 6' 'kubernetes 48' )
+  local -a expect=( 'python 9' 'java 8' 'go 51' 'swift 6' 'kubernetes 88' )
   for row in "${expect[@]}"; do
     t="${row%% *}"; want="${row##* }"
     got="$(_gate_clauses | cut -d'|' -f1 | grep -cxF -- "$t" || true)"
@@ -1637,6 +1736,167 @@ _gate_pair_violations() {
     return 1
   }
 }
+
+@test "#1561 the kubernetes E4 attribution cases are ordered, baseline first" {
+  # The profile calls this order load-bearing in as many words — "Read the
+  # baseline first, and consult `belongs to` only for a finding the baseline
+  # did not already place" — because the cases END DIFFERENTLY: cases 1 and 3
+  # report/file and let E5 close, case 2 halts. Swap case 1 and case 2 and a
+  # pre-existing finding on a path a child touched halts a delivered epic,
+  # which is the seam #1561 fixed. Every clause row greps the whole Gate, so
+  # all of them survive that swap; only position can catch it.
+  #
+  # The anchors carry NO list ordinal on purpose: a reorder in markdown
+  # renumbers, so ordinal-bearing anchors would all miss at once and the
+  # GONE arm below would fire instead of the ordering arms that carry the
+  # reasoning — telling the reader to re-anchor rather than to revert.
+  local profile
+  profile="$REPO_ROOT/development-kubernetes/skills/resolve-profile/SKILL.md"
+  [ -f "$profile" ] || { echo "no kubernetes profile at $profile" >&2; return 1; }
+  # ONE list, so a capture and its uniqueness check cannot drift apart.
+  local -a anchors=(
+    'Epic verification (§E4)'
+    "Decide *present on the baseline* with §3's own verb"
+    'Read the baseline first, and consult'
+    '**Present on the pre-epic baseline**'
+    '**Absent from the baseline, and it `belongs to`'
+    '**Absent from the baseline, and belonging to nothing'
+  )
+  local -a labels=(
+    'the Epic verification (§E4) bullet'
+    'the present-on-the-baseline definition'
+    'the baseline-first ordering rule'
+    'attribution case 1 (present on the baseline)'
+    'attribution case 2 (belongs to a changed source)'
+    'attribution case 3 (belongs to nothing the epic changed)'
+  )
+  # Two of these anchors are ALSO _gate_clauses rows, but that table's sweep is
+  # scoped to the `## Gate` section while these captures read line numbers from
+  # the WHOLE file — so uniqueness is asserted here as well, or a repetition
+  # outside the Gate silently retargets a capture. Count OCCURRENCES, not
+  # matching lines, per the doctrine the clause sweep states: a needle repeated
+  # inside one wrapped line counts as 1 to `grep -c` and passes.
+  local -a at=()
+  local i n
+  for i in "${!anchors[@]}"; do
+    n="$(grep -oF -- "${anchors[$i]}" "$profile" | grep -c . || true)"
+    case "$n" in
+      0) printf 'the kubernetes Gate lost %s.\n' "${labels[$i]}" >&2
+         printf 'Re-anchor it rather than dropping the assertion (#1561).\n' >&2
+         return 1 ;;
+      1) : ;;
+      *) printf '%s occurs %s times in the kubernetes profile;\n' "${labels[$i]}" "$n" >&2
+         printf 'a duplicated anchor silently retargets this test (#1561).\n' >&2
+         return 1 ;;
+    esac
+    at+=( "$(grep -n -m1 -F -- "${anchors[$i]}" "$profile" | cut -d: -f1)" )
+  done
+  local e4="${at[0]}" def="${at[1]}" rule="${at[2]}"
+  local c1="${at[3]}" c2="${at[4]}" c3="${at[5]}"
+  [ "$e4" -lt "$rule" ] || {
+    printf 'the attribution block (rule at line %s) no longer sits under the\n' "$rule" >&2
+    printf 'Epic verification bullet (line %s), so a §3 run reads E4-only\n' "$e4" >&2
+    printf 'attribution cases.\n' >&2
+    return 1
+  }
+  # A CONJUNCTION, spelled as two independent assertions so it cannot collapse
+  # back into a disjunction that no value can falsify (#1561).
+  [ "$rule" -lt "$def" ] || {
+    printf 'the present-on-the-baseline definition (line %s) no longer follows\n' "$def" >&2
+    printf 'the ordering rule (line %s).\n' "$rule" >&2
+    return 1
+  }
+  [ "$def" -lt "$c1" ] || {
+    printf 'the present-on-the-baseline definition (line %s) no longer precedes\n' "$def" >&2
+    printf 'case 1 (line %s), so every case turns on a term defined after it is\n' "$c1" >&2
+    printf 'read.\n' >&2
+    return 1
+  }
+  [ "$rule" -lt "$c1" ] || {
+    printf 'the ordering rule (line %s) no longer precedes the cases it\n' "$rule" >&2
+    printf 'orders (case 1 at line %s).\n' "$c1" >&2
+    return 1
+  }
+  [ "$c1" -lt "$c2" ] || {
+    printf 'attribution case 2 (line %s) now precedes case 1 (line %s).\n' "$c2" "$c1" >&2
+    echo "A model reading the list top-down then consults \`belongs to\` before" >&2
+    echo "the baseline, so a PRE-EXISTING finding on a path a child touched is" >&2
+    echo "called the epic's own regression and halts a fully delivered epic --" >&2
+    echo "the union-first defect #1561 replaced." >&2
+    return 1
+  }
+  [ "$c2" -lt "$c3" ] || {
+    printf 'attribution case 3 (line %s) now precedes case 2 (line %s).\n' "$c3" "$c2" >&2
+    echo "Case 3 closes and case 2 halts, so a finding that belongs to a" >&2
+    echo "changed source is reported as a stranger's and E5 closes the epic on" >&2
+    echo "its own regression." >&2
+    return 1
+  }
+}
+
+@test "#1561 the go E4 race attribution cases are ordered, baseline first" {
+  # go grew the same three-case list in the same story, so it earns the same
+  # positional guard, bounded under its own E4 bullet exactly as the kubernetes
+  # sibling is. Anchors carry no list ordinal, for the reason stated there.
+  local profile
+  profile="$REPO_ROOT/development-go/skills/resolve-profile/SKILL.md"
+  [ -f "$profile" ] || { echo "no go profile at $profile" >&2; return 1; }
+  local -a anchors=(
+    'Epic verification (§E4)'
+    'That baseline sorts a race into three, not two'
+    '**Present on the baseline** — genuinely pre-existing'
+    '**Absent from the baseline, and the failing package is IN'
+    '**Absent from the baseline, and the failing package neither is in nor'
+  )
+  local -a labels=(
+    'the Epic verification (§E4) bullet'
+    'the three-not-two opener'
+    'race case 1 (present on the baseline)'
+    'race case 2 (failing package in/imports the changed set)'
+    'race case 3 (failing package neither in nor imports it)'
+  )
+  local -a at=()
+  local i n
+  for i in "${!anchors[@]}"; do
+    n="$(grep -oF -- "${anchors[$i]}" "$profile" | grep -c . || true)"
+    case "$n" in
+      0) printf 'the go Gate lost %s.\n' "${labels[$i]}" >&2
+         printf 'Re-anchor it rather than dropping the assertion (#1561).\n' >&2
+         return 1 ;;
+      1) : ;;
+      *) printf '%s occurs %s times in the go profile;\n' "${labels[$i]}" "$n" >&2
+         printf 'a duplicated anchor silently retargets this test (#1561).\n' >&2
+         return 1 ;;
+    esac
+    at+=( "$(grep -n -m1 -F -- "${anchors[$i]}" "$profile" | cut -d: -f1)" )
+  done
+  local e4="${at[0]}" opener="${at[1]}"
+  local c1="${at[2]}" c2="${at[3]}" c3="${at[4]}"
+  [ "$e4" -lt "$opener" ] || {
+    printf 'the race-attribution block (opener at line %s) no longer sits under\n' "$opener" >&2
+    printf 'the Epic verification bullet (line %s), so a §3 run reads E4-only\n' "$e4" >&2
+    printf 'attribution cases.\n' >&2
+    return 1
+  }
+  [ "$opener" -lt "$c1" ] || {
+    printf 'the three-not-two opener (line %s) no longer precedes case 1\n' "$opener" >&2
+    printf '(line %s).\n' "$c1" >&2
+    return 1
+  }
+  [ "$c1" -lt "$c2" ] || {
+    printf 'race case 2 (line %s) now precedes case 1 (line %s).\n' "$c2" "$c1" >&2
+    echo "Case 1 reports and closes, case 2 halts, so a PRE-EXISTING race in a" >&2
+    echo "package the children touched halts a fully delivered epic." >&2
+    return 1
+  }
+  [ "$c2" -lt "$c3" ] || {
+    printf 'race case 3 (line %s) now precedes case 2 (line %s).\n' "$c3" "$c2" >&2
+    echo "Case 3 closes and case 2 halts, so a race a child introduced is" >&2
+    echo "reported as a stranger's and E5 closes the epic on its own race." >&2
+    return 1
+  }
+}
+
 
 @test "#1558 the java/python coverage-guard claims resolve at the script itself" {
   # The §6 carry-forward paragraphs make FALSIFIABLE claims about a script no
