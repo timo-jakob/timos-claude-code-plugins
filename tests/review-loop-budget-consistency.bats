@@ -391,7 +391,7 @@ grep_site() {  # grep_site <file> <fixed-string>
   # by raising --max-rounds itself, which the same paragraph forbids. Pinned
   # per site because each states them in its own voice.
   grep_site "$SKILL" 'beyond the ceiling, once'
-  grep_site "$ARCH" 'beyond `--max-rounds`, once'
+  grep_site "$ARCH" 'beyond the ceiling in force, once'
   grep_site "$EXPLAIN" 'once, and only for that sweep'
   grep_site "$SKILL" 'still reports what you passed'
   grep_site "$ARCH" 'keeps reporting what the caller passed'
@@ -683,7 +683,7 @@ grep_site() {  # grep_site <file> <fixed-string>
   grep_num "$EXTENSION" "prev_max \+ $INCREMENT"
   # ARCHITECTURE.md — the contract restatement, in both spellings
   grep_num "$ARCH" "offers \+$INCREMENT to the round ceiling"
-  grep_num "$ARCH" "raises .--max-rounds. by $INCREMENT"
+  grep_num "$ARCH" "raises the ceiling in force by $INCREMENT"
   # docs/explanation — the human-facing spelling
   grep -Fq 'Grant three more rounds' "$EXPLAIN"
   grep -Fq "raises the run's *ceiling* by three" "$EXPLAIN"
