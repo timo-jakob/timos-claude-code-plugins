@@ -197,8 +197,13 @@ meaning the blockers may be fresh rather than stuck).'
     echo "ARCHITECTURE.md's ladder sentence does not carry the #1498 exception"; return 1; }
   grep -qE 'possible-false-trip-continued.{0,60}auto-continues once' <<< "$t" || {
     echo "ARCHITECTURE.md does not say what the exception does"; return 1; }
-  # ...and says residue still wins, which is the whole of the rung's placement
-  grep -qF 'strictly **below** the residue rung' <<< "$t"
+  # ...and says where the rung sits, which is the whole of its placement. #1571
+  # INVERTED that: with residue's condition 2 gone it holds on almost any
+  # zero-CRITICAL non-convergence, so testing it first let it swallow this rung.
+  # The auto-continue is now tried ABOVE residue, and residue catches what it
+  # declines — pinned here so the two can never drift apart again.
+  grep -qF 'tried **above** the residue rung' <<< "$t" || {
+    echo "ARCHITECTURE.md no longer states the post-#1571 rung placement"; return 1; }
   # the status-JSON key list carries the new key, with its always-present reading
   grep -qE 'closing_sweep_granted, possible_false_trip_auto_continues' <<< "$t" || {
     echo "ARCHITECTURE.md's status-JSON key list omits the new key"; return 1; }
@@ -239,7 +244,7 @@ meaning the blockers may be fresh rather than stuck).'
 
 @test "#1498 roster tripwire: exactly four markdown sites name the auto-continue" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
-  # vanish?" — so the count is recorded here and a fourth (or second)
+  # vanish?" — so the roster is recorded here and a site that appears or vanishes
   # restatement reds until this file is updated in the same PR.
   # ROOT-ANCHORED on the way in, re-relativised on the way out: all_markdown
   # emits repo-relative paths, which a bare `xargs grep` would resolve against

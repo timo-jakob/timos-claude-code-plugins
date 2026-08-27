@@ -165,22 +165,31 @@ only to bound the hard tail. A round can end the loop in one of a few ways:
   this run, not a bigger budget.
 - **Converged with residue** (`CONVERGED_WITH_RESIDUE`, exit 14) — the run was
   *about* to exhaust its budget or
-  declare itself stuck, and neither was the honest verdict. Three things were
-  true at once: the last two rounds found **no Critical at all**; every blocker
-  still open sat in a file the loop's **own previous fix pass** had just
-  written; and the round saying so had read the **whole** change, not just the
-  slice it was scoped to. The first two say this is not shipped behaviour going
-  wrong — it is the implementer reviewing its own last edits. The third is what
+  declare itself stuck, and neither was the honest verdict. Two things were
+  true at once: the last two rounds found **no Critical at all**; and the round
+  saying so had read the **whole** change, not just the slice it was scoped to.
+  The first says this is not shipped behaviour going wrong. The second is what
   earns the right to say it: a round scoped to a slice can only speak for that
-  slice, so a run whose first two conditions hold on a *delta* round does not
-  end there. It promotes the closing full sweep first — one more round — and
+  slice, so a run whose first condition holds on a *delta* round does not
+  end there.
+
+  A third condition used to sit between them — that every open blocker lay in a
+  file the loop's own previous fix pass had just written. It was **removed**
+  (#1571), because it was already guaranteed a step earlier: every round's
+  findings are scoped to the change itself before they are counted, so a blocker
+  in code this run never touched is dropped long before it could become residue.
+  Read *Condition 2 — removed; the story-diff rail is upstream* in the residue
+  reference for why re-checking it made the ending unreachable. A run whose
+  remaining condition holds on a *delta* round promotes the
+  closing full sweep first — one more round — and
   only that sweep may declare residue. So the run **opens the PR** and files the
   remainder as follow-up issues instead of asking you for another round. This
   and plain **Converged** are the only two endings that open a PR, and both are
   reached only from a full sweep.
 - **Budget exhausted** — the rounds ran out with blockers still open, and the
-  residue conditions above did **not** hold: a Critical in the window, or a
-  blocker in a file nobody had just touched.
+  residue conditions above did **not** hold — typically a Critical somewhere in
+  the two-round window; a one-round budget, a promotion pass (where residue
+  never fires) or an unreadable round record also end here.
 - **Not converging** — the *same* blocker survived two rounds unchanged; more
   automated fixing clearly is not moving it. Same rule: this is the ending only
   when the residue conditions do not hold — **and** only when the loop could not
@@ -224,18 +233,23 @@ the run stops as it always did.
 ### What "residue" costs you, and what it buys
 
 The residue ending is the one place the loop opens a PR without a human ever
-seeing an escalation, so it is deliberately narrow. **All three** conditions are
-required: two consecutive zero-Critical rounds; *every* remaining blocker inside
-the previous round's own edits; and the round declaring it having run as a full
-sweep. A first round can never qualify — there is no previous fix pass to
-attribute anything to.
+seeing an escalation, so it is deliberately narrow. **Two** conditions are
+required: two consecutive zero-Critical rounds, and the round declaring it having
+run as a full sweep. A first round can never qualify — there is no second round
+to make the zero-Critical window out of.
 
-The three do not fail the same way. Either of the first two failing sends the run
-back to the ordinary escalation. The third failing does **not** — a delta round
-meeting the other two promotes the closing full sweep and carries on, so residue
-costs one more review round than the conditions alone suggest. That round is the
-one that reads every file the delta rounds structurally could not, which is what
-the extra round buys.
+A third condition used to sit between them, requiring every remaining blocker to
+be inside the previous round's own edits. It was **removed** (#1571) as already
+guaranteed a step earlier — every round's findings are scoped to the change
+itself before they are counted — and because its round-by-round reading made the
+ending unreachable from the very sweep it was meant to be declared on.
+
+The two do not fail the same way. The first failing sends the run back to the
+ordinary escalation. The second failing does **not** — a delta round meeting the
+first promotes the closing full sweep and carries on, so residue costs one more
+review round than the conditions alone suggest. That round is the one that reads
+every file the delta rounds structurally could not, which is what the extra round
+buys.
 
 What you get is a PR that says so. Its Summary names the residue ending and the
 follow-up issues it filed, and its review dossier records the terminal state, so

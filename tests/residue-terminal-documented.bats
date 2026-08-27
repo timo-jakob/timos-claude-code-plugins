@@ -182,7 +182,7 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
 
 @test "#1435 roster tripwire: exactly eleven markdown sites name the terminal" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
-  # vanish?" — so the count is recorded here and a seventh (or fifth) restatement
+  # vanish?" — so the roster is recorded here and a site that appears or vanishes
   # reds until this file is updated in the same PR.
   #
   # It has already earned its keep: `open-pr/SKILL.md` is NOT in the story's
@@ -426,8 +426,11 @@ docs/reference/commands.md" ] || {
   local t; t="$(flat "$F")"
   # (a) the reading of the machine-readable count
   grep -q '`dimensions.<lens>.open > 0` means blockers were deliberately left open, not missed' <<< "$t"
-  # (b) BOTH firing conditions, which are what make the leniency safe
-  grep -q 'found \*\*zero Criticals\*\* and every remaining blocker sits in a file the loop' <<< "$t"
+  # (b) BOTH firing conditions, which are what make the leniency safe. Since
+  #     #1571 the second is the FULL-SWEEP read, not the fix-touched membership
+  #     that condition 2 used to require — the template must not keep promising
+  #     an Approver a guarantee the loop stopped making.
+  grep -q 'found \*\*zero Criticals\*\* and the round declaring it had read the \*\*whole\*\* change' <<< "$t"
   # (c) the label pair, which is how a human finds the follow-ups
   grep -q '`review-residue` + `needs-refinement`' <<< "$t"
   # (d) the rule itself, in the NEGATIVE form — an Approver that blocks on
@@ -526,11 +529,17 @@ docs/reference/commands.md" ] || {
   #     react to a residue PR; they never tell anyone when residue may be
   #     declared, so the precondition is not theirs to state (both were excluded
   #     by omission before, with no reason recorded);
-  #   - reference/{residue,promotion,escalation,interactive}.md carry PROCEDURE
+  #   - reference/{promotion,escalation,interactive}.md carry PROCEDURE
   #     moved byte-for-byte by #1503 and frozen by verify-reference-move.zsh. The
   #     conductor's exit table introduces the terminal and states the
   #     precondition, and reference/review-loop.md — where the declaring round
   #     lives — is REQUIRED below rather than excluded.
+  #   - reference/residue.md LEFT this set in #1571. Its frozen span still says
+  #     nothing about the precondition, but the section that story appended
+  #     outside the span states it while explaining which condition was removed —
+  #     so the file now satisfies the sweep on its own text. It is listed nowhere
+  #     here on purpose: re-adding it would re-permit a residue.md that never
+  #     names the precondition.
   #
   # The exclusion set is itself asserted, so a NEW site naming the terminal
   # without the precondition reds here instead of quietly joining the excluded.
@@ -540,8 +549,7 @@ docs/reference/commands.md" ] || {
     'development/skills/open-pr/SKILL.md' \
     'development/skills/resolve-issue/reference/escalation.md' \
     'development/skills/resolve-issue/reference/interactive.md' \
-    'development/skills/resolve-issue/reference/promotion.md' \
-    'development/skills/resolve-issue/reference/residue.md' | sort)"
+    'development/skills/resolve-issue/reference/promotion.md' | sort)"
   got=""
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -573,9 +581,13 @@ docs/reference/commands.md" ] || {
     grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$t" || {
       echo "site names exit 14 but never the sweep precondition NEAR the terminal: $f"; return 1; }
   done
-  # the two normative sites say it in the strong form
-  grep -q 'THREE conditions, ALL required' <<< "$(flat "$SCRIPTS/resolve-story-loop.zsh")"
-  grep -q 'Three conditions, ALL required' <<< "$(flat "$REPO_ROOT/ARCHITECTURE.md")"
+  # The two normative sites say it in the strong form. Since #1571 that form
+  # names the SURVIVING PAIR by their original numbers — condition 2 was removed
+  # and 3 was deliberately NOT renumbered, so "1 and 3" is the assertion, and a
+  # site that renumbers the full-sweep rule to 2 reds here. That is the point:
+  # every other surface says "condition 3" meaning the full sweep.
+  grep -q 'Conditions 1 and 3, BOTH required' <<< "$(flat "$SCRIPTS/resolve-story-loop.zsh")"
+  grep -q 'Conditions 1 and 3, BOTH required' <<< "$(flat "$REPO_ROOT/ARCHITECTURE.md")"
 
   # PER-SITE CONTENT PINS for the two PROSE sites, because proximity alone is
   # satisfied there by an ACCIDENT. In both files the only pair inside the
@@ -599,10 +611,20 @@ docs/reference/commands.md" ] || {
     return 1; }
 }
 
-@test "#1435 §9 non-vacuity: the two-condition wording is gone everywhere" {
-  # The pre-amendment claim, transcribed. If any site still says the terminal
-  # takes two conditions, a reader following it concludes a delta round may
-  # declare residue — which is exactly what the amendment forbids.
+@test "#1435 §9 non-vacuity: the PRE-AMENDMENT two-condition wording is gone everywhere" {
+  # The pre-amendment claim, transcribed verbatim. If any site still says the
+  # terminal takes two conditions IN THIS WORDING, a reader following it
+  # concludes a delta round may declare residue — exactly what #1435 forbids.
+  #
+  # #1571 did NOT retire this guard, and the distinction is easy to lose: the
+  # terminal really does take two conditions again — but they are 1 and 3, the
+  # zero-CRITICAL window and the FULL SWEEP. The banned literal names the OTHER
+  # pair, 1 and 2, from before the sweep was required; it is the one shape that
+  # licenses a delta round to declare residue. So the ban stands on the literal
+  # while the surviving pair is asserted, positively and by number, above.
+  #
+  # Never "fix" a red here by rewording the pair as `TWO conditions, BOTH
+  # required` — that is the claim this test exists to keep out of the repo.
   local f hits=""
   while IFS= read -r f; do
     local t; t="$(flat "$REPO_ROOT/$f")"
@@ -759,4 +781,281 @@ sweepable() {
   sweepable | grep -qx 'development/skills/resolve-issue/scripts/resolve-story-loop.zsh'
   sweepable | grep -qx 'development/skills/resolve-issue/SKILL.md'
   sweepable | grep -qx 'ARCHITECTURE.md'
+}
+
+@test "#1571 AC1 the predicate's header states the removal AND names the upstream rail" {
+  local t; t="$(flat "$SCRIPTS/resolve-story-loop.zsh")"
+  # the removal itself, said in words rather than left as a silent deletion
+  grep -q 'Condition 2 .* was REMOVED' <<< "$t" || {
+    echo "the header no longer records that condition 2 was removed"; return 1; }
+  # ...and WHERE the guarantee went, which is the whole reason removing it is safe
+  grep -q 'scope-findings.* filters every round.s findings' <<< "$t" || {
+    echo "the header no longer names scope-findings as the upstream rail"; return 1; }
+  # ...and WHY the round-granular reading had to go, or a later reader
+  # "restores" it and makes the terminal unreachable again.
+  #
+  # A bare `unreachable` needle does NOT do that: the same file says "the
+  # sha256sum arm is otherwise unreachable and untestable" and "that no longer
+  # makes residue unreachable on the sweep", so deleting the explanation would
+  # still match. Pin the explanation's own claim instead.
+  grep -q 'unreachable FROM the closing sweep' <<< "$t" || {
+    echo "the header no longer says why the round-granular reading was unreachable"; return 1; }
+  grep -q 'against an empty set every blocker is' <<< "$t" || {
+    echo "the header no longer gives the MECHANISM (an empty set puts every blocker outside)"; return 1; }
+}
+
+@test "#1571 AC2 the predicate reads no fix-touched set and no ceiling — one rule, both rungs" {
+  # Extracted from the FUNCTION BODY, not the file: the header legitimately
+  # discusses the retired condition at length, and a file-wide grep would be
+  # satisfied by that prose while the code still read the set.
+  local body
+  body="$(awk '/^_residue_holds\(\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+    "$SCRIPTS/resolve-story-loop.zsh")"
+  [ -n "$body" ]
+  # non-vacuity: the extraction really did capture the predicate
+  grep -q 'summary.critical' <<< "$body" || {
+    echo "the extracted body is not _residue_holds"; return 1; }
+  grep -q 'fix-touched' <<< "$body" && {
+    echo "_residue_holds still reads a fix-touched set"; return 1; }
+  grep -qE 'effective_max|max_rounds' <<< "$body" && {
+    echo "_residue_holds carries a ceiling test — the rungs decide that, not the predicate"; return 1; }
+  return 0
+}
+
+@test "#1571 the fix-touched capture and its class consumer are DELIBERATELY untouched" {
+  # Removing the predicate's read is not a licence to delete the capture: the
+  # `class` stamp, the progress histogram and the waived-suggestion exemption all
+  # still depend on it. This is the guard against an over-eager cleanup.
+  local t; t="$(flat "$SCRIPTS/resolve-story-loop.zsh")"
+  grep -q '_capture_fix_touched' <<< "$t" || {
+    echo "the fix-touched capture is gone — the class stamp has no input"; return 1; }
+  grep -q -- '--fix-touched' <<< "$t" || {
+    echo "the consolidator is no longer handed --fix-touched — every blocker loses its class"; return 1; }
+}
+
+@test "#1571 no site still states residue as requiring fix-touched membership" {
+  # The #1435 sweeps above needle PRE-#1435 wordings. #1571 retired condition 2
+  # and produced a NEW family of stale claims that none of those needles can see
+  # — and the whole suite was green with a dozen of them live (the loop's own
+  # file header, five runtime diagnostics, the exit-14 verdict rendered into
+  # progress.md, the skill frontmatter and the page generated from it, and two
+  # sections of the explanation page). This is that family's sweep.
+  local f hits=""
+  while IFS= read -r f; do
+    local t; t="$(tr '\n' ' ' < "$REPO_ROOT/$f" | tr -s ' ')"
+    grep -q 'ALL THREE residue conditions' <<< "$t" && hits+="$f (all-three)"$'\n'
+    grep -q 'All three\*\* conditions are required' <<< "$t" && hits+="$f (all-three-prose)"$'\n'
+    grep -q 'residue is unreachable this round' <<< "$t" && hits+="$f (unreachable-this-round)"$'\n'
+    grep -q 'residue will be unreachable next round' <<< "$t" && hits+="$f (unreachable-next-round)"$'\n'
+    grep -q "lives in the previous round's own fix-touched files" <<< "$t" && hits+="$f (verdict-claim)"$'\n'
+    grep -q 'confined to its own last fix pass' <<< "$t" && hits+="$f (frontmatter-claim)"$'\n'
+    grep -q 'blocker in a file nobody had just touched' <<< "$t" && hits+="$f (budget-cause)"$'\n'
+    grep -q 'residue condition 2 fails on it forever' <<< "$t" && hits+="$f (condition-2-live)"$'\n'
+    grep -q 'the membership count below' <<< "$t" && hits+="$f (membership-count)"$'\n'
+  done < <(sweepable)
+  # docs/reference/commands.md IS already covered by `sweepable()` — the git
+  # pathspec `*.md` matches nested paths, which the roster tripwire relies on.
+  # It is read again here deliberately, as a belt-and-braces pin on a GENERATED
+  # surface: it restates the frontmatter rather than authoring the claim, so a
+  # regeneration is the way the claim comes back.
+  local gen="docs/reference/commands.md"
+  local gt; gt="$(tr '\n' ' ' < "$REPO_ROOT/$gen" | tr -s ' ')"
+  grep -q 'confined to its own last fix pass' <<< "$gt" && hits+="$gen (frontmatter-claim)"$'\n'
+  [ -z "$hits" ] || { echo "stale condition-2 claims still present:"; echo "$hits"; return 1; }
+}
+
+@test "#1571 non-vacuity: every needle of that sweep fires on a planted claim" {
+  # One plant per needle — a sweep whose needles nobody can trip is a green light
+  # forever, and this file has already paid for that once. Deliberately NOT a
+  # count: a numeral here goes stale the moment a needle is added, and the
+  # assertion below derives the pairing instead.
+  local m="$BATS_TEST_TMPDIR/planted-1571.md" t
+  local -a claims=(
+    'the ending fires when ALL THREE residue conditions hold'
+    'the terminal is narrow: **All three** conditions are required, always'
+    'the set cannot be computed; residue is unreachable this round'
+    'no stamp, so residue will be unreachable next round'
+    "every blocker lives in the previous round's own fix-touched files"
+    'a run whose blockers are confined to its own last fix pass ships'
+    'it exhausted its budget on a blocker in a file nobody had just touched'
+    'the loop drops them, so residue condition 2 fails on it forever'
+    'guarded anyway, because the membership count below is vacuously 0'
+  )
+  local -a needles=(
+    'ALL THREE residue conditions'
+    'All three\*\* conditions are required'
+    'residue is unreachable this round'
+    'residue will be unreachable next round'
+    "lives in the previous round's own fix-touched files"
+    'confined to its own last fix pass'
+    'blocker in a file nobody had just touched'
+    'residue condition 2 fails on it forever'
+    'the membership count below'
+  )
+  # `"${!needles[@]}"`, never `{1..8}`: bats runs under bash, whose arrays are
+  # ZERO-indexed, so a 1..8 loop over an 8-element array skips element 0 entirely
+  # and reads an UNSET index 8 — where both sides expand empty and the grep
+  # becomes `grep -q "" <<< " "`, which matches unconditionally. The control then
+  # reports eight needles proven while exercising seven and asserting nothing on
+  # the eighth.
+  local i
+  for i in "${!needles[@]}"; do
+    printf '%s\n' "${claims[$i]}" > "$m"
+    t="$(tr '\n' ' ' < "$m" | tr -s ' ')"
+    grep -q "${needles[$i]}" <<< "$t" || {
+      echo "needle $i never fires on its own planted claim: ${needles[$i]}"; return 1; }
+  done
+}
+
+@test "#1571 reference/residue.md states the SURVIVING pair and the upstream rail, by content" {
+  # residue.md left the §9 exclusion set in #1571, but the derived detector is
+  # proximity-based and matches its HISTORICAL sentence, not its normative one —
+  # the same accidental-proximity shape this file already pins per-site for
+  # ARCHITECTURE.md and the explanation page. residue.md is the one file a
+  # session that reaches the terminal actually opens, so pin it too.
+  local t; t="$(flat "$RI_REF/residue.md")"
+  # Pin what the conditions ARE, not just their numbers: a needle that stops at
+  # "and condition 3" leaves the parenthetical saying what condition 3 IS
+  # deletable with the whole suite green — the proximity sweep is satisfied by
+  # this file's HISTORICAL sentence, not by its normative one.
+  grep -q 'condition 1 (the last two rounds are both zero-CRITICAL) and condition 3' <<< "$t" || {
+    echo "residue.md no longer states which two conditions survived"; return 1; }
+  grep -q 'condition 3 (the declaring round ran as a full sweep)' <<< "$t" || {
+    echo "residue.md names condition 3 without saying it is the full sweep"; return 1; }
+  # Pin the RAIL SENTENCE, not the bare tool name: residue.md says
+  # `scope-findings` twice, and the second is a different claim (what this story
+  # did NOT change). A bare-name needle is satisfied by that one, so the rail
+  # could be narrowed to a single round and this test would stay green — and a
+  # one-round rail is exactly the reading that does not justify the removal.
+  grep -q 'filters \*\*every\*\* round.s findings to the story diff' <<< "$t" || {
+    echo "residue.md no longer states that scope-findings filters EVERY round's findings"; return 1; }
+  grep -q 'only\*\* input to the changelist' <<< "$t" || {
+    echo "residue.md no longer states that \$scoped is the only input to .blocking"; return 1; }
+}
+
+@test "#1571 non-vacuity: AC2's negative needles red on a predicate that DID read the set" {
+  # AC2 asserts two ABSENCES over the extracted `_residue_holds` body. Its only
+  # control proves the extraction found the function — not that either needle
+  # could ever fire. An awk range that terminated early, or a restored read
+  # spelled `fix_touched` / `$ft_file`, would leave both bans vacuous while the
+  # condition was back. So drive the SHIPPED extraction over a scratch copy with
+  # the pre-#1571 reads planted back in, and prove each needle bites.
+  local probe="$BATS_TEST_TMPDIR/probe-loop.zsh"
+  # Plant BOTH banned shapes immediately after the predicate's opening line, so
+  # the awk range certainly captures them. One streaming pass, not an in-place
+  # edit: `sed -i` and `perl -0pi` differ across platforms in ways that fail
+  # SILENTLY here — a plant that does not land makes this control pass while
+  # proving nothing, which is the exact failure it exists to rule out.
+  awk '{ print }
+       /^_residue_holds\(\) \{/ {
+         print "  touched=\"$work_dir/fix-touched-$(( r - 1 )).txt\""
+         print "  (( round == effective_max )) || return 1"
+       }' "$SCRIPTS/resolve-story-loop.zsh" > "$probe"
+  # the plant really landed, or every assertion below is vacuous
+  grep -q 'fix-touched-\$(( r - 1 ))' "$probe"
+
+  local body
+  body="$(awk '/^_residue_holds\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$probe")"
+  [ -n "$body" ]
+  # the extraction still found the predicate (same control AC2 uses)...
+  grep -q 'summary.critical' <<< "$body"
+  # ...and now BOTH of AC2's needles must fire, or AC2 proves nothing
+  grep -q 'fix-touched' <<< "$body" || {
+    echo "AC2's fix-touched needle does not fire on a body that reads the set"; return 1; }
+  grep -qE 'effective_max|max_rounds' <<< "$body" || {
+    echo "AC2's ceiling needle does not fire on a body carrying a ceiling test"; return 1; }
+}
+
+@test "#1571 the EXPLANATION page carries a positive pin, not only the negative sweep" {
+  # This file's own methodology (see the per-site pins above): a negative sweep
+  # bans literal transcriptions of the OLD claim, so a REWORDED revert slips
+  # past it; a positive pin requires the CURRENT claim to be present, which a
+  # revert cannot satisfy however it is phrased. residue.md, ARCHITECTURE.md and
+  # resolve-story-loop.zsh each got one for #1571. The user-facing page — the one
+  # a human actually reads — did not, so a reworded return to three conditions
+  # passed the whole suite.
+  local t; t="$(flat "$REPO_ROOT/docs/explanation/review-loop.md")"
+  grep -q '\*\*Two\*\* conditions are required' <<< "$t" || {
+    echo "the explanation page no longer states the residue terminal's TWO conditions"; return 1; }
+  grep -q 'A third condition used to sit between them' <<< "$t" || {
+    echo "the explanation page no longer records that condition 2 was removed"; return 1; }
+  grep -q 'removed\*\* (#1571)' <<< "$t" || {
+    echo "the explanation page no longer attributes the removal to #1571"; return 1; }
+}
+
+@test "#1571 reference/review-loop.md's correction note is pinned" {
+  # The round protocol is byte-frozen and still states the retired condition
+  # twice (the parked-blocker guarantee, and "a failure to compute the set only
+  # makes a residue ending unreachable"). The ONLY thing correcting them is the
+  # note appended below the span — and nothing asserted it: the §9 proximity
+  # sweep is satisfied by the FROZEN text, the roster tripwire counts files, and
+  # the negative sweep needles literals that appear nowhere in the frozen span.
+  # Deleting the whole note passed the suite, leaving the file a session reads on
+  # EVERY round telling it a parked-only run escalates by design.
+  local t; t="$(flat "$RI_REF/review-loop.md")"
+  grep -q 'Residue condition 2 was removed (#1571)' <<< "$t" || {
+    echo "review-loop.md no longer records that condition 2 was removed"; return 1; }
+  grep -q 'takes \*\*two\*\* conditions' <<< "$t" || {
+    echo "review-loop.md no longer states the surviving pair"; return 1; }
+  grep -q 'Only the residue predicate stopped reading it' <<< "$t" || {
+    echo "review-loop.md no longer says the fix-touched set is still load-bearing elsewhere"; return 1; }
+  # ...and the correction to the frozen parking rule, which is the one claim in
+  # that span this story makes false
+  grep -q 'do not read a parked-only run as escalating by design' <<< "$t" || {
+    echo "review-loop.md no longer retires the frozen parked-only inference"; return 1; }
+  # Pin the DEFERRAL's claim, not the bare number: `grep '#1581'` matches the
+  # digits anywhere, so the round-4 CRITICAL could be restored verbatim —
+  # "the residue branch therefore has to drop those parked candidates itself,
+  # matching on title; #1581 will settle the exact key" — with every needle here
+  # still firing, putting the three-field hand match (which silently drops a
+  # NON-parked sibling at a colliding spot) back in the file a session reads
+  # every round.
+  grep -q 'files its plan as built' <<< "$t" || {
+    echo "review-loop.md no longer says the branch files the plan as built"; return 1; }
+  grep -q 'Do not attempt it here' <<< "$t" || {
+    echo "review-loop.md no longer forbids improvising the parked match"; return 1; }
+  grep -q '#1581' <<< "$t" || {
+    echo "review-loop.md no longer defers the parked handling to #1581"; return 1; }
+  # ...and the file must NOT carry the instruction the deferral replaced
+  run ! grep -q 'has to drop those' "$RI_REF/review-loop.md"
+}
+
+@test "#1571 the skill frontmatter and its generated page carry a positive pin" {
+  # The LAST #1571 site covered only by the negative sweep. Every other one
+  # (the loop header, residue.md, review-loop.md, the explanation page,
+  # ARCHITECTURE.md, the Approver template) has a positive pin, for the reason
+  # this file states elsewhere: a negative sweep bans literal transcriptions of
+  # the OLD claim, so a REWORDED revert slips past it. Mutation this closes:
+  # rewrite the frontmatter to "blockers all sit in the files its own last fix
+  # pass touched" and regenerate commands.md — no condition-2 needle matches
+  # that wording, and the user-facing command reference then documents a firing
+  # condition the loop no longer applies.
+  local f="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  local g="$REPO_ROOT/docs/reference/commands.md"
+  local ft; ft="$(flat "$f")"
+  grep -q 'non-critical ends .CONVERGED_WITH_RESIDUE. (exit 14)' <<< "$ft" || {
+    echo "SKILL.md's frontmatter no longer states the post-#1571 residue condition"; return 1; }
+  # the generated page must say the same thing, or the two have drifted
+  local gt; gt="$(flat "$g")"
+  grep -q 'non-critical ends .CONVERGED_WITH_RESIDUE. (exit 14)' <<< "$gt" || {
+    echo "docs/reference/commands.md was not regenerated from the frontmatter"; return 1; }
+  # non-vacuity: neither may carry the retired clause in ANY spelling that
+  # still names the last fix pass
+  run ! grep -qE 'last fix pass touched|confined to its own last fix pass' "$f"
+  run ! grep -qE 'last fix pass touched|confined to its own last fix pass' "$g"
+}
+
+@test "#1571 the cross-file pointer resolves — both ends pinned" {
+  # The explanation page tells the reader to open a section of residue.md BY
+  # NAME. Nothing asserted either end: rename the heading (leaving every body
+  # sentence intact) or delete the pointer, and the suite stayed green while a
+  # user-facing instruction named a section that does not exist. (The parked
+  # section's pointer went to #1581 with the rest of that handling, so this is
+  # the only pointer of the shape left in-tree — the pin stands on its own.)
+  local heading='Condition 2 — removed; the story-diff rail is upstream'
+  grep -qF "## $heading (#1571)" "$RI_REF/residue.md" || {
+    echo "residue.md's #1571 section heading changed — the explanation page points at it by name"
+    return 1; }
+  grep -qF "$heading" "$REPO_ROOT/docs/explanation/review-loop.md" || {
+    echo "the explanation page no longer points at residue.md's #1571 section"; return 1; }
 }

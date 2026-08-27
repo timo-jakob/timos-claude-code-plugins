@@ -468,9 +468,10 @@ CI and the per-type criteria still decide):
 - **`dimensions.<lens>.open > 0` means blockers were deliberately left open, not
   missed.** The loop has one terminal that opens a PR with blockers still
   outstanding: `CONVERGED_WITH_RESIDUE`. It fires only when the last two rounds
-  found **zero Criticals** and every remaining blocker sits in a file the loop's
-  own previous fix pass had just written — so what is open is the implementer
-  reviewing its own last edits, not shipped behaviour going wrong. Each one was
+  found **zero Criticals** and the round declaring it had read the **whole**
+  change rather than one slice — and every round's findings are confined to that
+  change before they are counted, so what is open is non-critical material in the
+  diff under review, not shipped behaviour going wrong. Each one was
   **filed as a labelled follow-up issue** (`review-residue` +
   `needs-refinement`), which the PR Summary names.
 
@@ -479,8 +480,8 @@ CI and the per-type criteria still decide):
   merely because `open > 0`: there is no fix to confirm, and demanding one asks
   for work the run deliberately deferred and recorded. Do still raise a finding
   if the diff shows the open item is **not** what the dossier says it is — a
-  Critical, or a change to behaviour outside the last fix pass — because those
-  are exactly the two conditions the terminal claims were checked. An older
+  Critical, or something outside the change under review — because those
+  are exactly the conditions the terminal claims were checked. An older
   dossier carries no `open` key at all; absent means 0.
 
   **Read the Summary before extending that leniency — the dossier cannot vouch

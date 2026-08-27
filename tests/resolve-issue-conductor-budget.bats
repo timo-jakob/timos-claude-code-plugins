@@ -247,9 +247,18 @@ _all_raw_pointer_count() {
   # The control above plants the FIRST heading; this proves the set is the whole
   # roster rather than a single lucky entry, so a reference file that lost its
   # `##` heading (and with it its protection) reds here.
+  #
+  # SEVEN since #1571: residue.md gained ONE `##` section, stating why condition 2
+  # was removed. (The parked-blocker handling that story surfaced is #1581's, not
+  # this one's, so it adds no second heading here.) The count is deliberately exact
+  # rather than a minimum — a new reference heading is a new protected
+  # restatement, and it should be a decision someone made here, not one that
+  # arrives unnoticed. (reference/review-loop.md's #1571 note is a PARAGRAPH,
+  # not a heading, on purpose: a second `##` there also makes
+  # round-boundary-wait.bats' section locator ambiguous.)
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 6 ]
+  [ "$n" -eq 7 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
