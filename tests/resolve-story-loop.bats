@@ -1891,7 +1891,7 @@ residue_review() {  # $1 = file
 
 residue_fix='echo "v$REVIEW_ROUND" > "$REVIEW_REPO/touched.py"'
 
-@test "#1435 tc-happy-residue-terminal: hook mode, zero-CRITICAL window + all blockers fix-touched -> exit 14" {
+@test "#1435 tc-happy-residue-terminal: hook mode, zero-CRITICAL window on a full round -> exit 14" {
   residue_setup
   # round 2 IS the ceiling, so it lands on the BUDGET_EXHAUSTED rung — which the
   # residue check replaces. Both rounds report critical 0, and round 2's blocker
@@ -1908,7 +1908,14 @@ residue_fix='echo "v$REVIEW_ROUND" > "$REVIEW_REPO/touched.py"'
   # human the run converged clean.
   P="$BATS_TEST_TMPDIR/wd/progress.md"
   grep -q '^\*\*Final:\*\* CONVERGED_WITH_RESIDUE' "$P"
+  # Pin the CLAIM, not just the prefix. The verdict used to continue "...and
+  # lives in the previous round's own fix-touched files", which #1571 made false
+  # — and this needle stopped one word short of it, so progress.md (the surface a
+  # human tails through a long run) stated the retired condition while the suite
+  # stayed green.
   grep -q -- '- converged with residue' "$P"
+  grep -q 'this round read the whole story diff' "$P"
+  run ! grep -q "lives in the previous round's own fix-touched files" "$P"
   # ...and the class stamp is wired end-to-end into it, not merely into the JSON
   grep -q -- '- by class: new_defect 0, incomplete_propagation 1, under_assertion 0' "$P"
 }
@@ -2018,12 +2025,15 @@ residue_fix='echo "v$REVIEW_ROUND" > "$REVIEW_REPO/touched.py"'
   [ "$(cat "$BATS_TEST_TMPDIR/wd/fix-touched-1.txt")" = "touched.py" ]
 }
 
-@test "#1435 EVERY remaining blocker must be fix-touched: one stray blocker in a mixed round exits 13" {
+@test "#1571 a mixed round SHIPS: the fix-touched split survives as a class stamp, never as a residue veto" {
   residue_setup
-  # The quantifier is `n_outside == 0`. With one blocker per round, relaxing it
-  # to `n_outside < n_blocking` ("at least one is fix-touched") passes every
-  # other case — and a round holding one residue blocker PLUS one genuinely new
-  # defect in shipped code would open a PR and file the new defect as residue.
+  # This once pinned residue's quantifier (`n_outside == 0`). #1571 removed that
+  # condition, so the mixed round now SHIPS — and what this test is for changed
+  # with it: the fix-touched split it sets up must still reach the changelist as
+  # `class`, because the progress histogram and the grant decision read it. The
+  # class assertion below is therefore the whole point now, and the exit code is
+  # the scaffolding. Both blockers are in the story diff (`scope-findings` would
+  # have dropped either otherwise), which is why neither is a reason to refuse.
   loop --max-rounds 2 \
     --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then
         printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":100,\"title\":\"round 1 unquoted expansion\",\"description\":\"d1\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
@@ -2031,18 +2041,21 @@ residue_fix='echo "v$REVIEW_ROUND" > "$REVIEW_REPO/touched.py"'
         printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":200,\"title\":\"round 2 unquoted expansion\",\"description\":\"d2\",\"reviewer\":\"r\"},{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":300,\"title\":\"round 2 stale cache never invalidated\",\"description\":\"d3\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
       fi' \
     --fix-cmd "$residue_fix"
-  [ "$status" -eq 13 ]
-  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   # the round really is MIXED — otherwise this degenerates into the
   # single-outside-blocker case above and pins nothing new
   [ "$(jq '.blocking | length' "$BATS_TEST_TMPDIR/wd/changelist-2.json")" -eq 2 ]
   [ "$(jq -r '[.blocking[].class] | sort | join(",")' "$BATS_TEST_TMPDIR/wd/changelist-2.json")" = "incomplete_propagation,new_defect" ]
 }
 
-@test "#1435 tc-error-untouched-file: a blocker outside the fix-touched set exits 13, never 14" {
+@test "#1571 tc-error-untouched-file RETIRED: a blocker outside the fix-touched set now ships as residue" {
   residue_setup
-  # both rounds zero-CRITICAL, but round 2's blocker is in app.py, which no fix
-  # pass ever wrote — so ONLY the membership condition fails.
+  # Both rounds zero-CRITICAL, and round 2's blocker is in app.py — in the story
+  # diff, but written by no fix pass. Under the retired condition 2 that alone
+  # refused residue; since #1571 it ships, because being in the story diff is
+  # the only file-level claim residue ever needed and `scope-findings` already
+  # guarantees it.
   loop --max-rounds 2 \
     --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then
         printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":100,\"title\":\"round 1 unquoted expansion\",\"description\":\"d1\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
@@ -2050,15 +2063,15 @@ residue_fix='echo "v$REVIEW_ROUND" > "$REVIEW_REPO/touched.py"'
         printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":200,\"title\":\"round 2 stale cache never invalidated\",\"description\":\"d2\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
       fi' \
     --fix-cmd "$residue_fix"
-  [ "$status" -eq 13 ]
-  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
 }
 
 @test "#1435 tc-error-conflict-still-escalates: a surviving conflict still exits 11 under residue conditions" {
   residue_setup
   # Round 2 carries an opposed pair at one location in touched.py, so the
-  # residue conditions hold (zero CRITICALs both rounds, every blocker
-  # fix-touched) and the conflict rung must still win — no automated ending can
+  # residue conditions hold (zero CRITICALs both rounds) and the conflict rung
+  # must still win — no automated ending can
   # pick between two opposed recommendations.
   loop --max-rounds 3 \
     --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then
@@ -2089,9 +2102,11 @@ residue_fix='echo "v$REVIEW_ROUND" > "$REVIEW_REPO/touched.py"'
 
 @test "#1435 tc-corner-round1-unreachable: --max-rounds 1 exits 13, never 14" {
   residue_setup
-  # Zero CRITICALs and a blocker in a file the PRE-LOOP tree already changed —
-  # every surface condition of residue except the one that cannot be met: there
-  # is no previous round's fix pass to attribute it to.
+  # Zero CRITICALs and a blocker in the story diff — every surface condition of
+  # residue except the one round 1 structurally cannot meet: there is no second
+  # changelist, so the two-round zero-CRITICAL window cannot exist. (Before #1571
+  # it also failed for want of a previous fix pass to attribute the blocker to;
+  # that half went with condition 2, and the round-1 guard survives on this one.)
   loop --max-rounds 1 --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
   [ "$status" -eq 13 ]
   [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
@@ -2104,11 +2119,13 @@ residue_fix='echo "v$REVIEW_ROUND" > "$REVIEW_REPO/touched.py"'
   git -C "$R" add lib.zsh
   git -C "$R" commit -qm lib
   # --max-rounds 2, not 1: the fix hook runs only on a round that CONTINUES, so
-  # a single-round run captures nothing at all. Round 2 then exits 13 because
-  # this fix pass never writes touched.py, which is where the blockers are.
+  # a single-round run captures nothing at all. Round 2 then exits 14: both
+  # rounds are zero-CRITICAL and it is at the ceiling, so residue replaces
+  # BUDGET_EXHAUSTED. Where the fix pass wrote is no longer part of that verdict
+  # (#1571) — the set this test pins is now purely the `class` input.
   loop --max-rounds 2 --review-cmd "$(residue_review touched.py)" \
     --fix-cmd 'echo modified >> "$REVIEW_REPO/lib.zsh"; echo new > "$REVIEW_REPO/created.zsh"'
-  [ "$status" -eq 13 ]
+  [ "$status" -eq 14 ]
   # sorted, repo-relative, and nothing else: not the loop's own state, not the
   # findings sink, not README.md
   [ "$(cat "$BATS_TEST_TMPDIR/wd/fix-touched-1.txt")" = "created.zsh
@@ -2119,22 +2136,25 @@ lib.zsh" ]
   residue_setup
   loop --max-rounds 2 --review-cmd "$(residue_review touched.py)" \
     --fix-cmd 'mkdir -p "$REVIEW_REPO/.review" "$REVIEW_REPO/.claude/telemetry"; echo x > "$REVIEW_REPO/.review/scratch.json"; echo y > "$REVIEW_REPO/.claude/telemetry/telemetry.jsonl"'
-  [ "$status" -eq 13 ]
+  [ "$status" -eq 14 ]
   # present but empty — "the fix pass touched nothing REVIEWABLE" is a real
   # answer, and a distinct one from "no capture ran" (no file at all)
   [ -f "$BATS_TEST_TMPDIR/wd/fix-touched-1.txt" ]
   [ ! -s "$BATS_TEST_TMPDIR/wd/fix-touched-1.txt" ]
 }
 
-@test "#1435 an empty fix-touched set makes residue unreachable (every blocker is a new_defect)" {
+@test "#1571 an empty fix-touched set no longer blocks residue — every blocker is still classed new_defect" {
   residue_setup
   # The fix pass only ever writes under .review/, so nothing reviewable is ever
-  # attributable to it — the exclusion list is load-bearing for the VERDICT, not
-  # just for the file contents.
+  # attributable to it and the set comes out EMPTY. That is the #1558 shape in
+  # miniature: under the retired condition 2 an empty set made every blocker
+  # "outside" and residue unreachable — the defect #1571 fixed. The exclusion
+  # list is still load-bearing, but now for the CLASS rather than the verdict,
+  # which is what the last assertion pins.
   loop --max-rounds 2 --review-cmd "$(residue_review touched.py)" \
     --fix-cmd 'mkdir -p "$REVIEW_REPO/.review"; echo x > "$REVIEW_REPO/.review/scratch.json"'
-  [ "$status" -eq 13 ]
-  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   [ "$(jq -r '[.blocking[].class] | join(",")' "$BATS_TEST_TMPDIR/wd/changelist-2.json")" = "new_defect" ]
 }
 
@@ -2203,10 +2223,12 @@ lib.zsh" ]
   # this arm. review-dispatch reads GIT_BIN for its own delta, and passes that
   # down to git-tree-id.zsh, so its scope computation is unaffected.
   #
-  # The rule under test is fail-CLOSED-but-not-fatal: no set on disk (so residue
-  # is unreachable rather than decided on a guess), a named diagnostic (so an
-  # escalation instead of a residue exit is distinguishable from a genuine
-  # non-residue run), and a run that still reaches its terminal.
+  # The rule under test is fail-CLOSED-but-not-fatal: no set on disk (so no
+  # blocker is stamped from a guess), a named diagnostic (so a round whose
+  # by-class row is dark is distinguishable from one whose fix pass genuinely
+  # touched nothing), and a run that still reaches its terminal. Since #1571 the
+  # residue verdict is not among the things at stake here — which is why this
+  # test asserts exit 14 below.
   GITSTUB="$BATS_TEST_TMPDIR/git-no-difftree"
   cat > "$GITSTUB" <<'STUB_EOF'
 #!/usr/bin/env bash
@@ -2224,20 +2246,24 @@ STUB_EOF
     zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd-nogit" --max-rounds 2 \
     --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
   # the run is NOT aborted by the capture failure — it reaches a real terminal
-  [ "$status" -eq 13 ]
-  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
-  # ...leaving no set, so residue could not have been decided from a stale one
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
+  # ...leaving no set, so no blocker could be classed from a stale one
   [ ! -e "$BATS_TEST_TMPDIR/wd-nogit/fix-touched-1.txt" ]
   # ...and it said which arm failed, rather than going dark
   contains "$stderr" "fix-touched set (#1435)"
-  contains "$stderr" "residue is unreachable this round"
+  # The diagnostic names the consequence that is REAL since #1571. It used to
+  # promise "residue is unreachable this round" — in the very run this test also
+  # asserts exits 14, a contradiction the suite pinned rather than caught.
+  contains "$stderr" "will carry no class"
+  contains "$stderr" "residue is unaffected since #1571"
 }
 
 @test "#1435 each capture failure names ITS OWN arm, so an operator can tell which went dark" {
   residue_setup
-  # The three arms print three distinct diagnostics precisely so a run that
-  # escalated for a capture failure is distinguishable from a genuine
-  # non-residue run — and from each other. A shared tail cannot establish that;
+  # The three arms print three distinct diagnostics precisely so a round whose
+  # class stamps went dark for a capture failure is distinguishable from one
+  # whose fix pass touched nothing — and from each other. A shared tail cannot establish that;
   # each needle here is arm-unique.
   #
   # The stub is counter-keyed, because both identities in a round are minted by
@@ -2274,7 +2300,7 @@ STUB_EOF
     GIT_TREE_ID_BIN="$BATS_TEST_TMPDIR/git-nth" \
     zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd-arm2" --max-rounds 2 \
     --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
-  [ "$status" -eq 13 ]
+  [ "$status" -eq 14 ]
   contains "$stderr" "no pre-fix tree identity for round 1"
   [ ! -e "$BATS_TEST_TMPDIR/wd-arm2/fix-touched-1.txt" ]
 
@@ -2283,12 +2309,12 @@ STUB_EOF
     GIT_TREE_ID_BIN="$BATS_TEST_TMPDIR/git-nth" \
     zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd-arm3" --max-rounds 2 \
     --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
-  [ "$status" -eq 13 ]
+  [ "$status" -eq 14 ]
   contains "$stderr" "could not compute the post-fix tree identity for round 1"
   [ ! -e "$BATS_TEST_TMPDIR/wd-arm3/fix-touched-1.txt" ]
 }
 
-@test "#1435 a capture failure CLEARS any stale set, so residue can never read a previous round's" {
+@test "#1435 a capture failure CLEARS any stale set, so no blocker is classed from a previous round's" {
   residue_setup
   # The `rm -f` at the top of the capture is what makes the fail-closed promise
   # absolute rather than likely: without it a set left by an earlier round could
@@ -2309,7 +2335,7 @@ STUB_EOF
     GIT_TREE_ID_BIN="$GITSTUB2" \
     zsh "$S" --repo "$R" --base main --work-dir "$WD4" --max-rounds 2 \
     --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
-  [ "$status" -eq 13 ]
+  [ "$status" -eq 14 ]
   [ ! -e "$WD4/fix-touched-1.txt" ]
 }
 
@@ -2331,9 +2357,9 @@ STUB_EOF
 @test "#1435 the fix-touched set and the review scope share ONE path rule" {
   # _capture_fix_touched hand-copies review-dispatch.zsh's _normalise_paths, and
   # the header calls the two "deliberately identical". A one-sided edit would
-  # make the residue test and the review scope disagree about the same file,
-  # whose only symptom is a blocker misclassified `new_defect` and residue
-  # quietly unreachable. Pin the copies against each other rather than trusting
+  # make the `class` stamp and the review scope disagree about the same file,
+  # whose only symptom is a blocker misclassified `new_defect` and a by-class
+  # row nobody can trust. Pin the copies against each other rather than trusting
   # the comment.
   D="$REPO_ROOT/development/skills/resolve-issue/scripts/review-dispatch.zsh"
   # the ./-strip, the two artifact exclusions and the blank-line drop, in both
@@ -2366,8 +2392,8 @@ STUB_EOF
   # If either side keeps that default, the review scope and the fix-touched set
   # carry two different spellings of one file — so `consolidate-findings
   # --fix-touched` finds no match, a blocker the fix pass just wrote is classed
-  # `new_defect` instead of `incomplete_propagation`, and the residue terminal
-  # silently becomes unreachable for any repo with a non-ASCII filename.
+  # `new_defect` instead of `incomplete_propagation` — silently mis-stamping
+  # every `class` for a repo with a non-ASCII filename.
   # seeded like residue_setup, but with the non-ASCII name the flag is about
   printf 'v0\n' > "$R/café.py"
   local WD="$BATS_TEST_TMPDIR/wd"
@@ -2407,7 +2433,11 @@ EOF
   [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
   # ...and it really was the promotion gate that refused it: the run is the
   # promotion sub-loop, and every OTHER residue condition held (that is the
-  # non-vacuity half — the same fixture exits 14 without --promote)
+  # non-vacuity half — the same fixture exits 14 without --promote).
+  # The fix-touched assertion below is NOT part of that evidence since #1571 —
+  # the predicate does not read the set — it pins the `class` input instead, and
+  # is kept because a promotion round that lost its capture would go dark in the
+  # by-class histogram exactly where the grant decision reads it.
   echo "$output" | jq -e '.promotion_phase == true' >/dev/null
   echo "$output" | jq -e '.final_changelist.summary.critical == 0' >/dev/null
   [ "$(cat "$BATS_TEST_TMPDIR/wd-promo/fix-touched-1.txt")" = "touched.py" ]
@@ -2438,8 +2468,17 @@ EOF
   # granted resume with no base to diff and the class histogram dark exactly one
   # round after the grant was spent.
   WD5="$BATS_TEST_TMPDIR/wd-budget-stamp"
+  # A CRITICAL in round 1 keeps this fixture OFF the residue terminal (#1571).
+  # Exit 14 is a terminal SUCCESS with no fix pass after it, so it is correctly
+  # not in the stamp list — and since #1571 removed residue's file condition, a
+  # zero-CRITICAL fixture here now ships instead of exhausting its budget, and
+  # would silently stop testing the BUDGET_EXHAUSTED arm this test is named for.
   loop --max-rounds 2 --work-dir "$WD5" \
-    --review-cmd "$(residue_review app.py)" --fix-cmd 'true'
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then
+        printf "%s" "[{\"severity\":\"CRITICAL\",\"dimension\":\"bugs\",\"file\":\"app.py\",\"line\":10,\"title\":\"round 1 null dereference\",\"description\":\"d1\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
+      else
+        printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":900,\"title\":\"missing pipefail on download\",\"description\":\"d2\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
+      fi' --fix-cmd 'true'
   [ "$status" -eq 13 ]
   [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
   [ -s "$WD5/fix-base-2.txt" ]
@@ -2447,8 +2486,8 @@ EOF
   # ESCALATE_CONFLICT IS in the list, on the same reasoning: the interactive
   # extension covers it too, a human picks the winner, and a fix pass follows the
   # grant — so without a stamp that round is consolidated with no `--fix-touched`
-  # at all, stamping no `class`, blanking the histogram and making residue
-  # unreachable on the round after a grant was spent. (This test previously
+  # at all, stamping no `class` and blanking the histogram on the round after a
+  # grant was spent — which is when it is most wanted. (This test previously
   # asserted the opposite, on the mistaken premise that no grant resumes from a
   # conflict.)
   WD6="$BATS_TEST_TMPDIR/wd-conflict-stamp"
@@ -2479,12 +2518,13 @@ EOF
   # run 2 re-uses the work-dir WITHOUT --resume and stops at round 2, so it
   # never writes a fix-touched-2 of its own. Run 1's must be gone: left behind,
   # it would attribute a later round's blockers to a fix pass from a different
-  # run entirely — and residue's whole claim is "these edits are ours".
+  # run entirely, stamping `incomplete_propagation` against edits that are not
+  # ours and corrupting the by-class histogram the grant decision reads.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD2" --max-rounds 2 \
     --review-cmd "$(residue_review touched.py)" --fix-cmd 'true'
-  [ "$status" -eq 13 ]
-  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   [ ! -e "$WD2/fix-touched-2.txt" ]
 }
 
@@ -2503,7 +2543,7 @@ EOF
   # `_tree_id` occurrence count is unchanged, so the structural test stays
   # green, while `fix-touched-1.txt` silently grows `.loop-wd/changelist-1.json`,
   # `.loop-wd/history.jsonl` and `.loop-wd/progress.md` — inflating the set that
-  # decides residue, on a side effect whose exact contents this AC pins.
+  # stamps `class`, on a side effect whose exact contents this AC pins.
   # (NB: no stray apostrophes in these comments — the inert-assertion scanner
   # tracks quote parity across lines and an odd one desyncs the whole scan.)
   residue_setup
@@ -2512,7 +2552,7 @@ EOF
     zsh "$S" --repo "$R" --base main --work-dir "$IWD" --max-rounds 2 \
     --review-cmd "$(residue_review touched.py)" \
     --fix-cmd 'echo modified >> "$REVIEW_REPO/lib.zsh"; echo new > "$REVIEW_REPO/created.zsh"'
-  [ "$status" -eq 13 ]
+  [ "$status" -eq 14 ]
   # the work-dir really is inside the repo, or this pins nothing
   [ -f "$IWD/changelist-1.json" ]
   # ...and the set is EXACTLY the two edits the fix hook made — the same
@@ -2538,8 +2578,8 @@ EOF
   # gate block. Every file the gate writes — a regenerated fixture, a formatter
   # run from a test, a coverage report — then joins the set and is attributed to
   # the fix pass, so a blocker in one is stamped `incomplete_propagation` instead
-  # of `new_defect`. That is exactly the input that can flip an escalation into a
-  # CONVERGED_WITH_RESIDUE PR, and the whole suite stayed green through it.
+  # of `new_defect`. That is exactly the input the by-class histogram — and so the
+  # grant decision — reads, and the whole suite stayed green through it.
   residue_setup
   loop --max-rounds 2 --review-cmd "$(residue_review touched.py)" \
     --fix-cmd "$residue_fix" \
@@ -2561,7 +2601,7 @@ EOF
   # and every outside test still passes, because nothing collides. In production
   # it silently deletes every fix-pass edit under any repo directory whose name
   # matches the work-dir basename (`--work-dir /tmp/tests`, `$TMPDIR/src`), so
-  # those blockers are classed `new_defect`, residue goes unreachable, and the
+  # those blockers are classed `new_defect` on evidence nobody produced, and the
   # class histogram the grant decision reads is confidently wrong.
   #
   # So: force the collision. The work-dir is OUTSIDE the repo and named `wd`,
@@ -2602,11 +2642,12 @@ EOF
   grep -q 'promoting round 3 to the closing full sweep' "$BATS_TEST_TMPDIR/wd/progress.md"
 }
 
-@test "#1435 AC20 hook mode: a sweep blocker OUTSIDE the fix-touched set escalates, never 14" {
+@test "#1571 AC20 hook mode: a sweep blocker outside the fix-touched set SHIPS as residue" {
   # The sweep reads files the deltas never covered — that is its whole purpose —
-  # so a blocker it raises there fails residue condition 2. The run must escalate
-  # rather than open a PR, which is exactly the answer the motivating run should
-  # have received.
+  # and under the retired condition 2 that made its findings unshippable by
+  # construction, which is precisely why the motivating run never reached exit
+  # 14. Since #1571 such a blocker is the residue case rather than the veto: it
+  # is in the story diff, it is not Critical, and a full sweep raised it.
   residue_setup
   loop --max-rounds 2 \
     --review-cmd 'if [ "$REVIEW_ROUND" = 3 ]; then
@@ -2615,10 +2656,12 @@ EOF
         printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":$((REVIEW_ROUND*100)),\"title\":\"round $REVIEW_ROUND unquoted expansion\",\"description\":\"d$REVIEW_ROUND\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
       fi' \
     --fix-cmd "$residue_fix"
-  [ "$status" -ne 14 ]
-  [ "$(echo "$output" | jq -r '.status')" != "CONVERGED_WITH_RESIDUE" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   # it really did reach the sweep, or this proves nothing about the sweep
   [ "$(echo "$output" | jq -r '.rounds')" = "3" ]
+  # ...and the sweep-only blocker is the remainder that gets filed
+  [ "$(echo "$output" | jq -r '.final_changelist.blocking[0].file')" = "app.py" ]
 }
 
 @test "#1435 AC19 the zero-blocker promotion trigger is UNCHANGED (#1434 non-goal)" {
@@ -2707,9 +2750,10 @@ EOF
   # cleared at the top of the next. The obvious negative (grep for a round number
   # one higher) is unreachable, because the verdict interpolates
   # `closing_sweep_round`, which stays fixed once promoted. So reach the state
-  # instead: round 2 promotes round 3, and round 3 — the SWEEP — raises a blocker
-  # OUTSIDE the fix-touched set with budget still left, so it neither declares
-  # residue nor ends the run and falls to the ordinary continuing verdict.
+  # instead: round 2 promotes round 3, and round 3 — the SWEEP — raises a fresh,
+  # uncarried blocker with budget still left, so it reaches neither residue rung
+  # (`nonconv == 0`, and it is not at the ceiling) and falls to the ordinary
+  # continuing verdict.
   #
   # Surviving mutation without this: delete the reset. Round 3 then renders
   # "residue conditions hold, but on a DELTA round — promoting round 3" for a
@@ -2803,7 +2847,7 @@ pft_review() {  # $1 = round-3 findings (default: none)
   echo "$output" | jq -e '[.round_changelists[1].blocking[]
       | select(.non_converging == true)] | length == 2' >/dev/null
   echo "$output" | jq -e '[.round_changelists[1].blocking[]
-      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+      | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
   echo "$output" | jq -e '.round_changelists[1].summary.critical == 0' >/dev/null
   # the count is of CONTINUATIONS, not identities: four records, one round
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
@@ -2829,23 +2873,23 @@ pft_review() {  # $1 = round-3 findings (default: none)
   run ! grep -q -- '- false trip auto-continued (#983):' <<< "$r2"
 }
 
-@test "#1498 tc-error-second-ambiguous-match-escalates: a recorded identity escalates, marker unchanged" {
+@test "#1571 tc-error-second-ambiguous-match: a recorded identity is refused, and residue catches the rung" {
   # Round 3 re-raises a title the marker already holds. Its own normalised title
-  # IS recorded, so the one-shot bound refuses and the ladder falls through to
-  # the escalation it would have taken at round 2.
+  # IS recorded, so the one-shot bound refuses — and since #1571 the ladder falls
+  # through to RESIDUE, not to the escalation it would have taken before.
   local r3='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":11,\"title\":\"unquoted variable in the matcher\",\"description\":\"d3\",\"reviewer\":\"r\"}]'
   loop --review-cmd "$(pft_review "$r3")" --fix-cmd 'true'
-  [ "$status" -eq 12 ]
-  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
   # round 3 really was another ambiguous carried match — otherwise this pins the
   # wrong thing entirely
   echo "$output" | jq -e '[.round_changelists[2].blocking[]
-      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+      | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
   # the count did not move, and neither did the marker
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
   diff <(pft_expected_marker 2) "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
-  # ...and the ESCALATING round renders the PLAIN line. Without this the loop's
+  # ...and the round that ENDS the run renders the PLAIN line. Without this the loop's
   # `(( pftc )) &&` flag guard is only tested positively: pass the flag
   # unconditionally and every other assertion here still holds, while progress.md
   # tells the human the run continued on a round that in fact stopped.
@@ -2863,7 +2907,7 @@ pft_review() {  # $1 = round-3 findings (default: none)
   # rounds, one new synonym at a time.
   local r3='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":11,\"title\":\"unquoted variable in the resolver\",\"description\":\"d3\",\"reviewer\":\"r\"}]'
   loop --review-cmd "$(pft_review "$r3")" --fix-cmd 'true'
-  [ "$status" -eq 12 ]
+  [ "$status" -eq 14 ]
   # ...and it really was the matched_prior half that refused: round 3 matched
   # the prior the marker holds. Read BEFORE the `run !` below, which replaces
   # $output with grep's.
@@ -2877,16 +2921,17 @@ pft_review() {  # $1 = round-3 findings (default: none)
     "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
 }
 
-@test "#1498 tc-error-mixed-carried-set-escalates: one exact-title match beside the ambiguous ones vetoes" {
+@test "#1571 tc-error-mixed-carried-set: one exact-title match vetoes the free round, residue catches the rung" {
   # Round 2 re-raises the second blocker VERBATIM at its own line: an exact
   # normalised-title match, which is a verified survivor (possible_false_trip
   # false). "Every carried match is ambiguous" is then false, and the rung must
-  # not fire — a genuinely stuck blocker is exactly what the escalation is for.
+  # not fire on a genuinely stuck blocker; since #1571 what catches the rung
+  # afterwards is residue rather than the escalation.
   local r2='[{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"},{\"severity\":\"WARNING\",\"dimension\":\"tests\",\"file\":\"app.py\",\"line\":60,\"title\":\"missing timeout on the fetch helper\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
   loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$pft_round1"'" > "$REVIEW_FINDINGS"; else printf "%s" "'"$r2"'" > "$REVIEW_FINDINGS"; fi' \
        --fix-cmd 'true'
-  [ "$status" -eq 12 ]
-  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
   # the mix really is a mix: one ambiguous, one verified
   echo "$output" | jq -e '[.round_changelists[1].blocking[]
@@ -2904,7 +2949,7 @@ pft_review() {  # $1 = round-3 findings (default: none)
   # the carried match IS ambiguous — the ONLY thing separating this from the
   # happy case is the severity, which is what makes it a test of the veto
   echo "$output" | jq -e '[.round_changelists[1].blocking[]
-      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+      | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
   echo "$output" | jq -e '.round_changelists[1].summary.critical == 1' >/dev/null
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
   [ ! -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
@@ -2925,7 +2970,7 @@ pft_review() {  # $1 = round-3 findings (default: none)
   # the Critical really was there, and really was outside the carried set
   echo "$output" | jq -e '.round_changelists[1].summary.critical == 1' >/dev/null
   echo "$output" | jq -e '[.round_changelists[1].blocking[]
-      | select(.priority == "Critical")] | all(.non_converging == false)' >/dev/null
+      | select(.priority == "Critical")] | (length > 0) and all(.non_converging == false)' >/dev/null
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
   # The marker's CONTENT, not merely its existence — which is the other half of
   # this test's thesis. The out-of-set Critical must not be given a bound
@@ -2944,13 +2989,13 @@ pft_review() {  # $1 = round-3 findings (default: none)
   # catch-all and emits a bare-status exit 1 — an operational failure, not a
   # terminal. So this asserts the CODE as much as the absence of the marker.
   loop --max-rounds 2 --review-cmd "$(pft_review)" --fix-cmd 'true'
-  [ "$status" -eq 12 ]
-  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   [ "$(echo "$output" | jq '.rounds')" -eq 2 ]
   # the round really did carry an all-ambiguous set — the ceiling is the ONLY
   # thing that refused it
   echo "$output" | jq -e '[.round_changelists[1].blocking[]
-      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+      | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
   [ ! -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
   # ...and the round renders the PLAIN line: a ceiling refusal is still a
@@ -2987,8 +3032,8 @@ pft_review() {  # $1 = round-3 findings (default: none)
   loop --max-rounds 3 \
     --review-cmd 'case "$REVIEW_ROUND" in 1) printf "%s" "'"$one"'" > "$REVIEW_FINDINGS" ;; 2) printf "%s" "'"$two"'" > "$REVIEW_FINDINGS" ;; *) printf "%s" "'"$three"'" > "$REVIEW_FINDINGS" ;; esac' \
     --fix-cmd 'true'
-  [ "$status" -eq 13 ]
-  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   # EXACTLY the ceiling, not merely within it
   [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
   [ "$(echo "$output" | jq '.max_rounds')" -eq 3 ]
@@ -2998,29 +3043,31 @@ pft_review() {  # $1 = round-3 findings (default: none)
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
 }
 
-@test "#1498 tc-corner-residue-wins-over-auto-continue: the rung sits BELOW the residue rung" {
-  # #1435's placement rule is that residue is evaluated exactly where the loop
-  # would otherwise escalate. The new rung sits strictly below it, so a round
-  # that satisfies BOTH must still end in residue — otherwise a run that could
-  # have shipped would spend rounds instead.
+@test "#1571 tc-corner-auto-continue-wins-over-residue: the rung sits ABOVE the residue rung" {
+  # The ORDER of the two rungs, and #1571 inverted it. #1435's placement rule
+  # put residue first, which was right while residue also required every blocker
+  # to be in the previous round's fix-touched set — that made it rare here. With
+  # condition 2 removed residue holds on almost any zero-CRITICAL
+  # non-convergence, so leaving it first let it SWALLOW this rung: a run that
+  # admits it cannot tell a reworded survivor from a new neighbour would ship the
+  # finding instead of spending the round it still had. The auto-continue is
+  # therefore tried FIRST — it is the loop continuing, so the rung is not yet the
+  # ending residue is entitled to replace — and residue catches whatever it
+  # declines.
   residue_setup
   local one='[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":5,\"title\":\"unquoted variable in the matcher\",\"description\":\"d1\",\"reviewer\":\"r\"}]'
   local two='[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":8,\"title\":\"unquoted variable in the dispatcher\",\"description\":\"d2\",\"reviewer\":\"r\"}]'
   loop --max-rounds 5 \
     --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$one"'" > "$REVIEW_FINDINGS"; else printf "%s" "'"$two"'" > "$REVIEW_FINDINGS"; fi' \
     --fix-cmd "$residue_fix"
-  [ "$status" -eq 14 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
   # ROUND 2 is the round both rungs were live on: its carried set is entirely
-  # ambiguous AND its residue conditions hold, so residue promoting the closing
-  # sweep there — rather than the auto-continue taking the round — is the whole
-  # assertion. (Round 3, the sweep, re-raises the same title verbatim, which is a
-  # verified survivor and never ambiguous; asserting on the final changelist
-  # would therefore test nothing about the ordering.)
+  # ambiguous AND its residue conditions hold. The auto-continue taking that
+  # round — rather than residue promoting the closing sweep there — is the whole
+  # assertion, and it is the exact inversion of what this test pinned before.
   echo "$output" | jq -e '[.round_changelists[1].blocking[] | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
-  [ "$(cat "$BATS_TEST_TMPDIR/wd/.closing-sweep")" = "3" ]
-  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
-  [ ! -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
+  # the free round was SPENT, and its identity recorded so it cannot be spent twice
+  [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+  [ -e "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued" ]
 }
 
 @test "#1498 tc-corner-null-line-file-wide-match: a file-wide match auto-continues on a line-independent identity" {
@@ -3034,13 +3081,14 @@ pft_review() {  # $1 = round-3 findings (default: none)
   loop --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "'"$one"'" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "'"$two"'" > "$REVIEW_FINDINGS"; else printf "%s" "'"$three"'" > "$REVIEW_FINDINGS"; fi' \
        --fix-cmd 'true'
   # round 2 auto-continued; round 3 matched a RECORDED identity (round 2's own
-  # title, which is round 3's matched prior) and escalated
-  [ "$status" -eq 12 ]
+  # title, which is round 3's matched prior) and was refused a second
+  # continuation, so residue caught the rung
+  [ "$status" -eq 14 ]
   [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
   echo "$output" | jq -e '.round_changelists[1].blocking[0].line == null' >/dev/null
   echo "$output" | jq -e '[.round_changelists[1].blocking[]
-      | select(.non_converging == true)] | all(.possible_false_trip == true)' >/dev/null
+      | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
   grep -qF 'app.py	resilience	outbound call has no timeout' \
     "$BATS_TEST_TMPDIR/wd/.possible-false-trip-continued"
 }
@@ -3092,7 +3140,7 @@ pft_review() {  # $1 = round-3 findings (default: none)
   jq -es 'all(.[]; [keys[] | select(test("continu|auto|possible"))] | length == 0)' "$probe" >/dev/null
 }
 
-@test "#1498 tc-error-unstamped-changelist-escalates: an absent per-item flag is never read as a pass" {
+@test "#1571 tc-error-unstamped-changelist: an absent per-item flag is never read as a pass, and residue catches the rung" {
   # The rung reuses the `$stamped` predicate its four sibling surfaces use, and
   # the reason it must is that an UNSTAMPED changelist cannot be distinguished
   # from an all-ambiguous one by reading `.possible_false_trip` alone: both
@@ -3116,21 +3164,26 @@ EOF
     zsh "$dir/resolve-story-loop.zsh" --repo "$R" --base main \
     --work-dir "$BATS_TEST_TMPDIR/wdu" \
     --review-cmd "$(pft_review)" --fix-cmd 'true'
-  [ "$status" -eq 12 ]
+  [ "$status" -eq 14 ]
   # The copy sits at a different depth, so the loop cannot reach the telemetry
   # emitter by its relative path and says so on stderr — best-effort, swallowed,
   # and the run is unaffected. `grep '^{'` isolates the status JSON from that
   # note, the same idiom the #1434 hook-mode tests above use.
   local st
   st="$(echo "$output" | grep '^{')"
-  [ "$(echo "$st" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  # The stamp gate REFUSES the auto-continue — the subject of this test, and
+  # unchanged. What follows the refusal changed in #1571: residue now catches
+  # whatever the rung declines, so the run ends there instead of escalating.
+  [ "$(echo "$st" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
+  # the continuation really was refused, or the fall-through proves nothing
+  [ "$(echo "$st" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
   # the stripping really happened — otherwise this is just the happy path
   # asserting the wrong thing
-  echo "$st" | jq -e '[.round_changelists[1].blocking[] | has("non_converging")] | any | not' >/dev/null
+  echo "$st" | jq -e '[.round_changelists[1].blocking[] | has("non_converging")] | (length > 0) and (map(.) | any | not)' >/dev/null
   # ...and the round WAS the all-ambiguous shape underneath: the surviving
   # per-item flag still says so, which is exactly why the stamp gate has to be
   # what decides
-  echo "$st" | jq -e '[.round_changelists[1].blocking[] | .possible_false_trip] | all' >/dev/null
+  echo "$st" | jq -e '[.round_changelists[1].blocking[] | .possible_false_trip] | (length > 0) and all' >/dev/null
   [ "$(echo "$st" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
   [ ! -e "$BATS_TEST_TMPDIR/wdu/.possible-false-trip-continued" ]
 }
@@ -3640,4 +3693,45 @@ resume_clean() {   # resume_clean <work-dir> <max-rounds>
   resume_clean "$WD" 1
   [ "$status" -eq 2 ]
   contains "$stderr" "raise --max-rounds"
+}
+
+@test "#1571 the upstream rail holds AT THE LOOP: an out-of-diff blocker never becomes residue" {
+  # This is the guarantee #1571 traded condition 2 for, pinned where it actually
+  # has to hold. reference/residue.md says removal is safe because
+  # `scope-findings` confines every round's findings to the story diff and
+  # `$scoped` is the ONLY input to the changelist's `.blocking`. Nothing tested
+  # that JOIN: tests/review-dispatch.bats pins the filter as a unit, and every
+  # loop fixture files against app.py/touched.py, which are in the story diff
+  # anyway. Mutation this closes: replace the loop's `scope-findings` call with
+  # `cp "$findings_path" "$scoped"` — both loop suites stayed green, while the
+  # loop would ship, as residue, a WARNING filed against committed code this
+  # story never touched.
+  residue_setup
+  # README.md is committed at base and never modified, so it is OUTSIDE the story
+  # diff — unlike every other file these fixtures use.
+  loop --max-rounds 2 \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then
+        printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":100,\"title\":\"round 1 unquoted expansion\",\"description\":\"d1\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
+      else
+        printf "%s" "[{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"touched.py\",\"line\":200,\"title\":\"round 2 unquoted expansion\",\"description\":\"d2\",\"reviewer\":\"r\"},{\"severity\":\"WARNING\",\"dimension\":\"bugs\",\"file\":\"README.md\",\"line\":1,\"title\":\"shipped behaviour this run never opened\",\"description\":\"d3\",\"reviewer\":\"r\"}]" > "$REVIEW_FINDINGS"
+      fi' \
+    --fix-cmd "$residue_fix"
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
+  # the run really did reach the terminal with a remainder to file...
+  echo "$output" | jq -e '.final_changelist.summary.blocking > 0' >/dev/null
+  # ...and the out-of-diff finding is NOT in it, so it can never be filed as a
+  # follow-up issue against code this story never touched
+  [ "$(echo "$output" | jq '[.final_changelist.blocking[] | select(.file == "README.md")] | length')" -eq 0 ]
+  # non-vacuity: the IN-diff blocker of the same round did survive, so the
+  # assertion above is the filter biting rather than an empty changelist
+  [ "$(echo "$output" | jq '[.final_changelist.blocking[] | select(.file == "touched.py")] | length')" -eq 1 ]
+
+  # ...and the claim is about EVERY round, not just the one that ends the run.
+  # `.final_changelist` here is round 3, the promoted full sweep. Scoping only
+  # full rounds would satisfy every assertion above while round 2 (a DELTA round)
+  # carried the out-of-diff blocker into its changelist, into the fix pass's work
+  # list and into the review dossier — so assert it on the delta round as well.
+  [ "$(echo "$output" | jq '[.round_changelists[] | .blocking[]? | select(.file == "README.md")] | length')" -eq 0 ]
+  [ "$(echo "$output" | jq '[.round_changelists[1].blocking[]? | select(.file == "touched.py")] | length')" -ge 1 ]
 }

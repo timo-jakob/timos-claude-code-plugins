@@ -3593,18 +3593,35 @@ to zero, so the only endings left were `BUDGET_EXHAUSTED` and
 `ESCALATE_NO_CONVERGENCE`. Neither is the right verdict for a change whose
 remaining findings are all in the implementer's own last-round edits.
 
-So the loop has a third ending. **Three conditions, ALL required:**
+So the loop has a third ending. **Conditions 1 and 3, BOTH required:**
 
-1. the last **two** rounds' changelists both report `.summary.critical == 0`;
-2. **every** remaining blocking finding's `.file` is in the **previous** round's
-   fix-touched set; and
-3. the declaring round ran as a **full sweep** (`scope_mode == "full"`).
+- **Condition 1** — the last **two** rounds' changelists both report
+  `.summary.critical == 0`; and
+- **Condition 3** — the declaring round ran as a **full sweep**
+  (`scope_mode == "full"`).
+
+**The numbering gap is deliberate (#1571).** Condition 2 — *every remaining
+blocking finding's `.file` is in the previous round's fix-touched set* — was
+**removed**, and the surviving two keep their original numbers so that every
+surface naming "condition 3" still names the full-sweep rule.
+
+**Why condition 2 went, and why nothing replaces it.** Its guarantee — the
+residue lives in what this story wrote, not in shipped behaviour nobody has just
+rewritten — is real and still holds, because it is enforced **upstream**:
+`review-dispatch.zsh scope-findings` filters every round's findings to the story
+diff before consolidation, and `$scoped` is the only input to the changelist's
+`.blocking`. Every blocker that reaches the residue predicate is therefore in the
+story diff *by construction*, and re-testing it there would be a test that can
+never fail. Its **round**-granular reading was also what made the terminal
+unreachable from the closing sweep: the promoting round runs no fix pass, so its
+fix-touched set is deliberately empty, and against an empty set every blocker
+counted as "outside".
 
 **Condition 3 is what makes the dossier's claim true rather than merely
 well-formed.** #1434 guarantees `CONVERGED` is only ever reached from a full
 sweep, but it earns that sweep only on a **zero-blocker** delta round — and a
-residue round never returns zero, so the sweep would never be earned. Conditions
-1 and 2 are satisfiable on any delta round with a plateaued trend, which is the
+residue round never returns zero, so the sweep would never be earned. Condition
+1 is satisfiable on any delta round with a plateaued trend, which is the
 ordinary case rather than an exotic one, so without condition 3 the loop opens a
 PR having reviewed only the slices the deltas happened to cover. That is not
 hypothetical: the run that motivated this amendment declared residue off a delta
@@ -3619,9 +3636,7 @@ same `<work-dir>/.closing-sweep` marker, same one-round grant beyond
 `--max-rounds` — and exits `AWAITING_FIX` (step mode) or continues (hook mode),
 so the sweep actually runs. Only that sweep may declare 14, against the whole
 story diff. Two consequences, both intended: a residue ending costs **one more
-review round** than the two-condition rule implied, and the residue set is then
-the *sweep's* set, so a blocker the sweep raises outside the previous round's
-fix-touched set fails condition 2 and the run escalates. #1434's existing
+review round** than a delta-declared rule would, and the residue set is then the sweep's own. #1434's existing
 promotion trigger is untouched — this is a second trigger, not a replacement.
 
 **Never in the promotion sub-loop.** Its blockers are the human's own promoted
@@ -3641,13 +3656,14 @@ has budget — the loop keeps *fixing* while there is budget, and residue only
 replaces an *ending*. That placement is also what demotes identity-recurrence
 from sole trigger to one input: a `non_converging` blocker still ends the loop,
 it just no longer decides **how**. Round 1 is structurally unreachable — there
-is no previous fix pass to attribute residue to, and no second changelist.
+is no second changelist to prove the CRITICAL window.
 
 **The fix-touched set** is `<work-dir>/fix-touched-<round>.txt`: repo-relative
 paths, one per line, `./`-normalised and excluding `.review/` and
 `.claude/telemetry/` — the **same** normalisation and exclusions as
-`review-dispatch.zsh`'s `_normalise_paths`, so the residue test and the review
-scope can never disagree about what counts as a repo path. Both ends are
+`review-dispatch.zsh`'s `_normalise_paths`, so the `class` stamp and the review
+scope can never disagree about what counts as a repo path. (Until #1571 the
+residue test shared that rule too; it no longer reads the set at all.) Both ends are
 `git write-tree` identities (`git-tree-id.zsh`), diffed with `diff-tree`, so
 tracked edits, deletions and untracked additions compare by one uniform rule. It
 is **file-set membership, not hunk-level**: it matches the finding's own `.file`
@@ -3665,9 +3681,12 @@ decision reads goes dark one round after the grant was spent. It then diffs at
 `--resume`
 start, beside the `--gate-attest` comparison and **before** the gate runs (a
 suite that writes into the tree must not be charged to the session's fix pass).
-Every failure to compute it leaves **no** file, which makes residue unreachable —
-the fail-closed direction, since the fallback is the escalation the loop would
-have raised anyway.
+Every failure to compute it leaves **no** file. An **absent** set makes the loop
+omit `--fix-touched` entirely, so no blocker is stamped at all — which is how a
+reader tells *no fix-touched information* from *the fix pass touched nothing* (an
+**empty** set, which stamps every blocker `new_defect`). Since #1571 that costs
+the round's `class` and its `by class:` row, **not** its residue eligibility: the
+predicate no longer reads this set.
 
 **The class**, derived by `consolidate-findings.zsh --fix-touched` and stamped on
 each `blocking[]` item exactly as `false_trip` and `promoted` are:
@@ -3719,9 +3738,9 @@ arm for the status: residue never escalates, and a comment built from one would
 fall through to the generic "exited without converging" wording and tell the
 human the opposite of what happened.
 
-**The cadence guard (#1435 §10).** Conditions 2 and 3 are only as true as the
-fix-touched set they read, and that set is true only if a round's panel ran
-*before* that round's fix pass. The loop cannot see a fix pass it did not invoke,
+**The cadence guard (#1435 §10).** A round's per-blocker `class` — and the audit
+record built on it — is only as true as the fix-touched set it reads, and that
+set is true only if a round's panel ran *before* that round's fix pass. The loop cannot see a fix pass it did not invoke,
 so a round consolidated after one snapshots a post-fix tree and attributes the
 round's blockers to it — internally consistent arithmetic over false inputs, and
 the shortest path to a residue run filing follow-up issues for findings already
@@ -3832,8 +3851,11 @@ below the ceiling, and no identity involved has continued before, the loop
 records the identities in `<work-dir>/.possible-false-trip-continued` and
 **auto-continues once** instead. A second ambiguous match on a recorded identity
 escalates as before — that is evidence of a stuck blocker, not of a proximity
-artifact. The rung sits strictly **below** the residue rung, so residue still
-wins; it is a *continue*, not a grant, so `effective_max`, `max_rounds` and
+artifact. Since #1571 the rung is tried **above** the residue rung, and residue
+catches only what it declines: with condition 2 removed residue holds on almost
+any zero-CRITICAL non-convergence, so testing it first let it swallow this rung
+and ship a finding the loop still had a round to spend on. It is a *continue*,
+not a grant, so `effective_max`, `max_rounds` and
 `closing_sweep_granted` are all untouched and
 `_promote_closing_sweep` remains the only **in-loop** budget-mutating grant —
 the one other thing that moves the ceiling is a **human** grant, recorded out of

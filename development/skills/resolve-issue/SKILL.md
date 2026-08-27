@@ -14,7 +14,7 @@ description: >
   to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
   non-converging review-loop exit becomes an interactive extension (offer more
   rounds, give guidance, ask questions). A run whose only remaining blockers are
-  non-critical and confined to its own last fix pass ends
+  non-critical ends
   `CONVERGED_WITH_RESIDUE` (exit 14) instead — declarable only from the closing
   full sweep, so a delta round that qualifies promotes that sweep first: it opens
   the PR and files the remainder as labelled follow-up issues — see [The local
@@ -675,12 +675,13 @@ with a status JSON + code:
   Approver re-ingests (#563).
 - **`CONVERGED_WITH_RESIDUE`** (exit 14, #1435) → **also a convergence: it opens
   the PR.** The loop reached an ending that would otherwise have been
-  `ESCALATE_NO_CONVERGENCE` or `BUDGET_EXHAUSTED`, and found all THREE residue
-  conditions met: its last two rounds were both zero-CRITICAL, every remaining
-  blocker sits in a file the previous round's own fix pass wrote, **and the
-  declaring round ran as a full sweep** (§9 — a delta round meeting the first two
+  `ESCALATE_NO_CONVERGENCE` or `BUDGET_EXHAUSTED`, and found BOTH surviving
+  residue conditions met: its last two rounds were both zero-CRITICAL, **and the
+  declaring round ran as a full sweep** (§9 — a delta round meeting the first
   promotes that sweep instead of ending here, so this exit always speaks for the
-  whole story diff). Rather than spend a human grant on
+  whole story diff). Condition 2 — the blocker's file being in the previous
+  round's fix-touched set — was removed in #1571 because `scope-findings` already
+  confines every round's findings to the story diff. Rather than spend a human grant on
   material the reviewers themselves called non-critical, the run ships and files
   the remainder. Do **not** build an escalation comment, do **not** enter the
   interactive extension, and do **not** re-run the loop: this is a terminal

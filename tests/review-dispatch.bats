@@ -1644,3 +1644,29 @@ _profile_is_tracked() {
   run _profile_is_tracked "development-python/skills/resolve-profile/SKILL.md"
   [ "$status" -eq 0 ]
 }
+
+@test "#1571 scope-findings IS residue's file rail: an out-of-diff blocker never reaches the changelist" {
+  # Residue condition 2 used to re-check that every remaining blocker sat in a
+  # file this story wrote. #1571 removed it as redundant — and THIS is what it
+  # was redundant WITH. If this filter ever stops dropping out-of-diff findings,
+  # the residue terminal starts filing follow-up issues against code the run
+  # never touched, with nothing downstream to catch it.
+  #
+  # Asserted on the FILTERED OUTPUT, never on a loop exit code: a run whose only
+  # finding is dropped here is zero-blocking and exits CONVERGED (0), which
+  # satisfies `status != 14` while proving nothing — it would pass with the
+  # filter deleted.
+  echo "print(1)" > "$R/app.py"          # the story's diff
+  cat > "$R/findings.json" <<'JSON'
+[
+  {"severity":"WARNING","dimension":"bugs","file":"app.py","line":7,"title":"in the story diff"},
+  {"severity":"WARNING","dimension":"bugs","file":"legacy.py","line":3,"title":"shipped behaviour this run never opened"}
+]
+JSON
+  run env GIT_BIN=git zsh "$S" scope-findings --repo "$R" --base main --findings "$R/findings.json"
+  [ "$status" -eq 0 ]
+  # the out-of-diff one is GONE — the rail residue now leans on
+  [ "$(echo "$output" | jq '[.[] | select(.file == "legacy.py")] | length')" -eq 0 ]
+  # ...and the in-diff one SURVIVES, or the filter would "pass" by dropping all
+  [ "$(echo "$output" | jq '[.[] | select(.file == "app.py")] | length')" -eq 1 ]
+}

@@ -1027,3 +1027,49 @@ Each round:
    *Escalation*. No ordering is restated here on purpose: a partial restatement
    is how the two statements of it came to disagree once already.
 <!-- /moved: round-protocol -->
+
+**Residue condition 2 was removed (#1571).** The procedure above still describes the fix-touched set as an input to the
+**residue decision**. That is no longer true, and the paragraph saying so sits
+inside a byte-frozen `moved:` span, so the correction is recorded here rather
+than edited into it.
+
+Since #1571 the residue terminal takes **two** conditions — 1 (the last two
+rounds are both zero-CRITICAL) and 3 (the declaring round ran as a full sweep).
+Condition 2, which required every remaining blocker's file to be in the previous
+round's fix-touched set, was removed: `scope-findings` already confines every
+round's findings to the story diff before consolidation, so the membership it
+tested is guaranteed upstream and re-checking it could never fail.
+
+**The fix-touched set itself is unchanged and still load-bearing** for
+everything else the procedure above uses it for — the per-blocker `class`
+(`new_defect` / `incomplete_propagation`) that `consolidate-findings.zsh
+--fix-touched` stamps, the `by class:` progress row, and the waived-suggestion
+exemption. Only the residue predicate stopped reading it.
+
+**One consequence the procedure above still states the old way.** Its parking
+rule concludes that "Residue cannot rescue it either: a parked blocker sits in a
+file the fix pass deliberately did **not** write, so it fails the residue
+condition by construction", and tells you to read a parked-only run as escalating
+**by design**. That rested entirely on condition 2. A parked blocker that is in
+the story diff is now residue-eligible, so such a run **can** reach the closing
+sweep and exit 14.
+
+So do not read a parked-only run as escalating by design — that inference is
+retired. **The `File it NOW` rule above is not**: park-time filing stays
+mandatory, and the escalation paths still file nothing, so a park nobody filed
+is still a finding the run dropped. Only the *justification* the frozen text
+gives for it — that filing at a terminal would never happen — no longer holds.
+
+**What the residue branch should DO about it is deliberately not decided
+here — #1581 owns it.** The branch files its plan as built, which means a
+parked finding can end up with two issues — the one the fix pass filed when it
+parked it, and the residue follow-up. That is a known, tracked wart rather than
+a rule you should improvise around: a hand-rolled match between the two is
+exactly what #1581 exists to specify, because the builder's identity is four
+fields and the obvious three-field version silently drops a **non-parked**
+sibling at a colliding spot, losing a residual blocker the dossier claims was
+filed. Do not attempt it here.
+
+The normative statement, with the reasoning and what is deliberately not
+changed, is in `residue.md` § *Condition 2 — removed; the story-diff rail is
+upstream (#1571)*.

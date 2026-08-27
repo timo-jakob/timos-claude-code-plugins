@@ -291,8 +291,9 @@ plan=$(jq -c --argjson issue "$issue" --argjson parent "$parent" \
                   + (if ((.suggested_fix | safe) | length) > 0
                      then "**Suggested fix**\n\n\((.suggested_fix | safe)[0:1500])\n\n" else "" end)
                   + "---\n\n"
-                  + "Filed automatically by the review loop residue path (#1435): every remaining"
-                  + " blocker was non-critical and lived in the fix pass of the previous round, so"
+                  + "Filed automatically by the review loop residue path (#1435): the last two"
+                  + " rounds were zero-CRITICAL and the declaring round read the whole story diff,"
+                  + " which every remaining blocker is confined to, so"
                   + " story #\($issue) opened its PR and the remainder was filed here instead of"
                   + " spending another round.\n\n"
                   + "It carries `needs-refinement` on purpose — it is a finding, not a story, and it"
