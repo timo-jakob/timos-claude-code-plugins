@@ -87,7 +87,12 @@ plan() {  # $1 = languages json ; rest = extra flags
   plan '{"languages":["python"]}' --round 2 --final
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .round)" = "2" ]
-  [ "$(echo "$output" | jq -r .findings_path)" = "$R/.review/findings-round-2.json" ]
+  # Against the RESOLVED toplevel, never the literal $R (#1587/#1590). On macOS
+  # $BATS_TEST_TMPDIR sits under a /var/folders symlink and --show-toplevel
+  # returns /private/var/…, so a literal-$R comparison passes on Linux and reds
+  # `bats (ubuntu-latest)` — the exact platform split #1590 fixed in this file.
+  local root; root="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r .findings_path)" = "$root/.review/findings-round-2.json" ]
 }
 
 # ---- diff-scoping: only the story's changed files are the review scope
@@ -1099,13 +1104,28 @@ EOF
   [ -z "$output" ]
 }
 
-@test "plan: #1177 an ordinary relative --repo is NOT rewritten into the descriptor" {
-  # only a dash-prefixed path needs normalising; rewriting every relative
-  # spelling put `././` into findings_path for the ordinary `--repo .`
+@test "plan: #1587 a relative --repo is ANCHORED to the toplevel in the descriptor" {
+  # Renamed and re-subjected by #1587. This case began as #1177's guard against a
+  # doubled `././` in findings_path, produced by rewriting EVERY relative
+  # `--repo` rather than only the dash-prefixed one that needs it.
+  #
+  # Anchoring RETIRED that defect rather than moving it: findings_path is now
+  # built from `_repo_anchor`'s output, which is `rev-parse --show-toplevel` — an
+  # absolute, `./`-free path — so no normalisation of `--repo` can put anything
+  # into that field at all. An earlier cut of this case kept a
+  # `case */./*|*//*|./*` guard beside the equality below and claimed it still
+  # caught the regression; it could not, since a `//`-bearing path fails the
+  # equality on every platform, so the guard was inert. Inert is worse than
+  # absent (this file says so at the zero-padded-round case), hence its removal.
+  #
+  # What this case pins TODAY: `--repo .` yields the same absolute, root-anchored
+  # findings_path an absolute `--repo` does. The dash-normalisation arm keeps its
+  # own coverage in the four-spelling case in the #1587 section.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     bash -c "cd '$R' && zsh '$S' plan --repo . --base main"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r .findings_path)" = "./.review/findings-round-1.json" ]
+  local root; root="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r .findings_path)" = "$root/.review/findings-round-1.json" ]
 }
 
 @test "plan: #1177 a failing lang_count read is exit 1 and does NOT open the kubernetes gate" {
@@ -1381,7 +1401,10 @@ EOF
   plan '{"languages":["python"]}' --round 007 --final
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .round)" = "7" ]
-  [ "$(echo "$output" | jq -r .findings_path)" = "$R/.review/findings-round-7.json" ]
+  # against the RESOLVED toplevel, never the literal $R — see the note on the
+  # `findings_path is a well-known per-round path` case above (#1587/#1590)
+  local root; root="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r .findings_path)" = "$root/.review/findings-round-7.json" ]
 }
 
 # NOTE (updated #1177): the lang_count READ now has its own shim test above
@@ -1910,6 +1933,19 @@ JSON
   # Without the guard, `worktree_root` comes back empty and every scope_abs entry
   # is `/src/app.py` — absolute paths rooted at `/` that name no file, handed to
   # every reviewer, at exit 0 with a descriptor that looks well-formed.
+  #
+  # #1587 moved WHERE this class is caught, not whether. `_repo_anchor` calls
+  # `_worktree_root` before any reader, so a git that cannot answer
+  # `--show-toplevel` is now refused at the anchoring site and the named line is
+  # the anchor's. The #1582 guarantee this case exists for is untouched and
+  # still asserted below: exit 1, NO descriptor on stdout, a named line — never
+  # an empty prefix at exit 0.
+  #
+  # The grep names ONE owner (the anchor) deliberately. An earlier cut widened it
+  # to accept either wording, which absorbed the re-ordering silently AND left
+  # `cmd_plan`'s own `_worktree_root` guard with no coverage at all — the case
+  # below (`the SECOND --show-toplevel`) exists to reach that guard, and this
+  # exact needle is what keeps the two cases pinning different owners.
   echo "print(1)" > "$R/app.py"
   local fakegit="$BATS_TEST_TMPDIR/git-no-toplevel"
   cat > "$fakegit" <<'EOF'
@@ -1924,11 +1960,20 @@ EOF
     GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  echo "$stderr" | grep -q -- 'could not resolve the worktree root'
+  echo "$stderr" | grep -q -- 'could not resolve the repository root'
 }
 
 @test "#1582 a BLANK worktree root is exit 1 too — an empty identity is not an answer" {
   # The other half of the guard: a git that succeeds but prints nothing.
+  # Caught at the anchoring site since #1587, for the reason the case above
+  # states in full; the guarantee asserted here is unchanged. One difference
+  # from that case, and it is why this note is not just a pointer: git reports
+  # NOTHING here, so the anchor's re-probe captures no cause and the refusal
+  # line carries the stated fallback instead of git's own stderr. The empty
+  # cause IS the failure on this fixture — and it is ASSERTED below, because
+  # this is the only fixture that reaches that branch: without the assertion,
+  # deleting the two lines that substitute a stated cause leaves a causeless
+  # refusal and a green suite.
   echo "print(1)" > "$R/app.py"
   local fakegit="$BATS_TEST_TMPDIR/git-blank-toplevel"
   cat > "$fakegit" <<'EOF'
@@ -1943,7 +1988,9 @@ EOF
     GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  echo "$stderr" | grep -q -- 'could not resolve the worktree root'
+  echo "$stderr" | grep -q -- 'could not resolve the repository root'
+  # the stated fallback cause — the only fixture that reaches that branch
+  echo "$stderr" | grep -q -- 'returned no usable root and no error'
 }
 
 @test "#1582 an unresolvable original-checkout root is exit 1, never a false original_root: null" {
@@ -1990,11 +2037,25 @@ EOF
 }
 
 @test "#1582 a --repo SUBDIRECTORY still scopes the WHOLE repo, not just that subtree" {
-  # The repo-WIDE half of the `:/` pathspec fix, which the root-relative half
-  # cannot catch. Dropping `:/` while keeping `--full-name` leaves every path
-  # repo-root-relative — so an existence check still passes — while files outside
-  # the subdirectory vanish from changed_files, scope_abs and scope-findings'
-  # filter: the scope loss this story exists to fix.
+  # WHAT THIS CASE PINS TODAY: a subdirectory `--repo` still yields the WHOLE
+  # repo's diff, root-relative — the story-visible behaviour, which is worth a
+  # case whichever mechanism delivers it.
+  #
+  # It no longer discriminates `:/` or `--full-name`, and this note exists so
+  # nobody reads it as if it did. Since #1587 `--repo` is anchored to the
+  # toplevel before `_changed_files` runs, so both listings are issued AT the
+  # root, where `git diff -- ':/'` and `ls-files --others --full-name ':/'` are
+  # byte-identical to the same commands without those flags — dropping either
+  # leaves every assertion below passing. The script's `_changed_files` comment
+  # says the same of all three flags (`:/`, `--full-name`, `--no-relative`);
+  # its `--no-relative` sibling case carries the identical note.
+  #
+  # Do NOT "restore" a guard here: none can exist while the anchoring holds, and
+  # an inert control that claims to discriminate is what this file calls worse
+  # than no test. The historical reason the flags exist: pre-#1587 a
+  # subdirectory `--repo` made the listings relative to and scoped by that
+  # subtree, so files outside it vanished from changed_files, scope_abs and
+  # scope-findings' filter.
   mkdir -p "$R/pkg/inner"
   echo "print(1)" > "$R/pkg/inner/app.py"   # untracked, INSIDE the subdir
   echo "print(2)" > "$R/outside.py"         # untracked, OUTSIDE it
@@ -2070,13 +2131,26 @@ EOF
 }
 
 @test "#1582 --no-relative survives a user-level diff.relative=true" {
-  # `--no-relative` is the load-bearing half of the diff fix and is INERT in
-  # every other fixture, because a bare `git diff` is already repo-wide and
-  # root-relative when diff.relative is unset. Under `diff.relative=true` git
-  # emits cwd-relative paths and DROPS everything outside the cwd, and a
-  # pathspec does not countermand it — so without the flag, planning from a
-  # subdirectory silently loses every tracked change outside that subtree and
-  # prefixes the survivors with the repo root, naming files that do not exist.
+  # WHAT THIS CASE PINS TODAY: the anchored behaviour under `diff.relative=true`
+  # — a subdirectory `--repo` still yields the whole repo's diff, root-relative.
+  #
+  # It no longer discriminates `--no-relative` itself, and saying so is the
+  # point of this note. #1587 anchors `--repo` to the toplevel before
+  # `_changed_files` runs, so `git diff` is always issued AT the repo root and
+  # `diff.relative=true` has no cwd prefix to relativize against; deleting
+  # `--no-relative` from the diff half leaves every assertion below passing.
+  # The script's own `_changed_files` comment says the same of all three flags
+  # (`:/`, `--full-name`, `--no-relative`) — they are defence-in-depth now, kept
+  # because they kill the class rather than the one route anchoring closed.
+  #
+  # Do NOT read this case as a live guard on the flag, and do not "restore" one:
+  # there is no fixture that can discriminate it while the anchoring holds, and
+  # an inert control that CLAIMS to discriminate is what this file calls worse
+  # than no test at all. The historical reason the flag exists: under
+  # `diff.relative=true` git emits cwd-relative paths and drops everything
+  # outside the cwd, and a pathspec does not countermand it — so pre-#1587,
+  # planning from a subdirectory silently lost every tracked change outside that
+  # subtree and prefixed the survivors with the repo root.
   git -C "$R" config diff.relative true
   mkdir -p "$R/pkg/inner"
   echo "print(1)" > "$R/pkg/inner/app.py"   # untracked, inside
@@ -2262,4 +2336,650 @@ EOF
   [ "$(echo "$output" | jq -r '.changed_files | index("legacy.py")')" = "null" ]
   # the story's own change still is in scope
   [ "$(echo "$output" | jq -r '.changed_files | index("app.py") != null')" = "true" ]
+}
+
+# ---- #1587: ONE anchoring rule for --repo ----------------------------------
+# `--repo` names the REPOSITORY. Every subcommand resolves it to the git
+# toplevel once, before anything that DERIVES from it, so detection, the .maintenance.yml
+# lookup, the listings and the default sink all describe the same tree. Before
+# this, the listings were repo-wide (#1582) while detection and the sink tracked
+# whatever directory --repo named.
+#
+# Every path assertion here compares against `rev-parse --show-toplevel`, NEVER
+# against the literal $R: on macOS $BATS_TEST_TMPDIR sits under a /var/folders
+# symlink and the toplevel comes back as /private/var/…, so a literal-$R
+# comparison passes on Linux and reds `bats (ubuntu-latest)` — the platform
+# split #1590 fixed in this same file.
+
+# A repo whose ROOT and SUBDIRECTORY would detect differently, so a run that
+# anchored at the subdirectory could not accidentally agree. The root carries
+# the .maintenance.yml that breaks the multi-language tie.
+_anchor_fixture() {
+  AR="$BATS_TEST_TMPDIR/anchor"
+  mkdir -p "$AR/pkg"
+  git -C "$AR" init -q
+  git -C "$AR" config user.email t@example.com
+  git -C "$AR" config user.name tester
+  echo base > "$AR/README.md"
+  printf 'primary: go\n' > "$AR/.maintenance.yml"
+  git -C "$AR" add -A
+  git -C "$AR" commit -qm base
+  git -C "$AR" branch -M main
+  AROOT="$(git -C "$AR" rev-parse --show-toplevel)"
+}
+
+@test "plan: #1587 a subdirectory --repo and the root emit an IDENTICAL descriptor" {
+  _anchor_fixture
+  # byte-identical, not merely agreeing on repo_type: findings_path, both roots
+  # and scope_abs are all derived from the anchor, so a partial fix that
+  # anchored detection alone would still fail here.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR" --base main
+  [ "$status" -eq 0 ]
+  local from_root="$output"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base main
+  [ "$status" -eq 0 ]
+  [ "$output" = "$from_root" ]
+  # and it is the ROOT's answer that both produced — the .maintenance.yml tie
+  # break lives at the root, so a subdirectory anchoring would escalate exit 3
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+}
+
+@test "plan: #1587 the .maintenance.yml primary resolves from the root, not from --repo" {
+  _anchor_fixture
+  # The subdirectory holds NO .maintenance.yml. Un-anchored, `_primary` returns
+  # empty and the multi-language repo escalates as ambiguous (exit 3) instead of
+  # planning — which is the failure this AC names.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+}
+
+@test "plan: #1587 the default findings_path is root-anchored for ALL FOUR spellings of --repo" {
+  _anchor_fixture
+  local want="$AROOT/.review/findings-round-1.json"
+
+  # 1. absolute
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "$want" ]
+
+  # 2. `.` from inside the repo
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    bash -c "cd '$AR' && zsh '$S' plan --repo . --base main"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "$want" ]
+
+  # 3. a subdirectory
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "$want" ]
+
+  # 4. a DASH-prefixed relative path — the spelling with its own normalisation
+  # arm, so it needs its own case or that arm could regress unseen.
+  local dash="$BATS_TEST_TMPDIR/-anchor-dash"
+  mkdir -p "$dash"
+  git -C "$dash" init -q
+  git -C "$dash" config user.email t@example.com
+  git -C "$dash" config user.name tester
+  echo base > "$dash/README.md"
+  git -C "$dash" add -A
+  git -C "$dash" commit -qm base
+  git -C "$dash" branch -M main
+  local dashroot; dashroot="$(git -C "$dash" rev-parse --show-toplevel)"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' plan --repo -anchor-dash --base main"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "$dashroot/.review/findings-round-1.json" ]
+}
+
+@test "plan: #1587 the DEFAULTED sink is excluded under a subdirectory --repo, and nested story .review/ is not" {
+  # The #909 leak, closed at the anchoring site rather than at the exclusion.
+  # Both halves in ONE run deliberately: a fix that widened `_normalise_paths`
+  # to match `.review/` at any depth would pass the first assertion and fail the
+  # second, which is exactly the contract this must not trade away.
+  _anchor_fixture
+  local sink
+  sink="$(env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base main | jq -r .findings_path)"
+  [ "$sink" = "$AROOT/.review/findings-round-1.json" ]
+  mkdir -p "$(dirname "$sink")" "$AR/src/.review"
+  echo '[]' > "$sink"
+  echo cfg > "$AR/src/.review/config.json"
+  echo "print(1)" > "$AR/app.py"
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base main
+  [ "$status" -eq 0 ]
+  # the sink never reaches the panel …
+  echo "$output" | jq -e '.changed_files | map(select(startswith(".review/"))) | length == 0' >/dev/null
+  # … while the nested story file and the ordinary story file both stay
+  echo "$output" | jq -e '.changed_files | index("src/.review/config.json") != null' >/dev/null
+  echo "$output" | jq -e '.changed_files | index("app.py") != null' >/dev/null
+}
+
+@test "detect: #1587 a subdirectory --repo detects as the repository" {
+  _anchor_fixture
+  # detect and plan must never disagree about a repo (the #1504 contract), so
+  # anchoring plan alone would break it for a subdirectory --repo.
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" detect --repo "$AR/pkg"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+}
+
+@test "detect: #1587 a NON-git --repo is its own anchor and still reads its .maintenance.yml" {
+  # The no-toplevel fallback, as an explicit branch. `detect` deliberately keeps
+  # accepting a directory outside any git repository — the #1504 dash fixture is
+  # exactly that shape — so the rule must degrade rather than refuse. `plan` and
+  # `scope-findings` cannot reach this: `_verify_base` rejects a non-git --repo
+  # first, which the companion case below pins.
+  local nogit="$BATS_TEST_TMPDIR/nogit"
+  mkdir -p "$nogit"
+  printf 'primary: java\n' > "$nogit/.maintenance.yml"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    zsh "$S" detect --repo "$nogit"
+  [ "$status" -eq 0 ]
+  # java, not an exit-3 ambiguity: the fallback anchor still found the file
+  [ "$(echo "$output" | jq -r .repo_type)" = "java" ]
+}
+
+@test "plan: #1587 a non-git --repo is still refused by _verify_base, not silently anchored" {
+  # The fallback must not become a back door: `plan` still names the repo, with
+  # the #1177 wording, rather than planning against a directory with no repo.
+  local nogit="$BATS_TEST_TMPDIR/nogit-plan"
+  mkdir -p "$nogit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$nogit" --base main
+  [ "$status" -eq 1 ]
+  echo "$stderr" | grep -q 'not a git repository'
+}
+
+@test "scope-findings: #1587 anchoring is behaviour-neutral for a subdirectory --repo" {
+  # scope-findings is anchored for uniformity, not for correctness — it has no
+  # sink and no detection, and its listings were already repo-wide. This pins
+  # that the anchoring did not CHANGE what it filters.
+  _anchor_fixture
+  echo "print(1)" > "$AR/app.py"
+  local f="$BATS_TEST_TMPDIR/findings.json"
+  cat > "$f" <<'JSON'
+[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"real","description":"d","reviewer":"r"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"never-touched.py","line":1,"title":"out","description":"d","reviewer":"r"}]
+JSON
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" scope-findings --repo "$AR" --base main --findings "$f"
+  [ "$status" -eq 0 ]
+  local from_root="$output"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" scope-findings --repo "$AR/pkg" --base main --findings "$f"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$from_root" ]
+  [ "$(echo "$output" | jq 'length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.[0].file')" = "app.py" ]
+}
+
+@test "plan: #1587 an explicit --findings-path is HONOURED, not overwritten by the anchored default" {
+  # The `[[ -n "$findings_path" ]] ||` guard on the default had no coverage at
+  # all: the flag appeared in the suite only in the need_value roster, which
+  # exercises parse-time refusal and never an accepted value. Deleting the guard
+  # (so the anchored default unconditionally overwrites the caller's sink) left
+  # the whole suite green — and the redirection would be invisible in the
+  # descriptor too, since _normalise_paths strips the anchored path from scope.
+  _anchor_fixture
+  local custom="$BATS_TEST_TMPDIR/custom-sink.json"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base main --findings-path "$custom"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "$custom" ]
+  # FIXTURE SELF-CHECK: $custom is unequal to the anchored default by
+  # construction, so the equality above already settles this. Kept because it
+  # names the specific wrong answer in the failure output, not because a
+  # mutation reds it alone.
+  [ "$(echo "$output" | jq -r .findings_path)" != "$AROOT/.review/findings-round-1.json" ]
+}
+
+@test "plan: #1587 a RELATIVE --findings-path is passed through verbatim, never anchored" {
+  # The other half of the same guard: anchoring governs the DEFAULT only. A
+  # caller's own relative spelling is its business — the header documents the
+  # override as unfollowed by the scope exclusion, which is only true if it
+  # reaches the descriptor unchanged.
+  _anchor_fixture
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base main --findings-path "some/relative/sink.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .findings_path)" = "some/relative/sink.json" ]
+}
+
+@test "detect: #1587 a git FAULT is refused, never silently anchored at the subdirectory" {
+  # The fallback is keyed on the CAUSE, not the status. A git that fails for a
+  # reason other than the DISCOVERY fatal — dubious ownership (this fixture), a
+  # broken GIT_BIN, the gitfile fatal (its own case below) — must NOT be read as
+  # "there is no repository here", which would anchor at the subdirectory and
+  # reproduce the very misattribution #1587 removes, at exit 0 with nothing on
+  # either stream. An unreadable `.git` is deliberately NOT in that list: it
+  # takes the FALLBACK, because git's validation fails and discovery continues
+  # upward — `_repo_anchor`'s KNOWN LIMIT block owns that case.
+  _anchor_fixture
+  local shim="$BATS_TEST_TMPDIR/faultgit"
+  mkdir -p "$shim"
+  cat > "$shim/git" <<'SH'
+#!/usr/bin/env bash
+# fail ONLY on --show-toplevel, and with a cause that is not "not a git repository"
+for a in "$@"; do
+  if [ "$a" = "--show-toplevel" ]; then
+    echo "fatal: detected dubious ownership in repository at '/x'" >&2
+    exit 128
+  fi
+done
+exec /usr/bin/env git "$@"
+SH
+  chmod +x "$shim/git"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    GIT_BIN="$shim/git" zsh "$S" detect --repo "$AR/pkg"
+  [ "$status" -eq 1 ]
+  # named line, and git's own cause relayed rather than swallowed
+  echo "$stderr" | grep -q 'could not resolve the repository root'
+  echo "$stderr" | grep -q 'dubious ownership'
+  # and NO repo_type document was emitted on the fault path
+  [ -z "$output" ]
+}
+
+@test "plan: #1587 a --repo with NO WORK TREE is refused, not anchored on the raw path" {
+  # `_verify_base` probes `rev-parse --git-dir`, which SUCCEEDS for a bare
+  # repository while `--show-toplevel` fails — so this case really does reach
+  # `_repo_anchor`'s refusal arm from `plan`, contrary to an earlier draft of
+  # the comment that called it unreachable. Without the refusal it anchored on
+  # the raw path and surfaced as an exit-3 `unsupported_repo_type`: a verdict
+  # about the repo when the truth is that the path has no tree to review.
+  # CLONED from $R, not `init --bare`: an empty bare repo has no `main`, so
+  # `_verify_base` would fail first and this case would pass for the wrong
+  # reason — exit 1 with "--base does not resolve to a commit", never reaching
+  # the anchor at all. The clone gives it a resolvable `main`.
+  local bare="$BATS_TEST_TMPDIR/bare.git"
+  git clone -q --bare "$R" "$bare"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$bare" --base main
+  # exit 1 (environment), never 3 (a typed verdict about the repo's languages)
+  [ "$status" -eq 1 ]
+  echo "$stderr" | grep -q 'could not resolve the repository root'
+  # git's own cause is relayed, not swallowed — this is what distinguishes the
+  # no-work-tree refusal from a generic failure
+  echo "$stderr" | grep -q 'must be run in a work tree'
+  [ -z "$output" ]
+  # FIXTURE SELF-CHECK, not a discriminating assertion: the script exits at the
+  # first failing guard, so `_verify_base`'s message and the anchor's are
+  # mutually exclusive and this can only fire once the grep above already has.
+  # It is here to catch a fixture that stopped reaching the anchor (an empty
+  # bare repo has no `main`), which is a mistake worth a loud failure — but no
+  # mutation of the SUBJECT reds it alone. Same idiom as the SIGPIPE volume
+  # check. Via the rostered `lacks` helper: a bare `! … | grep` is inert under
+  # bats (#829) and so is a bare `[[ ]]` (#1011/#1067).
+  lacks "$stderr" 'does not resolve to a commit'
+}
+
+@test "review-dispatch: #1587 all THREE subcommands anchor --repo — one call site each" {
+  # A structural pin, in the idiom this file already uses for source-derived
+  # invariants. What it covers is the shapes no behavioural case can see: a
+  # SECOND call inside one subcommand, a line-wrapped or `|| { … }` spelling,
+  # and a deleted call in a subcommand that has no refusal fixture of its own.
+  #
+  # It is NOT the only thing standing behind scope-findings' call site — an
+  # earlier cut of this comment said so, and that stopped being true when
+  # `scope-findings: #1587 a --repo with NO WORK TREE is refused` landed:
+  # deleting the call there lets the bare-repo fixture pass `_verify_base`,
+  # reach the empty-findings shortcut and print `[]` at exit 0, so that case
+  # reds on plain deletion too. Do not delete either as redundant; they catch
+  # different mutations.
+  # THE REQUIREMENT THIS PINS, stated so a red here is actionable: each anchoring
+  # call must be `repo=$(_repo_anchor "$repo") || exit 1` on ONE line. The grep
+  # tolerates requoting the substitution and whitespace around the `||`, and
+  # skips comment lines so a header quoting the call cannot inflate the count —
+  # but it does NOT accept a line-wrapped spelling or the `|| { print …; exit 1 }`
+  # form this script uses at its other error sites. That is deliberate rather
+  # than an oversight: adding a per-site diagnostic there is a reasonable
+  # follow-up, and it must update this pattern in the same change.
+  # The awk half checks one call per subcommand and does NOT skip comments.
+  local n
+  n="$(grep -v '^[[:space:]]*#' "$S" \
+       | grep -cE 'repo=.?\$\(_repo_anchor "\$repo"\).?[[:space:]]*\|\|[[:space:]]*exit 1')"
+  [ "$n" -eq 3 ]
+  # and one inside each subcommand, so three calls in cmd_plan would not pass.
+  # The function-header regex is loosened for the same reason — `cmd_plan () {`
+  # is the same function.
+  local fn
+  for fn in cmd_plan cmd_detect cmd_scope_findings; do
+    awk -v f="$fn" '
+      $0 ~ "^"f"[[:space:]]*\\(\\)" {inside=1}
+      inside && /_repo_anchor "\$repo"/ {found++}
+      inside && /^\}/ {inside=0}
+      END {exit(found==1?0:1)}
+    ' "$S" || { echo "$fn does not anchor exactly once"; return 1; }
+  done
+}
+
+@test "plan: #1587 cmd_plan's OWN _worktree_root guard still fires — the SECOND --show-toplevel" {
+  # Coverage restored for the guard #1582 added. Anchoring made `_repo_anchor`
+  # the first thing to ask for the toplevel, so every fixture that fails EVERY
+  # `--show-toplevel` now stops at the anchor and can never reach cmd_plan's own
+  # guard. Without this case, replacing that guard with a bare
+  # `worktree_root=$(_worktree_root "$repo")` leaves the whole suite green.
+  #
+  # The shim passes the FIRST --show-toplevel (so the anchor succeeds and the
+  # plan proceeds) and fails the SECOND, which is cmd_plan's call: _verify_base
+  # uses --git-dir and --verify, and no other site asks for --show-toplevel.
+  echo "print(1)" > "$R/app.py"
+  local counter="$BATS_TEST_TMPDIR/toplevel-calls"
+  : > "$counter"
+  local fakegit="$BATS_TEST_TMPDIR/git-second-toplevel-fails"
+  cat > "$fakegit" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = "--show-toplevel" ]; then
+    printf 'x' >> "$counter"
+    if [ "\$(wc -c < "$counter")" -ge 2 ]; then
+      echo "second toplevel refused" >&2
+      exit 128
+    fi
+  fi
+done
+exec git "\$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # the OWNER-SPECIFIC needle: this case cannot be satisfied by the anchor's line
+  echo "$stderr" | grep -q -- 'plan: could not resolve the worktree root'
+  # and the shim really did let the anchor through first, or the case would be
+  # pinning the anchor again under a different name
+  [ "$(wc -c < "$counter" | tr -d ' ')" -ge 2 ]
+}
+
+@test "scope-findings: #1587 a --repo with NO WORK TREE is refused, not silently scoped" {
+  # The refusal arm reaches scope-findings too (its own comment says so), but
+  # only the structural grep pinned that call site — which asserts the line
+  # EXISTS, not that its status is honoured or that it runs before the
+  # subcommand can answer. Concrete mutation this case reds and the structural
+  # one does not: move the anchor (and _verify_base) BELOW the empty-findings
+  # shortcut, a realistic "fast-path the empty case" edit. scope-findings then
+  # prints [] at exit 0 where the contract says exit 1, telling a caller
+  # "nothing in scope" for a repo that was never scoped.
+  #
+  # The MISSING findings file is what makes it discriminate: it is the input
+  # that would take the shortcut.
+  local bare="$BATS_TEST_TMPDIR/sf-bare.git"
+  git clone -q --bare "$R" "$bare"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" scope-findings --repo "$bare" --base main \
+      --findings "$BATS_TEST_TMPDIR/no-such-findings.json"
+  [ "$status" -eq 1 ]
+  # the load-bearing half: it must NOT be the `[]` shortcut
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'could not resolve the repository root'
+  echo "$stderr" | grep -q 'must be run in a work tree'
+}
+
+@test "detect: #1587 a BROKEN gitfile is refused, not read as 'no repository here'" {
+  # git emits two distinct fatals carrying `not a git repository`, meaning
+  # opposite things. The discovery form — `(or any of the parent directories)` —
+  # is the genuine no-repo case that anchors to itself. The gitfile form —
+  # `not a git repository: <path>` — is a BROKEN repository: a `.git` FILE
+  # pointing at a gitdir that is gone, exactly what `git worktree prune` or a
+  # moved linked worktree leaves behind. This repo runs everything in worktrees,
+  # so it is reachable.
+  #
+  # A bare `not a git repository` substring test matches both, and the broken
+  # case would then anchor on the raw path at exit 0 with nothing on either
+  # stream — the silent misattribution the cause-keying exists to refuse.
+  local orphan="$BATS_TEST_TMPDIR/orphan"
+  mkdir -p "$orphan"
+  printf 'gitdir: %s/nowhere/.git/worktrees/gone\n' "$BATS_TEST_TMPDIR" > "$orphan/.git"
+  printf 'primary: java\n' > "$orphan/.maintenance.yml"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    zsh "$S" detect --repo "$orphan"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'could not resolve the repository root'
+  # git's own cause is relayed — this is what separates it from the discovery form
+  echo "$stderr" | grep -q 'not a git repository'
+}
+
+@test "detect: #1587 the no-repository fallback survives a non-English locale" {
+  # The cause key is a substring of git's own message, so it is closed only
+  # because the probe pins LC_ALL=C. Without the pin, a developer with a
+  # translated git refuses the ONE documented success path — `detect` on a plain
+  # directory — while CI stays green.
+  #
+  # Driven by a GIT_BIN SHIM, deliberately, not by exporting a host locale. A
+  # host-locale fixture is a canary, not a guard: `de_DE.UTF-8` is not generated
+  # on ubuntu-latest and macOS's system git is commonly built without NLS, so on
+  # both CI legs git would print English anyway and the case would pass with the
+  # pin DELETED — the mutation it exists to catch. Worse, it would then mean
+  # different things on the two legs. The shim makes the pin's presence the only
+  # thing that decides, on every platform.
+  #
+  # The shim answers --show-toplevel in German UNLESS the probe pinned the C
+  # locale, so: pin present -> English discovery fatal -> fallback -> exit 0
+  # with the directory's own .maintenance.yml read; pin deleted -> German ->
+  # no match -> exit 1. Everything else is delegated to the real git.
+  local nogit="$BATS_TEST_TMPDIR/nogit-locale"
+  mkdir -p "$nogit"
+  printf 'primary: java\n' > "$nogit/.maintenance.yml"
+  local fakegit="$BATS_TEST_TMPDIR/git-localised"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--show-toplevel" ]; then
+    if [ "${LC_ALL:-}" = "C" ]; then
+      echo "fatal: not a git repository (or any of the parent directories): .git" >&2
+    else
+      echo "fatal: Kein Git-Repository (oder eines der uebergeordneten Verzeichnisse): .git" >&2
+    fi
+    exit 128
+  fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  # A hostile ambient locale on top, so the case also proves the pin is what
+  # wins rather than the absence of a locale in the environment.
+  # --separate-stderr, like every other contract case here: $output must be the
+  # document alone. Merged, a stray warning about the bogus ambient locale would
+  # surface as a jq parse failure rather than a meaningful red.
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    GIT_BIN="$fakegit" LC_ALL=de_DE.UTF-8 LANGUAGE=de LANG=de_DE.UTF-8 \
+    zsh "$S" detect --repo "$nogit"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "java" ]
+}
+
+@test "plan: #1587 an UNREADABLE repository root is named, even when --repo itself is readable" {
+  # The subcommands' -r/-x gates judge the RAW --repo; every reader below uses
+  # the ANCHOR, which with a subdirectory --repo is a different directory. A
+  # traversable-but-unreadable root is reachable through a readable pkg/, and
+  # detect-stack would then report no languages — an exit-3
+  # `unsupported_repo_type` verdict about a repo the process could not read.
+  #
+  # 0311, NOT 0711: the fixture's owner is the process running it, and 0711
+  # grants the owner rwx, so a 0711 root is perfectly readable here and the case
+  # passed at exit 0. 0311 (owner -wx) is what actually clears `-r` while
+  # keeping `-x`, so git can still walk up to the toplevel and the guard is what
+  # refuses.
+  #
+  # This drives the `-r` half ONLY. The gate is `[[ -r "$root" && -x "$root" ]]`,
+  # and narrowing it to `-r` alone leaves the suite green — deliberately
+  # unpinned, because no fixture can reach it: a subdirectory `--repo` must be
+  # traversable to be opened at all, so a non-traversable ROOT is unreachable
+  # through the only spelling that makes this gate load-bearing. The `-x` half is
+  # defence-in-depth, in the same category as `:/` / `--full-name` /
+  # `--no-relative` above. Do not "restore" an inert control for it.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  local ro="$BATS_TEST_TMPDIR/unreadable-root"
+  mkdir -p "$ro/pkg"
+  git -C "$ro" init -q
+  git -C "$ro" config user.email t@example.com
+  git -C "$ro" config user.name tester
+  echo base > "$ro/README.md"
+  git -C "$ro" add -A
+  git -C "$ro" commit -qm base
+  git -C "$ro" branch -M main
+  chmod 0311 "$ro"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$ro/pkg" --base main
+  chmod 0755 "$ro"
+  [ "$status" -eq 1 ]
+  # the exit-1 contract is a stderr diagnostic AND an empty stdout — paired here
+  # like every other refusal case in this file, so a caller parsing stdout first
+  # cannot find a half-document
+  [ -z "$output" ]
+  # named as the root, not blamed on detect-stack and not a typed exit 3
+  echo "$stderr" | grep -q 'the repository root is not a readable directory'
+}
+
+@test "plan: #1587 the usability gates run BEFORE the anchor and name the caller's own spelling" {
+  # The documented division of labour (script header, ARCHITECTURE.md): the
+  # `-d`/`-r`/`-x` gates and `_verify_base` deliberately read the RAW `--repo`
+  # and own the diagnostics that name it; the anchor runs after, for the readers
+  # that DERIVE from it. Nothing pinned that ordering, so hoisting the anchor
+  # above `_verify_base` — a plausible "resolve it as early as possible" edit —
+  # left the whole suite green while every base/usability diagnostic silently
+  # started naming the resolved ROOT instead of what the caller typed.
+  _anchor_fixture
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" plan --repo "$AR/pkg" --base refs/heads/does-not-exist
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # the ref is named …
+  echo "$stderr" | grep -q -- 'does not resolve to a commit'
+  # … against the SUBDIRECTORY the caller passed, not the anchored root. This is
+  # the discriminating half: with the anchor hoisted, stderr names $AROOT.
+  echo "$stderr" | grep -qF -- "$AR/pkg"
+}
+
+# ---- #1587 the classifier needle's three disciplines ------------------------
+# `_repo_anchor`'s discovery-fatal test is the whole anchoring enum, and its
+# comment claims three deliberate disciplines: the C-locale pin, the `${err:l}`
+# case fold, and the `fatal: `-at-line-start anchor around a `(or any` prefix
+# chosen to cover BOTH discovery wordings. Only the locale one had a fixture, so
+# three mutations passed. These drive the other two, and the wording breadth.
+#
+# All go through one shim: it answers --show-toplevel with an arbitrary fatal and
+# delegates everything else to the real git, so each case differs only in the
+# message under test.
+_git_fatal_shim() {  # $1 = fatal text to emit on --show-toplevel
+  # A per-call path, so two shims in one test body cannot collide and silently
+  # give both call sites the second message.
+  _GIT_FATAL_SHIM_N=$(( ${_GIT_FATAL_SHIM_N:-0} + 1 ))
+  local path="$BATS_TEST_TMPDIR/fatal-shim-git-$_GIT_FATAL_SHIM_N"
+  # The message goes in a SIDECAR file and the shim body is a SINGLE-quoted
+  # heredoc, so no message content ever reaches the shell parser. Interpolating
+  # $1 into the script would make a message containing a quote, `$` or a
+  # backtick a fixture error rather than a result — the same class as the
+  # `print -r --` 127 this helper already tripped over.
+  printf '%s\n' "$1" > "$path.msg"
+  cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--show-toplevel" ]; then
+    cat "$0.msg" >&2
+    exit 128
+  fi
+done
+exec git "$@"
+EOF
+  chmod +x "$path"
+  # printf, not zsh's `print`: bats bodies run under BASH, so a `print -r --`
+  # here is a status-127 "command not found" that reads as a fixture failure.
+  printf '%s\n' "$path"
+}
+
+# A plain directory carrying its own .maintenance.yml, so a successful fallback
+# is observable as repo_type=java and a refusal as exit 1.
+_fatal_fixture() {
+  FF="$BATS_TEST_TMPDIR/fatal-fixture"
+  mkdir -p "$FF"
+  printf 'primary: java\n' > "$FF/.maintenance.yml"
+}
+
+@test "detect: #1587 the classifier is CASE-FOLDED — an older git's capital-N fatal still falls back" {
+  # git emitted `Not a git repository (or any …)` before the message
+  # lowercasing. Without `${err:l}` that git refuses the one documented success
+  # path — `detect` on a plain directory — which is the same class the C-locale
+  # pin closes. Mutation: `${err:l}` -> `${err}` leaves the suite green without
+  # this case.
+  _fatal_fixture
+  local g; g="$(_git_fatal_shim 'fatal: Not a git repository (or any of the parent directories): .git')"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    GIT_BIN="$g" zsh "$S" detect --repo "$FF"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "java" ]
+}
+
+@test "detect: #1587 the classifier covers the MOUNT-POINT discovery wording too" {
+  # git's second discovery wording, emitted when discovery stops at a filesystem
+  # boundary — the message a /tmp-on-tmpfs host produces for an ordinary non-git
+  # directory. `(or any` is the prefix chosen to cover both; narrowing it to
+  # `(or any of the parent directories` refuses this at exit 1, contradicting
+  # both ARCHITECTURE.md and the script's KNOWN LIMIT block, and the suite would
+  # stay green without this case.
+  _fatal_fixture
+  local g; g="$(_git_fatal_shim 'fatal: not a git repository (or any parent up to mount point /tmp)')"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    GIT_BIN="$g" zsh "$S" detect --repo "$FF"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "java" ]
+}
+
+@test "detect: #1587 an interpolated PATH cannot impersonate the discovery fatal" {
+  # `$err` carries caller-supplied paths on other fatals, so the test is anchored
+  # at `fatal: ` on a LINE START. Unanchored, this dubious-ownership refusal —
+  # whose quoted path embeds the needle — would match, and `detect` would anchor
+  # at the subdirectory at exit 0: the silent misattribution the cause-keying
+  # exists to refuse, arrived at through the message rather than the status.
+  #
+  # The embedded path carries `fatal: ` too, deliberately. That makes the case
+  # discriminate BOTH halves of the needle: dropping the `$'\n'` line anchors
+  # alone (keeping the `fatal: ` literal) still matches this fixture, so without
+  # the prefix in the path the anchor half would be unpinned.
+  _fatal_fixture
+  local g; g="$(_git_fatal_shim "fatal: detected dubious ownership in repository at '/x/fatal: not a git repository (or any/y'")"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["java","python"]}' \
+    GIT_BIN="$g" zsh "$S" detect --repo "$FF"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q 'could not resolve the repository root'
+  echo "$stderr" | grep -q 'dubious ownership'
+}
+
+@test "scope-findings: #1587 the usability gates run BEFORE the anchor and name the caller's spelling" {
+  # The plan twin of this case landed in round 3; scope-findings' half was
+  # unpinned, so hoisting `repo=$(_repo_anchor "$repo") || exit 1` above
+  # `_verify_base` in cmd_scope_findings left the suite green while every
+  # base/usability diagnostic silently began naming the resolved root instead of
+  # what the caller typed. The only other scope-findings base-failure case passes
+  # the ROOT as --repo, so it cannot see which spelling is named.
+  _anchor_fixture
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["go","python"]}' \
+    zsh "$S" scope-findings --repo "$AR/pkg" --base refs/heads/does-not-exist \
+      --findings "$BATS_TEST_TMPDIR/anything.json"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'does not resolve to a commit'
+  # the discriminating half: with the anchor hoisted, stderr names $AROOT, which
+  # never contains '/pkg'
+  echo "$stderr" | grep -qF -- "$AR/pkg"
 }

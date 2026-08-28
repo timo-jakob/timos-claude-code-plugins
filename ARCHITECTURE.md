@@ -3097,6 +3097,64 @@ zero orchestrator edits. The seam is
 `development/skills/resolve-issue/scripts/review-dispatch.zsh`, a pure function
 of the worktree with three subcommands.
 
+**`--repo` names the REPOSITORY — one anchoring rule, all three subcommands
+(#1587).** Each **anchors** it to `git rev-parse --show-toplevel` once, before
+anything that DERIVES from it — the usability gates and `_verify_base` run
+first and read the raw value deliberately, since they judge only whether the
+path is usable and own the diagnostics that name it. Every later reader — detection, the
+`.maintenance.yml` primary lookup, `worktree_root` / `original_root`, the
+changed-file listings and the default `findings_path` — uses that resolved root.
+So a `--repo` naming a **subdirectory** is a spelling of its repository, never a
+scope filter: `plan --repo <root>/pkg` and `plan --repo <root>` emit the same
+descriptor. Before this the listings were repo-wide (#1582) while detection and
+the sink still tracked whatever directory `--repo` named, so a subdirectory
+`--repo` picked a panel from one subtree's stack, handed it the whole repo's
+diff, and put the loop's own sink at `pkg/.review/…` — a path no start-anchored
+exclusion can drop without also dropping the nested story files that pattern is
+contracted to keep (#909).
+
+The fallback is keyed on the **cause**, not the status — and specifically on
+git's **discovery** fatal, `not a git repository (or any …)`, read under a
+pinned `LC_ALL=C` probe. Both disciplines are load-bearing, and the enum is
+closed only because of them: git localises that message, and it emits a
+*second*, near-identical fatal — `not a git repository: <path>`, for a `.git`
+**file** whose gitdir is gone, the shape `git worktree prune` or a moved
+worktree leaves behind — which means a **broken** repository and is **refused**.
+Widening the match to a bare `not a git repository` would reinstate the silent
+misattribution, in a repo that runs everything in worktrees.
+
+A directory that really is **not inside a git repository** has no toplevel and
+is its own anchor — that is what keeps `detect` usable on a plain directory, and
+`detect` is the subcommand that reaches it in the ordinary course, having no
+`_verify_base` in front of it. **Every other anchoring failure is refused with
+exit 1 and git's own stderr** — or, when git produced none, a stated cause
+naming the wrapper's status: a git fault (a `dubious ownership` refusal, a
+missing binary) must never be read as "there is no repository here". So must a
+`--repo` with **no work tree** — a bare repository, or a path inside `.git/` —
+which `plan` and `scope-findings` *can* reach: `_verify_base` probes
+`rev-parse --git-dir`, which succeeds there while `--show-toplevel` does not.
+And so must an anchored **root that is not itself readable and traversable**,
+which the raw `--repo` gates cannot catch when `--repo` names a readable
+subdirectory of it.
+
+Two shapes are indistinguishable from "no repository" *at this seam*, and the
+script records both as known limits rather than claiming to refuse them: a
+`.git` git cannot **validate** (mode 000 — discovery continues **upward**), and
+a root across a **mount boundary**. What follows depends on **what lies above
+`--repo`** and on **whether `--repo` is the root or a subdirectory** — both, not
+just the first. With **an enclosing repository** discovery *succeeds* at it, so
+the anchor is a **different tree at exit 0 with no diagnostic**, and
+`_verify_base` cannot catch it either (`rev-parse --git-dir` finds the same
+enclosing repo); that shape is live here, since linked worktrees sit under
+`<main>/.claude/worktrees/`, inside the main checkout's tree. With **no
+enclosing repository** discovery ends in the discovery fatal and the fallback
+anchors at `--repo` itself — the right answer when `--repo` **is** the root, but
+with a **subdirectory** `--repo` it anchors at that subdirectory, and while
+`plan` and `scope-findings` refuse upstream at `_verify_base`, `detect` answers
+from that subtree at exit 0. The **mount-boundary** shape lands in that same arm
+and is **not** exempt. None of it is guarded and none can be at this seam: git
+answered, and the answer is indistinguishable from a correct one.
+
 **`detect --repo PATH`** emits the repo type and nothing else —
 `{"repo_type": "claude-plugin"}`. No `--base`, no diff, no `changed_files`: the
 resolve-issue conductor calls it at §1b to pick a profile, where the branch is
@@ -3109,14 +3167,14 @@ accepted-and-ignored.
 **`plan --repo PATH [--base REF] [--round N] [--findings-path PATH] [--final]
 [--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]`** emits the
 dispatch descriptor. `--findings-path` overrides where the panel is told to write
-its aggregate, defaulting to `<repo>/.review/findings-round-<N>.json`; note the
-diff-scoping exclusion covers the **default** location only, so an override
-elsewhere in the repo is not held out of review scope — and, since #1582 made
-the listings repo-wide, the default sink itself escapes the exclusion when
-`--repo` names a **subdirectory** (it then arrives as `pkg/.review/…`, which the
-deliberately start-anchored pattern does not match). No real caller hits that —
-they pass an explicit `--findings-path` outside the repo — and the underlying
-`--repo` anchoring question is #1587. `--round` must be a
+its aggregate, defaulting to `<worktree_root>/.review/findings-round-<N>.json` —
+**absolute, and the same for every spelling of `--repo`**, because `--repo` is
+anchored (#1587, above). The diff-scoping exclusion covers the **default**
+location only, so an override elsewhere in the repo is not held out of review
+scope; the default itself is always excluded, since anchoring puts it at the repo
+root where the start-anchored `.review/` pattern matches. That default is a real
+one rather than a placeholder — `resolve-story-loop.zsh` passes no
+`--findings-path` and consumes it directly. `--round` must be a
 non-negative integer and is normalised (`007` → `7`), so a zero-padded value
 cannot mint a second artifact path for the same round:
 
@@ -3126,7 +3184,7 @@ cannot mint a second artifact path for the same round:
   "review_skill": "development-python:review",
   "round": 1,
   "base": "origin/main",
-  "findings_path": "<repo>/.review/findings-round-1.json",
+  "findings_path": "/Users/dev/repos/shop/.claude/worktrees/brisk-otter/.review/findings-round-1.json",
   "changed_files": ["src/app/checkout.py", "src/app/cart.py"],
   "worktree_root": "/Users/dev/repos/shop/.claude/worktrees/brisk-otter",
   "original_root": "/Users/dev/repos/shop",
@@ -3255,20 +3313,28 @@ cannot mint a second artifact path for the same round:
 - **The review scope is the story's diff, never the whole repo.** `changed_files`
   is everything that differs from `base` (committed + staged + unstaged) plus new
   untracked files — **repo-root-relative and repo-wide regardless of where
-  `--repo` points** (#1582: `--no-relative` and a `:/` pathspec on the diff half,
-  `--full-name ':/'` on the untracked half). Before that, a subdirectory `--repo`
+  `--repo` points**. Since #1587 that property comes from the **anchoring**:
+  both listings are issued at the toplevel, so there is no subdirectory for
+  them to be relative to or scoped by. The #1582 flags (`--no-relative` and a
+  `:/` pathspec on the diff half, `--full-name ':/'` on the untracked half) are
+  retained as defence-in-depth and no longer discriminate. Before both, a
+  subdirectory `--repo`
   produced subdirectory-relative paths for the untracked half *and* silently
   dropped everything outside that subtree, so the surviving paths matched no
   repo-relative `.file` a reviewer reports. Pre-existing findings in untouched code belong to
   `/development:maintenance`, not the loop — without diff-scoping, round 2
   re-litigates legacy code and the loop never converges.
 - **The panel writes its aggregate findings JSON** (the *Review finding schema*
-  above) to `findings_path`, a well-known per-round path in the worktree.
+  above) to `findings_path`, a well-known per-round path anchored at the
+  worktree root (#1587) — so it is the same path whatever directory `--repo`
+  named, and the exclusion above always covers it.
 
 **`scope-findings --repo PATH [--base REF] --findings FILE`** reads the panel's
 aggregate and prints only the findings whose `file` is inside the story's diff —
 the enforcement point for "findings outside the diff do not appear", downstream
-of whatever the panel reported. A missing/empty file yields `[]`. It filters
+of whatever the panel reported. Once `--repo` anchors and `--base` resolves, a
+missing/empty file yields `[]` — an unusable or un-anchorable `--repo` is exit 1
+even with no findings file, since that shortcut sits below those checks. It filters
 against the **full story diff on every round, delta rounds included**, and is
 never handed `--prior-tree`: a fix-verification finding about a file changed
 earlier in the story but not since the previous round is exactly the kind the
@@ -3280,9 +3346,11 @@ it.
 `{"error":"ambiguous_repo_type", …}`) and exits `3`; the orchestrator surfaces
 that as a `needs-human-decision` escalation (#564) rather than proceeding. Exit
 `2` is a usage error; `1` is an internal failure — detect-stack/git/jq, an
-unreadable `.maintenance.yml` primary key (#1588), or a
+unreadable `.maintenance.yml` primary key (#1588), a
 `--repo` that is present but unusable (absent, not a directory, not
-readable/traversable). The split is deliberate: a *missing* `--repo` is a
+readable/traversable), or a `--repo` that cannot be **anchored** (#1587) — a git
+fault, a path with no work tree (a bare repository, or inside `.git/`), or a
+repository root that is itself unreadable. The split is deliberate: a *missing* `--repo` is a
 malformed invocation (`2`), a *present but unusable* one is a well-formed
 invocation whose environment failed (`1`). Tests
 seam detection via `DETECT_STACK_BIN` and git via `GIT_BIN`.
