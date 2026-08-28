@@ -25,6 +25,24 @@
 # closing sweep happens (that rule moves with each human grant); this script owns
 # only the one descriptor value that decides the scope.
 #
+# `--repo` NAMES THE REPOSITORY (#1587) — one anchoring rule, all three
+# subcommands. Each anchors it via `_repo_anchor`, once, to `git rev-parse
+# --show-toplevel`, before anything that DERIVES from it: detection, the
+# `.maintenance.yml` primary lookup, both roots, the listings and the default
+# `findings_path` then all describe the same tree. (The usability gates and
+# `_verify_base` run BEFORE the anchoring and read the raw value — deliberately:
+# they judge only whether the path is usable and own the diagnostics that name
+# it, and both spellings name the same repository.) "Once" is about the
+# ANCHORING, not about the rev-parse count: `plan` re-derives that same toplevel
+# later, deliberately — see the two-roots block in `cmd_plan`. A `--repo` naming a
+# SUBDIRECTORY is therefore a spelling of its repository, never a scope filter —
+# `plan --repo <root>/pkg` and `plan --repo <root>` emit the same descriptor.
+# A directory outside any git repository has no toplevel and is its own anchor —
+# recognised by git's DISCOVERY fatal specifically, under a pinned C locale.
+# Any OTHER failure to anchor — a git fault, a `--repo` with no work tree, or an
+# anchored root that is not itself readable and traversable — is refused, exit 1;
+# `_repo_anchor`'s header and body carry the reasoning for all three.
+#
 # Subcommands:
 #   detect --repo PATH
 #       Emit ONLY the repo type: { repo_type }. No diff, no --base, no
@@ -50,9 +68,12 @@
 #       descriptor is what lets the dispatch tell each reviewer which tree it is
 #       reading.
 #       worktree_root is the toplevel of the tree under review
-#       (`rev-parse --show-toplevel`) — deliberately NOT `--repo`, which may name
-#       a SUBDIRECTORY while changed_files is always repo-root-relative, so
-#       prefixing with it would emit paths naming no file.
+#       (`rev-parse --show-toplevel`) — deliberately NOT the RAW `--repo`, which
+#       may name a SUBDIRECTORY while changed_files is always repo-root-relative,
+#       so prefixing with it would emit paths naming no file. Since #1587 the two
+#       coincide by construction (`--repo` is anchored to that same toplevel
+#       before anything that DERIVES from it); the derivation is kept because it is what
+#       makes the field true of the tree rather than of the caller's spelling.
 #       original_root is the main checkout's toplevel (the FIRST entry of
 #       `git worktree list --porcelain`) when it differs from worktree_root, and
 #       `null` otherwise. `null` asserts only that there is no second checkout to
@@ -102,13 +123,25 @@
 #       no supported one), so a JS/TS service shipping a Helm chart keeps the
 #       typed escalation instead of being reviewed by the manifest panel.
 #       The panel writes its aggregate findings JSON (issue #558 schema) to
-#       findings_path. On an unsupported or ambiguous repo type, print a typed
+#       findings_path, which defaults to
+#       `<worktree_root>/.review/findings-round-<N>.json` — ABSOLUTE, and the
+#       same for every spelling of `--repo`, because `--repo` is anchored
+#       (#1587). It is a real default rather than a placeholder:
+#       resolve-story-loop.zsh passes no `--findings-path` and consumes it
+#       directly, resolving it against the LOOP's cwd, so a relative spelling was
+#       correct only when the loop ran from the repo root. Anchoring it also puts
+#       the sink at the repo root, where `_normalise_paths`' start-anchored
+#       `.review/` exclusion already drops it from every scope.
+#       On an unsupported or ambiguous repo type, print a typed
 #       error object and exit 3 (see Exit codes).
 #
 #   scope-findings --repo PATH [--base REF] --findings FILE
 #       Read the panel's aggregate findings array (FILE) and print only the
 #       findings whose `file` is inside the story's diff — dropping anything in
-#       untouched code. Missing/empty FILE prints []. This enforces the
+#       untouched code. Once `--repo` anchors and `--base` resolves, a
+#       missing/empty FILE prints []; an unusable or un-anchorable `--repo` is
+#       exit 1 even when FILE is absent, since the shortcut sits deliberately
+#       BELOW those checks. This enforces the
 #       "findings outside the story's diff do not appear" contract downstream of
 #       whatever the panel reported.
 #
@@ -139,7 +172,14 @@
 #      `.maintenance.yml` primary key (#1588 — the repo itself is fine, a file
 #      inside it is not; reaches `detect` as well as `plan`, since both go
 #      through `_repo_type`), or `--repo` names
-#      something unusable (absent, not a directory, not readable/traversable).
+#      something unusable (absent, not a directory, not readable/traversable),
+#      or a `--repo` that cannot be ANCHORED (#1587) — a git fault, a path with
+#      no work tree (a bare repository, or inside `.git/`), or an anchored root
+#      that is not itself readable and traversable. The one anchoring failure
+#      that is NOT an error is git's DISCOVERY fatal, `not a git repository
+#      (or any …)`: that directory is its own root. The `not a git repository:
+#      <path>` GITFILE fatal is a broken repository and IS refused — the two
+#      share a prefix and mean opposite things.
 #      Note the split from 2: a MISSING `--repo` is a usage error (2), a `--repo`
 #      that is present but unusable is this one, because the invocation was
 #      well-formed and the environment is what failed.
@@ -214,24 +254,14 @@ need_value() {
 # pins it. Matching at any depth would silently drop those files from every
 # review scope.
 #
-# KNOWN, BOUNDED GAP, stated rather than papered over. Now that the listings are
-# repo-wide, a `--repo` naming a SUBDIRECTORY puts the DEFAULT sink at
-# `pkg/.review/findings-round-N.json`, which these start-anchored patterns do not
-# match — so it would reach the panel as story code. There is no pattern that
-# fixes it: `pkg/.review/…` is byte-identical in shape to the nested story file
-# the contract above requires to stay IN scope. Rooting the default sink at the
-# repo top instead would break the pinned `--repo .` spelling
-# (`./.review/findings-round-1.json`). It needs one anchoring rule for `--repo`,
-# which is a contract change rather than a path fix — filed as #1587.
-#
-# The sink is not the whole of that question, and this comment used to imply it
-# was. The same missing rule leaves DETECTION anchored at `--repo` (`_detect_json`
-# runs the detector under `cd -- "$repo"`) and the `.maintenance.yml` primary
-# lookup with it, while these listings are now repo-WIDE — so a subdirectory
-# `--repo` picks a panel from one subtree's stack and hands it a scope drawn from
-# the whole repo. #1587 covers both halves.
-# The mitigation meanwhile is the one every real caller already uses: pass an
-# explicit `--findings-path` outside the repo, as resolve-story-loop.zsh does.
+# The start-anchored patterns are ENOUGH because `--repo` is anchored (#1587):
+# every subcommand resolves it to the git toplevel before anything that DERIVES from it, so
+# the DEFAULT sink is always `<worktree_root>/.review/…` and these listings —
+# repo-root-relative since #1582 — always spell it `.review/…`, which the first
+# pattern deletes. The gap this comment used to document (a subdirectory
+# `--repo` putting the sink at `pkg/.review/…`, which no start-anchored pattern
+# can match without also dropping the nested story file above) is closed at the
+# anchoring site, so nothing here needs to widen.
 _normalise_paths() {
   sed -E 's#^\./##' | sort -u \
     | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d'
@@ -248,20 +278,25 @@ _changed_files() {
   # so such a file could never match the plain UTF-8 `.file` a reviewer reports —
   # it would be silently absent from the scope, and absent from the fix-touched
   # set that shares this normalisation.
-  # BOTH listings are forced repo-root-relative and repo-WIDE regardless of where
-  # `--repo` points (#1582). `--repo` accepts any readable directory, and from a
-  # SUBDIRECTORY the untracked listing was both relative to that subdirectory AND
-  # scoped to it — so a file elsewhere in the repo silently vanished from the
-  # scope, and the paths that did survive matched no repo-relative `.file` a
-  # reviewer reports.
+  # BOTH listings are repo-root-relative and repo-WIDE regardless of where
+  # `--repo` points — and since #1587 that comes from the ANCHORING: both callers
+  # resolve `repo` to the toplevel first, so this function only ever runs AT the
+  # repo root, where there is no subdirectory for a listing to be relative to or
+  # scoped by.
   #
-  # `--no-relative` on the diff half is NOT redundant with the `:/` pathspec: a
-  # user-level `diff.relative=true` makes `git diff` emit paths relative to the
-  # cwd and drop everything outside it, and a pathspec does not countermand that
-  # — `--no-relative` is the documented countermand. Without it the two halves
-  # would disagree under that config, and `scope_abs` would prefix a
-  # subdirectory-relative entry with the repo root, naming a file that does not
-  # exist. One spelling from both halves, under any config.
+  # ALL THREE flags — `:/`, `--full-name`, `--no-relative` — are therefore
+  # DEFENCE IN DEPTH since #1587: the anchoring above already delivers the
+  # property they were added for. They are kept because they kill the class
+  # outright rather than the one route to it that anchoring closed — but no
+  # fixture can discriminate any of them any more, so do not read their
+  # rationales, or the #1582 cases that drive them, as live guards.
+  #
+  # Historically (pre-#1587) `--no-relative` was the load-bearing one: a
+  # user-level `diff.relative=true` made `git diff` emit cwd-relative paths and
+  # drop everything outside the cwd, which a pathspec does not countermand, so
+  # without it the two halves disagreed and `scope_abs` prefixed a
+  # subdirectory-relative entry with the repo root, naming a file that did not
+  # exist.
   {
     "$git_bin" -C "$repo" -c core.quotePath=false diff --name-only --no-relative "$base" -- ':/' \
       || return 1
@@ -271,15 +306,172 @@ _changed_files() {
 }
 
 # --- the two tree roots the reviewers must be told about (#1582) ------------
-# The tree under review. From the git TOPLEVEL, never from `--repo`: this script
-# accepts any readable directory there, while `changed_files` is always
-# repo-root-relative, so a `--repo` naming a subdirectory would produce
-# `scope_abs[]` entries that name no file at all.
+# The tree under review. From the git TOPLEVEL, never from the RAW `--repo`:
+# this script accepts any readable directory there, while `changed_files` is
+# always repo-root-relative, so a `--repo` naming a subdirectory would produce
+# `scope_abs[]` entries that name no file at all. Since #1587 this is also the
+# function the anchoring rule itself is built on (`_repo_anchor`, below), so by
+# the time a subcommand calls it the two agree — it stays the derivation rather
+# than a re-read of the flag, which is what keeps that agreement a fact about
+# the tree instead of an assumption about the caller.
 _worktree_root() {
   local repo="$1" root=""
   root=$("$git_bin" -C "$repo" rev-parse --show-toplevel) || return 1
   [[ -n "$root" ]] || return 1
   print -r -- "$root"
+}
+
+# THE anchoring rule for `--repo` (#1587). `--repo` names the REPOSITORY, not a
+# subdirectory of it: every subcommand resolves it here, ONCE, before anything
+# that DERIVES from it — detection (`_detect_json`'s `cd`), the `.maintenance.yml` primary
+# lookup, both roots, the listings and the default `findings_path` all describe
+# the SAME tree. Before this, the listings were repo-wide (#1582) while
+# detection and the sink tracked whatever directory `--repo` happened to name —
+# so `plan --repo <root>/pkg` picked a panel from one subtree's stack and handed
+# it the whole repo's diff, and put the sink at `pkg/.review/…`, which no
+# start-anchored exclusion can drop without also dropping the nested story file
+# `_normalise_paths` is contracted to keep.
+#
+# The fallback is keyed on the CAUSE, never on the status. Exactly one failure
+# means "there is no repository here": git's DISCOVERY fatal, `not a git
+# repository (or any …)`, read under a pinned C locale — two disciplines the body
+# below explains, and the enum is only closed because of them. That
+# directory IS its own root — the only answer available, and the one that keeps
+# `detect: #1504 a --repo beginning with a dash is detected, not misattributed`
+# true, whose fixture is a bare `mkdir` with a `.maintenance.yml` and no
+# `git init`. `detect` is the subcommand that reaches it in the ordinary course,
+# having no `_verify_base` in front of it.
+#
+# EVERY OTHER non-zero exit is a fact about the MACHINE, and is refused with a
+# named line and git's own stderr. Falling back on those instead would silently
+# anchor at a SUBDIRECTORY — reproducing on the error path the exact
+# misattribution this rule exists to remove, at exit 0 with nothing on either
+# stream. The realistic causes are not exotic: a `detected dubious ownership`
+# refusal (routine wherever the checkout is owned by another uid — containers,
+# CI), and a `GIT_BIN` seam naming a missing binary. The dubious-ownership
+# refusal has a fixture; a missing `GIT_BIN` reaches the same arm by the same
+# route (its command-not-found text cannot match the discovery needle) and is
+# unfixtured. The list is deliberately short: the previous cut of it named an
+# unreadable `.git`, which takes the FALLBACK, and a corrupt object store, which
+# does not fail the probe at all — see the KNOWN LIMIT below.
+# It is the same rule `_primary` and every jq read here already
+# follow (#1177/#1588): a dead tool is never a verdict about the repo.
+#
+# KNOWN LIMIT, stated rather than assumed away, and it is NOT uniformly benign.
+# Two shapes are indistinguishable from "no repository here" AT THIS SEAM:
+#   * a repository whose `.git` cannot be VALIDATED — `is_git_directory()` opens
+#     `HEAD` and stats `objects`/`refs`, so a `.git` at mode 000 fails validation
+#     and discovery simply continues UPWARD. (An earlier cut of this comment
+#     listed an unreadable `.git`, and a corrupt object store, among the REFUSED
+#     faults. Both were wrong: the first lands here, and the second does not fail
+#     the probe at all — discovery succeeds and `--show-toplevel` answers.)
+#   * a root that lies across a filesystem boundary from `--repo`, where git
+#     stops at the mount point and says `(or any parent up to mount point …)` —
+#     which means "discovery stopped", not "there is no repository".
+#
+# What follows depends on TWO things — what lies above `--repo`, and whether
+# `--repo` is the root or a subdirectory. Both matter, and an earlier cut of
+# this block tracked only the first:
+#   - AN ENCLOSING repository — discovery SUCCEEDS at it. `_repo_anchor` takes
+#     its success branch and the anchor is a DIFFERENT tree, at exit 0, with no
+#     diagnostic anywhere; `_verify_base` does not catch it either, since
+#     `rev-parse --git-dir` discovers that same enclosing repo. This is not
+#     hypothetical here: linked worktrees live under `<main>/.claude/worktrees/`,
+#     inside the main checkout's tree, and a vendored plain clone is the general
+#     shape.
+#   - NO enclosing repository — discovery ends in the discovery fatal and the
+#     fallback anchors at `--repo` ITSELF. Benign only when `--repo` is the
+#     repository ROOT: anchoring there is the right answer. With a SUBDIRECTORY
+#     `--repo` it is not — the anchor is that subdirectory, and while `plan` and
+#     `scope-findings` still refuse upstream at `_verify_base`, `detect` does
+#     not: `_detect_json` cds into it and `_primary` reads its own
+#     `.maintenance.yml`, so a repo_type computed from ONE SUBTREE is emitted at
+#     exit 0 with nothing on stderr — the subdirectory misattribution this rule
+#     exists to remove, reached by the fallback. The MOUNT-BOUNDARY shape lands
+#     in exactly this arm for the same reason (git refuses to cross to the real
+#     root, so its wording matches and the fallback fires); it is not exempt.
+# None of it is guarded, and cannot be at this seam: git answered, and the
+# answer is indistinguishable from a correct one. It is recorded so a reader
+# triaging a wrong `detect` type has the case in front of them.
+#
+# `--repo` NAMING A REPOSITORY WITH NO WORK TREE — a bare repo, or a path inside
+# `.git/` — lands here too, and is refused rather than anchored. It is NOT
+# unreachable from `plan`/`scope-findings`, and an earlier draft of this comment
+# wrongly said it was: `_verify_base` probes `rev-parse --git-dir`, which
+# SUCCEEDS for both of those while `--show-toplevel` fails with `this operation
+# must be run in a work tree`. Left to the old blanket fallback, `plan --repo
+# <some.git>` anchored on the raw path and surfaced as an exit-3
+# `unsupported_repo_type` — a verdict about the repo when the truth is that the
+# path has no tree to review.
+#
+# The happy path is ONE git call. The second probe runs only after a failure,
+# to recover the stderr the first discarded — no temp file, and no cost on the
+# path every real invocation takes.
+_repo_anchor() {
+  local repo="$1" root="" err="" rc=0
+  root=$(_worktree_root "$repo" 2>/dev/null); rc=$?
+  if (( rc == 0 )) && [[ -n "$root" ]]; then
+    # Gate the ROOT, not just the caller's `--repo`. The subcommands' own
+    # `-d`/`-r`/`-x` gates ran on the raw value, and with a subdirectory `--repo`
+    # that is a DIFFERENT directory from the one every reader below now uses: a
+    # root at mode 0711 owned by ANOTHER uid — or 0311 for the running user, the
+    # shape the bats fixture needs, since 0711 grants its owner rwx — is
+    # reachable through a readable `pkg/`, and `_detect_json`
+    # would then report no languages and the run would exit 3 with an
+    # `unsupported_repo_type` verdict about a repo it simply could not read.
+    # One site here covers all three subcommands.
+    [[ -r "$root" && -x "$root" ]] || {
+      print -u2 -- "review-dispatch: the repository root is not a readable directory: $root"
+      return 1
+    }
+    print -r -- "$root"; return 0
+  fi
+  # `LC_ALL=C LANGUAGE=C` is what makes the substring test below LEGITIMATE.
+  # git marks these fatals for translation, so under a non-English locale the
+  # no-repository message is localised, the match fails, and the one documented
+  # success path — `detect` on a plain directory — would refuse. CI runs in the
+  # C locale, so nothing here could have caught that. `LANGUAGE` is set as
+  # belt-and-braces, NOT as an independent necessity: gettext ignores `LANGUAGE`
+  # under a C locale, so `LC_ALL=C` is the load-bearing half. Do not drop
+  # `LC_ALL` and keep `LANGUAGE` on the assumption that either alone suffices.
+  err=$(LC_ALL=C LANGUAGE=C "$git_bin" -C "$repo" rev-parse --show-toplevel 2>&1 >/dev/null)
+  # Match the DISCOVERY form only. git emits two distinct fatals carrying
+  # `not a git repository`, and they mean opposite things:
+  #   `not a git repository (or any of the parent directories): .git`
+  #     — and the `(or any parent up to mount point …)` variant — is the genuine
+  #     "there is no repository here", the case that anchors to itself;
+  #   `not a git repository: <path>` is a BROKEN repository: a `.git` FILE
+  #     pointing at a gitdir that is gone, which is exactly what `git worktree
+  #     prune` or a moved/copied linked worktree leaves behind. This repo runs
+  #     everything in worktrees, so it is reachable here.
+  # A bare `not a git repository` test matches both, so the broken-worktree case
+  # would anchor on the raw path at exit 0 with nothing on either stream — the
+  # silent misattribution this whole function exists to refuse. `(or any` is the
+  # shortest prefix that separates them and covers both discovery wordings.
+  # CASE-FOLDED and ANCHORED at git's own `fatal: ` at a line start. Folded
+  # because git emitted `Not a git repository (or any …)` before the message
+  # lowercasing, so an older git would otherwise refuse the one documented
+  # success path — the same class the C pin closes. Anchored because `$err`
+  # interpolates caller-supplied paths on other fatals, and an unanchored
+  # substring lets a path impersonate the cause; the whole point of keying on
+  # the cause is that the enum stays closed.
+  if [[ $'\n'"${err:l}" == *$'\n'"fatal: not a git repository (or any"* ]]; then
+    print -r -- "$repo"; return 0
+  fi
+  # Always name a cause. The re-probe can legitimately come back empty — a git
+  # that exits 0 printing nothing (the #1582 blank-toplevel shape), or a race in
+  # which the second call succeeds where the first failed — and a bare refusal
+  # naming no reason is hardest to act on in exactly the case hardest to
+  # reproduce.
+  # `$rc` is `_worktree_root`'s status, NOT git's, and the wording says so. On
+  # the #1582 blank-toplevel shape — the very case this arm exists for — git
+  # exits 0 and the wrapper returns 1 because the root came back empty, so
+  # calling it "git's exit" would send a reader hunting for a git fault that
+  # never happened.
+  [[ -n "$err" ]] || \
+    err="the first probe returned no usable root and no error (wrapper status $rc)"
+  print -u2 -- "review-dispatch: could not resolve the repository root for ${repo}: $err"
+  return 1
 }
 
 # The ORIGINAL checkout's toplevel. `git worktree list --porcelain` lists the
@@ -671,9 +863,13 @@ cmd_plan() {
   # gather-kubernetes-findings.zsh does: `[[ -d ]]` is true for `-fixtures/repo`
   # (test operators parse no options) but `cd` reads it as an option, and the
   # failure would then be blamed on detect-stack. Every other relative spelling
-  # is already unambiguous — and rewriting them all put a doubled prefix into the
-  # emitted `findings_path` for the ordinary `--repo .` (which `./*` never
-  # matched), a descriptor field the orchestrator consumes and hands back.
+  # is already unambiguous, so nothing else is touched. The doubled-prefix
+  # argument that used to carry this — rewriting them all put `././` into the
+  # emitted `findings_path` for the ordinary `--repo .` — is now HISTORICAL
+  # (pre-#1587): that field is derived from the anchored toplevel, so no
+  # normalisation of `--repo` can reach it. The rule stands on the reason above,
+  # which anchoring does not touch: `cd` and `git -C` still read a leading dash
+  # as an option, and both run on this value.
   # An EXPLICIT empty value is the one shape `need_value`'s arg-count check
   # cannot see, and it is the realistic `--prior-tree "$(<tree-1.txt)"` with the
   # file absent. Left alone it reads downstream as "flag omitted": harmless on a
@@ -697,6 +893,16 @@ cmd_plan() {
   fi
   if [[ "$repo" == -* ]]; then repo="./$repo"; fi
   _verify_base "$repo" "$base" || exit 1
+  # THE anchoring site for `plan` (#1587). Immediately after `_verify_base`,
+  # which has just established that `--repo` is inside a git repository — though
+  # NOT that it has a work tree, so `_repo_anchor` can still refuse here (a bare
+  # repo or a `.git/` path; its header says why) — and BEFORE every reader below,
+  # so `_repo_type`, `_primary`, the default `findings_path`, both roots and the
+  # listings all read one value. Reassigning `repo` rather than introducing a
+  # second name is what makes that true by construction: there is no un-anchored
+  # spelling left for a later reader to pick up. The status IS checked: an
+  # un-anchorable repo must fail as itself, not continue against the raw path.
+  repo=$(_repo_anchor "$repo") || exit 1
   # next to _verify_base, and BEFORE anything is scoped — the whole point is that
   # an unresolvable identity never reaches a scope computation
   [[ -z "$prior_tree" ]] || _verify_prior_tree "$repo" "$prior_tree" || exit 1
@@ -712,10 +918,39 @@ cmd_plan() {
   }
   local repo_type="$_RD_REPO_TYPE"
 
+  # ABSOLUTE, because `repo` is now the anchored root (#1587) — so the default is
+  # `<worktree_root>/.review/findings-round-<N>.json` for EVERY spelling of
+  # `--repo`, and the descriptor is self-contained the way `scope_abs` is. That
+  # is not cosmetic: `resolve-story-loop.zsh` passes no `--findings-path` at
+  # either of its `plan` calls and consumes this default directly — `mkdir -p` of
+  # its dirname, truncate, the #974 `:A` alias refusal, `REVIEW_FINDINGS`, and
+  # `scope-findings --findings` — resolving it against the LOOP's cwd, not
+  # against `--repo`. A relative spelling was therefore correct only when the
+  # loop happened to run from the repo root.
   [[ -n "$findings_path" ]] || findings_path="${repo%/}/.review/findings-round-${round}.json"
 
   # The two roots (#1582), resolved BEFORE the scope so a repo whose roots
   # cannot be read fails as itself rather than as a scope computation.
+  #
+  # `_worktree_root` here is DEFENCE IN DEPTH since #1587, not the primary catch:
+  # `_repo_anchor` already resolved this same value at the anchoring site above
+  # and refused if it could not, so on any ordinary run this call re-derives a
+  # value already known good, and the two #1582 cases that drive a git which
+  # cannot answer `--show-toplevel` now fail at the anchor instead (their
+  # comments say so). It is KEPT for two reasons: it keeps the field a fact about
+  # the TREE rather than about the caller's spelling (the file header and
+  # `_worktree_root`'s own header both say so), and it FAILS if `--show-toplevel`
+  # becomes unanswerable mid-run.
+  #
+  # Two things it does NOT do, both previously claimed here. It does not stop an
+  # empty prefix — `_repo_anchor` already refuses an empty root and its fallback
+  # prints a non-empty `$repo`, so `worktree_root="$repo"` could not produce one.
+  # And it does not notice a root that MOVES: there is no comparison between the
+  # two, so a toplevel that changes to a different resolvable value passes, and
+  # the descriptor then carries `findings_path` from the anchor beside
+  # `worktree_root`/`scope_abs` from the second derivation. That window is
+  # essentially unreachable inside one plan, which is why it is documented rather
+  # than guarded — but it is documented, not implied away.
   #
   # The two are NOT checked alike, and the difference is deliberate:
   #   - `_worktree_root` must produce a non-empty value or the plan aborts. An
@@ -836,6 +1071,14 @@ cmd_detect() {
     print -u2 -- "detect: --repo is not a readable directory: $repo"; exit 1
   }
   if [[ "$repo" == -* ]]; then repo="./$repo"; fi
+  # THE anchoring site for `detect` (#1587) — the same rule as `plan`'s, which is
+  # what keeps the two AGREEING on a repo, the property this subcommand exists to
+  # guarantee. `detect` runs no `_verify_base`, so it is the subcommand that
+  # reaches `_repo_anchor`'s fallback in the ordinary course: a `--repo` outside
+  # any git repository stays itself, and its own `.maintenance.yml` is still
+  # read. A git FAULT is still refused here, exit 1 — anchoring at a
+  # subdirectory because git was unwell is what would break that agreement.
+  repo=$(_repo_anchor "$repo") || exit 1
   _repo_type "$repo" detect || exit $?
   [[ -n "$_RD_REPO_TYPE" ]] || {
     print -u2 -- "detect: internal error: the repo type was not determined"; exit 1
@@ -872,6 +1115,16 @@ cmd_scope_findings() {
     print -u2 -- "scope-findings: --repo is not a readable directory: $repo"; exit 1
   }
   _verify_base "$repo" "$base" || exit 1
+  # THE anchoring site for `scope-findings` (#1587). BEHAVIOUR-NEUTRAL here, and
+  # deliberately applied anyway: this subcommand has no sink and no detection,
+  # and `_changed_files` is repo-wide from any directory since #1582, so the
+  # filtered output is the same either way (a test pins that). It is anchored so
+  # the script has ONE reading of `--repo` rather than two — the whole point of
+  # the rule — leaving no un-anchored subcommand for a future reader to copy.
+  # Status checked like its two siblings, and the refusal arms are shared, so
+  # this one reaches them too: a bare `--repo` passes `_verify_base` and still
+  # has no work tree.
+  repo=$(_repo_anchor "$repo") || exit 1
 
   # missing or empty findings file → nothing in scope
   if [[ ! -s "$findings" ]]; then print -r -- '[]'; return 0; fi
