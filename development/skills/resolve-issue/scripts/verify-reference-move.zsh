@@ -46,8 +46,12 @@
 # Exit codes:
 #   0  every chunk is byte-identical (or, for -h/--help, the usage string — the
 #      one exit-0 stdout that is NOT a verdict)
-#   1  at least one chunk differs, an input could not be read, OR a sentinel
-#      sweep failed: an undeclared/duplicated sentinel, or the #1582 split-span
+#   1  at least one chunk differs, an input could not be read, a MANIFEST row is
+#      malformed (fewer than four tab-separated fields — #1588, counted as a
+#      chunk failure so the sweeps below it still run), OR a sentinel
+#      sweep failed: an undeclared/duplicated sentinel, the sweep could not be
+#      RUN at all (#1588 — grep or its normalisation failed, so the invariant is
+#      vacuous rather than satisfied), or the #1582 split-span
 #      checks (a split sentinel not appearing exactly once, the halves out of
 #      order, or the split anchors no longer adjacent in the pre-move file).
 #      Chunk differences and sweep failures are counted and reported separately
@@ -235,6 +239,34 @@ typeset -a a b
 
 for row in "${MANIFEST[@]}"; do
   row="${row%$'\n'}"
+  # A row must carry FOUR tab-separated fields (#1588). Field-peeling below is
+  # forgiving in the wrong direction: on a three-field row `first` and `last`
+  # both end up holding the same string, `extract_range` fails to bracket a
+  # single line against itself, and the operator is told "could not locate the
+  # source range" beneath TWO IDENTICAL ANCHORS — a message that points at the
+  # anchors when the fault is the row. Never a silent pass (the empty-chunk
+  # guard and the counter reconciliation close those exits), so this costs
+  # diagnosis time only — which is exactly why it is worth one check.
+  #
+  # Counted as TABS, and `< 3` rather than `!= 3`: `last` deliberately absorbs
+  # everything after the third tab, so a FOURTH tab inside an anchor line is
+  # legitimate and must keep working. Only a row with too FEW fields is malformed.
+  #
+  # COUNTED and continued, like every other per-row failure here (missing
+  # reference file, unlocatable range, missing sentinel block, empty chunk) —
+  # not an `exit 1` mid-loop. The script's design is report-everything-exit-once:
+  # aborting here would report only the FIRST malformed row, skip the
+  # sentinel/duplicate sweeps and the whole split-span invariant block, and print
+  # neither summary line. The run still ends at exit 1 via the `chunk_failures`
+  # arm below, so the observable contract — exit 1, naming the offending row — is
+  # unchanged, and the reconciliation `verified + chunk_failures != ${#MANIFEST}`
+  # still balances.
+  typeset row_tabs="${row//[^$'\t']/}"
+  if (( ${#row_tabs} < 3 )); then
+    print -u2 -- "FAIL: malformed manifest row — needs 4 tab-separated fields, found $(( ${#row_tabs} + 1 )):"
+    print -u2 -r -- "  $row"
+    (( chunk_failures++ )); continue
+  fi
   name="${row%%$'\t'*}";        row="${row#*$'\t'}"
   ref_name="${row%%$'\t'*}";    row="${row#*$'\t'}"
   first="${row%%$'\t'*}"
@@ -257,8 +289,21 @@ for row in "${MANIFEST[@]}"; do
     (( chunk_failures++ )); continue
   fi
 
-  src=$(print -r -- "$src_raw" | strip_blanks)
-  dst=$(print -r -- "$dst" | strip_blanks)
+  # Both statuses are READ (#1588) — they were the only two command
+  # substitutions here that were not, while `extract_range`, `extract_chunk` and
+  # the adjacency `awk` all are. An unchecked `strip_blanks` failure (awk absent,
+  # a locale abort) returns an empty string, and the empty-chunk refusal below
+  # then fires with `empty chunk after normalisation` — a verdict about the
+  # chunk's CONTENT derived from a normalisation that never ran, which is the
+  # confidently-wrong cause this file's stderr-relay comments exist to avoid.
+  src=$(print -r -- "$src_raw" | strip_blanks) || {
+    print -u2 -- "FAIL $name: could not normalise the source chunk"
+    (( chunk_failures++ )); continue
+  }
+  dst=$(print -r -- "$dst" | strip_blanks) || {
+    print -u2 -- "FAIL $name: could not normalise the moved chunk in $ref_name"
+    (( chunk_failures++ )); continue
+  }
 
   # An empty-vs-empty comparison would pass and be counted as verified — a gate
   # whose whole job is to notice unmoved text signing off on a chunk containing
@@ -301,7 +346,50 @@ done
 # script still exiting 0. And stderr is NOT discarded — a grep that fails
 # outright must be distinguishable from one that found nothing.
 typeset -a sentinels stray dupes
-sentinels=("${(@f)$(grep -rhoE '^<!-- moved: .+ -->$' "$REF_DIR" | sed -E 's/^<!-- moved: (.*) -->$/\1/' | sort)}")
+# The STATUS is read, not only the stderr (#1588). Relaying stderr makes the two
+# cases distinguishable to a human; it left them identical to the SCRIPT, and
+# this is the load-bearing one: on a walk that fails outright, or partially (an
+# unreadable subtree under reference/), `sentinels` comes back short or empty and
+# the undeclared/duplicated invariant below silently passes over whatever it
+# never saw. A total failure is caught downstream anyway — every chunk then
+# reports `reference file not found` — but a PARTIAL walk would leave a real
+# stray sentinel unswept with nothing reported at all.
+#
+# Branch on grep's code, never on a bare `||`: grep exits **1 for "no matches"**
+# and only **>= 2** for a real error, so a bare `||` would report a sweep failure
+# for a reference tree that simply carries no sentinels — a state the
+# empty-manifest comment further down discusses as legitimate-if-unlikely (and
+# `tests/verify-reference-move.bats` annotates from the coverage side), and
+# turning it into a fabricated error would be its own confidently-wrong cause.
+#
+# grep is captured ALONE, not as `grep | sed | sort`. Under `pipefail` the
+# pipeline's status is the rightmost non-zero, so a `sed` that exits 1 — BSD sed
+# does, on `RE error: illegal byte sequence`, which a byte-identity gate can
+# plausibly meet — would be indistinguishable from grep's "no matches" and the
+# duplicate/stray sweeps would then iterate over an empty list while every
+# reference file is still present: a silent partial sweep, which is the exact
+# failure this status read exists to catch. Splitting the two also stops a
+# sed/sort failure being reported as `(grep exit N)`, naming a command that
+# succeeded.
+typeset sentinel_hits sentinels_raw grep_rc
+sentinel_hits=$(grep -rhoE '^<!-- moved: .+ -->$' "$REF_DIR")
+grep_rc=$?
+if (( grep_rc >= 2 )); then
+  # COUNTED and continued, like every other sweep arm — not a mid-run `exit 1`.
+  # Aborting here would discard the per-chunk work already done and print
+  # neither summary, which is the same argument the malformed-row guard above
+  # makes for itself. An empty `sentinel_hits` makes the sweeps below vacuous,
+  # so the failure is recorded rather than hidden, and the run still ends at 1.
+  print -u2 -- "FAIL: could not sweep $REF_DIR for sentinels (grep exit $grep_rc)"
+  (( sweep_failures++ ))
+  sentinel_hits=""
+fi
+sentinels_raw=$(print -r -- "$sentinel_hits" | sed -E 's/^<!-- moved: (.*) -->$/\1/' | sort) || {
+  print -u2 -- "FAIL: could not normalise the sentinel sweep output"
+  (( sweep_failures++ ))
+  sentinels_raw=""
+}
+sentinels=("${(@f)sentinels_raw}")
 sentinels=(${sentinels:#})
 # Duplicates are a failure, not something to dedupe away: extract_chunk exits at
 # the FIRST matching close, so a chunk copy-pasted into a second reference file
@@ -384,8 +472,27 @@ else
     typeset head_last="" tail_first="" mrow
     for mrow in "${MANIFEST[@]}"; do
       mrow="${mrow%$'\n'}"
+      # Skip a MALFORMED row, with the same test the main loop uses (#1588).
+      # This block re-reads MANIFEST independently, and since the field-count
+      # guard became count-and-continue rather than a mid-loop abort, a bad row
+      # now reaches here. On a two-field `round-protocol-head` the peels below
+      # return the string unchanged, `head_last` becomes the REF_FILE, the
+      # non-empty guard passes, and the awk then reports the split anchors as
+      # missing from the PINNED COMMIT — blaming `$pre` for a fault entirely in
+      # the row. Skipping instead lets the existing "no longer declares both
+      # round-protocol split rows" diagnostic say what is actually wrong.
+      typeset mrow_tabs="${mrow//[^$'\t']/}"
+      (( ${#mrow_tabs} >= 3 )) || continue
       case "${mrow%%$'\t'*}" in
-        round-protocol-head) head_last="${mrow##*$'\t'}" ;;
+        # Peeled NON-greedily, exactly as the main loop's `last="${row#*$'\t'}"`
+        # is (#1588). `${mrow##*$'\t'}` was greedy, so it kept only the text
+        # after the LAST tab — which differs from what the loop verifies the
+        # moment a LAST_LINE anchor contains a tab. That is the row shape the
+        # field-count guard's `< 3` (not `!= 3`) deliberately permits, so the
+        # two parses have to agree or the guard's stated tolerance is a lie:
+        # `extract_range` would verify the chunk while this block searched `$pre`
+        # for a truncated anchor, failed to find it, and blamed the pinned commit.
+        round-protocol-head) head_last="${${${mrow#*$'\t'}#*$'\t'}#*$'\t'}" ;;
         round-protocol-tail) tail_first="${${mrow#*$'\t'}#*$'\t'}"; tail_first="${tail_first%%$'\t'*}" ;;
       esac
     done
@@ -450,7 +557,15 @@ if (( chunk_failures )); then
   print -u2 -- "$chunk_failures of ${#MANIFEST} declared chunk(s) did not move verbatim."
 fi
 if (( sweep_failures )); then
-  print -u2 -- "$sweep_failures sentinel problem(s) in reference/ (undeclared or duplicated)."
+  # NOT "(undeclared or duplicated)" any more (#1588): `sweep_failures` is
+  # incremented by several arms, of which only the duplicate and stray ones are
+  # that. The
+  # adjacency arm — driven today — is caused by a MANIFEST edit inside this
+  # script, and the old parenthetical sent the operator hunting for a stray
+  # sentinel in reference/ that does not exist. The per-arm FAIL line above
+  # always names the real cause, so the summary points at it instead of
+  # guessing.
+  print -u2 -- "$sweep_failures sentinel/split-span problem(s) — see the FAIL line(s) above."
 fi
 if (( chunk_failures || sweep_failures )); then
   exit 1

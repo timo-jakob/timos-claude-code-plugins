@@ -397,10 +397,121 @@ EOF
 }
 
 @test "plan: .maintenance.yml primary disambiguates multiple panels" {
-  printf 'primary: java\n' > "$R/.maintenance.yml"
+  # #1588: driven over every SPELLING the `sed -nE` handles, not just the bare
+  # one. That expression strips leading whitespace, an inline `#` comment and
+  # surrounding quotes, then quits at the first match — four behaviours a single
+  # `primary: java` fixture leaves entirely unpinned. Mutations each spelling
+  # reds, all of which shipped green before this loop existed:
+  #   - delete `s/[[:space:]]*(#.*)?$//`  -> the trailing-comment form
+  #   - delete either quote strip         -> the "java" / 'java' forms
+  #   - delete the `q`                    -> the two-line file below
+  # A wrong answer here is not a crash: `primary` fails the `(Ie)` membership
+  # test, and the repo escalates as `ambiguous_repo_type` — telling a human to
+  # set a key the repo already carries.
+  local spelling
+  for spelling in \
+      'primary: java' \
+      'primary: "java"' \
+      "primary: 'java'" \
+      '   primary: java' \
+      'primary: java  # the app is the java service'; do
+    printf '%s\n' "$spelling" > "$R/.maintenance.yml"
+    plan '{"languages":["python","java"]}'
+    [ "$status" -eq 0 ]
+    # name the spelling in the failure, or a red loop says only "java != python"
+    if [ "$(echo "$output" | jq -r .repo_type)" != "java" ]; then
+      echo "spelling [$spelling] resolved to $(echo "$output" | jq -r '.repo_type // .error')" >&2
+      return 1
+    fi
+  done
+
+  # ...and the `q`: the FIRST `primary:` wins. Without it `sed` prints both
+  # lines, `primary` becomes a two-line value matching no candidate, and the
+  # repo escalates as ambiguous instead of resolving.
+  printf 'primary: java\nprimary: python\n' > "$R/.maintenance.yml"
   plan '{"languages":["python","java"]}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .repo_type)" = "java" ]
+}
+
+@test "#1588 the original_root gloss covers the BARE-repo case, not just a linked worktree" {
+  # Item 9, and it is a DELIBERATE DOCUMENTATION TRIPWIRE — the only one in this
+  # file. The gloss is a comment, so there is no behaviour to assert instead:
+  # the BEHAVIOUR is already driven end-to-end by `#1582 a BARE main repository
+  # reports NO original checkout`, which clones bare, adds a worktree and asserts
+  # `original_root` is null. This case exists only because the comment CONTRADICTED
+  # the two statements either side of it — `_main_root`'s header and the
+  # `_worktree_root`/`_main_root` contrast block both say the function succeeds
+  # with an EMPTY root for a bare main worktree — so a reader trusting "not a
+  # linked worktree" would conclude a null descriptor proves a main checkout.
+  #
+  # NARROWED to the single token that carries the admission, per the standard the
+  # sibling suite declares for its own one tripwire: a reword of the surrounding
+  # gloss must not red the suite, only DELETION of the admission may.
+  #
+  # COUNTED, not merely present, and counted over text whose COMMENT MARKERS are
+  # stripped first. Three things had to be got right here, each learned from a
+  # failure of the previous form:
+  #
+  #   * a presence check was satisfied by `_main_root`'s pre-existing header
+  #     alone, so deleting the gloss this story added — restoring the very
+  #     contradiction item 9 exists to remove — shipped green. That is the
+  #     non-uniqueness failure the sibling suite recorded for its own needles,
+  #     reintroduced here by narrowing to a single token;
+  #   * counting over the RAW flatten still counted only two, because the third
+  #     statement of the admission — the `_worktree_root`/`_main_root` contrast
+  #     block named in this case's own first paragraph — is split across a
+  #     comment-line wrap, and `tr '\n' ' '` leaves the `#` between its halves.
+  #     The count was therefore 2 by accident of wrapping, which made it
+  #     wrap-SENSITIVE in both directions: rewording the 80-column gloss pushes
+  #     `worktree:` onto the next `#` line (count 1, red on a safe reword), and
+  #     re-wrapping the contrast block joins its halves (count 3, red again).
+  #     Worse, the two cancel: delete the gloss AND re-wrap the contrast block
+  #     and the count returns to 2 — green, with the contradiction restored;
+  #   * stripping the marker before flattening is the sibling's own `_gap_text`
+  #     precedent, and it makes the count mean what the comment says. All THREE
+  #     statements are counted, which is the number this case's first paragraph
+  #     already names, and deleting ANY of them reds.
+  #
+  # So: reword-tolerant (including re-wrapping), deletion-sensitive on all three.
+  local flat
+  flat="$(sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$S" | tr '\n' ' ' | tr -s ' ')"
+  [ "$(printf '%s' "$flat" | grep -o 'BARE main worktree' | wc -l | tr -d ' ')" -eq 3 ]
+}
+
+@test "#1588 plan: an UNREADABLE .maintenance.yml exits 1, never ambiguous_repo_type" {
+  # The absent file is the ordinary "no primary" case and still escalates as
+  # ambiguous. An unreadable one is a fact about the MACHINE, and reporting it
+  # as a verdict about the REPO tells a human to set a key the repo may already
+  # carry. Mutation: drop the `||` on `primary=$(_primary "$repo")` in
+  # review-dispatch.zsh and this goes back to exit 3 / ambiguous_repo_type.
+  # Same root guard the detect-stack suite uses for its unreadable-path cases:
+  # root reads a mode-000 file, so the branch is simply not reachable there.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every file, so the unreadable-file branch cannot be exercised"
+  fi
+  printf 'primary: java\n' > "$R/.maintenance.yml"
+  chmod 000 "$R/.maintenance.yml"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python","java"]}' \
+    zsh "$S" plan --repo "$R" --base main
+  # restore before asserting, so a failing assertion cannot leave the fixture
+  # unreadable for the next test's cleanup
+  chmod 644 "$R/.maintenance.yml"
+  [ "$status" -eq 1 ]
+  # The exit-1 contract is a stderr diagnostic AND an empty stdout — every other
+  # exit-1 case in this file pairs the two, because a caller parsing stdout first
+  # must not find a half-document. Without it, a guard that emitted a typed
+  # object alongside the diagnostic would still pass here.
+  [ -z "$output" ]
+  # The negative points at STDERR, the stream that actually carries content:
+  # `lacks "$output" …` was tautological once `[ -z "$output" ]` landed above it
+  # (no string is findable in one already proved empty), so it read as a check
+  # and was inert. What is worth pinning is that the diagnostic does not itself
+  # misattribute a machine fault as a verdict about the repo.
+  # The rostered helper, not `grep -qv` (passes whenever ANY line differs, #829).
+  lacks "$stderr" "ambiguous_repo_type"
+  contains "$stderr" "could not read the .maintenance.yml primary key"
 }
 
 # ---- claude-plugin fallback repo_type (#809): a plugin repo detects no
@@ -1479,7 +1590,7 @@ detect() {  # $1 = languages json ; rest = extra flags
   # `cmd_detect` carries `if [[ "$repo" == -* ]]; then repo="./$repo"; fi`. Both
   # siblings gained a regression test for their copy precisely because deleting
   # it left the suite green. Without it a `--repo -weird` reaches `_primary`,
-  # whose `grep -E … "$repo/.maintenance.yml"` reads the path as an option
+  # whose `sed -nE … "$repo/.maintenance.yml"` reads the path as an option
   # bundle: the tiebreak silently vanishes and detect escalates exit 3 where
   # plan returns a type — breaking the one property this block calls
   # load-bearing.
@@ -2074,6 +2185,25 @@ fi
 exec git "\$@"
 EOF
   chmod +x "$fakegit"
+
+  # FIXTURE SELF-CHECK (#1588). The count above is not self-evidently large
+  # enough, and nothing else here notices if it stops being: shorten the
+  # synthetic path or trim the count and the listing quietly slips back under
+  # the pipe buffer, at which point this case passes with the OLD
+  # `git worktree list --porcelain | awk … exit` pipeline restored — i.e. it
+  # keeps claiming to be a mutation-checked control while controlling nothing.
+  # So assert the volume BEFORE the subject runs, and let a trim red here.
+  #
+  # The arithmetic: a block is `93 + digits(i)` bytes, so 94 B is the per-block
+  # lower bound and 5,000 x 94 B = 470,000 B >= 6 x 65,536 B = 393,216 B. The
+  # real listing measures ~484 KB (~7.4x the 64 KiB buffer).
+  #
+  # Bounded at 6x rather than the buffer's bare 4x deliberately: a `4*65536`
+  # bound still PASSES at ~3,100 blocks, which is precisely the trim it would
+  # exist to catch. Measured boundary at 6x: 4,060 blocks reds, 4,070 passes.
+  local listing_bytes
+  listing_bytes=$("$fakegit" worktree list --porcelain | wc -c | tr -d ' ')
+  [ "$listing_bytes" -gt $(( 6 * 65536 )) ]
 
   run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1

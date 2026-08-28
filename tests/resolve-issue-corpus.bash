@@ -129,30 +129,36 @@ resolve_issue_corpus() {
     # assertions over `$SKILL` = the corpus. `prose_window` is SYMMETRIC, so the
     # soundness condition is two-directional: every anchor must sit further than
     # its own span from BOTH ends of its member. The binding case is the one
-    # against a member's START, not its end, and it is far tighter than it looks:
-    # round-boundary-concurrency.bats's `2. Start the gate out of band` anchor is
-    # reference/review-loop.md:44 with span 42, which lands at corpus line 1530
-    # with `lo` = 1488 while the member itself begins at 1487 — a ONE-line
-    # margin, and what it would spill into is the CONDUCTOR's tail. (The tightest
+    # against a member's START, not its end, and it is the tighter of the two:
+    # round-boundary-concurrency.bats's `2. Start the gate out of band` anchor,
+    # in reference/review-loop.md with span 42, whose window's low bound clears
+    # that member's start by ~8 lines — and what it would spill into is the
+    # CONDUCTOR's tail. (The tightest
     # end-of-member margin belongs to fix-pass-subtracts.bats's `A fix pass
     # subtracts (#1496)` anchor with its span of 80, in reference/review-loop.md;
-    # it currently clears the member's end by ~56 lines. Stated as a MARGIN and
-    # an anchor NAME rather than as absolute line numbers: the numbers here were
-    # re-measured twice inside #1582 alone — the span re-cut moved the anchor,
-    # and then each fix pass moved it again — which is exactly the rot the
-    # anchor-by-content rule (#1189) exists to stop. Re-derive from the anchor if
-    # you need the figure.
+    # it currently clears the member's end by ~56 lines.
+    #
+    # BOTH margins are stated as a MARGIN and an anchor NAME rather than as
+    # absolute line numbers — said once here, for both, rather than once per
+    # margin: the numbers were re-measured twice inside #1582 alone (the span
+    # re-cut moved the anchor, then each fix pass moved it again) and the
+    # start-of-member figures went stale again on its very next preamble edit,
+    # by seven lines, without reddening anything (#1588). That is exactly the rot
+    # the anchor-by-content rule (#1189) exists to stop. Re-derive from the
+    # anchor if you need a figure.
     # escalation.md is only 71 lines — shorter than the largest span in use, the
     # 80 in fix-pass-subtracts.bats — so a window that size anchored anywhere in
     # it necessarily spills into both neighbours; smaller spans spill only within
     # `span` lines of an edge.) I measured all of those rather than reasoning
-    # them. They are accidents of current file lengths, not a mechanism, and the
-    # two thresholds are one line apart: delete TWO lines from review-loop.md's
-    # preamble and the span-42 window's low bound reaches the blank separator
-    # (which the flattening squeezes away, so nothing is read yet); delete THREE
-    # and it starts reading the conductor's last lines, where its `contains`
-    # needles can pass on a file the assertion was never about. Anchor a locality
-    # sweep at the per-file path.
+    # them. They are accidents of current file lengths, not a mechanism: shorten
+    # review-loop.md's preamble by more than that ~8-line margin and the span-42
+    # window's low bound walks off the front of the member into the conductor's
+    # last lines, where its `contains` needles can pass on a file the assertion
+    # was never about. Expressed against the margin rather than as a pair of
+    # delete-N-lines thresholds for the reason above — the thresholds were
+    # absolute figures in disguise, and #1582's preamble insert moved them by
+    # seven without reddening anything. Anchor a locality sweep at the per-file
+    # path.
     #
     # The order rule reads as an absolute prohibition and is likewise not what
     # the tree does: round-boundary-concurrency.bats pins the seven-step ordering
@@ -160,7 +166,14 @@ resolve_issue_corpus() {
     # only because every endpoint happens to land in review-loop.md. A
     # cross-member ordering pin would be meaningless — the declared file order
     # reproduces no document order, as the paragraph above explains.
-    printf '\n' >> "$out"
+    # `|| return 1` like the two writes above it (#1588). This was the one write
+    # in the loop without it, and it is the one whose failure is invisible: if it
+    # fails on a full or read-only TMPDIR, a member's last line and the next
+    # member's first become ONE line, `resolve_issue_corpus` still returns 0, and
+    # every line-oriented sweep runs against a silently-corrupt haystack — the
+    # "count passing by having stopped looking" failure the header says the
+    # corpus exists to prevent.
+    printf '\n' >> "$out" || return 1
   done
   printf '%s\n' "$out"
 }

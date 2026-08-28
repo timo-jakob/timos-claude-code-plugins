@@ -3211,6 +3211,11 @@ cannot mint a second artifact path for the same round:
   and is what hands reviewers a scope block carrying **both** spellings plus the
   verbatim opener — **two** sentences, one naming which tree to read and one
   requiring the finding's `file` to be reported under the repo-relative name.
+  A `[DELETED by this story]` entry is the one exception to the
+  **both-spellings** rule (#1588): the absolute spelling names a path nobody can
+  open, so it carries the repo-relative name and a diff excerpt instead. The
+  opener's two sentences still apply to it unchanged. The protocol states that
+  rule and its carried-section counterpart; this summary does not restate them.
   The six `development-<type>:review` panels' own launch templates do **not**
   carry it — #1582 scoped them out deliberately, one normative site rather than
   seven — so a panel invoked **directly** as `/development-<type>:review`,
@@ -3274,7 +3279,8 @@ it.
 `plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or
 `{"error":"ambiguous_repo_type", …}`) and exits `3`; the orchestrator surfaces
 that as a `needs-human-decision` escalation (#564) rather than proceeding. Exit
-`2` is a usage error; `1` is an internal failure — detect-stack/git/jq, or a
+`2` is a usage error; `1` is an internal failure — detect-stack/git/jq, an
+unreadable `.maintenance.yml` primary key (#1588), or a
 `--repo` that is present but unusable (absent, not a directory, not
 readable/traversable). The split is deliberate: a *missing* `--repo` is a
 malformed invocation (`2`), a *present but unusable* one is a well-formed
@@ -3489,7 +3495,24 @@ running to the **end of the line** so the sweep in
 paraphrases what it points at. That file is also where the conductor's line
 ceiling and the no-restated-heading rule are enforced;
 `scripts/verify-reference-move.zsh` proves the moved text is byte-identical to
-the pre-move `SKILL.md`.
+the pre-move `SKILL.md` — **for the chunks the manifest declares, which are not
+the whole of `reference/`**. The #1582 re-cut split `round-protocol` into a head
+and a tail to open a gap for the reviewer-path rule, and the text in that gap is
+verified by nothing: the gate proves only that no *original* line migrated into
+it, by asserting the two anchors stay adjacent in the pinned commit. The
+carve-out is owed by the **shape of the claim**, not by which file the claim is
+about: it belongs wherever a statement would otherwise read as covering a
+gap-containing file **as a whole** — `reference/review-loop.md`'s preamble
+("keeps this file honest") and the script's own header ("what it does not
+prove") both make such a claim and both carry it, and the header records an
+earlier unqualified wording as its own past mistake. A claim scoped to **each
+declared chunk** does not need it, being true and untouched by the gap — which
+is why the other `reference/*.md` preambles and `tests/resolve-issue-corpus.bash`
+do not carry it, even though the corpus's own sweep covers `review-loop.md`.
+Keying on the file would say the opposite for that last one. Stated as a
+condition rather than a site roster, and without a chunk count: #1582 already
+moved that number from seven to eight, and nothing compares the prose to the
+manifest.
 
 **The agentic steps run in-session — step mode is canonical (#971).** Running
 the panel and applying the fix pass are model-driven, so the driving session
