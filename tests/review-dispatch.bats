@@ -2046,13 +2046,28 @@ EOF
   # one. Driven with a stub rather than 300 real worktrees — deterministic, and
   # it exercises the same buffer boundary.
   echo "print(1)" > "$R/app.py"
+  # The first block names a path that is DELIBERATELY not this repo's toplevel,
+  # so `original_root` is non-null on every platform. Asserting it equals `$R`
+  # was a latent platform dependency: on macOS `$BATS_TEST_TMPDIR` lives under
+  # `/var/folders/…`, a symlink to `/private/var/…`, so `rev-parse
+  # --show-toplevel` (resolved) and `$R` (unresolved) differ by accident and the
+  # roots compared unequal; on Linux there is no such symlink, both are
+  # identical, `original_root` is correctly `null`, and the assertion failed.
+  # The code was right both times — the fixture was reading a symlink quirk as
+  # the behaviour under test.
+  local synthetic_main="/synthetic-main-checkout"
   local fakegit="$BATS_TEST_TMPDIR/git-many-worktrees"
+  # 5000 blocks at ~95 bytes is ~475 KB against a 64 KiB pipe buffer — ~7x, not
+  # the ~5% an earlier count left. The margin is the point: at ~69 KB a later
+  # trim of the count or the path length would silently stop crossing the
+  # boundary, and the case would pass with the old `awk … exit` pipeline
+  # restored, i.e. stop being the control its comment claims to be.
   cat > "$fakegit" <<EOF
 #!/usr/bin/env bash
 if [ "\$3" = "worktree" ] || [ "\$1" = "worktree" ]; then
-  printf 'worktree %s\nHEAD 0000000000000000000000000000000000000000\nbranch refs/heads/main\n\n' "$R"
-  for i in \$(seq 1 800); do
-    printf 'worktree /tmp/synthetic-wt-\$i\nHEAD 0000000000000000000000000000000000000000\ndetached\n\n'
+  printf 'worktree %s\nHEAD 0000000000000000000000000000000000000000\nbranch refs/heads/main\n\n' "$synthetic_main"
+  for i in \$(seq 1 5000); do
+    printf 'worktree /synthetic-linked-worktree-%s\nHEAD 0000000000000000000000000000000000000000\ndetached\n\n' "\$i"
   done
   exit 0
 fi
@@ -2063,8 +2078,8 @@ EOF
   run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
   [ "$status" -eq 0 ]
-  # the FIRST block is the answer, and the run did not abort
-  [ "$(echo "$output" | jq -r .original_root)" = "$R" ]
+  # the FIRST block is the answer — not the 5000 that follow it, and not null
+  [ "$(echo "$output" | jq -r .original_root)" = "$synthetic_main" ]
   # and it did not fail for the SIGPIPE reason specifically. The rostered helper,
   # not `grep -qv … || true` (never fails), not a bare `! … | grep` (inert, #829)
   # and not a bare `[[ ]]` (inert, #1011) — three shapes that all look like
