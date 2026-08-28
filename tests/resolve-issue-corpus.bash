@@ -131,11 +131,17 @@ resolve_issue_corpus() {
     # its own span from BOTH ends of its member. The binding case is the one
     # against a member's START, not its end, and it is far tighter than it looks:
     # round-boundary-concurrency.bats's `2. Start the gate out of band` anchor is
-    # reference/review-loop.md:44 with span 42, which lands at corpus line 1434
-    # with `lo` = 1392 while the member itself begins at 1391 — a ONE-line
+    # reference/review-loop.md:44 with span 42, which lands at corpus line 1530
+    # with `lo` = 1488 while the member itself begins at 1487 — a ONE-line
     # margin, and what it would spill into is the CONDUCTOR's tail. (The tightest
-    # end-of-member margin is 10 lines: fix-pass-subtracts.bats's `A fix pass
-    # subtracts (#1496)` at review-loop.md:939, span 80, in a 1029-line member.
+    # end-of-member margin belongs to fix-pass-subtracts.bats's `A fix pass
+    # subtracts (#1496)` anchor with its span of 80, in reference/review-loop.md;
+    # it currently clears the member's end by ~56 lines. Stated as a MARGIN and
+    # an anchor NAME rather than as absolute line numbers: the numbers here were
+    # re-measured twice inside #1582 alone — the span re-cut moved the anchor,
+    # and then each fix pass moved it again — which is exactly the rot the
+    # anchor-by-content rule (#1189) exists to stop. Re-derive from the anchor if
+    # you need the figure.
     # escalation.md is only 71 lines — shorter than the largest span in use, the
     # 80 in fix-pass-subtracts.bats — so a window that size anchored anywhere in
     # it necessarily spills into both neighbours; smaller spans spill only within

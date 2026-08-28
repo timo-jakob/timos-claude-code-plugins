@@ -21,7 +21,9 @@
 # SKILL.md that landed in no reference file, or landed but was never added to the
 # manifest, is invisible to every path here. Read the claim as "each declared
 # chunk moved verbatim", never as "nothing was lost". (Conservation is tracked
-# separately; see #1548.)
+# separately; see #1548.) Nor does it prove anything about text sitting BETWEEN
+# two chunks of a SPLIT span — the #1582 gap inside `round-protocol` — which is
+# verified by nothing; see the manifest comment below.
 #
 # Normalisation, stated so the claim is honest: leading and trailing BLANK or
 # WHITESPACE-ONLY lines are stripped from BOTH sides before comparison (they are
@@ -38,12 +40,18 @@
 #
 # `--base` defaults to the PINNED pre-move commit, never to a moving ref: once
 # #1503 merges, `origin/main` holds the POST-move conductor and contains none of
-# the seven chunks, so an `origin/main` default would fail its own documented
+# the moved chunks, so an `origin/main` default would fail its own documented
 # invocation forever and read as the very defect this script disproves.
 #
 # Exit codes:
-#   0  every chunk is byte-identical
-#   1  at least one chunk differs, or an input could not be read
+#   0  every chunk is byte-identical (or, for -h/--help, the usage string — the
+#      one exit-0 stdout that is NOT a verdict)
+#   1  at least one chunk differs, an input could not be read, OR a sentinel
+#      sweep failed: an undeclared/duplicated sentinel, or the #1582 split-span
+#      checks (a split sentinel not appearing exactly once, the halves out of
+#      order, or the split anchors no longer adjacent in the pre-move file).
+#      Chunk differences and sweep failures are counted and reported separately
+#      — they are different defects — but both land here.
 #   2  usage error
 
 emulate -L zsh
@@ -56,6 +64,16 @@ emulate -L zsh
 # returns from a function, and harmless if this file is ever sourced from inside
 # one; they are not what the ordering rule above is about.
 setopt no_unset pipefail
+
+# Same scrub as review-dispatch.zsh and git-tree-id.zsh (#1582). These override
+# `git -C "$repo"`, so an inherited one — git hooks, filter drivers, some CI
+# wrappers, any invocation nested inside a git subprocess — would make the two
+# git calls below read the pinned commit and SKILL.md out of a DIFFERENT
+# repository. That fails in the worst direction: if the other repo also contains
+# the pinned commit (a clone or worktree of this one does), the gate prints
+# `all N declared chunks are byte-identical` at exit 0 having verified nothing
+# about the tree the caller named with `--repo`.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 # The pre-move conductor. Pinned, and single-sourced here — the bats gate reads
 # this value out of the script rather than restating it.
@@ -106,9 +124,16 @@ if ! git -C "$repo" rev-parse --verify --quiet "${base}^{commit}" >/dev/null 2>&
   exit 1
 fi
 
+# git's own stderr is NOT discarded here. The check above has already proved
+# `$base` resolves to a commit, so "is it fetched?" is the one cause that cannot
+# be true by this point; the realistic ones are a path that did not exist at that
+# commit (a pin predating the file, or a rename) and an object-store read error,
+# which git distinguishes precisely. Swallowing that to print a hint we know is
+# wrong is the confidently-wrong-cause pattern `_detect_json`'s stderr relay
+# exists to avoid.
 typeset pre
-if ! pre=$(git -C "$repo" show "${base}:${SKILL_REL}" 2>/dev/null); then
-  print -u2 -- "verify-reference-move: could not read ${base}:${SKILL_REL} — is '$base' fetched?"
+if ! pre=$(git -C "$repo" show "${base}:${SKILL_REL}"); then
+  print -u2 -- "verify-reference-move: could not read ${base}:${SKILL_REL} — does that path exist at ${base}?"
   exit 1
 fi
 
@@ -117,11 +142,37 @@ fi
 # FIRST_LINE / LAST_LINE are matched in full (fixed-string, whole line) against
 # the pre-move SKILL.md. Keep this list in sync with the reference files'
 # sentinels — a chunk present in one and not the other is reported below.
+#
+# `round-protocol` is SPLIT into head + tail (#1582). The reviewer path rule had
+# to land in the round protocol, and the whole span was byte-frozen, so the span
+# was re-cut to open a gap for it. The gap holds ONLY new prose: the head ends at
+# `Each round:` and the tail resumes at step 1's own first line, so 224 + 788 of
+# the original 1 013 lines stay verified and the only original line in the gap is
+# the blank separator between them (which `strip_blanks` would discard anyway).
+#
+# The cost is still real and is recorded rather than hidden: text sitting in that
+# gap is verified by NOTHING, so an edit to the new rule passes this gate in
+# silence. It is bounded to the rule itself.
+#
+# The cut is where it is because of MARKDOWN, not preference. `extract_chunk`
+# matches a sentinel as a whole line at column 0, and a column-0 HTML comment
+# INSIDE a numbered list item destroys the list continuation — putting the tail's
+# opener mid-step produced 16 markdownlint findings on a file that lints clean.
+# The only column-0 positions that are structurally safe are outside the list, so
+# the gap sits between `Each round:` and the list's first item.
+#
+# One anchor that looks obvious is UNUSABLE, recorded so nobody re-derives it:
+# `   **How to wait** (this section) governs the wait — it is not restated here.`
+# occurs TWICE in the pinned pre-move SKILL.md, and `extract_range` starts at the
+# FIRST match of a first-anchor — so using it as the tail's opener would extract
+# from the wrong place and never match.
 typeset -a MANIFEST
 MANIFEST=(
 "interactive-remediation	interactive.md	Applies **only** with a human present, and only to a **shape (i)**	  what the gate exists to prevent.
 "
-"round-protocol	review-loop.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	   is how the two statements of it came to disagree once already.
+"round-protocol-head	review-loop.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:
+"
+"round-protocol-tail	review-loop.md	1. **Review panel, in-session.** Get the dispatch plan (\`review-dispatch.zsh	   is how the two statements of it came to disagree once already.
 "
 "residue-branch	residue.md	Runs **only** on \`CONVERGED_WITH_RESIDUE\` (exit 14). The loop has already	  them, and do not read the story's own work as unstartable.
 "
@@ -274,6 +325,98 @@ for s in "${stray[@]}"; do
   (( known )) || { print -u2 -- "FAIL: reference/ declares chunk '$s' that this script does not verify"; (( sweep_failures++ )) }
 done
 
+# --- the SPLIT-span invariant the manifest cannot express (#1582) ------------
+# head and tail are located independently, so per-chunk byte-identity proves
+# nothing about their RELATIONSHIP: swap the two blocks and every check above
+# still passes.
+#
+# What is asserted, and why it is EXACT rather than a size cap. The split cost
+# exactly ONE original line — the blank separator between `Each round:` and step
+# 1 — so head keeps 224 pre-move lines and tail 788, and 1 012 of 1 013 stay
+# byte-verified however much NEW prose the gap holds. The hazard is therefore
+# never the gap being large; it is ORIGINAL conductor prose migrating into it,
+# which happens by moving a chunk anchor inward and would shrink the verified
+# region while every byte-identity check above stayed green.
+#
+# A gap-SIZE cap only approximates that, and badly: it cannot fire until more
+# original lines migrate than the headroom the new prose happens to be leaving,
+# and any number it names can be raised in the same edit that violates it. The
+# exact statement is available instead — in the PRE-MOVE file, the head's LAST
+# anchor and the tail's FIRST anchor must be ADJACENT modulo blank lines, since
+# nothing sits between them there. Assert that, and no original line can enter
+# the gap undetected regardless of how the new prose grows.
+typeset rp_file="$REF_DIR/review-loop.md"
+typeset -a hc_hits to_hits
+# Captured as ARRAYS and required to be exactly one: `grep -n … | cut` emits one
+# line per match, so a DUPLICATED sentinel would assign a multi-line string to an
+# integer-attributed parameter — a bad-math abort, or a silently wrong line
+# number compared against the wrong pair. The stray sweep above cannot catch it
+# either: it greps only the OPENING form, so a duplicated `/moved:` closer is
+# seen by nothing else in this script.
+# stderr is NOT discarded, the same rule the sentinel sweep above states: an
+# unreadable `review-loop.md` (mode 000, an ACL, a bad checkout) would otherwise
+# be reported as "head-close: 0, tail-open: 0" — a verdict about the file's
+# CONTENT derived from a read that never happened. `-f` is true for an
+# unreadable regular file, so the guard above does not cover it.
+hc_hits=("${(@f)$(grep -nxF -- '<!-- /moved: round-protocol-head -->' "$rp_file")}")
+to_hits=("${(@f)$(grep -nxF -- '<!-- moved: round-protocol-tail -->'  "$rp_file")}")
+hc_hits=(${hc_hits:#}); to_hits=(${to_hits:#})
+if (( ${#hc_hits} != 1 || ${#to_hits} != 1 )); then
+  print -u2 -- "FAIL: the round-protocol split sentinels must appear exactly once each in review-loop.md (head-close: ${#hc_hits}, tail-open: ${#to_hits})"
+  (( sweep_failures++ ))
+else
+  typeset -i hc="${hc_hits[1]%%:*}" to="${to_hits[1]%%:*}"
+  if (( to <= hc )); then
+    print -u2 -- "FAIL: round-protocol-tail opens at line $to, at or before head closes at $hc — the split halves are out of order"
+    (( sweep_failures++ ))
+  else
+    # The EXACT invariant: in the pre-move conductor, nothing but blank lines
+    # separated the head's LAST anchor from the tail's FIRST anchor, so nothing
+    # original belongs in the gap now.
+    #
+    # Both anchors are READ OUT OF THE MANIFEST, never restated here. That is the
+    # whole point: `$pre` is a pinned, immutable commit, so an assertion built
+    # from literals is a CONSTANT — it would return the same verdict forever and
+    # could not fire on the one edit it exists to catch. The hazard is a manifest
+    # anchor moved inward (which migrates original lines into the gap while every
+    # per-chunk byte comparison still passes), and the manifest is the only thing
+    # such an edit touches.
+    typeset head_last="" tail_first="" mrow
+    for mrow in "${MANIFEST[@]}"; do
+      mrow="${mrow%$'\n'}"
+      case "${mrow%%$'\t'*}" in
+        round-protocol-head) head_last="${mrow##*$'\t'}" ;;
+        round-protocol-tail) tail_first="${${mrow#*$'\t'}#*$'\t'}"; tail_first="${tail_first%%$'\t'*}" ;;
+      esac
+    done
+    if [[ -z "$head_last" || -z "$tail_first" ]]; then
+      print -u2 -- "FAIL: the manifest no longer declares both round-protocol split rows, so their adjacency cannot be checked"
+      (( sweep_failures++ ))
+    else
+      # A here-string, not `print … | awk`: awk `exit`s at the tail anchor and
+      # would SIGPIPE the producer, which `pipefail` promotes to 141 — the very
+      # pattern this file documents for `extract_range` and that #1582 swept out
+      # of `_primary`. It matters here because the status IS read.
+      typeset between
+      typeset -i awk_rc=0
+      between=$(awk -v h="$head_last" -v t="$tail_first" '
+        $0 == h        { seen = 1; next }
+        seen && $0 == t { done = 1; exit }
+        seen && $0 ~ /[^[:space:]]/ { print }
+        END { if (!seen || !done) exit 3 }
+      ' <<< "$pre") || awk_rc=$?
+      if (( awk_rc )); then
+        print -u2 -- "FAIL: the split anchors named by the manifest are not both present in ${base}:${SKILL_REL} — head-last <<${head_last}>>, tail-first <<${tail_first}>>"
+        (( sweep_failures++ ))
+      elif [[ -n "$between" ]]; then
+        print -u2 -- "FAIL: the round-protocol split anchors are no longer adjacent in ${base}:${SKILL_REL} — original prose now sits between them, so the gap in review-loop.md is not new text alone:"
+        print -u2 -- "$between"
+        (( sweep_failures++ ))
+      fi
+    fi
+  fi
+fi
+
 # An EMPTIED MANIFEST (a bad merge, a botched edit to the multi-line array
 # literal) would otherwise leave every counter at 0 and print "all 0 declared
 # chunks are byte-identical" at exit 0 — a gate reporting success having verified
@@ -281,7 +424,7 @@ done
 #
 # Be precise about when that is actually reachable, because an earlier wording
 # here was wrong: against the REAL reference tree the stray-sentinel sweep above
-# already fails first, finding seven sentinels no manifest row declares. This
+# already fails first, finding every sentinel in reference/, none of which a manifest row declares. This
 # guard is the second net for the state where BOTH were lost together — an
 # emptied manifest AND a reference tree carrying no sentinels — which is the only
 # one that reaches the summary line. It also fires only at exactly zero rows: a

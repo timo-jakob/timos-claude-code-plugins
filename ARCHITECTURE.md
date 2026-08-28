@@ -3111,7 +3111,12 @@ accepted-and-ignored.
 dispatch descriptor. `--findings-path` overrides where the panel is told to write
 its aggregate, defaulting to `<repo>/.review/findings-round-<N>.json`; note the
 diff-scoping exclusion covers the **default** location only, so an override
-elsewhere in the repo is not held out of review scope. `--round` must be a
+elsewhere in the repo is not held out of review scope — and, since #1582 made
+the listings repo-wide, the default sink itself escapes the exclusion when
+`--repo` names a **subdirectory** (it then arrives as `pkg/.review/…`, which the
+deliberately start-anchored pattern does not match). No real caller hits that —
+they pass an explicit `--findings-path` outside the repo — and the underlying
+`--repo` anchoring question is #1587. `--round` must be a
 non-negative integer and is normalised (`007` → `7`), so a zero-padded value
 cannot mint a second artifact path for the same round:
 
@@ -3123,6 +3128,12 @@ cannot mint a second artifact path for the same round:
   "base": "origin/main",
   "findings_path": "<repo>/.review/findings-round-1.json",
   "changed_files": ["src/app/checkout.py", "src/app/cart.py"],
+  "worktree_root": "/Users/dev/repos/shop/.claude/worktrees/brisk-otter",
+  "original_root": "/Users/dev/repos/shop",
+  "scope_abs": [
+    "/Users/dev/repos/shop/.claude/worktrees/brisk-otter/src/app/checkout.py",
+    "/Users/dev/repos/shop/.claude/worktrees/brisk-otter/src/app/cart.py"
+  ],
   "scope_mode": "full",
   "scope_empty": false,
   "prior_tree": null,
@@ -3178,6 +3189,40 @@ cannot mint a second artifact path for the same round:
   construction; a silently empty scope is the #910 hazard, a round the loop
   happily converges on that no panel ever saw.
 
+- **Reviewers resolve paths against the WORKTREE, never the original checkout
+  (#1582).** `worktree_root` is the toplevel of the tree under review, from
+  `git rev-parse --show-toplevel` — deliberately **not** `--repo`, which may name
+  a subdirectory while `changed_files` is always repo-root-relative, so prefixing
+  with it would emit paths naming no file. `original_root` is the main checkout's
+  toplevel (the **first** entry of `git worktree list --porcelain`) when it
+  differs from `worktree_root`, and **`null`** otherwise. `null` asserts only
+  that there is **no second checkout to warn a reviewer about** — either `--repo`
+  is itself the main checkout, or the main worktree is **bare**, a git directory
+  rather than a tree anyone can read; it never means "this is the main
+  checkout". `null` rather than absent keeps one convention with `prior_tree` /
+  `fix_verification_path` / `adjudicated_path`, so a consumer reads the key
+  unconditionally. `scope_abs` is `changed_files` with
+  `worktree_root` joined onto each entry: same order, same length, `[]` exactly
+  when `changed_files` is `[]`. It **accompanies** `changed_files` and never
+  replaces it — a finding's `.file` stays **repo-relative**, because that is the
+  spelling `scope-findings` filters on (an absolute one is silently discarded).
+  **The rail is loop-side today**: the resolve-issue driving session builds each
+  reviewer's prompt directly (`reference/review-loop.md` § *The round protocol*)
+  and is what hands reviewers a scope block carrying **both** spellings plus the
+  verbatim opener — **two** sentences, one naming which tree to read and one
+  requiring the finding's `file` to be reported under the repo-relative name.
+  The six `development-<type>:review` panels' own launch templates do **not**
+  carry it — #1582 scoped them out deliberately, one normative site rather than
+  seven — so a panel invoked **directly** as `/development-<type>:review`,
+  outside the loop, gets the repo-relative scope and no opener. (The loop
+  dispatches the reviewers *of* the skill `review_skill` names, so using a panel
+  skill is the blessed path; what is off the rail is invoking one standalone.)
+  Why this
+  is a *dispatch* rail and not an output check: a finding carries only the path a
+  reviewer **reported**, never the one it **read**, so a reviewer reading a
+  repo-root file from the wrong tree reports an in-diff repo-relative path that no
+  downstream filter can distinguish from a correct one — which is precisely the
+  CRITICAL false positive of the #1558 session.
 - **Repo-type detection reuses the maintenance logic** — it runs
   `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
   review types are `swift` | `python` | `java` | `go` | `claude-plugin` |
@@ -3204,7 +3249,12 @@ cannot mint a second artifact path for the same round:
   joins the ambiguity tiebreak.
 - **The review scope is the story's diff, never the whole repo.** `changed_files`
   is everything that differs from `base` (committed + staged + unstaged) plus new
-  untracked files. Pre-existing findings in untouched code belong to
+  untracked files — **repo-root-relative and repo-wide regardless of where
+  `--repo` points** (#1582: `--no-relative` and a `:/` pathspec on the diff half,
+  `--full-name ':/'` on the untracked half). Before that, a subdirectory `--repo`
+  produced subdirectory-relative paths for the untracked half *and* silently
+  dropped everything outside that subtree, so the surviving paths matched no
+  repo-relative `.file` a reviewer reports. Pre-existing findings in untouched code belong to
   `/development:maintenance`, not the loop — without diff-scoping, round 2
   re-litigates legacy code and the loop never converges.
 - **The panel writes its aggregate findings JSON** (the *Review finding schema*
