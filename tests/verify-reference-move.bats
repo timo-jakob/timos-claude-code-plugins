@@ -17,17 +17,32 @@
 # — a new fixture family is not something a fix pass may add — then un-parked by
 # an explicit human decision.)
 #
-# WHAT THIS FILE DOES AND DOES NOT REACH. Every fail-closed branch in the script
-# is now driven except the two NAMED below (the empty-MANIFEST guard and the source-range branch) — one reachable through the CLI, one
-# that needs a mutated copy of the script — both tracked in **#1551**. The count
-# is deliberately not restated as a numeral: #1582 added three sweep arms and a
-# numeral would have gone stale in the same edit that added
-# them. This block is the map — read it as the whole answer, because the
-# rounds it was written in learned twice that a not-reached list one branch short
-# is the same defect as no list at all. Branches are cited by their CODE, never
+# WHAT THIS FILE DOES AND DOES NOT REACH. **The lists below are POSITIVE: what
+# they name really is driven here. They are not exhaustive in either direction,
+# so a branch's absence from them means "not recorded", never "not pinned" —
+# grep the suite before concluding anything from a silence.**
+#
+# This block used to claim the converse — "every fail-closed branch is driven
+# except the ones named below" — and that universal was falsified by its own
+# suite four times over as the script grew guards: each new arm made the claim
+# false until someone remembered to extend the exception list, and each extension
+# was itself a restatement that could go stale. A positive, non-exhaustive
+# inventory cannot rot that way: adding a guard leaves it merely incomplete
+# rather than actively wrong. Do not re-tighten it into a closure claim either —
+# "a branch it does not name is not driven" is false today (`--help` and the
+# byte-identical/summary branch are both driven and both unlisted), and it fails
+# in the same shape, just in the safe direction.
+#
+# The NOT-driven paragraphs below are kept, but as **annotations** — they explain
+# why particular unpinned branches are worth knowing about (and, for #1551, what
+# is parked). They are not a complete enumeration of everything unpinned, and
+# nothing should be inferred from a branch's absence from them.
+#
+# Branches are cited by their CODE, never
 # by line number: an earlier cut of this block pinned `script :279` / `:196` and
 # both rotted inside the very round that wrote them, which is what the repo's
-# anchor-by-content rule (#1189) is about.
+# anchor-by-content rule (#1189) is about. Counts are likewise not restated as
+# numerals — a numeral goes stale in the same edit that adds the arm.
 #
 # Driven here: an unknown argument; both empty-flag guards; a `--repo` that is
 # not a directory; a `--base` that is not a commit; a `--base` whose commit has
@@ -36,12 +51,34 @@
 # report; the empty-chunk refusal; a missing reference file; a chunk whose
 # sentinel PAIR is gone (`no <!-- moved: NAME --> block`); the stray-sentinel
 # sweep including a digit-bearing name; the duplicate-sentinel check; the
-# separate reporting of chunk failures vs sentinel problems; and (#1582) all
-# three split-span sweep arms — the halves out of ORDER, a split sentinel
+# separate reporting of chunk failures vs sentinel problems; and (#1582) the
+# split-span sweep arms it drives — the halves out of ORDER, a split sentinel
 # MISSING, and a split sentinel DUPLICATED (the last of which the stray sweep
 # cannot see, since it greps only the opening form) — plus the inherited
-# GIT_DIR/GIT_WORK_TREE scrub, driven under both names and under GIT_WORK_TREE
-# alone.
+# GIT_DIR/GIT_WORK_TREE scrub, driven under both names together and under
+# GIT_DIR alone; and (#1588) BOTH halves of the malformed-manifest-row guard —
+# a row whose REF_FILE field is removed (too few fields, refused), and a row
+# carrying a FOURTH tab (the tolerance half, which must NOT be refused, and is
+# what pins `< 3` rather than `!= 3`).
+#
+# The FOURTH-tab case ALSO drives `could not locate the source range`, which it
+# asserts by name: its mutated row's LAST_LINE anchor no longer resolves in the
+# pinned commit, so deleting the `extract_range` guard reds it. That branch was
+# listed here as deliberately undriven until #1588; it is now pinned incidentally
+# rather than by a case written for it, so #1551 keeps only whatever it wants a
+# dedicated driver for. (The old rationale for not driving it — that `--base
+# HEAD` would resolve every anchor because HEAD was still the pre-move commit —
+# no longer holds either: #1503 has merged, and HEAD's SKILL.md carries none of
+# the manifest's anchor lines.)
+#
+# GIT_DIR is the only name driven alone, and deliberately: this script's git
+# calls are `rev-parse --verify` and `git show`, both pure object-DB reads that a
+# work-tree override cannot redirect, so a GIT_WORK_TREE-alone arm PASSES with
+# `GIT_WORK_TREE` deleted from the `unset` — it read as coverage and pinned
+# nothing (#1588 measured that and replaced it). `GIT_WORK_TREE`/`GIT_INDEX_FILE`
+# remain in the scrub as defence in depth and are pinned by NO case here; do not
+# read their presence in the `unset` as tested. The `review-dispatch.zsh` twin
+# runs work-tree-sensitive commands, so its GIT_WORK_TREE arm does discriminate.
 #
 # The #1582 split-anchor ADJACENCY arm is driven too, in both directions — an
 # anchor MOVED INWARD (which migrates original conductor prose into the
@@ -65,14 +102,36 @@
 # which is the only state that would otherwise reach `all 0 declared chunks are
 # byte-identical` at exit 0.
 #
-# NOT driven, deliberately: the branch printing `could not locate the
-# source range`. #1551 carries it with its mutation. The obvious driver —
-# `--base HEAD`, on the theory that HEAD's SKILL.md is the post-move conductor —
-# does NOT work during the window that matters: the review loop gates the STAGED
-# tree, so while this PR is in flight HEAD is still the pre-move commit (it is
-# byte-identical to PRE_MOVE_DEFAULT right now), every anchor resolves, and the
-# case would exit 0. A driver that only starts working after the commit it is
-# meant to guard is not a driver.
+# NOT driven — the status-read arms #1588 added, and deleting any of them
+# ships green today. Called out individually because each one's ABSENCE is
+# expensive to rediscover, not because this list is exhaustive (it is not — see
+# the framing above):
+#   * `FAIL <name>: could not normalise the source chunk` and its `moved chunk`
+#     twin — the `|| { … }` on each `strip_blanks` substitution. Their driver
+#     needs a mutated copy of the script whose `strip_blanks` fails (an `awk`
+#     that is not on PATH, say). Without them a dead `awk` returns an empty
+#     string and the empty-chunk refusal below reports `empty chunk after
+#     normalisation` — a verdict about a chunk's CONTENT from a normalisation
+#     that never ran.
+#   * `FAIL: could not sweep <REF_DIR> for sentinels (grep exit N)` and
+#     `FAIL: could not normalise the sentinel sweep output`. Their driver needs
+#     an unreadable subtree under `reference/` (and a root-skip guard, since root
+#     reads it anyway), or a mutated copy. Without them a failed or partial walk
+#     leaves the undeclared/duplicated-sentinel invariant vacuous rather than
+#     satisfied — it passes by having stopped looking.
+#   * two arms of the split-span ADJACENCY block: `FAIL: the split anchors named
+#     by the manifest are not both present in <base>:<path>` (its `awk_rc`
+#     capture — the anchor-moved-inward case rewrites the head anchor to a line
+#     that IS present in the pinned commit, so that mutant reaches the
+#     `no longer adjacent` arm instead and never this one), and the
+#     `(( ${#mrow_tabs} >= 3 )) || continue` malformed-row skip #1588 added
+#     there (both malformed-row mutants corrupt a row this block's `case`
+#     ignores). Deleting the `awk_rc` capture is the costly one: an `awk` exiting
+#     3 then leaves `between` empty, the `[[ -n "$between" ]]` arm passes, and
+#     the adjacency invariant reports success having located neither anchor.
+# Every one of them is worth driving; none is driven here, and this block is the
+# only place that says so. Named rather than counted, for the reason the header
+# above gives about numerals.
 #
 # The `verified + chunk_failures != ${#MANIFEST}` reconciliation is in neither
 # list: every loop path increments exactly one counter before `continue`, so it
@@ -83,7 +142,7 @@
 #
 #   * USAGE errors (exit 2) need no repository at all — the script rejects them
 #     during flag parsing, before any git work. They are pure and instant.
-#   * SENTINEL / CHUNK behaviour needs a tree whose eight declared chunks
+#   * SENTINEL / CHUNK behaviour needs a tree whose declared chunks all
 #     resolve, because the MANIFEST is embedded in the script and pinned to the
 #     real pre-move anchors. So those cases stage a FAKE tree: a `.git` GITFILE
 #     pointing at the real admin dir (O(1) — never `cp -R` of the object store,
@@ -135,6 +194,68 @@ _require_pre_move_commit() {
   echo "PRE_MOVE_SHA ($PRE_MOVE_SHA) no longer resolves in a full clone —" >&2
   echo "re-pin PRE_MOVE_DEFAULT in $VERIFY." >&2
   return 1
+}
+
+# The 1-based line number of the FIRST line of $2 (a fixed string) in file $1.
+# Prints nothing and returns 1 when the needle is absent, so a caller's
+# assignment fails loudly under bats' errexit rather than comparing an empty
+# string as if it were a line number.
+#
+# Factored for the #1582 gap-prose family (#1588): those tests' needles were
+# whole-file greps, so the entire reviewer-path rule could be relocated BELOW
+# the protocol it governs — out of the unverified gap and past step 1 — with
+# every one of them still matching. Bracketing a representative needle between
+# the head-close and tail-open sentinels is what pins it in place.
+# `-x` matches the needle as a WHOLE LINE. The two sentinels need it — not
+# because of anything in THIS file, but because of the file being grepped:
+# `reference/review-loop.md`'s preamble quotes BOTH sentinels inline inside
+# backticks on one line, in the sentence explaining the gap. A substring search
+# therefore returns that one preamble line for both bounds, and every comparison
+# built on them is made against the wrong pair. (`extract_chunk` and the
+# stray-sentinel sweep match at column 0 for the same reason.)
+_gap_line() {  # [-x] $1 = file, $2 = fixed-string needle
+  local mode=-F
+  if [ "$1" = "-x" ]; then mode=-xF; shift; fi
+  [ "$#" -eq 2 ] || { printf '_gap_line: needs [-x] file, needle\n' >&2; return 2; }
+  local n
+  n=$(grep -n "$mode" -- "$2" "$1" | head -1 | cut -d: -f1)
+  [ -n "$n" ] || { printf '_gap_line: needle not found: %s\n' "$2" >&2; return 1; }
+  printf '%s\n' "$n"
+}
+
+# The whitespace-normalised text of the #1582 unverified gap ALONE — strictly
+# between the head-close and tail-open sentinels.
+#
+# This is what the gap-prose needles run against, and it collapses presence and
+# position into ONE assertion (#1588). The earlier cut ran each needle over the
+# whole file and then bracketed a single *representative* anchor, which is weaker
+# than it looks two ways: the anchor generally sat in a different sub-block from
+# the needles, so moving the asserted paragraph out of the gap left every needle
+# matching and the anchor unmoved — suite green, which is precisely the
+# relocation these checks exist to catch; and several anchors occur twice inside
+# the gap, so deleting the earlier sub-block silently re-anchored on the later
+# one. Grepping the gap's own text has neither failure mode, and needs no anchor.
+_gap_text() {  # $1 = file
+  [ "$#" -eq 1 ] || { printf '_gap_text: needs a file\n' >&2; return 2; }
+  local hc to
+  hc="$(_gap_line -x "$1" '<!-- /moved: round-protocol-head -->')" || return 1
+  to="$(_gap_line -x "$1" '<!-- moved: round-protocol-tail -->')" || return 1
+  # STRICTLY greater by more than one, not merely greater: on an EMPTY gap
+  # (`to == hc + 1`) the `sed` range's end precedes its start, and POSIX/GNU/BSD
+  # sed all then select exactly ONE line — line `hc+1`, which in that state is
+  # the tail sentinel itself. `_gap_text` would return that, non-empty, and every
+  # caller's `[ -n "$flat" ]` would pass over a gap holding nothing at all.
+  [ "$to" -gt "$((hc + 1))" ] || {
+    printf '_gap_text: the gap between the sentinels is empty or inverted (head close %s, tail open %s)\n' \
+      "$hc" "$to" >&2
+    return 1
+  }
+  # The blockquote marker is stripped while the text is still LINE-ORIENTED, and
+  # only at the start of a line. Doing it after the flatten (`sed 's/> //g'` over
+  # the whole string) also rewrites the `-> ` arrows in the both-spellings
+  # examples to `-`, so a needle written for that arrow — the load-bearing
+  # rendering of "Both, not either" — could only ever be written wrong.
+  sed -n "$((hc + 1)),$((to - 1))p" "$1" | sed 's/^> \{0,1\}//' | tr '\n' ' ' | tr -s ' '
 }
 
 # --- usage errors: exit 2, no repository needed ------------------------------
@@ -256,6 +377,13 @@ PY
   # ...and it failed for the right reason, not because the fixture was broken
   lacks "$output" "reference file not found"
   contains "$output" "did not move verbatim"
+  # The OTHER direction of the two-summary separation (#1588). The sweep summary
+  # must be absent on a chunk-only failure, exactly as the sweep-only case pins
+  # the chunk summary's absence. Without this, widening the sweep summary's guard
+  # to `(( chunk_failures || sweep_failures ))` prints
+  # `0 sentinel/split-span problem(s)` beside every chunk failure — the
+  # mis-direction the #1588 reword removed — with the whole file green.
+  lacks "$output" "sentinel/split-span problem"
   # The report itself, not just the verdict. The script's header promises "it
   # prints the first differing line, with both sides"; without this the whole
   # report loop could be deleted and the suite would stay green, leaving the gate
@@ -374,7 +502,15 @@ PY
     printf '<!-- /moved: undeclared-chunk -->\n'
   } >> "$fake/development/skills/resolve-issue/reference/residue.md"
   run -1 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
-  contains "$output" "sentinel problem"
+  # `sentinel/split-span problem` since #1588: the counter is incremented by
+  # several arms and only two of them are "undeclared or duplicated in reference/",
+  # so the old label mis-sent the operator on the arms it does not describe. What
+  # this case pins is the SEPARATION of the two summaries, not their wording.
+  # The COUNT too, not just the label: the fixture appends exactly one undeclared
+  # chunk, so it is deterministic. This is a computed value read back from the
+  # subject, not a restated numeral of the kind the header forbids — and it is
+  # what catches the summary reporting the wrong counter.
+  contains "$output" "1 sentinel/split-span problem"
   # no chunk actually differs, so the chunk line must be absent
   lacks "$output" "did not move verbatim"
 }
@@ -388,33 +524,32 @@ PY
 
 @test "#1582 the round protocol states the scope_abs rule, IN the gap above step 1" {
   local f="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
-  # the heading the rule lives under is still the protocol's own
-  grep -qF -- '## The round protocol' "$f"
+  # The heading the rule lives under is still the protocol's own — and still
+  # ABOVE the span it titles (#1588). A presence-only grep proved it existed
+  # somewhere: the heading sits outside every byte-verified chunk (above the
+  # head-open sentinel), so moving it to the bottom of the file left this test
+  # and the byte gate both green while the gap prose no longer sat under it.
+  local h_line hopen
+  h_line="$(_gap_line -x "$f" '## The round protocol')"
+  hopen="$(_gap_line -x "$f" '<!-- moved: round-protocol-head -->')"
+  [ "$h_line" -lt "$hopen" ]
   # build the scope block from scope_abs[], not changed_files alone
-  grep -qF -- 'Build each reviewer'"'"'s scope block from the plan'"'"'s `scope_abs[]`' "$f"
+  # Run against the GAP's flattened text (#1588), which makes presence and
+  # position one assertion — these three straddle a wrap point in their
+  # paragraph, so a line-oriented grep over them rots on the next re-flow.
+  local flat
+  flat="$(_gap_text "$f")"
+  [ -n "$flat" ]
+  printf '%s' "$flat" | grep -qF -- 'Build each reviewer'"'"'s scope block from the plan'"'"'s `scope_abs[]`'
   # the negation, pinned on the clause it actually turns on rather than on a
   # generic `never from` that any future sentence could satisfy
-  grep -qF -- '`changed_files` alone (#1582)' "$f"
+  printf '%s' "$flat" | grep -qF -- '`changed_files` alone (#1582)'
   # It names the frozen instruction it governs. Anchored on the NEW sentence, not
   # on the quoted fragment: `scoped to the plan's `changed_files`` also occurs
   # inside the byte-frozen tail chunk, where it can never be removed — so a
-  # whole-file grep for it can only ever match and would prove nothing.
-  grep -qF -- 'This governs step 1 below, whose frozen text' "$f"
-
-  # POSITION, not just presence. Every needle above is a whole-file grep, so
-  # without this the entire rule block could be moved to the end of the file —
-  # below the protocol it governs — with the suite still green.
-  local head_close tail_open rule
-  head_close=$(grep -nxF -- '<!-- /moved: round-protocol-head -->' "$f" | cut -d: -f1)
-  tail_open=$(grep -nxF -- '<!-- moved: round-protocol-tail -->' "$f" | cut -d: -f1)
-  rule=$(grep -nF -- "Build each reviewer's scope block" "$f" | cut -d: -f1)
-  # one per line: in an `&&`-list only the LAST status reaches errexit, so a
-  # joined guard reads as three checks and is one (#1067)
-  [ -n "$head_close" ]
-  [ -n "$tail_open" ]
-  [ -n "$rule" ]
-  [ "$rule" -gt "$head_close" ]
-  [ "$rule" -lt "$tail_open" ]
+  # whole-file grep for it can only ever match and would prove nothing. Grepping
+  # the gap alone removes that hazard outright: the tail chunk is not in it.
+  printf '%s' "$flat" | grep -qF -- 'This governs step 1 below, whose frozen text'
 }
 
 @test "#1582 BOTH forms of the verbatim reviewer sentence are stated" {
@@ -423,16 +558,20 @@ PY
   # reflowed blockquote sentences, and a line-oriented needle over them passes or
   # fails on where the paragraph happens to wrap
   local flat
-  flat="$(tr '\n' ' ' < "$f" | tr -s ' ' | sed 's/> //g')"
+  flat="$(_gap_text "$f")"
+  # non-vacuity: an empty gap must never satisfy the needles below
+  [ -n "$flat" ]
   # two-clause form, for a linked worktree
   printf '%s' "$flat" | grep -qF -- "Read every file you are given under \`<worktree_root>\`; this run's tree is that directory, not \`<original_root>\`."
   # single-clause form, for original_root == null
   printf '%s' "$flat" | grep -qF -- "Read every file you are given under \`<worktree_root>\`. Report every finding's"
-  # the prohibition that makes the null case unambiguous
-  grep -qF -- 'Never render the literal `null` into the sentence.' "$f"
+  # the prohibition that makes the null case unambiguous — flattened like the
+  # two above (#1588); it is ordinary wrapped prose, not a code-block line
+  printf '%s' "$flat" | grep -qF -- 'Never render the literal `null` into the sentence.'
   # the sentence must not be readable as a SCOPE instruction — it names which
   # tree, never how much of it
-  grep -qF -- 'it never widens the round'"'"'s scope' "$f"
+  printf '%s' "$flat" | grep -qF -- 'it never widens the round'"'"'s scope'
+
 }
 
 @test "#1582 the reporting rule is relayed INTO the reviewer prompt, not just stated" {
@@ -447,58 +586,173 @@ PY
   # different word and a line-oriented grep matches neither reliably — which is
   # how a needle over prose rots into a no-op.
   local flat
-  flat="$(tr '\n' ' ' < "$f" | tr -s ' ' | sed 's/> //g')"
+  flat="$(_gap_text "$f")"
+  # non-vacuity: an empty gap must never satisfy the needles below
+  [ -n "$flat" ]
   # BOTH forms carry the reporting sentence — the two-clause one and the
   # first-clause-only one for `original_root: null`
   [ "$(printf '%s' "$flat" | grep -o -- "Report every finding's \`file\` using the repo-relative name shown for it in the scope block — never the absolute path you read." | wc -l | tr -d ' ')" -eq 2 ]
-  grep -qF -- 'so the reviewer is who' "$f"
+  printf '%s' "$flat" | grep -qF -- 'so the reviewer is who'
   # the scope block must carry BOTH spellings, or the reporting rule above names
   # a column the prompt does not contain — the contradiction two reviewers found
-  grep -qF -- 'giving **both spellings of every file**' "$f"
-  grep -qF -- 'Both, not either' "$f"
+  printf '%s' "$flat" | grep -qF -- 'giving **both spellings of every file**'
+  printf '%s' "$flat" | grep -qF -- 'Both, not either'
+
 }
 
 @test "#1582 the rule keeps a finding's .file repo-relative" {
   local f="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
-  grep -qF -- "A finding's \`.file\` stays repo-relative" "$f"
+  # reflowable prose, whitespace-normalised (#1588)
+  local flat
+  flat="$(_gap_text "$f")"
+  # non-vacuity: an empty gap must never satisfy the needles below
+  [ -n "$flat" ]
+  printf '%s' "$flat" | grep -qF -- "A finding's \`.file\` stays repo-relative"
   # the load-bearing prohibition — scope_abs[] is the absolute spelling a
   # reviewer now HAS to hand, so forbidding it is the operative half
-  grep -qF -- 'never an entry from `scope_abs[]`' "$f"
-  grep -qF -- 'silently DISCARDS' "$f"
+  printf '%s' "$flat" | grep -qF -- 'never an entry from `scope_abs[]`'
+  printf '%s' "$flat" | grep -qF -- 'silently DISCARDS'
+
 }
 
 @test "#1582 the rule carries the work-dir subtraction, the confirm step and the deletion arm" {
   local f="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # Reflowable prose runs against WHITESPACE-NORMALISED text (#1588). These are
+  # wrapped paragraph sentences, so a line-oriented `grep -qF` matches or misses
+  # on where the paragraph happens to wrap — three needles in this family broke
+  # exactly that way inside #1582's own loop, and the verdict needle below broke
+  # again the moment it was written line-oriented.
+  local flat
+  flat="$(_gap_text "$f")"
+  # non-vacuity: an empty gap must never satisfy the needles below
+  [ -n "$flat" ]
+
   # scope_abs is the RAW changed_files joined to the root, so the subtraction
   # step 1 mandates has to be restated for the absolute list or the panel gets
   # dispatched over the loop's own state
-  grep -qF -- 'same `--work-dir` subtraction' "$f"
+  printf '%s' "$flat" | grep -qF -- 'same `--work-dir` subtraction'
   # plan reports the roots of whatever --repo it was handed; it cannot know it
   # was the right one
-  grep -qF -- 'First confirm the descriptor describes the tree the STORY was implemented in' "$f"
+  printf '%s' "$flat" | grep -qF -- 'First confirm the descriptor describes the tree the STORY was implemented in'
   # ...and the arm a naive cwd test gets backwards: an epic child runs in its own
   # worktree while the invoking session's cwd stays at the original checkout, so
-  # a cwd mismatch on a CORRECT descriptor must not trigger a re-plan
-  grep -qF -- 'even when that' "$f"
-  grep -qF -- 'Never re-plan against your cwd' "$f"
+  # a cwd mismatch on a CORRECT descriptor must not trigger a re-plan.
+  #
+  # Needle the VERDICT, not the connective (#1588). The former needle was
+  # `even when that`, which survives the mutation it existed to catch: rewriting
+  # the arm to `→ re-plan, **even when that differs…**` inverts the rule and the
+  # connective still matches. Binding the descriptor clause to its verdict is
+  # what makes the needle red on that inversion.
+  printf '%s' "$flat" | grep -qF -- 'IS the implementation worktree** → proceed, **even when that differs from your own cwd**'
+  printf '%s' "$flat" | grep -qF -- 'Never re-plan against your cwd'
   # and the re-plan arm must keep the round-scoping flags — a bare
   # `plan --repo <wt>` defaults --round to 1 and silently reviews the whole diff
-  grep -qF -- 'every other flag unchanged' "$f"
+  printf '%s' "$flat" | grep -qF -- 'every other flag unchanged'
   # changed_files lists deletions, so scope_abs provably contains unreadable paths
-  grep -qF -- 'a file the story DELETED' "$f"
+  printf '%s' "$flat" | grep -qF -- 'a file the story DELETED'
   # the deletion excerpt is ROOTED at the descriptor's tree, not at your cwd —
   # the same hazard the confirm step above exists for
-  grep -qF -- 'root the command at the tree the descriptor names' "$f"
+  printf '%s' "$flat" | grep -qF -- 'root the command at the tree the descriptor names'
   # ...and an empty excerpt is a stop, or a `[DELETED]` marking tells the
   # reviewer not to question a file nobody reviewed
-  grep -qF -- 'An EMPTY excerpt is a stop' "$f"
+  printf '%s' "$flat" | grep -qF -- 'An EMPTY excerpt is a stop'
   # the carried entries are the one thing a reviewer opens beyond the scope
   # block, and they get the same both-spellings treatment
-  grep -qF -- 'The carried entries are the one exception' "$f"
-  grep -qF -- 'Carried entries to verify' "$f"
-  # and the deletion arm reaches the REVIEWER, who is the party that opens the
-  # missing path — the same relay failure as the reporting rule
-  grep -qF -- '[DELETED by this story]' "$f"
+  printf '%s' "$flat" | grep -qF -- 'The carried entries are the one exception'
+  # ...these two are CODE-BLOCK lines, not reflowable prose, so they stay
+  # line-oriented: a fenced block does not re-wrap.
+  # Gap-scoped and DISCRIMINATING (#1588). These were whole-file greps for two
+  # strings that are not unique — `Carried entries to verify` renders twice and
+  # `[DELETED by this story]` five times — so each was satisfied by an occurrence
+  # other than the one it pins, and deleting the fenced block that renders the
+  # marked carried entry (the concrete form the rule points at) left the suite
+  # green. Count the carried blocks, and bind the marking to the header that
+  # immediately precedes it. `tr -s ' '` has already collapsed the block's
+  # indentation, so the entry flattens to a single-spaced form.
+  # Each block pinned by its OWN body, not by a shared count. A count of 2 reds
+  # on deleting either block, but it does not notice a block being GUTTED, and it
+  # would red falsely if a third legitimate rendering were ever added. Binding
+  # each marking to the header immediately above it does both jobs. The first
+  # needle also exercises the `-> ` arrow, which is the load-bearing rendering of
+  # "Both, not either" and the reason the blockquote strip runs before the
+  # flatten rather than after it.
+  printf '%s' "$flat" | grep -qF -- 'report under the repo-relative name beside it: development/skills/resolve-issue/scripts/review-dispatch.zsh -> /abs/path/to/<worktree>/development/skills/resolve-issue/scripts/review-dispatch.zsh'
+  printf '%s' "$flat" | grep -qF -- 'report under the repo-relative name beside it: development/skills/resolve-issue/scripts/old-helper.zsh [DELETED by this story]'
+  # ...and the SCOPE block's own two renderings, by the same shape
+  printf '%s' "$flat" | grep -qF -- "report each finding's \`file\` under the repo-relative name beside it: development/skills/resolve-issue/scripts/review-dispatch.zsh -> /abs/path/to/<worktree>/"
+  printf '%s' "$flat" | grep -qF -- 'say what to do with them: ```text development/skills/resolve-issue/scripts/old-helper.zsh [DELETED by this story]'
+
+}
+
+@test "#1588 the carried section carries an arm for a carried-and-DELETED file" {
+  # Items 11-12. A carried entry whose file the previous fix pass deleted sat in
+  # both lists with OPPOSITE instructions: the scope block said not to raise a
+  # finding about the missing path, the carried header said to read the absolute
+  # path. The reviewer had to pick one, and neither choice was stated.
+  local f="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  local flat
+  flat="$(_gap_text "$f")"
+  # non-vacuity: an empty gap must never satisfy the needles below
+  [ -n "$flat" ]
+
+  # it KEEPS its place — dropping it would retire a blocker nobody confirmed
+  printf '%s' "$flat" | grep -qF -- 'A carried entry whose file no longer exists keeps its place here'
+  # the marking REPLACES "read the absolute path" for that entry...
+  printf '%s' "$flat" | grep -qF -- 'The marking **replaces** "read the absolute path" for that entry'
+  # ...and the excerpt is what the reviewer confirms the landing from
+  printf '%s' "$flat" | grep -qF -- 'confirms the carried blocker landed from the excerpt'
+  # item 12: the single-spelling exception is STATED, not left implicit in an example
+  printf '%s' "$flat" | grep -qF -- 'a `[DELETED by this story]` entry is the one exception to "Both, not either"'
+
+  # The rule REACHES THE REVIEWER. Stating it only to the driving session leaves
+  # the scope block's blockquote as the sole marker-keyed instruction in the
+  # prompt — and that one says not to question the entry, which on a CARRIED
+  # entry means nobody accounts for the blocker and it is stalled or retired.
+  # Same relay failure as the reporting rule, so the same remedy: a verbatim
+  # sentence, plus the re-raise duty that makes it non-optional.
+  printf '%s' "$flat" | grep -qF -- 'in the **carried** section has no'
+  printf '%s' "$flat" | grep -qF -- 're-raise it at its original severity if you cannot'
+  # ...and the scope block's blockquote is SCOPED so it cannot be read as
+  # governing the carried section too
+  printf '%s' "$flat" | grep -qF -- '`[DELETED by this story]` **in the scope block** is expected'
+
+  # The antecedent is TESTED, not inferred from which round deleted the file —
+  # the carried section is built by string-prefixing verify-<R>.json and checks
+  # nothing, and keying on "the previous fix pass" would miss an entry deleted
+  # earlier and still unconfirmed.
+  printf '%s' "$flat" | grep -qF -- 'test whether its file exists under `<worktree_root>`'
+  printf '%s' "$flat" | grep -qF -- 'whatever round removed it'
+
+  # THE NOTE ARM, pinned in its own right. The blockquote has two arms and keys
+  # on which the entry carries; pinning only the excerpt arm left the note arm —
+  # the reviewer-facing half of the whole fix — deletable with the suite green,
+  # which is the same relay failure this family exists to catch, one level up.
+  printf '%s' "$flat" | grep -qF -- 'Where it carries the note **`exists in neither tree`** instead'
+  printf '%s' "$flat" | grep -qF -- 'count the entry as confirmed, say so in your count, and do not re-raise it'
+  # ...and emitting NEITHER form is forbidden, which is what makes the keying
+  # non-optional rather than a stylistic choice
+  printf '%s' "$flat" | grep -qF -- 'Emit one or the other, never neither'
+
+  # The empty-excerpt rule is stated ONCE and governs BOTH sections, so the
+  # scope block's abbreviated "report it and stop" cannot be read as the whole
+  # rule. Its probe must establish it can answer before any per-entry verdict.
+  printf '%s' "$flat" | grep -qF -- 'governs **both** sections'
+  printf '%s' "$flat" | grep -qF -- 'Establish the probe can answer at all'
+  printf '%s' "$flat" | grep -qF -- 'never by how many entries came back one way'
+
+  # The two arms of the per-entry split.
+  printf '%s' "$flat" | grep -qF -- 'absent at `<base>` too'
+  printf '%s' "$flat" | grep -qF -- 'do not stop'
+  printf '%s' "$flat" | grep -qF -- 'present at `<base>`**, excerpt still empty'
+
+  # ...and the DELTA-round reachability that makes the scope block need the rule
+  # too. An earlier cut asserted the scope block was immune because its entries
+  # come from `git diff --name-only`; on a delta round they come from
+  # `diff-tree <prior_tree> <cur>`, which does list a created-then-deleted file,
+  # so that assertion would have aborted a healthy delta round.
+  printf '%s' "$flat" | grep -qF -- 'Both sections reach case 2'"'"'s first arm'
+  printf '%s' "$flat" | grep -qF -- 'which lists a file that existed at `prior_tree` and is gone now'
+  printf '%s' "$flat" | grep -qF -- 'it is immune on full rounds only'
 }
 
 @test "#1582 the round-protocol span is re-cut into head + tail, and the old name is gone" {
@@ -544,12 +798,11 @@ PY
   # same edit that violated it, which is why the script now asserts adjacency
   # directly and this test checks that it does.
   local f="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # Through the helper (#1588), not a hand-rolled `grep -nxF | cut`: one lookup
+  # path, and its loud not-found message instead of a silently empty variable.
   local head_close tail_open span
-  head_close=$(grep -nxF -- '<!-- /moved: round-protocol-head -->' "$f" | cut -d: -f1)
-  tail_open=$(grep -nxF -- '<!-- moved: round-protocol-tail -->' "$f" | cut -d: -f1)
-  # one per line, same reason as above (#1067)
-  [ -n "$head_close" ]
-  [ -n "$tail_open" ]
+  head_close="$(_gap_line -x "$f" '<!-- /moved: round-protocol-head -->')"
+  tail_open="$(_gap_line -x "$f" '<!-- moved: round-protocol-tail -->')"
   [ "$tail_open" -gt "$head_close" ]
   span=$(( tail_open - head_close - 1 ))
   # non-vacuous: the gap really does hold the rule
@@ -567,9 +820,14 @@ PY
   ')"
   [ -z "$between" ]
 
-  # ...and the script really enforces it, rather than merely documenting it —
-  # a declared-but-unapplied invariant would leave this test the only checker
-  grep -qF -- 'split anchors are no longer adjacent' "$VERIFY"
+  # No needle here on the script's own diagnostic text (#1588). That the script
+  # really ENFORCES the invariant rather than merely documenting it is driven
+  # behaviourally, by the two cases `#1582 the adjacency invariant FIRES when a
+  # manifest anchor is moved inward` and `#1582 the adjacency invariant FIRES
+  # when the manifest stops declaring a split row` — each running a mutated copy
+  # and asserting it exits 1. A `grep` for the sentence was redundant beside
+  # those, not merely weak: it red on a harmless reword and passed on a gutted
+  # check, which is backwards on both counts.
 }
 
 @test "#1582 the split still verifies byte-identical, at eight chunks" {
@@ -586,9 +844,19 @@ PY
   # The gap is the cost of the re-cut. If nobody records it, the next reader
   # assumes the whole span is still proven — which is the false-confidence this
   # story exists to remove.
+  #
+  # THIS NEEDLE IS A DELIBERATE DOCUMENTATION TRIPWIRE, and the only one in the
+  # #1582 family (#1588). It pins COMMENT PROSE on purpose: the thing being
+  # guarded IS the recording, so there is no behaviour to assert instead, and
+  # reddening on deletion of the record is exactly the intent. Narrowed to the
+  # one token that carries the admission, so a reword around it stays green.
+  #
+  # Its former companion `SPLIT into head + tail (#1582)` was deleted rather
+  # than kept: unlike this one it named a CONDITION (that the span is split) and
+  # would have gone on passing if the gap were re-enlarged, so it did not guard
+  # what it named. Every other needle in this family pins behaviour.
   local v="$REPO_ROOT/development/skills/resolve-issue/scripts/verify-reference-move.zsh"
   grep -qF -- 'verified by NOTHING' "$v"
-  grep -qF -- 'SPLIT into head + tail (#1582)' "$v"
 }
 
 # --- #1582: the split-span sweep arms, DRIVEN (not merely re-derived) --------
@@ -603,8 +871,11 @@ PY
   local f="$fake/development/skills/resolve-issue/reference/review-loop.md"
   # swap the two inner sentinels: head's closer moves below tail's opener
   local hc to
-  hc=$(grep -nxF -- '<!-- /moved: round-protocol-head -->' "$f" | cut -d: -f1)
-  to=$(grep -nxF -- '<!-- moved: round-protocol-tail -->' "$f" | cut -d: -f1)
+  # through the helper, like every other sentinel lookup in this file (#1588):
+  # its not-found message names WHICH sentinel went missing, where an empty
+  # variable reaching the `sed` address below only yields a usage error
+  hc="$(_gap_line -x "$f" '<!-- /moved: round-protocol-head -->')"
+  to="$(_gap_line -x "$f" '<!-- moved: round-protocol-tail -->')"
   sed -i.bak -e "${hc}s|.*|<!-- moved: round-protocol-tail -->|" \
              -e "${to}s|.*|<!-- /moved: round-protocol-head -->|" "$f"
   rm -f "$f.bak"
@@ -612,6 +883,19 @@ PY
   run zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
   contains "$stderr$output" "the split halves are out of order"
+
+  # BOTH summaries, because this fixture drives BOTH counters (#1588). Swapping
+  # the sentinels makes `extract_chunk` overrun both round-protocol chunks into
+  # the gap, so chunk_failures is 2 alongside sweep_failures 1 — measured, not
+  # reasoned. This is the CO-OCCURRENCE arm of the separation the script's
+  # exit-code table promises ("counted and reported separately … but both land
+  # here"); the two single-defect directions are pinned by the chunk-only and
+  # sweep-only cases above. Without it, chaining the sweep summary onto the
+  # chunk summary as an `elif` leaves every case green while a both-defect run
+  # tells the operator only about chunks — the mis-attribution the separate
+  # reporting exists to prevent, inverted.
+  contains "$stderr$output" "did not move verbatim"
+  contains "$stderr$output" "1 sentinel/split-span problem"
 }
 
 @test "#1582 the sweep FAILS when a split sentinel is missing" {
@@ -661,11 +945,112 @@ PY
     zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT" --quiet
   [ -z "$output" ]
 
-  # GIT_WORK_TREE alone, so neither name can be dropped from the scrub
-  # independently
-  run -0 env GIT_WORK_TREE="$other" \
+  # GIT_DIR alone — the name that actually redirects this script's reads, so
+  # this arm DISCRIMINATES: removing `GIT_DIR` from the scrub reds it (#1588).
+  #
+  # It replaces a GIT_WORK_TREE-alone arm that could not fail. This script's
+  # only git calls are `rev-parse --verify <base>^{commit}` and
+  # `git show <base>:<path>` — pure object-DB reads, which a work-tree override
+  # does not touch — so both assertions held with `GIT_WORK_TREE` removed from
+  # the `unset` entirely, and the arm read as coverage while proving nothing.
+  #
+  # `GIT_WORK_TREE`/`GIT_INDEX_FILE` stay in the script's `unset` as
+  # DEFENCE-IN-DEPTH for this script, not because this suite pins them: no call
+  # here consults either. The `review-dispatch.zsh` twin is different — it runs
+  # work-tree-sensitive commands, so its GIT_WORK_TREE arm genuinely
+  # discriminates and stays.
+  run -0 env GIT_DIR="$other/.git" \
     zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT" --quiet
   [ -z "$output" ]
+}
+
+@test "#1588 ARCHITECTURE.md's byte-identity claim carries the unverified-gap carve-out" {
+  # Item 10. The claim is true of the EIGHT DECLARED CHUNKS and not of the whole
+  # of reference/: the #1582 re-cut opened a gap that no byte comparison covers.
+  # `reference/review-loop.md`'s preamble and the script header were both
+  # corrected; ARCHITECTURE.md was the third restatement site and still said it
+  # file-wide, which is the overclaim a reader would rely on.
+  #
+  # Whitespace-normalised, because this is wrapped prose in a long paragraph and
+  # a line-oriented needle over it rots on the next reflow (#1588).
+  local a="$REPO_ROOT/ARCHITECTURE.md"
+  local flat
+  flat="$(tr '\n' ' ' < "$a" | tr -s ' ')"
+  # NOT "the eight declared chunks": a numeral here is the counted enumeration
+  # the fix-pass rules say to replace with a name, and #1582 already moved this
+  # one from seven to eight with nothing comparing it to the manifest (#1588).
+  printf '%s' "$flat" | grep -qF -- 'for the chunks the manifest declares, which are not the whole of'
+  printf '%s' "$flat" | grep -qF -- 'the text in that gap is verified by nothing'
+  printf '%s' "$flat" | grep -qF -- 'asserting the two anchors stay adjacent in the pinned commit'
+  # The carve-out's scope is stated as a CONDITION, not a closed site roster —
+  # and the condition is on the CLAIM'S SHAPE, not on which file it is about.
+  # Keying it on the file contradicted the very next sentence, which correctly
+  # excludes tests/resolve-issue-corpus.bash: that file's sweep does cover
+  # review-loop.md, so "a claim about a gap-containing file" caught it while the
+  # exclusion said it was not owed (#1588).
+  printf '%s' "$flat" | grep -qF -- 'owed by the **shape of the claim**, not by which file the claim is'
+  printf '%s' "$flat" | grep -qF -- 'covering a gap-containing file **as a whole**'
+  # ...and the per-chunk claims are named as NOT owing it, with the reason
+  printf '%s' "$flat" | grep -qF -- 'A claim scoped to **each declared chunk** does not need it'
+  # ...and the numeral is really gone, not merely reworded around
+  lacks "$flat" "eight declared chunks"
+}
+
+@test "#1588 a manifest row with fewer than four fields exits 1 and prints the row" {
+  # Field-peeling is forgiving in the wrong direction: `${row%%$'\t'*}` /
+  # `${row#*$'\t'}` on a THREE-field row leave `first` and `last` holding the
+  # same string, so the operator is told "could not locate the source range"
+  # beneath two IDENTICAL anchors — a message pointing at the anchors when the
+  # fault is the row. Never a silent pass (the empty-chunk guard and the counter
+  # reconciliation close those exits), so the cost is diagnosis time; this pins
+  # the diagnosis. Mutation: delete the `(( ${#row_tabs} < 3 ))` guard and the
+  # run reports the misleading source-range failure instead.
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-short-row.zsh"
+  # Drop the REF_FILE field from the first manifest row, leaving three fields.
+  # The first row, so no other row is processed before the guard fires.
+  sed 's|^"interactive-remediation	interactive.md	|"interactive-remediation	|' \
+    "$VERIFY" > "$mutant"
+  # the mutation must have applied, or this case proves nothing (`run !`, since
+  # a bare `!` is inert in bats, #829)
+  run ! grep -qF '"interactive-remediation	interactive.md	' "$mutant"
+
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "needs 4 tab-separated fields, found 3"
+  # the OFFENDING ROW is printed — that is the whole point of the guard, and a
+  # message naming only the count would leave the operator hunting for which row
+  contains "$stderr$output" "interactive-remediation"
+  # ...and it did NOT reach the misleading diagnosis the guard exists to replace
+  lacks "$stderr$output" "could not locate the source range"
+}
+
+@test "#1588 a manifest row with a FOURTH tab is not refused — the guard is < 3, not != 3" {
+  # The other half of the guard's contract, and the half an earlier cut left
+  # undriven: `last` absorbs everything after the third tab, so a tab INSIDE an
+  # anchor line is legitimate and must keep working. Changing `< 3` to `!= 3`
+  # reds this case while leaving the too-few-fields case green, which is exactly
+  # the asymmetry that makes it worth driving.
+  #
+  # It drives the SCRIPT rather than re-deriving the arithmetic in the test: an
+  # earlier attempt re-implemented the tab count in bats and proved nothing about
+  # the subject.
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-extra-tab.zsh"
+  # Append a tab plus a token to the FIRST row's last field. The row now has four
+  # tabs; the anchor no longer matches the pinned commit, so the run still fails —
+  # but it must fail as an unlocatable RANGE, never as a malformed row.
+  sed 's|^\("interactive-remediation	interactive.md	[^	]*	.*\)$|\1	TRAILING|' \
+    "$VERIFY" > "$mutant"
+  run ! grep -qF '	TRAILING' "$VERIFY"
+  run -0 grep -qF '	TRAILING' "$mutant"
+
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  # the field-count guard did NOT fire — four tabs is a legitimate row shape
+  lacks "$stderr$output" "needs 4 tab-separated fields"
+  # ...it failed for the right reason instead
+  contains "$stderr$output" "could not locate the source range"
 }
 
 @test "#1582 the adjacency invariant FIRES when a manifest anchor is moved inward" {

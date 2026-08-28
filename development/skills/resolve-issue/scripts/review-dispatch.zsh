@@ -135,7 +135,10 @@
 #   3  typed escalation — unsupported or ambiguous repo type; a JSON error object
 #      { error, ... } is printed on stdout for the orchestrator to relay
 #   1  internal error — detect-stack / git / jq failed, a `--prior-tree` that
-#      does not resolve to a tree-ish in the repo, or `--repo` names
+#      does not resolve to a tree-ish in the repo, an unreadable
+#      `.maintenance.yml` primary key (#1588 — the repo itself is fine, a file
+#      inside it is not; reaches `detect` as well as `plan`, since both go
+#      through `_repo_type`), or `--repo` names
 #      something unusable (absent, not a directory, not readable/traversable).
 #      Note the split from 2: a MISSING `--repo` is a usage error (2), a `--repo`
 #      that is present but unusable is this one, because the invocation was
@@ -297,10 +300,12 @@ _worktree_root() {
 # than a tree — rendering it into the reviewer sentence would point the panel at
 # something it cannot read. Empty here means `null` in the descriptor, which is
 # the truthful answer: there is no original checkout to confuse a reviewer with.
-# Written without a `for … in` loop deliberately: `resolve-profile-contract.bats`
-# derives this script's emittable repo types by matching `^  for l in <…>; do`,
-# so such a loop here is parsed as a repo-type enumeration site and yields a
-# bogus type. Parameter expansion keeps the two apart.
+# Written without a `for … in` loop deliberately: a `^  for l in <…>; do` line in
+# this file is parsed by the suites as THE repo-type enumeration site, so such a
+# loop here yields a bogus type. Stated as the invariant rather than as a roster
+# of the suites that rely on it (#1588) — there are two today,
+# `resolve-profile-contract.bats` and `review-dispatch.bats`, and a named list
+# goes stale as sites are added. Parameter expansion keeps the two apart.
 _main_root() {
   local repo="$1" listing="" block="" root=""
   listing=$("$git_bin" -C "$repo" worktree list --porcelain) || return 1
@@ -559,7 +564,19 @@ _repo_type() {
   elif (( ${#supported} == 1 )); then
     repo_type="${supported[1]}"
   else
-    local primary; primary=$(_primary "$repo")
+    # The status IS read (#1588), for the same reason every jq read above is: an
+    # UNREADABLE (not absent) `.maintenance.yml` leaves `primary` empty, and an
+    # unchecked read then falls into the `ambiguous_repo_type` branch below —
+    # telling a human to "set .maintenance.yml primary to one of the candidates"
+    # for a repo that may already carry one. That is a verdict about the REPO
+    # where the truth is a fact about the MACHINE, the confidently-wrong cause
+    # `_primary`'s own comment says it exists to avoid. The absent file is not
+    # this case: `_primary` returns 0 for it, so the ordinary "no primary" path
+    # still reaches the escalation.
+    local primary
+    primary=$(_primary "$repo") || {
+      print -u2 -- "${ctx}: could not read the .maintenance.yml primary key for $repo"; exit 1
+    }
     if [[ -n "$primary" ]] && (( ${supported[(Ie)$primary]} )); then
       repo_type="$primary"
     else
@@ -718,7 +735,14 @@ cmd_plan() {
   main_root=$(_main_root "$repo") || {
     print -u2 -- "plan: could not resolve the original checkout root (git worktree list) for $repo"; exit 1
   }
-  # Empty means "not a linked worktree", which the emitter renders as `null`.
+  # Empty means "no original checkout to name", which the emitter renders as
+  # `null` — and that covers TWO cases, not one (#1588). The obvious one is a
+  # main checkout, whose two roots are equal. The other is a BARE main worktree:
+  # `_main_root` succeeds with an EMPTY root there (its own comment says so, and
+  # the contrast block above this function repeats it), so the comparison below
+  # is false and `original_root` is assigned that empty value. Glossing this as
+  # "not a linked worktree" alone would contradict both of those statements —
+  # a plan run FROM a linked worktree of a bare clone lands here too.
   # Keyed on the two roots DIFFERING, not on any worktree-detection flag: the
   # main checkout is its own first `worktree list` entry, so the comparison is
   # the whole test.

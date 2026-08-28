@@ -295,8 +295,8 @@ Then build the scope block, giving **both spellings of every file** — the
 repo-relative name the finding must carry, and the absolute path to read:
 
 ```text
-Review scope — read the absolute path; report each finding's `file` under the
-repo-relative name beside it:
+Review scope (the scope block) — read the absolute path; report each finding's
+`file` under the repo-relative name beside it:
   development/skills/resolve-issue/scripts/review-dispatch.zsh
     -> /abs/path/to/<worktree>/development/skills/resolve-issue/scripts/review-dispatch.zsh
 ```
@@ -304,7 +304,10 @@ repo-relative name beside it:
 Both, not either: a block of `scope_abs[]` alone leaves the prompt with no
 repo-relative spelling for the reporting rule below to name, and a block of
 `changed_files` alone is the cwd-resolution hazard this whole section exists to
-close.
+close. One entry breaks that symmetry, and it is the one the example below
+shows with a single spelling: a `[DELETED by this story]` entry is the one
+exception to "Both, not either" — the absolute spelling names a path nobody can
+open, so give the repo-relative name and the excerpt.
 
 Then open every reviewer prompt with these two sentences **verbatim**:
 
@@ -340,11 +343,106 @@ prompt a second, clearly-labelled section with the **same both-spellings
 treatment**, covering every file named in `<work-dir>/verify-<R>.json`:
 
 ```text
-Carried entries to verify — read the absolute path; report under the
-repo-relative name beside it:
+Carried entries to verify (the carried section) — read the absolute path;
+report under the repo-relative name beside it:
   development/skills/resolve-issue/scripts/review-dispatch.zsh
     -> /abs/path/to/<worktree>/development/skills/resolve-issue/scripts/review-dispatch.zsh
 ```
+
+**A carried entry whose file no longer exists keeps its place here.** The header
+above says to read the absolute path, and the deletion arm below says not to
+raise a finding about the missing path — a file in both lists would otherwise
+carry those two instructions at once. **Both apply, each scoped to its own
+section**: the scope block's covers reviewing the deletion as new work, the
+carried section's covers accounting for the blocker, and the two blockquotes
+below say so verbatim. It keeps its place because dropping it would silently
+retire a blocker nobody confirmed.
+
+**Test the antecedent; do not infer it from which round did the deleting.** The
+carried section is built by prefixing every name in `<work-dir>/verify-<R>.json`
+with the worktree root, which is a string operation and checks nothing — so
+**for every entry, test whether its file exists under `<worktree_root>`, and
+take this arm whenever it does not**, whatever round removed it. Keying on *the
+previous* fix pass would miss an entry deleted in round R-1 and still unconfirmed
+at R+1, which is the same silent retirement by a longer route.
+
+So mark it **`[DELETED by this story]`**, exactly as the scope block does, and
+give it the **same excerpt**:
+
+```text
+Carried entries to verify (the carried section) — read the absolute path;
+report under the repo-relative name beside it:
+  development/skills/resolve-issue/scripts/old-helper.zsh   [DELETED by this story]
+```
+
+The marking **replaces** "read the absolute path" for that entry — there is no
+path to read — and the reviewer **confirms the carried blocker landed from the
+excerpt** instead, rooted at the descriptor's tree like every other:
+
+```bash
+git -C "<worktree_root>" diff "<base>" -- "<path>"
+```
+
+**Say so IN THE PROMPT — the scope block's blockquote is the wrong instruction
+here.** That blockquote tells the reviewer to "neither raise a finding about the
+missing path nor fail the round on it", i.e. not to question the entry; applied
+to a *carried* entry it produces a reviewer that says nothing about a blocker it
+was asked to confirm, so the round comes back with fewer confirmations than
+carries and no re-raise to reconcile them — the blocker is stalled or retired for
+good, which is the harm this arm exists to prevent. Telling only yourself is not
+enough, exactly as with the reporting rule. Give the carried section its own
+sentence, and scope the scope block's blockquote to the scope block:
+
+> An entry marked `[DELETED by this story]` in the **carried** section has no
+> path to open. Where it carries a **diff excerpt**, confirm from the excerpt
+> that the carried blocker landed, and **re-raise it at its original severity if
+> you cannot**. Where it carries the note **`exists in neither tree`** instead,
+> the file the finding was about is in no tree the round can read: **count the
+> entry as confirmed, say so in your count, and do not re-raise it.** The scope
+> block's *neither raise a finding nor fail the round* rule covers reviewing the
+> deletion as new work; it never licenses leaving a carried entry unaccounted
+> for.
+
+The two forms are why the blockquote keys on **which of them the entry carries**
+rather than on the marking alone. An entry with no excerpt and no note would
+leave the reviewer unable to confirm and obliged to re-raise — every round, on a
+file that can never come back — so the run would trend to
+`ESCALATE_NO_CONVERGENCE` on a blocker the fix pass legitimately disposed of.
+Emit one or the other, never neither.
+
+**An empty excerpt is not always a stop.** This rule is stated **once**, here,
+and governs **both** sections — the scope block's own sentence says "report it
+and stop" without it, and that is the abbreviation, not the whole rule. Apply it
+wherever an excerpt comes back empty:
+
+1. **Establish the probe can answer at all** — `git -C "<worktree_root>"
+   rev-parse --verify "<base>^{commit}"`, and `git -C "<worktree_root>" rev-parse
+   --show-toplevel` must print `<worktree_root>`. Either failing means the
+   descriptor's tree or base is wrong, so **no** per-entry verdict below is
+   meaningful: report it and stop. This is the only root check the rule needs —
+   judge by it, never by how many entries came back one way.
+2. **Then, per entry**, ask whether the path exists at `<base>`
+   (`git -C "<worktree_root>" cat-file -e "<base>:<path>"`):
+   - **absent at `<base>` too** — the file is in **neither** tree, the ordinary
+     shape of one **this story created** and a later fix pass deleted (*A fix
+     pass subtracts* prefers that disposal). There was never a net change against
+     `<base>`, so there is no diff to show: emit the **`exists in neither tree`**
+     note in place of the excerpt and **do not stop**. In the **scope block**,
+     where the entry is being reviewed as new work rather than confirmed, show
+     the deletion instead with a `<prior_tree>`-rooted excerpt — `git -C
+     "<worktree_root>" diff "<prior_tree>" -- "<path>"` — which does render it;
+   - **present at `<base>`**, excerpt still empty — **that** is the stop. Its
+     causes are the scope block's own: the command read the wrong tree, or the
+     entry was never a story deletion. Report it and stop.
+
+**Both sections reach case 2's first arm, for different reasons.** The carried
+entries come from `verify-<R>.json`, which lists a file whatever became of it.
+The scope block's come from `changed_files` — and on a **delta** round that is
+`diff-tree <prior_tree> <cur>`, which lists a file that existed at `prior_tree`
+and is gone now, i.e. exactly the created-then-deleted shape. Only on a **full**
+round is it `diff --name-only <base>`, which cannot list one. An earlier cut of
+this rule asserted the scope block was immune; it is immune on full rounds only,
+and asserting otherwise would have aborted a healthy delta round.
 
 **A finding's `.file` stays repo-relative** — the same spelling `changed_files`
 uses, never an entry from `scope_abs[]`. `scope-findings` filters on that
@@ -366,9 +464,14 @@ what to do with them:
   development/skills/resolve-issue/scripts/old-helper.zsh   [DELETED by this story]
 ```
 
-> An entry marked `[DELETED by this story]` is expected: review the deletion in
-> the diff excerpt below, and neither raise a finding about the missing path nor
-> fail the round on it.
+> An entry marked `[DELETED by this story]` **in the scope block** is expected:
+> review the deletion in the diff excerpt below, and neither raise a finding
+> about the missing path nor fail the round on it.
+
+The scoping is load-bearing: the same marking appears in the **carried** section,
+where this instruction would be exactly wrong — there the reviewer must still
+account for the blocker, from the excerpt, and re-raise it if it cannot confirm.
+That section states its own rule; this one governs the scope block alone.
 
 Hand the deletion's content with it, since the reviewer cannot read a file that
 is gone — and **root the command at the tree the descriptor names**, never at
@@ -378,12 +481,18 @@ your cwd, for the reason the confirm step above gives:
 git -C "<worktree_root>" diff "<base>" -- "<path>"
 ```
 
-**An EMPTY excerpt is a stop, not a deletion.** In the implementation worktree
+**An EMPTY excerpt is a stop, not a deletion** — *once the empty-excerpt rule
+above has been applied*, which is where the exceptions live. On a **full** round
 the deletion is in the diff, so an empty result means the command read the wrong
-tree — the cwd hazard again — or the entry was never a story deletion at all.
-Do **not** dispatch it marked `[DELETED by this story]`: the marking tells the
-reviewer not to question it, so an empty excerpt beside it means nobody reviews
-that file and the round records a clean result over it. Re-confirm
+tree — the cwd hazard again — or the entry was never a story deletion at all. On
+a **delta** round it can also mean the file was created and removed inside this
+story, which is not a stop; that case is the rule's, not this sentence's.
+Do **not** dispatch it marked `[DELETED by this story]`: **in the scope block**
+that marking tells the reviewer not to question it, so an empty excerpt beside it
+means nobody reviews that file and the round records a clean result over it. (In
+the carried section the same marking means the opposite — account for it from the
+excerpt — which is why the shared empty-excerpt rule above resolves the two
+sections differently.) Re-confirm
 `worktree_root` per the step above; if the root is right and the excerpt is
 still empty, report it and stop.
 
