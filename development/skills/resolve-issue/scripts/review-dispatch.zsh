@@ -39,8 +39,33 @@
 #        [--adjudicated PATH]
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, round, base, findings_path, changed_files[],
+#           worktree_root, original_root, scope_abs[],
 #           scope_mode, scope_empty, prior_tree, delta_files,
 #           fix_verification_path, adjudicated_path }
+#       worktree_root / original_root / scope_abs are the #1582 path rail. A
+#       reviewer that resolves a repo-relative path against its own cwd reads the
+#       ORIGINAL checkout whenever the run is in a linked worktree — which is how
+#       a repo-root `.claude-plugin/marketplace.json` read from `main` produced a
+#       CRITICAL false positive on the #1558 session. Naming both roots in the
+#       descriptor is what lets the dispatch tell each reviewer which tree it is
+#       reading.
+#       worktree_root is the toplevel of the tree under review
+#       (`rev-parse --show-toplevel`) — deliberately NOT `--repo`, which may name
+#       a SUBDIRECTORY while changed_files is always repo-root-relative, so
+#       prefixing with it would emit paths naming no file.
+#       original_root is the main checkout's toplevel (the FIRST entry of
+#       `git worktree list --porcelain`) when it differs from worktree_root, and
+#       `null` otherwise. `null` asserts only that there is no second checkout to
+#       warn a reviewer about — either the --repo IS the main checkout, or the
+#       main worktree is BARE (a git directory, not a tree anyone can read). Do
+#       not read it as "this is the main checkout".
+#       `null` rather than absent, matching prior_tree / fix_verification_path /
+#       adjudicated_path, so a consumer can read the key unconditionally.
+#       scope_abs is changed_files with worktree_root joined onto each entry:
+#       same order, same length, `[]` exactly when changed_files is `[]`. It
+#       ACCOMPANIES changed_files and never replaces it — a finding's `.file`
+#       stays repo-relative, because that is the spelling `scope-findings`
+#       filters on.
 #       scope_mode is "full" when `round <= 1 || --final`, else "delta" — `<= 1`
 #       because `--round` is contracted as any NON-NEGATIVE integer, and there is
 #       no round 0 to iterate on.
@@ -119,6 +144,15 @@
 emulate -L zsh
 setopt nounset pipefail
 
+# These override `git -C "$repo"` and would silently make every git call here
+# describe a DIFFERENT repository — exported by git hooks, filters and some CI
+# wrappers. `git-tree-id.zsh` unsets exactly these for exactly this reason. It
+# matters more since #1582: `worktree_root` / `original_root` are now the values
+# every reviewer prompt is built from, so a wrong root sends the whole panel to
+# read the wrong checkout with no visible symptom — the #1558 failure this rail
+# exists to prevent.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 local self_dir="${0:A:h}"
 local detect_bin="${DETECT_STACK_BIN:-${self_dir}/../../bootstrap/scripts/detect-stack.sh}"
 local git_bin="${GIT_BIN:-git}"
@@ -171,6 +205,30 @@ need_value() {
 # (#1434) must go through the very same rules: one file-listing path, so a
 # `.review/` artifact excluded from a full round can never sneak into a delta
 # round, and a `./`-prefixed spelling can never make the two disagree.
+# The artifact exclusions stay START-ANCHORED. That is a deliberate contract, not
+# an oversight: a nested `src/.review/` inside story code is story code, and
+# `plan: the exclusion is start-anchored — nested/lookalike paths stay in scope`
+# pins it. Matching at any depth would silently drop those files from every
+# review scope.
+#
+# KNOWN, BOUNDED GAP, stated rather than papered over. Now that the listings are
+# repo-wide, a `--repo` naming a SUBDIRECTORY puts the DEFAULT sink at
+# `pkg/.review/findings-round-N.json`, which these start-anchored patterns do not
+# match — so it would reach the panel as story code. There is no pattern that
+# fixes it: `pkg/.review/…` is byte-identical in shape to the nested story file
+# the contract above requires to stay IN scope. Rooting the default sink at the
+# repo top instead would break the pinned `--repo .` spelling
+# (`./.review/findings-round-1.json`). It needs one anchoring rule for `--repo`,
+# which is a contract change rather than a path fix — filed as #1587.
+#
+# The sink is not the whole of that question, and this comment used to imply it
+# was. The same missing rule leaves DETECTION anchored at `--repo` (`_detect_json`
+# runs the detector under `cd -- "$repo"`) and the `.maintenance.yml` primary
+# lookup with it, while these listings are now repo-WIDE — so a subdirectory
+# `--repo` picks a panel from one subtree's stack and hands it a scope drawn from
+# the whole repo. #1587 covers both halves.
+# The mitigation meanwhile is the one every real caller already uses: pass an
+# explicit `--findings-path` outside the repo, as resolve-story-loop.zsh does.
 _normalise_paths() {
   sed -E 's#^\./##' | sort -u \
     | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d'
@@ -187,10 +245,77 @@ _changed_files() {
   # so such a file could never match the plain UTF-8 `.file` a reviewer reports —
   # it would be silently absent from the scope, and absent from the fix-touched
   # set that shares this normalisation.
+  # BOTH listings are forced repo-root-relative and repo-WIDE regardless of where
+  # `--repo` points (#1582). `--repo` accepts any readable directory, and from a
+  # SUBDIRECTORY the untracked listing was both relative to that subdirectory AND
+  # scoped to it — so a file elsewhere in the repo silently vanished from the
+  # scope, and the paths that did survive matched no repo-relative `.file` a
+  # reviewer reports.
+  #
+  # `--no-relative` on the diff half is NOT redundant with the `:/` pathspec: a
+  # user-level `diff.relative=true` makes `git diff` emit paths relative to the
+  # cwd and drop everything outside it, and a pathspec does not countermand that
+  # — `--no-relative` is the documented countermand. Without it the two halves
+  # would disagree under that config, and `scope_abs` would prefix a
+  # subdirectory-relative entry with the repo root, naming a file that does not
+  # exist. One spelling from both halves, under any config.
   {
-    "$git_bin" -C "$repo" -c core.quotePath=false diff --name-only "$base" -- || return 1
-    "$git_bin" -C "$repo" -c core.quotePath=false ls-files --others --exclude-standard || return 1
+    "$git_bin" -C "$repo" -c core.quotePath=false diff --name-only --no-relative "$base" -- ':/' \
+      || return 1
+    "$git_bin" -C "$repo" -c core.quotePath=false ls-files --others --exclude-standard \
+      --full-name ':/' || return 1
   } | _normalise_paths
+}
+
+# --- the two tree roots the reviewers must be told about (#1582) ------------
+# The tree under review. From the git TOPLEVEL, never from `--repo`: this script
+# accepts any readable directory there, while `changed_files` is always
+# repo-root-relative, so a `--repo` naming a subdirectory would produce
+# `scope_abs[]` entries that name no file at all.
+_worktree_root() {
+  local repo="$1" root=""
+  root=$("$git_bin" -C "$repo" rev-parse --show-toplevel) || return 1
+  [[ -n "$root" ]] || return 1
+  print -r -- "$root"
+}
+
+# The ORIGINAL checkout's toplevel. `git worktree list --porcelain` lists the
+# main worktree FIRST — the documented shape, and it needs no special-casing for
+# an unusual common dir the way `dirname $(rev-parse --git-common-dir)` would.
+#
+# Read the listing into a variable rather than piping it into awk. An `awk … exit`
+# on the first match SIGPIPEs the producer once its output exceeds one buffer —
+# roughly 20 linked worktrees at ~190 porcelain bytes each — git re-raises the
+# signal (141), and `pipefail` promotes that to the pipeline status, so the
+# `|| return 1` below would fire for a perfectly healthy repo and abort every
+# plan. Measured, not reasoned: the same pipeline returns 0 on a short listing
+# and 141 on a long one. `verify-reference-move.zsh` documents this exact hazard
+# for its own awk, which is why this reads the whole listing instead.
+#
+# A BARE main worktree is reported as no original checkout at all. Its porcelain
+# block carries a lone `bare` line, and its path names a git directory rather
+# than a tree — rendering it into the reviewer sentence would point the panel at
+# something it cannot read. Empty here means `null` in the descriptor, which is
+# the truthful answer: there is no original checkout to confuse a reviewer with.
+# Written without a `for … in` loop deliberately: `resolve-profile-contract.bats`
+# derives this script's emittable repo types by matching `^  for l in <…>; do`,
+# so such a loop here is parsed as a repo-type enumeration site and yields a
+# bogus type. Parameter expansion keeps the two apart.
+_main_root() {
+  local repo="$1" listing="" block="" root=""
+  listing=$("$git_bin" -C "$repo" worktree list --porcelain) || return 1
+  # porcelain separates entries with a blank line, so the FIRST block is the
+  # main worktree's
+  block="${listing%%$'\n\n'*}"
+  # a lone `bare` line in that block: the main worktree is a bare repo, which is
+  # a git directory rather than a checkout — report no original root at all
+  [[ $'\n'"$block"$'\n' == *$'\nbare\n'* ]] && return 0
+  local -a hits
+  hits=("${(@M)${(@f)block}:#worktree *}")
+  (( ${#hits} )) || return 1
+  root="${hits[1]#worktree }"
+  [[ -n "$root" ]] || return 1
+  print -r -- "$root"
 }
 
 # --- the delta since the previous round's tree (#1434) ----------------------
@@ -297,10 +422,30 @@ _detect_json() {
 }
 
 # --- .maintenance.yml primary (dependency-free, mirrors maintenance SKILL) --
+# No early-exiting pipeline consumer here (#1582's sweep). `… | head -1` closes
+# the pipe after one line, SIGPIPEs the producer, and `setopt pipefail` promotes
+# that 141 to the pipeline's status — the shape that made `_main_root` abort
+# every plan on a repo with enough worktrees. Nothing misbehaves here today (the
+# caller discards the status, and a `.maintenance.yml`'s handful of matching
+# lines never fills a pipe buffer), but leaving the last instance of a swept
+# pattern in place is how it comes back. One `sed` that quits after the first
+# match does the whole job with no pipe at all.
 _primary() {
   local repo="$1"
-  grep -E '^[[:space:]]*primary:' "$repo/.maintenance.yml" 2>/dev/null | head -1 \
-    | sed -E 's/^[[:space:]]*primary:[[:space:]]*//; s/[[:space:]]*(#.*)?$//; s/^["'\'']//; s/["'\'']$//'
+  # The absent file is the ordinary case and yields "no primary" — but only that
+  # case. Left to a blanket `2>/dev/null`, an UNREADABLE or unparseable
+  # `.maintenance.yml` produced the same empty answer, and the ambiguity
+  # escalation then told a human to "set .maintenance.yml primary to one of the
+  # candidates" for a repo that has already recorded one: the confidently-wrong
+  # cause `_detect_json`'s stderr relay exists to avoid.
+  [[ -f "$repo/.maintenance.yml" ]] || return 0
+  sed -nE '/^[[:space:]]*primary:/{
+             s/^[[:space:]]*primary:[[:space:]]*//
+             s/[[:space:]]*(#.*)?$//
+             s/^["'\'']//
+             s/["'\'']$//
+             p; q
+           }' "$repo/.maintenance.yml"
 }
 
 # --- THE repo-type detector, shared by `plan` and `detect` (#1504) ---------
@@ -552,6 +697,34 @@ cmd_plan() {
 
   [[ -n "$findings_path" ]] || findings_path="${repo%/}/.review/findings-round-${round}.json"
 
+  # The two roots (#1582), resolved BEFORE the scope so a repo whose roots
+  # cannot be read fails as itself rather than as a scope computation.
+  #
+  # The two are NOT checked alike, and the difference is deliberate:
+  #   - `_worktree_root` must produce a non-empty value or the plan aborts. An
+  #     empty one would make every `scope_abs[]` entry start at `/`, naming no
+  #     file, in a descriptor that otherwise looks well-formed.
+  #   - `_main_root` FAILS (exit 1) only when the listing cannot be read or
+  #     holds no worktree entry. It succeeds with an EMPTY root for a BARE main
+  #     worktree, which the emitter renders as `original_root: null` — the
+  #     truthful answer, since a bare repo is a git directory and not a second
+  #     checkout a reviewer could read. Do NOT add a non-empty check here: it
+  #     would abort every plan run from a worktree of a bare clone.
+  local worktree_root=""
+  worktree_root=$(_worktree_root "$repo") || {
+    print -u2 -- "plan: could not resolve the worktree root (git rev-parse --show-toplevel) for $repo"; exit 1
+  }
+  local main_root=""
+  main_root=$(_main_root "$repo") || {
+    print -u2 -- "plan: could not resolve the original checkout root (git worktree list) for $repo"; exit 1
+  }
+  # Empty means "not a linked worktree", which the emitter renders as `null`.
+  # Keyed on the two roots DIFFERING, not on any worktree-detection flag: the
+  # main checkout is its own first `worktree list` entry, so the comparison is
+  # the whole test.
+  local original_root=""
+  [[ "$main_root" == "$worktree_root" ]] || original_root="$main_root"
+
   local full_json
   full_json=$(_changed_files "$repo" "$base" | jq -R . | jq -sc .) || {
     print -u2 -- "plan: could not compute changed files"; exit 1
@@ -593,6 +766,8 @@ cmd_plan() {
     --arg base "$base" \
     --arg findings_path "$findings_path" \
     --argjson changed "$changed_json" \
+    --arg worktree_root "$worktree_root" \
+    --arg original_root "$original_root" \
     --arg scope_mode "$scope_mode" \
     --arg prior_tree "$prior_tree" \
     --argjson delta "$delta_json" \
@@ -600,6 +775,9 @@ cmd_plan() {
     --arg adjud "$adjudicated" \
     '{repo_type:$repo_type, review_skill:$review_skill, round:$round, base:$base,
       findings_path:$findings_path, changed_files:$changed,
+      worktree_root:$worktree_root,
+      original_root:(if $original_root=="" then null else $original_root end),
+      scope_abs:[ $changed[] | $worktree_root + "/" + . ],
       scope_mode:$scope_mode,
       scope_empty:(($changed | length) == 0),
       prior_tree:(if $prior_tree=="" then null else $prior_tree end),

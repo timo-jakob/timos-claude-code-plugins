@@ -2103,7 +2103,9 @@ _moved_needles() {
 
 @test "#1504 the frozen-span exemption is asserted, not assumed" {
   # One moved needle has a LIVE duplicate inside review-loop.md's byte-frozen
-  # `<!-- moved: round-protocol -->` span, which #1504 is contractually
+  # `<!-- moved: round-protocol-tail -->` span (#1582 split the original
+  # `round-protocol` span into head + tail; the needle lives in the tail),
+  # which #1504 is contractually
   # forbidden to edit and #1506 will extract. Pin it: the sweep above is honest
   # only if the text it skips is exactly that, and this reds if the span ever
   # stops holding it (the exemption became unnecessary) or if the stripper stops

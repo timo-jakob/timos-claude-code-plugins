@@ -1670,3 +1670,451 @@ JSON
   # ...and the in-diff one SURVIVES, or the filter would "pass" by dropping all
   [ "$(echo "$output" | jq '[.[] | select(.file == "app.py")] | length')" -eq 1 ]
 }
+
+# ---- #1582: reviewers resolve paths against the WORKTREE, never the original
+# checkout. The descriptor names both roots and carries an absolute scope list,
+# because a finding records only the path a reviewer REPORTED, never the one it
+# READ — so a repo-root file read from the wrong tree yields an in-diff,
+# repo-relative path that no downstream filter can tell from a correct finding.
+# That is the #1558 CRITICAL false positive, and it is why this is a dispatch
+# rail rather than an output check.
+
+@test "#1582 plan in a LINKED WORKTREE names both roots and prefixes a non-empty scope_abs" {
+  # A worktree of the fixture repo. The diff is deliberately NON-EMPTY: the
+  # per-entry prefix assertion below is vacuously true on an empty array, so an
+  # empty-diff fixture would stay green with scope_abs deleted outright.
+  # `--detach`: `main` is already checked out in $R, and git refuses to check the
+  # same branch out twice. The base ref still resolves — a linked worktree shares
+  # the object store and refs with its main checkout, which is the whole reason
+  # this hazard exists.
+  local wt; wt="$BATS_TEST_TMPDIR/worktree-brisk-otter"
+  git -C "$R" worktree add -q --detach "$wt" main
+  echo "print(1)" > "$wt/app.py"
+  echo "print(2)" > "$wt/second.py"
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$wt" --base main --round 1
+  [ "$status" -eq 0 ]
+
+  local wt_top; wt_top="$(git -C "$wt" rev-parse --show-toplevel)"
+  local main_top; main_top="$(git -C "$R" rev-parse --show-toplevel)"
+
+  [ "$(echo "$output" | jq -r .worktree_root)" = "$wt_top" ]
+  [ "$(echo "$output" | jq -r .original_root)" = "$main_top" ]
+  # the two roots genuinely DIFFER, or the case proves nothing about a worktree
+  [ "$wt_top" != "$main_top" ]
+
+  # non-empty, and index-aligned with changed_files — same order, same length
+  [ "$(echo "$output" | jq '.scope_abs | length')" -gt 0 ]
+  [ "$(echo "$output" | jq '.scope_abs | length')" \
+    -eq "$(echo "$output" | jq '.changed_files | length')" ]
+  # entry i == worktree_root + "/" + changed_files[i], asserted elementwise
+  [ "$(echo "$output" | jq -r '[ .scope_abs[] ] == [ .changed_files[] | $r + "/" + . ]' \
+       --arg r "$wt_top")" = "true" ]
+}
+
+@test "#1582 plan on an ORDINARY checkout emits original_root as JSON null, not a string or an absent key" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 1
+  [ "$status" -eq 0 ]
+
+  # JSON null — not the string "null" (which would render into the reviewer
+  # sentence verbatim), and not absent (the key is read unconditionally).
+  [ "$(echo "$output" | jq -r '.original_root | type')" = "null" ]
+  [ "$(echo "$output" | jq 'has("original_root")')" = "true" ]
+
+  local top; top="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r .worktree_root)" = "$top" ]
+  # and scope_abs is populated exactly as in the worktree case
+  [ "$(echo "$output" | jq '.scope_abs | length')" -gt 0 ]
+  [ "$(echo "$output" | jq -r '[ .scope_abs[] ] == [ .changed_files[] | $r + "/" + . ]' \
+       --arg r "$top")" = "true" ]
+}
+
+@test "#1582 an EMPTY scope still carries all three keys, with scope_abs []" {
+  # The vacuity case, pinned separately so the worktree case above can never be
+  # satisfied by an empty scope. No working-tree change at all -> empty diff.
+  plan '{"languages":["python"]}' --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .changed_files)" = "[]" ]
+  [ "$(echo "$output" | jq -c .scope_abs)" = "[]" ]
+  [ "$(echo "$output" | jq -r .scope_empty)" = "true" ]
+  # worktree_root is still emitted — an empty scope is not a missing root
+  [ -n "$(echo "$output" | jq -r .worktree_root)" ]
+  [ "$(echo "$output" | jq -r '.worktree_root | type')" = "string" ]
+}
+
+@test "#1582 worktree_root comes from the git TOPLEVEL, never from --repo" {
+  # --repo accepts any readable directory, but changed_files is always
+  # repo-root-relative. Prefixing with a --repo that is a SUBDIRECTORY would
+  # emit scope_abs entries naming no file at all.
+  mkdir -p "$R/pkg/inner"
+  echo "print(1)" > "$R/pkg/inner/app.py"
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R/pkg/inner" --base main --round 1
+  [ "$status" -eq 0 ]
+
+  local top; top="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r .worktree_root)" = "$top" ]
+  [ "$(echo "$output" | jq -r .worktree_root)" != "$R/pkg/inner" ]
+
+  # every emitted absolute path names a file that actually EXISTS — the real
+  # point of the criterion, and what a --repo-derived prefix would break.
+  # Counted, not just looped: on an empty scope_abs the loop body never runs and
+  # the claim would pass having checked nothing.
+  local n_abs seen=0 p
+  n_abs="$(echo "$output" | jq '.scope_abs | length')"
+  [ "$n_abs" -gt 0 ]
+  while IFS= read -r p; do
+    [ -e "$p" ]
+    seen=$(( seen + 1 ))
+  done < <(echo "$output" | jq -r '.scope_abs[]')
+  [ "$seen" -eq "$n_abs" ]
+}
+
+@test "#1582 scope_abs ACCOMPANIES changed_files — the repo-relative form is untouched" {
+  # scope-findings filters on the repo-relative spelling, so absolutising
+  # changed_files would silently drop every finding and converge the loop on a
+  # review that filtered everything out. Pin that they round-trip.
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 1
+  [ "$status" -eq 0 ]
+  local top; top="$(git -C "$R" rev-parse --show-toplevel)"
+  # EVERY scope_abs entry is genuinely absolute and genuinely prefixed. Asserted
+  # before the round-trip below, which alone would not catch a dropped prefix:
+  # `ltrimstr` on an unprefixed entry is a no-op, so `[a.py] == [a.py]` holds
+  # just as well when scope_abs is a bare copy of changed_files.
+  [ "$(echo "$output" | jq '.scope_abs | length')" -gt 0 ]
+  [ "$(echo "$output" | jq -r '[ .scope_abs[] | startswith($r + "/") ] | all' \
+       --arg r "$top")" = "true" ]
+  # stripping the root off scope_abs reproduces changed_files exactly
+  [ "$(echo "$output" | jq -r '[ .scope_abs[] | ltrimstr($r + "/") ] == .changed_files' \
+       --arg r "$top")" = "true" ]
+  # and changed_files itself carries no absolute entry
+  [ "$(echo "$output" | jq '[ .changed_files[] | select(startswith("/")) ] | length')" -eq 0 ]
+}
+
+@test "#1582 an unresolvable worktree root is exit 1 with a named line, never an empty prefix" {
+  # Without the guard, `worktree_root` comes back empty and every scope_abs entry
+  # is `/src/app.py` — absolute paths rooted at `/` that name no file, handed to
+  # every reviewer, at exit 0 with a descriptor that looks well-formed.
+  echo "print(1)" > "$R/app.py"
+  local fakegit="$BATS_TEST_TMPDIR/git-no-toplevel"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--show-toplevel" ]; then echo "boom" >&2; exit 128; fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'could not resolve the worktree root'
+}
+
+@test "#1582 a BLANK worktree root is exit 1 too — an empty identity is not an answer" {
+  # The other half of the guard: a git that succeeds but prints nothing.
+  echo "print(1)" > "$R/app.py"
+  local fakegit="$BATS_TEST_TMPDIR/git-blank-toplevel"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--show-toplevel" ]; then exit 0; fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'could not resolve the worktree root'
+}
+
+@test "#1582 an unresolvable original-checkout root is exit 1, never a false original_root: null" {
+  # The more dangerous twin. Left ungated, `main_root` comes back empty, compares
+  # unequal to worktree_root, and the descriptor confidently reports "ordinary
+  # checkout" for a run that IS in a linked worktree — the sentence drops its
+  # second clause and the #1558 false-positive class reopens at exit 0.
+  echo "print(1)" > "$R/app.py"
+  local fakegit="$BATS_TEST_TMPDIR/git-no-worktree-list"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "worktree" ]; then echo "boom" >&2; exit 128; fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'could not resolve the original checkout root'
+}
+
+@test "#1582 an EMPTY worktree listing is exit 1, not a silent original_root: null" {
+  # A `worktree list --porcelain` that succeeds but emits nothing (or whose shape
+  # changed under us). Asserted as a NAMED failure rather than as `original_root:
+  # null`, which is what makes it distinguishable from an ordinary checkout.
+  echo "print(1)" > "$R/app.py"
+  local fakegit="$BATS_TEST_TMPDIR/git-empty-worktree-list"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "worktree" ]; then exit 0; fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'could not resolve the original checkout root'
+}
+
+@test "#1582 a --repo SUBDIRECTORY still scopes the WHOLE repo, not just that subtree" {
+  # The repo-WIDE half of the `:/` pathspec fix, which the root-relative half
+  # cannot catch. Dropping `:/` while keeping `--full-name` leaves every path
+  # repo-root-relative — so an existence check still passes — while files outside
+  # the subdirectory vanish from changed_files, scope_abs and scope-findings'
+  # filter: the scope loss this story exists to fix.
+  mkdir -p "$R/pkg/inner"
+  echo "print(1)" > "$R/pkg/inner/app.py"   # untracked, INSIDE the subdir
+  echo "print(2)" > "$R/outside.py"         # untracked, OUTSIDE it
+  echo "changed"  >> "$R/legacy.py"         # tracked modification, outside it
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R/pkg/inner" --base main --round 1
+  [ "$status" -eq 0 ]
+
+  # all three are in scope, in their repo-root-relative spelling
+  [ "$(echo "$output" | jq -r '.changed_files | index("pkg/inner/app.py") != null')" = "true" ]
+  [ "$(echo "$output" | jq -r '.changed_files | index("outside.py") != null')" = "true" ]
+  [ "$(echo "$output" | jq -r '.changed_files | index("legacy.py") != null')" = "true" ]
+  # ...and scope_abs mirrors that, elementwise
+  local top; top="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r '[ .scope_abs[] ] == [ .changed_files[] | $r + "/" + . ]' \
+       --arg r "$top")" = "true" ]
+}
+
+@test "#1582 the repo-wide listing keeps the START-ANCHORED artifact contract" {
+  # Making the listings repo-wide must not change WHICH paths count as
+  # artifacts. The root sink is excluded; a nested `.review/` inside story code
+  # stays IN scope, because it is story code — the contract
+  # `plan: the exclusion is start-anchored` pins, and which a match-at-any-depth
+  # pattern would silently violate for every review scope.
+  mkdir -p "$R/src/.review" "$R/.review"
+  echo '[]'  > "$R/.review/findings-round-1.json"
+  echo "cfg" > "$R/src/.review/config.json"
+  echo "print(1)" > "$R/app.py"
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 0 ]
+  # root artifact: out
+  [ "$(echo "$output" | jq '[ .changed_files[] | select(startswith(".review/")) ] | length')" -eq 0 ]
+  # nested story file: in, and mirrored into scope_abs
+  [ "$(echo "$output" | jq -r '.changed_files | index("src/.review/config.json") != null')" = "true" ]
+  local top; top="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r --arg p "$top/src/.review/config.json" \
+       '.scope_abs | index($p) != null')" = "true" ]
+  # non-vacuous: the ordinary file DID make it into the scope
+  [ "$(echo "$output" | jq -r '.changed_files | index("app.py") != null')" = "true" ]
+}
+
+@test "#1582 scope_abs mirrors changed_files on a DELTA round too, not just a full one" {
+  # Every other #1582 case is a full round, where changed_files == the full diff.
+  # Building scope_abs from the full diff instead of the round's scope would stay
+  # green in all of them while pointing an iteration round's reviewers at the
+  # whole story diff.
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round 3 --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
+  # the delta is the fix-pass file only, and scope_abs mirrors exactly that
+  [ "$(echo "$output" | jq -c .changed_files)" = '["helper.py"]' ]
+  local top; top="$(git -C "$R" rev-parse --show-toplevel)"
+  [ "$(echo "$output" | jq -r '[ .scope_abs[] ] == [ .changed_files[] | $r + "/" + . ]' \
+       --arg r "$top")" = "true" ]
+}
+
+@test "#1582 plan's descriptor key set is pinned, so a key cannot appear or vanish silently" {
+  # detect has had this since #1504; plan did not, so each of its keys was pinned
+  # only by whichever assertion happened to name it, and ARCHITECTURE.md's
+  # documented shape could drift from the emitter with the suite green.
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
+    "repo_type,review_skill,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,fix_verification_path,adjudicated_path" ]
+}
+
+@test "#1582 --no-relative survives a user-level diff.relative=true" {
+  # `--no-relative` is the load-bearing half of the diff fix and is INERT in
+  # every other fixture, because a bare `git diff` is already repo-wide and
+  # root-relative when diff.relative is unset. Under `diff.relative=true` git
+  # emits cwd-relative paths and DROPS everything outside the cwd, and a
+  # pathspec does not countermand it — so without the flag, planning from a
+  # subdirectory silently loses every tracked change outside that subtree and
+  # prefixes the survivors with the repo root, naming files that do not exist.
+  git -C "$R" config diff.relative true
+  mkdir -p "$R/pkg/inner"
+  echo "print(1)" > "$R/pkg/inner/app.py"   # untracked, inside
+  echo "changed"  >> "$R/legacy.py"         # TRACKED modification, outside
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R/pkg/inner" --base main --round 1
+  [ "$status" -eq 0 ]
+  # the tracked change outside the subdirectory is the one diff.relative would eat
+  [ "$(echo "$output" | jq -r '.changed_files | index("legacy.py") != null')" = "true" ]
+  [ "$(echo "$output" | jq -r '.changed_files | index("pkg/inner/app.py") != null')" = "true" ]
+  # and no entry is subdirectory-relative
+  [ "$(echo "$output" | jq -r '.changed_files | index("inner/app.py")')" = "null" ]
+  # every absolute path still names a real file
+  local p
+  while IFS= read -r p; do [ -e "$p" ]; done < <(echo "$output" | jq -r '.scope_abs[]')
+}
+
+@test "#1582 a BARE main repository reports NO original checkout" {
+  # `_main_root`'s bare arm. Without it the first porcelain entry is the bare
+  # repo's own path, so original_root becomes a .git directory that compares
+  # unequal to worktree_root — and every reviewer is told "this run's tree is
+  # that directory, not /path/to/bare.git", a path that is not a checkout.
+  local bare="$BATS_TEST_TMPDIR/bare.git"
+  git clone --bare -q "$R" "$bare"
+  local wt="$BATS_TEST_TMPDIR/wt-of-bare"
+  git -C "$bare" worktree add -q --detach "$wt" main
+  echo "print(1)" > "$wt/app.py"
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$wt" --base main --round 1
+  [ "$status" -eq 0 ]
+  # JSON null, not the bare repo's path
+  [ "$(echo "$output" | jq -r '.original_root | type')" = "null" ]
+  # discriminating: the ordinary linked-worktree case DOES report a root, so
+  # this is not passing merely because original_root is always null
+  [ "$(echo "$output" | jq -r .worktree_root)" = "$(git -C "$wt" rev-parse --show-toplevel)" ]
+}
+
+@test "#1582 an inherited GIT_DIR/GIT_WORK_TREE cannot redirect the roots" {
+  # GIT_DIR and GIT_WORK_TREE take precedence over `git -C`, and since #1582 the
+  # two roots are what every reviewer prompt is built from — so an inherited one
+  # would send the whole panel to read another checkout, at exit 0, with no
+  # visible symptom.
+  local other="$BATS_TEST_TMPDIR/other-repo"
+  mkdir -p "$other"
+  git -C "$other" init -q
+  git -C "$other" config user.email t@example.com
+  git -C "$other" config user.name tester
+  echo other > "$other/README.md"
+  git -C "$other" add -A
+  git -C "$other" commit -qm base
+  git -C "$other" branch -M main
+  echo "print(1)" > "$R/app.py"
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_DIR="$other/.git" GIT_WORK_TREE="$other" \
+    zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .worktree_root)" = "$(git -C "$R" rev-parse --show-toplevel)" ]
+  [ "$(echo "$output" | jq -r .worktree_root)" != "$other" ]
+
+  # GIT_WORK_TREE alone, so neither name can be dropped from the scrub
+  # independently
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_WORK_TREE="$other" \
+    zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .worktree_root)" = "$(git -C "$R" rev-parse --show-toplevel)" ]
+}
+
+@test "#1582 a LARGE worktree listing does not SIGPIPE the producer into a false failure" {
+  # _main_root reads the listing into a variable instead of piping it into an
+  # early-exiting awk. Past roughly 20 linked worktrees the producer's second
+  # buffer flush hits EPIPE, git re-raises SIGPIPE (141), `pipefail` promotes it,
+  # and `|| return 1` aborts EVERY plan on a healthy repo. Measured, not
+  # reasoned: the old pipeline returns 0 on a short listing and 141 on a long
+  # one. Driven with a stub rather than 300 real worktrees — deterministic, and
+  # it exercises the same buffer boundary.
+  echo "print(1)" > "$R/app.py"
+  local fakegit="$BATS_TEST_TMPDIR/git-many-worktrees"
+  cat > "$fakegit" <<EOF
+#!/usr/bin/env bash
+if [ "\$3" = "worktree" ] || [ "\$1" = "worktree" ]; then
+  printf 'worktree %s\nHEAD 0000000000000000000000000000000000000000\nbranch refs/heads/main\n\n' "$R"
+  for i in \$(seq 1 800); do
+    printf 'worktree /tmp/synthetic-wt-\$i\nHEAD 0000000000000000000000000000000000000000\ndetached\n\n'
+  done
+  exit 0
+fi
+exec git "\$@"
+EOF
+  chmod +x "$fakegit"
+
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 0 ]
+  # the FIRST block is the answer, and the run did not abort
+  [ "$(echo "$output" | jq -r .original_root)" = "$R" ]
+  # and it did not fail for the SIGPIPE reason specifically. The rostered helper,
+  # not `grep -qv … || true` (never fails), not a bare `! … | grep` (inert, #829)
+  # and not a bare `[[ ]]` (inert, #1011) — three shapes that all look like
+  # assertions and none of which reds.
+  lacks "$stderr" "could not resolve the original checkout root"
+}
+
+@test "#1582 a non-ASCII path stays in scope and is never quoted-escaped" {
+  # Both listings carry `-c core.quotePath=false`, on the two command lines this
+  # story rewrote. With the default TRUE, git emits `"src/caf\303\251.zsh"` —
+  # quotes and octal escapes included — which can never match the plain UTF-8
+  # `.file` a reviewer reports, so the file vanishes from changed_files,
+  # scope_abs and scope-findings' filter.
+  # BOTH halves need their own file: committing café.py makes it TRACKED, so on
+  # its own it exercises only `diff --name-only` and the `ls-files --others`
+  # invocation keeps its flag untested.
+  printf 'x\n' > "$R/café.py"
+  git -C "$R" add café.py
+  git -C "$R" -c user.email=t@e -c user.name=t commit -qm add-nonascii
+  printf 'y\n' >> "$R/café.py"                 # tracked-modification half
+  printf 'z\n' > "$R/naïve.py"                 # untracked half — never added
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 0 ]
+  # nothing arrives quoted
+  [ "$(echo "$output" | jq '[ .changed_files[] | select(startswith("\"")) ] | length')" -eq 0 ]
+  # ...and BOTH files really are in scope (non-vacuity), matched normalisation-
+  # agnostically so macOS NFD cannot make this flaky
+  [ "$(echo "$output" | jq '[ .changed_files[] | select(test("caf")) ] | length')" -ge 1 ]
+  [ "$(echo "$output" | jq '[ .changed_files[] | select(test("na")) ] | length')" -ge 1 ]
+  [ "$(echo "$output" | jq '[ .scope_abs[] | select(test("caf")) ] | length')" -ge 1 ]
+  [ "$(echo "$output" | jq '[ .scope_abs[] | select(test("na")) ] | length')" -ge 1 ]
+}
+
+@test "#1582 an inherited GIT_INDEX_FILE cannot inflate the scope" {
+  # The third name in the scrub, and the only one whose effect is on scope
+  # CONTENT rather than on the roots: git hooks and filter drivers export it, and
+  # `ls-files --others --exclude-standard` read against a foreign (empty) index
+  # reports every tracked file as an untracked addition.
+  echo "print(1)" > "$R/app.py"
+  local foreign="$BATS_TEST_TMPDIR/foreign.index"
+  : > "$foreign"
+
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_INDEX_FILE="$foreign" zsh "$S" plan --repo "$R" --base main --round 1
+  [ "$status" -eq 0 ]
+  # committed files must NOT show up as untracked additions
+  [ "$(echo "$output" | jq -r '.changed_files | index("README.md")')" = "null" ]
+  [ "$(echo "$output" | jq -r '.changed_files | index("legacy.py")')" = "null" ]
+  # the story's own change still is in scope
+  [ "$(echo "$output" | jq -r '.changed_files | index("app.py") != null')" = "true" ]
+}
