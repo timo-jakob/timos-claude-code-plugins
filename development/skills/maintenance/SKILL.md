@@ -185,10 +185,14 @@ unreadable tree are **not distinguishable** from the evidence you have. Forward
 the stderr verbatim, say that, and give the one decidable instruction: re-run
 once; if the same statuses recur the cause is **most likely** permissions, so
 have the user check them on the paths the search covers. Say "most likely" and
-not "the tree is unreadable" — a tree being written throughout both runs (an
-installer populating `node_modules`, a background `git gc`) reproduces the same
-statuses. Never assert "transient, just re-run" either: on an unreadable tree
-that is an unbounded retry loop dressed up as a diagnosis.
+not "the tree is unreadable" — a tree being written throughout both runs
+reproduces the same statuses (for the opentofu marker an installer populating
+`node_modules`, which its walk still enters; for either marker a build
+rewriting a tree the walk does enter, such as `dist/` or a chart directory).
+Do not cite `node_modules`, `.git`, `vendor` or `templates` for the kubernetes
+marker: since #1393 its walk never enters them. Never assert "transient, just
+re-run" either: on an unreadable tree that is an unbounded retry loop dressed
+up as a diagnosis.
 
 Validate from `detect.json` (only after a zero exit):
 
@@ -354,10 +358,19 @@ fi
 # topic itself: a side-effecting `if … fi` exits 0 whether or not the marker
 # fired, so a caller reading `$?` uniformly across these recipes would detect
 # the topic on every repo.
-# Capture before filtering: `find | grep -q` loses the match to SIGPIPE under
+# Capture, don't pipe: `find | grep -q` loses the match to SIGPIPE under
 # `set -o pipefail`, which every maintenance script sets.
 # `! -type d` for the same reason the react recipe carries it: a DIRECTORY named
 # `Kustomization` is not a manifest, while a symlinked one still counts.
+# The vendored trees are PRUNED during the walk (`-path '*/x' -prune -o`, the
+# react recipe's shape — #1393), never post-filtered: a `grep -v` after the walk
+# still DESCENDS them, and `find` exits non-zero when any path under them
+# vanishes mid-traversal (a background `git gc` inside `.git`, an installer
+# rewriting `node_modules`) — a "did not complete" for a tree whose contents
+# the recipe discards anyway. `-path`, not `-name`, so the segment boundary is
+# exact: `templates-src/` is still searched. The explicit `-print` is
+# load-bearing — without it find's implicit print applies to the WHOLE
+# expression, and every pruned directory is printed as a hit.
 #
 # THREE exit statuses, not two (#1177): 0 = kubernetes, 1 = searched and found
 # nothing, 2 = COULD NOT LOOK. The old single `|| true` spanned the whole
@@ -367,23 +380,13 @@ fi
 # SEPARATELY now, and an unfinished search taints only the NEGATIVE verdict: a
 # hit is a hit regardless of an unreadable sibling directory (which is why the
 # argoproj-only-plus-locked-subtree repo still reports 0), while "no" is only
-# ever reported when both halves — and the prune filter between them (#1428) —
-# genuinely completed.
+# ever reported when both halves genuinely completed.
 # kubernetes-marker:begin
-k8s_hits="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
-                       -o -name kustomization.yml -o -name Kustomization \) \
-                 ! -type d 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
-# the filter reads the captured string, never the filesystem — but it CAN still
-# fail (grep exit 2, or no grep at all), and `|| true` absorbed those exactly
-# like the intended no-match 1 (#1428): the hits went empty with find's status
-# still 0, so the "did not complete" arm below never fired and the recipe
-# answered "not kubernetes" for a search that never ran. Same shape as the
-# opentofu recipe: capture the filter's own status; 1 stays the genuine
-# "everything was pruned" answer. Keep whitespace after the last `-e` operand,
-# whatever trails it — the parity oracle's `[^ ']+` run swallows anything glued.
-k8s_hits="$(printf '%s\n' "$k8s_hits" \
-  | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ 2>/dev/null
-)" && k8s_filter_rc=0 || k8s_filter_rc=$?
+k8s_hits="$(find . -path '*/node_modules' -prune -o -path '*/.git' -prune -o \
+                   -path '*/vendor' -prune -o -path '*/templates' -prune -o \
+                   \( -name Chart.yaml -o -name kustomization.yaml \
+                      -o -name kustomization.yml -o -name Kustomization \) \
+                   ! -type d -print 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
 k8s_argo_rc=1
 if [ -z "$k8s_hits" ]; then
   grep -rqlF 'argoproj.io' \
@@ -393,9 +396,9 @@ if [ -z "$k8s_hits" ]; then
 fi
 if [ -n "$k8s_hits" ] || [ "$k8s_argo_rc" -eq 0 ]; then
   true
-elif [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_filter_rc" -ge 2 ] || [ "$k8s_argo_rc" -ge 2 ]; then
-  printf 'kubernetes marker: search did not complete (find %s, filter %s, grep %s) — refusing to report "not kubernetes"\n' \
-    "$k8s_find_rc" "$k8s_filter_rc" "$k8s_argo_rc" >&2
+elif [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_argo_rc" -ge 2 ]; then
+  printf 'kubernetes marker: search did not complete (find %s, grep %s) — refusing to report "not kubernetes"\n' \
+    "$k8s_find_rc" "$k8s_argo_rc" >&2
   ( exit 2 )
 else
   false
@@ -423,9 +426,11 @@ tofu_hits="$(find . -name '*.tf' ! -type d 2>/dev/null)" && tofu_find_rc=0 || to
 # fail (grep exit 2, or no grep at all), and `|| true` absorbed those exactly
 # like the intended no-match 1, so an unfinished filter returned the recipe's
 # "searched and found nothing" status instead of its "did not complete" one.
-# Capture-before-filter for the same reason the kubernetes recipe does it:
-# `find … | grep -q` inverts under `set -o pipefail` once find's output outruns
-# the pipe buffer, turning a genuine match into "not opentofu".
+# Capture-before-filter for the same reason the kubernetes recipe captures its
+# find: `find … | grep -q` inverts under `set -o pipefail` once find's output
+# outruns the pipe buffer, turning a genuine match into "not opentofu". (The
+# kubernetes recipe prunes inside the find since #1393 and has no filter left;
+# this one still post-filters — that change is its own, not #1393's.)
 tofu_hits="$(printf '%s\n' "$tofu_hits" \
   | grep -v -e '/\.terraform/' -e /node_modules/ -e '/\.git/' -e /vendor/
 )" && tofu_filter_rc=0 || tofu_filter_rc=$?
@@ -574,18 +579,20 @@ would make that repo undispatchable. Two things about its marker are deliberate:
   kustomize itself accepts — `kustomization.yaml`, `kustomization.yml`,
   `Kustomization`), or the literal string `argoproj.io`, which no non-Argo file
   carries by accident.
-- **The find output is captured before it is filtered.** `find … | grep -q` looks
-  equivalent but inverts under `set -o pipefail`: `grep -q` exits at its first
-  match, `find` — still writing — dies of SIGPIPE, and the pipeline reports
-  non-zero even though a chart *was* found. It fails only on repos whose `find`
-  output outruns the pipe buffer, which is the worst possible failure mode.
-  Capture, then test the variable.
+- **The find output is captured, never piped into a test.** `find … | grep -q`
+  looks equivalent but inverts under `set -o pipefail`: `grep -q` exits at its
+  first match, `find` — still writing — dies of SIGPIPE, and the pipeline
+  reports non-zero even though a chart *was* found. It fails only on repos whose
+  `find` output outruns the pipe buffer, which is the worst possible failure
+  mode. Capture, then test the variable.
 
 All four copies — the marker, `gather-kubernetes-findings.zsh`, the manifests
 lister below, and detect-stack.sh's `is-kubernetes-marker` block (#1153) — prune
-`node_modules`, `.git`, `vendor` and `templates`; the last one matters here,
-since this very repo ships chart *templates* under bootstrap's `templates/`
-tree.
+`node_modules`, `.git`, `vendor` and `templates` **during the walk**
+(`-path '*/x' -prune -o`, #1393), never by filtering paths after it: the walk
+never enters those trees, so a path vanishing under them mid-traversal cannot
+trip the `find`. The last one matters here, since this very repo ships chart
+*templates* under bootstrap's `templates/` tree.
 
 **`gather-docs-findings.zsh` landed in #793**, so `docs` is a **supported** topic
 whenever its marker fires: #801 stood up the `development-docs` dispatcher and this
@@ -614,11 +621,14 @@ below as *provisional* for them:
 | anything else | **the marker was not evaluated** | `unsupported_topics`, with the recipe's own stderr as the note — **never** the absent bucket |
 
 - **`kubernetes` exits `2`** when the search came up empty and either the
-  `find`, the **prune filter** or the `argoproj.io` grep did not finish (#1177,
-  #1428) — an unreadable subtree, a `find` killed mid-run, a `grep` that exited
-  `2`. Note it as
+  `find` or the `argoproj.io` grep did not finish (#1177) — an unreadable
+  subtree, a `find` killed mid-run, a `grep` that exited `2`. Note it as
   `kubernetes marker: search did not complete — the topic was not evaluated`,
-  quoting the recipe's stderr, which names all three statuses.
+  quoting the recipe's stderr, which names both statuses. There is no third
+  trigger since #1393: the vendored trees are pruned inside the `find`, so the
+  post-walk filter whose own failure #1428 captured no longer exists — and a
+  path vanishing under `.git` or `node_modules` mid-walk no longer trips the
+  `find` at all, because the walk never enters them.
 
   **In practice Phase 1 usually catches this first, and that is by design.**
   `detect-stack.sh` runs a **parity-pinned** copy of this marker in Phase 1 —
@@ -1284,7 +1294,7 @@ differences:
   # both content markers emit the same repo-relative form the example above shows)
   grep -REl --include='build.gradle.kts' 'org\.springframework\.boot|spring-boot-starter-' . 2>/dev/null | sed 's|^\./||'
 
-  # kubernetes → the HYBRID case (see below): the marker's own filtered path list,
+  # kubernetes → the HYBRID case (see below): the marker's own pruned-walk path list,
   # falling back to the argoproj.io matches only when it is empty. The final
   # printf is GUARDED, so an empty result prints NOTHING — matching the two
   # recipes above, whose consumers read "one path per line" and would otherwise
@@ -1308,19 +1318,16 @@ differences:
   # in every shell without `pipefail`, which the Bash tool's shell is. That would
   # make the `-ge 2` half of the ladder below dead code and print an empty list
   # for a repo with one unreadable *.yaml: the exact defect this block removes.
-  # The presence half's prune filter reads the captured string, not the
-  # filesystem — but grep can still fail operationally (exit 2, or no grep at
-  # all), and piping it straight into `sed` under `|| true` discarded that
-  # status exactly like its no-match 1 (#1428): an empty list at exit 0 for a
-  # filter that never ran. So the filter is captured on its own, BEFORE the
-  # `sed`, for the same reason the argoproj half is.
+  # The presence half has no post-walk filter to capture: the vendored trees are
+  # pruned INSIDE the find (#1393, the marker recipe's shape and reason), so the
+  # only status between the walk and the `sed` is find's own. The `sed` reads
+  # the captured string and cannot fail for a reason the list should care about.
   # kubernetes-manifests:begin
-  k8s_paths="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
+  k8s_paths="$(find . -path '*/node_modules' -prune -o -path '*/.git' -prune -o \
+                      -path '*/vendor' -prune -o -path '*/templates' -prune -o \
+                      \( -name Chart.yaml -o -name kustomization.yaml \
                          -o -name kustomization.yml -o -name Kustomization \) \
-                   ! -type d 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
-  k8s_paths="$(printf '%s\n' "$k8s_paths" \
-                 | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ 2>/dev/null
-               )" && k8s_filter_rc=0 || k8s_filter_rc=$?
+                      ! -type d -print 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
   k8s_paths="$(printf '%s\n' "$k8s_paths" | sed 's|^\./||')"
   k8s_argo_rc=1
   if [ -z "$k8s_paths" ]; then
@@ -1330,9 +1337,9 @@ differences:
       --exclude-dir=templates . 2>/dev/null)" && k8s_argo_rc=0 || k8s_argo_rc=$?
     [ -z "$k8s_argo_raw" ] || k8s_paths="$(printf '%s\n' "$k8s_argo_raw" | sed 's|^\./||')"
   fi
-  if [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_filter_rc" -ge 2 ] || [ "$k8s_argo_rc" -ge 2 ]; then
-    printf 'kubernetes manifests: search did not complete (find %s, filter %s, grep %s) — refusing to report a possibly-truncated list\n' \
-      "$k8s_find_rc" "$k8s_filter_rc" "$k8s_argo_rc" >&2
+  if [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_argo_rc" -ge 2 ]; then
+    printf 'kubernetes manifests: search did not complete (find %s, grep %s) — refusing to report a possibly-truncated list\n' \
+      "$k8s_find_rc" "$k8s_argo_rc" >&2
     ( exit 2 )
   elif [ -n "$k8s_paths" ]; then
     printf '%s\n' "$k8s_paths"
@@ -1343,7 +1350,7 @@ differences:
   **`kubernetes` is a HYBRID marker and needs its own clause**, because it is
   neither purely path-based nor purely content-based: it fires on a *file
   presence* set (`Chart.yaml`, the three `kustomization` spellings) **or** on
-  `argoproj.io` *content*. Its `manifests` is the filtered path list the recipe
+  `argoproj.io` *content*. Its `manifests` is the path list the pruned walk
   above produces — many paths, not one — falling back to the `argoproj.io`
   matches when the presence half found nothing. Note the fallback drops `-q`:
   the verdict recipe's `grep -rqlF` deliberately prints nothing, so reusing it
