@@ -89,17 +89,26 @@ local -a notes=()
 # or the literal `argoproj.io`, which nothing else carries by accident.
 local has_manifests="false"
 
-# Capture BEFORE filtering. `find … | grep -q` looks equivalent but inverts under
-# `set -o pipefail`: grep -q exits at its first match, find — still writing — dies
-# of SIGPIPE, and the whole condition goes FALSE even though a chart WAS found.
-# It misfires only once find's output outruns the pipe buffer, which is the worst
-# possible failure mode. `grep -v` reads its input to EOF, so the filter itself is
-# safe; the capture keeps it that way if the filter is ever changed.
+# Capture, never pipe into a test. `find … | grep -q` looks equivalent but
+# inverts under `set -o pipefail`: grep -q exits at its first match, find — still
+# writing — dies of SIGPIPE, and the whole condition goes FALSE even though a
+# chart WAS found. It misfires only once find's output outruns the pipe buffer,
+# which is the worst possible failure mode.
 #
-# `cd` into the repo so the emitted paths are repo-RELATIVE: with an absolute
-# "$repo" the prune substrings would also test the checkout's own prefix, and a
-# repo living under ~/templates/ (or a workspace directory named vendor) would
-# filter every hit and be reported manifest-free.
+# The vendored trees are PRUNED during the walk (`-path '*/x' -prune -o`, the
+# react marker's shape — #1393), not filtered out of the captured paths after
+# it: a post-walk `grep -v` still DESCENDS them, and find exits non-zero when any
+# path under them vanishes mid-traversal (a background `git gc` inside `.git`, an
+# installer rewriting `node_modules`) — an "unfinished search" over a tree whose
+# contents this recipe discards anyway. The explicit `-print` is load-bearing:
+# without it find's implicit print covers the WHOLE expression and every pruned
+# directory is printed as a hit.
+#
+# `cd` into the repo so the emitted paths are repo-RELATIVE, and so the prune
+# patterns test them: `-path '*/templates'` against an absolute "$repo" would
+# also match the checkout's own prefix, and a repo living under ~/templates/ (or
+# a workspace directory named vendor) would prune its whole tree at the root and
+# be reported manifest-free. `.` never matches a `*/x` pattern.
 local manifest_hits
 # one rc per SEARCH, so a failure can be attributed to the half that failed
 local manifest_rc=0 argo_rc=1 policy_rc=0 test_rc=0 test_hits=""
@@ -118,10 +127,11 @@ local manifest_rc=0 argo_rc=1 policy_rc=0 test_rc=0 test_hits=""
 # BOTH-halves-empty answer with an unfinished search refuses to answer at all.
 # gather-kubernetes-marker:begin
 manifest_hits="$(cd -- "$repo" 2>/dev/null || exit 125
-                 find . \
+                 find . -path '*/node_modules' -prune -o -path '*/.git' -prune -o \
+                        -path '*/vendor' -prune -o -path '*/templates' -prune -o \
                    \( -name Chart.yaml -o -name kustomization.yaml \
                       -o -name kustomization.yml -o -name Kustomization \) \
-                   ! -type d 2>/dev/null)" && manifest_rc=0 || manifest_rc=$?
+                   ! -type d -print 2>/dev/null)" && manifest_rc=0 || manifest_rc=$?
 # 125 is the subshell's sentinel for a failed `cd`, which no find returns.
 # Deliberately UNTESTED: the `[[ -r && -x ]]` gate above pre-empts it with its
 # own exit 2 and a different message, so no seam reaches this branch — it is
@@ -130,10 +140,6 @@ manifest_hits="$(cd -- "$repo" 2>/dev/null || exit 125
 # inert, which is worse than none (the same call tests/gather-kubernetes.bats
 # records for the fixture-find check).
 (( manifest_rc != 125 )) || { print -r -u2 -- "gather-kubernetes-findings.zsh: cannot enter $repo"; exit 2 }
-# the filter reads the captured string, not the filesystem, so `|| true` absorbs
-# only its no-match exit 1 — never a search failure
-manifest_hits="$(printf '%s\n' "$manifest_hits" \
-                   | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
 if [[ -z "$manifest_hits" ]]; then
   # `cd` first, and grep the literal `.` — for the SAME reason the find branch
   # does it, but a sharper failure: GNU grep documents --exclude-dir as skipping

@@ -1922,15 +1922,16 @@ false negative here is the unfixable accusation invariant (1) forbids, so an
 incomplete walk takes the same branch as a positive hit rather than being
 treated as "none found".
 
-**That probe prunes DURING its walk, not afterwards** — the one place in this
-family where the order matters. Every other recipe filters a captured list, and
-can, because there an unfinished search only ever softens a NEGATIVE verdict.
-Here the status SUPPRESSES a finding, so it must describe only the region
-actually searched: a permission error inside `.terraform/` or `node_modules/` —
-trees the marker ignores by design — must not read as "could not rule out" and
-silence the plugin's one built-in check. **#1162's inline copy owes the same
-scoping**, and following house style (walk everything, filter after) would break
-invariant (3) on any repo with an unreadable provider cache.
+**That probe prunes DURING its walk, not afterwards**, as the kubernetes
+marker's four parity-pinned copies do since #1393. The opentofu marker still
+filters a captured list, and can, because there an unfinished search only ever
+softens a NEGATIVE verdict. Here the status SUPPRESSES a finding, so it must
+describe only the region actually searched: a permission error inside
+`.terraform/` or `node_modules/` — trees the marker ignores by design — must not
+read as "could not rule out" and silence the plugin's one built-in check.
+**#1162's inline copy owes the same scoping**, and filtering after the walk, as
+the opentofu marker does, would break invariant (3) on any repo with an
+unreadable provider cache.
 
 **If NO `.tf` can be read at all, the gather refuses outright** — there is
 nothing to classify, and an unresolved-ownership note would still be a claim
@@ -6393,8 +6394,8 @@ with readable charts. Callers must branch on **non-zero**, never on a specific c
 (`set -euo pipefail` can also abort it with `1`), and must **not** parse the
 empty document: every key reads as absent, which looks exactly like a repo with
 no git, no languages and no artifacts. The **stderr is the deliverable** — it
-names which half of which search failed — so forward it verbatim rather than
-re-deriving a cause. **The obligation is on every caller, present and future** —
+names which search did not finish, and with what status — so forward it
+verbatim rather than re-deriving a cause. **The obligation is on every caller, present and future** —
 deliberately stated as a rule rather than as a list of call sites, because an
 enumeration rots the moment one is added and the next contract change would then
 be applied to the named ones and miss the rest. Today it binds maintenance
@@ -6487,8 +6488,10 @@ libraries they `load` are **bash**, not zsh, because bats is a bash harness — 
 have no choice in the matter. Those libraries are `tests/assertions.bash` (the
 shared assertion helpers, `load assertions`), `tests/roster.bash` (the helper
 roster derived from it, `load roster`), `tests/prose-lockstep.bash` (the
-propagation invariants' shared prose normalisation, `load prose-lockstep`, #1432)
-and `tests/acceptance/lib/ops-acceptance.bash`
+propagation invariants' shared prose normalisation, `load prose-lockstep`, #1432),
+`tests/resolve-issue-corpus.bash` (the resolve-issue skill's file set, `load
+resolve-issue-corpus`, #1503), `tests/marker-find-stub.bash` (the failing-marker-find
+fixture, `load marker-find-stub`, #1393) and `tests/acceptance/lib/ops-acceptance.bash`
 (the acceptance tier's fixture helpers, `load ../lib/ops-acceptance`) — note that
 last one is **nested**, so a library is not necessarily at `tests/*.bash`. They
 are standalone `.bash` files,

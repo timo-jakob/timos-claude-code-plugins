@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash
 #
 # The resolve-issue skill is no longer ONE file (#1503). It is a conductor —
 # `development/skills/resolve-issue/SKILL.md`, which keeps each step's

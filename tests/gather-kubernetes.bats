@@ -16,6 +16,7 @@
 bats_require_minimum_version 1.5.0
 
 load assertions
+load marker-find-stub
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -182,9 +183,10 @@ gather_directly() { "$GATHER" "$W"; }
   done
 }
 
-@test "the prune filter matches whole path SEGMENTS, not substrings (#1152)" {
-  # a directory merely NAMED like a pruned one must still be searched; a filter
-  # widened to a bare substring would silently stop detecting these repos
+@test "the walk-time prune matches whole path SEGMENTS, not substrings (#1152)" {
+  # a directory merely NAMED like a pruned one must still be searched; a prune
+  # pattern widened to a bare substring (`-path '*templates*'`) would silently
+  # stop detecting these repos
   mkdir -p "$W/templates-src/charts/app"
   printf 'apiVersion: v2\nname: a\nversion: 0.1.0\n' > "$W/templates-src/charts/app/Chart.yaml"
   run gather
@@ -333,9 +335,11 @@ gather_directly() { "$GATHER" "$W"; }
 }
 
 @test "an existing but UNREADABLE repo directory is an error, not an all-false payload (#1152)" {
-  # "could not look" must never render as "looked and found nothing": every search
-  # below the gate is wrapped in || true / 2>/dev/null, so without the -r/-x check
-  # this would exit 0 with a confident empty verdict
+  # "could not look" must never render as "looked and found nothing". Every
+  # search below the gate captures its own status (#1177, #1428) and refuses on
+  # an unfinished one — but this gate is the only thing that names the CAUSE as
+  # the repo itself: without it the failure is reported as an unfinished search
+  # inside a repo that could never be entered
   if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
   local locked="$BATS_TEST_TMPDIR/locked"
   mkdir -p "$locked/charts/app"
@@ -398,24 +402,48 @@ gather_directly() { "$GATHER" "$W"; }
   contains "$stderr" "did not complete"
 }
 
-@test "an unreadable node_modules trips the gather's FIND half specifically (#1177)" {
+@test "a find that fails with NO hits trips the gather's FIND half specifically (#1177, #1393)" {
   # the mirror of the grep-half test below: the locked-DIRECTORY test above fails
   # BOTH halves, so `manifest_rc != 0` is never the sole cause and could be
-  # deleted with the suite green. node_modules discriminates — the argoproj grep
-  # skips it (--exclude-dir) while find has no -prune and descends it. The
-  # regression pinned here is the common one: a vendored tree with restrictive
-  # permissions emitting manifest_validation:false at exit 0, which the
-  # orchestrator renders as a completed, clean search.
-  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
-  mkdir -p "$W/node_modules/pkg"
-  chmod 000 "$W/node_modules"
-  run --separate-stderr gather
-  chmod 755 "$W/node_modules"
+  # deleted with the suite green. Until #1393 an unreadable node_modules
+  # discriminated — the argoproj grep skipped it while find descended it and
+  # filtered afterwards — but both halves now skip the same trees, so no
+  # directory can fail find alone (that is the "never entered" test below). The
+  # stub is the seam: it fails only the manifest find, leaving the policy finds
+  # and the argoproj grep untouched.
+  local stub="$BATS_TEST_TMPDIR/find-stub" zsh_bin
+  zsh_bin="$(command -v zsh)"
+  failing_marker_find_stub "$stub"
+  run --separate-stderr env PATH="$stub:$PATH" "$zsh_bin" "$GATHER" "$W"
+  [ -f "$stub/fired" ]
   [ "$status" -eq 2 ]
   [ -z "$output" ]
   # BOTH halves named: find failed, grep completed cleanly
   contains "$stderr" "find exit 1"
   contains "$stderr" "grep exit 1"
+  # the script's own message and ONLY that: the stub writes a diagnostic, and
+  # the find's 2>/dev/null is what keeps it out of the orchestrator's note
+  lacks "$stderr" "stub: marker find failed"
+}
+
+@test "an unreadable node_modules no longer trips the gather at all — the tree is never entered (#1393)" {
+  # the property #1393 delivers, stated as the fixture #1177 used to fail on:
+  # the trees are PRUNED during the walk, so find never opens node_modules and a
+  # locked one cannot make the search "incomplete". A repo with no manifests is
+  # manifest_validation:false at exit 0 again — a COMPLETED search, which is
+  # what the orchestrator renders it as. Exit 2 here is the post-filter shape
+  # regressing. All four pruned trees, so a copy that pruned three would show.
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  local dir
+  for dir in node_modules .git vendor templates; do
+    rm -rf "$W"; mkdir -p "$W/$dir/pkg"
+    chmod 000 "$W/$dir"
+    run --separate-stderr gather
+    chmod 755 "$W/$dir"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r '.tooling_configured.manifest_validation' <<<"$output")" = "false" ]
+    [ -z "$stderr" ]
+  done
 }
 
 @test "an unreadable FILE trips the gather's GREP half specifically (#1177)" {
@@ -437,6 +465,41 @@ gather_directly() { "$GATHER" "$W"; }
   # silently turning this back into the both-halves fixture it replaces.
   contains "$stderr" "grep exit 2"
   contains "$stderr" "find exit 0"
+}
+
+@test "the gather has NO post-walk filter to fail: its refusal names find and grep only (#1393)" {
+  # #1428 captured the status of a `grep -v` that filtered the pruned trees out
+  # of find's output after the walk. #1393 removed that filter from all four
+  # copies — the trees are pruned inside the find — so the refusal names exactly
+  # two statuses. A third reappearing means a post-walk filter came back, and
+  # with it the trigger this issue removed (a walk that enters the trees it
+  # discards).
+  local stub="$BATS_TEST_TMPDIR/find-stub" zsh_bin
+  zsh_bin="$(command -v zsh)"
+  failing_marker_find_stub "$stub"
+  run --separate-stderr env PATH="$stub:$PATH" "$zsh_bin" "$GATHER" "$W"
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 2 ]
+  contains "$stderr" "(find exit 1, grep exit 1)"
+  lacks "$stderr" "filter"
+}
+
+@test "a failed find does NOT taint the gather's positive verdict (#1177, #1393)" {
+  # the tolerant half: a hit is a hit, whatever else failed (the block says so
+  # itself). With the find dead — no hits, status 1 — the argoproj search still
+  # runs and its match settles manifest_validation:true. Hoisting the find
+  # refusal above the positive arm would keep the refusal test above green and
+  # turn an Argo-only GitOps repo with a hiccuping find into no payload at all.
+  argocd
+  local stub="$BATS_TEST_TMPDIR/find-stub" zsh_bin
+  zsh_bin="$(command -v zsh)"
+  failing_marker_find_stub "$stub"
+  run --separate-stderr env PATH="$stub:$PATH" "$zsh_bin" "$GATHER" "$W"
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.manifest_validation' <<<"$output")" = "true" ]
+  # the stub writes to stderr; the find's 2>/dev/null keeps it out of the run
+  [ -z "$stderr" ]
 }
 
 @test "an unreadable SUBTREE does not taint a found manifest (#1177)" {
@@ -587,11 +650,12 @@ gather_directly() { "$GATHER" "$W"; }
 }
 
 @test "a repo whose PARENT directory has a pruned name is still searched (#1152)" {
-  # the load-bearing reason for `cd "$repo" && find .`: with an absolute $repo the
-  # grep -v filter would also test the checkout's own prefix, so a repo living
-  # under ~/templates/ (or a workspace named vendor/) would have every hit
-  # filtered and be reported manifest-free. Reverting the cd passes every other
-  # test in this file, because BATS_TEST_TMPDIR never contains such a segment.
+  # the load-bearing reason for `cd "$repo" && find .`: with an absolute $repo
+  # the `-path '*/templates' -prune` pattern would also test the checkout's own
+  # prefix, so a repo living under ~/templates/ (or a workspace named vendor/)
+  # would be pruned whole at its root and reported manifest-free. Reverting the
+  # cd passes every other test in this file, because BATS_TEST_TMPDIR never
+  # contains such a segment.
   local parent
   for parent in templates vendor node_modules; do
     local nested="$BATS_TEST_TMPDIR/$parent/repo"

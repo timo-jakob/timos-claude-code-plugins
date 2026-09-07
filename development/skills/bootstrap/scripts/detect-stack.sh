@@ -41,8 +41,13 @@
 #                                  any language or none; review-dispatch.zsh reads it
 #                                  as a no-language FALLBACK repo_type, after
 #                                  is_claude_plugin. Kept identical to the
-#                                  orchestrator's topic-marker recipe and to
-#                                  gather-kubernetes-findings.zsh. It also selects
+#                                  orchestrator's topic-marker recipe, its
+#                                  manifests lister, and
+#                                  gather-kubernetes-findings.zsh: marker names,
+#                                  prune set and --exclude-dir/--include tokens
+#                                  are derived by tests/kubernetes-topic-marker.bats;
+#                                  the `! -type d` guard is pinned behaviourally
+#                                  by tests/detect-stack.bats. It also selects
 #                                  the IaC candidate set: the marker WITH NO
 #                                  DETECTED LANGUAGE. A recorded `primary:` in
 #                                  .maintenance.yml can only VETO that (any value
@@ -257,11 +262,14 @@
 #      re-deriving a cause from the empty document.
 #      Note the trigger is not only a locked directory: `find` also exits
 #      non-zero when a path vanishes mid-traversal (a concurrent `git gc`, an
-#      installer writing into node_modules), and those trees are filtered AFTER
-#      the walk rather than pruned during it. Re-running is the remedy for a
-#      transient one; pruning them in the walk is a cross-copy change to all
-#      four parity-pinned recipes (and to the oracles that hold them identical),
-#      tracked as #1393.
+#      installer writing into node_modules). Since #1393 the KUBERNETES marker
+#      prunes `.git`, `node_modules`, `vendor` and `templates` DURING the walk
+#      (all four parity-pinned copies, and the oracles that hold them identical),
+#      so a path vanishing under those trees no longer trips it at all — the
+#      walk never enters them. The OPENTOFU marker below still filters its
+#      prune set after the walk and keeps the wider trigger; a failure there
+#      that does not recur on a second run was transient, and pruning it in the
+#      walk is that marker's own change, not #1393's.
 #   any other non-zero  an unanticipated internal failure under `set -e`. Stdout
 #      is empty there too, so callers must branch on **non-zero**, never on
 #      `== 2`: an enum read literally would treat those as success and parse an
@@ -1427,17 +1435,25 @@ fi
 # accepts), or the literal `argoproj.io`, which nothing else carries by accident
 # — deliberately NOT "any YAML with apiVersion", which matches a workflow file or
 # an OpenAPI document in half the repos in existence.
-# Capture BEFORE filtering: `find | grep -q` loses the match to SIGPIPE under
-# `set -o pipefail`. `! -type d` because a DIRECTORY named `Kustomization` is not
-# a manifest, while a symlinked one still counts. `cd` first so the prune
-# substrings test repo-RELATIVE paths — with an absolute prefix, a checkout
-# living under ~/templates/ would filter every hit and report itself
-# manifest-free.
+# Capture, never pipe into a test: `find | grep -q` loses the match to SIGPIPE
+# under `set -o pipefail`. `! -type d` because a DIRECTORY named `Kustomization`
+# is not a manifest, while a symlinked one still counts. The vendored trees are
+# PRUNED during the walk (`-path '*/x' -prune -o`, detect_lang's shape — #1393),
+# never filtered out of the captured paths after it: a post-walk `grep -v` still
+# DESCENDS them, and find exits non-zero when any path under them vanishes
+# mid-traversal (a background `git gc` inside `.git`, an installer rewriting
+# `node_modules`) — which, in THIS script, promoted to a whole-run exit 2 for
+# every repo, Kubernetes or not, over a tree the recipe discards anyway. The
+# explicit `-print` is load-bearing: without it find's implicit print covers the
+# WHOLE expression and every pruned directory is printed as a hit. `cd` first so
+# the prune patterns test repo-RELATIVE paths — `-path '*/templates'` against an
+# absolute prefix would match a checkout living under ~/templates/ at its root,
+# prune the whole tree and report it manifest-free; `.` never matches `*/x`.
 #
 # The `is-kubernetes-marker:begin`/`:end` sentinels are LOAD-BEARING, like the
 # orchestrator SKILL.md recipe's: tests/kubernetes-topic-marker.bats extracts
 # the text between them and derives the parity oracles from that bounded block
-# rather than from this whole 1600-line file. Unbounded, a `--exclude-dir=` or
+# rather than from this whole 2000-plus-line file. Unbounded, a `--exclude-dir=` or
 # `--include=` token added anywhere else in this script would mask its deletion
 # from THIS recipe — the union would be unchanged and the parity test green
 # while the argoproj grep quietly became "any file mentioning Argo". Keep the
@@ -1449,17 +1465,21 @@ fi
 # "could not look" emitted as `is_kubernetes: false`, which every consumer reads
 # as a completed search. An unfinished search taints only the NEGATIVE verdict:
 # a hit stands whatever else failed, so an argoproj-only repo with one unreadable
-# sibling directory still reports true. Only when BOTH halves came up empty AND
-# one of them did not finish does this script refuse to answer — loudly, on
-# stderr, with a non-zero exit, because its JSON has no third state and
-# `is_kubernetes: false` would be a lie about a search that never ran.
+# sibling directory still reports true. Only when the hits are empty AND the
+# find or the argoproj grep did not finish does this script refuse to answer —
+# loudly, on stderr, with a non-zero exit, because its JSON has no third state
+# and `is_kubernetes: false` would be a lie about a search that never ran. (The
+# post-walk prune filter whose own status #1428 captured is gone since #1393 —
+# the trees are pruned inside the find — so there is no third status to name.)
 # is-kubernetes-marker:begin
 is_kubernetes="false"
 k8s_hits="$(
 	cd "$cwd" 2>/dev/null || exit 125
-	find . \( -name Chart.yaml -o -name kustomization.yaml \
+	find . -path '*/node_modules' -prune -o -path '*/.git' -prune -o \
+		-path '*/vendor' -prune -o -path '*/templates' -prune -o \
+		\( -name Chart.yaml -o -name kustomization.yaml \
 		-o -name kustomization.yml -o -name Kustomization \) \
-		! -type d 2>/dev/null
+		! -type d -print 2>/dev/null
 )" && k8s_find_rc=0 || k8s_find_rc=$?
 if [[ "$k8s_find_rc" -eq 125 ]]; then
 	# 125 is the subshell's own sentinel for a failed `cd`, which no find returns:
@@ -1471,10 +1491,6 @@ if [[ "$k8s_find_rc" -eq 125 ]]; then
 	printf 'detect-stack: cannot enter %s to run the kubernetes marker\n' "$cwd" >&2
 	exit 2
 fi
-# the filter reads the captured string, not the filesystem, so `|| true` here
-# absorbs only its no-match exit 1 — never a search failure
-k8s_hits="$(printf '%s\n' "$k8s_hits" |
-	grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
 k8s_argo_rc=1
 if [[ -z "$k8s_hits" ]]; then
 	# grep the literal `.` after cd, not "$cwd": GNU grep documents
@@ -1512,8 +1528,8 @@ if [[ -n "$k8s_hits" || "$k8s_argo_rc" -eq 0 ]]; then
 	is_kubernetes="true"
 elif [[ "$k8s_find_rc" -ne 0 || "$k8s_argo_rc" -ge 2 ]]; then
 	# grep exit 2 is an OPERATIONAL error, not a no-match — and an unreadable
-	# subtree may equally have hidden a find hit, so neither half can be reported
-	# as "searched, nothing there".
+	# subtree may equally have hidden a find hit, so neither half can be
+	# reported as "searched, nothing there".
 	printf 'detect-stack: the kubernetes marker search did not complete (find exit %s, grep exit %s) — refusing to report is_kubernetes false\n' \
 		"$k8s_find_rc" "$k8s_argo_rc" >&2
 	exit 2

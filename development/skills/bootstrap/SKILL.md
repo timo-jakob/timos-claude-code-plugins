@@ -110,8 +110,12 @@ as a repo with no git, no languages and no artifacts and would drive Step 4 to
 render the wrong set entirely. Re-run once — if the same statuses recur the
 cause is **most likely** permissions on the paths the search covers. Say "most
 likely", not "the tree is unreadable": the searches suppress their own
-diagnostics, and a tree being *written* throughout both runs (an installer
-populating `node_modules`, a background `git gc`) reproduces the same statuses.
+diagnostics, and a tree being *written* throughout both runs reproduces the
+same statuses (for the opentofu marker an installer populating `node_modules`,
+which its walk still enters; for either marker a build rewriting a tree the
+walk does enter, such as `dist/` or a chart directory). Do not cite
+`node_modules`, `.git`, `vendor` or `templates` for the kubernetes marker:
+since #1393 its walk never enters them.
 This is the same wording maintenance SKILL.md's Phase 1 mandates — both skills
 read the same contract off the same suppressed evidence, so they must not give
 the user opposite certainties.
