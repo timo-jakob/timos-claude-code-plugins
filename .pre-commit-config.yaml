@@ -13,7 +13,7 @@
 # parse zsh). Extension matches the shebang for every script, so no per-file
 # exceptions are needed — the shebang-less `tests/**/*.bash` libraries bats
 # sources (assertions.bash, roster.bash, prose-lockstep.bash,
-# resolve-issue-corpus.bash, prune-stub.bash, acceptance/lib/ops-acceptance.bash) each
+# resolve-issue-corpus.bash, marker-find-stub.bash, acceptance/lib/ops-acceptance.bash) each
 # carry a `# shellcheck shell=bash` directive instead. A new one must too, or
 # shellcheck cannot tell its dialect. Note the `**`: a library may be nested (the
 # acceptance tier's is), and a `tests/*.bash` reading would miss it.

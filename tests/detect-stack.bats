@@ -16,7 +16,7 @@
 # this declaration, or bats emits BW02 for every one of them.
 bats_require_minimum_version 1.5.0
 
-load prune-stub
+load marker-find-stub
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -1868,68 +1868,111 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   echo "$stderr" | grep -q 'find exit 0'
 }
 
-@test "detect-stack #1428: a failing kubernetes prune filter refuses, never is_kubernetes false" {
-  # the prune filter's `|| true` absorbed grep's exit 2 like a no-match: the
-  # hits went empty with find's status still 0, the argoproj half returned a
-  # clean 1, and the script emitted `is_kubernetes: false` for a repo whose
-  # Chart.yaml the find DID return — then review-dispatch routed it away from
-  # the kubernetes panel and bootstrap treated it as non-GitOps, silently.
+@test "detect-stack #1393: a find that fails AFTER returning a chart still answers true" {
+  # the tolerant half, isolated to the find disjunct, and with the widest blast
+  # radius of the four copies: this script's refusal is a whole-script exit 2
+  # that writes NO JSON, so every caller halts. A walk that died after printing
+  # the chart — the stub's shape, a mid-run `git gc`'s shape — must still
+  # report true: hoisting the find refusal above the positive arm keeps the
+  # refusal test above green while bootstrap halts on a repo it should detect.
   mkdir -p charts/app
   printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
-  local stub="$BATS_TEST_TMPDIR/grep-stub"
-  failing_prune_grep_stub "$stub"
-  run --separate-stderr env "PATH=$stub:$PATH" bash "$DETECT"
-  [ -f "$stub/fired" ]
-  [ "$status" -eq 2 ]
-  [ -z "$output" ]
-  # arm-unique needles, as the #1177 sibling explains; plus the filter status,
-  # which is what this fixture isolates (find 0, grep 1 alongside it)
-  echo "$stderr" | grep -q 'the kubernetes marker search did not complete'
-  echo "$stderr" | grep -q 'refusing to report is_kubernetes false'
-  echo "$stderr" | grep -q 'filter exit 2'
-  echo "$stderr" | grep -q 'find exit 0'
-}
-
-@test "detect-stack #1428: a failing prune filter does NOT taint a positive is_kubernetes" {
-  # the tolerant half, and with the widest blast radius of the four copies: this
-  # script's refusal is a whole-script exit 2 that writes NO JSON, so every
-  # caller halts. An argoproj-only repo whose prune grep hiccups must still
-  # report true — hoisting the filter refusal above the positive arm keeps the
-  # refusal test above green while bootstrap halts on a repo it should detect.
-  mkdir -p argocd
-  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > argocd/app.yaml
-  # a readable .tf so the OPENTOFU marker also reaches a verdict (#1160) — the
-  # stub keys on the kubernetes prune operand only, and leaves that one alone
-  printf 'provider "aws" {}\n' > main.tf
-  local stub="$BATS_TEST_TMPDIR/grep-stub"
-  failing_prune_grep_stub "$stub"
+  local stub="$BATS_TEST_TMPDIR/find-stub"
+  failing_marker_find_stub "$stub"
   run --separate-stderr env "PATH=$stub:$PATH" bash "$DETECT"
   [ -f "$stub/fired" ]
   [ "$status" -eq 0 ]
   [ "$(jq -r .is_kubernetes <<<"$output")" = "true" ]
-  # the stub writes to stderr; the filter's 2>/dev/null keeps it out of the run
+  # the stub writes to stderr; the find's 2>/dev/null keeps it out of the run
   [ -z "$stderr" ]
 }
 
-@test "detect-stack #1177: an unreadable node_modules trips the FIND half specifically" {
+@test "detect-stack #1177/#1393: a find that fails with NO hits trips the FIND half specifically" {
   # the mirror gap: both fixtures above are satisfied by the grep disjunct, so
-  # `"$k8s_find_rc" -ne 0 ||` could be deleted with the suite green. node_modules
-  # discriminates — the argoproj grep skips it via --exclude-dir, find descends
-  # it (the recipe filters paths after the walk, it never prunes). Consequence of
-  # the regression: is_kubernetes:false for a repo whose find aborted, which
-  # routes a GitOps repo away from the kubernetes review panel and makes
-  # bootstrap treat it as non-GitOps — both silently.
-  if [ "$(id -u)" -eq 0 ]; then
-    skip "root reads every directory, so the guard cannot be exercised"
-  fi
-  mkdir -p node_modules/pkg
-  chmod 000 node_modules
-  run --separate-stderr bash "$DETECT"
-  chmod 755 node_modules
+  # `"$k8s_find_rc" -ne 0 ||` could be deleted with the suite green. Until
+  # #1393 an unreadable node_modules discriminated — the argoproj grep skipped
+  # it while find descended it and filtered afterwards — but both halves now
+  # skip the same trees, so no directory can fail find alone (the "never
+  # entered" test below). The stub is the seam: it fails only the invocation
+  # carrying the marker operands and delegates every other find in this script.
+  # Consequence of the regression: is_kubernetes:false for a repo whose find
+  # aborted, which routes a GitOps repo away from the kubernetes review panel
+  # and makes bootstrap treat it as non-GitOps — both silently.
+  local stub="$BATS_TEST_TMPDIR/find-stub"
+  failing_marker_find_stub "$stub"
+  run --separate-stderr env "PATH=$stub:$PATH" bash "$DETECT"
+  [ -f "$stub/fired" ]
   [ "$status" -eq 2 ]
   [ -z "$output" ]
   echo "$stderr" | grep -q 'find exit 1'
   echo "$stderr" | grep -q 'grep exit 1'
+  # two statuses, not three: the post-walk filter #1428 captured is gone
+  echo "$stderr" | grep -q '(find exit 1, grep exit 1)'
+  run ! grep -q 'filter' <<< "$stderr"
+  # the script's own message and ONLY that — every caller forwards this stderr
+  # verbatim, and the find's 2>/dev/null is what keeps the stub's line out
+  run ! grep -q 'stub: marker find failed' <<< "$stderr"
+}
+
+@test "detect-stack #1393: an unreadable node_modules no longer halts the run — the tree is never entered" {
+  # the sharp end of #1393. Before it, a vanished or unreadable path under
+  # node_modules/.git/vendor/templates failed the marker's find, and in THIS
+  # script that promoted to a whole-run exit 2 with no JSON — bootstrap Step 1
+  # and maintenance Phase 1 halted for EVERY repo, Kubernetes or not, even
+  # though detect_lang prunes those same trees and completed fine. Pruned in
+  # the walk, the tree is never opened: a repo with no manifests is
+  # is_kubernetes:false at exit 0 — a completed search — and silent. Exit 2
+  # here is the post-filter shape regressing.
+  #
+  # A readable .tf at the root, because the OPENTOFU marker still filters its
+  # prune set AFTER the walk (out of #1393's scope) and would refuse on the
+  # same locked directory with no hit to stand on; one `*.tf` settles its
+  # verdict whatever else failed. So this test proves the KUBERNETES half never
+  # enters the tree — it says nothing about the opentofu twin, which is that
+  # marker's own change.
+  if [ "$(id -u)" -eq 0 ]; then
+    skip "root reads every directory, so the guard cannot be exercised"
+  fi
+  printf 'provider "aws" {}\n' > main.tf
+  local dir
+  for dir in node_modules .git vendor templates; do
+    rm -rf "$dir"; mkdir -p "$dir/pkg"
+    chmod 000 "$dir"
+    run --separate-stderr bash "$DETECT"
+    chmod 755 "$dir"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r .is_kubernetes <<<"$output")" = "false" ]
+    [ -z "$stderr" ]
+  done
+}
+
+@test "detect-stack #1393: the Exit codes header names the pruned walk and the opentofu deferral" {
+  # AC (4) of #1393: the deferral note links the issue and says WHICH marker was
+  # fixed, rather than describing the deferral abstractly. Prose, so the
+  # recipe-level tests cannot see it: without this pin the paragraph can be
+  # deleted, or simplified into "both markers were fixed", with the suite green
+  # — and it is the one place a caller reading the exit contract learns that a
+  # mid-walk git gc under .git/node_modules no longer aborts the whole script,
+  # while the opentofu half deliberately still can. The same shape
+  # tests/kubernetes-topic-marker.bats uses for the SKILL.md twin.
+  # BOUNDED to the contract block (the `Exit codes (…):` line down to `set -euo
+  # pipefail`), the way the sibling suite bounds its sentinel extractions: a
+  # needle satisfied by a stray comment elsewhere in this 2000-line script
+  # would pass while the header said nothing. Strip the comment prefixes BEFORE
+  # folding whitespace, so a needle may span two header lines.
+  local header
+  header="$(sed -n '/^# Exit codes (/,/^set -euo pipefail$/p' "$DETECT" | sed 's/^#[[:space:]]*//' | tr -s '[:space:]' ' ')"
+  [ -n "$header" ]
+  [ "$(printf '%s' "$header" | wc -c | tr -d ' ')" -lt 6000 ]
+  echo "$header" | grep -qF 'Since #1393 the KUBERNETES marker prunes'
+  echo "$header" | grep -qF 'the walk never enters them'
+  # the deferral half, so the note cannot claim both markers were fixed
+  echo "$header" | grep -qF 'The OPENTOFU marker below still filters its prune set after the walk'
+  # and the abstract pre-#1393 wording is gone — both needles are VERBATIM
+  # from the superseded header ("… are filtered AFTER the walk rather than
+  # pruned during it … tracked as #1393"), so a revert restores exactly them
+  run ! grep -qF 'tracked as #1393' <<< "$header"
+  run ! grep -qF 'filtered AFTER the walk rather than pruned during it' <<< "$header"
 }
 
 @test "detect-stack #1177: an unreadable subtree with a chart still answers true" {

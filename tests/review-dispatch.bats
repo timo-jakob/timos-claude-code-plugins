@@ -929,7 +929,7 @@ EOF
   local stub="$BATS_TEST_TMPDIR/detect-fail.sh"
   cat > "$stub" <<'EOF'
 #!/usr/bin/env bash
-echo "detect-stack: the kubernetes marker search did not complete (find exit 1, filter exit 0, grep exit 2)" >&2
+echo "detect-stack: the kubernetes marker search did not complete (find exit 1, grep exit 2)" >&2
 exit 2
 EOF
   chmod +x "$stub"
