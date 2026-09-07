@@ -16,6 +16,8 @@
 # this declaration, or bats emits BW02 for every one of them.
 bats_require_minimum_version 1.5.0
 
+load prune-stub
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   DETECT="$REPO_ROOT/development/skills/bootstrap/scripts/detect-stack.sh"
@@ -1741,7 +1743,8 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
 
 @test "detect-stack #1153: the marker survives an unreadable subtree under errexit" {
   # detect-stack.sh runs under `set -euo pipefail`, and this recipe depends on
-  # `2>/dev/null` on BOTH halves plus `|| true` on the capture to survive one
+  # `2>/dev/null` on BOTH halves plus each search's status captured as
+  # `&& rc=0 || rc=$?` (never a blanket `|| true`, #1177/#1428) to survive one
   # unreadable directory. The parity oracles in kubernetes-topic-marker.bats
   # compare only -name / prune / --exclude-dir / --include tokens, so they are
   # blind to those guards — drop one and detect-stack aborts non-zero on any
@@ -1863,6 +1866,49 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
   # BOTH halves named, so the fixture provably isolates the grep disjunct
   echo "$stderr" | grep -q 'grep exit 2'
   echo "$stderr" | grep -q 'find exit 0'
+}
+
+@test "detect-stack #1428: a failing kubernetes prune filter refuses, never is_kubernetes false" {
+  # the prune filter's `|| true` absorbed grep's exit 2 like a no-match: the
+  # hits went empty with find's status still 0, the argoproj half returned a
+  # clean 1, and the script emitted `is_kubernetes: false` for a repo whose
+  # Chart.yaml the find DID return — then review-dispatch routed it away from
+  # the kubernetes panel and bootstrap treated it as non-GitOps, silently.
+  mkdir -p charts/app
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > charts/app/Chart.yaml
+  local stub="$BATS_TEST_TMPDIR/grep-stub"
+  failing_prune_grep_stub "$stub"
+  run --separate-stderr env "PATH=$stub:$PATH" bash "$DETECT"
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # arm-unique needles, as the #1177 sibling explains; plus the filter status,
+  # which is what this fixture isolates (find 0, grep 1 alongside it)
+  echo "$stderr" | grep -q 'the kubernetes marker search did not complete'
+  echo "$stderr" | grep -q 'refusing to report is_kubernetes false'
+  echo "$stderr" | grep -q 'filter exit 2'
+  echo "$stderr" | grep -q 'find exit 0'
+}
+
+@test "detect-stack #1428: a failing prune filter does NOT taint a positive is_kubernetes" {
+  # the tolerant half, and with the widest blast radius of the four copies: this
+  # script's refusal is a whole-script exit 2 that writes NO JSON, so every
+  # caller halts. An argoproj-only repo whose prune grep hiccups must still
+  # report true — hoisting the filter refusal above the positive arm keeps the
+  # refusal test above green while bootstrap halts on a repo it should detect.
+  mkdir -p argocd
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > argocd/app.yaml
+  # a readable .tf so the OPENTOFU marker also reaches a verdict (#1160) — the
+  # stub keys on the kubernetes prune operand only, and leaves that one alone
+  printf 'provider "aws" {}\n' > main.tf
+  local stub="$BATS_TEST_TMPDIR/grep-stub"
+  failing_prune_grep_stub "$stub"
+  run --separate-stderr env "PATH=$stub:$PATH" bash "$DETECT"
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .is_kubernetes <<<"$output")" = "true" ]
+  # the stub writes to stderr; the filter's 2>/dev/null keeps it out of the run
+  [ -z "$stderr" ]
 }
 
 @test "detect-stack #1177: an unreadable node_modules trips the FIND half specifically" {

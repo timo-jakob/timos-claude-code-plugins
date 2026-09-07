@@ -29,6 +29,7 @@
 bats_require_minimum_version 1.5.0
 
 load assertions
+load prune-stub
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -108,7 +109,7 @@ setup() {
   [ -f "$DETECT" ]
   # SENTINEL-bounded, exactly like RECIPE and MANIFESTS above — and for a
   # sharper reason. The oracles below compare sorted UNIONS of extracted
-  # tokens, so deriving detect-stack's operand from the WHOLE 1600-line file
+  # tokens, so deriving detect-stack's operand from the WHOLE (2000-plus-line) file
   # would let any other block in this actively-extended script supply a
   # `--exclude-dir=templates` or `--include='*.yaml'` and mask its deletion
   # from the kubernetes recipe: union unchanged, parity green, and the argoproj
@@ -123,10 +124,11 @@ setup() {
   DETECT_BLOCK="$(sed -n '/^# is-kubernetes-marker:begin$/,/^# is-kubernetes-marker:end$/p' "$DETECT" \
     | grep -v '^[[:space:]]*#')"
   [ -n "$DETECT_BLOCK" ]
-  # a looser bound than its three siblings (~21-22 lines) because this copy
+  # a looser bound than its three siblings (30 lines) because this copy
   # carries two NAMED cannot-enter branches the others fold into one, and it is
-  # tab-indented bash rather than a fenced snippet. Still a runaway guard: the
-  # file is ~1900 lines, so a sed range running to EOF misses this by 40x.
+  # tab-indented bash rather than a fenced snippet. Still a runaway guard: a
+  # sed range running from the sentinel to EOF prints hundreds of lines, an
+  # order of magnitude over this bound whatever the file's exact length.
   [ "$(printf '%s\n' "$DETECT_BLOCK" | wc -l)" -le 45 ]
   starts_with "$DETECT_BLOCK" 'is_kubernetes="false"'
   ends_with "$DETECT_BLOCK" 'fi'
@@ -431,6 +433,66 @@ chart() {
   [ -z "$stderr" ]
 }
 
+@test "the RECIPE refuses (2) when the prune filter itself fails (#1428)" {
+  # #1177 captured each SEARCH's status but left the prune filter under
+  # `|| true`, which absorbs grep's operational exit 2 (and a missing grep's
+  # 127) exactly like its no-match 1. The hits went empty with find's status
+  # still 0, the "did not complete" arm never fired, and the recipe answered
+  # "not kubernetes" for a filter that never ran. Twin of the opentofu test
+  # #1160 landed; restoring `|| true` turns this back into a confident 1.
+  # Run in the orchestrator's shell — errexit AND pipefail — like every other
+  # refusal test here: the capture is spelled `&& rc=0 || rc=$?` precisely so a
+  # non-zero filter survives `set -e`, and only this leg can tell that shape
+  # from a bare `; rc=$?`, which aborts the whole block with no verdict.
+  chart
+  local stub="$BATS_TEST_TMPDIR/grep-stub"
+  failing_prune_grep_stub "$stub"
+  run --separate-stderr env "PATH=$stub:$PATH" bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 2 ]
+  contains "$stderr" 'did not complete'
+  # the message names WHICH half failed — filter, with find and grep both clean —
+  # so this fixture provably isolates the new disjunct
+  contains "$stderr" 'filter 2'
+  contains "$stderr" 'find 0'
+  contains "$stderr" 'grep 1'
+}
+
+@test "a filter that merely prunes EVERYTHING is a clean 1 under errexit, not an abort (#1428)" {
+  # the other boundary of `-ge 2`, under the orchestrator's `set -e`: exit 1 is
+  # grep's genuine "every hit was pruned" answer, and a repo whose only chart
+  # sits under node_modules/ — every JS-bearing repo — must be a clean 1, not a
+  # refusal (tighten `-ge 2` to `-ne 0` and this answers 2). What this test
+  # CANNOT see is the capture shape itself: a bare `; rc=$?` also exits 1 here,
+  # silently, under errexit. That shape is pinned by the refusal test above,
+  # where the abort would exit 2 WITHOUT the "did not complete" message.
+  mkdir -p "$W/node_modules/dep/chart"
+  printf 'apiVersion: v2\nname: dep\nversion: 0.1.0\n' > "$W/node_modules/dep/chart/Chart.yaml"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
+  [ "$status" -eq 1 ]
+  [ -z "$stderr" ]
+}
+
+@test "a failed prune filter does NOT taint an argoproj-positive verdict (#1428)" {
+  # the tolerant half, unchanged by the fix: a hit is a hit. With the filter
+  # dead the argoproj search still runs, and its match settles the verdict —
+  # otherwise the hardening would refuse every repo the moment grep hiccups,
+  # the same over-correction the #1177 positive-verdict test guards against.
+  mkdir -p "$W/apps"
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/apps/app.yaml"
+  local stub="$BATS_TEST_TMPDIR/grep-stub"
+  failing_prune_grep_stub "$stub"
+  run --separate-stderr env "PATH=$stub:$PATH" bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$RECIPE")"
+  # the stub proves it intercepted the filter: status 0 and silence are also
+  # what an UN-stubbed run produces, so without this the test cannot tell a
+  # tolerant recipe from a stub that stopped matching
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 0 ]
+  # SILENT: the stub writes a diagnostic to stderr, and the recipe's `2>/dev/null`
+  # on the filter is what keeps it out of the transcript
+  [ -z "$stderr" ]
+}
+
 @test "the manifests recipe reports an incomplete search instead of an empty list (#1177)" {
   # one level down, the same defect with a different blast radius: an empty
   # `manifests` list dispatches the topic naming no files at all, so the agents
@@ -472,6 +534,56 @@ chart() {
   # both needles, so the fixture provably isolates the GREP disjunct
   contains "$stderr" 'grep 2'
   contains "$stderr" 'find 0'
+}
+
+@test "the manifests lister refuses (2) when its prune filter fails (#1428)" {
+  # the lister carried the same defect one layer deeper: its filter was piped
+  # straight into `sed` under `|| true`, so a grep that exited 2 printed an empty
+  # list at exit 0 — a topic dispatched naming no files. Both legs, no-pipefail
+  # FIRST, for the reason the #1177 lister test states: the orchestrator's shell
+  # sets neither, so the filter's own status must be captured before the `sed`.
+  chart
+  local stub="$BATS_TEST_TMPDIR/grep-stub"
+  failing_prune_grep_stub "$stub"
+  run --separate-stderr env "PATH=$stub:$PATH" bash -c "cd '$W'; $(printf '%s' "$MANIFESTS")"
+  local plain_status="$status" plain_out="$output" plain_err="$stderr"
+  run --separate-stderr env "PATH=$stub:$PATH" bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  [ -f "$stub/fired" ]
+  [ "$plain_status" -eq 2 ]
+  [ -z "$plain_out" ]
+  contains "$plain_err" 'did not complete'
+  contains "$plain_err" 'filter 2'
+  # the recipe's own message, and ONLY that: the stub writes a diagnostic to
+  # stderr, and the lister's stderr is relayed VERBATIM into the
+  # `manifest listing did not complete: <stderr>` note — so the filter's
+  # `2>/dev/null` is what keeps raw grep noise out of the operator's transcript
+  lacks "$plain_err" 'stub: prune filter failed'
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" 'filter 2'
+  contains "$stderr" 'find 0'
+  lacks "$stderr" 'stub: prune filter failed'
+}
+
+@test "the manifests lister treats a filter that pruned EVERYTHING as a clean no-match (#1428)" {
+  # the `-ge 2` boundary on the lister's new disjunct: filter exit 1 is grep's
+  # genuine "every presence hit was pruned" answer, and the lister must then fall
+  # back to the argoproj paths at exit 0 — an Argo repo that also vendors a chart
+  # under node_modules/ is that repo. Tightening `-ge 2` to `-ne 0` would refuse
+  # it with "manifest listing did not complete", and the consumer rule would move
+  # a healthy repo to unsupported_topics. Both legs, like the refusal test.
+  mkdir -p "$W/node_modules/dep/chart" "$W/apps"
+  printf 'apiVersion: v2\nname: dep\nversion: 0.1.0\n' > "$W/node_modules/dep/chart/Chart.yaml"
+  printf 'apiVersion: argoproj.io/v1alpha1\nkind: Application\n' > "$W/apps/app.yaml"
+  run --separate-stderr bash -c "cd '$W'; $(printf '%s' "$MANIFESTS")"
+  local plain_status="$status" plain_out="$output" plain_err="$stderr"
+  run --separate-stderr bash -c "set -e; set -o pipefail; cd '$W'; $(printf '%s' "$MANIFESTS")"
+  [ "$plain_status" -eq 0 ]
+  [ "$plain_out" = "apps/app.yaml" ]
+  [ -z "$plain_err" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "apps/app.yaml" ]
+  [ -z "$stderr" ]
 }
 
 @test "an unreadable node_modules trips the lister's FIND half — and it refuses a TRUNCATED list (#1177)" {
@@ -702,7 +814,7 @@ chart() {
   manifests_ex="$(printf '%s\n' "$MANIFESTS" | grep -oE '\-\-exclude-dir=[a-z_.]+' | sort -u | tr '\n' ' ')"
   # derived from the SENTINEL-BOUNDED block, not the whole file: an unbounded
   # union cannot distinguish "present in this recipe" from "present somewhere
-  # in a 1600-line script", so a token deleted here but present elsewhere would
+  # in a 2000-plus-line script", so a token deleted here but present elsewhere would
   # leave the union — and this test — unchanged
   detect_ex="$(printf '%s\n' "$DETECT_BLOCK" | grep -oE '\-\-exclude-dir=[a-z_.]+' | sort -u | tr '\n' ' ')"
   [ -n "$recipe_ex" ]
@@ -790,6 +902,13 @@ chart() {
   contains "$skill" 'kubernetes marker: search did not complete'
   # never the absent bucket — the sentence that makes it a rule, not a hint
   contains "$skill" '**never** the absent bucket'
+  # and the exit-2 triggers name the prune filter as a third one (#1428), so a
+  # revert to the two-half wording — the round-1 finding — cannot ship green.
+  # The whole trigger clause, not a bare '**prune filter**': the opentofu bullet
+  # below it names the prune filter too, so a shorter needle would be satisfied
+  # by that copy while the kubernetes one silently lost its third trigger
+  contains "$skill" 'either the `find`, the **prune filter** or the `argoproj.io` grep did not finish'
+  contains "$skill" 'which names all three statuses'
   # and the manifests lister's own consumer rule (#1177), which is a different
   # step with a different consequence — an empty manifests list, not a dropped topic
   contains "$skill" 'manifest listing did not complete'
@@ -849,6 +968,9 @@ chart() {
   contains "$arch" 'branch on **non-zero**, never on a specific code'
   contains "$arch" 'must **not** parse the empty document'
   contains "$arch" 'The **stderr is the deliverable**'
+  # component-agnostic since #1428 — a marker may name two statuses or three —
+  # so a re-narrowing to a fixed pair (the old "which half") reds here
+  contains "$arch" 'names which search did not finish, and with what status'
   contains "$arch" 'obligation is on every caller'
 
   # the THIRD prose call site, named by ARCHITECTURE.md and edited by #1177 — no

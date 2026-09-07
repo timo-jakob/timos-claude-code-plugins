@@ -367,15 +367,23 @@ fi
 # SEPARATELY now, and an unfinished search taints only the NEGATIVE verdict: a
 # hit is a hit regardless of an unreadable sibling directory (which is why the
 # argoproj-only-plus-locked-subtree repo still reports 0), while "no" is only
-# ever reported when both halves genuinely completed.
+# ever reported when both halves — and the prune filter between them (#1428) —
+# genuinely completed.
 # kubernetes-marker:begin
 k8s_hits="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
                        -o -name kustomization.yml -o -name Kustomization \) \
                  ! -type d 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
-# the filter reads the captured string, never the filesystem, so it cannot fail
-# for a reason the verdict should care about; `|| true` absorbs its no-match 1
+# the filter reads the captured string, never the filesystem — but it CAN still
+# fail (grep exit 2, or no grep at all), and `|| true` absorbed those exactly
+# like the intended no-match 1 (#1428): the hits went empty with find's status
+# still 0, so the "did not complete" arm below never fired and the recipe
+# answered "not kubernetes" for a search that never ran. Same shape as the
+# opentofu recipe: capture the filter's own status; 1 stays the genuine
+# "everything was pruned" answer. Keep whitespace after the last `-e` operand,
+# whatever trails it — the parity oracle's `[^ ']+` run swallows anything glued.
 k8s_hits="$(printf '%s\n' "$k8s_hits" \
-  | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
+  | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ 2>/dev/null
+)" && k8s_filter_rc=0 || k8s_filter_rc=$?
 k8s_argo_rc=1
 if [ -z "$k8s_hits" ]; then
   grep -rqlF 'argoproj.io' \
@@ -385,9 +393,9 @@ if [ -z "$k8s_hits" ]; then
 fi
 if [ -n "$k8s_hits" ] || [ "$k8s_argo_rc" -eq 0 ]; then
   true
-elif [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_argo_rc" -ge 2 ]; then
-  printf 'kubernetes marker: search did not complete (find %s, grep %s) — refusing to report "not kubernetes"\n' \
-    "$k8s_find_rc" "$k8s_argo_rc" >&2
+elif [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_filter_rc" -ge 2 ] || [ "$k8s_argo_rc" -ge 2 ]; then
+  printf 'kubernetes marker: search did not complete (find %s, filter %s, grep %s) — refusing to report "not kubernetes"\n' \
+    "$k8s_find_rc" "$k8s_filter_rc" "$k8s_argo_rc" >&2
   ( exit 2 )
 else
   false
@@ -605,11 +613,12 @@ below as *provisional* for them:
 | `1` | marker absent | the topic is not this repo's — drop it, silently and correctly |
 | anything else | **the marker was not evaluated** | `unsupported_topics`, with the recipe's own stderr as the note — **never** the absent bucket |
 
-- **`kubernetes` exits `2`** when both halves of its search came up empty and at
-  least one of them did not finish (#1177) — an unreadable subtree, a `find`
-  killed mid-run, a `grep` that exited `2`. Note it as
+- **`kubernetes` exits `2`** when the search came up empty and either the
+  `find`, the **prune filter** or the `argoproj.io` grep did not finish (#1177,
+  #1428) — an unreadable subtree, a `find` killed mid-run, a `grep` that exited
+  `2`. Note it as
   `kubernetes marker: search did not complete — the topic was not evaluated`,
-  quoting the recipe's stderr, which names which half failed.
+  quoting the recipe's stderr, which names all three statuses.
 
   **In practice Phase 1 usually catches this first, and that is by design.**
   `detect-stack.sh` runs a **parity-pinned** copy of this marker in Phase 1 —
@@ -1299,15 +1308,20 @@ differences:
   # in every shell without `pipefail`, which the Bash tool's shell is. That would
   # make the `-ge 2` half of the ladder below dead code and print an empty list
   # for a repo with one unreadable *.yaml: the exact defect this block removes.
-  # The presence half's filter may stay piped — its status is discarded (`||
-  # true`) because it reads the captured string, not the filesystem.
+  # The presence half's prune filter reads the captured string, not the
+  # filesystem — but grep can still fail operationally (exit 2, or no grep at
+  # all), and piping it straight into `sed` under `|| true` discarded that
+  # status exactly like its no-match 1 (#1428): an empty list at exit 0 for a
+  # filter that never ran. So the filter is captured on its own, BEFORE the
+  # `sed`, for the same reason the argoproj half is.
   # kubernetes-manifests:begin
   k8s_paths="$(find . \( -name Chart.yaml -o -name kustomization.yaml \
                          -o -name kustomization.yml -o -name Kustomization \) \
                    ! -type d 2>/dev/null)" && k8s_find_rc=0 || k8s_find_rc=$?
   k8s_paths="$(printf '%s\n' "$k8s_paths" \
-                 | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ \
-                 | sed 's|^\./||')" || true
+                 | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ 2>/dev/null
+               )" && k8s_filter_rc=0 || k8s_filter_rc=$?
+  k8s_paths="$(printf '%s\n' "$k8s_paths" | sed 's|^\./||')"
   k8s_argo_rc=1
   if [ -z "$k8s_paths" ]; then
     k8s_argo_raw="$(grep -rlF 'argoproj.io' \
@@ -1316,9 +1330,9 @@ differences:
       --exclude-dir=templates . 2>/dev/null)" && k8s_argo_rc=0 || k8s_argo_rc=$?
     [ -z "$k8s_argo_raw" ] || k8s_paths="$(printf '%s\n' "$k8s_argo_raw" | sed 's|^\./||')"
   fi
-  if [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_argo_rc" -ge 2 ]; then
-    printf 'kubernetes manifests: search did not complete (find %s, grep %s) — refusing to report a possibly-truncated list\n' \
-      "$k8s_find_rc" "$k8s_argo_rc" >&2
+  if [ "$k8s_find_rc" -ne 0 ] || [ "$k8s_filter_rc" -ge 2 ] || [ "$k8s_argo_rc" -ge 2 ]; then
+    printf 'kubernetes manifests: search did not complete (find %s, filter %s, grep %s) — refusing to report a possibly-truncated list\n' \
+      "$k8s_find_rc" "$k8s_filter_rc" "$k8s_argo_rc" >&2
     ( exit 2 )
   elif [ -n "$k8s_paths" ]; then
     printf '%s\n' "$k8s_paths"

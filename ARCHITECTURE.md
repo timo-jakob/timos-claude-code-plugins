@@ -6325,8 +6325,8 @@ with readable charts. Callers must branch on **non-zero**, never on a specific c
 (`set -euo pipefail` can also abort it with `1`), and must **not** parse the
 empty document: every key reads as absent, which looks exactly like a repo with
 no git, no languages and no artifacts. The **stderr is the deliverable** — it
-names which half of which search failed — so forward it verbatim rather than
-re-deriving a cause. **The obligation is on every caller, present and future** —
+names which search did not finish, and with what status — so forward it
+verbatim rather than re-deriving a cause. **The obligation is on every caller, present and future** —
 deliberately stated as a rule rather than as a list of call sites, because an
 enumeration rots the moment one is added and the next contract change would then
 be applied to the named ones and miss the rest. Today it binds maintenance
@@ -6419,8 +6419,10 @@ libraries they `load` are **bash**, not zsh, because bats is a bash harness — 
 have no choice in the matter. Those libraries are `tests/assertions.bash` (the
 shared assertion helpers, `load assertions`), `tests/roster.bash` (the helper
 roster derived from it, `load roster`), `tests/prose-lockstep.bash` (the
-propagation invariants' shared prose normalisation, `load prose-lockstep`, #1432)
-and `tests/acceptance/lib/ops-acceptance.bash`
+propagation invariants' shared prose normalisation, `load prose-lockstep`, #1432),
+`tests/resolve-issue-corpus.bash` (the resolve-issue skill's file set, `load
+resolve-issue-corpus`, #1503), `tests/prune-stub.bash` (the failing-prune-grep
+fixture, `load prune-stub`, #1428) and `tests/acceptance/lib/ops-acceptance.bash`
 (the acceptance tier's fixture helpers, `load ../lib/ops-acceptance`) — note that
 last one is **nested**, so a library is not necessarily at `tests/*.bash`. They
 are standalone `.bash` files,
