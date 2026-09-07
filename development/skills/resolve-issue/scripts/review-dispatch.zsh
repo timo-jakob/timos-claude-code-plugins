@@ -392,8 +392,9 @@ _detect_json() {
   local repo="$1" out rc err_file
   # RELAY detect-stack's stderr rather than dropping it (#1177). Since detect-
   # stack grew an error contract, its non-zero exit carries its whole meaning
-  # there ("the kubernetes marker search did not complete (find exit N, grep
-  # exit M)"). Swallowing it leaves the operator with a bare "detect-stack
+  # there ("the kubernetes marker search did not complete (find exit N, filter
+  # exit F, grep exit M)"). Swallowing it leaves the operator with a bare
+  # "detect-stack
   # failed" and no way to tell a permissions problem from a missing binary — and
   # that named message is the deliverable the hardening exists to produce.
   # A temp FILE, not `2>&1` around the assignment: `out=$( … )` inside a command

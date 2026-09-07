@@ -16,6 +16,7 @@
 bats_require_minimum_version 1.5.0
 
 load assertions
+load prune-stub
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -333,9 +334,11 @@ gather_directly() { "$GATHER" "$W"; }
 }
 
 @test "an existing but UNREADABLE repo directory is an error, not an all-false payload (#1152)" {
-  # "could not look" must never render as "looked and found nothing": every search
-  # below the gate is wrapped in || true / 2>/dev/null, so without the -r/-x check
-  # this would exit 0 with a confident empty verdict
+  # "could not look" must never render as "looked and found nothing". Every
+  # search below the gate captures its own status (#1177, #1428) and refuses on
+  # an unfinished one — but this gate is the only thing that names the CAUSE as
+  # the repo itself: without it the failure is reported as an unfinished search
+  # inside a repo that could never be entered
   if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
   local locked="$BATS_TEST_TMPDIR/locked"
   mkdir -p "$locked/charts/app"
@@ -437,6 +440,42 @@ gather_directly() { "$GATHER" "$W"; }
   # silently turning this back into the both-halves fixture it replaces.
   contains "$stderr" "grep exit 2"
   contains "$stderr" "find exit 0"
+}
+
+@test "a failing prune filter is an error, not manifest_validation:false (#1428)" {
+  # the gather's copy of the marker carried the same `|| true` as the SKILL.md
+  # recipe and detect-stack: a filter that exited 2 emptied the hits with find's
+  # status still 0, and the refusal never fired — the whole topic skipped, with
+  # no stderr and no unsupported_topics entry to say so.
+  chart
+  local stub="$BATS_TEST_TMPDIR/grep-stub" zsh_bin
+  zsh_bin="$(command -v zsh)"
+  failing_prune_grep_stub "$stub"
+  run --separate-stderr env PATH="$stub:$PATH" "$zsh_bin" "$GATHER" "$W"
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "did not complete"
+  contains "$stderr" "filter exit 2"
+  contains "$stderr" "find exit 0"
+}
+
+@test "a failing prune filter does NOT taint the gather's positive verdict (#1428)" {
+  # the tolerant half: a hit is a hit, whatever else failed (the block says so
+  # itself). With the filter dead the argoproj search still runs and its match
+  # settles manifest_validation:true. Hoisting the filter refusal above the
+  # positive arm would keep the refusal test above green and turn an Argo-only
+  # GitOps repo with a hiccuping grep into no payload at all.
+  argocd
+  local stub="$BATS_TEST_TMPDIR/grep-stub" zsh_bin
+  zsh_bin="$(command -v zsh)"
+  failing_prune_grep_stub "$stub"
+  run --separate-stderr env PATH="$stub:$PATH" "$zsh_bin" "$GATHER" "$W"
+  [ -f "$stub/fired" ]
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.tooling_configured.manifest_validation' <<<"$output")" = "true" ]
+  # the stub writes to stderr; the filter's 2>/dev/null keeps it out of the run
+  [ -z "$stderr" ]
 }
 
 @test "an unreadable SUBTREE does not taint a found manifest (#1177)" {

@@ -41,8 +41,13 @@
 #                                  any language or none; review-dispatch.zsh reads it
 #                                  as a no-language FALLBACK repo_type, after
 #                                  is_claude_plugin. Kept identical to the
-#                                  orchestrator's topic-marker recipe and to
-#                                  gather-kubernetes-findings.zsh. It also selects
+#                                  orchestrator's topic-marker recipe, its
+#                                  manifests lister, and
+#                                  gather-kubernetes-findings.zsh: marker names,
+#                                  prune set and --exclude-dir/--include tokens
+#                                  are derived by tests/kubernetes-topic-marker.bats;
+#                                  the `! -type d` guard is pinned behaviourally
+#                                  by tests/detect-stack.bats. It also selects
 #                                  the IaC candidate set: the marker WITH NO
 #                                  DETECTED LANGUAGE. A recorded `primary:` in
 #                                  .maintenance.yml can only VETO that (any value
@@ -1437,7 +1442,7 @@ fi
 # The `is-kubernetes-marker:begin`/`:end` sentinels are LOAD-BEARING, like the
 # orchestrator SKILL.md recipe's: tests/kubernetes-topic-marker.bats extracts
 # the text between them and derives the parity oracles from that bounded block
-# rather than from this whole 1600-line file. Unbounded, a `--exclude-dir=` or
+# rather than from this whole 2000-plus-line file. Unbounded, a `--exclude-dir=` or
 # `--include=` token added anywhere else in this script would mask its deletion
 # from THIS recipe — the union would be unchanged and the parity test green
 # while the argoproj grep quietly became "any file mentioning Argo". Keep the
@@ -1449,8 +1454,9 @@ fi
 # "could not look" emitted as `is_kubernetes: false`, which every consumer reads
 # as a completed search. An unfinished search taints only the NEGATIVE verdict:
 # a hit stands whatever else failed, so an argoproj-only repo with one unreadable
-# sibling directory still reports true. Only when BOTH halves came up empty AND
-# one of them did not finish does this script refuse to answer — loudly, on
+# sibling directory still reports true. Only when the hits are empty AND the
+# find, the prune filter (#1428) or the argoproj grep did not finish does this
+# script refuse to answer — loudly, on
 # stderr, with a non-zero exit, because its JSON has no third state and
 # `is_kubernetes: false` would be a lie about a search that never ran.
 # is-kubernetes-marker:begin
@@ -1471,10 +1477,16 @@ if [[ "$k8s_find_rc" -eq 125 ]]; then
 	printf 'detect-stack: cannot enter %s to run the kubernetes marker\n' "$cwd" >&2
 	exit 2
 fi
-# the filter reads the captured string, not the filesystem, so `|| true` here
-# absorbs only its no-match exit 1 — never a search failure
-k8s_hits="$(printf '%s\n' "$k8s_hits" |
-	grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
+# the filter reads the captured string, not the filesystem — but grep can still
+# fail operationally (exit 2, or no grep at all), and `|| true` absorbed that
+# exactly like its no-match exit 1 (#1428): the hits went empty with find's
+# status still 0, the argoproj half returned a clean 1, and the script emitted
+# `is_kubernetes: false` for a repo whose Chart.yaml the find DID return. Its
+# status is captured on its own; 1 stays the genuine "everything was pruned".
+k8s_hits="$(
+	printf '%s\n' "$k8s_hits" |
+		grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ 2>/dev/null
+)" && k8s_filter_rc=0 || k8s_filter_rc=$?
 k8s_argo_rc=1
 if [[ -z "$k8s_hits" ]]; then
 	# grep the literal `.` after cd, not "$cwd": GNU grep documents
@@ -1510,12 +1522,13 @@ if [[ "$k8s_argo_rc" -eq 125 ]]; then
 fi
 if [[ -n "$k8s_hits" || "$k8s_argo_rc" -eq 0 ]]; then
 	is_kubernetes="true"
-elif [[ "$k8s_find_rc" -ne 0 || "$k8s_argo_rc" -ge 2 ]]; then
-	# grep exit 2 is an OPERATIONAL error, not a no-match — and an unreadable
-	# subtree may equally have hidden a find hit, so neither half can be reported
-	# as "searched, nothing there".
-	printf 'detect-stack: the kubernetes marker search did not complete (find exit %s, grep exit %s) — refusing to report is_kubernetes false\n' \
-		"$k8s_find_rc" "$k8s_argo_rc" >&2
+elif [[ "$k8s_find_rc" -ne 0 || "$k8s_filter_rc" -ge 2 || "$k8s_argo_rc" -ge 2 ]]; then
+	# grep exit 2 is an OPERATIONAL error, not a no-match — in the prune filter
+	# as much as in the argoproj search — and an unreadable subtree may equally
+	# have hidden a find hit, so no half can be reported as "searched, nothing
+	# there".
+	printf 'detect-stack: the kubernetes marker search did not complete (find exit %s, filter exit %s, grep exit %s) — refusing to report is_kubernetes false\n' \
+		"$k8s_find_rc" "$k8s_filter_rc" "$k8s_argo_rc" >&2
 	exit 2
 fi
 # is-kubernetes-marker:end

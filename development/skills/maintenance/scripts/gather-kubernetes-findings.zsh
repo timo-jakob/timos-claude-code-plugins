@@ -102,7 +102,7 @@ local has_manifests="false"
 # filter every hit and be reported manifest-free.
 local manifest_hits
 # one rc per SEARCH, so a failure can be attributed to the half that failed
-local manifest_rc=0 argo_rc=1 policy_rc=0 test_rc=0 test_hits=""
+local manifest_rc=0 filter_rc=0 argo_rc=1 policy_rc=0 test_rc=0 test_hits=""
 #
 # `! -type d` for the same reason the react marker carries it: a DIRECTORY named
 # `Kustomization` is not a manifest, while a symlinked one still counts. Kept
@@ -130,10 +130,14 @@ manifest_hits="$(cd -- "$repo" 2>/dev/null || exit 125
 # inert, which is worse than none (the same call tests/gather-kubernetes.bats
 # records for the fixture-find check).
 (( manifest_rc != 125 )) || { print -r -u2 -- "gather-kubernetes-findings.zsh: cannot enter $repo"; exit 2 }
-# the filter reads the captured string, not the filesystem, so `|| true` absorbs
-# only its no-match exit 1 — never a search failure
+# the filter reads the captured string, never the filesystem — but grep can
+# still fail operationally (exit 2, or no grep at all), and `|| true` absorbed
+# that exactly like its no-match 1 (#1428), emptying the hits with find's status
+# still 0 so the refusal below never fired. Capture its own status; 1 stays the
+# genuine "everything was pruned" answer.
 manifest_hits="$(printf '%s\n' "$manifest_hits" \
-                   | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ || true)"
+                   | grep -v -e /node_modules/ -e '/\.git/' -e /vendor/ -e /templates/ 2>/dev/null
+                 )" && filter_rc=0 || filter_rc=$?
 if [[ -z "$manifest_hits" ]]; then
   # `cd` first, and grep the literal `.` — for the SAME reason the find branch
   # does it, but a sharper failure: GNU grep documents --exclude-dir as skipping
@@ -164,11 +168,11 @@ fi
 (( argo_rc != 125 )) || { print -r -u2 -- "gather-kubernetes-findings.zsh: cannot enter $repo"; exit 2; }
 if [[ -n "$manifest_hits" ]] || (( argo_rc == 0 )); then
   has_manifests="true"
-elif (( manifest_rc != 0 || argo_rc >= 2 )); then
+elif (( manifest_rc != 0 || filter_rc >= 2 || argo_rc >= 2 )); then
   # grep exit >= 2 is an OPERATIONAL error, not a no-match, and the same
   # unreadable subtree may equally have hidden a find hit — so neither half may
   # be reported as "searched, nothing there".
-  print -r -u2 -- "gather-kubernetes-findings.zsh: the manifest search did not complete (find exit $manifest_rc, grep exit $argo_rc) — refusing to emit manifest_validation:false"
+  print -r -u2 -- "gather-kubernetes-findings.zsh: the manifest search did not complete (find exit $manifest_rc, filter exit $filter_rc, grep exit $argo_rc) — refusing to emit manifest_validation:false"
   exit 2
 fi
 # gather-kubernetes-marker:end
