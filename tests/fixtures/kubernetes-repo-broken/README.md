@@ -55,22 +55,22 @@ nothing observable.
 `render` and `schema` are expected **green even here**, and a red in either is a
 **regression**, not the fixture doing its job.
 
-`config-scan` is a third case, and deliberately not part of that rule. It is
-thresholded at `HIGH,CRITICAL` and none of these defects reaches that band, so it
-*should* be green — but the job is **unasserted** (see below), so a red there is
-not a fixture regression and must not be "fixed" by editing these manifests.
+`config-scan` owns nothing here either: it is thresholded at `HIGH,CRITICAL`
+and none of these defects reaches that band. Under the gate it is **reached**
+only once the lint and policy rows are out of the way (the gate stops at the
+first red), and then it is green.
 
 `render` and `schema` are backed by the whole-`RENDER_DIR` block below, and by
 [`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
-(#1199), which executes the workflow's own `run:` blocks over a temp copy of this
-variant with the pinned toolchain — including the per-file assertions that keep
-the table above one-to-one.
-
-**`config-scan` is not**: it runs a third-party `trivy-action` that no command
-here executes, and trivy's severity assignments move between releases, so a
-promoted check could red it on a fixture nothing else objects to. #1199 made the
-call — the job is **unasserted**, neither green nor red is claimed — and pinned
-it with a test that fails the moment `config-scan` grows a `run:` step.
+(#1199, #1603), which runs the bootstrapped gate script
+(`scripts/k8s-gate.zsh`) over a temp copy of this variant with the pinned
+toolchain — including the per-file assertions that keep the table above
+one-to-one. The gate **stops at the first failing stage**, so the harness sees
+the `policy` and `argocd` rows by first removing the files of the rows that red
+the earlier stages; each such removal is stated in the test that makes it.
+(Under #1199, `config-scan` was **unasserted** because it ran as a third-party
+`trivy-action` step the harness could not execute; the gate runs the pinned
+`trivy` binary itself, so that exemption is gone.)
 
 ## `kyverno test` is never reached in this variant under the pipeline
 
@@ -87,10 +87,12 @@ gate, or a failed CLI install. The policy-violation red is the one carrying
 
 ## Run against a copy, never the working tree
 
-The `policy` job dereferences `policies/kyverno` **in place** — `rm -rf` followed
-by a `mv` of a mirror — so copy the variant to a temp directory before pointing a
-**pipeline run** at it. The direct tool commands below are non-destructive and
-are meant to run from this directory.
+The gate script leaves the tree it gates untouched, but the six-job workflow's
+`policy` job, still shipped until #1604, dereferences `policies/kyverno` **in
+place** (`rm -rf` followed by a `mv` of a mirror) — so copy the variant to a
+temp directory before pointing **any pipeline run** at it, and the harness
+copies every variant on principle. The direct tool commands below are
+non-destructive and are meant to run from this directory.
 
 ## The fixture contract
 
@@ -102,18 +104,18 @@ the runner's own `github.repository`. This variant declares:
 repoURL: https://example.com/fixture-org/kubernetes-repo-broken.git
 ```
 
-so a harness must present the slug **`fixture-org/kubernetes-repo-broken`** to
-that job. Note *how*: the workflow pins `REPO_SLUG: ${{ github.repository }}` at
-step level, and a step-level `env:` beats an exported shell variable — so
-exporting `REPO_SLUG` around an unmodified workflow run does nothing. The
-contract is met by a harness that **executes the job's `run:` block** with
-`REPO_SLUG` set (which is what
-[`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats) does),
-or by overriding `github.repository`. Get it wrong *with a non-empty but wrong
-slug* and the filter selects nothing, the job passes **vacuously**, and this
-fixture's most important reds silently do not happen. An **empty** slug is no
-longer one of the ways to get it wrong: since #1199 the step refuses it outright
-with `::error::REPO_SLUG is empty …`.
+so a harness must present the slug **`fixture-org/kubernetes-repo-broken`**.
+The gate script resolves it from `REPO_SLUG`, then `GITHUB_REPOSITORY`, then the
+`origin` remote — and
+[`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats) sets
+`REPO_SLUG` in the gate's environment. Get it wrong *with a non-empty but wrong
+slug* and the filter selects nothing, the stage passes **vacuously**, and this
+fixture's most important reds silently do not happen. An **unresolvable** slug
+is not one of the ways to get it wrong: with Applications present and no source
+resolving, the gate refuses with `gate: argocd FAILED` naming
+`REPO_SLUG=owner/name`. (The six-job workflow, still shipped until #1604, pins
+`REPO_SLUG: ${{ github.repository }}` at step level and refuses an empty value
+outright; a harness driving *that* must execute the job's `run:` block.)
 
 ## Verifying it directly
 
@@ -126,7 +128,7 @@ IAC_BIN="$(zsh "$REPO_ROOT/tests/iac-tools.zsh")"
 [ -n "$IAC_BIN" ] \
   && export PATH="$IAC_BIN:$PATH" \
   || echo 'FAIL: toolchain not resolved — no verdict below is trustworthy'
-zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative six versions
+zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative seven versions
 ```
 
 (No `exit` in that block on purpose: it is the one snippet here you must run in
@@ -235,8 +237,11 @@ grep -q 'found 4 lint errors' /tmp/b/all.txt \
 
 ### Checking the argocd filter
 
-The `argocd` job extracts paths with `yq` + `jq` rather than the tools above, so
-its two rows need their own check. The expression is the job's own, inlined here
+The argocd check uses neither of the tools above, so its two rows need their
+own check. The gate script extracts source pairs with `yq` and filters them in
+the shell; the six-job **workflow's** job (still shipped until #1604) does the
+same with `yq` + `jq`; the two were verified to agree on these fixtures at
+#1603. The expression below is that job's own, inlined here
 so this block stands alone:
 
 ```bash
@@ -270,6 +275,7 @@ needed to keep that file load-bearing.
 | [`../kubernetes-repo/`](../kubernetes-repo/) | fully green |
 | `.` (this one) | red, every finding attributable to one file |
 | [`../kubernetes-repo-untested-policy/`](../kubernetes-repo-untested-policy/) | green, with the untested-policy warning |
+| [`../kubernetes-repo-helmcharts/`](../kubernetes-repo-helmcharts/) | green (policy skipped); proves `helmCharts:` inflation |
 
 No network access, no private content, and no reference to any real deployment.
 
