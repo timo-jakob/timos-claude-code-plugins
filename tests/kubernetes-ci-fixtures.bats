@@ -1107,16 +1107,28 @@ expected_all_skipped() {
 # Preconditions — a missing tool, the renderer fallback, the slug
 # ---------------------------------------------------------------------------
 
-# A PATH holding the pinned toolchain MINUS the named tools, and nothing else
-# from the host's toolchain — so "the tool is absent" is a fact about the PATH
-# under test, not about whether the developer happens to have brew-installed it.
+# A PATH holding the pinned toolchain MINUS the named tools, plus ONLY the
+# interpreters and coreutils the gate itself calls — and nothing else from the
+# host. "The tool is absent" must be a fact about the PATH under test, not
+# about the host: `$partial:/usr/bin:/bin` read as absent on macOS and in the
+# debian container, but GitHub's ubuntu-latest image ships /usr/bin/kubectl, so
+# there the kustomize leg found the fallback renderer, ran every stage, and the
+# assertion went red for a reason no message named (#1614).
 partial_toolchain() {
-  local dir="$BATS_TEST_TMPDIR/partial-bin" tool
+  local dir="$BATS_TEST_TMPDIR/partial-bin" tool resolved
   rm -rf "$dir"
   mkdir -p "$dir"
   for tool in helm kustomize kubeconform kube-linter kyverno trivy yq; do
     case " $* " in *" $tool "*) continue ;; esac
     ln -s "$IAC_BIN/$tool" "$dir/$tool"
+  done
+  # the wrapper's bash + the gate's zsh, then every external the gate calls
+  # (grep the template for the list; a new one shows up here as a 127)
+  for tool in bash zsh tar find grep sed awk mktemp ls cut tr dirname basename \
+              sort git cp mkdir rm head printf env; do
+    resolved="$(command -v "$tool")"
+    [ -n "$resolved" ]
+    ln -s "$resolved" "$dir/$tool"
   done
   printf '%s\n' "$dir"
 }
@@ -1128,8 +1140,9 @@ partial_toolchain() {
   # a deleted one would fail mid-stage with a raw 127 instead of this exit 2
   for tool in helm kustomize kubeconform kube-linter kyverno trivy yq; do
     partial="$(partial_toolchain "$tool")"
-    # /usr/bin:/bin for the coreutils the script needs; neither ships any of these
-    run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY PATH="$partial:/usr/bin:/bin" \
+    # the PATH is ONLY that directory: nothing the host has installed can stand
+    # in for the missing tool (ubuntu-latest's /usr/bin/kubectl would, #1614)
+    run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY PATH="$partial" \
       REPO_SLUG="$SLUG" bash -c "cd '$W' && zsh '$GATE'"
     [ "$status" -eq 2 ]
     case "$tool" in
@@ -1145,7 +1158,7 @@ partial_toolchain() {
   done
   # and every missing tool is named in ONE run, not one per attempt
   partial="$(partial_toolchain kubeconform trivy)"
-  run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY PATH="$partial:/usr/bin:/bin" \
+  run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY PATH="$partial" \
     REPO_SLUG="$SLUG" bash -c "cd '$W' && zsh '$GATE'"
   [ "$status" -eq 2 ]
   contains "$output" 'required tool not on PATH: kubeconform'
