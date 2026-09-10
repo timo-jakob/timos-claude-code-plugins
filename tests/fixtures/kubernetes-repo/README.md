@@ -4,22 +4,19 @@ A self-contained repository shape for exercising `development-kubernetes`: a
 Helm chart, a Kustomize base + prod overlay, two Argo CD `Application`s, and a
 Kyverno policy with a pass-only test fixture.
 
-**This variant is fully green.** Five of the bootstrapped `kubernetes-ci`
-pipeline's six jobs — `render`, `schema`, `lint`, `policy`, `argocd` — pass over
-it, and each of those five is **measured**, both by the tool-level checks below
-and, end-to-end, by
+**This variant is fully green.** All six stages of the bootstrapped IaC gate
+(`scripts/k8s-gate.zsh`, #1603) — `render`, `schema`, `lint`, `policy`,
+`config-scan`, `argocd` — pass over it, and each is **measured**, both by the
+tool-level checks below and, end-to-end, by
 [`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
-(#1199), which executes the workflow's own `run:` blocks over a temp copy of this
-variant with the pinned toolchain.
+(#1199, #1603), which runs the gate script over a temp copy of this variant with
+the pinned toolchain. (Under #1199 the harness executed the six-job workflow's
+`run:` blocks and `config-scan` was **unasserted**, because it ran as a
+third-party `trivy-action` step nothing could execute; the gate runs the pinned
+`trivy` binary itself, with the check set embedded in that binary, so the
+exemption is gone.)
 
-**`config-scan` is the sixth job, and deliberately excluded.** It runs a third-party
-`trivy-action` rather than a `run:` block, so step extraction has nothing to
-execute and trivy's severity assignments move between releases anyway. #1199
-made that call: the job is **unasserted** — neither green nor red is claimed —
-and the decision is pinned by a test that fails the moment `config-scan` grows a
-`run:` step, so the exemption cannot go quietly stale.
-
-A red in any of those **five** jobs is therefore a **regression**, never the
+A red in any of the **six** stages is therefore a **regression**, never the
 fixture doing its job; the deliberate defects all live in
 [`../kubernetes-repo-broken/`](../kubernetes-repo-broken/) — with one designed
 exception, `argocd/foreign-app.yaml`, described under the fixture contract.
@@ -62,17 +59,18 @@ argocd/app-of-apps.yaml   repoURL .../fixture-org/kubernetes-repo.git   path cha
 argocd/foreign-app.yaml   repoURL .../fixture-org/kubernetes-repo-extra.git   path charts/does-not-exist
 ```
 
-so a harness must present the slug **`fixture-org/kubernetes-repo`** to that job.
-Note *how*: the workflow pins `REPO_SLUG: ${{ github.repository }}` at step
-level, and a step-level `env:` beats an exported shell variable — so exporting
-`REPO_SLUG` around an unmodified workflow run does nothing. The contract is met
-by a harness that **executes the job's `run:` block** with `REPO_SLUG` set (which
-is what [`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
-does), or by overriding `github.repository`. Get it wrong *with a non-empty but
-wrong slug* and the filter selects nothing, the job exits 0 having verified no
-path at all, and the green is **vacuous**. An **empty** slug is no longer one of
-the ways to get it wrong: since #1199 the step refuses it outright with
-`::error::REPO_SLUG is empty …`.
+so a harness must present the slug **`fixture-org/kubernetes-repo`**. The gate
+script resolves it from `REPO_SLUG`, then `GITHUB_REPOSITORY` (what every
+Actions runner exports), then the `origin` remote — and
+[`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats) sets
+`REPO_SLUG` in the gate's environment. Get it wrong *with a non-empty but
+wrong slug* and the filter selects nothing, the stage passes having verified no
+path at all, and the green is **vacuous**. An **unresolvable** slug is not one
+of the ways to get it wrong here: when Applications are present and no source
+resolves, the gate refuses with `gate: argocd FAILED` and a message naming
+`REPO_SLUG=owner/name`. (The six-job workflow, still shipped until #1604, pins
+`REPO_SLUG: ${{ github.repository }}` at step level and refuses an empty value
+outright; a harness driving *that* must execute the job's `run:` block.)
 
 `foreign-app.yaml` is the negative control that makes the green non-vacuous in
 the other direction: it is deliberately foreign, and its slug has this variant's
@@ -81,10 +79,13 @@ would select it, find its absent path, and red this variant.
 
 ## Run against a copy, never the working tree
 
-The `policy` job dereferences `policies/kyverno` **in place** — `rm -rf` followed
-by a `mv` of a mirror — so copy the variant to a temp directory before pointing a
-**pipeline run** at it. The direct tool commands below are non-destructive and
-are meant to run from this directory.
+The gate script leaves the tree it gates untouched (a symlink-shared policy set
+is evaluated through a same-depth sibling mirror, removed afterwards) — but the
+six-job workflow's `policy` job, still shipped until #1604, dereferences
+`policies/kyverno` **in place** (`rm -rf` followed by a `mv` of a mirror), so
+copy the variant to a temp directory before pointing **any pipeline run** at
+it, and the harness copies every variant on principle. The direct tool commands
+below are non-destructive and are meant to run from this directory.
 
 ## Verifying it directly
 
@@ -99,7 +100,7 @@ IAC_BIN="$(zsh "$REPO_ROOT/tests/iac-tools.zsh")"
 [ -n "$IAC_BIN" ] \
   && export PATH="$IAC_BIN:$PATH" \
   || echo 'FAIL: toolchain not resolved — no verdict below is trustworthy'
-zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative six versions
+zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative seven versions
 ```
 
 (No `exit` in that block on purpose: it is the one snippet here you must run in
@@ -123,9 +124,9 @@ on it. Every verdict below would then be measured with an unpinned binary while
 still looking like a result.
 
 The versions are deliberately **not restated here** — `--print-pins` is the one
-authoritative list (four read from the workflow template, plus helm and
-kustomize pinned in `iac-tools.zsh`, since the template installs neither).
-All six matter: the recipe below starts with `helm template` and
+authoritative list (four read from the workflow template, plus helm, kustomize
+and trivy pinned in `iac-tools.zsh`, since the template installs none of them
+directly). All seven matter: the recipe below starts with `helm template` and
 `kustomize build`, whose output feeds every verdict it asserts. Note
 `kube-linter` is
 invoked *without* `--config`, exactly as the pipeline invokes it: it
@@ -153,6 +154,8 @@ done
 
 kube-linter lint /tmp/rendered/                                      # zero findings
 kubeconform -strict -summary -ignore-missing-schemas /tmp/rendered/  # 7 resources: 3 valid, 0 invalid, 4 CRs skipped
+trivy config --skip-check-update --skip-version-check \
+  --exit-code 1 --severity HIGH,CRITICAL /tmp/rendered/              # 0 misconfigurations on every target
 kyverno test policies/kyverno/                                       # 1 test passed
 
 kyverno apply policies/kyverno/require-registry.yaml \
@@ -168,9 +171,12 @@ design. Validate rendered output, not inputs.
 
 ### Checking the argocd filter
 
-The `argocd` job uses neither of the tools above — it extracts paths with
-`yq` + `jq` — so the negative control needs its own command. This is the one
-that shows `foreign-app.yaml` doing its job:
+The argocd check uses neither of the tools above, so the negative control needs
+its own command. The gate script extracts source pairs with `yq` and filters
+them in the shell; the six-job **workflow's** job (still shipped until #1604)
+does the same with `yq` + `jq`, and that is the expression inlined below — the
+two agree on every fixture. This is the one that shows `foreign-app.yaml`
+doing its job:
 
 ```bash
 set -euo pipefail
@@ -208,6 +214,7 @@ binary can report findings on a genuinely clean fixture.
 | `.` (this one) | fully green |
 | [`../kubernetes-repo-broken/`](../kubernetes-repo-broken/) | red, every finding attributable to one file |
 | [`../kubernetes-repo-untested-policy/`](../kubernetes-repo-untested-policy/) | green, with the untested-policy warning |
+| [`../kubernetes-repo-helmcharts/`](../kubernetes-repo-helmcharts/) | green (policy skipped); proves `helmCharts:` inflation |
 
 No network access, no private content, and no reference to any real deployment —
 this fixture must stay usable by anyone who clones the repository.

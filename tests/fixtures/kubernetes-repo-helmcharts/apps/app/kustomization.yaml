@@ -1,0 +1,23 @@
+# A Kustomization that INFLATES a Helm chart through `helmCharts:` — the shape
+# the render stage exists to get right, and the one that plain `kustomize build`
+# gets silently wrong: without `--enable-helm` the field is refused outright by
+# current kustomize (and ignored, rendering an empty tree, by older builds), so
+# every downstream check would pass green on nothing.
+#
+# The chart is VENDORED under charts/ (kustomize's default chartHome), so no
+# `repo:`/`version:` is declared and nothing is pulled: kustomize finds the
+# chart directory present and skips `helm pull`. That is what keeps this
+# fixture self-contained and the harness offline after the toolchain fetch.
+#
+# `valuesInline` overrides the chart's `note`, so the rendered ConfigMap reads
+# `rendered-by-kustomize-helm` — distinguishable from `rendered-by-helm`, which
+# is what the render stage's separate top-level `helm template` pass over the
+# same vendored chart produces with the chart's own values. The two renders are
+# expected side by side; only the kustomize one proves inflation happened.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: app
+    releaseName: app
+    valuesInline:
+      note: rendered-by-kustomize-helm

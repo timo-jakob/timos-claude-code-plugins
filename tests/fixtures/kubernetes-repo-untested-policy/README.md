@@ -9,23 +9,18 @@ and passes everything silently, so the machinery must notice it:
 
 - **maintenance** reports it as a `policy_tests` finding
   (→ `kubernetes-policy-triage`);
-- the **check pipeline** is expected to emit `::warning::policies declared but
-  no kyverno test fixtures` from its `policy` job and stay **green** — an
-  untested policy set is a finding to file, not a build failure.
+- the **gate** is expected to emit `warning: policies declared but no kyverno
+  test fixtures` (`::warning::…` under GitHub Actions) from its `policy` stage
+  and stay **green** — an untested policy set is a finding to file, not a
+  build failure.
 
-**`config-scan` is the sixth job, and deliberately excluded** — same carve-out
-as the two sibling variants. It runs a third-party `trivy-action` rather than a
-`run:` block, so step extraction has nothing to execute, and trivy's severity
-assignments move between releases. The job is **unasserted**: neither green nor
-red is claimed, and a red there is *not* a fixture regression — do not chase it
-by editing this variant's chart. Every "green" claim on this page means the five
-executable jobs.
-
-That pipeline-level expectation **is** verified end-to-end, by
+That expectation **is** verified end-to-end, by
 [`../../kubernetes-ci-fixtures.bats`](../../kubernetes-ci-fixtures.bats)
-(#1199), which executes the workflow's own `run:` blocks over a temp copy of
-this variant with the pinned toolchain. What is verified *here* is tool-level
-(see below).
+(#1199, #1603), which runs the bootstrapped gate script (`scripts/k8s-gate.zsh`)
+over a temp copy of this variant with the pinned toolchain and asserts all six
+stages green — `config-scan` included, since the gate runs the pinned `trivy`
+binary itself (under #1199's workflow-step harness that stage was unasserted).
+What is verified *here* is tool-level (see below).
 
 ## Why there is a chart
 
@@ -50,19 +45,20 @@ unreachable by the very machinery it exists to exercise:
   `schema`, `policy` and `argocd` would all pass **vacuously** — and the warning
   would sit behind a policy set nothing had exercised. `lint` would not even do
   that: `kube-linter` errors with "no valid objects found" on an object-free
-  tree, so it would red outright, and the render job's sentinel would not save
-  it (the policy document carries a top-level `kind:`, so the sentinel never
-  fires).
+  tree, so it would red outright — and the gate's nothing-to-render skip would
+  not save it either (the policy document carries a top-level `kind:`, so the
+  rendered tree is never object-free).
 
 The chart is clean, so this variant's expectation is **green plus the
 untested-policy warning**.
 
 ## Run against a copy, never the working tree
 
-The `policy` job dereferences `policies/kyverno` **in place** — `rm -rf` followed
-by a `mv` of a mirror — so pointing a pipeline run at this directory would
-rewrite the fixture, and `policies/kyverno` is the one thing this variant is
-about. **Copy the variant to a temp directory and point the tool or the pipeline
+The gate script leaves the tree it gates untouched, but the six-job workflow's
+`policy` job, still shipped until #1604, dereferences `policies/kyverno` **in
+place** (`rm -rf` followed by a `mv` of a mirror) — so pointing that pipeline at
+this directory would rewrite the fixture, and `policies/kyverno` is the one
+thing this variant is about. **Copy the variant to a temp directory and point the tool or the pipeline
 at the copy**, as a repository in its own right — exactly as it would meet an
 untested policy directory in reality.
 
@@ -76,7 +72,7 @@ IAC_BIN="$(zsh "$REPO_ROOT/tests/iac-tools.zsh")"
 [ -n "$IAC_BIN" ] \
   && export PATH="$IAC_BIN:$PATH" \
   || echo 'FAIL: toolchain not resolved — no verdict below is trustworthy'
-zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative six versions
+zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins      # the authoritative seven versions
 ```
 
 (No `exit` in that block on purpose: it is the one snippet here you must run in
@@ -129,28 +125,23 @@ passed **and** when it matched nothing at all. Only the counter tells those
 apart — and a rule matching nothing is exactly the vacuity the chart was added
 to prevent.
 
-## The argocd job still needs REPO_SLUG set
+## The argocd stage and REPO_SLUG on this variant
 
-This variant ships no Argo CD `Application`, so it pins **no particular slug**.
-It is not free of the variable, though: the `argocd` job runs on every variant,
-and since #1199 its very first statement is a `[ -z "${REPO_SLUG:-}" ]` guard.
-The `:-` is what makes **unset and empty behave identically** — both stop there
-with `::error::REPO_SLUG is empty …` and exit 1, before any Application is read.
-(Before that guard, unset died on `set -u`'s unbound-variable error and empty
-passed silently; only the guard collapses the two into one legible failure.)
+This variant ships no Argo CD `Application`, so it pins **no particular slug**
+— and under the gate script it needs none: the slug is resolved lazily
+(`REPO_SLUG`, then `GITHUB_REPOSITORY`, then the `origin` remote) and consulted
+only when an Application was found, so with none declared the argocd stage is
+green whether the variable is set, empty or absent. The typed refusal — `gate:
+argocd FAILED` naming `REPO_SLUG=owner/name` — fires only when Applications are
+present and nothing resolves; it is what stops an unresolved slug from
+filtering every Application out and passing vacuously.
 
-**Why the empty case needed its own guard.** It was the worse of the two: the
-probe URL collapses to a bare host with a trailing slash, the filter's
-`endswith("/" + $s)` guard degenerates to `endswith("/")` — which is TRUE — so
-the probe *passed*, no typed error was raised, and the job greened having
-selected nothing. A vacuous pass the probe itself could not catch, and one
-`set -u` never caught and never could, because the variable is *set*, just
-empty. That is the blind spot #1199 closed.
-
-A harness must therefore still set `REPO_SLUG` to some non-empty value here —
-any value will do, since this variant ships no Argo CD `Application` — but the
-consequence of forgetting is now a loud failure that names the variable, whether
-you left it empty or never set it at all.
+The six-job **workflow**, still shipped until #1604, is stricter: its `argocd`
+job opens with a `[ -z "${REPO_SLUG:-}" ]` guard that refuses an unset *or*
+empty value with `::error::REPO_SLUG is empty …` before any Application is read
+(the empty case used to pass silently — the filter's `endswith("/")` degenerated
+to true — which is the blind spot #1199 closed). A harness driving that job
+must set a non-empty value even here.
 
 ## Sibling variants
 
@@ -159,6 +150,7 @@ you left it empty or never set it at all.
 | [`../kubernetes-repo/`](../kubernetes-repo/) | fully green |
 | [`../kubernetes-repo-broken/`](../kubernetes-repo-broken/) | red, every finding attributable to one file |
 | `.` (this one) | green, with the untested-policy warning |
+| [`../kubernetes-repo-helmcharts/`](../kubernetes-repo-helmcharts/) | green (policy skipped); proves `helmCharts:` inflation |
 
 No network access, no private content, and no reference to any real deployment.
 

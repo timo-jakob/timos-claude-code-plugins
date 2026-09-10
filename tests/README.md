@@ -25,17 +25,13 @@ tests/run-script-tests.zsh
 # the gate helper); that file is the roster, and it is deliberately NOT restated
 # here — an enumerated copy drifts, and this one already did, three times.
 # Everything in it is called unguarded on purpose, so an absent tool reds the
-# suite rather than silently skipping its coverage. The easiest to miss is `jq`:
-# the kubernetes-ci harness executes the argocd step, which pipes `yq -o=json`
-# into `jq`, so without it that step fails with the template's own "expression
-# does not compile" message — which points at correct shipped content, not at
-# your PATH:
+# suite rather than silently skipping its coverage:
 tests/run-script-tests.zsh --local
 ```
 
-**Three exceptions to that isolation.** The first, in both modes: the `kubernetes-ci`
+**Three exceptions to that isolation.** The first, in both modes: the IaC gate's
 real-tool harness needs a **pinned** IaC toolchain, and `tests/iac-tools.zsh`
-fetches roughly 100 MB of it from the network into
+fetches roughly 200 MB of it from the network into
 `${IAC_TOOLS_CACHE:-${XDG_CACHE_HOME:-~/.cache}/timos-claude-code-plugins/iac-tools}/<os>-<arch>/`
 the first time the suite runs — so if you have `XDG_CACHE_HOME` set, it is not
 under `~/.cache`, and `IAC_TOOLS_CACHE` overrides both (it is also how the
@@ -69,11 +65,12 @@ see the pre-flight at the top of `run-script-tests.zsh` for the exact set, which
 is where it can't drift — rather than letting a bare `fatal: not a git
 repository` surface from inside the container.
 
-Four of the six pins (`kubeconform`, `kube-linter`, `kyverno`, `yq`) are read
+Four of the seven pins (`kubeconform`, `kube-linter`, `kyverno`, `yq`) are read
 **from the workflow template**, so bumping the template moves the harness with
-it. `helm` and `kustomize` are the exception: the template installs neither
-(`ubuntu-latest` ships both), so there is no upstream pin to read and they are
-pinned inside `iac-tools.zsh` to the runner image the workflow targets — bump
+it. `helm`, `kustomize` and `trivy` are the exceptions: the template installs
+none of them directly (`ubuntu-latest` ships the first two; the third runs
+through `trivy-action`, whose default version is the pin), so there is no
+`*_VERSION:` upstream to read and they are pinned inside `iac-tools.zsh` — bump
 them there. Never from `brew` or `apt` in either case: kube-linter's default
 check set moves between releases — checks are added, renamed and retired — so a
 newer binary does not reproduce the fixtures' counts. Measured, not
@@ -99,8 +96,8 @@ diagnose a red as a harness bug:
   container and needs the `linux-*` leaf, which is filled only by running
   `tests/run-script-tests.zsh` once while online. Each platform you run on needs
   its own online run.
-- **The `schema` job needs the network once per cache root, not once per run.**
-  The shipped pipeline step is `kubeconform -strict -summary
+- **The `schema` stage needs the network once per cache root, not once per run.**
+  The shipped gate stage is `kubeconform -strict -summary
   -ignore-missing-schemas` with **no** `-cache`, so in a consumer's CI it
   re-downloads the Kubernetes JSON schemas from `raw.githubusercontent.com`
   every time. The harness does not: `kubernetes-ci-fixtures.bats` puts a shim
@@ -145,11 +142,11 @@ runs the whole suite once in parallel and exits with bats' real status.
 | `marker-find-stub.bats` | Unit coverage for the above — delegation (a `Chart.yaml`-only find included), the marker-shaped intercept (exit 1, output kept, stderr line, `fired`), the three refusals (missing `DIR`, no executable `find`, `find` already under `DIR`), the `type -P` executable-not-function resolution, the rebuild clearing `fired`, and both a `DIR` and a real-find path containing a space (pins all three `%q` interpolations) |
 | `acceptance/` | Outside-in cases against a **running** service built from a bootstrap template — deliberately NOT in the default gate (`bats` does not recurse); see [`acceptance/README.md`](acceptance/README.md) and #243 |
 | `find-inert-bracket-assertions.zsh` | Detector behind the inert-assertion suite lint — `bracket` (#1011) and `and-tail` (#1067) rules |
-| `iac-tools.zsh` | Resolves the **pinned** helm/kustomize/kubeconform/kube-linter/kyverno/yq the `kubernetes-ci` harness runs on (#1199) |
+| `iac-tools.zsh` | Resolves the **pinned** helm/kustomize/kubeconform/kube-linter/kyverno/trivy/yq the IaC gate harness runs on (#1199, #1603) |
 | `iac-tools.bats` | Tests `iac-tools.zsh` — pin extraction, the usage taxonomy, the anchored version probe and the cache layout, fully offline (#1199) |
 | `fixtures/clean/` | A self-contained, finding-free mini plugin repo (a `development-fixture` plugin) |
-| `fixtures/kubernetes-repo*/` | Three GitOps repository shapes — clean, broken, untested-policy (#1155) |
-| `kubernetes-ci-fixtures.bats` | Executes the bootstrapped `kubernetes-ci` workflow with **real tools** over those fixtures (#1199) |
+| `fixtures/kubernetes-repo*/` | Four GitOps repository shapes — clean, broken, untested-policy (#1155), helmcharts (#1603) |
+| `kubernetes-ci-fixtures.bats` | Executes the bootstrapped IaC gate script (`scripts/k8s-gate.zsh`) with **real tools** over those fixtures (#1199, #1603) |
 | `no-cluster-deploy.bats` | The #1206 direct-to-cluster gate — `check-no-cluster-deploy.zsh` behaviour, its workflow template's requirable shape (`yq`-structural), and both `branch-protection.sh` directions. Also holds that rule's **propagation invariant**: four clause sweeps plus the roster canary over a derived restatement roster, the guarded-creator clause among them (#1432) |
 | `iac-selection-rule.bats` | Propagation invariant for the zero-language **IaC selection rule** (#1432) — every site stating the selection by the absence of a language must name the marker in the same statement; derived roster, roster tripwire against `MAINTAINING.md`, prose + code non-vacuity controls |
 | `gather-claude-plugin.bats` | Tests `gather-claude-plugin-findings.zsh` — one mutation of `clean` per validator, asserting the matching finding |

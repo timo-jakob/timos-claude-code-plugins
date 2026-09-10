@@ -2,7 +2,7 @@
 #
 # Behavioral tests for tests/iac-tools.zsh (#1199) — the script that resolves the
 # PINNED toolchain tests/kubernetes-ci-fixtures.bats executes the bootstrapped
-# kubernetes-ci workflow with.
+# IaC gate script (`scripts/k8s-gate.zsh`) with.
 #
 # WHY THIS FILE MATTERS MORE THAN A HELPER'S TESTS USUALLY DO. This script is the
 # seam that decides what "green" means for the whole real-tool harness. If it
@@ -74,6 +74,7 @@ fake_toolchain() {
       kube-linter) probe="${want}" ;;
       kyverno)     probe="Version: ${want}" ;;
       yq)          probe="yq (https://github.com/mikefarah/yq/) version v${want}" ;;
+      trivy)       probe="Version: ${want}" ;;
       *) return 1 ;;
     esac
     printf '#!/bin/sh\necho "%s"\n' "$probe" > "$BIN/$tool"
@@ -140,7 +141,7 @@ minimal_path() {
 # --print-pins — the single source the harness asserts against
 # ---------------------------------------------------------------------------
 
-@test "--print-pins reports all six tools, reading four of them from the template (#1199)" {
+@test "--print-pins reports all seven tools, reading four of them from the template (#1199, #1603)" {
   run zsh "$SCRIPT" --print-pins
   [ "$status" -eq 0 ]
   # The four the template installs, asserted against the template itself rather
@@ -163,16 +164,17 @@ minimal_path() {
   contains "$output" "kyverno $want"
   want="$(tmpl_pin '.jobs.argocd.steps[] | select(.name == "install yq") | .env.YQ_VERSION')"
   contains "$output" "yq $want"
-  # and the two that exist nowhere but this script. Unanchored: `matches` takes
+  # and the three that exist nowhere but this script. Unanchored: `matches` takes
   # an ERE and bash's `=~` does not read `\n` as a newline, so a `(^|\n)` prefix
   # would only ever match the FIRST line — passing for helm and failing for
   # every tool after it, for a reason that has nothing to do with the pins.
   matches "$output" 'helm [0-9]+\.[0-9]+\.[0-9]+'
   matches "$output" 'kustomize [0-9]+\.[0-9]+\.[0-9]+'
-  # exactly six lines: a seventh tool nobody installs, or a dropped one, both
+  matches "$output" 'trivy [0-9]+\.[0-9]+\.[0-9]+'
+  # exactly seven lines: an eighth tool nobody installs, or a dropped one, both
   # break the harness's own count guard silently otherwise
   run bash -c "zsh '$SCRIPT' --print-pins | grep -c ."
-  [ "$output" = "6" ]
+  [ "$output" = "7" ]
 }
 
 @test "--print-pins installs nothing and needs no network (#1199)" {
@@ -327,23 +329,26 @@ minimal_path() {
   contains "$output" 'curl is required'
 }
 
-@test "the pin sweep MAINTAINING.md documents still finds both constants (#1199)" {
-  # MAINTAINING.md's quarterly inventory greps this script for the two pins that
-  # exist nowhere else. Rewriting the line as `typeset`, indenting it, or moving
-  # the pair into an array makes that command print NOTHING — which reads exactly
-  # like "no pins to check", the failure the inventory exists to prevent.
-  local pins helm_v kustomize_v
+@test "the pin sweep MAINTAINING.md documents still finds all three constants (#1199, #1603)" {
+  # MAINTAINING.md's quarterly inventory greps this script for the three pins
+  # that exist nowhere else. Rewriting a line as `typeset`, indenting it, or
+  # moving the set into an array makes that command print NOTHING — which reads
+  # exactly like "no pins to check", the failure the inventory exists to prevent.
+  local pins helm_v kustomize_v trivy_v
   pins="$(zsh "$SCRIPT" --print-pins)"
   helm_v="$(printf '%s\n' "$pins" | awk '$1 == "helm" { print $2 }')"
   kustomize_v="$(printf '%s\n' "$pins" | awk '$1 == "kustomize" { print $2 }')"
+  trivy_v="$(printf '%s\n' "$pins" | awk '$1 == "trivy" { print $2 }')"
   [ -n "$helm_v" ]
   [ -n "$kustomize_v" ]
-  run grep -n -E "^local (helm|kustomize)_v=" "$SCRIPT"
+  [ -n "$trivy_v" ]
+  run grep -n -E "^local (helm|kustomize|trivy)_v=" "$SCRIPT"
   [ "$status" -eq 0 ]
   contains "$output" "$helm_v"
   contains "$output" "$kustomize_v"
+  contains "$output" "$trivy_v"
   # and MAINTAINING.md really does document that command
-  run grep -F 'grep -n -E "^local (helm|kustomize)_v=" tests/iac-tools.zsh' "$REPO_ROOT/MAINTAINING.md"
+  run grep -F 'grep -n -E "^local (helm|kustomize|trivy)_v=" tests/iac-tools.zsh' "$REPO_ROOT/MAINTAINING.md"
   [ "$status" -eq 0 ]
 }
 
@@ -461,7 +466,7 @@ minimal_path() {
   run env PATH="$STUB:$PATH" zsh "$SCRIPT" --bin-dir "$BIN"
   [ "$status" -eq 1 ]
   local tool
-  for tool in helm kustomize kubeconform kube-linter kyverno yq; do
+  for tool in helm kustomize kubeconform kube-linter kyverno yq trivy; do
     contains "$output" "fetching $tool"
   done
   # the TYPED diagnostics, both shapes — without them a failed fetch surfaces as
@@ -508,7 +513,7 @@ minimal_path() {
     want="$(printf '%s\n' "$pins" | awk '$1 == "kubeconform" { print $2 }')"
     # the version segment too — without it `want` is computed and thrown away,
     # and a copy-paste splicing another tool's version into this URL (the
-    # realistic mutation across six near-identical fetch_tar calls) stays green
+    # realistic mutation across seven near-identical fetch_tar calls) stays green
     # offline and only surfaces as a 404 on the first cold cache
     contains "$output" "download/v${want}/kubeconform-${os}-${arch}.tar.gz"
     # kube-linter: architecture as a SUFFIX, and OMITTED entirely for amd64
@@ -524,6 +529,12 @@ minimal_path() {
     # yq: a bare binary, not a tarball
     want="$(printf '%s\n' "$pins" | awk '$1 == "yq" { print $2 }')"
     contains "$output" "download/v${want}/yq_${os}_${arch}"
+    # trivy: its own spelling of BOTH halves — Linux/macOS, 64bit/ARM64
+    want="$(printf '%s\n' "$pins" | awk '$1 == "trivy" { print $2 }')"
+    local tos="Linux" tarch="64bit"
+    if [ "$os" = "darwin" ]; then tos="macOS"; fi
+    if [ "$arch" = "arm64" ]; then tarch="ARM64"; fi
+    contains "$output" "download/v${want}/trivy_${want}_${tos}-${tarch}.tar.gz"
   done
 }
 
@@ -562,7 +573,7 @@ EOF
 }
 
 @test "the IaC docs name no version literal — --print-pins is the only list (#1199)" {
-  # The drift class this replaced: four documents used to restate the six pinned
+  # The drift class this replaced: four documents used to restate the pinned
   # versions in prose, none asserted, so bumping a template pin left them telling
   # the next reader to reproduce at the old version and to treat a red there as a
   # regression. They now point at --print-pins, which cannot drift. This is the
@@ -574,14 +585,14 @@ EOF
   # own title. And the file list is the SAME GLOB MAINTAINING.md sweeps, not four
   # hardcoded paths — a fifth fixture variant must not be swept by the documented
   # command while going unasserted here.
-  local pattern="(helm|kustomize|kubeconform|kube-linter|kyverno|yq)[\`'\"]?[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+"
+  local pattern="(helm|kustomize|kubeconform|kube-linter|kyverno|trivy|yq)[\`'\"]?[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+"
   # the glob is expanded HERE, by the test body's own shell — never inside a
   # `bash -c "…$pattern…"`, where the backtick in the character class would be
   # read as command substitution and silently gut the pattern
   local docs=("$REPO_ROOT"/tests/README.md "$REPO_ROOT"/tests/fixtures/kubernetes-repo*/README.md)
   # ...and the glob really did reach the documents, so a renamed fixture tree
   # cannot make this test pass by matching nothing
-  [ "${#docs[@]}" -ge 4 ]
+  [ "${#docs[@]}" -ge 5 ]
 
   # A POSITIVE CONTROL, because everything below asserts a NEGATIVE. Without it
   # a pattern narrowed to `(helm)`, or one that lost `[[:space:]]+`, would match
@@ -613,9 +624,9 @@ EOF
   # byte-identical in both files.
   # both fragments are asserted to be in MAINTAINING.md AND in this test's own
   # $pattern — pinning them only on one side would let this copy drift freely
-  contains "$pattern" '(helm|kustomize|kubeconform|kube-linter|kyverno|yq)'
+  contains "$pattern" '(helm|kustomize|kubeconform|kube-linter|kyverno|trivy|yq)'
   contains "$pattern" '[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+'
-  run grep -F '(helm|kustomize|kubeconform|kube-linter|kyverno|yq)' "$REPO_ROOT/MAINTAINING.md"
+  run grep -F '(helm|kustomize|kubeconform|kube-linter|kyverno|trivy|yq)' "$REPO_ROOT/MAINTAINING.md"
   [ "$status" -eq 0 ]
   run grep -F '[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/MAINTAINING.md"
   [ "$status" -eq 0 ]

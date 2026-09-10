@@ -1,8 +1,9 @@
 #!/usr/bin/env zsh
 # iac-tools.zsh — resolve the PINNED toolchain tests/kubernetes-ci-fixtures.bats
-# executes the bootstrapped `kubernetes-ci` pipeline with (#1199).
+# executes the bootstrapped IaC gate script (`scripts/k8s-gate.zsh`) with
+# (#1199, #1603).
 #
-# WHY PINNED, AND WHY NOT $PATH. The three fixture repositories under
+# WHY PINNED, AND WHY NOT $PATH. The four fixture repositories under
 # tests/fixtures/kubernetes-repo* assert tool VERDICTS, not just exit codes: the
 # clean variant is "zero kube-linter findings", the broken one is "exactly four,
 # each attributable to one file and one check id" (four findings across THREE
@@ -20,23 +21,29 @@
 # THE PINS ARE READ FROM THE WORKFLOW TEMPLATE, not restated here — the template
 # is what a consumer repo actually runs, so a bump there must move the harness
 # with it rather than leaving the two silently describing different toolchains.
-# The two exceptions are helm and kustomize: the template installs NEITHER
-# (ubuntu-latest ships both), so there is no pin upstream to read. They are
-# pinned below to the versions of the runner image the workflow targets, which is
-# as close as this harness can get to "what the consumer's CI actually renders
-# with" while still being reproducible on a developer machine and on the macOS CI
-# leg, where the runner image ships neither tool at all.
+# The exceptions are helm, kustomize and trivy. The template installs NEITHER
+# helm nor kustomize (ubuntu-latest ships both), so there is no pin upstream to
+# read. They are pinned below to the versions of the runner image the workflow
+# targets, which is as close as this harness can get to "what the consumer's CI
+# actually renders with" while still being reproducible on a developer machine
+# and on the macOS CI leg, where the runner image ships neither tool at all.
+# trivy is pinned below too (#1603): the template runs it through the
+# `aquasecurity/trivy-action` ACTION, whose pinned ref names the action's
+# version, not trivy's — the trivy version is that action's own default, which
+# no `*_VERSION:` key in the template carries. The gate script the fixture
+# harness executes (`k8s-gate.zsh`) runs the binary directly, so the harness
+# needs the same version the action installs.
 #
 # Usage:
 #   iac-tools.zsh [--bin-dir DIR] [--template PATH] [--print-pins] [-h|--help]
 #
 #     --print-pins     print the resolved pins as `<tool> <version>` lines and
-#                      exit, installing nothing. This is the ONE place the six
+#                      exit, installing nothing. This is the ONE place the seven
 #                      versions are named, so the harness asserts what the
 #                      binaries report against THIS rather than restating them —
-#                      including helm and kustomize, whose pins live nowhere
-#                      else and would otherwise be the two the suite never
-#                      checks.
+#                      including helm, kustomize and trivy, whose pins live
+#                      nowhere else and would otherwise be the three the suite
+#                      never checks.
 #
 #     --bin-dir DIR    the EXACT directory the binaries live in. Without it they
 #                      go to <cache-root>/<os>-<arch>, where <cache-root> is
@@ -173,6 +180,12 @@ yq_v="$(tmpl_env '.jobs.argocd.steps[] | select(.name == "install yq") | .env.YQ
 # runner-images repo. MAINTAINING.md's Step 1 inventory names this file for the
 # quarterly sweep; its Step 2 carries the full re-read procedure.
 local helm_v=3.21.3 kustomize_v=5.8.1
+# trivy: the default `version` input of the `aquasecurity/trivy-action` ref the
+# template pins (its `# vX.Y.Z` comment names the ACTION release; the trivy
+# version is that release's action.yaml default). Bumping the action ref in the
+# template is what moves this pin — re-read the default from the new ref's
+# action.yaml, do not guess it from the action's version number.
+local trivy_v=0.70.0
 
 # `--print-pins` answers BEFORE the platform is resolved and before anything is
 # installed: it is a pure question about the template, so it must work on a
@@ -180,6 +193,7 @@ local helm_v=3.21.3 kustomize_v=5.8.1
 if (( print_pins )); then
   print -r -- "helm $helm_v"
   print -r -- "kustomize $kustomize_v"
+  print -r -- "trivy $trivy_v"
   print -r -- "kubeconform $kubeconform_v"
   print -r -- "kube-linter $kube_linter_v"
   print -r -- "kyverno $kyverno_v"
@@ -191,8 +205,8 @@ fi
 # below --print-pins, which is a pure question about the template.
 command -v curl >/dev/null 2>&1 \
   || { print -u2 -- "iac-tools: curl is required to download the pinned binaries"; exit 1 }
-# tar too, and for the same reason the other preconditions are named: five of the
-# six tools arrive as `curl … | tar -xz`, so without it all five report
+# tar too, and for the same reason the other preconditions are named: six of the
+# seven tools arrive as `curl … | tar -xz`, so without it all six report
 # "download or extraction failed: <url>" — pointing the reader at the release
 # hosts and their network when the cause is a missing local tool
 command -v tar >/dev/null 2>&1 \
@@ -269,6 +283,7 @@ have() {
     kube-linter) out="$("$bin" version 2>/dev/null)" ;;
     kyverno)     out="$("$bin" version 2>/dev/null)" ;;
     yq)          out="$("$bin" --version 2>/dev/null)" ;;
+    trivy)       out="$("$bin" --version 2>/dev/null)" ;;
   esac || return 1
   # Anchored on a non-version character on BOTH sides, so 1.13.4 does not match
   # a hypothetical 1.13.40 and 0.7.2 does not match 10.7.2.
@@ -384,6 +399,14 @@ install_tool() {
     yq)
       fetch_bin "https://github.com/mikefarah/yq/releases/download/v${want}/yq_${os}_${arch}" \
                 "$bin_dir/yq" ;;
+    trivy)
+      # …and trivy spells BOTH halves its own way: `Linux`/`macOS` for the OS,
+      # `64bit`/`ARM64` for the architecture, joined by a dash.
+      local tos="Linux" tarch="64bit"
+      if [[ "$os" == darwin ]]; then tos="macOS"; fi
+      if [[ "$arch" == arm64 ]]; then tarch="ARM64"; fi
+      fetch_tar "https://github.com/aquasecurity/trivy/releases/download/v${want}/trivy_${want}_${tos}-${tarch}.tar.gz" \
+                trivy "$bin_dir/trivy" ;;
   esac || return 1
   # Verify AFTER installing, not just that the download succeeded: a release
   # whose asset was re-cut, or a redirect serving an error page, would otherwise
@@ -395,7 +418,8 @@ install_tool() {
 }
 
 local -a tools=(helm "$helm_v" kustomize "$kustomize_v" kubeconform "$kubeconform_v"
-                kube-linter "$kube_linter_v" kyverno "$kyverno_v" yq "$yq_v")
+                kube-linter "$kube_linter_v" kyverno "$kyverno_v" yq "$yq_v"
+                trivy "$trivy_v")
 local i rc=0
 for (( i = 1; i <= $#tools; i += 2 )); do
   # Keep going on a failure rather than dying at the first one: a cold run with

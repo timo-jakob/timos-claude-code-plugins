@@ -1,0 +1,13 @@
+# The templated manifest, as in the clean variant: `note` is substituted from
+# values — the chart's own values.yaml under `helm template`, and the overlay's
+# `valuesInline` under `kustomize build --enable-helm`. The rendered value is
+# how the harness tells the two renders apart (see ../../../kustomization.yaml).
+#
+# (helm parses the WHOLE file as a Go template, comments included, so a literal
+# template action written out in a comment here is a render error.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  note: "{{ .Values.note }}"

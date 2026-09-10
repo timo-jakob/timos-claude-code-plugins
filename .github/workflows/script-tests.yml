@@ -79,9 +79,8 @@ on:
       # approver-policy overlay does NOT exist yet, so the PR that finally lands
       # it must red this suite at PR time rather than after merge — AND, since
       # #1154, bootstrap-iac-pipeline.bats reads the kubernetes-ci workflow
-      # template here, joined since #1199 by kubernetes-ci-fixtures.bats (which
-      # extracts every `run:` step from it) and iac-tools.bats / iac-tools.zsh
-      # (which read all four version pins from it), and run-script-tests.bats
+      # template here, joined since #1199 by iac-tools.bats / iac-tools.zsh
+      # (which read four version pins from it), and run-script-tests.bats
       # (which asserts the cache key names the template). SEVERAL suites now
       # depend on this entry: retiring the Go assertion does not free it.
       - 'development/skills/bootstrap/templates/**'
@@ -222,16 +221,18 @@ jobs:
         # exemption is recorded rather than implied, since the Linux leg declares
         # the same toolchain explicitly (#1360).
         run: brew install bats-core jq shellcheck node parallel yamllint yq
-      # The pinned IaC toolchain the kubernetes-ci real-tool harness executes the
-      # workflow with (tests/kubernetes-ci-fixtures.bats, #1199): helm,
-      # kustomize, kubeconform, kube-linter, kyverno and yq.
+      # The pinned IaC toolchain the real-tool harness executes the bootstrapped
+      # gate script with (tests/kubernetes-ci-fixtures.bats, #1199, #1603): helm,
+      # kustomize, kubeconform, kube-linter, kyverno, trivy and yq.
       #
-      # FOUR of those six — kubeconform, kube-linter, kyverno, yq — are read FROM
-      # the workflow template, which installs them, so a bump there moves the
-      # harness with it. helm and kustomize are the exception: the template
-      # installs neither (ubuntu-latest ships both), so there is no upstream pin
-      # to read and they are pinned in tests/iac-tools.zsh instead. That is the
-      # same split the cache key below encodes.
+      # FOUR of those seven — kubeconform, kube-linter, kyverno, yq — are read
+      # FROM the workflow template, which installs them, so a bump there moves
+      # the harness with it. helm, kustomize and trivy are the exception: the
+      # template installs none of them directly (ubuntu-latest ships the first
+      # two; the third runs through trivy-action, whose default version is the
+      # pin), so there is no `*_VERSION:` upstream to read and they are pinned in
+      # tests/iac-tools.zsh instead. That is the same split the cache key below
+      # encodes.
       #
       # Deliberately NOT apt/brew: those track latest, and kube-linter's default
       # check set moves between releases, so a newer binary reports three
@@ -255,8 +256,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/timos-claude-code-plugins/iac-tools
-          # both inputs that can move a pin: the script (helm/kustomize) and the
-          # workflow template (the other four)
+          # both inputs that can move a pin: the script (helm/kustomize/trivy)
+          # and the workflow template (the other four)
           key: >-
             iac-tools-${{ runner.os }}-${{ runner.arch }}-${{
             hashFiles('tests/iac-tools.zsh',

@@ -146,12 +146,13 @@ print -u2 -- "==> building test image (tests/Dockerfile) ..."
 docker build -q -t claude-plugin-script-tests "$repo_root/tests" >/dev/null \
   || { print -u2 -- "test image build failed (tests/Dockerfile)"; exit 1 }
 
-# The pinned IaC toolchain (#1199) is NOT baked into the image. Four of the six
+# The pinned IaC toolchain (#1199) is NOT baked into the image. Four of the seven
 # pins (kubeconform, kube-linter, kyverno, yq) are read from the workflow
-# template, which lives outside this build context; helm and kustomize are pinned
-# in tests/iac-tools.zsh, because the template installs neither. And baking any
-# of them in would re-download ~100 MB on every image rebuild — the reason that
-# covers all six. Mount the host's cache root instead. It is safe to share because iac-tools.zsh keys its leaf directory by
+# template, which lives outside this build context; helm, kustomize and trivy are
+# pinned in tests/iac-tools.zsh, because the template installs none of them
+# directly. And baking any of them in would re-download ~200 MB on every image
+# rebuild — the reason that covers all seven. Mount the host's cache root
+# instead. It is safe to share because iac-tools.zsh keys its leaf directory by
 # os-arch — the host's darwin binaries and the container's linux ones sit side by
 # side — so each platform downloads once, ever, rather than once per run.
 # typed for the same reason as iac-tools.zsh's copy: the expansion dereferences
