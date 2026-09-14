@@ -28,6 +28,75 @@ setup() {
   echo "print(1)" > "$R/app.py"   # the story's diff (in-scope file)
 
   CRIT='[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"T","description":"d","reviewer":"r"}]'
+
+  # #1583: a round that carries entries to verify must account for each one
+  # (confirmed / re-raised / unconfirmed per reviewer) or the loop refuses it as
+  # CARRY-UNACCOUNTED. The fixture panels are omniscient: every carried entry is
+  # CONFIRMED by reviewer "r" unless a test supplies its own accounting. That
+  # default is applied by a WRAPPER the tests invoke as $S; the real script is
+  # $LOOP_REAL (use it to read the loop's source, or to bypass the default):
+  #   * hook mode — every --review-cmd runs the $CARRY_ALL prelude first, which
+  #     writes the <findings-path>.carry.json sidecar (nothing on an empty
+  #     carry); a test that wants a re-raise or an unconfirmed entry writes its
+  #     own sidecar after the prelude, or deletes it;
+  #   * step mode — a --resume without --carry-accounting gets a confirm-all
+  #     file built from the carry the round is about to read (the highest
+  #     verify-N.json in --work-dir).
+  # A --review-cmd whose value is empty or a flag is passed through untouched,
+  # so the usage-error tests still exercise the real parser.
+  LOOP_REAL="$S"
+  CARRY_ALL="$BATS_TEST_TMPDIR/carry-all.sh"
+  cat > "$CARRY_ALL" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${REVIEW_FIX_VERIFICATION:-}" ] && [ -s "$REVIEW_FIX_VERIFICATION" ] \
+   && [ "$(jq 'length' "$REVIEW_FIX_VERIFICATION")" != "0" ]; then
+  jq '[.[] | {file, dimension, title, confirmed: ["r"], re_raised: [], unconfirmed: []}]' \
+    "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"
+fi
+EOF
+  chmod +x "$CARRY_ALL"
+  CARRY_AUTO_FILE="$BATS_TEST_TMPDIR/carry-auto.json"
+  export CARRY_ALL LOOP_REAL CARRY_AUTO_FILE
+  S="$BATS_TEST_TMPDIR/loop-with-omniscient-panel.zsh"
+  cat > "$S" <<'EOF'
+#!/usr/bin/env zsh
+emulate -L zsh
+local -a args=()
+# every name initialised: at a script's top level a bare `local NAME` whose name
+# is already in the environment PRINTS it to stdout — which here is the status
+# JSON every test parses (the hazard resolve-story-loop.zsh documents about itself)
+local wd="" resume=0 has_acct=0 has_review=0 i=0 n="" v="" c=""
+for (( i=1; i<=$#; i++ )); do
+  case "${@[i]}" in
+    --work-dir) wd="${@[i+1]:-}" ;;
+    --resume) resume=1 ;;
+    --carry-accounting) has_acct=1 ;;
+    --review-cmd) has_review=1 ;;
+  esac
+done
+for (( i=1; i<=$#; i++ )); do
+  if [[ "${@[i]}" == --review-cmd && $i -lt $# && -n "${@[i+1]}" && "${@[i+1]}" != --* \
+        && "${@[i+1]}" != '"$CARRY_ALL"; '* ]]; then
+    args+=( --review-cmd "\"\$CARRY_ALL\"; ${@[i+1]}" ); (( i++ ))
+  else
+    args+=( "${@[i]}" )
+  fi
+done
+if (( resume && ! has_acct && ! has_review )) && [[ -n "$wd" && -d "$wd" ]]; then
+  # the highest-numbered verify-N.json that is a REGULAR file — a test that
+  # plants a directory at the next carry path (the kill-window test) must not
+  # have it read as the carry
+  for c in $(ls "$wd" 2>/dev/null | sed -n 's/^verify-\([0-9][0-9]*\)\.json$/\1/p' | sort -rn); do
+    [[ -f "$wd/verify-$c.json" ]] && { n="$c"; break; }
+  done
+  v="$wd/verify-${n:-0}.json"
+  if [[ -n "$n" && -s "$v" && "$(jq 'length' "$v" 2>/dev/null)" != 0 ]]; then
+    jq '[.[] | {file, dimension, title, confirmed: ["r"], re_raised: [], unconfirmed: []}]' "$v" > "$CARRY_AUTO_FILE" \
+      && args+=( --carry-accounting "$CARRY_AUTO_FILE" )
+  fi
+fi
+exec zsh "$LOOP_REAL" "${args[@]}"
+EOF
 }
 
 # a test that chmods a dir read-only must not leave it un-removable if an
@@ -1558,7 +1627,8 @@ seed_exhausted_wd() {
   # INTERNAL errors, so a caller mistake would be misreported as one
   local f
   for f in --repo --base --review-cmd --fix-cmd --test-cmd --gate-attest \
-           --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file; do
+           --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file \
+           --carry-accounting; do
     run zsh "$S" "$f"
     [ "$status" -eq 2 ] || { echo "$f dangling: want exit 2, got $status"; return 1; }
     contains "$output" "$f requires a value" || {
@@ -1583,7 +1653,8 @@ seed_exhausted_wd() {
   # run the suite.
   local f
   for f in --repo --base --review-cmd --fix-cmd --test-cmd \
-           --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file; do
+           --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file \
+           --carry-accounting; do
     run zsh "$S" "$f" "" --no-review
     [ "$status" -eq 2 ] || { echo "$f empty: want exit 2, got $status"; return 1; }
     contains "$output" "$f requires a non-empty value" || {
@@ -2346,12 +2417,12 @@ STUB_EOF
   # future call site that invokes $TREE_ID directly would silently reopen that,
   # and no behavioural test can see it (a caller that exports the seam works
   # either way) — so the invariant is pinned structurally.
-  grep -q 'GIT_TREE_ID_BIN="\${GIT_TREE_ID_BIN:-git}" "\$TREE_ID"' "$S"
+  grep -q 'GIT_TREE_ID_BIN="\${GIT_TREE_ID_BIN:-git}" "\$TREE_ID"' "$LOOP_REAL"
   # exactly two mentions of "$TREE_ID" as a command: the helper body and the
   # `-x` executability guard beside the gate attestation
-  [ "$(grep -c '"\$TREE_ID"' "$S")" -eq 2 ]
+  [ "$(grep -c '"\$TREE_ID"' "$LOOP_REAL")" -eq 2 ]
   # ...and every mint goes through the helper
-  [ "$(grep -c '_tree_id "\$repo"' "$S")" -eq 6 ]
+  [ "$(grep -c '_tree_id "\$repo"' "$LOOP_REAL")" -eq 6 ]
 }
 
 @test "#1435 the fix-touched set and the review scope share ONE path rule" {
@@ -2367,7 +2438,7 @@ STUB_EOF
                 "\\#^\\.review/#d" \
                 "\\#^\\.claude/telemetry/#d" \
                 "/^\$/d"; do
-    grep -qF -- "$needle" "$S" || { echo "loop lost the path rule: $needle"; return 1; }
+    grep -qF -- "$needle" "$LOOP_REAL" || { echo "loop lost the path rule: $needle"; return 1; }
     grep -qF -- "$needle" "$D" || { echo "dispatch lost the path rule: $needle"; return 1; }
   done
   # ...and the quotePath flag both need so a non-ASCII path is spelled the same
@@ -2382,7 +2453,7 @@ STUB_EOF
   # 3 calls + 2 comments in dispatch, 1 call + 1 comment in the loop. The
   # behavioural pin is the test below; this one localises a deletion to the
   # line that lost it.
-  [ "$(grep -cF -- 'core.quotePath=false' "$S")" -eq 3 ]
+  [ "$(grep -cF -- 'core.quotePath=false' "$LOOP_REAL")" -eq 3 ]
   [ "$(grep -cF -- 'core.quotePath=false' "$D")" -eq 5 ]
 }
 
@@ -2502,7 +2573,7 @@ EOF
   # exits before the round produces any findings to classify, so a stamp would
   # serve nothing. That exclusion is what keeps this a membership test rather
   # than "stamp everything".
-  run ! grep -qE 'ESCALATE_AMBIGUOUS' <<< "$(sed -n '/pre-fix tree identity/,/^  fi$/p' "$S")"
+  run ! grep -qE 'ESCALATE_AMBIGUOUS' <<< "$(sed -n '/pre-fix tree identity/,/^  fi$/p' "$LOOP_REAL")"
 }
 
 @test "#1435 a fresh (non---resume) run clears a previous run's fix-touched state" {
@@ -3163,7 +3234,9 @@ EOF
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$dir/resolve-story-loop.zsh" --repo "$R" --base main \
     --work-dir "$BATS_TEST_TMPDIR/wdu" \
-    --review-cmd "$(pft_review)" --fix-cmd 'true'
+    --review-cmd "\"\$CARRY_ALL\"; $(pft_review)" --fix-cmd 'true'
+  # (the COPY is invoked directly, not through the $S wrapper, so the
+  # confirm-all prelude is spelled out here)
   [ "$status" -eq 14 ]
   # The copy sits at a different depth, so the loop cannot reach the telemetry
   # emitter by its relative path and says so on stderr — best-effort, swallowed,
@@ -3263,7 +3336,7 @@ seed_resumable() {   # seed_resumable <work-dir>
 # with a message about the wrong thing.
 sidecar_slack() {
   local v
-  v=$(sed -n 's/^typeset -gr MAX_ROUNDS_SIDECAR_SLACK=\([0-9]*\)$/\1/p' "$S")
+  v=$(sed -n 's/^typeset -gr MAX_ROUNDS_SIDECAR_SLACK=\([0-9]*\)$/\1/p' "$LOOP_REAL")
   [ -n "$v" ] || { echo "could not read MAX_ROUNDS_SIDECAR_SLACK from $S" >&2; return 1; }
   printf '%s' "$v"
 }
@@ -3567,10 +3640,10 @@ resume_clean() {   # resume_clean <work-dir> <max-rounds>
 @test "#1576 the fresh-run clear NAMES the sidecar, in the rm diagnostic and the header inventory" {
   # A clear whose failure diagnostic does not name the file it failed to remove
   # leaves the operator guessing which foreign state was adopted.
-  run grep -c 'max-rounds sidecar (\.max-rounds, \.max-rounds\.tmp\.\*)' "$S"
+  run grep -c 'max-rounds sidecar (\.max-rounds, \.max-rounds\.tmp\.\*)' "$LOOP_REAL"
   [ "$output" = "1" ]
   # ...and the file is inventoried in the header beside its siblings
-  run grep -c '`<work-dir>/\.max-rounds`' "$S"
+  run grep -c '`<work-dir>/\.max-rounds`' "$LOOP_REAL"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
@@ -3734,4 +3807,113 @@ resume_clean() {   # resume_clean <work-dir> <max-rounds>
   # list and into the review dossier — so assert it on the delta round as well.
   [ "$(echo "$output" | jq '[.round_changelists[] | .blocking[]? | select(.file == "README.md")] | length')" -eq 0 ]
   [ "$(echo "$output" | jq '[.round_changelists[1].blocking[]? | select(.file == "touched.py")] | length')" -ge 1 ]
+}
+
+# --- #1583: carry accounting in HOOK mode (the <findings-path>.carry.json sidecar)
+
+@test "#1583 AC 2 hook mode: a carried round whose panel writes no <findings-path>.carry.json is refused as CARRY-UNACCOUNTED" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  # the $S wrapper still prepends the $CARRY_ALL prelude, so this panel DELETES
+  # the sidecar the prelude just wrote — that deletion is load-bearing: it is
+  # what leaves round 2 with a carry and no accounting
+  loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'rm -f "$REVIEW_FINDINGS.carry.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carry unaccounted: round 2 carries 1 entries but no carry accounting was supplied'
+  # hook mode names the CONCRETE sidecar it expected, never the step-mode flag
+  # (which hook mode refuses as a usage error)
+  contains "$output" 'findings-round-2.json.carry.json, which the hook must write on a carried round'
+  lacks "$output" '--carry-accounting FILE in step mode'
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+  # the safety invariant
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(jq 'length' "$WD/verify-2.json")" -eq 1 ]
+  grep -q -- '^\*\*Refused (round 2):\*\* stale findings — carry unaccounted' "$WD/progress.md"
+  # ...and a ZERO-BYTE sidecar — the realistic shape of a hook whose jq write
+  # failed — is told apart from an absent one (a fresh run, same work-dir)
+  loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st2.json" \
+    --review-cmd ': > "$REVIEW_FINDINGS.carry.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  contains "$output" 'findings-round-2.json.carry.json, which exists but is empty — the hook'"'"'s write failed'
+}
+
+@test "#1583 hook mode: an UNCONFIRMED sidecar refuses the round naming the entry, and lists it in carry_unconfirmed" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [], re_raised: [], unconfirmed: [\"manifest-check\"]}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (unconfirmed by: manifest-check)'
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(jq '.round_changelists | length' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]
+  # the status JSON's final_changelist is round 1's — the carry's origin — never
+  # the refused round's zero-blocker changelist that already sits on disk
+  [ "$(jq '.final_changelist.blocking | length' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]
+  [ "$(jq -r '.final_changelist.blocking[0].title' "$BATS_TEST_TMPDIR/st.json")" = "T" ]
+}
+
+@test "#1583 hook mode: a sidecar left at the findings path by an EARLIER run is cleared before the panel runs, and a directory there fails loudly" {
+  # The findings path is per round (.review/findings-round-N.json), so nothing
+  # stale survives WITHIN a run — the hazard is a second run in the same repo.
+  # Plant last run's confirm-all sidecar at round 2's path, for an identity that
+  # is NOT in this run's carry, and run a panel that writes no sidecar on round
+  # 2 (the REAL loop, so the wrapper's prelude cannot write one either). Read,
+  # the planted file would refuse the round as naming an entry not in
+  # verify-2.json; cleared, the round is refused for want of an accounting —
+  # the two refusals are distinguishable, and only the second is correct.
+  mkdir -p "$R/.review"
+  printf '[{"file":"other.py","dimension":"bugs","title":"stale","confirmed":["r"],"re_raised":[],"unconfirmed":[]}]' \
+    > "$R/.review/findings-round-2.json.carry.json"
+  WD="$BATS_TEST_TMPDIR/wd-stale"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  contains "$output" 'carry unaccounted: round 2 carries 1 entries but no carry accounting was supplied'
+  lacks "$output" 'names entries that are not in verify-2.json'
+  [ ! -e "$R/.review/findings-round-2.json.carry.json" ]
+  # ...and a directory planted at the sidecar path makes the clear fail LOUDLY
+  # (exit 1, named), never get silently read as this round's accounting
+  rm -rf "$R/.review" "$WD"
+  mkdir -p "$R/.review/findings-round-2.json.carry.json"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$output" 'could not clear the stale carry-accounting sidecar'
+}
+
+@test "#1583 hook mode: a confirming sidecar is accepted and stamped, and the triple renders beside the new/carried split" {
+  # the fix pass moves the tree, so round 2 is a real delta with a carry; the
+  # prelude confirms it, round 2 finds nothing, and the promoted closing sweep
+  # (empty carry) converges — every round's changelist carries the stamp
+  WD="$BATS_TEST_TMPDIR/wd-stamp"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then echo "print(2)" >> "$REVIEW_REPO/app.py"; fi'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "CONVERGED" ]
+  [ "$(jq '.rounds' "$BATS_TEST_TMPDIR/st.json")" -eq 3 ]
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"total":1,"confirmed":[{"file":"app.py","dimension":"bugs","title":"T"}],"re_raised":[],"unconfirmed":[]}' ]
+  [ "$(jq -c '.round_changelists[2].carry_accounting' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"total":0,"confirmed":[],"re_raised":[],"unconfirmed":[]}' ]
+  grep -q -- 'carried: confirmed 1 / re-raised 0 / unconfirmed 0 of 1' "$WD/progress.md"
+  # a round that HAS blockers renders the triple beside the new/carried split,
+  # on the same line — the stuck shape: the carry is re-raised in the findings
+  # file, and the prelude also confirms it (a confirmation decides the
+  # accounting outcome; the re-raise still blocks on its own evidence)
+  WD2="$BATS_TEST_TMPDIR/wd-stuck"
+  stuck_loop --max-rounds 3 --work-dir "$WD2"
+  [ "$status" -eq 12 ]
+  grep -q -- '- blockers: 1 (critical: 1, warning: 0) (new: 0, carried: 1), conflicts: 0, suggestions: 0, carried: confirmed 1 / re-raised 0 / unconfirmed 0 of 1' "$WD2/progress.md"
 }

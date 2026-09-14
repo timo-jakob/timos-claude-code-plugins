@@ -2689,9 +2689,15 @@ forward both into each agent's launch prompt — the previous round's blockers t
 verify (the only way a fix that silently did not land gets re-raised, since a
 delta round cannot re-derive it) and the already-waived suggestions the panel
 must not re-litigate. Each panel also states that when it DOES verify a
-non-empty carry it **reports how many carried entries it confirmed** — on ANY
+non-empty carry it **reports how many carried entries it confirmed**, how many
+it re-raised and how many it left unconfirmed — on ANY
 round whose `fix_verification_path` holds entries, and whatever it writes to the
-findings file, `[]` or otherwise. That count is what tells a result which passed
+findings file, `[]` or otherwise. Since #1583 each carried entry has exactly
+one of three outcomes per reviewer — confirmed, re-raised, unconfirmed: a
+re-raise cites what the reviewer observed still present (the file:line and the
+unchanged text, or the passing mutation), never the absence of a fix, and an
+unconfirmed entry is a count the reviewer reports, never a finding it writes.
+That triple is what tells a result which passed
 verification from one that skipped it, and `/development:resolve-issue` §3.5
 step 2 keys a recovery arm on its absence — so scoping the duty to a clean `[]`
 would make a legitimate round (carry confirmed, new blockers found) look failed.
@@ -2705,7 +2711,9 @@ means the story diff itself is empty, and `[]` would be the CONVERGED condition
 over a story that changed nothing. And not when the round's
 `fix_verification_path` holds entries — a bare `[]` would retire carried
 blockers with no agent confirming them, so the panel dispatches with the carry
-or re-raises what it cannot confirm. A `null` or unreadable carry on a round ≥ 2
+and accounts for every entry as one of confirmed, re-raised, unconfirmed; the
+loop, not the panel, refuses a round in which an entry is neither confirmed nor
+re-raised (the CARRY-UNACCOUNTED arm, below). A `null` or unreadable carry on a round ≥ 2
 is a **different** case, not merely "the same as non-empty" — and it is read
 from the descriptor's `fix_verification_path` **or** hook mode's
 `$REVIEW_FIX_VERIFICATION`, since a hook-mode panel sees no descriptor at all
@@ -2717,8 +2725,10 @@ evidence of an empty one, and the missing aggregate is what makes the caller's
 omission surface as a refusal instead of a silently unverified round.
 
 All six panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `kubernetes`)
-carry **both rules**, with the empty-scope one's two qualifications and the
-confirmation-count report; a new panel is not wired up until it states them all. The
+carry **both rules**, with the empty-scope one's two qualifications, the
+confirmation-count report and — since #1583 — the hook-mode sidecar duty (write
+the per-entry accounting to `$REVIEW_FINDINGS.carry.json`, or the loop refuses
+the round); a new panel is not wired up until it states them all. The
 invariant is the two duties, **not the bytes** — each panel spells them in its
 own scope vocabulary (the repo, the project, the rendered temp tree) and against
 its own not-applicable terminal, and `kubernetes` necessarily says more, because
@@ -4013,7 +4023,7 @@ mode's non-terminal
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
 status JSON (`{status, rounds, max_rounds, effective_max_rounds,
 max_rounds_source, promotion_phase,
-closing_sweep_granted, possible_false_trip_auto_continues, repo_type,
+closing_sweep_granted, possible_false_trip_auto_continues, carry_unconfirmed, repo_type,
 review_skill, escalation_reasons, residue_replaced_reasons, history, round_changelists,
 final_changelist}`), where `effective_max_rounds` (an integer — the ceiling
 actually in force) and `max_rounds_source` (`"flag"` or `"work-dir"`) are
@@ -4031,8 +4041,10 @@ set, i.e. when it is the promotion sub-loop (a `--resume` that omits `--promote`
 and re-adopts the work-dir's `.promote` records `true` too) — that
 `build-telemetry-record.zsh` copies into the payload so the documented
 convergence metrics can exclude a promotion pass.
-One further exit-2 semantic, `STALE_FINDINGS` (#974), means the round's panel
-never ran. In step mode it covers a `--findings-file` that is missing/empty on
+One further exit-2 semantic, `STALE_FINDINGS` (#974), means the round was never
+really reviewed — its panel never ran, it read a tree that no longer exists, or
+it left a carried entry unaccounted for (#1583, below). In step mode it covers a
+`--findings-file` that is missing/empty on
 `--resume`, byte-identical to the round just consumed, or aliased to the round's
 own dispatch `findings_path` (the internal sink the loop truncates). Since #1434
 it also covers two arms that are **wiring-independent** — they key on the
@@ -4040,9 +4052,27 @@ round's state rather than on `--findings-file`, so both fire in hook mode: a
 **delta round with an empty scope and nothing carried**, and a **full round
 whose panel produced no findings file at all**. The second additionally fires on
 a fresh run's round 1 — which is always planned `"full"`, so the delta arm
-cannot reach it.
-The second is what makes the panels' own "on a full round, report and write no
-findings file" terminal enforceable: zero blockers on `scope_mode: "full"` is
+cannot reach it. Since #1583 a third wiring-independent arm,
+**CARRY-UNACCOUNTED**, fires after consolidation and **before**
+`verify-<R+1>.json` is written: a round with a non-empty carry whose
+accounting — step mode's `--carry-accounting FILE`, hook mode's
+`<findings-path>.carry.json` sidecar, either an array of `{file, dimension,
+title, confirmed[], re_raised[], unconfirmed[]}` records naming reviewers — is
+missing, malformed, names no carried identity, claims a re-raise the findings
+file does not carry (refused by name — the accounting alone is not evidence —
+and this ground populates nothing), or leaves a carried identity neither
+confirmed nor re-raised by any reviewer (a carried entry the findings file
+re-raised — a blocking entry at that identity: same file, dimension and title,
+whatever its line, or one the consolidator matched to the carried prior — counts
+as re-raised whether or not a record says so). The status
+JSON's always-present `carry_unconfirmed[]` names those identities — never
+`.blocking` — and an accepted round's changelist is stamped
+`carry_accounting: {total, confirmed[], re_raised[], unconfirmed[]}`, which
+`render-progress-block.zsh` renders as the round line's
+`carried: confirmed N / re-raised M / unconfirmed K of T` (nothing on an
+empty carry; `(no accounting)` on a changelist that predates the stamp).
+The full-round arm is what makes the panels' own "on a full round, report and
+write no findings file" terminal enforceable: zero blockers on `scope_mode: "full"` is
 the CONVERGED condition, so an absent aggregate must never be read as a clean
 review. Where no `--findings-file` is passed (hook mode, and the loop reading
 `findings_path` itself), the `[]` default survives only on a delta round, which
@@ -4058,7 +4088,8 @@ the primary signal. The `kubernetes` panel additionally leaves durable detail in
 `<findings-path>.failed.json` — the sidecar convention — and on a loop-driven
 **delta** round that carries nothing it uses that same sidecar to report NOT
 APPLICABLE while still writing `[]` (with a non-empty carry it dispatches with
-the carry, or re-raises what it cannot confirm — see the panel duties above); on
+the carry and accounts for each entry as one of confirmed, re-raised, unconfirmed
+— see the panel duties above); on
 a loop-driven **full** round it writes nothing, because `[]` with zero blockers
 on `scope_mode: "full"` is the CONVERGED condition. The other
 five panels report a failed round to their caller and write no sidecar, so

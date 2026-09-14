@@ -331,12 +331,13 @@ block is the whole of what a reviewer reads **for new findings**.
 
 **The carried entries are the one exception, and they need the same treatment.**
 From round 2 on each reviewer's first job is to confirm the previous round's
-blockers landed, and step 1 requires a carried entry to be re-raised when it
-cannot be confirmed **even when its file is outside this round's delta** — so on
-a delta round that file is, by construction, not in the scope block. Left there,
-the two rules collide: a reviewer honouring the sentence above declines to open
-it and re-raises a blocker that was in fact fixed (every round, trending the run
-to `ESCALATE_NO_CONVERGENCE`), and a reviewer that opens it anyway has only the
+blockers landed, and step 1 requires every carried entry to be accounted for —
+confirmed, re-raised, unconfirmed — **even when its file is outside this
+round's delta** — so on a delta round that file is, by construction, not in the
+scope block. Left there, the two rules collide: a reviewer honouring the
+sentence above declines to open it and reports unconfirmed a blocker that was in
+fact fixed (every round, so the loop refuses every round as CARRY-UNACCOUNTED
+and the run never advances), and a reviewer that opens it anyway has only the
 carry's repo-relative spelling and resolves it against its own cwd — the #1558
 mechanism, arrived at through the one door this section left open. So give the
 prompt a second, clearly-labelled section with the **same both-spellings
@@ -395,20 +396,24 @@ sentence, and scope the scope block's blockquote to the scope block:
 
 > An entry marked `[DELETED by this story]` in the **carried** section has no
 > path to open. Where it carries a **diff excerpt**, confirm from the excerpt
-> that the carried blocker landed, and **re-raise it at its original severity if
-> you cannot**. Where it carries the note **`exists in neither tree`** instead,
+> that the carried blocker landed; **re-raise it at its original severity only
+> if the excerpt shows the defect still present**, and report it
+> **unconfirmed** if the excerpt settles neither. Where it carries the note
+> **`exists in neither tree`** instead,
 > the file the finding was about is in no tree the round can read: **count the
-> entry as confirmed, say so in your count, and do not re-raise it.** The scope
+> entry as confirmed, say so in your count, and do not re-raise it** — spell
+> its per-entry line `confirmed (exists in neither tree)`, since there is no
+> file:line to name. The scope
 > block's *neither raise a finding nor fail the round* rule covers reviewing the
 > deletion as new work; it never licenses leaving a carried entry unaccounted
 > for.
 
 The two forms are why the blockquote keys on **which of them the entry carries**
 rather than on the marking alone. An entry with no excerpt and no note would
-leave the reviewer unable to confirm and obliged to re-raise — every round, on a
-file that can never come back — so the run would trend to
-`ESCALATE_NO_CONVERGENCE` on a blocker the fix pass legitimately disposed of.
-Emit one or the other, never neither.
+leave the reviewer unable to confirm and without evidence to re-raise, so it
+reports the entry unconfirmed — every round, on a file that can never come back
+— and the loop refuses every round as CARRY-UNACCOUNTED over a blocker the fix
+pass legitimately disposed of. Emit one or the other, never neither.
 
 **An empty excerpt is not always a stop.** This rule is stated **once**, here,
 and governs **both** sections — the scope block's own sentence says "report it
@@ -470,7 +475,8 @@ what to do with them:
 
 The scoping is load-bearing: the same marking appears in the **carried** section,
 where this instruction would be exactly wrong — there the reviewer must still
-account for the blocker, from the excerpt, and re-raise it if it cannot confirm.
+account for the blocker, from the excerpt, as one of confirmed, re-raised, unconfirmed
+(re-raising only what the excerpt shows still present).
 That section states its own rule; this one governs the scope block alone.
 
 Hand the deletion's content with it, since the reviewer cannot read a file that
@@ -1308,6 +1314,117 @@ everything else the procedure above uses it for — the per-blocker `class`
 (`new_defect` / `incomplete_propagation`) that `consolidate-findings.zsh
 --fix-touched` stamps, the `by class:` progress row, and the waived-suggestion
 exemption. Only the residue predicate stopped reading it.
+
+### Carry accounting — confirmed, re-raised, unconfirmed (#1583)
+
+The `fix_verification_path` bullet above (step 1) tells the reviewers to re-raise a
+fix the reviewer failed to confirm at its original severity, and step 2's
+carry arm treats a round whose count does not add up — fewer confirmations than
+carries and no re-raise of the remainder — as failed. Both sit inside a
+byte-frozen `moved:` span, so — exactly as
+the #1571 correction above — the rule that replaces them is recorded here
+rather than edited into the span. **Where the span and this section disagree, this
+section governs.**
+
+Each reviewer reports ONE of three outcomes per carried entry: **confirmed**
+(it names where the fix is); **re-raised** (it observed the defect **still
+present** and cites what it saw — the file:line and the unchanged text, or the
+passing mutation — never the absence of a fix; the re-raise goes into the
+findings file at its original severity, citing the carried entry, *even when
+its file is outside this round's delta*); or **unconfirmed** (it could not
+establish either). An unconfirmed entry is a count, not a defect: it never
+enters the findings file and never becomes a blocking finding on its own.
+**One confirmation decides the accounting outcome whatever another reviewer
+reports** — but a re-raise in the findings file is a finding like any other:
+aggregate it unchanged, never drop it because a colleague confirmed; the loop
+carries it forward on its own evidence. **A re-raise comes only from the
+reviewer of the entry's own dimension** (the identity the loop matches on
+includes the dimension, and a finding stamped with another dimension is a
+different identity): a reviewer of another dimension that sees a carried
+defect still present reports it `unconfirmed` and says what it saw in prose. A
+reviewer silent about an entry contributes nothing either way, since the entry
+may be outside its dimension. What is refused — by the loop, not by you — is a
+carried entry that no reviewer confirmed **and** no reviewer re-raised, silent
+or reported-unconfirmed alike.
+
+**Tell each reviewer to account for every carried entry by the carry's own
+spelling, one line per entry, before its triple** (the panels' prompt-template
+line says so): `carried entry "<title>" (<file>, <dimension>): confirmed at
+<file:line> | re-raised (see finding) | unconfirmed`, then `carried: confirmed N
+/ re-raised M / unconfirmed K of TOTAL`. The per-entry lines are what you
+assemble; the triple is the checksum that the list is complete. A reviewer that
+reports no per-entry lines at all on a carried round took the wrong branch —
+re-dispatch **the panel** for that reviewer's dimension (you never spawn a
+reviewer agent directly: the panel's Step 1 is what wires the JSON layer and
+the fix-verification line into its prompt), never invent a record; one that
+reports `unconfirmed` (or nothing) for an entry outside its dimension is fine,
+and counts as silent for that entry.
+
+**Supply the accounting — without it the loop refuses.** On every round whose
+`verify-<R>.json` is non-empty, assemble one file from the reviewers' per-entry
+lines — an array of per-identity records, one per entry of `verify-<R>.json`,
+naming the reviewers under each outcome:
+
+```json
+[{"file": "…", "dimension": "…", "title": "…",
+  "confirmed": ["<reviewer>", "…"], "re_raised": ["<reviewer>", "…"], "unconfirmed": ["<reviewer>", "…"]}]
+```
+
+— and pass it as `--carry-accounting <carry-round-R.json>`, kept **outside**
+the repo beside `findings-round-R.json`. The invocation templates above gain
+that flag; round 1 carries nothing and needs none:
+
+```bash
+resolve-story-loop.zsh … --resume --findings-file <…> \
+  --carry-accounting <carry-round-R.json> …   # plus the attestation flags, exactly as the templates above
+```
+
+The loop matches each record to the carry by identity (file, dimension, title —
+the consolidator's own normalisation: file stripped of `./`, dimension
+verbatim, title lower-cased and whitespace-collapsed), counts a carried entry
+as re-raised when the findings file carries a **blocking entry at that
+identity** — same file, dimension and title, whatever its line — or one the
+consolidator matched to the carried prior, stamps `carry_accounting: {total, confirmed[],
+re_raised[], unconfirmed[]}` into the round's changelist (the progress block
+renders it as `carried: confirmed N / re-raised M / unconfirmed K of T`), and
+refuses the round as `STALE_FINDINGS` — the **CARRY-UNACCOUNTED** arm, fired
+**before** `verify-<R+1>.json` is written, so `verify-<R>.json` stays the carry
+and the accumulators are untouched — when: no accounting was supplied; the file
+is not that shape; a record names no carried identity; a record claims a
+re-raise the findings file does not carry (the accounting alone is not
+evidence); or a carried identity has **no confirmation and no re-raise** from
+any reviewer. Its stderr names each such entry (`carry unaccounted: round R
+carried entry "…" (…) was neither confirmed nor re-raised by any reviewer
+(unconfirmed by: … | no reviewer reported it)`) and the status JSON lists them
+in `carry_unconfirmed[]` — never in `.blocking` (a record-only re-raise is
+refused by name and populates nothing). Step 2's `STALE_FINDINGS` list above is
+to be read as `#974, #1434, #1435, #1583`, this arm the fourth; like the
+empty-delta, full-round and cadence arms it is wiring-independent and fires in
+hook mode too, where the panel writes the same records to
+`<findings-path>.carry.json`.
+
+**Recover by ground.** For the first three grounds — no accounting supplied,
+a file of the wrong shape, a record naming no carried identity — the panel
+already ran and its per-entry lines are in your context: assemble or repair
+`carry-round-R.json` from them and re-invoke; run no panel. For an
+**unevidenced re-raise** the reviewer's finding sits under the wrong identity:
+re-dispatch **the panel** for that entry, quoting the carried `{file,
+dimension, title}` verbatim and saying the finding must carry it, with an
+**empty** scope (a delta-round panel reviews nothing and only accounts for the
+carry) and a `fix_verification_path` naming only that entry. For an entry
+**neither confirmed nor re-raised**, re-dispatch the panel the same way for
+those entries only. **A re-dispatch writes to its own path** —
+`findings-round-R-carry.json`, never `findings-round-R.json`, which still holds
+the first pass's findings — and you then merge the two arrays into
+`findings-round-R.json` (`jq -s 'add' findings-round-R.json
+findings-round-R-carry.json`): panel output, never a hand edit; never retype or
+reword a finding yourself (a record-only `re_raised[]` is refused, and a
+re-raise that never reaches `.blocking` never reaches the next carry).
+Re-assemble the accounting from all the per-entry lines and re-invoke. If the
+re-run again leaves an entry unaccounted, report it in the conversation and
+stop. A confirmed-clean `[]` is legitimate and says so in its triple; the
+`kubernetes` panel's not-applicable arm above likewise dispatches with the carry
+and accounts for each entry as one of confirmed, re-raised, unconfirmed.
 
 **One consequence the procedure above still states the old way.** Its parking
 rule concludes that "Residue cannot rescue it either: a parked blocker sits in a

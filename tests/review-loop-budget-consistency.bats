@@ -517,11 +517,14 @@ grep_site() {  # grep_site <file> <fixed-string>
     grep_site "$REPO_ROOT/$panel" 'never a licence to'
     grep_site "$REPO_ROOT/$panel" 'still write `[]`'
     grep_site "$REPO_ROOT/$panel" 'CONVERGED condition'
-    # `carried blocker you c` — NOT the bare `carried blocker`, which also
-    # matches the EXEMPTION paragraph ("every carried blocker landed"), so the
-    # prohibition could be deleted outright and the sweep would pass on the
-    # sentence granting the opposite permission.
-    grep_site "$REPO_ROOT/$panel" 'carried blocker you c'
+    # the three-outcome rule (#1583): each carried entry is confirmed,
+    # re-raised or unconfirmed, and a re-raise cites what was observed still
+    # present — never the absence of a fix. Two needles, one per half: the
+    # third outcome's definition, and the prohibition that replaced the
+    # retired "re-raise what you cannot confirm" rule (whose absence the
+    # paired sweep below asserts).
+    grep_site "$REPO_ROOT/$panel" 'unconfirmed (you could not establish either)'
+    grep_site "$REPO_ROOT/$panel" 'Never re-raise on the absence of a fix.'
     # ...and the confirmation-count REPORT, which §3.5 step 2 keys a recovery
     # arm on: without the count a caller cannot tell a `[]` that passed
     # verification from one that skipped it
@@ -532,6 +535,10 @@ grep_site() {  # grep_site <file> <fixed-string>
     # the null-carry terminal, the third qualification
     grep_site "$REPO_ROOT/$panel" 'Absence of the carry is never'
     grep_site "$REPO_ROOT/$panel" '--fix-verification'
+    # ...and the hook-mode sidecar duty (#1583): the loop's hook mode reads the
+    # per-entry accounting from this file and refuses a carried round without
+    # it, so a panel that never says to write it is not wired up
+    grep_site "$REPO_ROOT/$panel" '$REVIEW_FINDINGS.carry.json'
     # (b) the two-carry injection duty. The descriptor tokens alone do NOT
     # pin it: they also occur in the maintainer-facing narrative that
     # introduces the duty, and kubernetes' prompt binds {FIX VERIFICATION} /
@@ -541,9 +548,30 @@ grep_site() {  # grep_site <file> <fixed-string>
     grep_site "$REPO_ROOT/$panel" 'fix_verification_path'
     grep_site "$REPO_ROOT/$panel" 'adjudicated_path'
     grep_site "$REPO_ROOT/$panel" "the previous round's blockers. Confirm each one actually landed"
-    grep_site "$REPO_ROOT/$panel" 'Say in your report how many of them you confirmed landed'
+    # ...and the prompt-template line ends with the triple the conductor
+    # assembles into the loop's --carry-accounting file (#1583)
+    grep_site "$REPO_ROOT/$panel" 'carried: confirmed N / re-raised M / unconfirmed K of TOTAL'
+    # ...the re-raise IDENTITY rule and the own-dimension restriction on that
+    # same line (#1583 round-1 fix): a re-raise under any other spelling is not
+    # matched to the carry and the round is refused, and a reviewer of another
+    # dimension reports the entry unconfirmed rather than filing it under its
+    # own dimension (which would be exactly such an unmatched re-raise)
+    grep_site "$REPO_ROOT/$panel" "the carried entry's own spelling (title verbatim)"
+    grep_site "$REPO_ROOT/$panel" 'Re-raise only carried entries of your own dimension'
     grep_site "$REPO_ROOT/$panel" 'suggestions earlier rounds surfaced and the human waived'
   done
+  # the Metrics bullet of the five report-writing panels (kubernetes has no
+  # Metrics section — its Step 3 paragraph is pinned by the AC 1 sweep below):
+  # the triple as per-entry UNION outcomes, with each reviewer's per-entry
+  # lines reproduced beneath it — the lines the driving session assembles the
+  # loop's --carry-accounting file from
+  for panel in "${found[@]}"; do
+    case "$panel" in development-kubernetes/*) continue ;; esac
+    grep_site "$REPO_ROOT/$panel" '- **Carried entries:** confirmed N / re-raised M / unconfirmed K of TOTAL'
+    grep_site "$REPO_ROOT/$panel" "reproduce each reviewer's per-entry"
+  done
+  # ...and ARCHITECTURE's wiring checklist names the sidecar duty by name
+  grep_site "$ARCH_PANEL_DUTIES" 'hook-mode sidecar duty'
 }
 
 @test "the five language panels state the delta-carry block in LOCKSTEP, not merely in fragments (#1434)" {
@@ -594,9 +622,16 @@ grep_site() {  # grep_site <file> <fixed-string>
     *"do not write a bare []"*) : ;;
     *) printf 'the agreed block does not forbid a bare []: %s\n' "$ref" >&2; return 1 ;;
   esac
+  # the three-outcome rule (#1583): the third outcome is defined, and the
+  # retired "re-raise what you cannot confirm" instruction is replaced by its
+  # prohibition — both halves, since either could be deleted alone
   case "$ref" in
-    *"re-raise every carried blocker you cannot confirm"*) : ;;
-    *) printf 'the agreed block does not require the re-raise: %s\n' "$ref" >&2; return 1 ;;
+    *"unconfirmed (you could not establish either)"*) : ;;
+    *) printf 'the agreed block does not define the unconfirmed outcome: %s\n' "$ref" >&2; return 1 ;;
+  esac
+  case "$ref" in
+    *"Never re-raise on the absence of a fix."*) : ;;
+    *) printf 'the agreed block does not forbid re-raising on the absence of a fix: %s\n' "$ref" >&2; return 1 ;;
   esac
   case "$ref" in
     *"Absence of the carry is never evidence of an empty one."*) : ;;
@@ -744,4 +779,184 @@ grep_site() {  # grep_site <file> <fixed-string>
   grep -Fq 'five-grant point' "$EXPLAIN"
   grep -Fq 'by the fifth grant' "$EXTENSION"
   grep -Fq 'by the fifth grant' "$ARCH"
+}
+
+# --- #1583: the carried-blocker rule is "confirmed / re-raised / unconfirmed" --
+#
+# The retired rule — "a carried blocker the reviewer cannot confirm is re-raised
+# at its original severity" — turned a reviewer's ignorance into a WARNING in
+# the aggregate. It was restated at 17 sites in 8 files, in eight spellings.
+# The paired sweep below asserts every spelling is gone from every live site
+# (negative, with a non-vacuity control) AND that the three-outcome rule stands
+# at every expected site (positive, with the site count pinned), so a site can
+# neither keep the old rule nor silently drop the new one.
+
+# the eight retired spellings, one per line — a function rather than a
+# top-level array so bats' per-test sourcing cannot reorder or drop it
+old_carry_needles() {
+  printf '%s\n' \
+    'cannot confirm landed' \
+    're-raise every carried blocker you cannot confirm' \
+    're-raises every carried blocker you could not confirm' \
+    're-raise any you cannot confirm' \
+    're-raises what it cannot confirm' \
+    're-raise it if it cannot confirm' \
+    're-raises what it could not confirm' \
+    'it could not confirm'
+}
+
+# The text of a file OUTSIDE its `<!-- moved: NAME -->` … `<!-- /moved: NAME -->`
+# spans. Those spans are byte-frozen copies of the pre-#1503 conductor
+# (verify-reference-move.zsh proves it), so a rule that changes inside one is
+# recorded in an addendum AFTER the span — the #1571 precedent, followed by
+# #1583 — and the retired spelling the span still carries is expected there.
+# A file without sentinels is printed whole.
+_outside_moved_spans() {  # $1 = file
+  awk '/^<!-- moved: /{skip=1} !skip{print} /^<!-- \/moved: /{skip=0}' "$1"
+}
+
+@test "#1583 AC 1: the retired carry rule survives at NO live site (paired sweep, negative half)" {
+  local -a found=() swept=()
+  local f needle text
+  # Every tracked file except THIS suite (it quotes the needles above) and the
+  # frozen design records under docs/superpowers/ — judged by everything
+  # OUTSIDE its byte-frozen `moved:` spans (see _outside_moved_spans). The four
+  # files that carry an unrelated "cannot confirm" (the two resolve-profile
+  # SKILL.md coverage-floor rules, docs-c4-drift-advisor.md,
+  # docs/explanation/review-loop.md) are deliberately NOT excluded: none
+  # contains a needle, and sweeping them is what catches a future paraphrase of
+  # the retired rule landing there.
+  # ONE grep per file (all eight needles at once, via -f); the per-needle loop
+  # runs only on a hit, to name the spelling. Files without sentinels are
+  # grepped in place; only the few with `<!-- moved: -->` spans are filtered.
+  local needles="$BATS_TEST_TMPDIR/old-carry-needles.txt"
+  old_carry_needles > "$needles"
+  while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    swept+=("$f")
+    local hit=0 spanned=0
+    if grep -q '^<!-- moved: ' -- "$REPO_ROOT/$f" </dev/null; then
+      spanned=1
+      text="$(_outside_moved_spans "$REPO_ROOT/$f")"
+      if printf '%s\n' "$text" | grep -Fq -f "$needles"; then hit=1; fi
+    else
+      if grep -Fq -f "$needles" -- "$REPO_ROOT/$f" </dev/null; then hit=1; fi
+    fi
+    [ "$hit" -eq 1 ] || continue
+    while IFS= read -r needle; do
+      if [ "$spanned" -eq 1 ]; then
+        if printf '%s\n' "$text" | grep -Fq -e "$needle"; then found+=("$f: $needle"); fi
+      else
+        if grep -Fq -e "$needle" -- "$REPO_ROOT/$f" </dev/null; then found+=("$f: $needle"); fi
+      fi
+    done < "$needles"
+  done < <(cd "$REPO_ROOT" \
+    && git -c core.quotePath=false ls-files -z ':!:docs/superpowers/**' ':!:tests/review-loop-budget-consistency.bats')
+  # a broken enumeration (a failed cd, a pathspec typo) must not read as clean:
+  # a floor on the swept set, and the one file the story is about must be in it
+  [ "${#swept[@]}" -ge 50 ]
+  printf '%s\n' "${swept[@]}" | grep -qx 'development/skills/resolve-issue/reference/review-loop.md'
+  if [ "${#found[@]}" -ne 0 ]; then
+    printf 'retired carry rule still present:\n' >&2
+    printf '  %s\n' "${found[@]}" >&2
+    return 1
+  fi
+  # the non-vacuity control: the same test over a scratch copy of a swept file
+  # with a retired spelling re-inserted OUTSIDE its spans MUST trip — otherwise
+  # the sweep above proves nothing. Two spellings, because the wrapped one
+  # ("re-raises what it could not confirm") matched nothing on a single-line
+  # grep even before the rule was retired, so only this control proves it. And
+  # the frozen-span exclusion is itself controlled: the same spelling INSIDE a
+  # span is not found, so the exclusion is real rather than a no-op.
+  local scratch="$BATS_TEST_TMPDIR/control.md"
+  cp "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md" "$scratch"
+  run -1 grep -Fq -e 'cannot confirm landed' <<< "$(_outside_moved_spans "$scratch")"
+  printf '\n<!-- moved: control -->\nor re-raises what it could not confirm.\n<!-- /moved: control -->\n' >> "$scratch"
+  run -1 grep -Fq -e 're-raises what it could not confirm' <<< "$(_outside_moved_spans "$scratch")"
+  printf '\nor that the reviewer cannot confirm landed, must be re-raised\n' >> "$scratch"
+  printf 'or re-raises what it could not confirm.\n' >> "$scratch"
+  grep -Fq -e 'cannot confirm landed' <<< "$(_outside_moved_spans "$scratch")"
+  grep -Fq -e 're-raises what it could not confirm' <<< "$(_outside_moved_spans "$scratch")"
+}
+
+@test "#1583 AC 1: the three-outcome rule stands at all 21 expected sites in 8 files (paired sweep, positive half)" {
+  # One (file, needle) pair per site, each needle chosen to be unique to the
+  # site it pins — so a deleted site cannot be covered by a neighbour's copy,
+  # and the count is a real count rather than a sum of constants.
+  # review-loop.md's three sites are the #1583 addendum after the frozen tail
+  # span (its heading), and the two #1582-gap paragraphs the story could edit
+  # in place: the [DELETED by this story] scoping paragraph and the carried-
+  # section sentence. The frozen `fix_verification_path` bullet and step-2 arm
+  # inside the span are superseded by the addendum, not edited (see the
+  # negative half).
+  local -a sites=(
+    "development/skills/resolve-issue/reference/review-loop.md|Carry accounting — confirmed, re-raised, unconfirmed"
+    "development/skills/resolve-issue/reference/review-loop.md|from the excerpt, as one of confirmed, re-raised, unconfirmed"
+    "development/skills/resolve-issue/reference/review-loop.md|confirmed, re-raised, unconfirmed — **even when its file is outside this"
+    "ARCHITECTURE.md|one of three outcomes per reviewer — confirmed, re-raised, unconfirmed"
+    "ARCHITECTURE.md|accounts for each entry as one of confirmed, re-raised, unconfirmed"
+    # the four single-site rules the round-1 fix pass added (no lockstep copy
+    # exists, so nothing else pins them): the kubernetes panel's carried-re-raise
+    # exception to file attribution and its Step-3 union/per-entry paragraph,
+    # and the addendum's panel re-dispatch and its separate output path
+    "development-kubernetes/skills/review/SKILL.md|A re-raise of a CARRIED entry is the one exception"
+    "development-kubernetes/skills/review/SKILL.md|reproduce each agent's per-entry lines verbatim"
+    "development/skills/resolve-issue/reference/review-loop.md|re-dispatch **the panel** for that reviewer's dimension"
+    "development/skills/resolve-issue/reference/review-loop.md|A re-dispatch writes to its own path"
+  )
+  local p
+  for p in development-claude-plugin development-go development-java development-python development-swift development-kubernetes; do
+    sites+=("$p/skills/review/SKILL.md|Never re-raise on the absence of a fix")
+    sites+=("$p/skills/review/SKILL.md|carried: confirmed N / re-raised M / unconfirmed K of TOTAL")
+  done
+  [ "${#sites[@]}" -eq 21 ]
+  local matched=0 s f needle
+  for s in "${sites[@]}"; do
+    f="${s%%|*}"; needle="${s#*|}"
+    # an `if`, not an `&&` tail: the helper's status is control flow here, and
+    # the count below is what fails the test — never a swallowed assertion
+    if grep_site "$REPO_ROOT/$f" "$needle"; then matched=$(( matched + 1 )); fi
+  done
+  [ "$matched" -eq 21 ]
+  # ...and the sites really are 8 distinct files
+  [ "$(printf '%s\n' "${sites[@]}" | cut -d'|' -f1 | sort -u | wc -l | tr -d ' ')" -eq 8 ]
+}
+
+@test "#1583 AC 9: the explanation page states the unconfirmed outcome and carries no retired spelling" {
+  grep_site "$EXPLAIN" 'reports it as unconfirmed rather than re-raising'
+  local needle
+  while IFS= read -r needle; do
+    run -1 grep -Fq -e "$needle" -- "$EXPLAIN"
+  done < <(old_carry_needles)
+}
+
+@test "#1583 the step-mode flag the accounting travels on is pinned in the prose, derived from the loop's own parser" {
+  # The panel-side half of the contract (the $REVIEW_FINDINGS.carry.json sidecar)
+  # is pinned per panel above; this is the step-mode half. The flag name is
+  # READ out of the parser's case arm rather than transcribed, so a rename in
+  # the script reds the prose pin instead of leaving stale instructions that
+  # refuse every carried step-mode round.
+  local flag
+  flag="$(grep -oE '^  --carry-[a-z-]+\) _need_val' "$LOOP" | sed -E 's/^  (--[a-z-]+)\).*/\1/')"
+  [ -n "$flag" ]
+  [ "$(printf '%s\n' "$flag" | wc -l | tr -d ' ')" -eq 1 ]
+  # the reference: the invocation instruction, the addendum's own template, and
+  # the round-1 template's flag
+  grep_site "$SKILL" "pass it as \`$flag <carry-round-R.json>\`"
+  grep_site "$SKILL" "  $flag <carry-round-R.json>"
+  # the conductor's STALE_FINDINGS bullet names the arm and routes to the addendum
+  grep_site "$CONDUCTOR" 'the CARRY-UNACCOUNTED arm'
+  grep_site "$CONDUCTOR" 'Carry accounting — confirmed, re-raised,'
+  # ...and its fourth recovery ground — an unevidenced re-raise is re-dispatched,
+  # never hand-edited into the findings file (two needles, one per half)
+  grep_site "$CONDUCTOR" 're-raised without evidence'
+  grep_site "$CONDUCTOR" 'the findings file is panel output — never'
+  # the interactive extension's granted resume is a carried round, so its
+  # (frozen) template is read with the flag: the addendum says so by name
+  grep_site "$EXTENSION" 'A granted resume is a carried round'
+  grep_site "$EXTENSION" "$flag <carry-round-R.json>"
+  # ...and the -h line of the loop lists the flag the prose names
+  run zsh "$LOOP" --help
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -Fq -- "[$flag FILE]"
 }

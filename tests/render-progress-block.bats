@@ -703,3 +703,69 @@ EOF
   run zsh "$S" --changelist "$CL" --round 2 --verdict "v" --possible-false-trip
   [ "$status" -eq 2 ]
 }
+
+# --- #1583: the carry-accounting triple on the round line ---------------------
+
+@test "#1583 AC 5: a stamped carry renders 'carried: confirmed N / re-raised M / unconfirmed K of T' on the round line" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+ "blocking":[],"suggestions":[],"conflicts":[],"non_converging":false,
+ "carry_accounting":{"total":3,
+   "confirmed":[{"file":"a.py","dimension":"bugs","title":"x"},{"file":"b.py","dimension":"tests","title":"y"}],
+   "re_raised":[{"file":"c.py","dimension":"bugs","title":"z"}],
+   "unconfirmed":[]}}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- blockers: 0, conflicts: 0, suggestions: 0, carried: confirmed 2 / re-raised 1 / unconfirmed 0 of 3'
+}
+
+@test "#1583 AC 5: an empty carry (total 0) renders NO carried fragment — there was nothing to account for" {
+  cat > "$CL" <<'EOF'
+{"round":1,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+ "blocking":[],"suggestions":[],"conflicts":[],"non_converging":false,
+ "carry_accounting":{"total":0,"confirmed":[],"re_raised":[],"unconfirmed":[]}}
+EOF
+  run zsh "$S" --changelist "$CL" --round 1 --verdict "converged"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- blockers: 0, conflicts: 0, suggestions: 0$'
+  run -1 grep -q 'carried:' <<< "$output"
+}
+
+@test "#1583 AC 5: a changelist WITHOUT the stamp renders '(no accounting)', never three zeros" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+ "blocking":[],"suggestions":[],"conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "converged"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '- blockers: 0, conflicts: 0, suggestions: 0, carried: (no accounting)$'
+  run -1 grep -q 'unconfirmed 0' <<< "$output"
+}
+
+@test "#1583 AC 5: three DISTINCT non-zero counts render in their own positions — no term can be hardcoded or swapped" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},
+ "blocking":[],"suggestions":[],"conflicts":[],"non_converging":false,
+ "carry_accounting":{"total":6,
+   "confirmed":[{"file":"a.py","dimension":"bugs","title":"a"}],
+   "re_raised":[{"file":"b.py","dimension":"bugs","title":"b"},{"file":"c.py","dimension":"bugs","title":"c"}],
+   "unconfirmed":[{"file":"d.py","dimension":"tests","title":"d"},{"file":"e.py","dimension":"tests","title":"e"},{"file":"f.py","dimension":"tests","title":"f"}]}}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- ', carried: confirmed 1 / re-raised 2 / unconfirmed 3 of 6$'
+}
+
+@test "#1583 AC 5: on a round that HAS blockers the triple sits beside the new/carried split, on the same line" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":1,"high":1,"low":0,"blocking":2,"conflicts":0},
+ "blocking":[{"file":"a.py","line":1,"dimension":"bugs","title":"x","non_converging":true},
+             {"file":"b.py","line":2,"dimension":"tests","title":"y","non_converging":false}],
+ "suggestions":[],"conflicts":[],"non_converging":true,
+ "carry_accounting":{"total":2,"confirmed":[{"file":"c.py","dimension":"bugs","title":"c"}],"re_raised":[{"file":"a.py","dimension":"bugs","title":"x"}],"unconfirmed":[]}}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- '^- blockers: 2 (critical: 1, warning: 1) (new: 1, carried: 1), conflicts: 0, suggestions: 0, carried: confirmed 1 / re-raised 1 / unconfirmed 0 of 2$'
+}

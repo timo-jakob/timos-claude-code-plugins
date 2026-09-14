@@ -87,7 +87,12 @@ independent repeat of it. Three kinds of round:
   branch. Nothing has happened yet to iterate on.
 - **Intermediate rounds — the delta.** Scoped to what the *previous round's fix
   pass actually changed*. Two things ride along: the previous round's blockers,
-  so the panel verifies the fixes it asked for actually landed; and the list of
+  so the panel verifies the fixes it asked for actually landed — each reviewer
+  reports every carried blocker as confirmed, re-raised (it saw the defect still
+  present, and says where) or unconfirmed; a reviewer that cannot find a fix
+  reports it as unconfirmed rather than re-raising it, and the loop refuses a
+  round in which nobody confirmed or re-raised a carried blocker rather than
+  letting it drop out of the carry; and the list of
   suggestions earlier rounds already surfaced and you already let go, which a
   reviewer must not re-raise. An already-waived suggestion re-raised at
   Suggestion level is dropped and counted, never silently — but the same finding

@@ -553,3 +553,18 @@ actually in force) and `max_rounds_source` (`flag` or `work-dir`). **`max_rounds
 still reports what you passed** — the same split #1434 made for
 `closing_sweep_granted`, so the `+3`/`grants` bookkeeping above, the soft cap and
 the escalation summary all keep reading exactly the number they read before.
+
+**A granted resume is a carried round — pass the carry accounting (#1583).**
+Step 5's granted-resume template above and the `STALE_FINDINGS` recovery
+re-invoke it points at predate #1583. Since then a step-mode `--resume` whose
+`verify-<R>.json` is non-empty is refused — exit 2, `STALE_FINDINGS`, the
+CARRY-UNACCOUNTED arm — unless `--carry-accounting <carry-round-R.json>` is
+passed, and a granted round **always** carries entries: the terminal round it
+extends still held blockers, which is what was escalated. So read both
+invocations as carrying `--carry-accounting <carry-round-R.json>`, assembled
+from the granted round's panel exactly as on any other carried round, per
+`reference/review-loop.md` § *Carry accounting — confirmed, re-raised,
+unconfirmed (#1583)* — which also governs the refusal's recovery. Omitting it
+burns the grant on a refusal round-trip: the loop consolidates the granted
+round, then refuses it before `verify-<R+1>.json` is written, and the human's
+grant has bought nothing until the re-invoke.
