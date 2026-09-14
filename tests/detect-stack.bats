@@ -2074,6 +2074,28 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
 }
 
+@test "detect-stack #1604: the kubernetes fixture gets the four emission artifacts as gaps, never the pre-commit config" {
+  # everything under templates/iac is collected, so the Makefile, the hook and
+  # the gate script arrive by construction; .pre-commit-config.yaml comes from
+  # templates/common and is held out, because this path's hook is a versioned
+  # file rather than a framework install — gap-filling it would re-add one
+  cp -R "$REPO_ROOT/tests/fixtures/kubernetes-repo/." .
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  local p
+  for p in Makefile hooks/pre-push scripts/k8s-gate.zsh .github/workflows/kubernetes-ci.yml; do
+    [ "$(missing_has "$out" "$p")" = "number" ]
+  done
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "null" ]
+}
+
+@test "detect-stack #1604: a language repo still reports .pre-commit-config.yaml as a gap" {
+  # the control for the hold-out above: it is the IaC path's alone
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
+}
+
 @test "detect-stack #1154: a present kubernetes-ci.yml is existing, not missing" {
   k8s_chart
   mkdir -p .github/workflows
@@ -2092,6 +2114,8 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
   [ "$(jq -r '.languages | index("go")' <<<"$out")" != "null" ]
   [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  # the #1604 pre-commit hold-out is keyed on the IaC PATH, not on the marker
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
   # POSITIVE CONTROL: candidates ARE collected, so the null above is a
   # decision rather than an empty candidate set (this file's convention)
   [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
@@ -2125,6 +2149,7 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   # and the kubernetes-ci needle alone could not see it
   [ "$(missing_has "$out" ".nvmrc")" = "number" ]
   [ "$(missing_has "$out" "tsconfig.json")" = "number" ]
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
   # POSITIVE CONTROL: candidates ARE being collected, so the null above is a
   # decision rather than an empty candidate set
   [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
@@ -2136,6 +2161,7 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
   [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
   # POSITIVE CONTROL: candidates ARE collected, so the null above is a
   # decision rather than an empty candidate set (this file's convention)
   [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
@@ -2254,6 +2280,7 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   printf 'primary: kubernetes-operator\n' > .maintenance.yml
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
   [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
 }
 

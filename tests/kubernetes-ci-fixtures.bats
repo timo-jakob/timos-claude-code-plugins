@@ -6,15 +6,14 @@
 # executed with helm, kustomize, kubeconform, kube-linter, kyverno, trivy and
 # yq over the fixture repositories under tests/fixtures/kubernetes-repo*.
 #
-# WHY IT EXISTS. tests/bootstrap-iac-pipeline.bats covers the kubernetes-ci
-# workflow template with RECORDING STUBS: it proves each step reaches the right
-# tool with the right arguments, which is what you need to see a vacuous pass
-# coming. It cannot prove the tools then AGREE — that the clean fixture really
-# lints clean, that the broken one really reds with the four check ids its
-# README table names. This file proves that half, and since #1603 it proves it
-# against the ONE artifact a consumer will actually run: the gate script that
-# `make lint`, the pre-push hook and the one-job CI workflow all invoke verbatim
-# once #1604 wires them — today it is run directly. (#1199 first proved it by
+# WHY IT EXISTS. tests/bootstrap-iac-pipeline.bats covers the WIRING around the
+# gate: that the one-job CI workflow, the Makefile and the pre-push hook all run
+# the one gate command (#1604). It cannot prove the tools then AGREE — that the
+# clean fixture really lints clean, that the broken one really reds with the
+# four check ids its README table names. This file proves that half, against the
+# ONE artifact a consumer actually runs: the gate script that `make lint`, the
+# pre-push hook and the one-job CI workflow all invoke verbatim. (#1199 first
+# proved it by
 # extracting the six-job workflow's `run:` blocks; the gate script lifted those
 # blocks, and the verdict counts below are the same ones — that they still hold
 # is #1603's central acceptance criterion.)
@@ -28,11 +27,10 @@
 # four. Each fixture README carries the same rule: at the pinned versions a red
 # is a regression, on any other version re-run pinned before concluding anything.
 # tests/iac-tools.zsh resolves the pinned versions into a cache directory OUTSIDE
-# the repository, and this file puts that directory first on PATH. Four of the
-# seven (kubeconform, kube-linter, kyverno, yq) are read FROM the workflow
-# template, so a bump there moves the harness with it; helm, kustomize and trivy
-# are pinned in that script, because the template installs none of them
-# directly. The host's own brew-installed kube-linter is therefore never what
+# the repository, and this file puts that directory first on PATH. All seven are
+# read FROM the workflow template's `gate` job, which installs every one of them
+# (#1604), so a bump there moves the harness with it. The host's own
+# brew-installed kube-linter is therefore never what
 # these assertions measure — which is the only way "green" here can mean
 # anything.
 #
@@ -284,7 +282,7 @@ variants() {
 
 @test "the harness runs the versions the pipeline installs, not the host's (#1199, #1603)" {
   # The install steps are the one part of the consumer's CI this harness does
-  # NOT execute — they curl into /usr/local/bin, which is not a thing to do to a
+  # NOT execute — they unpack release archives onto the runner, which is not a thing to do to a
   # developer's machine. Asserting the resolved binaries report the versions
   # those steps pin is the honest equivalent: it is what makes every verdict
   # below reproducible, and it fails loudly if iac-tools.zsh and the template
@@ -302,14 +300,11 @@ variants() {
     starts_with "$output" "$IAC_BIN/"
   done
 
-  # ALL SEVEN, against iac-tools.zsh's own `--print-pins`. Not four: helm,
-  # kustomize and trivy are the pins that exist NOWHERE but that script (the
-  # template installs none of them directly, so there is no upstream pin to
-  # read), which makes them the ones most prone to silent drift — and a helm
-  # bump that changes default rendering moves `Valid: 3` and the rendered sets
-  # below with nothing naming the cause. Read from the script rather than
-  # restated here, the same read-it-from-the-thing-that-installs-it discipline
-  # as the template pins.
+  # ALL SEVEN, against iac-tools.zsh's own `--print-pins`, which reads every one
+  # from the template's install steps (#1604) — a helm bump that changes default
+  # rendering moves `Valid: 3` and the rendered sets below, so no tool is exempt.
+  # Read from the script rather than restated here, the same
+  # read-it-from-the-thing-that-installs-it discipline.
   local pins tool want probe seen=0
   pins="$(zsh "$REPO_ROOT/tests/iac-tools.zsh" --print-pins)"
   [ -n "$pins" ]

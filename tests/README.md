@@ -65,13 +65,9 @@ see the pre-flight at the top of `run-script-tests.zsh` for the exact set, which
 is where it can't drift — rather than letting a bare `fatal: not a git
 repository` surface from inside the container.
 
-Four of the seven pins (`kubeconform`, `kube-linter`, `kyverno`, `yq`) are read
-**from the workflow template**, so bumping the template moves the harness with
-it. `helm`, `kustomize` and `trivy` are the exceptions: the template installs
-none of them directly (`ubuntu-latest` ships the first two; the third runs
-through `trivy-action`, whose default version is the pin), so there is no
-`*_VERSION:` upstream to read and they are pinned inside `iac-tools.zsh` — bump
-them there. Never from `brew` or `apt` in either case: kube-linter's default
+All seven pins are read **from the workflow template**'s `gate` job, which
+installs every tool the gate runs (#1604), so bumping the template moves the
+harness with it. Never from `brew` or `apt`: kube-linter's default
 check set moves between releases — checks are added, renamed and retired — so a
 newer binary does not reproduce the fixtures' counts. Measured, not
 hypothesised: one minor ahead of the pin reports **three** findings on the

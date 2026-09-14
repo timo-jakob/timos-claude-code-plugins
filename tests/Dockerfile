@@ -13,7 +13,7 @@ FROM debian:stable-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bats jq shellcheck zsh python3 python3-venv python3-pip git ca-certificates \
-      nodejs yamllint curl \
+      nodejs yamllint curl make \
  && rm -rf /var/lib/apt/lists/*
 # mikefarah yq, NOT Debian's `yq` apt package (which is kislyuk's python-yq, a
 # different query language): the suite and the shipped kubernetes-ci template
@@ -37,14 +37,11 @@ RUN curl -sSfLo /usr/local/bin/yq \
 # #1603) needs helm, kustomize, kubeconform, kube-linter, kyverno, trivy and yq
 # — and they are deliberately NOT installed here. Two reasons, both about
 # correctness rather than image size:
-#   * the versions are PINNED, and four of the seven (kubeconform, kube-linter,
-#     kyverno, yq) are read from the workflow template
-#     (development/skills/bootstrap/templates/iac/...), which is outside this
-#     build context. An apt/brew build of kube-linter one minor ahead reports
-#     three findings on the fixture that pins four, so "whatever the distro
-#     ships" is not an option. (helm, kustomize and trivy are pinned in
-#     tests/iac-tools.zsh — the template installs none of them directly — so
-#     this reason does not apply to them; the next one does.);
+#   * the versions are PINNED, and all seven are read from the workflow template
+#     (development/skills/bootstrap/templates/iac/..., #1604), which is outside
+#     this build context. An apt/brew build of kube-linter one minor ahead
+#     reports three findings on the fixture that pins four, so "whatever the
+#     distro ships" is not an option;
 #   * baking them in would re-download ~200 MB on every image rebuild.
 # tests/iac-tools.zsh fetches them into a cache keyed by os-arch, and
 # run-script-tests.zsh mounts the host's cache root at /iac-tools

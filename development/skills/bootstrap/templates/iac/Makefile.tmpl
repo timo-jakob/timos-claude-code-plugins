@@ -1,0 +1,14 @@
+# This repository's gate, bootstrapped by /development:bootstrap.
+#
+#   make lint    the gate COMMAND — CI (.github/workflows/kubernetes-ci.yml) and hooks/pre-push run exactly this
+#   make hooks   point git at the version-controlled hooks/ directory; run it once per clone
+#
+# `lint` runs the gate MECHANISM, scripts/k8s-gate.zsh, through zsh rather than by its executable bit, so a
+# checkout that lost the mode still gates.
+.PHONY: lint hooks
+
+lint:
+	zsh scripts/k8s-gate.zsh
+
+hooks:
+	git config core.hooksPath hooks

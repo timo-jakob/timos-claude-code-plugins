@@ -229,6 +229,87 @@ EOF
   run ! grep -q 'docker: yes' "$OUT/d"
 }
 
+@test "render: #1604 --gate-command defaults to make lint, and an explicit value replaces it verbatim" {
+  printf 'run: {{GATE_COMMAND}}\n' > "$T/g.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" g.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/g")" = "run: make lint" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --gate-command 'make a && make b' g.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/g")" = "run: make a && make b" ]
+}
+
+@test "render: #1604 a BLANK or multi-line --gate-command is a usage error that writes nothing" {
+  # a blank command renders a gate that runs nothing — green on every PR — and a
+  # newline breaks the workflow's `run: |` block
+  printf 'run: {{GATE_COMMAND}}\n' > "$T/g.tmpl"
+  local bad
+  for bad in '' ' ' $'make lint\nmake more'; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --gate-command "$bad" g.tmpl
+    [ "$status" -eq 2 ]
+    contains "$output" "--gate-command needs a non-blank, single-line value"
+    [ ! -e "$OUT/g" ]
+  done
+}
+
+@test "render: #1604 KUBERNETES block follows --primary kubernetes" {
+  printf 'a: 1\n# --- KUBERNETES-START ---\ngate: yes\n# --- KUBERNETES-END ---\n' > "$T/k.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary kubernetes k.tmpl
+  [ "$status" -eq 0 ]
+  grep -qx 'gate: yes' "$OUT/k"
+  # an EXACT match only: another primary, a prefix of `kubernetes`, and no
+  # --primary at all each strip it
+  local primary
+  for primary in --primary=python --primary=kubernetes-operator none; do
+    if [ "$primary" = none ]; then
+      run zsh "$SCRIPT" --templates "$T" --out "$OUT" k.tmpl
+    else
+      run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary "${primary#--primary=}" k.tmpl
+    fi
+    [ "$status" -eq 0 ]
+    run ! grep -q 'gate: yes' "$OUT/k"
+    # the rest of the file still rendered, so the strip is a decision, not a blank file
+    grep -qx 'a: 1' "$OUT/k"
+  done
+}
+
+@test "render: #1604 the real .maintenance.yml.tmpl records gate: only on the kubernetes primary" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary kubernetes \
+    common/.maintenance.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary python --languages python \
+    common/.maintenance.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.primary' "$OUT/common/.maintenance.yml")" = "python" ]
+  run ! grep -q '^gate:' "$OUT/common/.maintenance.yml"
+  run ! grep -q 'KUBERNETES' "$OUT/common/.maintenance.yml"
+}
+
+@test "render: #1604 the output carries the template's executable bit, in both directions" {
+  mkdir -p "$T/hooks"
+  printf '#!/bin/sh\ntrue\n' > "$T/hooks/x.tmpl"
+  chmod 0755 "$T/hooks/x.tmpl"
+  printf 'notes\n' > "$T/notes.md.tmpl"
+  chmod 0644 "$T/notes.md.tmpl"
+  # a stale executable output from an earlier render must not keep its bit
+  printf 'old\n' > "$OUT/notes.md"
+  chmod 0755 "$OUT/notes.md"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" hooks/x.tmpl notes.md.tmpl
+  [ "$status" -eq 0 ]
+  [ -x "$OUT/hooks/x" ]
+  [ ! -x "$OUT/notes.md" ]
+  [ "$(cat "$OUT/notes.md")" = "notes" ]
+}
+
+@test "render: #1604 an IaC-shaped tag keep_block was never taught still fails loudly" {
+  # KUBERNETES was ADDED to the keep-rules; the loud failure for every other tag stays
+  printf '# --- IAC-START ---\nx\n# --- IAC-END ---\n' > "$T/i.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary kubernetes i.tmpl
+  [ "$status" -eq 1 ]
+  contains "$output" "unknown block tag 'IAC'"
+}
+
 @test "render: unknown block tag fails loudly with file:line" {
   printf 'a\n# --- MYSTERY-START ---\nx\n# --- MYSTERY-END ---\n' > "$T/u.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" u.tmpl

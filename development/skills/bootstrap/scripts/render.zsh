@@ -26,7 +26,9 @@
 #      otherwise pile up blank lines that fail yamllint's empty-lines rule).
 #   4. Writes to <out>/<relpath> with a trailing `.tmpl` suffix removed;
 #      parent directories are created. Files without placeholders/blocks
-#      pass through unchanged.
+#      pass through unchanged. The output carries the template's executable
+#      bit (#1604): git silently ignores a non-executable hook, so a rendered
+#      `hooks/pre-push` that lost the bit would never run.
 #
 # After all files: fails loudly (exit 1) listing every surviving
 # `{{UPPERCASE}}` placeholder as file:line. GitHub `${{ ... }}` expressions
@@ -50,7 +52,13 @@
 #   --org-key <s>                 {{ORG_KEY}}
 #   --default-branch <s>          {{DEFAULT_BRANCH}}   (default: main)
 #   --languages "<a b c>"         {{LANGUAGES}} + block keep set; may be ""
-#   --primary <s>                 {{PRIMARY}}
+#   --primary <s>                 {{PRIMARY}} (+ the KUBERNETES block keep set:
+#                                 kept iff the value is `kubernetes`, the
+#                                 §3l IaC path)
+#   --gate-command <s>            {{GATE_COMMAND}} (default: make lint) — the
+#                                 IaC gate command (#1604); a blank or
+#                                 multi-line value is a usage error (exit 2),
+#                                 since it would render a gate that runs nothing
 #   --coverage-threshold <n>      {{COVERAGE_THRESHOLD}} (default: 90)
 #   --python-version <x.y>        {{PYTHON_VERSION}} (default: 3.12; the
 #                                 compact form {{PYTHON_VERSION_COMPACT}} is
@@ -127,6 +135,7 @@ vals[COVERAGE_THRESHOLD]="90"
 vals[PYTHON_VERSION]="3.12"
 vals[JAVA_VERSION]="21"
 vals[CLAUDE_PLUGINS_REPO]="timo-jakob/timos-claude-code-plugins"
+vals[GATE_COMMAND]="make lint"
 
 typeset -a files
 while (($# > 0)); do
@@ -140,6 +149,11 @@ while (($# > 0)); do
 	--default-branch) vals[DEFAULT_BRANCH]="$2" && shift 2 ;;
 	--languages) languages="$2" && languages_set=1 && shift 2 ;;
 	--primary) vals[PRIMARY]="$2" && shift 2 ;;
+	--gate-command)
+		[[ "${2-}" == *[![:space:]]* && "${2-}" != *$'\n'* ]] ||
+			{ print -u2 -- "render.zsh: --gate-command needs a non-blank, single-line value" && usage; }
+		vals[GATE_COMMAND]="$2" && shift 2
+		;;
 	--coverage-threshold) vals[COVERAGE_THRESHOLD]="$2" && shift 2 ;;
 	--python-version) vals[PYTHON_VERSION]="$2" && shift 2 ;;
 	--java-version) vals[JAVA_VERSION]="$2" && shift 2 ;;
@@ -261,6 +275,7 @@ keep_block() {
 	SURFACE_REST) has_surface rest ;;
 	SURFACE_WEB_UI) has_surface web_ui ;;
 	SURFACE_GRPC) has_surface grpc ;;
+	KUBERNETES) [[ "${vals[PRIMARY]:-}" == "kubernetes" ]] ;;
 	*) return 2 ;; # unknown tag — the caller fails loudly
 	esac
 }
@@ -343,6 +358,13 @@ render_file() {
 		print -rl -- "${final[@]}" >"$dst"
 	else
 		: >"$dst"
+	fi
+	# Mirrored both ways, so a re-render into an existing out dir cannot leave a
+	# stale bit behind on a file whose template has none.
+	if [[ -x "$src" ]]; then
+		chmod +x "$dst"
+	else
+		chmod a-x "$dst"
 	fi
 	rendered+=("$dst")
 }

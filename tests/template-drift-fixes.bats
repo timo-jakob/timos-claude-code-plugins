@@ -137,6 +137,41 @@ JSON
   [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
 }
 
+@test "the IaC gate SCRIPT and HOOK are TRACKED, their markers after a shebang (#1604)" {
+  # both are plugin-owned and refreshed by a re-run (design §3.8); without these
+  # entries a consumer on a stale gate script — the file holding every stage's
+  # rules — is reported drift-free forever
+  local target tpl shebang f
+  mkdir -p "$REPO/scripts" "$REPO/hooks"
+  # the pair is tracked on the IaC path only — the repo carries its workflow
+  printf '# claude-bootstrap: rendered from %s @ v0.1.0 sha256:deadbeefdeadbeef\nname: kubernetes-ci\n' \
+    "iac/.github/workflows/kubernetes-ci.yml.tmpl" > "$REPO/.github/workflows/kubernetes-ci.yml"
+  while IFS='|' read -r target tpl shebang; do
+    printf '%s\n# claude-bootstrap: rendered from %s @ v0.1.0 sha256:deadbeefdeadbeef\nmake lint\n' \
+      "$shebang" "$tpl" > "$REPO/$target"
+  done <<'PAIRS'
+scripts/k8s-gate.zsh|iac/scripts/k8s-gate.zsh.tmpl|#!/usr/bin/env zsh
+hooks/pre-push|iac/hooks/pre-push.tmpl|#!/bin/sh
+PAIRS
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  for target in scripts/k8s-gate.zsh hooks/pre-push; do
+    f="$(printf '%s' "$output" | jq -c --arg t "$target" '.[] | select(.file == $t)')"
+    [ -n "$f" ]
+    [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
+  done
+  # off the IaC path both are the repo's OWN, UNMARKED files: no finding at all —
+  # not even the unknown_provenance a marker-less tracked file otherwise gets
+  rm "$REPO/.github/workflows/kubernetes-ci.yml"
+  printf '#!/bin/sh\nmake lint\n' > "$REPO/hooks/pre-push"
+  printf '#!/usr/bin/env zsh\nexit 0\n' > "$REPO/scripts/k8s-gate.zsh"
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  for target in scripts/k8s-gate.zsh hooks/pre-push; do
+    [ -z "$(printf '%s' "$output" | jq -c --arg t "$target" '.[] | select(.file == $t)')" ]
+  done
+}
+
 # --- #689/#1358: the stamp table and the drift array must name the same files -
 #
 # Two lists, one invariant, in different files: SKILL.md Step 3.6's table drives

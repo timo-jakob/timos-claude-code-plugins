@@ -414,13 +414,23 @@ flow. Stop and ask for input wherever marked; do not guess.
    JSON), and gate the seed on `mkdocs.yml`'s C4 nav entries the same way §3h
    does. Skip-if-present keeps it idempotent.
 
-   **The IaC workflow (#1154) is the third not-blind set.** When
-   `missing_artifacts` contains `.github/workflows/kubernetes-ci.yml`, it is
-   there because `detect-stack.sh` fell back to its marker-with-no-detected-
+   **The IaC set (#1154, #1604) is the third not-blind set.** When
+   `missing_artifacts` contains any of `.github/workflows/kubernetes-ci.yml`,
+   `scripts/k8s-gate.zsh`, `hooks/pre-push` or `Makefile`, they are there
+   because `detect-stack.sh` fell back to its marker-with-no-detected-
    language *heuristic* — Q4 has not run, so nobody has confirmed the repo is a
-   GitOps repo. Ask Q4 (IaC wording) **first** and render it only on the
-   confirmed "none" answer; a language answer drops it from the gap-fill.
-   Rendering it blind commits the whole §3l shape — the workflow,
+   GitOps repo. Ask Q4 (IaC wording) **first** and render them only on the
+   confirmed "none" answer; a language answer drops all of them from the
+   gap-fill. Render the workflow and the hook with `--gate-command` resolved per
+   the Step 3 placeholder table, and leave `Makefile` unstamped (Step 3.6).
+   Two files that are already present still need this set's content, and
+   rendering missing paths never reaches them: a `Makefile` already on disk goes
+   to the idempotency reviewer against the rendered `iac/Makefile.tmpl` (its
+   `lint`/`hooks` merge strategy) before the hook is written, or `make lint` has
+   no target to run; and an existing `.maintenance.yml` gets §3a's `gate:` rule —
+   append `gate: <the value you passed to --gate-command>` when the key is
+   absent, and leave a present value alone.
+   Rendering them blind commits the whole §3l shape — the workflow,
    `primary: kubernetes`, and six required contexts — to a repo the user would
    have called a language repo. Only the confirmed "none" answer settles it;
    a recorded `primary: kubernetes` does not settle it on its own (#1193).
@@ -857,6 +867,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated **resolved** languages; **empty on the §3l IaC path** (`--languages ""`) |
 | `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, `is_kubernetes` is `true` **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → `kubernetes` (the IaC/GitOps repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
+| `{{GATE_COMMAND}}` | the repo's gate **command** on the §3l IaC path (#1604) — rendered into `.github/workflows/kubernetes-ci.yml`'s last step, `hooks/pre-push` and `.maintenance.yml`'s `gate:` line. Resolve it as the **recorded** `gate:` value when `.maintenance.yml` already carries one, else `make lint`. Read it with `yq -r .gate`; an absent key, `null` or a blank value is **not** a recorded value. Pass it via `render.zsh --gate-command` (its default is `make lint`; an explicit empty value is refused). |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`language_meta.python.version`) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `language_meta.python.version.replace('.', '')`. |
@@ -1096,6 +1107,7 @@ in the same PR:
 | `SURFACE_REST` | `rest` in `--acceptance-interfaces` |
 | `SURFACE_WEB_UI` | `web-ui` in `--acceptance-interfaces` |
 | `SURFACE_GRPC` | `grpc` in `--acceptance-interfaces` |
+| `KUBERNETES` | `--primary kubernetes` (the §3l IaC path — gates `.maintenance.yml`'s `gate:` line, #1604) |
 
 The `SURFACE_*` tags (#766) gate the docs templates' per-interface nav/MOC
 entries (§3h); when `--acceptance-interfaces` isn't passed at all, every
@@ -1167,9 +1179,9 @@ the first arg and it emits the fragment unchanged).
 
 Copy from `templates/common/`:
 
-- `.pre-commit-config.yaml` (merge language-specific hooks based on the **resolved** languages — on the §3l IaC path
-  that set is empty by definition, so no language block renders; keep the `CLAUDE_PLUGIN` block
-  only when `--claude-plugin true`)
+- `.pre-commit-config.yaml` (merge language-specific hooks based on the **resolved** languages; keep the
+  `CLAUDE_PLUGIN` block only when `--claude-plugin true`) — **not on the §3l IaC path**, whose hook is the
+  version-controlled `hooks/pre-push` (#1604)
 - **Dependency updates — pick ONE:**
   - default → `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem).
   - `--claude-plugin true` → copy `renovate.json` instead (static, no substitution) and **do NOT render
@@ -1248,7 +1260,11 @@ Copy from `templates/common/`:
   hook and any YAML CI). Static copy, no substitution.
 - `.maintenance.yml` (render `.maintenance.yml.tmpl` — substitute `{{PRIMARY}}`). Declares the repo's primary type so
   `/development:maintenance` treats it as primary and everything else as auxiliary (see ARCHITECTURE.md "Primary /
-  auxiliary model").
+  auxiliary model"). On the §3l IaC path it also records `gate:`, the repo's gate command (#1604): an existing
+  `.maintenance.yml` **without** a `gate:` key gets the line appended — idempotency rule 3 with `merge` as the
+  recommendation, since no existing value changes; an existing `gate:`
+  value is **left alone** byte-for-byte and is the `--gate-command` value for this run's workflow and hook renders, so
+  a consumer who renamed the command keeps the name.
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
@@ -3675,9 +3691,9 @@ It is also why the workflow's first job is `render`: every job after it
 consumes the **rendered** artifact, not the templates, so a chart that lints
 clean but renders an invalid manifest fails.
 
-The template carries no `{{UPPERCASE}}` substitution placeholders — it renders
-byte-for-byte, so no `render.zsh` flags apply. (It does contain GitHub Actions
-`${{ env.… }}` expressions, which are not bootstrap placeholders.)
+The template carries one `{{UPPERCASE}}` placeholder, `{{GATE_COMMAND}}` (#1604) —
+render it with `render.zsh --gate-command` resolved per the Step 3 placeholder
+table, never as a static copy.
 
 **Six separately requirable checks** — `render`, `schema`, `lint`, `policy`,
 `config-scan`, `argocd`. Producing checks a repo can *require* is the whole
@@ -3825,6 +3841,8 @@ actually rendered in Step 3 — §3a through §3l):
 | --- | --- |
 | `.github/dependabot.yml` | `common/.github/dependabot.yml.tmpl` |
 | `.github/workflows/kubernetes-ci.yml` | `iac/.github/workflows/kubernetes-ci.yml.tmpl` |
+| `scripts/k8s-gate.zsh` | `iac/scripts/k8s-gate.zsh.tmpl` (§3l IaC path only) |
+| `hooks/pre-push` | `iac/hooks/pre-push.tmpl` (§3l IaC path only) |
 | `.github/workflows/no-cluster-deploy.yml` | `common/.github/workflows/no-cluster-deploy.yml.tmpl` (not on the §3l IaC path) |
 | `scripts/check-no-cluster-deploy.zsh` | `common/scripts/check-no-cluster-deploy.zsh` (not on the §3l IaC path) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
@@ -3866,7 +3884,7 @@ The `.yamllint` `line-length` exemption (#356) already covers
 `CONTRIBUTING.md`, `SETUP.md`, `SECURITY.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
 `.github/ISSUE_TEMPLATE/*`, `.gitignore`, `.editorconfig`, `.yamllint`,
 `.maintenance.yml`, `renovate.json`, `.gitleaks.toml`, `LICENSE`, `sonar-project.properties`,
-`.snyk`, `.pre-commit-config.yaml`, `ruff.toml`, the Approver policy at
+`.snyk`, `.pre-commit-config.yaml`, `ruff.toml`, the §3l IaC `Makefile`, the Approver policy at
 `.claude/approver-policy.md`. The
 maintenance pipeline expects user customization on these and would
 emit noisy drift findings every run.

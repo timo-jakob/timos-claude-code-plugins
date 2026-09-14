@@ -64,6 +64,12 @@ typeset -a tracked=(
   # never consumed, and a consumer repo whose kubernetes-ci.yml has fallen
   # behind the template is reported drift-free forever
   ".github/workflows/kubernetes-ci.yml"
+  # ...and the gate MECHANISM and HOOK that workflow's command runs (#1604):
+  # plugin-owned, refreshed by a re-run and stamped at Step 3.6 like the
+  # workflow. The script is the half that goes stale — every stage's rules live
+  # in it — and stamp-marker.zsh inserts after a shebang, preserving the mode.
+  "scripts/k8s-gate.zsh"
+  "hooks/pre-push"
   # the application-repo direct-to-cluster gate (#1206) — BOTH halves. The
   # workflow is the runner; the CHECKER holds the matched command set, so it is
   # the half that actually goes stale: widen the IN set upstream and a consumer
@@ -117,6 +123,12 @@ for target_rel in "${tracked[@]}"; do
   if [[ ! -f "$target_abs" ]]; then
     continue
   fi
+  # the IaC gate pair is bootstrap's only on the §3l path (#1604); elsewhere a
+  # hooks/pre-push is the repo's own core.hooksPath hook, not ours to track
+  case "$target_rel" in
+    hooks/pre-push|scripts/k8s-gate.zsh)
+      [[ -f "${repo}/.github/workflows/kubernetes-ci.yml" ]] || continue ;;
+  esac
 
   marker_line=$(head -10 "$target_abs" | grep "^# claude-bootstrap: rendered from " | head -1 || true)
 

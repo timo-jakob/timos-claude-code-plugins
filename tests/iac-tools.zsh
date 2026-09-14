@@ -18,32 +18,19 @@
 # last put on PATH cannot make that promise, so this script puts the pinned
 # binaries in front of it instead.
 #
-# THE PINS ARE READ FROM THE WORKFLOW TEMPLATE, not restated here — the template
-# is what a consumer repo actually runs, so a bump there must move the harness
-# with it rather than leaving the two silently describing different toolchains.
-# The exceptions are helm, kustomize and trivy. The template installs NEITHER
-# helm nor kustomize (ubuntu-latest ships both), so there is no pin upstream to
-# read. They are pinned below to the versions of the runner image the workflow
-# targets, which is as close as this harness can get to "what the consumer's CI
-# actually renders with" while still being reproducible on a developer machine
-# and on the macOS CI leg, where the runner image ships neither tool at all.
-# trivy is pinned below too (#1603): the template runs it through the
-# `aquasecurity/trivy-action` ACTION, whose pinned ref names the action's
-# version, not trivy's — the trivy version is that action's own default, which
-# no `*_VERSION:` key in the template carries. The gate script the fixture
-# harness executes (`k8s-gate.zsh`) runs the binary directly, so the harness
-# needs the same version the action installs.
+# THE PINS ARE READ FROM THE WORKFLOW TEMPLATE, not restated here — all seven.
+# The template is what a consumer repo actually runs: its one `gate` job installs
+# every tool the gate script runs, each on a step named `install <tool>` carrying
+# `<TOOL>_VERSION` as step-level env (#1604). So a bump there moves the harness
+# with it, rather than leaving the two silently describing different toolchains.
 #
 # Usage:
 #   iac-tools.zsh [--bin-dir DIR] [--template PATH] [--print-pins] [-h|--help]
 #
 #     --print-pins     print the resolved pins as `<tool> <version>` lines and
-#                      exit, installing nothing. This is the ONE place the seven
-#                      versions are named, so the harness asserts what the
-#                      binaries report against THIS rather than restating them —
-#                      including helm, kustomize and trivy, whose pins live
-#                      nowhere else and would otherwise be the three the suite
-#                      never checks.
+#                      exit, installing nothing. The harness asserts what the
+#                      binaries report against THIS rather than restating the
+#                      versions.
 #
 #     --bin-dir DIR    the EXACT directory the binaries live in. Without it they
 #                      go to <cache-root>/<os>-<arch>, where <cache-root> is
@@ -158,34 +145,21 @@ tmpl_env() {
   print -r -- "$got"
 }
 
-local kubeconform_v kube_linter_v kyverno_v yq_v
-kubeconform_v="$(tmpl_env '.jobs.schema.steps[] | select(.name == "install kubeconform") | .env.KUBECONFORM_VERSION')" \
+local helm_v kustomize_v trivy_v kubeconform_v kube_linter_v kyverno_v yq_v
+helm_v="$(tmpl_env '.jobs.gate.steps[] | select(.name == "install helm") | .env.HELM_VERSION')" \
+  || { print -u2 -- "iac-tools: could not read HELM_VERSION from $template"; exit 1 }
+kustomize_v="$(tmpl_env '.jobs.gate.steps[] | select(.name == "install kustomize") | .env.KUSTOMIZE_VERSION')" \
+  || { print -u2 -- "iac-tools: could not read KUSTOMIZE_VERSION from $template"; exit 1 }
+trivy_v="$(tmpl_env '.jobs.gate.steps[] | select(.name == "install trivy") | .env.TRIVY_VERSION')" \
+  || { print -u2 -- "iac-tools: could not read TRIVY_VERSION from $template"; exit 1 }
+kubeconform_v="$(tmpl_env '.jobs.gate.steps[] | select(.name == "install kubeconform") | .env.KUBECONFORM_VERSION')" \
   || { print -u2 -- "iac-tools: could not read KUBECONFORM_VERSION from $template"; exit 1 }
-kube_linter_v="$(tmpl_env '.jobs.lint.steps[] | select(.name == "install kube-linter") | .env.KUBE_LINTER_VERSION')" \
+kube_linter_v="$(tmpl_env '.jobs.gate.steps[] | select(.name == "install kube-linter") | .env.KUBE_LINTER_VERSION')" \
   || { print -u2 -- "iac-tools: could not read KUBE_LINTER_VERSION from $template"; exit 1 }
-kyverno_v="$(tmpl_env '.jobs.policy.env.KYVERNO_VERSION')" \
+kyverno_v="$(tmpl_env '.jobs.gate.steps[] | select(.name == "install kyverno") | .env.KYVERNO_VERSION')" \
   || { print -u2 -- "iac-tools: could not read KYVERNO_VERSION from $template"; exit 1 }
-yq_v="$(tmpl_env '.jobs.argocd.steps[] | select(.name == "install yq") | .env.YQ_VERSION')" \
+yq_v="$(tmpl_env '.jobs.gate.steps[] | select(.name == "install yq") | .env.YQ_VERSION')" \
   || { print -u2 -- "iac-tools: could not read YQ_VERSION from $template"; exit 1 }
-
-# Not readable from the template — see the header. Bumping these is a deliberate
-# act: they say which runner image the harness claims to mirror.
-#
-# PROVENANCE, so the claim is checkable rather than asserted: both were read on
-# 2026-08-05 from the runner image `ubuntu-latest` resolved to then (Ubuntu
-# 24.04). The versions are NOT restated in this comment — the constants below are
-# the only place they are written, the same no-restatement rule the IaC docs now
-# follow. To re-read them, FIRST confirm which image `ubuntu-latest` resolves to
-# today (it moves on GitHub's schedule), then read that manifest from the
-# runner-images repo. MAINTAINING.md's Step 1 inventory names this file for the
-# quarterly sweep; its Step 2 carries the full re-read procedure.
-local helm_v=3.21.3 kustomize_v=5.8.1
-# trivy: the default `version` input of the `aquasecurity/trivy-action` ref the
-# template pins (its `# vX.Y.Z` comment names the ACTION release; the trivy
-# version is that release's action.yaml default). Bumping the action ref in the
-# template is what moves this pin — re-read the default from the new ref's
-# action.yaml, do not guess it from the action's version number.
-local trivy_v=0.70.0
 
 # `--print-pins` answers BEFORE the platform is resolved and before anything is
 # installed: it is a pure question about the template, so it must work on a
