@@ -1453,3 +1453,32 @@ filed. Do not attempt it here.
 The normative statement, with the reasoning and what is deliberately not
 changed, is in `residue.md` § *Condition 2 — removed; the story-diff rail is
 upstream (#1571)*.
+
+### The third histogram state — present, below the threshold (#1510)
+
+Step 3's fix-pass trigger above closes two histogram states with an explicit
+rule-2 binding and leaves the third open: totals at or above the threshold make
+rule 2's collapse MANDATORY, an absent histogram relaxes it to advisory, and a
+histogram that is **present** with totals **below** the threshold is never
+named — the paragraph ends at "Otherwise the histogram is present." That
+paragraph sits inside a byte-frozen `moved:` span, so — exactly as the #1571
+and #1583 corrections above — the binding is recorded here rather than edited
+into it. **Where the span is silent or disagrees with this section — rule 2's
+absolute wording inside it included — this section governs.**
+
+**A present histogram whose totals fall below the threshold binds rule 2 no
+harder than an absent one**: a restatement at more than two sites may still be
+corrected in place, and the threshold is the only thing that makes collapsing
+mandatory. So the three states read: at or above the threshold — collapse
+MANDATORY; absent — advisory; present and below — advisory, same as absent.
+What a fix pass may observably do differently across the threshold is exactly
+one thing: whether it may patch a more-than-two-site restatement copy by copy.
+Rules 1, 3 and 4 and the ban on adding surface bind on every round, and the
+two-sites-or-fewer rule is unchanged in every state, as the span already says.
+
+This reverses the residue finding's own suggested fix (#1510), which would have
+made rule 2 bind as written below the threshold and left the threshold deciding
+nothing. The two summary sites — ARCHITECTURE.md's *the class condition that
+turns collapsing from advisory into mandatory* and
+`docs/explanation/review-loop.md`'s *stops being advisory and becomes required*
+— are accurate under this reading and are deliberately not edited.

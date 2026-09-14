@@ -242,6 +242,34 @@ _roster_hits() {
   contains "$body" 'a – cell — an en dash, as that script emits — is the stamp-less sentinel'
 }
 
+@test "#1510 the third histogram state is bound after the frozen span, and governs" {
+  # The trigger paragraph names two states and stops at "Otherwise the
+  # histogram is present." — a PRESENT histogram BELOW the threshold was never
+  # bound, and the two summary sites read it as advisory while rule 2's own
+  # text is absolute. That paragraph sits inside a byte-frozen `moved:` span,
+  # so the binding is recorded AFTER the span (as #1571 and #1583 are) and must
+  # say it governs where the span disagrees. Gated on the section's own heading
+  # in the one file it lives in: the trigger's 20-line window cannot reach it.
+  local ln body
+  ln="$(prose_gate_lines "$PROTO" 'The third histogram state — present, below the threshold (#1510)')"
+  [ -n "$ln" ]
+  # FORWARD-ONLY: the #1583 section sits immediately above the gate line, and a
+  # centred span would let every needle below be satisfied from its tail.
+  body="$(prose_window "$PROTO" "$((ln + 20))" 20)"
+  # the BINDING: advisory, same as absent — the threshold alone makes it mandatory
+  contains "$body" 'A present histogram whose totals fall below the threshold binds rule 2 no harder than an absent one'
+  contains "$body" 'the threshold is the only thing that makes collapsing mandatory'
+  # the OPERATIVE clauses a reader acts on — the closed enumeration, what the
+  # relaxation licenses, and its scope — without which the two abstractions
+  # above survive a rewrite that inverts the state
+  contains "$body" 'So the three states read: at or above the threshold — collapse MANDATORY; absent — advisory; present and below — advisory, same as absent.'
+  contains "$body" 'a restatement at more than two sites may still be corrected in place'
+  contains "$body" 'Rules 1, 3 and 4 and the ban on adding surface bind on every round, and the two-sites-or-fewer rule is unchanged in every state'
+  # …and that it GOVERNS where the span DISAGREES — rule 2's own wording inside
+  # the span is absolute, so "silent" alone would not reach the third state
+  contains "$body" "Where the span is silent or disagrees with this section — rule 2's absolute wording inside it included — this section governs."
+}
+
 @test "#1496 the four rules keep their operative clauses, not just their headlines" {
   # The uniqueness pins above match one leading fragment per rule, so every
   # rule's substance is mutable underneath them: delete rule 1's overrides,
@@ -429,6 +457,10 @@ _roster_hits() {
   # the file the rule now lives in. The claim — ARCHITECTURE points AT the rule
   # rather than restating it — is unchanged.
   contains "$body" "development/skills/resolve-issue/reference/review-loop.md § The round protocol, step 3"
+  # #1510's post-span section quotes this clause verbatim as one of the two
+  # summary sites it leaves unedited; pinned at its source so a reword here reds
+  # where a fixer can see the citation needs updating too.
+  contains "$body" 'the class condition that turns collapsing from advisory into mandatory'
   # The load-bearing half: `class` is reporting-only, so the loop MEASURES
   # compliance and never enforces it. A doc that said otherwise would licence a
   # reader to stop applying the rule by hand.
