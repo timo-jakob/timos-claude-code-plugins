@@ -701,13 +701,22 @@ with a status JSON + code:
   — #1434 — an empty delta with nothing carried to verify, or a **full** round
   whose panel produced no findings file at all, or — #1435 — the
   `--findings-tree` you attested disagrees with the working tree, so the panel
-  read one tree and you are consolidating against another). Recover **by cause**
+  read one tree and you are consolidating against another, or — #1583 — the
+  round's carry accounting left a carried entry neither confirmed nor re-raised,
+  the CARRY-UNACCOUNTED arm). Recover **by cause**
   per §3.5's *Each round* step 2 before re-invoking: several causes are **not** cleared by
   re-running the panel — an empty delta with nothing carried, an aliased
   `--findings-file`, and a panel that reported NOT APPLICABLE on a full round —
   while the cadence cause is cleared *only* by re-running it (against the current
-  tree) or by discarding the fix that moved the tree. **Never** build an escalation comment or a
-  dossier from it.
+  tree) or by discarding the fix that moved the tree, and the carry cause per
+  `reference/review-loop.md` § *Carry accounting — confirmed, re-raised,
+  unconfirmed (#1583)* — which governs where step 2's own carry arm disagrees —
+  by ground: repair the accounting file for a missing, malformed or unmatched
+  record, and re-dispatch the panel for an entry it left unaccounted **or
+  re-raised without evidence** (the findings file is panel output — never
+  hand-edit it), merging the re-dispatch's findings into the round's file
+  before re-assembling the accounting. **Never** build an escalation comment
+  or a dossier from it.
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
   *Escalation* below. Opening a PR here would spend CI on unconverged work.

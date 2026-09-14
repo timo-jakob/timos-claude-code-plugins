@@ -709,9 +709,12 @@ PY
   # prompt — and that one says not to question the entry, which on a CARRIED
   # entry means nobody accounts for the blocker and it is stalled or retired.
   # Same relay failure as the reporting rule, so the same remedy: a verbatim
-  # sentence, plus the re-raise duty that makes it non-optional.
+  # sentence, plus the accounting duty that makes it non-optional — since #1583
+  # a re-raise needs the excerpt to show the defect still present, and an
+  # excerpt that settles neither is reported unconfirmed rather than re-raised.
   printf '%s' "$flat" | grep -qF -- 'in the **carried** section has no'
-  printf '%s' "$flat" | grep -qF -- 're-raise it at its original severity if you cannot'
+  printf '%s' "$flat" | grep -qF -- 'only if the excerpt shows the defect still present'
+  printf '%s' "$flat" | grep -qF -- 'report it **unconfirmed** if the excerpt settles neither'
   # ...and the scope block's blockquote is SCOPED so it cannot be read as
   # governing the carried section too
   printf '%s' "$flat" | grep -qF -- '`[DELETED by this story]` **in the scope block** is expected'

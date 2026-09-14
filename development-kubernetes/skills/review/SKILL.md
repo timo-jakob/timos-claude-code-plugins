@@ -199,19 +199,29 @@ holding **at least one** entry, this round is never a bare `[]` — the gate fir
 before dispatch, so writing one would retire those blockers without a single
 agent confirming them, and the loop would then record `verify-<R+1>.json` as
 `[]`, dropping the carry chain for good and narrating the carried blockers as
-fixed. Instead, either **dispatch the agents anyway** with the carry (the tree
+fixed. Instead, **dispatch the agents anyway** with the carry (the tree
 renders; they can confirm the carried fixes against the source files named in
-each entry, which is what the carry duty already asks of them), or write a
-findings array that **re-raises every carried blocker you could not confirm, at
-its original severity, citing the carried entry**. `[]` is correct when the carry is
-`[]`, and also when you dispatched with the carry and the agents positively
-confirmed every carried entry landed while finding nothing new. The rule forbids
-a `[]` that skipped the verification, not one that passed it.
+each entry, which is what the carry duty already asks of them) — there is no
+second path: without an agent observation nothing can be confirmed or re-raised,
+so every entry would be unconfirmed and the loop would refuse the round. The
+findings array then **re-raises only the carried blockers the agents observed
+still present, at their original severity, citing the carried entry**. For each
+carried entry report ONE of: confirmed (name the file:line where the fix is),
+re-raised (name the file:line and the unchanged text or the passing mutation you
+observed still present), unconfirmed (you could not establish either).
+Never re-raise on the absence of a fix. An unconfirmed entry goes into your
+report only, never into the findings file; the loop, not you, decides what a
+carried entry nobody confirmed or re-raised means (#1583). `[]` is correct when the carry is
+`[]`, and also when you dispatched with the carry, re-raised nothing and found
+nothing new — including when some entries are unconfirmed: the triple, not the
+findings file, carries the unconfirmed count. The rule forbids a `[]` that
+skipped the verification, not one that reported it.
 
-**Report the count whenever the carry is non-empty** — `say in your report that
-you confirmed N carried entries` — **whatever you write to the findings file**,
-`[]` or otherwise. A round that confirms the carry and *also* finds new blockers
-still owes it; omitting it is treated as a failed round.
+**Report the triple whenever the carry is non-empty** — `say in your report that
+you confirmed N carried entries, re-raised M and left K unconfirmed, of TOTAL` —
+**whatever you write to the findings file**, `[]` or otherwise. A round that
+confirms the carry and *also* finds new blockers still owes it; omitting it is
+treated as a failed round.
 
 **A `null` or unreadable carry on a round ≥ 2 is a caller slip, not an empty
 carry.** Read it from the plan's `fix_verification_path` **or, in hook mode,
@@ -226,6 +236,14 @@ the caller that the carry path was absent or unreadable and that the round could
 not be verified, naming `--fix-verification` as what to fix (the detail goes in
 `<findings-path>.failed.json`, as for any failed round). Absence of the carry is never
 evidence of an empty one.
+
+**In hook mode, write the accounting too (#1583).** The loop's hook mode reads
+the per-entry records behind your triple from `$REVIEW_FINDINGS.carry.json` — an
+array of `{file, dimension, title, confirmed[], re_raised[], unconfirmed[]}`
+records, one per carried entry, naming the reviewers in the three arrays — and
+refuses the round (CARRY-UNACCOUNTED) without it whenever the carry is
+non-empty. In step mode the driving session assembles the same records from
+your per-entry lines and passes them as `--carry-accounting`.
 
 **On a loop-driven FULL round the terminal stands as written — for all THREE
 not-applicable shapes, the empty scope included.** Read the round's `scope_mode`
@@ -360,14 +378,14 @@ wired in once, for every agent, so the reviewer definitions stay pure prose:
     Source repository root: {REPO}
     Rendered-to-source map: {RENDER MAP}
     Changed source files in scope: {CHANGED FILES}
-    Fix verification (round >= 2): {FIX VERIFICATION} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new, and re-raise any you cannot confirm at its ORIGINAL severity, citing the carried entry — even when its file is outside this round's scope. Say in your report how many of them you confirmed landed, whatever else you find.
+    Fix verification (round >= 2): {FIX VERIFICATION} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text or passing mutation in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Re-raise only carried entries of your own dimension ("{DIMENSION}", which the identity includes); an entry of another dimension that you see still present is reported unconfirmed, with what you saw in prose. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL.
     Already waived (round >= 2): {ADJUDICATED} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 
     Analyze the rendered manifests in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 
     Then, after the prose, emit those same findings once more as a single fenced `json` block — a JSON array of finding objects — per the Review finding schema in ARCHITECTURE.md. Each object has exactly: severity (the CRITICAL|WARNING|SUGGESTION tag from the prose), dimension ("{DIMENSION}"), file, line (integer, or null when file-level), title, description, suggested_fix (may be ""), reviewer ("{AGENT NAME}"), round ({ROUND}). Emit [] if you found nothing.
 
-    `file` MUST be one of the changed source files listed above — resolve the rendered document back to its source via the rendered-to-source map, then report the CHANGED file whose edit produced the text you are flagging (the values.yaml or overlay patch when the field was substituted or patched; the template only when the template itself is in that list). Never the rendered temp-tree path, and never a directory: a downstream filter keeps only findings whose file exactly matches a changed path, so anything else is silently discarded and your finding is lost. Use line: null when the rendered line has no line in that source file. When a changed-file list IS given and no changed file produced the flagged text — the text lives in a file this story did not touch, which is exactly how a deleted child path breaks an unchanged app-of-apps parent — do NOT report the unchanged file: the filter discards it on an exact match against the diff, and your finding is lost. Report it against the closest CHANGED file in scope with line: null, and say in the prose that the attribution is approximate and which unchanged file the text is actually in. When the changed-file list is `none — standalone run`, that filter does not exist: resolve via the render map and report the concrete repo-relative source FILE the flagged text came from (patch, kustomization.yaml, values.yaml, template or standalone manifest) — never the chart or overlay root the map may name — and never withhold a finding for want of a list. Either way, if you cannot tie a finding to any file at all, report it against the closest file in scope with line: null and say the attribution is approximate; reporting nothing is worse than reporting it approximately.
+    `file` MUST be one of the changed source files listed above — resolve the rendered document back to its source via the rendered-to-source map, then report the CHANGED file whose edit produced the text you are flagging (the values.yaml or overlay patch when the field was substituted or patched; the template only when the template itself is in that list). Never the rendered temp-tree path, and never a directory: a downstream filter keeps only findings whose file exactly matches a changed path, so anything else is silently discarded and your finding is lost. Use line: null when the rendered line has no line in that source file. When a changed-file list IS given and no changed file produced the flagged text — the text lives in a file this story did not touch, which is exactly how a deleted child path breaks an unchanged app-of-apps parent — do NOT report the unchanged file: the filter discards it on an exact match against the diff, and your finding is lost. Report it against the closest CHANGED file in scope with line: null, and say in the prose that the attribution is approximate and which unchanged file the text is actually in. When the changed-file list is `none — standalone run`, that filter does not exist: resolve via the render map and report the concrete repo-relative source FILE the flagged text came from (patch, kustomization.yaml, values.yaml, template or standalone manifest) — never the chart or overlay root the map may name — and never withhold a finding for want of a list. Either way, if you cannot tie a finding to any file at all, report it against the closest file in scope with line: null and say the attribution is approximate; reporting nothing is worse than reporting it approximately. A re-raise of a CARRIED entry is the one exception to all of the above: it keeps the carried entry's own file, dimension and title verbatim even when that file is not in the changed-file list — the loop's filter is the story diff, which the carried file is in, and a re-raise under any other identity is refused (#1583).
 
 Without this block the panel's findings cannot be consumed by
 `consolidate-findings.zsh` or the resolve-issue review loop — ARCHITECTURE.md
@@ -410,3 +428,11 @@ and write it to the findings path the caller passed (default
 `## Findings (JSON)` heading. This is the file `consolidate-findings.zsh` and
 the resolve-issue loop read; without it a caller that maps an absent file to
 `[]` records a clean review that never happened.
+
+On a round whose carry is non-empty (#1583), report the triple — `carried:
+confirmed N / re-raised M / unconfirmed K of TOTAL` — as **per-entry union
+outcomes** over the three agents (an entry is confirmed if any agent confirmed
+it, else re-raised if any agent's re-raise is in the findings array, else
+unconfirmed; TOTAL is the number of carried entries, never a sum across
+agents), and **reproduce each agent's per-entry lines verbatim** beneath it —
+they are the source of the accounting records the driving session assembles.

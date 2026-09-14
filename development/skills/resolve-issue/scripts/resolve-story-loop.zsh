@@ -160,7 +160,9 @@
 #                    The EMPTY-DELTA, FULL-ROUND and CADENCE arms are
 #                    WIRING-INDEPENDENT — they fire in hook mode too, where the
 #                    panel is --review-cmd's job, because they key on the round's
-#                    own state rather than on --findings-file. The rest are
+#                    own state rather than on --findings-file — and so is the
+#                    CARRY-UNACCOUNTED arm (#1583), which keys on the round's
+#                    accounting. An arm that keys on --findings-file itself is
 #                    step-mode-only by construction, since hook mode has no
 #                    --findings-file at all.
 #
@@ -210,7 +212,24 @@
 #                        that no longer exists. Step mode compares the session's
 #                        --findings-tree attestation; hook mode compares this
 #                        round's own dispatch stamp, catching a --review-cmd
-#                        that rewrites the tree mid-round.
+#                        that rewrites the tree mid-round;
+#                      * (WIRING-INDEPENDENT) the CARRY-UNACCOUNTED arm (#1583) —
+#                        the round carries entries to verify and its accounting
+#                        leaves one neither confirmed nor re-raised: no
+#                        accounting was supplied at all (step mode:
+#                        --carry-accounting FILE; hook mode: the panel's
+#                        <findings-path>.carry.json sidecar), the file is not an
+#                        array of {file, dimension, title, confirmed[],
+#                        re_raised[], unconfirmed[]} records, a record names no
+#                        carried identity, a record claims a re-raise the
+#                        findings file does not carry (the accounting alone is
+#                        not evidence), or a carried identity has no
+#                        confirmation and no re-raise from any reviewer (silent
+#                        or reported-unconfirmed alike — those identities are
+#                        listed in the status JSON's `carry_unconfirmed[]`). It
+#                        fires AFTER consolidation and BEFORE verify-<R+1>.json
+#                        is written, so the carry chain survives the refusal.
+#                        See _carry_account.
 #                    Left unguarded, the MISSING/EMPTY and FULL-ROUND arms let
 #                    a round nobody reviewed be consumed — on a full round that
 #                    is the false CONVERGED that green-lights the PR — and the
@@ -228,9 +247,21 @@
 #                    findings, hence its residue verdict, would describe a tree
 #                    that no longer exists.
 #
+#   --carry-accounting FILE  (#1583) step mode, round >= 2 with a non-empty
+#                    carry: the per-reviewer accounting of the carried entries,
+#                    an array of {file, dimension, title, confirmed[],
+#                    re_raised[], unconfirmed[]} records (reviewer names in the
+#                    three arrays), matched to verify-<R>.json by identity. A
+#                    carried round without it is refused (CARRY-UNACCOUNTED,
+#                    above); on an empty-carry round it is optional and an
+#                    empty array. Hook mode never passes it — the panel writes
+#                    the same shape to <findings-path>.carry.json instead.
+#
 #                    The remedy is per arm, not one rule: MISSING/EMPTY,
 #                    BYTE-IDENTICAL and FULL-ROUND are cleared by producing this
-#                    round's real aggregate and re-invoking; the CADENCE arm by
+#                    round's real aggregate and re-invoking; the CARRY-UNACCOUNTED
+#                    arm by re-dispatching the panel for the unaccounted entries
+#                    and supplying the accounting; the CADENCE arm by
 #                    re-running this round's panel against the CURRENT tree and
 #                    passing a freshly minted --findings-tree (or by discarding
 #                    the fix that moved the tree), never by re-passing the same
@@ -276,7 +307,14 @@
 #                 so test its CONTENTS, never its presence. Missing/empty
 #                 output is treated as "no findings" on a DELTA round only; on
 #                 a FULL round it is refused as STALE_FINDINGS (#1434), since
-#                 zero blockers there is the CONVERGED condition.
+#                 zero blockers there is the CONVERGED condition. Since #1583,
+#                 on a round where $REVIEW_FIX_VERIFICATION holds entries it
+#                 must ALSO write the carry accounting — an array of
+#                 {file, dimension, title, confirmed[], re_raised[],
+#                 unconfirmed[]} records (reviewer names in the three arrays),
+#                 one per carried entry — to $REVIEW_FINDINGS.carry.json; the
+#                 loop clears that sidecar before the hook runs and refuses the
+#                 round (CARRY-UNACCOUNTED) without it.
 #   --fix-cmd     applies the blockers. Sees $REVIEW_ROUND, $REVIEW_REPO,
 #                 $REVIEW_CHANGELIST (full changelist) and $REVIEW_BLOCKERS
 #                 (blockers-only slice). Expected to leave the tree buildable.
@@ -300,12 +338,13 @@
 #       --findings-file FILE [--test-cmd CMD] [--resume] \
 #       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
 #       [--issue N] [--telemetry-file PATH] [--gate-attest TREE_ID] \
-#       [--findings-tree TREE_ID] [--promote FILE]                # step mode
+#       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE]  # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
 #       [--promote FILE] ...                                      # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path;
-#                                        # refused together with --promote)
+#                                        # refused together with --promote or
+#                                        # --carry-accounting, #1583)
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
@@ -327,13 +366,19 @@
 #       invocation's. It is a non-terminal refusal: no telemetry record and no
 #       progress.md `**Final:**` line, because the loop resumes once the caller
 #       supplies the round's real findings. Since #1434 the same refusal covers
-#       further causes, and the EMPTY-DELTA, FULL-ROUND and CADENCE arms also
-#       fire in hook mode, so exit 2 mid-run is no longer step-mode-only.
+#       further causes, and every arm that keys on the round's own state rather
+#       than on --findings-file (EMPTY-DELTA, FULL-ROUND, CADENCE and, since
+#       #1583, CARRY-UNACCOUNTED) also fires in hook mode, so exit 2 mid-run is
+#       no longer step-mode-only.
 #       EMPTY-DELTA (a delta round with an empty scope and nothing carried to
 #       verify) and FULL-ROUND (a full round whose panel produced no findings
 #       file) have no reviewed round at all, and reading either as CONVERGED is
 #       the same false green. CADENCE (#1435) HAS one — but of a repo state that
-#       no longer exists.
+#       no longer exists. CARRY-UNACCOUNTED (#1583) has one too — but a carried
+#       blocker in it was neither confirmed nor re-raised by any reviewer, so
+#       consuming it would drop that blocker from the next carry; the status
+#       JSON names those identities in `carry_unconfirmed[]` (always present,
+#       `[]` on every other exit).
 #   1   internal/operational error (sub-script failed, hook failed, tests red)
 
 emulate -L zsh
@@ -370,6 +415,7 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
+local carry_accounting=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -422,6 +468,12 @@ while [[ $# -gt 0 ]]; do
   --gate-attest) _need_val_optional "$1" $# "${2:-}"; gate_attest="$2"; shift 2 ;;
   --findings-tree) _need_val "$1" $# "${2:-}"; findings_tree="$2"; shift 2 ;;
   --findings-file) _need_val "$1" $# "${2:-}"; findings_file="$2"; shift 2 ;;
+  # --carry-accounting (#1583): step mode's per-reviewer carry accounting — one
+  # record per carried identity saying which reviewers CONFIRMED it, which
+  # RE-RAISED it (with evidence, in the findings file) and which reported it
+  # UNCONFIRMED. Hook mode reads the same shape from the panel's
+  # `<findings-path>.carry.json` sidecar instead. Consumed by _carry_account.
+  --carry-accounting) _need_val "$1" $# "${2:-}"; carry_accounting="$2"; shift 2 ;;
   # --promote (#994): pass-through in SUBSTANCE. The loop never *interprets* the
   # promoted set — but it does validate the file's shape up front
   # (_validate_promote) and canonicalise the path, then forwards that path to the
@@ -444,9 +496,12 @@ while [[ $# -gt 0 ]]; do
     print -r -- "  [--findings-tree TREE_ID]  # step mode: the tree the round's panel READ (git-tree-id.zsh),"
     print -r -- "                             # minted BEFORE the panel ran. Omitting it disables the #1435"
     print -r -- "                             # cadence check; it is not --gate-attest and neither implies the other."
+    print -r -- "  [--carry-accounting FILE]  # step mode, round >= 2 with a non-empty carry: per-reviewer"
+    print -r -- "                             # confirmed / re_raised / unconfirmed per carried entry (#1583)."
+    print -r -- "                             # Hook mode reads <findings-path>.carry.json instead."
     print -r -- "  [--promote FILE]"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH]"
-    print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote"
+    print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote and --carry-accounting"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -469,6 +524,13 @@ closing_sweep_round=0
 # from the marker on --resume, since step mode runs each round as its own
 # invocation. A plain assignment, not `local`: see the note above.
 pft_continues=0
+# The carried identities the CARRY-UNACCOUNTED refusal (#1583) found neither
+# confirmed nor re-raised — `[]` on every other exit. Read by emit_and_exit on
+# EVERY exit so the status JSON always carries `carry_unconfirmed`, for the same
+# reason the three fields above are always present: a consumer must never have
+# to tell "nothing unconfirmed" from "a status file that predates the key". A
+# plain assignment, not `local`: see the note above.
+carry_unconfirmed_json='[]'
 
 # Clear a stale telemetry run-id sidecar (#995) as EARLY as the run is known to
 # be fresh — here, right after argument parsing, where `work_dir` and `resume`
@@ -510,6 +572,16 @@ if (( ! resume )) && [[ -n "$work_dir" ]]; then
     print -ru2 -- "resolve-story-loop: could not clear the stale telemetry run-id sidecar at $work_dir/.telemetry-run-id (${rm_err}) — a later read may return a PREVIOUS run's id (#995)"
 fi
 
+
+# --carry-accounting is step mode's channel (#1583); hook mode reads the panel's
+# <findings-path>.carry.json sidecar instead. Accepting the flag beside
+# --review-cmd and then ignoring it would tell the caller "no carry accounting
+# was supplied" for a file they did supply — the same shape of mistake the
+# --no-review/--promote pair refuses up front. The same holds beside
+# --no-review, which consolidates nothing and would ignore the file just as
+# silently.
+[[ -n "$carry_accounting" && ( -n "$review_cmd" || $no_review -eq 1 ) ]] && {
+  print -u2 -- "resolve-story-loop: --carry-accounting is step-mode only; in hook mode the panel writes <findings-path>.carry.json, and --no-review consolidates nothing"; exit 2 }
 
 # --issue rides straight into the telemetry envelope, whose contract is a
 # non-negative integer. Before #1004 a junk value (`--issue '#123'` from a
@@ -605,11 +677,12 @@ emit_and_exit() {
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
     --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
     --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
-    --argjson pftc "$pft_continues" \
+    --argjson pftc "$pft_continues" --argjson cu "$carry_unconfirmed_json" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
       effective_max_rounds:$effmax, max_rounds_source:$maxsrc,
       promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
       possible_false_trip_auto_continues:$pftc,
+      carry_unconfirmed:$cu,
       repo_type:(if $repo_type=="" then null else $repo_type end),
       review_skill:(if $review_skill=="" then null else $review_skill end),
       escalation_reasons:$esc, residue_replaced_reasons:$residue_replaced,
@@ -1300,6 +1373,183 @@ _pft_auto_continue() {   # $1 = round, $2 = this round's changelist
   return 0
 }
 
+# Carry accounting (#1583) — the CARRY-UNACCOUNTED arm of STALE_FINDINGS.
+#
+# From round 2 on the panel is handed the previous round's blockers to verify
+# (`verify-<R>.json`, #1434). Each reviewer reports ONE of three outcomes per
+# carried entry: CONFIRMED (it names where the fix is), RE-RAISED (it observed
+# the defect still present, with evidence, and the re-raise is in the findings
+# file) or UNCONFIRMED (it could not establish either). A reviewer's ignorance
+# is a count, not a defect: an unconfirmed entry never becomes a blocking
+# finding on its own, and the union rule stands — ONE confirmation retires the
+# entry whatever another reviewer reports. What the loop refuses is a carried
+# identity that NO reviewer confirmed and NO reviewer re-raised, silent or
+# reported-unconfirmed alike, because consuming such a round would drop it from
+# `verify-<R+1>.json` (written from `.blocking`) and the run could converge with
+# the blocker unfixed.
+#
+# The accounting reaches the loop as an array of per-identity records —
+#   [{file, dimension, title, confirmed:[reviewer…], re_raised:[…], unconfirmed:[…]}]
+# — via `--carry-accounting FILE` in step mode, or the panel's
+# `<findings-path>.carry.json` sidecar in hook mode. Entries are matched to the
+# carry by the consolidator's own identity normalisation (file stripped of
+# `./`, dimension verbatim, title lower-cased and whitespace-collapsed), and an
+# entry in the findings file AT the carried identity — same file, dimension
+# and title, whatever its line — or one the consolidator matched to the carried
+# prior (`non_converging: true`) counts as a re-raise whether or not the
+# accounting lists one — the findings file IS the evidence. The identity test
+# is deliberately line-free: the consolidator's proximity window (ten lines)
+# is a cross-round MATCHING heuristic, and a fix pass that inserts more than
+# that above the defect would otherwise turn an honest re-raise at the shifted
+# line into an "unevidenced" refusal whose remedy is already satisfied.
+#
+# Ordering is the safety property: this runs AFTER consolidation (it needs the
+# matched priors) and BEFORE the changelists append and the `verify-<R+1>.json`
+# write, so a refused round leaves `verify-<R>.json` as the carry and the
+# accumulators untouched — the round simply re-runs on --resume. Every refusal
+# here is a caller mistake, resumable, so it takes the STALE_FINDINGS door:
+#   * a non-empty carry with NO accounting supplied;
+#   * an accounting file that is not the shape above;
+#   * an accounting entry that names no carried identity (a typo, or a stale
+#     file from another round — silently ignoring it would let the real entry
+#     go unaccounted);
+#   * a record that claims a re-raise the findings file does not carry — the
+#     accounting alone is not evidence; refused by name, and it does NOT
+#     populate carry_unconfirmed[] (the entry was accounted for, wrongly);
+#   * a carried identity neither confirmed nor re-raised — the status JSON's
+#     `carry_unconfirmed[]` names each one for the progress block; nothing here
+#     ever reaches `.blocking`.
+# On an accepted round the changelist is stamped with
+#   carry_accounting: {total, confirmed:[id…], re_raised:[id…], unconfirmed:[id…]}
+# (each id `{file, dimension, title}` as the carry spelled it; `total: 0` with
+# three empty arrays on an empty-carry round, round 1 included) so
+# render-progress-block.zsh reads the triple from the changelist it already
+# consumes — an ABSENT key is a pre-#1583 changelist, which it renders as
+# `(no accounting)` rather than as three zeros.
+_carry_account() {   # $1 = round; reads $fix_verification, $changelist, $findings_path
+  local r="$1" src="" carried=0 carry_json='[]' acct="" stamp="" detail="" unmatched=""
+  if [[ -n "$fix_verification" && -s "$fix_verification" ]]; then
+    carried=$(jq 'length' -- "$fix_verification") || {
+      print -u2 -- "resolve-story-loop: could not read the fix-verification carry $fix_verification for the carry accounting at round $r"; exit 1 }
+    [[ "$carried" == <-> ]] || {
+      print -u2 -- "resolve-story-loop: non-numeric fix-verification length at round $r ($fix_verification): ${carried:-<empty>}"; exit 1 }
+    carry_json=$(<"$fix_verification")
+  fi
+  if (( step_mode )); then
+    src="$carry_accounting"
+  else
+    [[ -s "$findings_path.carry.json" ]] && src="$findings_path.carry.json"
+  fi
+  if [[ -z "$src" ]]; then
+    if (( carried > 0 )); then
+      local expected="--carry-accounting FILE in step mode, <findings-path>.carry.json in hook mode"
+      if (( ! step_mode )); then
+        # name the concrete sidecar, and tell a failed hook write ("exists but
+        # is empty") from a hook that never wrote one
+        if [[ -e "$findings_path.carry.json" ]]; then
+          expected="$findings_path.carry.json, which exists but is empty — the hook's write failed"
+        else
+          expected="$findings_path.carry.json, which the hook must write on a carried round"
+        fi
+      fi
+      refuse_stale_findings "carry unaccounted: round $r carries $carried entries but no carry accounting was supplied (expected $expected) — verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
+    fi
+    stamp='{"total":0,"confirmed":[],"re_raised":[],"unconfirmed":[]}'
+  else
+    [[ -s "$src" ]] || \
+      refuse_stale_findings "carry unaccounted: round $r names the carry accounting $src, which is missing or empty — verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
+    # -s + `length == 1`, like every sibling guard: a multi-value file (the `>>`
+    # slip) must not pass on its LAST value while --slurpfile below reads its
+    # FIRST
+    jq -e -s 'length == 1 and (.[0] | type == "array" and all(.[];
+             type == "object" and (.file | type) == "string" and (.dimension | type) == "string"
+             and (.title | type) == "string" and ((.confirmed // []) | type) == "array"
+             and ((.re_raised // []) | type) == "array" and ((.unconfirmed // []) | type) == "array"))' \
+       -- "$src" >/dev/null 2>&1 || \
+      refuse_stale_findings "carry unaccounted: round $r's carry accounting $src is not an array of {file, dimension, title, confirmed[], re_raised[], unconfirmed[]} records — verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
+    # NB: no apostrophes in this block — the jq program is single-quoted. Element
+    # equality is tested with any(), never index(): on an array-of-arrays input
+    # jq's index() searches for a SUBSEQUENCE, not an element.
+    acct=$(jq -c --argjson carry "$carry_json" --slurpfile acct "$src" --slurpfile cl "$changelist" '
+      def normtitle: ((. // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
+        | sub("^ +"; "") | sub(" +$"; ""));
+      def normfile: ((. // "") | tostring | sub("^\\./"; ""));
+      def ident: [ (.file | normfile), ((.dimension // "") | tostring), (.title | normtitle) ];
+      def strs: (. // []) | map(tostring) | unique;
+      ($acct[0]) as $a | ($cl[0]) as $c
+      | ([ ($c.blocking // [])[]
+           | (.file | normfile) as $f | ((.dimension // "") | tostring) as $d
+           | [$f, $d, (.title | normtitle)],
+             (if .non_converging == true then [$f, $d, (.matched_prior.title | normtitle)] else empty end) ]) as $rr_ids
+      | ([ $carry[] | ident ]) as $carry_ids
+      | ([ $a[] | (ident) as $i | select(any($carry_ids[]; . == $i) | not) | {file, dimension, title} ]) as $unmatched
+      | ([ $carry[] | . as $e | (ident) as $i
+           | ([ $a[] | select((ident) == $i) ]) as $m
+           | ([ $m[] | .confirmed | strs[] ] | unique) as $conf
+           | ([ $m[] | .re_raised | strs[] ] | unique) as $rr
+           | ([ $m[] | .unconfirmed | strs[] ] | unique) as $unc
+           | (any($rr_ids[]; . == $i)) as $in_findings
+           | { id: {file: $e.file, dimension: ($e.dimension // ""), title: $e.title},
+               outcome: (if ($conf | length) > 0 then "confirmed"
+                         elif $in_findings then "re_raised"
+                         elif ($rr | length) > 0 then "unevidenced"
+                         else "unconfirmed" end),
+               reporters: $unc, claimants: $rr } ]) as $rows
+      | { total: ($carry | length),
+          confirmed: [ $rows[] | select(.outcome == "confirmed") | .id ],
+          re_raised: [ $rows[] | select(.outcome == "re_raised") | .id ],
+          unconfirmed: [ $rows[] | select(.outcome == "unconfirmed") | .id ],
+          detail: [ $rows[] | select(.outcome == "unconfirmed") | {id, reporters} ],
+          unevidenced: [ $rows[] | select(.outcome == "unevidenced") | {id, claimants} ],
+          unmatched: $unmatched }' -n) || {
+      print -u2 -- "resolve-story-loop: could not compute the carry accounting at round $r"; exit 1 }
+    # Every string below lands in progress.md and on stderr, and every one of
+    # them is reviewer-authored (a carried title, a record's file/dimension, a
+    # reviewer name) — the same threat model render-progress-block.zsh states
+    # for the same file, so the same `safe`: no newline or backtick may forge a
+    # progress line or break out of its markdown span. NB: no apostrophes in
+    # these jq programs — they are single-quoted.
+    unmatched=$(print -r -- "$acct" | jq -r '
+      def safe: tostring | gsub("[\r\n`\\\\]"; " ") | .[0:200];
+      .unmatched | map("\"\(.title | safe)\" (\(.file | safe), \(.dimension | safe))") | join("; ")') || {
+      print -u2 -- "resolve-story-loop: could not read the carry accounting at round $r"; exit 1 }
+    [[ -z "$unmatched" ]] || \
+      refuse_stale_findings "carry unaccounted: round $r's carry accounting names entries that are not in verify-$r.json: $unmatched — every record must name a carried identity (file, dimension, title); fix the file and re-invoke. verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
+    # ONE refusal for every unaccounted identity of the round, two shapes in it:
+    #   * a re-raise the accounting CLAIMS but the findings file does not carry
+    #     — not evidence: the carry is written from `.blocking`, so accepting
+    #     the claim would retire the entry with nothing to carry it forward,
+    #     the exact ride-out this arm exists to close. Named as such, so the
+    #     operator can tell it from an unconfirmed entry, and it does NOT
+    #     populate carry_unconfirmed[] (the entry was accounted for — wrongly);
+    #   * an entry no reviewer confirmed and no reviewer re-raised — silent or
+    #     reported-unconfirmed alike — which carry_unconfirmed[] lists.
+    # Both shapes are named in the same message so the operator learns every
+    # unaccounted identity in one invocation rather than one per re-invoke, and
+    # carry_unconfirmed[] is set BEFORE the refusal for the same reason.
+    carry_unconfirmed_json=$(print -r -- "$acct" | jq -c '.unconfirmed') || carry_unconfirmed_json='[]'
+    detail=$(print -r -- "$acct" | jq -r '
+      def safe: tostring | gsub("[\r\n`\\\\]"; " ") | .[0:200];
+      def ident: "carried entry \"\(.id.title | safe)\" (\(.id.file | safe), \(.id.dimension | safe))";
+      ( [ .unevidenced[] | ident + " is re-raised in the accounting by " + (.claimants | map(safe) | join(", "))
+                           + " but the findings file of this round carries no blocking entry at that identity (same file, dimension and title)" ]
+        + [ .detail[] | ident + " was neither confirmed nor re-raised by any reviewer ("
+                        + (if (.reporters | length) > 0 then "unconfirmed by: " + (.reporters | map(safe) | join(", ")) else "no reviewer reported it" end) + ")" ] )
+      | join("; ")') || {
+      print -u2 -- "resolve-story-loop: could not read the carry accounting at round $r"; exit 1 }
+    [[ -z "$detail" ]] || \
+      refuse_stale_findings "carry unaccounted: round $r $detail — a carried entry retires only on a confirmation or an evidence-bearing re-raise: a re-raise must be in the findings file at its original severity under the carried entry's own file, dimension and title (the accounting alone is not evidence), and an entry nobody confirmed or re-raised needs the panel re-dispatched for it. Fix the accounting; for a re-raise, re-dispatch the panel for that entry so the finding reaches the findings file of this round under the carried file, dimension and title — never edit the findings file by hand — then re-invoke; verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
+    stamp=$(print -r -- "$acct" | jq -c '{total, confirmed, re_raised, unconfirmed}') || {
+      print -u2 -- "resolve-story-loop: could not build the carry_accounting stamp at round $r"; exit 1 }
+  fi
+  # -c, because the changelist is appended VERBATIM to changelists.jsonl as one
+  # line per round — a pretty-printed stamp would corrupt the resume state
+  jq -c --argjson ca "$stamp" '. + {carry_accounting: $ca}' -- "$changelist" > "$changelist.carry-tmp" \
+    && mv -- "$changelist.carry-tmp" "$changelist" || {
+    rm -f -- "$changelist.carry-tmp"
+    print -u2 -- "resolve-story-loop: could not stamp carry_accounting into the round $r changelist"; exit 1 }
+}
+
 # refuse this round's findings as never-produced (#974) and exit 2. Typed, so
 # --status-file can never keep the PREVIOUS invocation's AWAITING_FIX and read
 # as this one's verdict (the #912 lesson) — but NOT terminal: emit_and_exit
@@ -1308,7 +1558,10 @@ _pft_auto_continue() {   # $1 = round, $2 = this round's changelist
 # the completed-round count, so it agrees with history as everywhere else.
 refuse_stale_findings() {
   local detail="$1"
-  print -u2 -- "resolve-story-loop: $detail"
+  # -r: since #1583 a detail can carry reviewer-authored text (a carried title,
+  # a reviewer name); without -r, print would escape-process a `\n` or `\c` in
+  # it and forge or truncate the very line the caller recovers by
+  print -ru2 -- "resolve-story-loop: $detail"
   # a refusal is still worth a progress line — the user tailing progress.md
   # must see WHY a round they expected did not happen (same non-fatal rules)
   if [[ -n "$work_dir" && -d "$work_dir" ]]; then
@@ -1442,8 +1695,9 @@ local wd_rel=""
 if [[ "${work_dir:A}" == "${repo:A}"/* ]]; then
   wd_rel="${${work_dir:A}#"${repo:A}"/}/"
 fi
-# The work-dir is a DIRECTORY (prefix match, trailing slash); the other three are
-# single FILES (exact match). Keeping them in separate lists is what stops
+# The work-dir is a DIRECTORY (prefix match, trailing slash); the caller-chosen
+# file paths below (status, findings, telemetry, carry accounting) are single
+# FILES (exact match). Keeping them in separate lists is what stops
 # `--status-file "$repo/loop.json"` from also swallowing `loop.json.bak`.
 #
 # `--telemetry-file` belongs here for a reason the static `.claude/telemetry/`
@@ -1455,7 +1709,7 @@ fi
 # supposedly touched: the fail-OPEN direction this whole list exists to close.
 local -a loop_internal_files=()
 local _lp=""
-for _lp in "$status_file" "$findings_file" "$telemetry_file"; do
+for _lp in "$status_file" "$findings_file" "$telemetry_file" "$carry_accounting"; do
   [[ -n "$_lp" ]] || continue
   [[ "${_lp:A}" == "${repo:A}"/* ]] || continue
   loop_internal_files+=("${${_lp:A}#"${repo:A}"/}")
@@ -2428,6 +2682,11 @@ while (( round <= effective_max )); do
     # REVIEW_FIX_VERIFICATION is an empty string on round 1 (nothing to verify);
     # REVIEW_ADJUDICATED is always a path, holding `[]` until something is
     # waived — so a hook must read its CONTENTS, not test for emptiness.
+    # A stale `<findings-path>.carry.json` (#1583) from a previous round must
+    # never be read as THIS round's accounting — clear it before the panel runs,
+    # so only what this round's panel writes is consulted.
+    rm -f -- "$findings_path.carry.json" || {
+      print -u2 -- "resolve-story-loop: could not clear the stale carry-accounting sidecar $findings_path.carry.json at round $round"; exit 1 }
     ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
              REVIEW_SKILL="$review_skill" REVIEW_SCOPE_FILE="$scope_file" \
              REVIEW_REPO="$repo" REVIEW_SCOPE_MODE="$scope_mode" \
@@ -2469,8 +2728,9 @@ while (( round <= effective_max )); do
   # A repo-internal work-dir's own files are loop state, never story findings —
   # the #909/#911 exclusion must hold in step mode too (final-review fix, #971).
   #
-  # The EXACT list (`--status-file` / `--findings-file` / `--telemetry-file`) is
-  # filtered here as well, not just the work-dir prefix (#1435). Leaving it out
+  # The EXACT list (`--status-file` / `--findings-file` / `--telemetry-file` /
+  # `--carry-accounting`) is filtered here as well, not just the work-dir
+  # prefix (#1435). Leaving it out
   # made this path strictly worse than before that change: the loop rewrites
   # those files every round, so a blocker raised on one is unfixable and
   # re-appears each round — driving the run to non-convergence over the loop's
@@ -2528,6 +2788,10 @@ while (( round <= effective_max )); do
   "$CONSOLIDATE" "${consolidate_args[@]}" > "$changelist" || {
     print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
   final_changelist="$changelist"
+  # 3b. carry accounting (#1583) — BEFORE the accumulators and the next carry
+  # are written, so a refused round leaves both exactly as the previous round
+  # left them (see _carry_account for the ordering argument).
+  _carry_account "$round"
   # CHECKED, because the accumulators ARE the resume state. A failed or partial
   # write leaves changelists BEHIND history, and the --resume repair only knows
   # how to fix the other direction (exactly one line AHEAD, the kill-window

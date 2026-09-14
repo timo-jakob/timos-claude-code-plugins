@@ -4,6 +4,26 @@
 # per round, findings supplied via --findings-file, fixes applied in-session
 # between invocations (so the loop exits AWAITING_FIX instead of running a fix
 # hook). Detection is stubbed via DETECT_STACK_BIN; git runs for real.
+#
+# Coverage note for the #1583 carry-accounting arm (_carry_account in the
+# loop): every refusal ground and the stamp-write failure are driven below.
+# These exits are NOT driven — deleting any one ships green today:
+#   * the two `could not read the carry accounting at round R` arms, which
+#     guard a jq read of $acct — JSON the same function just produced, so no
+#     fixture can make that read fail without also failing the earlier shape
+#     check (which IS driven);
+#   * `could not build the carry_accounting stamp`, the same shape;
+#   * `could not compute the carry accounting`, the jq program that produces
+#     $acct — its inputs (the carry, the accounting, the changelist) have all
+#     passed their own shape checks by then, so no fixture reaches it either;
+#   * the two `$fix_verification` read guards at the top of the function
+#     (`could not read the fix-verification carry` and `non-numeric
+#     fix-verification length`), which guard a jq read of verify-R.json — a
+#     file the loop itself wrote from the consolidator's `.blocking` one
+#     invocation earlier, so the same class: raised and waived in round 1.
+# They are defensive exits on values the loop itself produced, not behaviour;
+# listed here so a reviewer does not read their absence from the suite as a
+# gap — and so the inventory is complete, not a sample.
 
 bats_require_minimum_version 1.5.0
 load assertions
@@ -38,6 +58,75 @@ setup() {
   # JSON into a shell string (word splitting / globbing hazard)
   CRIT_FILE="$BATS_TEST_TMPDIR/crit.json"
   printf '%s' "$CRIT" > "$CRIT_FILE"
+
+  # #1583: a round that carries entries to verify must account for each one
+  # (confirmed / re-raised / unconfirmed per reviewer) or the loop refuses it as
+  # CARRY-UNACCOUNTED. The fixture panels are omniscient: every carried entry is
+  # CONFIRMED by reviewer "r" unless a test supplies its own accounting. That
+  # default is applied by a WRAPPER the tests invoke as $S; the real script is
+  # $LOOP_REAL (use it to read the loop's source, or to bypass the default):
+  #   * hook mode — every --review-cmd runs the $CARRY_ALL prelude first, which
+  #     writes the <findings-path>.carry.json sidecar (nothing on an empty
+  #     carry); a test that wants a re-raise or an unconfirmed entry writes its
+  #     own sidecar after the prelude, or deletes it;
+  #   * step mode — a --resume without --carry-accounting gets a confirm-all
+  #     file built from the carry the round is about to read (the highest
+  #     verify-N.json in --work-dir).
+  # A --review-cmd whose value is empty or a flag is passed through untouched,
+  # so the usage-error tests still exercise the real parser.
+  LOOP_REAL="$S"
+  CARRY_ALL="$BATS_TEST_TMPDIR/carry-all.sh"
+  cat > "$CARRY_ALL" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${REVIEW_FIX_VERIFICATION:-}" ] && [ -s "$REVIEW_FIX_VERIFICATION" ] \
+   && [ "$(jq 'length' "$REVIEW_FIX_VERIFICATION")" != "0" ]; then
+  jq '[.[] | {file, dimension, title, confirmed: ["r"], re_raised: [], unconfirmed: []}]' \
+    "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"
+fi
+EOF
+  chmod +x "$CARRY_ALL"
+  CARRY_AUTO_FILE="$BATS_TEST_TMPDIR/carry-auto.json"
+  export CARRY_ALL LOOP_REAL CARRY_AUTO_FILE
+  S="$BATS_TEST_TMPDIR/loop-with-omniscient-panel.zsh"
+  cat > "$S" <<'EOF'
+#!/usr/bin/env zsh
+emulate -L zsh
+local -a args=()
+# every name initialised: at a script's top level a bare `local NAME` whose name
+# is already in the environment PRINTS it to stdout — which here is the status
+# JSON every test parses (the hazard resolve-story-loop.zsh documents about itself)
+local wd="" resume=0 has_acct=0 has_review=0 i=0 n="" v="" c=""
+for (( i=1; i<=$#; i++ )); do
+  case "${@[i]}" in
+    --work-dir) wd="${@[i+1]:-}" ;;
+    --resume) resume=1 ;;
+    --carry-accounting) has_acct=1 ;;
+    --review-cmd) has_review=1 ;;
+  esac
+done
+for (( i=1; i<=$#; i++ )); do
+  if [[ "${@[i]}" == --review-cmd && $i -lt $# && -n "${@[i+1]}" && "${@[i+1]}" != --* \
+        && "${@[i+1]}" != '"$CARRY_ALL"; '* ]]; then
+    args+=( --review-cmd "\"\$CARRY_ALL\"; ${@[i+1]}" ); (( i++ ))
+  else
+    args+=( "${@[i]}" )
+  fi
+done
+if (( resume && ! has_acct && ! has_review )) && [[ -n "$wd" && -d "$wd" ]]; then
+  # the highest-numbered verify-N.json that is a REGULAR file — a test that
+  # plants a directory at the next carry path (the kill-window test) must not
+  # have it read as the carry
+  for c in $(ls "$wd" 2>/dev/null | sed -n 's/^verify-\([0-9][0-9]*\)\.json$/\1/p' | sort -rn); do
+    [[ -f "$wd/verify-$c.json" ]] && { n="$c"; break; }
+  done
+  v="$wd/verify-${n:-0}.json"
+  if [[ -n "$n" && -s "$v" && "$(jq 'length' "$v" 2>/dev/null)" != 0 ]]; then
+    jq '[.[] | {file, dimension, title, confirmed: ["r"], re_raised: [], unconfirmed: []}]' "$v" > "$CARRY_AUTO_FILE" \
+      && args+=( --carry-accounting "$CARRY_AUTO_FILE" )
+  fi
+fi
+exec zsh "$LOOP_REAL" "${args[@]}"
+EOF
 }
 
 # a test that chmods a dir read-only (the failed-consume case) must not leave it
@@ -1628,7 +1717,9 @@ promote_file() {
   seed_awaiting                       # round 1: one blocker
   rm -f "$WD/verify-2.json"           # simulate the legacy work-dir
   printf '[]' > "$F"                  # no fix: round 2's delta is empty
-  step --resume
+  # the wrapper derives its confirm-all accounting FROM verify-2.json, which
+  # this test removed — so the accounting for the rebuilt carry is explicit
+  step --resume --carry-accounting "$(carry_record '["r"]' '[]' '[]')"
   [ "$status" -eq 20 ]
   # NOT refused — the fallback rebuilt the carry from round 1's changelist
   [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
@@ -1688,7 +1779,9 @@ promote_file() {
   seed_awaiting                       # round 1: one blocker
   : > "$WD/verify-2.json"             # a FAILED write, not an empty carry
   printf '[]' > "$F"                  # no fix: round 2's delta is empty
-  step --resume
+  # explicit accounting for the same reason as the missing-carry test above:
+  # the wrapper cannot derive it from a zero-byte carry
+  step --resume --carry-accounting "$(carry_record '["r"]' '[]' '[]')"
   [ "$status" -eq 20 ]
   [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
   # rebuilt from round 1's changelist, exactly as the absent case is
@@ -2589,7 +2682,7 @@ _tree_now() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-
   #     absence from a file this fixture never creates would be vacuous — the
   #     trap this suite has had to fix twice. What is real, and what a deletion
   #     would break, is its membership in the list all three consumers read.
-  grep -qF 'for _lp in "$status_file" "$findings_file" "$telemetry_file"' "$S"
+  grep -qF 'for _lp in "$status_file" "$findings_file" "$telemetry_file" "$carry_accounting"' "$LOOP_REAL"
   # (b) ...but its prefix sibling IS — the match is exact, not a prefix
   grep -qxF 'loop-status.json.bak' "$WDO/fix-touched-1.txt"
   grep -qxF 'touched.py' "$WDO/fix-touched-1.txt"
@@ -3046,4 +3139,457 @@ pft_findings() {  # $1 = round
   [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
   [ "$(cat "$WD/.closing-sweep")" = "4" ]
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
+}
+
+# --- #1583: carry accounting — confirmed / re-raised / unconfirmed -------------
+#
+# From round 2 on the loop reads, per carried entry, which reviewers confirmed
+# it, which re-raised it (with evidence, in the findings file) and which left it
+# unconfirmed. A reviewer's ignorance is a count, not a defect: the loop refuses
+# only a carried identity that NO reviewer confirmed and NO reviewer re-raised,
+# and it does so BEFORE verify-<R+1>.json is written, so the carry survives.
+
+# the accounting for the round-1 CRIT blocker ("T" in app.py, bugs), with the
+# three reviewer lists given as JSON arrays; prints the file's path
+carry_record() {  # carry_record <confirmed[]> <re_raised[]> <unconfirmed[]>
+  local out="$BATS_TEST_TMPDIR/carry-record-$RANDOM.json"
+  printf '[{"file":"app.py","dimension":"bugs","title":"T","confirmed":%s,"re_raised":%s,"unconfirmed":%s}]' \
+    "$1" "$2" "$3" > "$out"
+  printf '%s' "$out"
+}
+
+@test "#1583 AC 2 step mode: a carried round with NO --carry-accounting is refused as CARRY-UNACCOUNTED; with one it is accepted; an empty carry needs none" {
+  seed_awaiting
+  local before; before="$(shasum -a 256 "$WD/verify-2.json")"
+  printf '[]' > "$F"
+  # bypass the wrapper's confirm-all default: invoke the REAL loop, flag omitted
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume \
+    --status-file "$BATS_TEST_TMPDIR/st.json"
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carry unaccounted: round 2 carries 1 entries but no carry accounting was supplied'
+  contains "$output" '--carry-accounting FILE in step mode, <findings-path>.carry.json in hook mode'
+  # the safety invariant: nothing was consumed and the carry chain is untouched
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(shasum -a 256 "$WD/verify-2.json")" = "$before" ]
+  [ "$(jq '.rounds' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]
+  # the SAME round with a well-formed accounting is accepted: a zero-blocker
+  # delta round, which promotes the closing sweep (#1434)
+  step --resume --carry-accounting "$(carry_record '["r"]' '[]' '[]')"
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  [ "$(jq 'length' "$WD/verify-3.json")" -eq 0 ]
+  # ...and the closing sweep carries nothing, so it needs no accounting at all
+  # (the REAL loop again, so the wrapper cannot supply one)
+  printf '[]' > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq -c '.round_changelists[2].carry_accounting')" = '{"total":0,"confirmed":[],"re_raised":[],"unconfirmed":[]}' ]
+}
+
+@test "#1583 AC 3(a) the union rule: A confirms X, B reports it unconfirmed -> accepted, X not blocking, carry_unconfirmed empty" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --carry-accounting "$(carry_record '["claude-plugin-tests"]' '[]' '["claude-plugin-contract-integrity"]')"
+  [ "$status" -eq 20 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "AWAITING_FIX" ]
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+  [ "$(jq '.final_changelist.blocking | length' "$BATS_TEST_TMPDIR/st.json")" -eq 0 ]
+  # the stamp: one carried entry, confirmed, spelled exactly as the carry spelled it
+  [ "$(jq -c '.round_changelists[1].carry_accounting' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"total":1,"confirmed":[{"file":"app.py","dimension":"bugs","title":"T"}],"re_raised":[],"unconfirmed":[]}' ]
+  # AC 4: round 1 carried nothing, and its stamp says so rather than omitting the key
+  [ "$(jq -c '.round_changelists[0].carry_accounting' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"total":0,"confirmed":[],"re_raised":[],"unconfirmed":[]}' ]
+  # the progress block renders the triple, and only that (the carried: N of the
+  # new/carried split renders only when there ARE blockers)
+  grep -q -- 'carried: confirmed 1 / re-raised 0 / unconfirmed 0 of 1' "$WD/progress.md"
+}
+
+@test "#1583 AC 3(b) nobody confirms X, one re-raises it with evidence -> X blocks at its original severity (unchanged behaviour)" {
+  seed_awaiting
+  printf '%s' "$CRIT2" > "$F"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --carry-accounting "$(carry_record '[]' '["claude-plugin-scripts"]' '[]')"
+  [ "$status" -eq 12 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "ESCALATE_NO_CONVERGENCE" ]
+  [ "$(jq -r '.final_changelist.blocking[0].priority' "$BATS_TEST_TMPDIR/st.json")" = "Critical" ]
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting.re_raised' "$BATS_TEST_TMPDIR/st.json")" = \
+    '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
+}
+
+@test "#1583 the findings file IS the evidence: a re-raise in the aggregate counts as re-raised even when the record says unconfirmed" {
+  seed_awaiting
+  printf '%s' "$CRIT2" > "$F"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$(carry_record '[]' '[]' '["r"]')"
+  [ "$status" -eq 12 ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting | {re_raised: (.re_raised | length), unconfirmed: (.unconfirmed | length)}' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"re_raised":1,"unconfirmed":0}' ]
+}
+
+@test "#1583 AC 3(c) nobody confirms X, one reports it unconfirmed -> refused naming X, carry_unconfirmed lists it, the carry chain survives, and the re-dispatch clears it" {
+  seed_awaiting
+  local before; before="$(shasum -a 256 "$WD/verify-2.json")"
+  printf '[]' > "$F"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --carry-accounting "$(carry_record '[]' '[]' '["claude-plugin-manifest-check"]')"
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (unconfirmed by: claude-plugin-manifest-check)'
+  contains "$output" 'verify-3.json was NOT written and verify-2.json remains the carry'
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
+  # AC 4, never in .blocking: the refused round was consumed by NOTHING — no
+  # changelist, no history line — so its unconfirmed entry is a blocking finding
+  # of no round. The status JSON's final_changelist is round 1's verdict, the
+  # round that RAISED the blocker (that is the carry's origin, not this round):
+  # asserted, because this is the first STALE_FINDINGS arm that fires while a
+  # changelist for the CURRENT round already exists on disk, and reporting THAT
+  # one would show zero blockers beside a carry that still holds the entry
+  [ "$(jq '.final_changelist.blocking | length' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]
+  [ "$(jq -r '.final_changelist.blocking[0].title' "$BATS_TEST_TMPDIR/st.json")" = "T" ]
+  [ "$(jq '.round_changelists | length' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]
+  [ "$(jq '.rounds' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(shasum -a 256 "$WD/verify-2.json")" = "$before" ]
+  grep -q -- '^\*\*Refused (round 2):\*\* stale findings — carry unaccounted: round 2 carried entry "T"' "$WD/progress.md"
+  # the recovery: the panel is re-dispatched for that entry, confirms it, and
+  # the same --resume is accepted
+  step --resume --carry-accounting "$(carry_record '["claude-plugin-manifest-check"]' '[]' '[]')"
+  [ "$status" -eq 20 ]
+  [ "$(echo "$output" | jq -c '.carry_unconfirmed')" = "[]" ]
+}
+
+@test "#1583 AC 3(d) nobody mentions X at all -> the same refusal, 'no reviewer reported it'" {
+  seed_awaiting
+  printf '[]' > "$F"
+  printf '[]' > "$BATS_TEST_TMPDIR/silent.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/silent.json"
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (no reviewer reported it)'
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
+  [ ! -e "$WD/verify-3.json" ]
+}
+
+@test "#1583 an accounting record naming no carried identity is refused, never silently ignored" {
+  seed_awaiting
+  printf '[]' > "$F"
+  printf '[{"file":"other.py","dimension":"bugs","title":"nope","confirmed":["r"],"re_raised":[],"unconfirmed":[]}]' \
+    > "$BATS_TEST_TMPDIR/bad.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/bad.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'names entries that are not in verify-2.json: "nope" (other.py, bugs)'
+  [ ! -e "$WD/verify-3.json" ]
+  # the status JSON is typed on this arm too, and lists nothing as unconfirmed
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+}
+
+@test "#1583 a malformed accounting file is refused by shape, naming the shape" {
+  seed_awaiting
+  printf '[]' > "$F"
+  printf '{"confirmed": true}' > "$BATS_TEST_TMPDIR/bad.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/bad.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'is not an array of {file, dimension, title, confirmed[], re_raised[], unconfirmed[]} records'
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+}
+
+@test "#1583 identity matching normalises the title and a ./ file prefix, the way the consolidator does" {
+  seed_awaiting
+  printf '[]' > "$F"
+  printf '[{"file":"./app.py","dimension":"bugs","title":"  t ","confirmed":["r"],"re_raised":[],"unconfirmed":[]}]' \
+    > "$BATS_TEST_TMPDIR/norm.json"
+  step --resume --carry-accounting "$BATS_TEST_TMPDIR/norm.json"
+  [ "$status" -eq 20 ]
+}
+
+@test "#1583 AC 4 / AC 7: carry_unconfirmed is always present, round 1 is stamped total 0, and the contract names the arm and the flag" {
+  printf '[]' > "$F"
+  step
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.carry_unconfirmed')" = "[]" ]
+  [ "$(echo "$output" | jq -c '.round_changelists[0].carry_accounting')" = '{"total":0,"confirmed":[],"re_raised":[],"unconfirmed":[]}' ]
+  # a round that carried nothing renders no carried fragment
+  run -1 grep -q 'carried:' "$WD/progress.md"
+  run zsh "$S" --no-review
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.carry_unconfirmed')" = "[]" ]
+  # the loop's own contract comment names the arm, and its usage names the flag
+  grep -q 'CARRY-UNACCOUNTED' "$LOOP_REAL"
+  run zsh "$S" --help
+  [ "$status" -eq 0 ]
+  contains "$output" '--carry-accounting FILE'
+}
+
+@test "#1583 a record-only re-raise is NOT evidence: re_raised in the accounting with no matching finding is refused by name" {
+  # the carry is written from .blocking, so an accounting-only re-raise would
+  # retire the entry with nothing to carry it forward — the ride-out the arm
+  # exists to close. Refused distinctly from an unconfirmed entry.
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$(carry_record '[]' '["claude-plugin-scripts"]' '[]')"
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carried entry "T" (app.py, bugs) is re-raised in the accounting by claude-plugin-scripts but the findings file of this round carries no blocking entry at that identity'
+  contains "$output" 'the accounting alone is not evidence'
+  # ...and the remedy ROUTES (to a panel re-dispatch) rather than licensing a
+  # hand edit of the findings file, which the addendum forbids
+  contains "$output" 're-dispatch the panel for that entry'
+  contains "$output" 'never edit the findings file by hand'
+  lacks "$output" 'was neither confirmed nor re-raised'
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+}
+
+@test "#1583 an accounting file that is missing or zero-byte is refused by its own diagnostic" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --carry-accounting "$BATS_TEST_TMPDIR/nope.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'which is missing or empty'
+  : > "$BATS_TEST_TMPDIR/empty.json"
+  step --resume --carry-accounting "$BATS_TEST_TMPDIR/empty.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'which is missing or empty'
+  [ ! -e "$WD/verify-3.json" ]
+}
+
+@test "#1583 a multi-value accounting file is refused by shape, not read by its last value" {
+  seed_awaiting
+  printf '[]' > "$F"
+  printf '[]\n' > "$BATS_TEST_TMPDIR/multi.json"
+  cat "$(carry_record '["r"]' '[]' '[]')" >> "$BATS_TEST_TMPDIR/multi.json"
+  step --resume --carry-accounting "$BATS_TEST_TMPDIR/multi.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'is not an array of {file, dimension, title, confirmed[], re_raised[], unconfirmed[]} records'
+}
+
+@test "#1583 identity matching collapses internal whitespace too, and the match is COUNTED confirmed" {
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"T  two","description":"d","reviewer":"r"}]' > "$F"
+  step
+  [ "$status" -eq 20 ]
+  printf '[]' > "$F"
+  printf '[{"file":"./app.py","dimension":"bugs","title":"t two","confirmed":["r"],"re_raised":[],"unconfirmed":[]}]' \
+    > "$BATS_TEST_TMPDIR/ws.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/ws.json"
+  [ "$status" -eq 20 ]
+  # spelled as the CARRY spelled it, not as the record did
+  [ "$(jq -c '.round_changelists[1].carry_accounting.confirmed' "$BATS_TEST_TMPDIR/st.json")" = \
+    '[{"file":"app.py","dimension":"bugs","title":"T  two"}]' ]
+}
+
+@test "#1583 an explicit [] accounting on an EMPTY-carry round is accepted; a stale non-empty one is refused" {
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume
+  [ "$status" -eq 20 ]                # zero-blocker delta: the closing sweep is promoted, verify-3.json is []
+  printf '[]' > "$F"
+  printf '[]' > "$BATS_TEST_TMPDIR/none.json"
+  printf '[{"file":"app.py","dimension":"bugs","title":"T","confirmed":["r"],"re_raised":[],"unconfirmed":[]}]' \
+    > "$BATS_TEST_TMPDIR/stale.json"
+  # the stale record first: a carry of [] has no identity for it to name
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume \
+    --carry-accounting "$BATS_TEST_TMPDIR/stale.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'names entries that are not in verify-3.json'
+  # the explicit empty array is the documented benign shape
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume \
+    --carry-accounting "$BATS_TEST_TMPDIR/none.json" --status-file "$BATS_TEST_TMPDIR/st.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "CONVERGED" ]
+  [ "$(jq -c '.round_changelists[2].carry_accounting' "$BATS_TEST_TMPDIR/st.json")" = '{"total":0,"confirmed":[],"re_raised":[],"unconfirmed":[]}' ]
+}
+
+@test "#1583 a TWO-entry carry: the stamp counts both, the refusal names both, and reporters are listed in full" {
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"A","description":"d","reviewer":"r"},{"severity":"WARNING","dimension":"tests","file":"app.py","line":7,"title":"B","description":"d","reviewer":"r"}]' > "$F"
+  step
+  [ "$status" -eq 20 ]
+  [ "$(jq 'length' "$WD/verify-2.json")" -eq 2 ]
+  printf '[]' > "$F"
+  # A silent, B reported unconfirmed by two reviewers: both refused, both named
+  printf '[{"file":"app.py","dimension":"tests","title":"B","confirmed":[],"re_raised":[],"unconfirmed":["x","y"]}]' \
+    > "$BATS_TEST_TMPDIR/two-unaccounted.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/two-unaccounted.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'carried entry "A" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (no reviewer reported it); carried entry "B" (app.py, tests) was neither confirmed nor re-raised by any reviewer (unconfirmed by: x, y)'
+  [ "$(jq '.carry_unconfirmed | length' "$BATS_TEST_TMPDIR/st.json")" -eq 2 ]
+  [ "$(jq -c '[.carry_unconfirmed[].title]' "$BATS_TEST_TMPDIR/st.json")" = '["A","B"]' ]
+  # confirm both: total 2, both under confirmed, nothing else
+  printf '[{"file":"app.py","dimension":"bugs","title":"A","confirmed":["x"],"re_raised":[],"unconfirmed":[]},{"file":"app.py","dimension":"tests","title":"B","confirmed":["y"],"re_raised":[],"unconfirmed":["x"]}]' \
+    > "$BATS_TEST_TMPDIR/two-confirmed.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/two-confirmed.json"
+  [ "$status" -eq 20 ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting | {total, c: (.confirmed | length), r: (.re_raised | length), u: (.unconfirmed | length)}' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"total":2,"c":2,"r":0,"u":0}' ]
+  grep -q -- 'carried: confirmed 2 / re-raised 0 / unconfirmed 0 of 2' "$WD/progress.md"
+}
+
+@test "#1583 --carry-accounting beside --review-cmd is a usage error, not a silently ignored flag" {
+  printf '[]' > "$BATS_TEST_TMPDIR/acct.json"
+  run zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'true' --fix-cmd 'true' --carry-accounting "$BATS_TEST_TMPDIR/acct.json"
+  [ "$status" -eq 2 ]
+  contains "$output" '--carry-accounting is step-mode only'
+}
+
+@test "#1583 a re-raise at a SHIFTED line still counts as evidence — identity is file, dimension and title, never the proximity window" {
+  # a fix pass that inserts more than the consolidator's ten-line window above
+  # the defect moves the honest re-raise out of the cross-round match, so the
+  # consolidator emits it as a NEW blocker; the accounting must still read it
+  # as the carried entry's re-raise, or every honest re-submission is refused
+  seed_awaiting                       # carried at line 1
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":40,"title":"T","description":"still there, further down","reviewer":"r"}]' > "$F"
+  # no record for T at all: the findings file alone is the evidence
+  printf '[]' > "$BATS_TEST_TMPDIR/silent.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/silent.json"
+  [ "$status" -eq 20 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "AWAITING_FIX" ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting.re_raised' "$BATS_TEST_TMPDIR/st.json")" = \
+    '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
+  # ...and it carries forward, as a re-raise must
+  [ "$(jq -r '.[0].title' "$WD/verify-3.json")" = "T" ]
+}
+
+@test "#1583 an unevidenced re-raise and an unconfirmed entry are refused TOGETHER, and carry_unconfirmed lists the unconfirmed one" {
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"A","description":"d","reviewer":"r"},{"severity":"WARNING","dimension":"tests","file":"app.py","line":7,"title":"B","description":"d","reviewer":"r"}]' > "$F"
+  step
+  [ "$status" -eq 20 ]
+  printf '[]' > "$F"
+  printf '[{"file":"app.py","dimension":"bugs","title":"A","confirmed":[],"re_raised":["x"],"unconfirmed":[]},{"file":"app.py","dimension":"tests","title":"B","confirmed":[],"re_raised":[],"unconfirmed":["y"]}]' \
+    > "$BATS_TEST_TMPDIR/both.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$BATS_TEST_TMPDIR/both.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'carried entry "A" (app.py, bugs) is re-raised in the accounting by x but the findings file of this round carries no blocking entry at that identity'
+  contains "$output" 'carried entry "B" (app.py, tests) was neither confirmed nor re-raised by any reviewer (unconfirmed by: y)'
+  # one refusal names both, so the operator needs one round-trip, not two —
+  # and the status key lists only the UNCONFIRMED identity (the unevidenced
+  # one was accounted for, wrongly)
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"tests","title":"B"}]' ]
+  [ ! -e "$WD/verify-3.json" ]
+}
+
+@test "#1583 a failed carry_accounting stamp write aborts the round by name, leaving the changelist valid and unstamped" {
+  seed_awaiting
+  printf '[]' > "$F"
+  # a directory at the temp path the stamp is written through
+  mkdir -p "$WD/changelist-2.json.carry-tmp"
+  step --resume --carry-accounting "$(carry_record '["r"]' '[]' '[]')"
+  [ "$status" -eq 1 ]
+  contains "$output" 'could not stamp carry_accounting into the round 2 changelist'
+  # the changelist the consolidator wrote survives, unstamped — never a half-written one
+  jq -e 'has("carry_accounting") | not' "$WD/changelist-2.json" >/dev/null
+  # ...and neither the accumulators nor the next carry moved
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(wc -l < "$WD/changelists.jsonl" | tr -d ' ')" -eq 1 ]
+}
+
+@test "#1583 --carry-accounting beside --no-review is a usage error too — the fast path would ignore it just as silently" {
+  printf '[]' > "$BATS_TEST_TMPDIR/acct.json"
+  run zsh "$LOOP_REAL" --repo "$R" --no-review --carry-accounting "$BATS_TEST_TMPDIR/acct.json"
+  [ "$status" -eq 2 ]
+  contains "$output" '--carry-accounting is step-mode only'
+}
+
+@test "#1583 a repo-internal --carry-accounting is loop state: never charged to the fix pass" {
+  # --carry-accounting is the FOURTH member of the loop-internal exclusion list
+  # (status, findings, telemetry, carry accounting). A caller that keeps
+  # carry-round-R.json inside the repo — the instruction says outside, nothing
+  # enforces it — must not see it in the fix-touched set, where it would be
+  # classed as the fix pass's own edit every round.
+  local CA="$R/carry.json"
+  local WDO="$BATS_TEST_TMPDIR/wd-ca"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WDO" --findings-file "$F" --max-rounds 3
+  [ "$status" -eq 20 ]
+  # the session edits ONE story file and writes the accounting INSIDE the repo
+  echo "v1" > "$R/touched.py"
+  jq '[.[] | {file, dimension, title, confirmed: ["r"], re_raised: [], unconfirmed: []}]' "$WDO/verify-2.json" > "$CA"
+  [ -s "$CA" ]
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WDO" --findings-file "$F" --resume --max-rounds 3 \
+    --carry-accounting "$CA"
+  [ "$status" -eq 20 ]
+  run -1 grep -qxF 'carry.json' "$WDO/fix-touched-1.txt"
+  grep -qxF 'touched.py' "$WDO/fix-touched-1.txt"
+}
+
+@test "#1583 reviewer text in the refusal is neutralised: a carried title cannot forge a progress line or a Final line" {
+  # the round-1 blocker's title carries a backtick, two newlines, a forged
+  # terminal line, a forged round heading and a backslash-n
+  printf '%s' '[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"x`y\n**Final:** CONVERGED\n## Round 99 — no blockers \\n forged","description":"d","reviewer":"r"}]' > "$F"
+  step
+  [ "$status" -eq 20 ]
+  printf '[]' > "$F"
+  printf '[]' > "$BATS_TEST_TMPDIR/silent.json"
+  step --resume --carry-accounting "$BATS_TEST_TMPDIR/silent.json"
+  [ "$status" -eq 2 ]
+  local loop_out="$output"   # the `run -1 grep` calls below overwrite $output
+  # nothing forged: no Final line, no round heading, exactly one Refused line
+  run -1 grep -q '^\*\*Final:\*\*' "$WD/progress.md"
+  run -1 grep -q '^## Round 99' "$WD/progress.md"
+  [ "$(grep -c '^\*\*Refused (round 2):' "$WD/progress.md")" -eq 1 ]
+  # ...and the title sits flattened on that one line, its neighbours joined
+  grep -q -- 'carried entry "x y \*\*Final:\*\* CONVERGED ## Round 99 — no blockers  n forged" (app.py, bugs)' "$WD/progress.md"
+  # the same on stderr: one diagnostic line, not a forged second one
+  [ "$(printf '%s\n' "$loop_out" | grep -c 'carry unaccounted')" -eq 1 ]
+  run -1 grep -q '^\*\*Final:\*\*' <<< "$loop_out"
+}
+
+@test "#1583 a re-raise at SUGGESTION level is not evidence: a carried CRITICAL demoted by the reviewer is refused" {
+  seed_awaiting
+  printf '%s' '[{"severity":"SUGGESTION","dimension":"bugs","file":"app.py","line":1,"title":"T","description":"maybe","reviewer":"r"}]' > "$F"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$(carry_record '[]' '["x"]' '[]')"
+  [ "$status" -eq 2 ]
+  contains "$output" 'carries no blocking entry at that identity'
+  [ ! -e "$WD/verify-3.json" ]
+}
+
+@test "#1583 the union rule outranks an unevidenced re-raise: A confirms X, B claims a re-raise nobody filed -> accepted, X retired as confirmed" {
+  # The ordered ladder is confirmed > re_raised > unevidenced > unconfirmed.
+  # Every other fixture keeps confirmed[] and re_raised[] disjoint, so the
+  # precedence between the first rung and the third was never observed: a
+  # reorder that tests the record-only re-raise BEFORE the confirmation would
+  # refuse this — wholly ordinary — round as CARRY-UNACCOUNTED, and the loop
+  # could never advance past a round in which one reviewer confirmed and
+  # another's claimed re-raise never reached `.blocking`.
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --carry-accounting "$(carry_record '["a"]' '["b"]' '[]')"
+  [ "$status" -eq 20 ]
+  lacks "$output" 'is re-raised in the accounting by'
+  lacks "$output" 'carry unaccounted'
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "AWAITING_FIX" ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"total":1,"confirmed":[{"file":"app.py","dimension":"bugs","title":"T"}],"re_raised":[],"unconfirmed":[]}' ]
+  [ -s "$WD/verify-3.json" ]
+}
+
+@test "#1583 the refusal line is written raw: a caller path holding a backslash escape survives to the remedy" {
+  # `safe` neutralises REVIEWER text; a caller PATH ($src) is interpolated as
+  # is, so only the sink's -r keeps a `\c` in it from swallowing the rest of
+  # the line — including the `verify-<R+1>.json was NOT written` remedy the
+  # conductor recovers by. Without -r both needles below vanish from stderr.
+  seed_awaiting
+  printf '[]' > "$F"
+  step --resume --carry-accounting "$BATS_TEST_TMPDIR/a\\cb.json"
+  [ "$status" -eq 2 ]
+  contains "$output" 'a\cb.json, which is missing or empty'
+  contains "$output" 'verify-3.json was NOT written'
+  # ...and the progress.md copy of the same detail is written raw as well
+  grep -qF -- 'a\cb.json, which is missing or empty' "$WD/progress.md"
+  [ ! -e "$WD/verify-3.json" ]
 }
