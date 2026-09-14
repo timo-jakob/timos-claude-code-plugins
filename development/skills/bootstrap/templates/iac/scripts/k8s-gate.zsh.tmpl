@@ -2,12 +2,12 @@
 # k8s-gate.zsh — this repository's validation gate for Kubernetes manifests.
 #
 # A template of /development:bootstrap's IaC path (#1602), emitted into a
-# repository as scripts/k8s-gate.zsh once #1604 and #1605 add it to the
-# skill's render set. It is the MECHANISM behind the repository's gate
-# command. The wiring around it — a `Makefile` whose `lint` target runs this
-# script, a version-controlled `hooks/pre-push` that runs `make lint`, and a
-# one-job CI workflow that runs `make lint` — lands with #1604; until then,
-# run the script directly (below).
+# repository as scripts/k8s-gate.zsh once #1605 adds it to the skill's render
+# set. It is the MECHANISM behind the repository's gate command. The wiring
+# around it (#1604) — a `Makefile` whose `lint` target runs this script, a
+# version-controlled `hooks/pre-push` that runs the gate command, and a one-job
+# CI workflow that runs the same command — is what developers and CI invoke;
+# `make lint` is the default command.
 # The intent is one script, one verdict, everywhere: a check that exists only
 # in CI is the thing this file exists to make impossible.
 #
@@ -82,9 +82,8 @@
 # HOW TO RUN IT
 # ---------------------------------------------------------------------------
 #   scripts/k8s-gate.zsh      run it FROM THE REPOSITORY ROOT: it gates the
-#                             current directory, which is where `make` and git
-#                             hooks run it from once #1604 has wired them up
-#                             (`make lint` is then the repository's gate command)
+#                             current directory, which is where `make lint` and
+#                             the git hook run it from
 #
 # Environment:
 #   REPO_SLUG             `owner/name` of this repository, for the argocd

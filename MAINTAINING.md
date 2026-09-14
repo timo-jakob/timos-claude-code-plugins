@@ -194,9 +194,10 @@ grep -rhn -E "(python|node|go|java)-version:" development/skills/bootstrap/templ
 # brew formula names referenced in preflight.sh
 grep -E '"[a-z-]+"' development/skills/bootstrap/scripts/preflight.sh | grep -v "^\s*#" | sort -u
 
-# CLI tool versions a workflow template downloads itself (#1154's kubernetes-ci
-# installs kubeconform, kube-linter, kyverno and yq by release URL — these are
-# NOT `uses:` pins, so Renovate never sees them and Step 2 never covers them)
+# CLI tool versions a workflow template downloads itself (the IaC kubernetes-ci's
+# one `gate` job installs every tool its gate script runs by release URL, #1604 —
+# these are NOT `uses:` pins, so Renovate never sees them and Step 2 never covers
+# them). tests/iac-tools.zsh reads its fixture-harness pins from those same lines.
 grep -rhn -E "^\s*[A-Z_]+_VERSION:\s+" development/skills/bootstrap/templates/ | sort -u
 
 # …and the two sites that MIRROR the templates' yq pin. Both exist so the bats
@@ -206,19 +207,6 @@ grep -rhn -E "^\s*[A-Z_]+_VERSION:\s+" development/skills/bootstrap/templates/ |
 # no-cluster-deploy.yml.tmpl (#1206) and these two. Bump all four together or
 # the suite stops testing what ships.
 grep -rn -E "YQ_VERSION[:=]" tests/Dockerfile .github/workflows/script-tests.yml
-
-# …and the three IaC toolchain pins with no `*_VERSION:` upstream (#1199,
-# #1603). The IaC gate's real-tool harness renders with helm and kustomize,
-# which the template does NOT install (ubuntu-latest ships both), so there is
-# nothing for the sweep above to find. They are pinned in the harness instead,
-# to the versions of the `ubuntu-latest` runner image the workflow targets — the
-# one class of pin whose upstream is a runner image rather than a release tag,
-# so Renovate cannot see it and neither can any grep over templates/. trivy is
-# the third: the template runs it through `aquasecurity/trivy-action`, whose
-# pinned ref names the ACTION's release, so the trivy version is that release's
-# `version` input default — re-read it from the new ref's action.yaml whenever
-# Renovate bumps the action, and move the harness pin with it.
-grep -n -E "^local (helm|kustomize|trivy)_v=" tests/iac-tools.zsh
 
 # …and a GUARD, not a to-do list: the IaC docs must name NO version literal.
 # They used to, and it was a standing drift hazard — bumping a template pin left
@@ -258,14 +246,6 @@ must all quote the SAME pin. A repo-wide sweep in
 `tests/api-styleguide-ruleset.bats` fails any partial bump, so if you ever move
 the pin by hand, move all three.
 
-The batched PR carries **one more lockstep**, and nothing executable enforces
-it: a bump of the `aquasecurity/trivy-action` ref in `kubernetes-ci.yml.tmpl`
-moves `trivy_v` in `tests/iac-tools.zsh` (#1603). The harness runs the trivy
-binary the gate script runs, at the version that action installs by default —
-so before merging such a bump, read the `version` input's default from the new
-ref's `action.yaml` and move the pin in the same PR, or consumer CI and the
-fixture verdicts run different check sets.
-
 The remaining steps below (pre-commit revs, Docker tags, runtime strings, brew
 formulas, and the `*_VERSION:` CLI pins a template downloads by release URL)
 Renovate doesn't see, so those stay manual. The `*_VERSION:` class is worth a deliberate look each pass:
@@ -275,34 +255,11 @@ Renovate doesn't see, so those stay manual. The `*_VERSION:` class is worth a de
 templates' `yq -o=json` behaviour; move all four or the suite validates the
 shipped workflows under a different yq than they ship with.
 
-`tests/iac-tools.zsh`'s `helm_v` / `kustomize_v` are the odd pair out (#1199):
-their upstream is the **`ubuntu-latest` runner image**, not a release tag, so
-"current" means whatever that image ships today. (`trivy_v` beside them is
-different again: its upstream is the `trivy-action` ref the template pins, read
-as described in the Step 1 inventory above.)
-
-**Confirm which image that label resolves to before reading anything** — it
-moves on GitHub's schedule, not this repo's, and `kubernetes-ci.yml.tmpl` pins
-`runs-on: ubuntu-latest`. Reading a stale manifest is worse than not reading one:
-you would bump the constants to the *previous* image's versions and stamp a
-provenance line claiming they came from `ubuntu-latest`.
-
-```sh
-# 1. which image does the ubuntu-latest LABEL resolve to today? The label
-#    mapping lives in the runner-images root README — NOT in the images/ubuntu
-#    listing, whose highest-numbered manifest is usually a newer image that
-#    ships under its own label first and is not yet ubuntu-latest.
-gh api repos/actions/runner-images/contents/README.md \
-  --jq .content | base64 -d | grep -iE 'ubuntu-latest|ubuntu-2[0-9]'
-# 2. then read THAT manifest — substitute the version step 1 confirmed
-gh api repos/actions/runner-images/contents/images/ubuntu/Ubuntu2404-Readme.md \
-  --jq .content | base64 -d | grep -iE '^- (Helm|Kustomize) '
-```
-
-Bump the two constants to match, and update the date in that script's
-`PROVENANCE` comment. A drift here is quiet rather than red: the harness keeps
-passing, it just stops rendering the fixtures with the helm the consumer's CI
-actually uses.
+The IaC toolchain has **no pin outside that sweep** (#1604): `kubernetes-ci.yml.tmpl`'s
+one `gate` job installs all seven tools its gate script runs — helm and kustomize
+included, rather than taking the runner image's — and `tests/iac-tools.zsh` reads
+the fixture harness's pins from those `install <tool>` steps. Bump a
+`*_VERSION:` there and the harness moves with it.
 
 Actions to pay particular attention to when reviewing a major bump (most likely
 to ship breaking changes between majors):
@@ -313,7 +270,6 @@ to ship breaking changes between majors):
 | `actions/setup-*` | Verify the cache key format hasn't changed |
 | `docker/build-push-action` | Read release notes — output and input names change |
 | `docker/metadata-action` | Tag pattern syntax sometimes evolves |
-| `aquasecurity/trivy-action` | Versioned by date-ish tags (0.28.0, 0.29.0) — usually safe, **but it is a lockstep**: the harness pin `trivy_v` in `tests/iac-tools.zsh` is that ref's `version` input default. Read it from the new ref's `action.yaml` and move the pin in the same PR (#1603) |
 | `SonarSource/sonarqube-scan-action` | New majors often require config changes — read notes |
 | `ossf/scorecard-action` | Check the v2 → v3 if/when it happens |
 | `sigstore/cosign-installer` | Stable; minor cosmetic changes only |
@@ -670,6 +626,6 @@ the test wins.
 `tests/no-cluster-deploy.bats` pins the substantive clauses across the
 restatements, so a rule change that misses one reds rather than drifting. And
 `kubernetes-ci.yml.tmpl` pins `KYVERNO_VERSION`, where a Kyverno minor can add
-policy *kinds* the pinned CLI cannot evaluate — which that workflow reports as a
-failure rather than silently passing, so a stale pin surfaces as a red check in
-a consumer repo.
+policy *kinds* the pinned CLI cannot evaluate — which the gate script that
+workflow runs reports as a failure rather than silently passing, so a stale pin
+surfaces as a red check in a consumer repo.

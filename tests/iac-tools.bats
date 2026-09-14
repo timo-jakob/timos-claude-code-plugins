@@ -141,36 +141,29 @@ minimal_path() {
 # --print-pins — the single source the harness asserts against
 # ---------------------------------------------------------------------------
 
-@test "--print-pins reports all seven tools, reading four of them from the template (#1199, #1603)" {
+@test "--print-pins reports all seven tools, each read from the template's gate job (#1199, #1603, #1604)" {
   run zsh "$SCRIPT" --print-pins
   [ "$status" -eq 0 ]
-  # The four the template installs, asserted against the template itself rather
-  # than restated — that equivalence is the whole reason the script reads them.
+  # All seven, asserted against the template itself rather than restated — that
+  # equivalence is the whole reason the script reads them.
   #
   # Each expected value is EXTRACTED AND GUARDED first, never inlined into the
   # needle. `yq -r` prints nothing and exits 0 for a selector that matches no
   # node, so `contains "$output" "kubeconform $(yq …)"` would collapse to the
-  # needle `"kubeconform "` — a substring of the very line it is checking. All
-  # four cross-checks would then pass having compared the script's pin against
+  # needle `"kubeconform "` — a substring of the very line it is checking. Every
+  # cross-check would then pass having compared the script's pin against
   # nothing, and this is the ONLY place they are compared: the selectors here
   # are an independent restatement of the script's, so a rename applied to
   # this copy is caught by nothing else.
-  local want
-  want="$(tmpl_pin '.jobs.schema.steps[] | select(.name == "install kubeconform") | .env.KUBECONFORM_VERSION')"
-  contains "$output" "kubeconform $want"
-  want="$(tmpl_pin '.jobs.lint.steps[] | select(.name == "install kube-linter") | .env.KUBE_LINTER_VERSION')"
-  contains "$output" "kube-linter $want"
-  want="$(tmpl_pin '.jobs.policy.env.KYVERNO_VERSION')"
-  contains "$output" "kyverno $want"
-  want="$(tmpl_pin '.jobs.argocd.steps[] | select(.name == "install yq") | .env.YQ_VERSION')"
-  contains "$output" "yq $want"
-  # and the three that exist nowhere but this script. Unanchored: `matches` takes
-  # an ERE and bash's `=~` does not read `\n` as a newline, so a `(^|\n)` prefix
-  # would only ever match the FIRST line — passing for helm and failing for
-  # every tool after it, for a reason that has nothing to do with the pins.
-  matches "$output" 'helm [0-9]+\.[0-9]+\.[0-9]+'
-  matches "$output" 'kustomize [0-9]+\.[0-9]+\.[0-9]+'
-  matches "$output" 'trivy [0-9]+\.[0-9]+\.[0-9]+'
+  local pair tool key want
+  for pair in helm:HELM_VERSION kustomize:KUSTOMIZE_VERSION trivy:TRIVY_VERSION \
+              kubeconform:KUBECONFORM_VERSION kube-linter:KUBE_LINTER_VERSION \
+              kyverno:KYVERNO_VERSION yq:YQ_VERSION; do
+    tool="${pair%%:*}"
+    key="${pair#*:}"
+    want="$(tmpl_pin ".jobs.gate.steps[] | select(.name == \"install $tool\") | .env.$key")"
+    contains "$output" "$tool $want"
+  done
   # exactly seven lines: an eighth tool nobody installs, or a dropped one, both
   # break the harness's own count guard silently otherwise
   run bash -c "zsh '$SCRIPT' --print-pins | grep -c ."
@@ -192,34 +185,24 @@ minimal_path() {
 # Reading the pins out of the template
 # ---------------------------------------------------------------------------
 
-@test "a missing version key is a typed failure, one per pin (#1199)" {
-  # all four, not one exemplar: each is a separate selector into a separate job,
-  # and a wrong one would silently pin a version nothing installs
-  local t
-  t="$(tmpl_copy)"
-
-  yq -i 'del(.jobs.schema.steps[] | select(.name == "install kubeconform") | .env.KUBECONFORM_VERSION)' "$t"
-  run zsh "$SCRIPT" --template "$t" --print-pins
-  [ "$status" -eq 1 ]
-  contains "$output" 'could not read KUBECONFORM_VERSION'
-
-  t="$(tmpl_copy)"
-  yq -i 'del(.jobs.lint.steps[] | select(.name == "install kube-linter") | .env.KUBE_LINTER_VERSION)' "$t"
-  run zsh "$SCRIPT" --template "$t" --print-pins
-  [ "$status" -eq 1 ]
-  contains "$output" 'could not read KUBE_LINTER_VERSION'
-
-  t="$(tmpl_copy)"
-  yq -i 'del(.jobs.policy.env.KYVERNO_VERSION)' "$t"
-  run zsh "$SCRIPT" --template "$t" --print-pins
-  [ "$status" -eq 1 ]
-  contains "$output" 'could not read KYVERNO_VERSION'
-
-  t="$(tmpl_copy)"
-  yq -i 'del(.jobs.argocd.steps[] | select(.name == "install yq") | .env.YQ_VERSION)' "$t"
-  run zsh "$SCRIPT" --template "$t" --print-pins
-  [ "$status" -eq 1 ]
-  contains "$output" 'could not read YQ_VERSION'
+@test "a missing version key is a typed failure, one per pin (#1199, #1604)" {
+  # all seven, not one exemplar: each is a separate selector, and a wrong one
+  # would silently pin a version nothing installs
+  local pair tool key sel t
+  for pair in helm:HELM_VERSION kustomize:KUSTOMIZE_VERSION trivy:TRIVY_VERSION \
+              kubeconform:KUBECONFORM_VERSION kube-linter:KUBE_LINTER_VERSION \
+              kyverno:KYVERNO_VERSION yq:YQ_VERSION; do
+    tool="${pair%%:*}"
+    key="${pair#*:}"
+    sel=".jobs.gate.steps[] | select(.name == \"install $tool\") | .env.$key"
+    t="$(tmpl_copy)"
+    yq -i "del($sel)" "$t"
+    # the deletion must be real, or the red below proves nothing about this key
+    [ "$(yq -r "$sel" "$t")" = "null" ]
+    run zsh "$SCRIPT" --template "$t" --print-pins
+    [ "$status" -eq 1 ]
+    contains "$output" "could not read $key"
+  done
 }
 
 @test "a version key set to null is refused, not spliced into a URL (#1199)" {
@@ -227,12 +210,12 @@ minimal_path() {
   # exact defect the script's guard exists for, and one a bare -n check misses
   local t
   t="$(tmpl_copy)"
-  yq -i '(.jobs.policy.env.KYVERNO_VERSION) = null' "$t"
+  yq -i '(.jobs.gate.steps[] | select(.name == "install kyverno") | .env.KYVERNO_VERSION) = null' "$t"
   # pin the MUTATION first: both tmpl_env guards (`-n` and `!= "null"`) produce
   # the same exit and the same message, so without this the test would pass
   # whether yq wrote a literal `null` — the branch this test is named for — or
   # an empty scalar, which the `-n` guard above it catches instead
-  run yq -r '.jobs.policy.env.KYVERNO_VERSION' "$t"
+  run yq -r '.jobs.gate.steps[] | select(.name == "install kyverno") | .env.KYVERNO_VERSION' "$t"
   [ "$output" = "null" ]
   run zsh "$SCRIPT" --template "$t" --print-pins
   [ "$status" -eq 1 ]
@@ -245,7 +228,7 @@ minimal_path() {
   # guard and then splice a newline into the download URL
   local t
   t="$(tmpl_copy)"
-  yq -i '.jobs.lint.steps += [{"name": "install kube-linter", "run": "true", "env": {"KUBE_LINTER_VERSION": "9.9.9"}}]' "$t"
+  yq -i '.jobs.gate.steps += [{"name": "install kube-linter", "run": "true", "env": {"KUBE_LINTER_VERSION": "9.9.9"}}]' "$t"
   run zsh "$SCRIPT" --template "$t" --print-pins
   [ "$status" -eq 1 ]
   contains "$output" 'matched more than one value'
@@ -329,27 +312,19 @@ minimal_path() {
   contains "$output" 'curl is required'
 }
 
-@test "the pin sweep MAINTAINING.md documents still finds all three constants (#1199, #1603)" {
-  # MAINTAINING.md's quarterly inventory greps this script for the three pins
-  # that exist nowhere else. Rewriting a line as `typeset`, indenting it, or
-  # moving the set into an array makes that command print NOTHING — which reads
-  # exactly like "no pins to check", the failure the inventory exists to prevent.
-  local pins helm_v kustomize_v trivy_v
-  pins="$(zsh "$SCRIPT" --print-pins)"
-  helm_v="$(printf '%s\n' "$pins" | awk '$1 == "helm" { print $2 }')"
-  kustomize_v="$(printf '%s\n' "$pins" | awk '$1 == "kustomize" { print $2 }')"
-  trivy_v="$(printf '%s\n' "$pins" | awk '$1 == "trivy" { print $2 }')"
-  [ -n "$helm_v" ]
-  [ -n "$kustomize_v" ]
-  [ -n "$trivy_v" ]
-  run grep -n -E "^local (helm|kustomize|trivy)_v=" "$SCRIPT"
-  [ "$status" -eq 0 ]
-  contains "$output" "$helm_v"
-  contains "$output" "$kustomize_v"
-  contains "$output" "$trivy_v"
-  # and MAINTAINING.md really does document that command
-  run grep -F 'grep -n -E "^local (helm|kustomize|trivy)_v=" tests/iac-tools.zsh' "$REPO_ROOT/MAINTAINING.md"
-  [ "$status" -eq 0 ]
+@test "a renamed install step is refused, and no version constant is left in the script (#1604)" {
+  # the pins live ONLY in the template now. A constant that crept back into the
+  # script would be a second pin a template bump never moves; a renamed step must
+  # read as a refusal, never as a partial pin list
+  local t
+  t="$(tmpl_copy)"
+  yq -i '(.jobs.gate.steps[] | select(.name == "install kubeconform") | .name) = "fetch kubeconform"' "$t"
+  run zsh "$SCRIPT" --template "$t" --print-pins
+  [ "$status" -eq 1 ]
+  contains "$output" "iac-tools: could not read KUBECONFORM_VERSION from $t"
+  lacks "$output" 'helm '
+  run grep -nE '^[[:space:]]*local [a-z_]+_v=[0-9]' "$SCRIPT"
+  [ "$status" -eq 1 ]
 }
 
 @test "--help prints the usage header without resolving anything (#1199)" {

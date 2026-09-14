@@ -1791,6 +1791,11 @@ if [[ "$iac_only" == "true" ]]; then
 		"sonar-project.properties" ".snyk"
 		"infra/sonarqube/docker-compose.yml" "infra/sonarqube/README.md"
 		"infra/github-runner/README.md"
+		# the pre-commit framework config (#1604): this path's hook is a
+		# version-controlled file (hooks/pre-push, wired by `make hooks`), not a
+		# per-machine framework install, so the config is never rendered here and
+		# State-D gap-fill must not be told it is missing.
+		".pre-commit-config.yaml"
 	)
 	# NOTE: the interface-gated common artifacts (acceptance.yml, the how-to
 	# stubs) need no entry here. `iac_only` implies a zero-language repo, so

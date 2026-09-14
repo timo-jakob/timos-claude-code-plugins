@@ -124,9 +124,8 @@ on it. Every verdict below would then be measured with an unpinned binary while
 still looking like a result.
 
 The versions are deliberately **not restated here** — `--print-pins` is the one
-authoritative list (four read from the workflow template, plus helm, kustomize
-and trivy pinned in `iac-tools.zsh`, since the template installs none of them
-directly). All seven matter: the recipe below starts with `helm template` and
+authoritative list, all seven read from the workflow template. All seven matter:
+the recipe below starts with `helm template` and
 `kustomize build`, whose output feeds every verdict it asserts. Note
 `kube-linter` is
 invoked *without* `--config`, exactly as the pipeline invokes it: it

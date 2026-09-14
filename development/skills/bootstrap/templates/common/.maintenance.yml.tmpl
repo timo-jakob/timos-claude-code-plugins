@@ -4,3 +4,8 @@
 # mechanical/lint-level treatment only. See ARCHITECTURE.md "Primary / auxiliary
 # model" in the development plugin family.
 primary: {{PRIMARY}}
+# --- KUBERNETES-START ---
+# The repository's gate COMMAND: what .github/workflows/kubernetes-ci.yml and hooks/pre-push run. A re-run of
+# bootstrap keeps a recorded value and renders it into both.
+gate: {{GATE_COMMAND}}
+# --- KUBERNETES-END ---

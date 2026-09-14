@@ -107,6 +107,18 @@ and additive template content can coexist, and that case is `merge`.
   folding the starter's local `rules:` back beside the pin recreates the N
   drifting copies the shim exists to abolish, and the shim's own header
   ("carries no rules of its own", "never edited locally") forbids the result.
+- **The current file is a PLUGIN-OWNED IaC gate artifact** — a
+  `.github/workflows/kubernetes-ci.yml`, `scripts/k8s-gate.zsh` or `hooks/pre-push`
+  carrying a `# claude-bootstrap: rendered from iac/` provenance marker (#1604).
+  Bootstrap owns and refreshes all three: the script is the mechanism behind the
+  repository's gate command, and the workflow and the hook run that command. A marked
+  copy that differs from the template is a previous shipped version, never the
+  user's work, so recommend `overwrite` (after the diff the orchestrator shows). A
+  marked six-job workflow against the one-job template is the live case, and `merge`
+  is the harmful answer there: it keeps six jobs the local gate never runs. An
+  UNMARKED file at any of these paths is the consumer's own, and the rules below apply. The command a
+  consumer chose lives in `.maintenance.yml`'s `gate:` and is rendered back into
+  the hook, so nothing of theirs is lost.
 
 ### Recommend `merge` when
 
@@ -127,7 +139,14 @@ ANY of the following hold:
   template state.
 - The file is naturally additive — both `.gitignore` and
   `.pre-commit-config.yaml` are extension lists where adding the
-  template's entries doesn't disturb the user's existing entries.
+  template's entries doesn't disturb the user's existing entries. So is the
+  IaC path's `Makefile` (#1604): a conflict is the consumer's own Makefile.
+  Strategy: "append the `lint` and `hooks` targets when absent; touch no other
+  target", both listed in `.PHONY`; and when a `lint` target exists whose recipe
+  does not run `scripts/k8s-gate.zsh`, add that line to its recipe, or `make lint`
+  stays green without running the gate; an existing `hooks` target is left alone,
+  since its recipe may install hooks into `.git/hooks` that `core.hooksPath` bypasses —
+  name `git config core.hooksPath hooks` in the Why line as the manual step instead.
 - Both versions contain non-overlapping but valid content.
 
 For `merge`, also describe the merge strategy in one sentence. Two
@@ -187,8 +206,9 @@ group, sort alphabetically by path.
   user's work. If a REPLACE-CANDIDATE has steps the planned template
   doesn't carry (e.g., distro package installs, custom timeouts),
   recommend `merge` and describe how to fold them in.
-  **One exception: a retired template the new one supersedes** (above). Its
-  extra content is a previous version of OUR artifact, not the user's work, so
-  the lose-their-work reasoning does not apply and `merge` is the harmful
-  answer rather than the safe one.
+  **The exception: a file that is OUR artifact** — a retired template the new
+  one supersedes, or a plugin-owned IaC gate artifact (both above). Its extra
+  content is a previous version of our artifact, not the user's work, so the
+  lose-their-work reasoning does not apply and `merge` is the harmful answer
+  rather than the safe one.
 - Do not request additional context. Work from the prompt alone.

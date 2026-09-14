@@ -93,9 +93,8 @@ here** — `--print-pins` is the one authoritative list.
 
 **At those versions a red is a regression.** On any other version, re-run pinned
 before concluding anything. This recipe
-exercises kube-linter and kyverno (read from the workflow template) plus helm
-(pinned in `iac-tools.zsh`, since the template installs neither helm nor
-kustomize) — the `helm template` below produces everything the other two judge:
+exercises kube-linter, kyverno and helm (all read from the workflow template) —
+the `helm template` below produces everything the other two judge:
 
 ```bash
 set -euo pipefail
