@@ -5,8 +5,10 @@
 # THE RULE, as ARCHITECTURE.md states it: **at most one IaC workflow is rendered
 # per repo**. A repo with an application language takes neither IaC path; a
 # zero-language repo takes at most one — the path whose MARKER it carries; a
-# marker-less repo takes neither; and the dual-marker case must halt (a
-# specification #1162 owns, not current behaviour).
+# marker-less repo takes neither, with ONE named exception (#1605): the explicit
+# empty-GitOps-repo confirmation at bootstrap Q4 puts a marker-less repo on the
+# kubernetes path; and the dual-marker case must halt (a specification #1162
+# owns, not current behaviour).
 #
 # WHY THIS SWEEP EXISTS. The rule is restated in at least six artifacts —
 # `detect-stack.sh`'s `iac_only` derivation, `bootstrap/SKILL.md` (§3l, Step 4b,
@@ -24,8 +26,9 @@
 # WHAT IT PINS, and why that clause. The half a restatement actually gets wrong
 # is the QUALIFIER: the condition is the **marker**, not merely the absence of a
 # language. Drop it and the rule reads "a zero-language repo takes the IaC
-# path", which would put a language-less repo that carries no marker at all onto
-# a path whose six required contexts nothing renders. So: wherever a site states
+# path", which would put a language-less repo that carries no marker at all — and
+# whose owner confirmed nothing at Q4 — onto a path whose required context
+# nothing renders. So: wherever a site states
 # the selection by the absence of a language, it must name the marker in the
 # same statement.
 #
@@ -207,7 +210,7 @@ selection_gaps() {
 
 @test "ARCHITECTURE.md is the one authoritative statement of the IaC selection rule (#1432)" {
   # The site every other one must agree with, held to the rule in FULL — all
-  # four clauses. A restatement sweep is only meaningful if the thing being
+  # four clauses and the one named exception. A restatement sweep is only meaningful if the thing being
   # propagated is itself pinned somewhere.
   # STATEMENT-scoped, like the restatement half of this file and for the same
   # reason: ARCHITECTURE.md is thousands of lines, so four clauses asserted
@@ -230,6 +233,10 @@ selection_gaps() {
   contains "$body" 'at most one IaC workflow is rendered per repo'
   contains "$body" 'a repo with an application language takes neither IaC path'
   contains "$body" 'the condition is the marker, not merely the absence of a language'
+  # …and the ONE exception to it (#1605), inside the same window: stated
+  # elsewhere in ARCHITECTURE.md it would leave this statement reading as an
+  # unconditional marker rule that bootstrap's Q4 confirmation contradicts
+  contains "$body" 'The one exception is the explicit empty-GitOps-repo confirmation at bootstrap Q4'
   # The dual-marker halt — specification, owned by #1162; seed 2 pins how the
   # rule is STATED, never that the halt is implemented. Needled on the FULL
   # clause, not a bare "must halt": that phrase occurs again two paragraphs
@@ -271,10 +278,11 @@ selection_gaps() {
 }
 
 @test "the IaC-selection sweep skips a site that only MENTIONS the flag (#1432)" {
-  # Two roster members reference `--iac-only` without stating the selection
-  # condition: the checker's header (quoting §3l on what its JSON does not
-  # carry) and the how-to (naming the flag that requires the six contexts).
-  # They are correctly outside the gate, and pinned as their own case so a gate
+  # Roster members that reference `--iac-only` without stating the selection
+  # condition — among them the checker's header (quoting §3l on what its JSON
+  # does not carry), the how-to (naming the flag that requires the six contexts)
+  # and, since #1605, preflight.sh (choosing its tool list by the flag) — are
+  # correctly outside the gate. The first two are pinned as their own case so a gate
   # that widened to every roster member reds here rather than forcing a
   # restatement into a site whose job is not to carry one.
   local a="$REPO_ROOT/development/skills/bootstrap/templates/common/scripts/check-no-cluster-deploy.zsh"
@@ -316,17 +324,17 @@ selection_gaps() {
 
 @test "ROSTER TRIPWIRE: MAINTAINING.md records this invariant's derived site count (#1432)" {
   # A derived sweep answers *do the sites I found agree?* but never *did a site
-  # appear or vanish?* — a seventh restatement could land tomorrow, carry the
-  # clause, and pass in silence, with nobody told the rule now moves seven
-  # files. So the count is written down in the pattern's own table, and this
+  # appear or vanish?* — one more restatement could land tomorrow, carry the
+  # clause, and pass in silence, with nobody told the rule now moves one more
+  # file. So the count is written down in the pattern's own table, and this
   # ties the written figure to the derivation. Adding or removing a restatement
   # reds here until MAINTAINING.md is updated in the same PR.
   local table row f n gated statements
   local -a sites=()
   table="$(sed -n '/^| Invariant | Authoritative site |/,/^$/p' "$REPO_ROOT/MAINTAINING.md")"
   [ -n "$table" ]
-  # Read the ROW, not the whole table: both invariants in force today happen to
-  # sweep six files, so a table-wide needle would be satisfied by the sibling
+  # Read the ROW, not the whole table: the sibling row's figure can equal this
+  # one's, so a table-wide needle would be satisfied by the sibling
   # row and this tripwire would pass with its own figure deleted. `awk` rather
   # than `grep`, which exits 1 on no match and would abort before `[ -n "$row" ]`
   # could report the deleted row.
@@ -337,7 +345,7 @@ selection_gaps() {
   done < <(selection_sites)
   n="${#sites[@]}"
   gated="$(selection_gated "${sites[@]}" | awk 'END{print NR}')"
-  # The STATEMENT count, which the two file counts cannot see: a seventh
+  # The STATEMENT count, which the two file counts cannot see: one more
   # selection statement added inside a file already on the roster moves neither
   # `n` nor `gated`. The pattern's own rule is to record every figure that
   # moves independently, and this is the third.
@@ -348,10 +356,10 @@ selection_gaps() {
   # THREE figures, because all three move independently: a new file naming the
   # flag grows the roster, a new file that also states the selection grows the
   # gated set, and a new statement in an existing file grows only the last.
-  [ "$n" -eq 6 ]
+  [ "$n" -eq 7 ]
   [ "$gated" -eq 4 ]
   [ "$statements" -eq 8 ]
-  matches "$row" '(^|[^0-9])6 roster files'
+  matches "$row" '(^|[^0-9])7 roster files'
   matches "$row" '(^|[^0-9])4 stating the selection'
   matches "$row" '(^|[^0-9])8 selection statements'
   # …and the sweep that enforces it is named IN THE ROW, so a reader of the

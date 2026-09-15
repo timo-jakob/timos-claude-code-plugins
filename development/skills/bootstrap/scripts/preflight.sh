@@ -7,7 +7,15 @@
 #                --languages "swift javascript python go" \
 #                --has-dockerfile true|false \
 #                [--has-ko true|false] \
+#                [--iac-only true|false] \
 #                [--assume-yes]
+#
+#   --iac-only true   the §3l IaC path (#1605): require `gh jq git` plus the
+#                     gate's toolchain (iac_brews below) and no other brew
+#                     formula — no pre-commit, gitleaks, semgrep, sonar-scanner
+#                     or snyk-cli — and skip the Docker-daemon check, none of
+#                     which that path uses. Default false; any other value is
+#                     rejected.
 #
 # Exits 0 if all required tools are present (or installed during this run).
 # Exits non-zero if a required tool is missing and could not be installed.
@@ -24,6 +32,7 @@ LANGUAGES=""
 HAS_DOCKERFILE="false"
 ASSUME_YES="false"
 CLAUDE_APPROVER="false"
+IAC_ONLY="false"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -54,57 +63,73 @@ while [[ $# -gt 0 ]]; do
 		CLAUDE_APPROVER="$2"
 		shift 2
 		;;
+	--iac-only)
+		[[ $# -ge 2 ]] || die "--iac-only must be true or false"
+		IAC_ONLY="$2"
+		shift 2
+		;;
 	*) die "Unknown argument: $1" ;;
 	esac
 done
 
 [[ "$VISIBILITY" =~ ^(public|private)$ ]] || die "--visibility must be public or private"
+[[ "$IAC_ONLY" =~ ^(true|false)$ ]] || die "--iac-only must be true or false"
 
 # --- preconditions ------------------------------------------------------------
 require_macos
 require_brew
 
 # --- assemble required formulas ----------------------------------------------
-# Always required
-required_brews=(
-	"gh"            # GitHub CLI — auth, secrets, branch protection, runner token
-	"jq"            # JSON parsing in scripts
-	"git"           # already there on macOS, but pin it
-	"pre-commit"    # hook framework
-	"gitleaks"      # secret scanning
-	"semgrep"       # cross-language SAST
-	"sonar-scanner" # Sonar CLI
-)
+# The IaC gate's toolchain (#1605): the tools the bootstrapped scripts/k8s-gate.zsh
+# refuses to run without (its `require_tool` block), plus the standalone
+# `kustomize` renderer it prefers over `kubectl kustomize`. Exactly the seven tools
+# kubernetes-ci.yml pins; Homebrew cannot pin, so locally they are brew-current.
+iac_brews=(helm kustomize kubeconform kube-linter kyverno trivy yq)
 
-# Path-specific
-case "$VISIBILITY" in
-public)
-	required_brews+=("snyk-cli") # provides the `snyk` binary
-	;;
-private)
-	required_brews+=("trivy")
-	;;
-esac
+if [[ "$IAC_ONLY" == "true" ]]; then
+	required_brews=("gh" "jq" "git" "${iac_brews[@]}")
+else
+	# Always required
+	required_brews=(
+		"gh"            # GitHub CLI — auth, secrets, branch protection, runner token
+		"jq"            # JSON parsing in scripts
+		"git"           # already there on macOS, but pin it
+		"pre-commit"    # hook framework
+		"gitleaks"      # secret scanning
+		"semgrep"       # cross-language SAST
+		"sonar-scanner" # Sonar CLI
+	)
 
-# Language-specific
-for lang in $LANGUAGES; do
-	case "$lang" in
-	swift) required_brews+=("swiftlint" "swiftformat") ;;
-	python) required_brews+=("ruff") ;;
-	go) required_brews+=("golangci-lint") ;;
-	javascript) : ;; # eslint is per-project via npm
+	# Path-specific
+	case "$VISIBILITY" in
+	public)
+		required_brews+=("snyk-cli") # provides the `snyk` binary
+		;;
+	private)
+		required_brews+=("trivy")
+		;;
 	esac
-done
 
-# Claude-plugin repos run the bats review-loop gate (run-gate.zsh, #980), which
-# parallelises the suite via bats' GNU-parallel `--jobs` backend. Offer `parallel`
-# so the gate isn't stuck in loud DEGRADED (sequential) mode. There is no
-# "claude-plugin" language token, so key off the .claude-plugin marker in the
-# repo being bootstrapped — the same signal detect-stack.sh's is_claude_plugin
-# uses (cwd is the target repo root).
-if [[ -e ".claude-plugin/marketplace.json" ]] ||
-	[[ -n "$(find . -path '*/.claude-plugin/plugin.json' -not -path '*/.git/*' 2>/dev/null | head -n1)" ]]; then
-	required_brews+=("parallel")
+	# Language-specific
+	for lang in $LANGUAGES; do
+		case "$lang" in
+		swift) required_brews+=("swiftlint" "swiftformat") ;;
+		python) required_brews+=("ruff") ;;
+		go) required_brews+=("golangci-lint") ;;
+		javascript) : ;; # eslint is per-project via npm
+		esac
+	done
+
+	# Claude-plugin repos run the bats review-loop gate (run-gate.zsh, #980), which
+	# parallelises the suite via bats' GNU-parallel `--jobs` backend. Offer `parallel`
+	# so the gate isn't stuck in loud DEGRADED (sequential) mode. There is no
+	# "claude-plugin" language token, so key off the .claude-plugin marker in the
+	# repo being bootstrapped — the same signal detect-stack.sh's is_claude_plugin
+	# uses (cwd is the target repo root).
+	if [[ -e ".claude-plugin/marketplace.json" ]] ||
+		[[ -n "$(find . -path '*/.claude-plugin/plugin.json' -not -path '*/.git/*' 2>/dev/null | head -n1)" ]]; then
+		required_brews+=("parallel")
+	fi
 fi
 
 # Casks: Docker is handled separately via check_docker (three-way detection
@@ -135,6 +160,20 @@ for pkg in "${required_brews[@]}"; do
 		else
 			warn "parallel — missing (GNU parallel required; a non-GNU 'parallel' such as moreutils does not satisfy bats --jobs; if you have moreutils, 'brew unlink moreutils' before installing, or install parallel in its own step)"
 			missing_brews+=("parallel")
+		fi
+		continue
+	fi
+	# yq needs mikefarah's v4 specifically: the bootstrapped scripts/k8s-gate.zsh
+	# refuses anything else, and kislyuk's python-yq installs a `yq` too, so a bare
+	# `command -v` would pass a binary the gate then rejects (#1637). Same two
+	# spellings the gate accepts.
+	if [[ "$pkg" == "yq" ]]; then
+		yq_version="$(yq --version 2>/dev/null || true)"
+		if [[ "$yq_version" == *[Mm]ikefarah* || "$yq_version" == "yq version 4."* ]]; then
+			ok "yq (mikefarah v4)"
+		else
+			warn "yq — missing (mikefarah v4 required; a yq that is not mikefarah's v4 does not satisfy scripts/k8s-gate.zsh; if Homebrew's python-yq is installed, 'brew unlink python-yq' before installing)"
+			missing_brews+=("yq")
 		fi
 		continue
 	fi
@@ -195,6 +234,20 @@ if [[ ${#missing_brews[@]} -gt 0 || ${#missing_casks[@]} -gt 0 ]]; then
 			done
 		fi
 		ok "Installed missing packages"
+		# brew installing the yq formula does not change which `yq` PATH finds: a
+		# python-yq earlier on PATH, or an unlinked formula, still fails the gate (#1637).
+		# Each `$(yq --version)` looks `yq` up afresh in its own subshell, so the
+		# re-check sees a yq the install put earlier on PATH.
+		if [[ " ${missing_brews[*]} " == *" yq "* ]]; then
+			yq_version="$(yq --version 2>/dev/null || true)"
+			[[ "$yq_version" == *[Mm]ikefarah* || "$yq_version" == "yq version 4."* ]] ||
+				die "yq on PATH ($(command -v yq || echo none)) is still not mikefarah's v4 after install — run 'brew link yq' and remove the other yq (or move it after $(brew --prefix)/bin on PATH), then re-run preflight."
+		fi
+		# the same for GNU parallel: a moreutils `parallel` still first on PATH breaks bats --jobs
+		if [[ " ${missing_brews[*]} " == *" parallel "* ]]; then
+			parallel --version </dev/null 2>/dev/null | grep -i 'GNU parallel' >/dev/null ||
+				die "parallel on PATH ($(command -v parallel || echo none)) is still not GNU parallel after install — run 'brew unlink moreutils' and 'brew link parallel', then re-run preflight."
+		fi
 	else
 		die "Required packages not installed. Re-run preflight after installing manually."
 	fi
@@ -214,7 +267,8 @@ fi
 
 # --- docker (private path or any project with a Dockerfile) ------------------
 needs_docker="false"
-if [[ "$VISIBILITY" == "private" || "$HAS_DOCKERFILE" == "true" ]]; then
+# never on the IaC path: its Docker consumers (image, Trivy image, SonarQube) are never emitted there
+if [[ "$IAC_ONLY" != "true" ]] && [[ "$VISIBILITY" == "private" || "$HAS_DOCKERFILE" == "true" ]]; then
 	needs_docker="true"
 fi
 

@@ -552,9 +552,8 @@ without the flag.
 > **Infrastructure (GitOps) repositories: this section does not apply.** If
 > `.maintenance.yml` records `primary: kubernetes`, bootstrap installs neither
 > half of this gate and `branch-protection.sh --iac-only true` never requires
-> the context — your checks are `kubernetes-ci.yml`'s six (`render`, `schema`,
-> `lint`, `policy`, `config-scan`, `argocd`) instead. Writing to a cluster is
-> what an infrastructure repository is *for*.
+> the context — your required check is `kubernetes-ci.yml`'s single `gate`
+> instead. Writing to a cluster is what an infrastructure repository is *for*.
 
 **Nothing for you to do — this is what the check means when it fires.**
 
@@ -625,8 +624,8 @@ deliberate re-decision, which is not the same as a standing escape hatch.
 
 **Infrastructure repositories are exempt as a whole.** The checker exits 0 when
 `.maintenance.yml` records `primary: kubernetes` — an infrastructure repository
-is the one place a cluster write belongs, and its own checks are
-`kubernetes-ci.yml`'s six jobs instead. A repository that carries Kubernetes
+is the one place a cluster write belongs, and its own required check is
+`kubernetes-ci.yml`'s `gate` job instead. A repository that carries Kubernetes
 manifests **and** records a language primary is an application repository, and
 is checked.
 
@@ -708,7 +707,7 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
   - **PUBLIC**: `test-and-coverage`, `sonarcloud`, `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, `analyze (<language>)` (one per CodeQL language), `image` (only if a Dockerfile is present)
   - **PRIVATE**: `test-and-coverage`, `sonarqube`, `trivy-fs`, `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, `image` (only if a Dockerfile is present)
   - **`no-cluster-deploy` (§3h)** is required on both application paths **when BOTH `.github/workflows/no-cluster-deploy.yml` and `scripts/check-no-cluster-deploy.zsh` are on disk** (absent, the script warns and omits the context, exactly as it does for `image`/`ko-image.yml`, so a repo predating the gate is never wedged at `expected`). Unlike `image`, it carries **no path filter at all** — a required check whose workflow a `paths:` filter skipped sits at `expected` forever and wedges every PR that misses those paths. It is a static scan of `.github/workflows/**`, so running it unconditionally costs seconds. It is **not** in the IaC set below: an infrastructure repo is the one place a cluster write belongs.
-  - **IaC** (the kubernetes topic marker with no application language and no other `primary:` recorded in `.maintenance.yml` — `branch-protection.sh --iac-only true`): `render`, `schema`, `lint`, `policy`, `config-scan`, `argocd`. This set **replaces** the two above rather than adding to them: that path emits no `quality-*.yml`, so every language-app context would sit at `expected` forever and block each PR. The six come from `.github/workflows/kubernetes-ci.yml`, and each validates the **rendered** manifests rather than the templates.
+  - **IaC** (the kubernetes topic marker — or bootstrap's explicit empty-GitOps-repo confirmation — with no application language and no other `primary:` recorded in `.maintenance.yml` — `branch-protection.sh --iac-only true`): `gate`. This single context **replaces** the two above rather than adding to them: that path emits no `quality-*.yml`, so every language-app context would sit at `expected` forever and block each PR. It comes from `.github/workflows/kubernetes-ci.yml`'s one job, which runs the repo's gate command (`make lint` → `scripts/k8s-gate.zsh`, whose stages validate the **rendered** manifests rather than the templates).
   - **`image` is path-conditional (#386):** keep it required, but the job only runs the container build+scan when the PR touches container files (`Dockerfile*`, `.dockerignore`, compose files, the scanner policy `.snyk`/`trivy.yaml`). On an app/dependency PR that touches none of those, the `image` job ends green *without* scanning — so a pre-existing base-image CVE the change can't influence never blocks it ("working on the app → app checks, working on the image → container checks"). A PR that does touch container files gets the full scan gate. Non-PR events (push to the default branch, release, weekly schedule) always scan + publish.
   - **Not required:** `push-and-sign` (the GHCR publish job) runs only on push/release events — it never produces a PR check, so it is never in the required list. Snyk's `security/snyk` (Open Source) is an **advisory** PR check, not a workflow job — leave it unchecked here (matching `branch-protection.sh`, which never adds it). `code/snyk` (Snyk Code) is **disabled** per §2.5 (CodeQL covers SAST), so it isn't produced at all; if you leave it on, it's advisory too and the Approver excludes it from its green gate (#387). `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).
 - [x] Require branches to be up to date before merging
