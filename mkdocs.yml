@@ -119,6 +119,7 @@ nav:
       - The local review loop: explanation/review-loop.md
       - Pipeline telemetry: explanation/pipeline-telemetry.md
       - The Grafana hand-off: explanation/telemetry-grafana-handoff.md
+      - Philosophy: explanation/philosophy.md
   - Architecture:
       - architecture/index.md
       - System Context: architecture/c4-context.md
