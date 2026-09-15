@@ -24,3 +24,5 @@ behind the plugins. Read these to understand *why* things are the way they are.
 - [The Grafana hand-off](telemetry-grafana-handoff.md) — why the reporting stack
   lives in another repo, why the telemetry envelope is closed, and why the
   hand-off is a committed artifact rather than a conversation.
+- [Philosophy](philosophy.md) — the six pillars the family is designed around,
+  what enforces each one today, and the epic that closes each remaining gap.
