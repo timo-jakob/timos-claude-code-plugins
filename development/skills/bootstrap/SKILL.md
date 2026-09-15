@@ -290,13 +290,13 @@ flow. Stop and ask for input wherever marked; do not guess.
    > ask Q4 (IaC wording) **first**, and
    > render it only on the confirmed "none" answer; a language answer drops it
    > from the gap-fill. Rendering it blind would commit the §3l shape — the
-   > workflow, `primary: kubernetes`, and six required contexts — to a repo the
+   > workflow, `primary: kubernetes`, and the required `gate` context — to a repo the
    > user would have declared a language repo.
    >
    > **Resolve the IaC condition before invoking `branch-protection.sh` in any
    > of the three bullets below** (#1154). The condition is:
-   > the repo carries the **kubernetes topic marker**, so
-   > `kubernetes-ci.yml` is present **AND**
+   > the repo carries the **kubernetes topic marker** (or, marker-less, its Q4
+   > empty-repo confirmation was accepted — §3l), so `kubernetes-ci.yml` is present **AND**
    > the **resolved** language set is empty **AND**
    > no other `primary:` is recorded — matching `detect-stack.sh`'s
    > `case` and §3l: any other recorded primary settles it the other way, and
@@ -306,17 +306,16 @@ flow. Stop and ask for input wherever marked; do not guess.
    > ask Q4 (IaC wording) BEFORE invoking the script — exactly as the
    > render half two paragraphs above already does. This tree is ordered, and
    > step 3 runs before Q4 is asked in step 6: keying on merely-*detected*
-   > languages would PUT the six IaC contexts, then let the user name a
+   > languages would PUT the IaC `gate` context, then let the user name a
    > language, leaving a language repo whose protection rule requires only the
    > IaC set and none of its own. A language answer settles `--iac-only false` —
    > invoke the script with the language-app context set for that repo.
    >
    > **Only when the three-part IaC condition above holds** (workflow present
    > AND resolved language set empty AND no other `primary:` recorded)
-   > invoke `branch-protection.sh` with **`--iac-only true`**, and its context comparison set is the six
-   > `kubernetes-ci.yml` jobs (`render`, `schema`, `lint`, `policy`,
-   > `config-scan`, `argocd`), never the language-app set. The PUT *replaces*
-   > the rule, so getting this wrong swaps six live contexts for contexts no
+   > invoke `branch-protection.sh` with **`--iac-only true`**, and its context comparison set is the
+   > single `gate` context `kubernetes-ci.yml` reports, never the language-app set. The PUT *replaces*
+   > the rule, so getting this wrong swaps the live `gate` context for contexts no
    > workflow on that repo reports — pinning every PR on the permanent
    > `expected` state §3l exists to prevent.
    >
@@ -431,9 +430,18 @@ flow. Stop and ask for input wherever marked; do not guess.
    append `gate: <the value you passed to --gate-command>` when the key is
    absent, and leave a present value alone.
    Rendering them blind commits the whole §3l shape — the workflow,
-   `primary: kubernetes`, and six required contexts — to a repo the user would
+   `primary: kubernetes`, and the required `gate` context — to a repo the user would
    have called a language repo. Only the confirmed "none" answer settles it;
    a recorded `primary: kubernetes` does not settle it on its own (#1193).
+   A marker-less repo with no detected language never lists these files —
+   `detect-stack.sh` proposes the IaC set only on the marker — and lists §3l's
+   not-emitted artifacts instead. So when `is_kubernetes` is `false` and
+   `languages` is empty, ask Q4 and its empty-repo confirmation **here, before
+   rendering anything** from `missing_artifacts`: on a confirmed "none", drop every
+   §3l not-emitted artifact from the list, render the IaC set, and then take step
+   3's `github_state` gap-fill with `--iac-only true`, which the drops have made
+   reachable; on a language answer, render the list as usual; on a declined
+   confirmation, render nothing and halt as Q4 directs.
 
    **The ops-major migration (#1330) is the fourth not-blind set.** When
    `contracts/ops/v1/openapi.yaml` **exists on disk** and `missing_artifacts`
@@ -600,7 +608,7 @@ wording so behavior stays consistent:
 | **Q1: Create GitHub repo now?** | State A, or State B without a GitHub remote | "Do you want me to create a GitHub repo for this and connect it as `origin` now?" | If yes → Q2 + Q3 + run `gh repo create <name> --<vis> --source=. --remote=origin`. If no → Q3 only. |
 | **Q2: Repo name** | Only if Q1=yes | "What should the GitHub repo be named? (default: `<current-directory-name>`)" | Used in `gh repo create`. |
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the toolchain path — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the path for the rest of the skill. |
-| **Q4: Languages** | Whenever detected `languages=[]` — with the IaC wording when `is_kubernetes=true`. A recorded `primary: kubernetes` does **not** skip it — the record can veto this path but never grant it (§3l; the mixed repo is #1193) | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)". When `is_kubernetes=true`, offer **"none — this is a GitOps/IaC repo"** as a first-class answer: "This looks like an infrastructure-as-code repo (charts / overlays / Argo CD resources) with no application language. Bootstrap it as one, or will it also hold application code?" | Selects per-language fragments and CodeQL matrix. **"None" is a valid answer for an IaC repo** — it takes §3l, not a halt: the manifest checks stand on their own, so a language is never a precondition for bootstrapping. **"None" with `is_kubernetes=false`** is *not*: explain that only a repo carrying the kubernetes topic marker can bootstrap language-free, ask the user to add the missing marker artifact or name a language, and stop if they decline. The answer resolves the language set the rest of the skill reads — §3l and `{{PRIMARY}}` branch (2) key on the RESOLVED set, so a language named here makes this a language repo however empty detection was. |
+| **Q4: Languages** | Whenever detected `languages=[]` — with the IaC wording when `is_kubernetes=true`. A recorded `primary: kubernetes` does **not** skip it — the record can veto this path but never grant it (§3l; the mixed repo is #1193) | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)". When `is_kubernetes=true`, offer **"none — this is a GitOps/IaC repo"** as a first-class answer: "This looks like an infrastructure-as-code repo (charts / overlays / Argo CD resources) with no application language. Bootstrap it as one, or will it also hold application code?" | Selects per-language fragments and CodeQL matrix. **"None" is a valid answer for an IaC repo** — it takes §3l, not a halt: the manifest checks stand on their own, so a language is never a precondition for bootstrapping. **"None" with `is_kubernetes=false`** asks the **empty-repo confirmation** instead of halting: "There is no chart, kustomization or Argo CD resource here yet. Bootstrap this as an empty GitOps/IaC repository anyway — one required `gate` check, the `make lint` pre-push hook, and `primary: kubernetes`?" Three outcomes: **confirmed** → §3l, and `primary: kubernetes` is written; **declined** → halt: ask the user to add a marker artifact or name a language, and stop; **another `primary:` already recorded** in `.maintenance.yml` → §3l's conflict branch — the confirmation is never granted over a recorded primary. Nothing records the confirmation, so until a marker exists every re-run asks Q4 and the confirmation again (§3l, #1193). The answer resolves the language set the rest of the skill reads — §3l and `{{PRIMARY}}` branch (2) key on the RESOLVED set, so a language named here makes this a language repo however empty detection was. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
 
@@ -612,9 +620,10 @@ You now have, with certainty:
 - A visibility (`public` or `private`).
 - Optionally, a GitHub remote (created or pre-existing).
 - A **resolved** languages list — detected, or declared by the user in Q4. It is
-  non-empty **except** on the IaC path: `is_kubernetes=true`, the user answered
-  Q4 with "none — this is a GitOps/IaC repo", **and `.maintenance.yml` records
-  no other `primary:`**. There an empty list is
+  non-empty **except** on the IaC path: `is_kubernetes=true` and the user answered
+  Q4 with "none — this is a GitOps/IaC repo" — or `is_kubernetes=false`, the user
+  answered "none" and confirmed Q4's empty-repo question — **and
+  `.maintenance.yml` records no other `primary:`**. There an empty list is
   the answer, not a missing value, and the run continues into §3l. With a
   conflicting recorded primary the run goes to §3l's conflict branch instead,
   which settles it — the empty list is not settled here.
@@ -679,13 +688,19 @@ delivered:
 ```text
   Docker scanning:  no — the image scan + push-and-sign jobs live in
                     quality-*.yml, which this path does not emit
-  CI runner:        github-hosted — kubernetes-ci.yml's six jobs all run on
+  CI runner:        github-hosted — kubernetes-ci.yml's one `gate` job runs on
                     ubuntu-latest, so no self-hosted runner is provisioned even
                     when visibility is private
-  CI gate:          .github/workflows/kubernetes-ci.yml — render, schema, lint,
-                    policy, config-scan, argocd (all six required on <branch>)
-  Setup automation: preflight only — verifies and batch-installs local tools
-                    (gh, jq, pre-commit; the batch may include unused scanners).
+  CI gate:          .github/workflows/kubernetes-ci.yml — one job, `gate`
+                    (required on <branch>), running the gate command
+                    (make lint → scripts/k8s-gate.zsh: render, schema, lint,
+                    policy, config-scan, argocd)
+  Local hook:       hooks/pre-push runs the same command once `make hooks` has
+                    wired it (Step 4a, when the gate already passes; else the
+                    final report names `make hooks`)
+  Setup automation: preflight only (--iac-only true) — verifies and
+                    batch-installs gh, jq, git and the gate's tools (helm,
+                    kustomize, kubeconform, kube-linter, kyverno, trivy, yq).
                     The Sonar / Snyk / runner automation is skipped: nothing on
                     this path consumes it.
 ```
@@ -708,7 +723,7 @@ runs the local approver and merges in-session (Step 4f) rather than waiting. It
 does **not** waive the per-action prompts elsewhere: the Step 4c build-file
 confirmations (Java's `build.gradle.kts` edit and Groovy→Kotlin offer, and
 Python's `pyproject.toml`/`requirements-dev.txt` pytest-cov edit), the Step 4e
-writer-App install offer, and 4a's `brew install pre-commit` still apply — "no
+writer-App install offer, and 4a's `brew install pre-commit` (language paths only) still apply — "no
 further prompt" scopes to the finish, not to those (see the Step 4 intro for the
 authoritative retained set). The Step
 4.5 setup automation, by contrast, **is** covered by this approval: it runs by
@@ -789,8 +804,8 @@ Inputs to each agent are provided **in the agent's prompt**, not on disk
 - Consistency reviewer: full text of `sonar-project.properties`, the planned
   workflow file, `SETUP.md`, and the `checks` array `branch-protection.sh`
   would use given current detection results. **On the §3l IaC path there is no
-  `sonar-project.properties`** — pass `kubernetes-ci.yml` and the six-context
-  `--iac-only` checks array instead, and tell the reviewer the Sonar
+  `sonar-project.properties`** — pass `kubernetes-ci.yml` and the `--iac-only`
+  checks array (the single `gate` context) instead, and tell the reviewer the Sonar
   cross-references are intentionally absent, or it reports a plan that is
   correct by design as an inconsistency and returns `BLOCK`.
 - Idempotency reviewer: for each entry in `existing_artifacts` from
@@ -866,7 +881,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated **resolved** languages; **empty on the §3l IaC path** (`--languages ""`) |
-| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, `is_kubernetes` is `true` **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → `kubernetes` (the IaC/GitOps repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
+| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, `is_kubernetes` is `true` (or the user confirmed Q4's empty-repo question) **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → `kubernetes` (the IaC/GitOps repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
 | `{{GATE_COMMAND}}` | the repo's gate **command** on the §3l IaC path (#1604) — rendered into `.github/workflows/kubernetes-ci.yml`'s last step, `hooks/pre-push` and `.maintenance.yml`'s `gate:` line. Resolve it as the **recorded** `gate:` value when `.maintenance.yml` already carries one, else `make lint`. Read it with `yq -r .gate`; an absent key, `null` or a blank value is **not** a recorded value. Pass it via `render.zsh --gate-command` (its default is `make lint`; an explicit empty value is refused). |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`language_meta.python.version`) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
@@ -1391,8 +1406,8 @@ on:
 **Exception — the §3l IaC workflow.** `kubernetes-ci.yml` is `on: pull_request`
 only: no branch filter, no `paths-ignore`, no `push`/`schedule`/`release`. It
 feeds no Sonar baseline and scans no dependency database, so those triggers have
-no consumer there — and its six jobs are *required contexts* with no `-noop`
-companion, so a `paths-ignore` would leave every doc-only PR pinned at
+no consumer there — and its one job, `gate`, is a *required context* with no
+`-noop` companion, so a `paths-ignore` would leave every doc-only PR pinned at
 `expected` forever. Do not "normalise" it to the shape above.
 
 ### Pre-commit CI backstop
@@ -3633,6 +3648,22 @@ Q4, so a repo whose languages the detector missed and the user named in Q4 is a
 language repo, not this path. The user confirmed "none — this is a GitOps/IaC
 repo".
 
+**The confirmed empty repo — the one exception to the marker (Q4).** This path
+also applies when `is_kubernetes` is `false` but the user answered Q4 "none" and
+then confirmed Q4's empty-repo question, provided `.maintenance.yml` records no
+other `primary:` — a recorded one takes the conflict branch below, and the
+confirmation is never granted over it. `detect-stack.sh` is unchanged and knows
+nothing of the confirmation: it still reports `is_kubernetes: false`, so it
+proposes none of this path's artifacts. On a confirmed repo **the skill renders
+the IaC set itself** — the gate artifacts under *What this path emits* below —
+and **leaves out every row of the not-emitted table below** — on a marker-less
+repo `detect-stack.sh` holds none of them out, so `quality-*.yml`, `codeql.yml`,
+`.pre-commit-config.yaml`, `scripts/check-no-cluster-deploy.zsh` and
+`.github/workflows/no-cluster-deploy.yml` can all reach `missing_artifacts`
+(State D step 4). The confirmation grants nothing beyond
+this run — a recorded `primary: kubernetes` still never grants the path (#1193) —
+so **until a marker exists, every re-run asks Q4 and the confirmation again**.
+
 `detect-stack.sh` applies the same condition **internally**, on the pre-Q4
 signal: the marker, no *detected* language, and the **same** recorded-primary
 veto — only *detected* vs *resolved* differs. It is what puts `.github/workflows/kubernetes-ci.yml` in the candidate set
@@ -3681,13 +3712,15 @@ recorded primary on its own. **Both answers have a defined outcome:**
 
 **On this path** — and only here, never on the conflict path just described —
 emit `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` as
-`.github/workflows/kubernetes-ci.yml` and write `primary: kubernetes` into
+`.github/workflows/kubernetes-ci.yml`, `templates/iac/scripts/k8s-gate.zsh.tmpl` as
+`scripts/k8s-gate.zsh`, `templates/iac/hooks/pre-push.tmpl` as `hooks/pre-push`
+and `templates/iac/Makefile.tmpl` as `Makefile`, and write `primary: kubernetes` into
 `.maintenance.yml` (branch (2) of the `{{PRIMARY}}` table in Step 3 above).
 
 Do **not** require an application language before bootstrapping. A repo of
 charts and manifests has plenty to validate — rendering always produces
 something to check, which is why this works before the first service exists.
-It is also why the workflow's first job is `render`: every job after it
+It is also why the gate's first stage is `render`: every stage after it
 consumes the **rendered** artifact, not the templates, so a chart that lints
 clean but renders an invalid manifest fails.
 
@@ -3695,14 +3728,21 @@ The template carries one `{{UPPERCASE}}` placeholder, `{{GATE_COMMAND}}` (#1604)
 render it with `render.zsh --gate-command` resolved per the Step 3 placeholder
 table, never as a static copy.
 
-**Six separately requirable checks** — `render`, `schema`, `lint`, `policy`,
-`config-scan`, `argocd`. Producing checks a repo can *require* is the whole
-point of this path: branch protection on a GitOps repo could previously demand
-a review but nothing that builds.
+**One requirable check — `gate`.** `kubernetes-ci.yml` is a single job, `gate`,
+that runs the repo's gate command (`make lint` unless `.maintenance.yml` records
+another), which runs `scripts/k8s-gate.zsh`'s six stages — render, schema, lint,
+policy, config-scan, argocd. `hooks/pre-push` runs the same command locally.
+Producing a check a repo can *require* is the whole point of this path: branch
+protection on a GitOps repo could previously demand a review but nothing that
+builds.
+
+**Local tools are Homebrew-current; CI and the harness run the pins.** Step 4.5's
+preflight installs the gate's tools with `brew install`, which cannot pin a
+version, so a developer's `make lint` runs whatever Homebrew ships today, while
+`kubernetes-ci.yml` and the plugin's fixture harness run the pinned versions.
 
 **The language set is empty, so every language-conditioned section is inert
-here by construction** — the per-language `.pre-commit-config.yaml` hook blocks,
-the §3d toolchain fragments, the Python `pytest-cov` recommendation, the Java
+here by construction** — the §3d toolchain fragments, the Python `pytest-cov` recommendation, the Java
 build-system gate, and Step 4c all key on a detected language, and this path has
 none. That equivalence is exactly what the mixed repo would break, which is why
 [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193)
@@ -3711,8 +3751,9 @@ misfire, and closing them needs the rule stated once across every consumer
 rather than a note per site.
 
 **What this path emits, exactly** — an enumeration, not a rule to apply. The
-§3a common artifacts **minus the rows in the table below**, plus
-`.github/workflows/kubernetes-ci.yml`, plus the §3h
+§3a common artifacts **minus the rows in the table below**, plus the gate
+artifacts — `.github/workflows/kubernetes-ci.yml`, `scripts/k8s-gate.zsh`,
+`hooks/pre-push` and `Makefile` — plus the §3h
 end-user docs machinery (a GitOps repo has users and runbooks like any other,
 and §3h's set is language-neutral — its `surface: none` shape is exactly this
 case). From §3b/§3c it emits **only** the language-agnostic supply-chain pieces
@@ -3724,20 +3765,26 @@ case). From §3b/§3c it emits **only** the language-agnostic supply-chain piece
 | `codeql.yml` **and `codeql-noop.yml`** | CodeQL has no language to analyse; the `-noop` companion exists to mirror `analyze (<lang>)` contexts that do not exist here, and its `{{CODEQL_LANGUAGES}}` placeholder cannot resolve on a zero-language repo, so `render.zsh`'s leftover check would hard-fail the render |
 | `sonar-project.properties`, `.snyk` | No Sonar analysis and no dependency manifest to scan |
 | `infra/sonarqube/**`, `infra/github-runner/README.md` (private path) | Scaffolding for a Sonar scan and a self-hosted runner this path never generates or uses |
-| the §3d per-language fragments (`.nvmrc`, `eslint.config.js`, `ruff.toml`, `release.yml`, the `gitignore` fragments …) and `.pre-commit-config.yaml`'s per-language hook blocks | There is no detected language to configure — both sets are keyed on one, so they are inert here rather than suppressed. `detect-stack.sh` holds the fragments out of `missing_artifacts` on the same condition, so a State-D gap-fill cannot re-create them |
+| the §3d per-language fragments (`.nvmrc`, `eslint.config.js`, `ruff.toml`, `release.yml`, the `gitignore` fragments …) | There is no detected language to configure — the set is keyed on one, so it is inert here rather than suppressed. `detect-stack.sh` holds the fragments out of `missing_artifacts` on the same condition, so a State-D gap-fill cannot re-create them |
+| `.pre-commit-config.yaml` — the whole file, not only its per-language hook blocks | This path's local hook is the version-controlled `hooks/pre-push`, which runs the same gate command CI's `gate` job runs; the file's CI backstop lives in `quality-*.yml`, which this path does not emit either. `detect-stack.sh` holds it out of `missing_artifacts` on this path (§3a) |
 | `scripts/check-no-cluster-deploy.zsh` **and `.github/workflows/no-cluster-deploy.yml`** (#1206) | The gate exists to keep an APPLICATION repo out of the cluster; an infrastructure repo is the one place a cluster write belongs, so requiring it here would fail the repo for doing its job. `detect-stack.sh` holds **both** halves out of `missing_artifacts` on this path — never one without the other, since the workflow runs the script — and `branch-protection.sh --iac-only true` never adds the context |
-| `SETUP.md`'s §3h section, **and the `no-cluster-deploy` bullets in `CLAUDE.md` and `CONTRIBUTING.md`** (the direct-to-cluster rule) | All three scaffolds ARE emitted here, but each describes an installed, required gate this path does not install — and `CLAUDE.md`'s bullet actively tells the repo's agent never to write to a cluster, which is what a GitOps repo exists to do. Drop all three (`SETUP.md` §3h plus the `(§3h)` cross-reference in its §4 bullet; `CLAUDE.md`'s and `CONTRIBUTING.md`'s CI bullets), or replace each with a one-line pointer to `kubernetes-ci.yml`'s six checks. `SETUP.md` §3h opens with an IaC courtesy blockquote, but that is for an app repo's reader — it is not a substitute for removing the section here, and it does not exist in the other two |
+| `SETUP.md`'s §3h section and its §1/§6 pre-commit steps, **and the `no-cluster-deploy` bullets in `CLAUDE.md` and `CONTRIBUTING.md`** (the direct-to-cluster rule) | All three scaffolds ARE emitted here, but each describes an installed, required gate this path does not install — and `CLAUDE.md`'s bullet actively tells the repo's agent never to write to a cluster, which is what a GitOps repo exists to do. Drop all three (`SETUP.md` §3h plus the `(§3h)` cross-reference in its §4 bullet; `CLAUDE.md`'s and `CONTRIBUTING.md`'s CI bullets) — and SETUP.md's §1 `pre-commit` install lines, its §1 cross-language `gitleaks`/`semgrep` installs, its §6 all-files `pre-commit` step and its §6 SonarCloud/Snyk first-run note with them, since this path emits neither a pre-commit config nor a quality workflow — or replace each with a one-line pointer to the required `gate` check and its local command, `make lint`. `SETUP.md` §3h opens with an IaC courtesy blockquote, but that is for an app repo's reader — it is not a substitute for removing the section here, and it does not exist in the other two |
 
-Say in the final report which were skipped and why — an explicit omission beats
-a silent one. Note the consequence: the `pre-commit` CI backstop lives in
-`quality-*.yml`, so on this path pre-commit is enforced locally by the Step 4a
-hooks only.
+**The final report names** the gate command (the resolved `{{GATE_COMMAND}}`,
+`make lint` unless one is recorded), the single required `gate` context, and
+every artifact above that was skipped and why, on a confirmed empty repo too. An
+explicit omission beats a silent one. Unless Step 4a's `install-iac-hooks.zsh`
+ran and exited 0, it also says the
+pre-push hook is **not wired** and names `make hooks` as the remedy — or, after a
+declined `Makefile` merge, merging `iac/Makefile.tmpl`'s `lint` and `hooks`
+targets first. When Step 4a found the hook already wired, it says instead that the
+hook is wired and rejects pushes until the gate command passes.
 
 **Branch protection still runs — with the IaC context set.** Call Step 4b's
 `branch-protection.sh` with `--iac-only true`. That swaps the language-app
 contexts (`test-and-coverage`, `semgrep`, `pre-commit`, `no-cluster-deploy`,
-plus the visibility-specific Sonar/Trivy/CodeQL/image contexts) for the six
-above — required contexts no workflow reports would
+plus the visibility-specific Sonar/Trivy/CodeQL/image contexts) for the single
+`gate` context above — required contexts no workflow reports would
 pin every PR on a permanent `expected` state — while everything else the script
 applies is unchanged and still needed here: PR-required, linear history, no
 force-push or deletion, and the repo-level `allow_auto_merge` /
@@ -3764,7 +3811,7 @@ bootstrap takes the language path throughout — **whatever `.maintenance.yml`
 records**, since the record vetoes but never grants (#1193). Restated here
 because this paragraph is a cross-reference target and is read standalone.
 `branch-protection.sh --iac-only
-false` then replaces the six live IaC contexts with the language-app set, which
+false` then replaces the live `gate` context with the language-app set, which
 will sit at `expected` until that language's workflow first reports. That is the
 mixed repo the scope note above excludes, and this slice does **not** special-case
 it — a rule spanning Step 4b, Step 4.5 and State D for an explicitly
@@ -3906,7 +3953,8 @@ user's machine is at stake (this list is authoritative — the Step 2 and Step 4
 restatements defer to it):
 
 - **Tool / App installs on the user's machine** — 4a's `brew install pre-commit`
-  when it's missing, and the **4e** writer-App install offer
+  when it's missing (language paths only: the §3l IaC path installs no
+  pre-commit, so it has no such confirmation), and the **4e** writer-App install offer
   (`register-claude-apps.zsh` / `install-claude-apps.zsh`) — the same class as
   the Step 4.5 preflight's own install offers.
 - **The 4c build-file edits** — Java's `build.gradle.kts` (and the Groovy→Kotlin
@@ -3916,9 +3964,42 @@ restatements defer to it):
   Mechanical 4a.5 fixer-hook normalization is **not** an overwrite and stays
   folded (its fixups ride the 4d commit and are visible in the PR).
 
-### 4a. Install pre-commit hooks
+### 4a. Install git hooks
 
-If `pre-commit` is installed on the user's machine, run:
+**The §3l IaC path wires its hook differently.** That path emits no
+`.pre-commit-config.yaml`, so none of the pre-commit steps below apply to it and
+no install of that framework is offered. Wire the version-controlled pre-push
+hook instead:
+
+```bash
+"<skill-base-dir>/scripts/install-iac-hooks.zsh" --repo "<repo-path>"
+```
+
+**Run it only once the gate already passes here:** run the resolved gate command
+(`make lint` unless `.maintenance.yml` records another) in `<repo-path>` first.
+The hook runs that same command on every push, so wiring it while the gate fails —
+a gate tool not yet installed (Step 4.5 installs them only after Step 4e's push), a
+`yq` the gate refuses, or findings in manifests the repo already has — would reject
+Step 4e's bot push. When it fails, skip the script and show the gate's first
+failure; the final report then names `make hooks` for once the gate command
+passes — or, when the `Makefile` merge was declined and it has no `hooks` target,
+merging `iac/Makefile.tmpl`'s `lint` and `hooks` targets into it first.
+If `core.hooksPath` already reads `hooks` (`git -C "<repo-path>" config --get core.hooksPath`)
+— an earlier run or a manual `make hooks` wired it — skipping the script leaves
+that hook in place: the final report then says the hook **is wired** and rejects
+every push, Step 4e's included, until the gate command passes, instead of naming
+`make hooks`.
+
+It checks that `Makefile` has a `hooks` target and `hooks/pre-push` is
+executable, runs `make hooks`, and verifies that `core.hooksPath` is `hooks`; its
+header states the exit codes. **On a non-zero exit, surface its stderr and
+continue** — CI's required `gate` check still gates every PR — and the final
+report says the pre-push hook is not wired and names `make hooks` as the remedy —
+or, on exit 5 for a missing `hooks` target (a declined `Makefile` merge), merging
+`iac/Makefile.tmpl`'s `lint` and `hooks` targets first.
+**Step 4a.5 does not run on this path.**
+
+**Every other path:** if `pre-commit` is installed on the user's machine, run:
 
 ```bash
 "<skill-base-dir>/scripts/install-precommit-hooks.zsh"
@@ -3949,7 +4030,7 @@ on push until the corresponding hook type is installed.
 
 ### 4a.5. Normalize pre-existing files: `pre-commit run --all-files` until clean
 
-The CI backstop job runs the hooks with `--all-files`, but local commits
+**Not on the §3l IaC path** (see 4a). The CI backstop job runs the hooks with `--all-files`, but local commits
 only check *staged* files — so pre-existing repo files the bootstrap never
 touched (a `Dockerfile` missing its trailing newline, a `.proto` with
 trailing whitespace, …) will fail the first CI run even though every
@@ -3996,7 +4077,7 @@ approval):
   --has-ko "<true|false — whether a root .ko.yaml exists (Go ko image path, #875)>" \
   --has-codeql "<true|false — whether codeql.yml was generated>" \
   --codeql-languages "<SPACE-separated CodeQL language list, e.g. 'python javascript', when has-codeql=true — NOT the comma-separated {{CODEQL_LANGUAGES}} form; the script splits on whitespace>" \
-  --iac-only "<true on the §3l IaC path — the kubernetes topic marker with an empty RESOLVED language set (after Q4) and no other `primary:` recorded; else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for those six contexts to come from>" \
+  --iac-only "<true on the §3l IaC path — the kubernetes topic marker with an empty RESOLVED language set (after Q4) and no other `primary:` recorded, or a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --require-signed-commits "<true if --signed-commits was passed at invocation, else false>"
 ```
@@ -4007,7 +4088,7 @@ The script applies a single protection rule that:
 - Requires status checks — the script computes the exact contexts from
   the flags above (visibility, has-dockerfile, has-codeql, codeql-languages),
   so they line up with the jobs the generated workflow produces. With
-  `--iac-only true` it requires the six `kubernetes-ci.yml` jobs **instead of**
+  `--iac-only true` it requires the `kubernetes-ci.yml` `gate` context **instead of**
   the language-app set, because §3l renders no `quality-*.yml` for those
   contexts to come from. Everything else in this list still applies on that
   path — the merge settings below above all, which Step 4e's arming needs.
@@ -4055,8 +4136,7 @@ auto-merge / delete-branch settings) and exits 0, because a hand-applied rule is
 a legitimate outcome. So detect the fallback from that **output**, not from the
 status — Step 5 keys its branch-protection checklist item on it. Do not retry.
 **On the §3l IaC path, cite `SETUP.md`'s IaC context bullet, not its
-PUBLIC/PRIVATE ones** — the six `kubernetes-ci.yml` contexts (`render`,
-`schema`, `lint`, `policy`, `config-scan`, `argocd`), which is also what
+PUBLIC/PRIVATE ones** — the single `kubernetes-ci.yml` context, `gate`, which is also what
 `branch-protection.sh` itself prints on a 403 and what the Step 5 IaC checklist
 carries. Relaying the language-app bullets instead would hand the user two
 conflicting recipes in one run.
@@ -4547,6 +4627,7 @@ anything missing:
   --languages "<space-separated detected languages>" \
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — root .ko.yaml, #875>" \
+  --iac-only "<true on the §3l IaC path, else false>" \
   --claude-approver "<true|false>"
 ```
 
@@ -4565,11 +4646,13 @@ The script will:
 3. List missing tools (`gh`, `jq`, `pre-commit`, `gitleaks`, `semgrep`,
    `sonar-scanner`, plus path-specific: `snyk` for public, `trivy` + Docker for
    private, plus language-specific linters, plus `parallel` on claude-plugin
-   repos — the bats review-loop gate parallelises via it, #980).
+   repos — the bats review-loop gate parallelises via it, #980). With
+   `--iac-only true` the list is `gh`, `jq`, `git` and the gate's tools (`helm`,
+   `kustomize`, `kubeconform`, `kube-linter`, `kyverno`, `trivy`, `yq`) instead.
 4. Offer to `brew install` all missing pieces in one batch.
 5. Verify `gh auth status`; offer to run `gh auth login` if not authenticated.
-6. For private path: verify Docker daemon is running; offer to launch
-   Docker.app if not.
+6. For private path (not with `--iac-only true`): verify Docker daemon is
+   running; offer to launch Docker.app if not.
 7. When `--claude-approver true`: verify `python3` is present, verify both
    Claude Apps are registered locally (apps.json + Keychain entries), and
    offer to run `register-claude-apps.zsh` when missing.
@@ -4585,7 +4668,7 @@ Step 2 plan approval, not a separate opt-in prompt.
 > **The §3l IaC path skips this section entirely.** Two reasons, and the first
 > is destructive: `automate-public.sh` / `automate-private.sh` both re-invoke
 > `branch-protection.sh` **without `--iac-only`**, and that PUT *replaces* the
-> rule — so the six `kubernetes-ci.yml` contexts Step 4b required would be
+> rule — so the `gate` context Step 4b required would be
 > swapped back for language-app contexts nothing on this repo reports, pinning
 > every PR on the permanent `expected` state §3l exists to prevent. Second,
 > everything else these scripts configure — the SonarCloud/SonarQube project,
@@ -4596,20 +4679,16 @@ Step 2 plan approval, not a separate opt-in prompt.
 > protection was already applied by Step 4b with `--iac-only true`. (The
 > `--claude-approver` extension below is likewise moot — a manifests repo has no
 > Approver-capable language.) **Scope: this section only.** The *preflight
-> check* above still runs — the IaC path wants `gh`, `jq` and `pre-commit` like
-> any other, and 4a.5 depends on its install rescue. **Accept its batch install**
-> even though `sonar-scanner` / `snyk-cli` come with it: the script offers one
-> all-or-nothing prompt, and declining is a preflight *failure*, which by the
-> rule above skips Step 4.5 entirely — taking the `pre-commit` rescue with it.
-> The unused scanners are the cheaper outcome (`sonar-scanner` on both paths,
-> plus `snyk-cli` on the public path / `trivy` on the private one); say so in the report rather
-> than declining. **Invoke it with `--has-dockerfile false`** whatever the repo
-> contains: preflight's Docker-daemon gate exists for the image/Trivy/SonarQube
-> consumers this path never emits, and it *hard-exits*, so an absent daemon —
-> or a private IaC repo, where the gate turns on regardless — would read as a
-> preflight failure and skip Step 4.5 along with the pre-commit rescue. If it
-> fails on Docker anyway, treat that as a **degrade, not a skip**: run 4a/4a.5
-> by hand and report it.
+> check* above still runs, **with `--iac-only true`**: it then requires `gh`, `jq`
+> and `git` plus the gate's tools (`helm`, `kustomize`, `kubeconform`,
+> `kube-linter`, `kyverno`, `trivy`, `yq`) — what `make lint` and the pre-push
+> hook run locally — and none of the language-app scanners, so its one
+> all-or-nothing install prompt carries nothing this path leaves unused.
+> Declining it is a preflight *failure*, which by the rule above skips Step 4.5:
+> CI's `gate` still gates, but `make lint` and the hook refuse on the first
+> missing tool, so say so in the report. `--iac-only true` also skips preflight's
+> Docker-daemon check, which exists for image/Trivy/SonarQube consumers this path
+> never emits.
 
 **Public path:**
 
@@ -4893,25 +4972,36 @@ For private path the checklist additionally includes:
 
 For the **IaC path** (§3l — the `kubernetes` topic marker with an empty RESOLVED language set
 and no other `primary:` recorded; a recorded
-`primary: kubernetes` never grants this path on its own — #1193)
-Step 4b already required the six `kubernetes-ci.yml` checks via
+`primary: kubernetes` never grants this path on its own — #1193; a marker-less
+repo reaches it only through Q4's empty-repo confirmation)
+Step 4b already required the `kubernetes-ci.yml` `gate` check via
 `--iac-only true`, so branch protection is **not** an outstanding item. What the
 checklist carries instead is what the user cannot infer — **unless
 Step 4b hit its 403 fallback** (no admin permission), in which case the general
 rule wins and the manual branch-protection setup IS an outstanding item, listed
-with the six `kubernetes-ci.yml` contexts:
+with the `gate` context:
 
 ```text
-- The six required checks (render, schema, lint, policy, config-scan, argocd)
-  show as "expected" in Settings → Branches until the first PR runs the
-  workflow. That is normal; the rule is already valid.
+- The required `gate` check shows as "expected" in Settings → Branches until
+  the first PR runs the workflow. That is normal; the rule is already valid.
+- (unless Step 4a's install-iac-hooks.zsh ran and exited 0, or found the hook
+  already wired) The pre-push hook is NOT wired: run `make hooks` once the gate
+  command (`make lint` unless one is recorded) passes in this clone — merging
+  iac/Makefile.tmpl's `lint` and `hooks` targets first if the Makefile merge was
+  declined.
+- (only when Step 4a found core.hooksPath already `hooks` and the gate failing)
+  The pre-push hook IS wired and rejects every push until the gate command
+  passes in this clone.
+- (only on a confirmed empty repo) Until a chart, kustomization or Argo CD
+  resource is committed, every bootstrap re-run asks Q4 and the empty-repo
+  confirmation again.
 - This repo has no application language, so the language-app gates were not
   generated: no quality-public/private workflow, no CodeQL, no Sonar project,
-  no .snyk. Consequently `pre-commit` runs locally (the Step 4a hooks) but has
-  no CI backstop check here. Add a language later and re-run bootstrap to pick
+  no .snyk, no .pre-commit-config.yaml. The local gate is `make lint`, the same
+  command CI's `gate` runs. Add a language later and re-run bootstrap to pick
   the language gates up — a detected language takes the repo off this path even
   though `.maintenance.yml` records `primary: kubernetes`. Expect that re-run to
-  REPLACE the six IaC contexts with the language-app set, which show as
+  REPLACE the `gate` context with the language-app set, which show as
   "expected" until that language's workflow first reports.
 - (only when the repo carries a Dockerfile) That image is NOT scanned in CI:
   the image build/scan/sign jobs live in `quality-*.yml`, which this path does

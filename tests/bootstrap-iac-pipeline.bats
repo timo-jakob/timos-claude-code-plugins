@@ -37,11 +37,13 @@ setup() {
   REVIEWER="$REPO_ROOT/development/agents/bootstrap-idempotency-reviewer.md"
   PROTECT="$REPO_ROOT/development/skills/bootstrap/scripts/branch-protection.sh"
   # The six contexts `branch-protection.sh --iac-only` STILL requires. The
-  # one-job workflow reports only `gate`; moving branch protection and §3l's
-  # prose onto it is a sibling story of #1604 (design §9.3, §9.4), so the
-  # branch-protection and §3l tests below keep pinning today's script and prose
-  # with this list — it no longer describes the workflow's jobs.
+  # one-job workflow reports only `gate`, and SKILL.md and SETUP.md name only
+  # `gate` since #1605; moving the script onto it is #1606, so ONLY the
+  # branch-protection tests below still read this list (a test at the end of
+  # this file keeps it that way).
   EXPECTED_JOBS="render schema lint policy config-scan argocd"
+  SETUP="$TEMPLATES/common/SETUP.md.tmpl"
+  HOOKS_SCRIPT="$REPO_ROOT/development/skills/bootstrap/scripts/install-iac-hooks.zsh"
   # every tool the gate script requires, with the env key its install step pins
   TOOL_PINS="helm:HELM_VERSION kustomize:KUSTOMIZE_VERSION kubeconform:KUBECONFORM_VERSION"
   TOOL_PINS="$TOOL_PINS kube-linter:KUBE_LINTER_VERSION kyverno:KYVERNO_VERSION"
@@ -735,16 +737,16 @@ EOF
   contains "$section" 'since the record vetoes but never grants'
 }
 
-@test "bootstrap's §3l names the six checks and runs branch protection in IaC mode (#1154)" {
+@test "bootstrap's §3l names the gate check and runs branch protection in IaC mode (#1154, #1605)" {
   # skipping branch-protection.sh entirely was the earlier design and it silently
   # dropped the merge settings auto-merge arming depends on; the retired
   # instruction is asserted gone so the flip cannot be reverted
-  local section job
+  local section
   section="$(iac_section)"
   [ -n "$section" ]
-  for job in $EXPECTED_JOBS; do
-    contains "$section" "\`$job\`"
-  done
+  contains "$section" '**One requirable check — `gate`.**'
+  contains "$section" 'for the single `gate` context above'
+  lacks "$section" 'Six separately requirable checks'
   contains "$section" '--iac-only true'
   contains "$section" 'Never skip the script on this path'
   # the pointer at Step 4.5 — the step that would otherwise UNDO the rule three
@@ -782,7 +784,7 @@ EOF
   # the VALUE and the condition, not just the flag name — the block could
   # otherwise document `--iac-only false` on the IaC path and still pass
   contains "$block" '--iac-only "<true on the §3l IaC path'
-  contains "$block" 'it requires the six `kubernetes-ci.yml` jobs **instead of**'
+  contains "$block" 'it requires the `kubernetes-ci.yml` `gate` context **instead of**'
   # the no-other-primary qualifier the sibling sites carry. This is the site a
   # model reads when COMPOSING the invocation, so without it here the conflict
   # repo yields `--iac-only true` and requires six contexts from a workflow §3l
@@ -809,15 +811,11 @@ EOF
   setup="$(tr -s '[:space:]' ' ' \
     < "$REPO_ROOT/development/skills/bootstrap/templates/common/SETUP.md.tmpl")"
   contains "$setup" 'no application language and no other `primary:` recorded'
-  # …and the six context NAMES. SETUP.md says of itself that branch-protection.sh
-  # is the source of truth and this list mirrors it — but a rename reds the
-  # template and branch-protection tests (forcing EXPECTED_JOBS to move) while
-  # SETUP.md silently keeps the stale names, handing a no-admin user (the 403
-  # path) a recipe for contexts no workflow reports.
-  local job
-  for job in $EXPECTED_JOBS; do
-    contains "$setup" "\`$job\`"
-  done
+  # …and the context NAME. A rename of the workflow's job would otherwise leave
+  # SETUP.md handing a no-admin user (the 403 path) a recipe for a context no
+  # workflow reports — and the retired six-name list is asserted gone (#1605)
+  contains "$setup" '`branch-protection.sh --iac-only true`): `gate`. This single context **replaces**'
+  lacks "$setup" '`render`, `schema`, `lint`, `policy`, `config-scan`, `argocd`'
   step5="$(sed -n '/^For the \*\*IaC path\*\*/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')"
   contains "$step5" 'no other `primary:` recorded'
 }
@@ -848,10 +846,15 @@ EOF
   # deleted outright
   ends_with "$block" '## Important Rules '
   # the LIST as written, not the bare names
-  contains "$block" 'The six required checks (render, schema, lint, policy, config-scan, argocd)'
-  contains "$block" 'show as "expected" in Settings'
+  contains "$block" 'The required `gate` check shows as "expected" in Settings'
   contains "$block" 'no CodeQL'
-  contains "$block" 'no CI backstop'
+  # the local gate is the hook's command, and a failed wiring is an outstanding item
+  contains "$block" 'The local gate is `make lint`, the same command CI'"'"'s `gate` runs'
+  contains "$block" '(unless Step 4a'"'"'s install-iac-hooks.zsh ran and exited 0, or found the hook already wired) The pre-push hook is NOT wired: run `make hooks`'
+  # a hook an earlier run wired stays wired when Step 4a skips the script
+  contains "$block" '(only when Step 4a found core.hooksPath already `hooks` and the gate failing) The pre-push hook IS wired and rejects every push until the gate command passes in this clone.'
+  # the confirmed empty repo is asked again until a marker lands (#1605)
+  contains "$block" 'every bootstrap re-run asks Q4 and the empty-repo confirmation again'
   # the 403 caveat: branch-protection.sh degrades to printed instructions and
   # exits 0, so an unconditional "not outstanding" claim leaves a no-admin repo
   # unprotected with no TODO
@@ -866,7 +869,7 @@ EOF
   # path, so a re-run DOES pick the language gates up — but say what it costs
   contains "$block" 'Add a language later and re-run bootstrap'
   contains "$block" 'takes the repo off this path'
-  contains "$block" 'REPLACE the six IaC contexts'
+  contains "$block" 'REPLACE the `gate` context'
 }
 
 @test "Step 4.5 skips the per-path automation that would UNDO --iac-only (#1154)" {
@@ -889,18 +892,24 @@ EOF
   lacks "$block" '--has-codeql "true"'
 }
 
-@test "Q4 offers the IaC answer and refuses it without the marker (#1154)" {
+@test "Q4 offers the IaC answer, and without the marker asks the empty-repo confirmation (#1154, #1605)" {
   # the only door into §3l. Delete the positive half and no question ever
   # produces the empty resolved language set the path keys on; delete the
-  # negative half and any language-less repo — marker or not — is bootstrapped
-  # with six required checks whose workflow was never emitted.
+  # confirmation's outcomes and a language-less repo with no marker is either
+  # refused outright or bootstrapped without anyone having confirmed it.
   local row
   row="$(grep -F '| **Q4: Languages** |' "$SKILL")"
   [ -n "$row" ]
   contains "$row" 'none — this is a GitOps/IaC repo'
   contains "$row" '**"None" is a valid answer for an IaC repo**'
   contains "$row" 'takes §3l, not a halt'
-  contains "$row" '**"None" with `is_kubernetes=false`** is *not*'
+  # no marker: the confirmation and all three of its outcomes (#1605)
+  contains "$row" '**"None" with `is_kubernetes=false`** asks the **empty-repo confirmation** instead of halting'
+  contains "$row" '**confirmed** → §3l, and `primary: kubernetes` is written'
+  contains "$row" '**declined** → halt'
+  contains "$row" '**another `primary:` already recorded** in `.maintenance.yml` → §3l'"'"'s conflict branch — the confirmation is never granted over a recorded primary'
+  # the retired unconditional refusal, asserted gone
+  lacks "$row" 'is *not*: explain that only a repo carrying the kubernetes topic marker can bootstrap language-free'
   # …and a recorded `primary: kubernetes` must NOT skip the question: the record
   # vetoes this path but never grants it, so skipping would resolve a mixed repo
   # onto the IaC path without ever asking (#1193)
@@ -937,7 +946,8 @@ EOF
   # The workflow's presence is evidence the repo already took the §3l path; the
   # rule detect-stack.sh and §3l actually state keys on the marker, and this
   # site is swept for that clause by tests/iac-selection-rule.bats.
-  contains "$block" 'the repo carries the **kubernetes topic marker**'
+  contains "$block" 'the repo carries the **kubernetes topic marker** (or, marker-less, its Q4'
+  contains "$block" 'empty-repo confirmation was accepted — §3l), so `kubernetes-ci.yml` is present **AND**'
   contains "$block" 'a recorded `primary: kubernetes` grants nothing on its own'
   # RESOLVED, not merely detected — and the ORDERING that makes it achievable.
   # This tree is ordered and step 3 runs before Q4 is asked in step 6, so keying
@@ -1073,4 +1083,385 @@ EOF
   # would red this suite on a binary the resolver deliberately accepts — telling
   # the developer to replace something that works.
   matches "$output" '([Mm]ikefarah|^yq version 4\.)'
+}
+
+# ---------------------------------------------------------------------------
+# The §3l skill flow on the gate model (#1605)
+# ---------------------------------------------------------------------------
+
+@test "§3l emits the gate artifacts, holds out .pre-commit-config.yaml, and handles the confirmed empty repo (#1605)" {
+  local section
+  section="$(iac_section)"
+  ends_with "$section" '### Idempotency rules (apply for every file write) '
+  # the emitted enumeration as ONE list: four names scattered through §3l would
+  # pass while the list itself still named only the workflow
+  contains "$section" 'plus the gate artifacts — `.github/workflows/kubernetes-ci.yml`, `scripts/k8s-gate.zsh`, `hooks/pre-push` and `Makefile` — plus the §3h'
+  # …each rendered from its own template
+  contains "$section" '`templates/iac/scripts/k8s-gate.zsh.tmpl` as `scripts/k8s-gate.zsh`'
+  contains "$section" '`templates/iac/hooks/pre-push.tmpl` as `hooks/pre-push`'
+  contains "$section" '`templates/iac/Makefile.tmpl` as `Makefile`'
+  # the whole pre-commit config is a not-emitted ROW, not a clause of another row
+  contains "$section" '| `.pre-commit-config.yaml` — the whole file, not only its per-language hook blocks |'
+  # SETUP.md.tmpl is unchanged, so this row IS the fix for its §1/§6 pre-commit steps
+  contains "$section" '| `SETUP.md`'"'"'s §3h section and its §1/§6 pre-commit steps'
+  contains "$section" 'SETUP.md'"'"'s §1 `pre-commit` install lines, its §1 cross-language `gitleaks`/`semgrep` installs, its §6 all-files `pre-commit` step and its §6 SonarCloud/Snyk first-run note with them, since this path emits neither a pre-commit config nor a quality workflow'
+  contains "$section" '**Local tools are Homebrew-current; CI and the harness run the pins.**'
+  # the confirmed empty repo: the exception, what the skill leaves out itself,
+  # the recorded-primary limit and the re-ask
+  contains "$section" 'confirmed Q4'"'"'s empty-repo question'
+  contains "$section" '**the skill renders the IaC set itself**'
+  contains "$section" '**leaves out every row of the not-emitted table below** — on a marker-less repo `detect-stack.sh` holds none of them out, so `quality-*.yml`, `codeql.yml`, `.pre-commit-config.yaml`, `scripts/check-no-cluster-deploy.zsh` and `.github/workflows/no-cluster-deploy.yml` can all reach `missing_artifacts`'
+  contains "$section" 'the confirmation is never granted over it'
+  contains "$section" '**until a marker exists, every re-run asks Q4 and the confirmation again**'
+}
+
+@test "§3l's final-report instruction names the gate command, the gate context and the skipped artifacts (#1605)" {
+  local section
+  section="$(iac_section)"
+  ends_with "$section" '### Idempotency rules (apply for every file write) '
+  contains "$section" '**The final report names** the gate command (the resolved `{{GATE_COMMAND}}`, `make lint` unless one is recorded), the single required `gate` context, and every artifact above that was skipped and why'
+  contains "$section" 'every artifact above that was skipped and why, on a confirmed empty repo too'
+  contains "$section" 'Unless Step 4a'"'"'s `install-iac-hooks.zsh` ran and exited 0, it also says the pre-push hook is **not wired** and names `make hooks` as the remedy'
+}
+
+# Step 4a's IaC branch, whitespace-normalised and end-anchored by its caller.
+step4a_iac() {
+  sed -n '/^\*\*The §3l IaC path wires its hook differently\.\*\*/,/^\*\*Every other path:\*\*/p' "$SKILL" \
+    | tr -s '[:space:]' ' '
+}
+
+@test "Step 4a's IaC branch wires install-iac-hooks.zsh, offers no pre-commit, and continues on failure (#1605)" {
+  local block step4a
+  block="$(step4a_iac)"
+  ends_with "$block" '**Every other path:** if `pre-commit` is installed on the user'"'"'s machine, run: '
+  # the branch belongs to 4a, not to some later section that reuses the words
+  step4a="$(sed -n '/^### 4a\. Install git hooks/,/^### 4a\.5\./p' "$SKILL" | tr -s '[:space:]' ' ')"
+  contains "$step4a" '**The §3l IaC path wires its hook differently.**'
+  contains "$block" '"<skill-base-dir>/scripts/install-iac-hooks.zsh" --repo "<repo-path>"'
+  # wired only once the gate itself passes, or the hook rejects Step 4e's bot push —
+  # the whole precondition, skip clause included
+  contains "$block" '**Run it only once the gate already passes here:** run the resolved gate command (`make lint` unless `.maintenance.yml` records another) in `<repo-path>` first. The hook runs that same command on every push, so wiring it while the gate fails — a gate tool not yet installed (Step 4.5 installs them only after Step 4e'"'"'s push), a `yq` the gate refuses, or findings in manifests the repo already has — would reject Step 4e'"'"'s bot push. When it fails, skip the script and show the gate'"'"'s first failure; the final report then names `make hooks` for once the gate command passes — or, when the `Makefile` merge was declined and it has no `hooks` target, merging `iac/Makefile.tmpl`'"'"'s `lint` and `hooks` targets into it first.'
+  lacks "$block" 'install-precommit-hooks'
+  lacks "$block" 'brew install pre-commit'
+  contains "$block" '**On a non-zero exit, surface its stderr and continue**'
+  contains "$block" 'the final report says the pre-push hook is not wired and names `make hooks` as the remedy'
+  # exit 5 is a missing hooks target — a declined Makefile merge — which `make hooks` cannot fix
+  contains "$block" 'or, on exit 5 for a missing `hooks` target (a declined `Makefile` merge), merging `iac/Makefile.tmpl`'"'"'s `lint` and `hooks` targets first'
+  # skipping the script does not unwire a hook an earlier run wired
+  contains "$block" 'skipping the script leaves that hook in place: the final report then says the hook **is wired** and rejects every push, Step 4e'"'"'s included, until the gate command passes, instead of naming `make hooks`.'
+  contains "$block" '**Step 4a.5 does not run on this path.**'
+  # the language path keeps its installer, so the lacks above are not vacuous
+  contains "$step4a" '"<skill-base-dir>/scripts/install-precommit-hooks.zsh"'
+}
+
+@test "Step 4.5 runs the preflight with --iac-only true on the IaC path (#1605)" {
+  local block quote
+  block="$(sed -n '/^### Preflight check/,/^### Per-path automation/p' "$SKILL" | tr -s '[:space:]' ' ')"
+  ends_with "$block" '### Per-path automation '
+  contains "$block" '--iac-only "<true on the §3l IaC path, else false>"'
+  contains "$block" 'With `--iac-only true` the list is `gh`, `jq`, `git` and the gate'"'"'s tools'
+  quote="$(sed -n '/^> \*\*The §3l IaC path skips this section entirely/,/^\*\*Public path:\*\*/p' "$SKILL" \
+    | tr -s '[:space:]' ' ')"
+  ends_with "$quote" '**Public path:** '
+  contains "$quote" 'still runs, **with `--iac-only true`**'
+}
+
+@test "no IaC-path section describes the pre-commit framework as installed or enforced (#1605)" {
+  # the phrasings the retired text used to promise the framework on this path
+  local -a needles=(
+    'install-precommit-hooks' 'brew install pre-commit' 'pre-commit install'
+    'pre-commit run' 'pre-commit is enforced' '`pre-commit` runs locally'
+    'the Step 4a hooks' 'pre-commit` rescue' '`pre-commit` like'
+    'jq, pre-commit' 'the pre-commit rescue' 'its install rescue' 'run 4a/4a.5 by hand'
+  )
+  local -a sections=()
+  sections+=("$(iac_section)")
+  sections+=("$(sed -n '/^   > \*\*The IaC set is NOT blind-renderable/,/^   - `branch_protection.state == "missing"`/p' "$SKILL" | tr -s '[:space:]' ' ')")
+  sections+=("$(sed -n '/^   \*\*The IaC set (#1154, #1604) is the third not-blind set\.\*\*/,/^   \*\*The ops-major migration/p' "$SKILL" | tr -s '[:space:]' ' ')")
+  sections+=("$(sed -n '/^\*\*On the §3l IaC path the plan takes a different shape\*\*/,/^A GitOps repo may still carry a Dockerfile/p' "$SKILL" | tr -s '[:space:]' ' ')")
+  sections+=("$(step4a_iac)")
+  sections+=("$(sed -n '/^> \*\*The §3l IaC path skips this section entirely/,/^\*\*Public path:\*\*/p' "$SKILL" | tr -s '[:space:]' ' ')")
+  sections+=("$(sed -n '/^For the \*\*IaC path\*\*/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')")
+  # END-ANCHORS, one per section, so no range silently ran to EOF — which would
+  # judge the rest of SKILL.md (where the language path's pre-commit prose
+  # legitimately lives) and red, or be emptied and pass nothing
+  ends_with "${sections[0]}" '### Idempotency rules (apply for every file write) '
+  ends_with "${sections[1]}" '- `branch_protection.state == "missing"` → offer "Apply branch protection '
+  starts_with "${sections[2]}" ' **The IaC set (#1154, #1604) is the third not-blind set.**'
+  ends_with "${sections[2]}" '**The ops-major migration (#1330) is the fourth not-blind set.** When '
+  # the marker-less, language-less repo asks Q4 BEFORE rendering, then reaches step 3
+  contains "${sections[2]}" 'So when `is_kubernetes` is `false` and `languages` is empty, ask Q4 and its empty-repo confirmation **here, before rendering anything** from `missing_artifacts`: on a confirmed "none", drop every §3l not-emitted artifact from the list, render the IaC set, and then take step 3'"'"'s `github_state` gap-fill with `--iac-only true`, which the drops have made reachable; on a language answer, render the list as usual; on a declined confirmation, render nothing and halt as Q4 directs.'
+  ends_with "${sections[3]}" 'A GitOps repo may still carry a Dockerfile (a tooling image, say). On this path '
+  contains "${sections[3]}" 'Setup automation: preflight only (--iac-only true) — verifies and batch-installs gh, jq, git and the gate'"'"'s tools'
+  ends_with "${sections[4]}" '**Every other path:** if `pre-commit` is installed on the user'"'"'s machine, run: '
+  ends_with "${sections[5]}" '**Public path:** '
+  ends_with "${sections[6]}" '## Important Rules '
+  local s n
+  for s in "${sections[@]}"; do
+    for n in "${needles[@]}"; do
+      lacks "$s" "$n"
+    done
+  done
+  # NON-VACUITY: the needles are live phrasings — the language path's 4a carries
+  # two of them, so a needle list that matched nothing anywhere would red here
+  local lang
+  lang="$(sed -n '/^\*\*Every other path:\*\*/,/^### 4a\.5\./p' "$SKILL" | tr -s '[:space:]' ' ')"
+  contains "$lang" 'install-precommit-hooks'
+  contains "$lang" 'brew install pre-commit'
+}
+
+@test "SKILL.md and SETUP.md.tmpl name the single gate context, never six IaC contexts (#1605)" {
+  local -a retired=(
+    'Six separately requirable checks' 'six required' 'six IaC contexts'
+    'six live IaC contexts' 'six `kubernetes-ci.yml`' '`kubernetes-ci.yml`'"'"'s six'
+    'six-context' 'six jobs'
+  )
+  local skill setup n
+  skill="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  setup="$(tr -s '[:space:]' ' ' < "$SETUP")"
+  for n in "${retired[@]}"; do
+    lacks "$skill" "$n"
+    lacks "$setup" "$n"
+  done
+  # …and every IaC required-context statement names `gate`
+  contains "$skill" '**One requirable check — `gate`.**'
+  contains "$skill" 'single `gate` context `kubernetes-ci.yml` reports, never the language-app set'
+  contains "$skill" 'for the single `gate` context above'
+  contains "$skill" 'replaces the live `gate` context with the language-app set'
+  contains "$skill" 'it requires the `kubernetes-ci.yml` `gate` context **instead of**'
+  contains "$skill" 'the single `kubernetes-ci.yml` context, `gate`, which is also what'
+  contains "$skill" 'its one job, `gate`, is a *required context* with no `-noop` companion'
+  contains "$skill" 'Step 4b already required the `kubernetes-ci.yml` `gate` check'
+  contains "$skill" 'the `--iac-only` checks array (the single `gate` context)'
+  contains "$setup" 'your required check is `kubernetes-ci.yml`'"'"'s single `gate`'
+  contains "$setup" 'its own required check is `kubernetes-ci.yml`'"'"'s `gate` job instead'
+  contains "$setup" '`branch-protection.sh --iac-only true`): `gate`.'
+}
+
+@test "EXPECTED_JOBS is read only by the branch-protection.sh --iac-only tests (#1605)" {
+  # SKILL.md and SETUP.md moved to `gate`; only the script still requires six
+  # (#1606). The regex is bracketed so this test's own line does not match it.
+  local users t
+  users="$(awk '/^@test /{ name = $0 } /[$]EXPECTED_JOB[S]/ && name != "" { print name }' "$BATS_TEST_FILENAME" | sort -u)"
+  [ -n "$users" ]
+  while IFS= read -r t; do
+    starts_with "$t" '@test "branch-protection'
+  done <<< "$users"
+}
+
+# ---------------------------------------------------------------------------
+# install-iac-hooks.zsh (#1605) — Step 4a's hook wiring on the IaC path
+# ---------------------------------------------------------------------------
+
+# A consumer repository at $HOOK_REPO holding the RENDERED Makefile and hook.
+# Git's global and system config are masked so a developer's own core.hooksPath
+# can neither leak into the "unset" cases nor be rewritten by them.
+hook_repo() {
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  HOOK_REPO="$BATS_TEST_TMPDIR/gitops"
+  render_iac iac/Makefile.tmpl iac/hooks/pre-push.tmpl
+  git init -q "$HOOK_REPO"
+  mkdir -p "$HOOK_REPO/hooks"
+  cp "$MAKEFILE" "$HOOK_REPO/Makefile"
+  cp -p "$HOOK" "$HOOK_REPO/hooks/pre-push"
+}
+
+# core.hooksPath as git resolves it, or nothing when it is unset.
+hooks_path() {
+  git -C "$1" config --get core.hooksPath || true
+}
+
+# A refusal: exit $1, EMPTY stdout, a stderr line under the script's prefix, and
+# $HOOK_REPO's core.hooksPath still exactly $2. Every refusal before `make hooks`
+# (exits 2-5) must also stay silent about "replacing core.hooksPath", which the
+# script prints only once every check has passed; exit 1 comes after that point.
+assert_hooks_refused() {
+  [ "$status" -eq "$1" ]
+  [ -z "$output" ]
+  if [ "$1" -ne 1 ]; then
+    lacks "$stderr" 'replacing core.hooksPath'
+  fi
+  starts_with "$(printf '%s\n' "$stderr" | grep '^install-iac-hooks: ' | head -n 1)" 'install-iac-hooks: '
+  [ "$(hooks_path "$HOOK_REPO")" = "$2" ]
+}
+
+@test "install-iac-hooks.zsh is committed executable and its header states the contract (#1605)" {
+  run git -C "$REPO_ROOT" ls-files -s -- development/skills/bootstrap/scripts/install-iac-hooks.zsh
+  [ "$status" -eq 0 ]
+  starts_with "$output" '100755 '
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --help
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  contains "$output" 'install-iac-hooks.zsh [--repo <path>]'
+  contains "$output" 'install-iac-hooks.zsh -h|--help'
+  local help="$output"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" -h
+  [ "$status" -eq 0 ]
+  [ "$output" = "$help" ]
+  local code
+  for code in 0 1 2 3 4 5; do
+    matches "$output" "(^|"$'\n'")  $code  "
+  done
+  contains "$output" 'Stdout is exactly `install-iac-hooks: core.hooksPath=hooks`'
+  contains "$output" "prints \`install-iac-hooks: replacing core.hooksPath '<old>'\` to stderr"
+  contains "$output" 'On every non-zero exit, stdout is empty and stderr carries one or more lines'
+}
+
+@test "install-iac-hooks wires core.hooksPath through the rendered Makefile, and a re-run is idempotent (#1605)" {
+  hook_repo
+  [ -z "$(hooks_path "$HOOK_REPO")" ]
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'install-iac-hooks: core.hooksPath=hooks' ]
+  [ "$(hooks_path "$HOOK_REPO")" = hooks ]
+  # an unset prior value is not a replacement either
+  lacks "$stderr" 'replacing'
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'install-iac-hooks: core.hooksPath=hooks' ]
+  [ "$(hooks_path "$HOOK_REPO")" = hooks ]
+  # its own value is not a replacement
+  lacks "$stderr" 'replacing'
+  # a hooks rule that lists other targets too, with a space before the colon, is
+  # still a hooks rule — the target list is split into words
+  printf '.PHONY: lint hooks\nlint hooks :\n\tgit config core.hooksPath hooks\n' > "$HOOK_REPO/Makefile"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'install-iac-hooks: core.hooksPath=hooks' ]
+}
+
+@test "install-iac-hooks defaults --repo to the current directory (#1605)" {
+  hook_repo
+  cd "$HOOK_REPO"
+  run --separate-stderr zsh "$HOOKS_SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'install-iac-hooks: core.hooksPath=hooks' ]
+  [ "$(hooks_path "$HOOK_REPO")" = hooks ]
+}
+
+@test "install-iac-hooks replaces a different core.hooksPath with a warning and exits 0 (#1605)" {
+  hook_repo
+  git -C "$HOOK_REPO" config core.hooksPath .githooks
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'install-iac-hooks: core.hooksPath=hooks' ]
+  contains "$stderr" "install-iac-hooks: replacing core.hooksPath '.githooks'"
+  [ "$(hooks_path "$HOOK_REPO")" = hooks ]
+}
+
+@test "install-iac-hooks refuses a missing gate artifact with exit 5 (#1605)" {
+  hook_repo
+  git -C "$HOOK_REPO" config core.hooksPath .githooks
+  mv "$HOOK_REPO/Makefile" "$BATS_TEST_TMPDIR/Makefile.kept"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 5 .githooks
+  contains "$stderr" 'no Makefile'
+  # a Makefile with only a lint target — `.PHONY` naming hooks is not a rule
+  printf '.PHONY: lint hooks\nlint:\n\tzsh scripts/k8s-gate.zsh\n' > "$HOOK_REPO/Makefile"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 5 .githooks
+  contains "$stderr" 'has no hooks target'
+  # nor is a comment, an assignment, or an indented recipe line that says `hooks:`
+  local mk
+  # …nor a target that merely contains the word (`install-hooks:`), a plain `=`
+  # assignment whose value has a colon, or a colonless `define hooks` block
+  for mk in '# hooks: wire git\nlint:\n\ttrue\n' 'hooks := x\nlint:\n\ttrue\n' 'lint:\n\t@echo hooks: done\n' \
+    'install-hooks:\n\ttrue\n' 'hooks = a:b\nlint:\n\ttrue\n' 'define hooks\nendef\nlint:\n\ttrue\n'; do
+    printf '%b' "$mk" > "$HOOK_REPO/Makefile"
+    run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+    assert_hooks_refused 5 .githooks
+    contains "$stderr" 'has no hooks target'
+  done
+  cp "$BATS_TEST_TMPDIR/Makefile.kept" "$HOOK_REPO/Makefile"
+  chmod -x "$HOOK_REPO/hooks/pre-push"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 5 .githooks
+  contains "$stderr" 'hooks/pre-push is not executable'
+  rm "$HOOK_REPO/hooks/pre-push"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 5 .githooks
+  contains "$stderr" 'hooks/pre-push is missing'
+}
+
+@test "install-iac-hooks refuses a directory that is not a work-tree root with exit 3 (#1605)" {
+  hook_repo
+  git -C "$HOOK_REPO" config core.hooksPath .githooks
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO/hooks"
+  assert_hooks_refused 3 .githooks
+  contains "$stderr" 'not the root of its git work tree'
+  # outside any work tree: the ceiling stops discovery at the test's own tmpdir,
+  # and the directory carries every gate artifact, so only the git check can refuse
+  local loose="$BATS_TEST_TMPDIR/loose"
+  mkdir -p "$loose/hooks"
+  cp "$MAKEFILE" "$loose/Makefile"
+  cp -p "$HOOK" "$loose/hooks/pre-push"
+  run --separate-stderr env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" zsh "$HOOKS_SCRIPT" --repo "$loose"
+  assert_hooks_refused 3 .githooks
+  contains "$stderr" 'not inside a git work tree'
+  [ ! -e "$loose/.git" ]
+}
+
+@test "install-iac-hooks refuses with exit 4 when git or make is not on PATH, after usage and before the repo checks (#1605)" {
+  hook_repo
+  git -C "$HOOK_REPO" config core.hooksPath .githooks
+  local nomake="$BATS_TEST_TMPDIR/no-make-bin" nogit="$BATS_TEST_TMPDIR/no-git-bin"
+  mkdir -p "$nomake" "$nogit"
+  ln -s "$(command -v git)" "$nomake/git"
+  ln -s "$(command -v zsh)" "$nomake/zsh"
+  ln -s "$(command -v make)" "$nogit/make"
+  ln -s "$(command -v zsh)" "$nogit/zsh"
+  # `zsh -f`: a ~/.zshenv that rebuilds PATH would otherwise put make back
+  run --separate-stderr env PATH="$nomake" zsh -f "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 4 .githooks
+  contains "$stderr" 'make is not on PATH'
+  run --separate-stderr env PATH="$nogit" zsh -f "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 4 .githooks
+  contains "$stderr" 'git is not on PATH'
+  # ORDER: the tool check wins over a directory outside any work tree (3)…
+  local loose="$BATS_TEST_TMPDIR/loose"
+  mkdir -p "$loose"
+  run --separate-stderr env PATH="$nomake" GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" zsh -f "$HOOKS_SCRIPT" --repo "$loose"
+  assert_hooks_refused 4 .githooks
+  # …and loses to a usage error (2)
+  printf 'not a directory\n' > "$BATS_TEST_TMPDIR/a-file"
+  run --separate-stderr env PATH="$nomake" zsh -f "$HOOKS_SCRIPT" --repo "$BATS_TEST_TMPDIR/a-file"
+  assert_hooks_refused 2 .githooks
+}
+
+@test "install-iac-hooks exits 1 when make hooks fails or leaves core.hooksPath unset (#1605)" {
+  hook_repo
+  printf '.PHONY: hooks\nhooks:\n\t@true\n' > "$HOOK_REPO/Makefile"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 1 ''
+  contains "$stderr" "core.hooksPath is '' after make hooks, expected 'hooks'"
+  # …and a no-op hooks target over a DIFFERENT prior value is not "hooks" either
+  git -C "$HOOK_REPO" config core.hooksPath .githooks
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 1 .githooks
+  contains "$stderr" "core.hooksPath is '.githooks' after make hooks, expected 'hooks'"
+  git -C "$HOOK_REPO" config --unset core.hooksPath
+  printf '.PHONY: hooks\nhooks:\n\t@echo recipe-out-marker; echo recipe-err-marker >&2; false\n' > "$HOOK_REPO/Makefile"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO"
+  assert_hooks_refused 1 ''
+  contains "$stderr" 'install-iac-hooks: make hooks exited'
+  # make's own output on BOTH streams is forwarded, not discarded…
+  contains "$stderr" 'install-iac-hooks: recipe-out-marker'
+  contains "$stderr" 'install-iac-hooks: recipe-err-marker'
+  # …and every line of it carries the prefix
+  [ -z "$(printf '%s\n' "$stderr" | grep -v '^install-iac-hooks: ')" ]
+}
+
+@test "install-iac-hooks refuses a usage error with exit 2 (#1605)" {
+  hook_repo
+  git -C "$HOOK_REPO" config core.hooksPath .githooks
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$HOOK_REPO" --bogus
+  assert_hooks_refused 2 .githooks
+  contains "$stderr" 'unknown argument: --bogus'
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo
+  assert_hooks_refused 2 .githooks
+  contains "$stderr" '--repo needs a non-empty value'
+  printf 'not a directory\n' > "$BATS_TEST_TMPDIR/a-file"
+  run --separate-stderr zsh "$HOOKS_SCRIPT" --repo "$BATS_TEST_TMPDIR/a-file"
+  assert_hooks_refused 2 .githooks
+  contains "$stderr" '--repo is not a directory'
 }

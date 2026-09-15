@@ -2093,9 +2093,13 @@ repo**: a repo with an application language takes neither IaC path, and a
 zero-language repo takes at most one — the path whose marker it carries. A
 marker-less repo takes neither, and the dual-marker case must halt (below); the
 condition is the **marker**, not merely the absence of a language, which is what
-`detect-stack.sh` already enforces and what #1162's widening must preserve. It
-is the *maintenance* pipelines that compose freely (above); CI is the narrower
-half.
+`detect-stack.sh` already enforces and what #1162's widening must preserve. The
+one exception is the explicit empty-GitOps-repo confirmation at bootstrap Q4: a
+marker-less repo with no language whose owner answers "none" and then confirms
+it is an empty GitOps repository takes the kubernetes path — rendered by the
+bootstrap skill itself, since `detect-stack.sh` still reports no marker, and never
+over another recorded `primary:` (#1605). It is the *maintenance* pipelines that
+compose freely (above); CI is the narrower half.
 
 **The dual-marker case is a specification, not current behaviour.** A
 zero-language repo carrying *both* markers must **halt** at bootstrap rather
