@@ -424,8 +424,8 @@ is the self-contained test fixtures
 A repo declaring `primary: kubernetes` now selects this plugin rather than
 being treated as a stale declaration, the dispatcher now routes every group
 to a shipped agent rather than escalating it to a human, and a GitOps repo now
-bootstraps into **six separately requirable checks** — `render`, `schema`,
-`lint`, `policy`, `config-scan`, `argocd` — so branch protection there can
+bootstraps into **one requirable check, `gate`**, running the `render`,
+`schema`, `lint`, `policy`, `config-scan` and `argocd` stages — so branch protection there can
 finally require that something *builds*, not just that someone reviewed. The
 workflow is a **bootstrap** template owned by the generic `development` plugin,
 not something this plugin's skills run: the same boundary that keeps detection

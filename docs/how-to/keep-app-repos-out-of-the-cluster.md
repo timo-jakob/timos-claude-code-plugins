@@ -135,9 +135,9 @@ no-cluster-deploy EXEMPT: .maintenance.yml records primary: kubernetes
 ```
 
 An infrastructure repository is the one place a cluster write belongs; its own
-gate is `kubernetes-ci.yml`'s six checks (`render`, `schema`, `lint`, `policy`,
-`config-scan`, `argocd`), which `branch-protection.sh --iac-only true` requires
-instead. Bootstrap does not
+gate is `kubernetes-ci.yml`'s single `gate` check (running the `render`,
+`schema`, `lint`, `policy`, `config-scan` and `argocd` stages), which
+`branch-protection.sh --iac-only true` requires instead. Bootstrap does not
 render the pair on that path, `detect-stack.sh` holds both halves out of
 `missing_artifacts` there, and `--iac-only true` never adds the context.
 

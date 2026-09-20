@@ -766,6 +766,18 @@ rstep() {
   # a "will emit" that describes a file which exists.
   lacks "$flat" '**will emit**'
   contains "$flat" '**emits**'
+  # #1606: what branch protection REQUIRES is the one `gate` context, not the six
+  # stages — the contract must not tell a maintainer to restore contexts no job
+  # reports any more
+  contains "$flat" '**requires the single `gate` context instead of**'
+  lacks "$flat" 'requires those six contexts'
+  # and that the call can REFUSE: without this the contract reads as applying a
+  # rule unconditionally, and the sentence could be deleted from both this file
+  # and the plan's byte-equal copy with the derived comparison still green
+  contains "$flat" 'It refuses, before writing any rule, when that workflow is absent or has no `gate` job'
+  # all three causes, not two: a `gate` job GitHub reports under another name is
+  # the third, and the charter is what #1162's author composes from
+  contains "$flat" 'job carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
 }
 
 @test "ARCHITECTURE.md records the policy/policy_tests missing_tooling exemption (#1151)" {
@@ -1123,7 +1135,10 @@ rstep() {
   # retired — flipped, not deleted, and its replacement pinned as tightly, or the
   # page users read would still describe the checks as forthcoming
   lacks "$section" 'The rest of epic'
-  contains "$section" 'six separately requirable checks'
+  # #1606 moved branch protection onto the single `gate` context, so the page
+  # names that one check rather than the six retired per-stage ones
+  contains "$section" 'one requirable check, `gate`'
+  lacks "$section" 'six separately requirable checks'
   # ATTRIBUTION, pinned as tightly as the capability: #1154's PIPELINE landed in
   # the `development` plugin — a page claiming it for this plugin would explain
   # the unmoved minor as an omission rather than a boundary. The claim is now

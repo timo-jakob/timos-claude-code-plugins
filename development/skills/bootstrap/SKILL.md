@@ -319,6 +319,41 @@ flow. Stop and ask for input wherever marked; do not guess.
    > workflow on that repo reports — pinning every PR on the permanent
    > `expected` state §3l exists to prevent.
    >
+   > **When that `--iac-only true` call REFUSES (exit 1, no rule written)**
+   > (#1606), the workflow on disk cannot report `gate` — typically a repo
+   > bootstrapped before #1604, whose present `kubernetes-ci.yml` still has one
+   > job per stage, so `missing_artifacts` never lists it and step 5's drift
+   > check is never reached while this gap stands. **Do not re-invoke
+   > `/development:bootstrap` to clear it** — handle it in this run, below: a
+   > re-invocation only re-reaches this same branch, and on an unmarked file the
+   > same refusal — and never fall back to the language-app set. Read the script's
+   > message, which names the file's provenance:
+   >
+   > - **it carries the plugin's provenance marker** (`rendered from iac/`) →
+   >   render `iac/.github/workflows/kubernetes-ci.yml.tmpl` (`--gate-command` per
+   >   the Step 3 placeholder table) and hand the on-disk file and that render to
+   >   the `bootstrap-idempotency-reviewer`, exactly as step 5b does, so the user
+   >   sees the diff and approves it — it is **never** overwritten blind. (For a
+   >   marked copy the reviewer recommends `overwrite`: its plugin-owned IaC
+   >   rule.) On an approved overwrite, write and stamp the result (Step 3.6) and
+   >   repeat the `branch-protection.sh` call **in this same run**. That refreshed
+   >   file is the one working-tree write this gap-fill makes, and it rides Step 4d/4e as the bot PR — the PR's own run reports
+   >   `gate`. If the overwrite is declined, or the repeated call refuses again,
+   >   take the next bullet — never render a second time;
+   > - **no marker** (user-owned) or **absent** → do not overwrite a user's file;
+   >   list the unapplied rule **and** the unapplied merge settings as an
+   >   outstanding Step 5 item quoting the message, and continue with the other
+   >   gaps.
+   >
+   > **A third message names no provenance at all**: the `gate` job is there but
+   > carries `name:`, a `strategy:` block or a reusable-workflow `uses:`, so
+   > GitHub reports the check under another name.
+   > There is nothing to refresh — the file already has the job — so take the
+   > **second** bullet whatever the file's provenance: make **no** working-tree
+   > edit here (dropping that key is the owner's call, and this gap-fill's one
+   > sanctioned write is the reviewed refresh above), and list the unapplied rule
+   > and merge settings as an outstanding Step 5 item quoting the message.
+   >
    > **A language now detected takes the repo OFF this path**, whatever
    > `.maintenance.yml` records — the recorded value can only veto, never grant
    > (§3l). Such a repo has outgrown this slice: §3l's *Known limitation*
@@ -348,7 +383,9 @@ flow. Stop and ask for input wherever marked; do not guess.
 
    Gap-fill actions invoke only the specific Step 4 sub-scripts they need
    (e.g., `branch-protection.sh`, `gh secret set`); they do NOT touch files
-   in the working tree. If multiple gaps coexist, present them as a
+   in the working tree — the one exception being the reviewed, marker-carrying
+   `kubernetes-ci.yml` refresh above, when `branch-protection.sh --iac-only true`
+   refuses it. If multiple gaps coexist, present them as a
    checkboxed list so the user can pick a subset.
 
 4. **Missing-file gap-fill — run this BEFORE the drift check whenever
@@ -3771,7 +3808,10 @@ case). From §3b/§3c it emits **only** the language-agnostic supply-chain piece
 | `SETUP.md`'s §3h section and its §1/§6 pre-commit steps, **and the `no-cluster-deploy` bullets in `CLAUDE.md` and `CONTRIBUTING.md`** (the direct-to-cluster rule) | All three scaffolds ARE emitted here, but each describes an installed, required gate this path does not install — and `CLAUDE.md`'s bullet actively tells the repo's agent never to write to a cluster, which is what a GitOps repo exists to do. Drop all three (`SETUP.md` §3h plus the `(§3h)` cross-reference in its §4 bullet; `CLAUDE.md`'s and `CONTRIBUTING.md`'s CI bullets) — and SETUP.md's §1 `pre-commit` install lines, its §1 cross-language `gitleaks`/`semgrep` installs, its §6 all-files `pre-commit` step and its §6 SonarCloud/Snyk first-run note with them, since this path emits neither a pre-commit config nor a quality workflow — or replace each with a one-line pointer to the required `gate` check and its local command, `make lint`. `SETUP.md` §3h opens with an IaC courtesy blockquote, but that is for an app repo's reader — it is not a substitute for removing the section here, and it does not exist in the other two |
 
 **The final report names** the gate command (the resolved `{{GATE_COMMAND}}`,
-`make lint` unless one is recorded), the single required `gate` context, and
+`make lint` unless one is recorded), the single required `gate` context — or,
+when `branch-protection.sh --iac-only true` refused (#1606) or fell back on a
+403, that no rule was applied and `gate` is **not yet** required, quoting the
+script's message as the Step 5 item — and
 every artifact above that was skipped and why, on a confirmed empty repo too. An
 explicit omission beats a silent one. Unless Step 4a's `install-iac-hooks.zsh`
 ran and exited 0, it also says the
@@ -4128,6 +4168,22 @@ the script; if you cannot, list it as an outstanding Step 5 item rather than
 reporting the context as required. Never infer from exit 0 alone that every
 context in §3a's list was applied — two of them (`image`, `no-cluster-deploy`)
 are computed from on-disk probes, not from the flags.
+
+**One FATAL refusal, on the §3l IaC path only (#1606).** With `--iac-only true`
+the script exits **1** before writing anything — neither the rule nor the merge
+settings — when `.github/workflows/kubernetes-ci.yml` cannot report `gate`: it is
+absent, has no `gate` job, or its `gate` job carries `name:`, a `strategy:` block
+or a reusable-workflow `uses:` (GitHub would then report the check under that
+name, one leg per matrix entry, or `gate / <called job>`).
+Whichever arm fired, the handling below is the same. In a full run §3l has just rendered
+that workflow, so the refusal means the idempotency reviewer **kept** the present
+file — unmarked, or marked with its overwrite declined — or a render failed. The reviewer has
+already decided about that file, so the message's refresh advice does **not**
+apply in a full run: do not re-run bootstrap, do not re-render, and do not retry
+the script on the same file. Report the script's message, list the unapplied
+rule **and** merge settings as an outstanding Step 5 item, and expect Step 4e's
+arming to take its *arming failed* branch, since `allow_auto_merge` was never
+set. (State D's gap-fill has its own branch for this refusal — step 3.)
 
 On a 403 (the user is not a repo admin) the script does **not** exit non-zero:
 it warns `403 — your account does not have admin permission`, prints the
@@ -4676,7 +4732,11 @@ Step 2 plan approval, not a separate opt-in prompt.
 > runner — has **no consumer** on this path: §3l emits no
 > `sonar-project.properties`, no `.snyk`, and no workflow that reads either
 > secret. So on the IaC path: run no `automate-*.sh`, and report that branch
-> protection was already applied by Step 4b with `--iac-only true`. (The
+> protection was already applied by Step 4b with `--iac-only true` — **unless
+> Step 4b hit its #1606 refusal or its 403 fallback**, in which case report it as
+> **not** applied and carry Step 4b's outstanding Step 5 item (the rule **and**
+> the merge settings) instead. Reaching this section is never itself evidence
+> that the rule was written. (The
 > `--claude-approver` extension below is likewise moot — a manifests repo has no
 > Approver-capable language.) **Scope: this section only.** The *preflight
 > check* above still runs, **with `--iac-only true`**: it then requires `gh`, `jq`
@@ -4979,7 +5039,12 @@ Step 4b already required the `kubernetes-ci.yml` `gate` check via
 checklist carries instead is what the user cannot infer — **unless
 Step 4b hit its 403 fallback** (no admin permission), in which case the general
 rule wins and the manual branch-protection setup IS an outstanding item, listed
-with the `gate` context:
+with the `gate` context. **Or unless Step 4b hit its #1606 refusal** (exit 1:
+the workflow on disk cannot report `gate` — absent, no `gate` job, or a `gate`
+job carrying `name:`, a `strategy:` block or a reusable-workflow `uses:`): then
+neither the rule nor the merge
+settings were applied, and that is an outstanding item quoting the script's
+message — fix the workflow it names, then re-run `branch-protection.sh`:
 
 ```text
 - The required `gate` check shows as "expected" in Settings → Branches until

@@ -20,10 +20,14 @@
 # quality workflow is not rendered at all, so its checks — test-and-coverage,
 # sonarcloud, semgrep, pre-commit, license-fs — would be required contexts that no
 # workflow ever reports, pinning every PR on the permanent `expected` state. The
-# repo's checks are the six kubernetes-ci.yml jobs instead. Everything else the
-# rule applies (PR required, linear history, no force-push/deletion, and the
-# repo-level merge settings auto-merge arming depends on) is unchanged: the
-# contexts differ, the protection does not.
+# repo's one check is kubernetes-ci.yml's single `gate` job instead. Everything
+# else the rule applies (PR required, linear history, no force-push/deletion, and
+# the repo-level merge settings auto-merge arming depends on) is unchanged: the
+# contexts differ, the protection does not. It refuses (exit 1, before any rule
+# is written) when .github/workflows/kubernetes-ci.yml is absent, has no `gate`
+# job, or has a `gate` job carrying `name:`, `strategy:` or a reusable-workflow
+# `uses:` (GitHub then reports the check under that name, one leg per matrix
+# entry, or `gate / <called job>`), since the `gate` context would never report.
 #
 # --codeql-languages is required when --has-codeql=true. CodeQL's analyze
 # job runs as a matrix per language and GitHub reports each one as
@@ -136,9 +140,82 @@ fi
 # forever and block each PR. The visibility case below is skipped for the same
 # reason — its contexts come from that same unrendered workflow.
 if [[ "$IAC_ONLY" == "true" ]]; then
-	# the six jobs of templates/iac/.github/workflows/kubernetes-ci.yml.tmpl,
-	# in pipeline order
-	checks=("render" "schema" "lint" "policy" "config-scan" "argocd")
+	# Gated on the job actually being ON DISK, like `no-cluster-deploy` above and
+	# `image` below — but REFUSED rather than dropped. A repo bootstrapped before
+	# #1604 still carries the per-stage kubernetes-ci.yml, which never reports
+	# `gate`, and this script re-runs standalone and from the State-D gap-fill:
+	# requiring `gate` there would swap working required contexts for one nothing
+	# reports, and dropping it would silently require no check at all. So stop
+	# before any rule is written and name the fix for the file's PROVENANCE (#1606):
+	# a file carrying the plugin's marker is refreshed from its template once its
+	# diff is reviewed, an unmarked one is the user's to edit. **Re-running
+	# bootstrap helps only a marked file** — State D's refusal branch refreshes
+	# that one through the idempotency reviewer; on an UNMARKED file bootstrap
+	# keeps the user's copy and reaches this same refusal again, which is why the
+	# message hands that case back to the user instead.
+	#
+	# The probe reads the `jobs:` mapping rather than the whole file, at whatever
+	# indent that block uses (YAML fixes none), so a comment, a step, an `env:`
+	# key or any other mapping merely MENTIONING gate never satisfies it — and a
+	# consumer's four-space workflow with a real `gate` job is not refused for its
+	# layout. It also refuses a `gate` job carrying `name:`, a `strategy:` block
+	# or a reusable-workflow `uses:` — the three ways a job stops being reported
+	# under its own id (that name, `gate (<leg>)`, `gate / <called job>`) — so
+	# requiring `gate` would wedge every PR at `expected`, the very failure this
+	# guard exists to prevent, and the shape the message already asks for.
+	# Anchored at the work-tree root, not the CWD: unlike the two probes that
+	# merely DROP a context with a warning, this one is fatal, so a run from a
+	# subdirectory (where `gh repo view` still resolves the repo) would otherwise
+	# refuse a repo whose workflow is fine — and send the operator to render the
+	# template into that subdirectory. Outside a work tree there is nothing better
+	# to resolve against, so it falls back to the CWD rather than refusing: that
+	# keeps the probe no stricter than the two beside it.
+	iac_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+	iac_ci="$iac_root/.github/workflows/kubernetes-ci.yml"
+	iac_tmpl="templates/iac/.github/workflows/kubernetes-ci.yml.tmpl"
+	if [[ ! -f "$iac_ci" ]]; then
+		die "\`$iac_ci\` is absent — NOT applying branch protection: its \`gate\` check would never report. Render it from the plugin's $iac_tmpl into the working tree first, then re-run this script."
+	fi
+	# 0: a `gate` job GitHub reports as `gate`; 1: no `gate` job; 2: a `gate` job
+	# whose reported name is something else. Every line-end match goes through
+	# `[[:space:]]*`, which a CRLF-authored workflow's trailing CR satisfies, so
+	# such a file is read like any other.
+	gate_job_state=$(
+		awk '
+			/^["\047]?jobs["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ { in_jobs = 1; next }
+			in_jobs && /^[^[:space:]#]/ { in_jobs = 0 }
+			in_jobs && /^[[:space:]]+[^[:space:]#]/ {
+				match($0, /^[[:space:]]+/)
+				this_indent = substr($0, 1, RLENGTH)
+				if (job_indent == "") { job_indent = this_indent }
+				if (this_indent == job_indent) {
+					in_gate = (substr($0, RLENGTH + 1) ~ /^["\047]?gate["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/)
+					if (in_gate) { found = 1 }
+					gate_key_indent = ""
+				} else if (in_gate && length(this_indent) > length(job_indent)) {
+					# only keys belonging to the gate job ITSELF: the first child
+					# line fixes their indent, so a step name, a `with:` map or a
+					# block scalar writing YAML sits deeper and never trips this
+					if (gate_key_indent == "") { gate_key_indent = this_indent }
+					if (this_indent == gate_key_indent &&
+					    substr($0, RLENGTH + 1) ~ /^["\047]?(name|strategy|uses)["\047]?[[:space:]]*:/) { renamed = 1 }
+				}
+			}
+			END { print (found ? (renamed ? 2 : 0) : 1) }
+		' "$iac_ci"
+	)
+	if [[ "$gate_job_state" == 2 ]]; then
+		die "\`$iac_ci\`'s \`gate\` job carries \`name:\`, a \`strategy:\` block or a reusable-workflow \`uses:\`, so GitHub reports it under another name (that name, one leg per matrix entry, or \`gate / <called job>\`) — NOT applying branch protection: the \`gate\` context would never report. Drop \`name:\`/\`strategy:\` from the job (its steps may keep their own \`name:\`/\`uses:\`), or — for a reusable-workflow \`uses:\` — inline the called workflow's steps into the \`gate\` job, then re-run this script."
+	fi
+	if [[ "$gate_job_state" != 0 ]]; then
+		if awk 'NR <= 10 && /^# claude-bootstrap: rendered from iac\//{ found = 1 } NR > 10 { exit } END { exit !found }' "$iac_ci"; then
+			die "\`$iac_ci\` carries the plugin's provenance marker but has no \`gate\` job (a pre-#1604 per-stage one?) — NOT applying branch protection: \`gate\` would never report. Refresh it from the plugin's $iac_tmpl into the working tree (after reviewing the diff), then re-run this script."
+		fi
+		die "\`$iac_ci\` is user-owned and has no \`gate\` job — NOT applying branch protection: \`gate\` would never report. Give it a job with id \`gate\` that GitHub reports under that id (no \`name:\`, no \`strategy:\`/matrix, no reusable-workflow \`uses:\`), or remove it so the plugin's $iac_tmpl is rendered, then re-run this script."
+	fi
+	# the one job of templates/iac/.github/workflows/kubernetes-ci.yml.tmpl: it
+	# carries no `name:` and no matrix, so GitHub reports it under its id
+	checks=("gate")
 fi
 
 # Everything below builds the LANGUAGE-APP context set, so the IaC path skips it

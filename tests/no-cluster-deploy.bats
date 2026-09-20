@@ -38,8 +38,9 @@ setup() {
   PROTECT="$REPO_ROOT/development/skills/bootstrap/scripts/branch-protection.sh"
   SKILL="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
   SETUP_TMPL="$REPO_ROOT/development/skills/bootstrap/templates/common/SETUP.md.tmpl"
-  # the six IaC contexts, which the --iac-only set must stay exactly equal to
-  IAC_JOBS="render schema lint policy config-scan argocd"
+  # the IaC context — kubernetes-ci.yml's single `gate` job (#1606) — which the
+  # --iac-only set must stay exactly equal to
+  IAC_JOBS="gate"
   W="$BATS_TEST_TMPDIR/repo"
   STUB_BIN="$BATS_TEST_TMPDIR/stub-bin"
   mkdir -p "$W/.github/workflows" "$STUB_BIN"
@@ -1494,6 +1495,14 @@ jobs:
 # Branch protection — both directions
 # ---------------------------------------------------------------------------
 
+# branch-protection.sh refuses --iac-only true unless the repo's kubernetes-ci.yml
+# has a `gate` job (#1606), so the IaC-path tests stage the shipped template's
+# workflow — its `gate:` job key survives unrendered — into the fixture repo.
+stage_iac_workflow() {
+  cp "$REPO_ROOT/development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl" \
+    "$W/.github/workflows/kubernetes-ci.yml"
+}
+
 protection_stubs() {
   CURL_DATA="$BATS_TEST_TMPDIR/curl-data.txt"
   : > "$CURL_DATA"
@@ -1570,7 +1579,7 @@ EOF
   contains "$contexts" 'test-and-coverage'
 }
 
-@test "the --iac-only context set is UNCHANGED at the six IaC jobs (#1206)" {
+@test "the --iac-only context set is UNCHANGED at the single gate job (#1206, #1606)" {
   # the other direction, and the one a careless addition breaks: requiring
   # no-cluster-deploy on a GitOps repo pins every IaC PR at `expected`, because
   # §3l renders no such workflow there. EXACT equality, not a `lacks` sweep — a
@@ -1582,6 +1591,7 @@ EOF
   touch "$W/.github/workflows/no-cluster-deploy.yml"
   mkdir -p "$W/scripts"
   touch "$W/scripts/check-no-cluster-deploy.zsh"
+  stage_iac_workflow
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --visibility public --has-dockerfile false --has-codeql false \
@@ -1599,6 +1609,7 @@ EOF
   # negative a decision — and the regression it guards is a GitOps bootstrap
   # telling an operator to install a required check that must never exist there.
   protection_stubs
+  stage_iac_workflow
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --visibility public --has-dockerfile false --has-codeql false \
