@@ -660,6 +660,11 @@ setup() {
   # re-checked, and these three are the intersection a reader must be able to act on
   contains "$ARCH_FLAT" '`lint`, `config-scan` and `policy` are enumerated byte-identically to the shipped kubernetes template'
   contains "$ARCH_FLAT" 'matched by **name**'
+  # …and WHAT they collide with, since #1604/#1606 left the kubernetes side with
+  # one requirable context: these three are gate STAGES there, so a reader cannot
+  # take the paragraph as naming three kubernetes contexts that still exist
+  contains "$ARCH_FLAT" 'stages of the kubernetes gate **script**, not job ids'
+  contains "$ARCH_FLAT" 'the collision is **latent**'
   contains "$ARCH_FLAT" 'known, accepted collision'
   # the bound is AT MOST one workflow, not exactly one: a repo with an
   # application language takes neither IaC path, so "exactly" overstates it

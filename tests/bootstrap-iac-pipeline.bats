@@ -36,12 +36,10 @@ setup() {
   SKILL="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
   REVIEWER="$REPO_ROOT/development/agents/bootstrap-idempotency-reviewer.md"
   PROTECT="$REPO_ROOT/development/skills/bootstrap/scripts/branch-protection.sh"
-  # The six contexts `branch-protection.sh --iac-only` STILL requires. The
-  # one-job workflow reports only `gate`, and SKILL.md and SETUP.md name only
-  # `gate` since #1605; moving the script onto it is #1606, so ONLY the
-  # branch-protection tests below still read this list (a test at the end of
-  # this file keeps it that way).
-  EXPECTED_JOBS="render schema lint policy config-scan argocd"
+  # The contexts `branch-protection.sh --iac-only` requires: the one job the
+  # rendered workflow reports (#1606). A test near the end of this file holds it
+  # equal to that workflow's job ids, so the two cannot drift apart.
+  EXPECTED_JOBS="gate"
   SETUP="$TEMPLATES/common/SETUP.md.tmpl"
   HOOKS_SCRIPT="$REPO_ROOT/development/skills/bootstrap/scripts/install-iac-hooks.zsh"
   # every tool the gate script requires, with the env key its install step pins
@@ -72,7 +70,7 @@ step_index() {
 #
 # A sed range whose end address stops matching prints to EOF, and `[ -n ]` still
 # passes — so the haystack silently widens to include Step 5's IaC block, which
-# itself names all six checks. Every §3l needle below would then pass with §3l
+# itself names every gate stage. Every §3l needle below would then pass with §3l
 # deleted outright. The terminator is asserted by its caller for that reason.
 iac_section() {
   sed -n '/^### 3l\. Infrastructure-as-code repos/,/^### /p' "$SKILL" | tr -s '[:space:]' ' '
@@ -512,9 +510,20 @@ echo "${CURL_HTTP_STATUS:-200}"
 exit 0
 EOF
   chmod +x "$STUB_BIN/gh" "$STUB_BIN/curl"
+  # The script runs from the target repo root and refuses --iac-only true unless
+  # that repo's kubernetes-ci.yml has a `gate` job (#1606), so every test runs in
+  # a GitOps repo holding the REALLY RENDERED workflow — not a hand-written
+  # stand-in that could keep passing after the template renames its job. The
+  # repo holds no no-cluster-deploy pair, so the language-path tests' context
+  # set does not depend on where bats was started either.
+  PROTECT_REPO="$BATS_TEST_TMPDIR/gitops-repo"
+  render_iac iac/.github/workflows/kubernetes-ci.yml.tmpl
+  mkdir -p "$PROTECT_REPO/.github/workflows"
+  cp "$WF" "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  cd "$PROTECT_REPO"
 }
 
-@test "branch-protection --iac-only requires the six kubernetes-ci checks and nothing else (#1154)" {
+@test "branch-protection --iac-only requires the single kubernetes-ci gate check and nothing else (#1154, #1606)" {
   # the point of the whole slice: a GitOps repo's branch protection can require
   # something that BUILDS. Requiring the language-app contexts instead would pin
   # every PR on checks no rendered workflow reports.
@@ -526,16 +535,17 @@ EOF
   local contexts expected
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"
   # EXACT equality, derived from the same list the template is checked against: a
-  # substring sweep accepts a context renamed to `render-manifests`, which branch
+  # substring sweep accepts a context renamed to `gate-k8s`, which branch
   # protection would then require and no job would ever report
   expected="$(printf '%s\n' $EXPECTED_JOBS | LC_ALL=C sort | paste -sd, -)"
   [ "$contexts" = "$expected" ]
+  [ "$contexts" = "gate" ]
   lacks "$contexts" 'test-and-coverage'
   lacks "$contexts" 'sonarcloud'
   lacks "$contexts" 'license-fs'
 }
 
-@test "branch-protection --iac-only on a 403 prints the SIX contexts and exits 0 (#1154)" {
+@test "branch-protection --iac-only on a 403 prints the gate context and exits 0 (#1154, #1606)" {
   # the only arm that exits 0 without applying the rule, and Step 5's IaC
   # checklist is keyed on it ("unless Step 4b hit its 403 fallback") — the suite
   # pinned that PROSE while nothing executed the branch. A regression that moved
@@ -573,7 +583,7 @@ EOF
   # the flag guards three of them — the visibility case, the `image` context and
   # the CodeQL matrix — but a test passing --has-dockerfile false --has-codeql
   # false only discriminates the first. Hoisting either of the others outside the
-  # guard would add contexts no kubernetes-ci job reports, and the six-name
+  # guard would add contexts no kubernetes-ci job reports, and the one-name
   # equality above would never see it.
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
@@ -582,7 +592,7 @@ EOF
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"
-  [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | length')" -eq 6 ]
+  [ "$contexts" = "$(printf '%s\n' $EXPECTED_JOBS | LC_ALL=C sort | paste -sd, -)" ]
   lacks "$contexts" 'image'
   lacks "$contexts" 'analyze ('
 }
@@ -595,7 +605,7 @@ EOF
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"
-  [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | length')" -eq 6 ]
+  [ "$contexts" = "$(printf '%s\n' $EXPECTED_JOBS | LC_ALL=C sort | paste -sd, -)" ]
   lacks "$contexts" 'sonarqube'
   lacks "$contexts" 'trivy-fs'
 }
@@ -611,6 +621,10 @@ EOF
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
+  # EXACT, in the order the script builds it: #1606 swapped only the IaC set, and
+  # the language-app set must come through that change byte-for-byte
+  [ "$contexts" = "test-and-coverage,semgrep,pre-commit,sonarcloud,license-fs" ]
+  lacks "$contexts" 'gate'
   contains "$contexts" 'test-and-coverage'
   contains "$contexts" 'sonarcloud'
   lacks "$contexts" 'render'
@@ -657,10 +671,265 @@ EOF
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
-  contains "$contexts" 'test-and-coverage'
-  contains "$contexts" 'sonarcloud'
-  lacks "$contexts" 'render'
-  lacks "$contexts" 'config-scan'
+  # the same exact set as the explicit `false` above: a default keyed on the
+  # flag's presence would diverge here
+  [ "$contexts" = "test-and-coverage,semgrep,pre-commit,sonarcloud,license-fs" ]
+}
+
+@test "branch-protection --iac-only REFUSES when kubernetes-ci.yml is absent, before any rule is written (#1606)" {
+  # requiring `gate` with no workflow to report it wedges every PR at `expected`;
+  # dropping it would silently require nothing — so neither PUT nor PATCH may run
+  protection_stubs
+  rm "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --visibility public --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" '.github/workflows/kubernetes-ci.yml` is absent'
+  # the template to render, not just "render something": State D quotes this
+  # message verbatim as the operator's only instruction
+  contains "$output" 'Render it from the plugin'"'"'s templates/iac/.github/workflows/kubernetes-ci.yml.tmpl'
+  contains "$output" 'into the working tree first, then re-run this script'
+  # never "re-run bootstrap": a bootstrap run is this script's caller (#1606)
+  lacks "$output" 'Re-run /development:bootstrap'
+  [ ! -s "$CURL_DATA" ]
+}
+
+# A per-stage kubernetes-ci.yml with no `gate` JOB that still MENTIONS gate
+# everywhere a line probe could be fooled: a comment, a step running the gate
+# script, a step id, a valued `gate:` key nested deeper than a job, a VALUELESS
+# nested `gate:` mapping (defeats a probe that drops its `^` anchor), and a job
+# whose id merely STARTS with gate (defeats one that drops the key's `:` — GitHub
+# would report that job as `gate-lint`, never `gate`), and a VALUED two-space
+# `gate:` key in a top-level `env:` (defeats one that drops its end anchor).
+# $1 = "marked" stamps the plugin's provenance marker; anything else leaves it
+# user-owned.
+write_per_stage_workflow() {
+  local stage
+  {
+    if [ "$1" = marked ]; then
+      printf '# claude-bootstrap: rendered from iac/.github/workflows/kubernetes-ci.yml.tmpl @ v1.160.0 sha256:0\n'
+    fi
+    printf 'name: kubernetes-ci\non:\n  pull_request:\nenv:\n  gate: legacy\n# runs the gate stages, one job each\njobs:\n'
+    for stage in render schema policy config-scan argocd; do
+      printf '  %s:\n    runs-on: ubuntu-latest\n    env:\n      gate: %s\n' "$stage" "$stage"
+      printf '    steps:\n      - id: gate\n        run: zsh scripts/k8s-gate.zsh %s\n' "$stage"
+    done
+    printf '  gate-lint:\n    runs-on: ubuntu-latest\n    services:\n      gate:\n        image: busybox\n'
+    printf '    steps:\n      - run: zsh scripts/k8s-gate.zsh lint\n'
+    # a valueless `gate:` at the JOB indent but in a mapping AFTER the jobs block:
+    # only the rule that leaves `jobs:` on a column-0 key keeps this from reading
+    # as a job, and nothing else in the suite places a decoy below the block
+    printf 'concurrency:\n  gate:\n'
+  } > "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+}
+
+@test "branch-protection --iac-only REFUSES a plugin-rendered pre-#1604 per-stage kubernetes-ci.yml (#1606)" {
+  # the upgrade case: a repo bootstrapped before #1604 reports one context per
+  # stage and never `gate`. Re-running this script there must not swap its
+  # working required contexts for one nothing reports — and the fixture mentions
+  # `gate` everywhere but a job key, so a probe loosened to a substring reds here
+  protection_stubs
+  write_per_stage_workflow marked
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --visibility public --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'carries the plugin'"'"'s provenance marker but has no `gate` job'
+  contains "$output" 'Refresh it from the plugin'"'"'s templates/iac/.github/workflows/kubernetes-ci.yml.tmpl'
+  lacks "$output" 'Re-run /development:bootstrap'
+  [ ! -s "$CURL_DATA" ]
+}
+
+@test "branch-protection --iac-only REFUSES a user-owned kubernetes-ci.yml with no gate job, naming the user's fix (#1606)" {
+  # the idempotency reviewer never overwrites an unmarked file, so "re-render"
+  # would loop: the message must hand the edit to the user instead
+  protection_stubs
+  write_per_stage_workflow unmarked
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --visibility public --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'is user-owned and has no `gate` job'
+  # the remedy must name all three causes, or a reader who adds a `gate` job with
+  # a reusable `uses:` satisfies it literally and is refused again
+  contains "$output" 'Give it a job with id `gate` that GitHub reports under that id (no `name:`, no `strategy:`/matrix, no reusable-workflow `uses:`)'
+  # the second remedy, for a user who does not want to own the file at all
+  contains "$output" 'or remove it so the plugin'"'"'s templates/iac/.github/workflows/kubernetes-ci.yml.tmpl is rendered'
+  lacks "$output" 'provenance marker'
+  [ ! -s "$CURL_DATA" ]
+}
+
+@test "branch-protection --iac-only accepts a gate job key carrying a trailing comment (#1606)" {
+  # the probe matches the template's shape, not its exact bytes: a comment on
+  # the job key must not turn a working workflow into a refusal
+  protection_stubs
+  sed -i.bak -E 's/^  gate:[[:space:]]*$/  gate:  # the one job/' "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  grep -q '^  gate:  # the one job$' "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --visibility public --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
+}
+
+# A workflow whose ONE job is `gate`, written the way $1 says: `4-space` indents
+# the jobs block by four, `quoted` quotes the key, `crlf` uses CRLF endings,
+# `commented-jobs` comments the `jobs:` key, `step-name` carries `name:` on a step
+# and inside a `with:` map, `heredoc-name` writes `name:`/`strategy:` lines from a
+# block scalar; `named`, `named-quoted`, `named-4-space`, `matrix`,
+# `matrix-4-space` and `reusable` give the JOB ITSELF the key that renames its
+# reported check. Each is a shape YAML and GitHub accept, so the probe's verdict
+# on it is a decision, not an accident of the template's byte layout — and only
+# the last group changes the reported check name.
+write_gate_workflow() {
+  local out="$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  case "$1" in
+  4-space) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n    gate:\n        runs-on: ubuntu-latest\n        steps:\n          - run: make lint\n' > "$out" ;;
+  step-name) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        name: checkout\n      - uses: actions/upload-artifact@v4\n        with:\n          name: gate-report\n      - run: make lint\n' > "$out" ;;
+  heredoc-name) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |\n          cat > m.yaml <<EOF\n          name: not-a-job-key\n          strategy: neither\n          EOF\n          make lint\n' > "$out" ;;
+  quoted) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  "gate":\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  single-quoted) printf "name: kubernetes-ci\non:\n  pull_request:\njobs:\n  'gate':\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n" > "$out" ;;
+  commented-jobs) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:  # the one job\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  reusable) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    uses: ./.github/workflows/gate-impl.yml\n' > "$out" ;;
+  named-quoted) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    "name": Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  named-single-quoted) printf "name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    'name': Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n" > "$out" ;;
+  named-spaced) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    name : Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  sibling-named) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  build:\n    name: Build\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        dir: [a, b]\n    steps:\n      - run: make build\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n  notify:\n    uses: ./.github/workflows/notify.yml\n' > "$out" ;;
+  flush-steps) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n    - uses: actions/checkout@v4\n      name: checkout\n    - run: make lint\n' > "$out" ;;
+  trailing-top-level-key) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\nconcurrency:\n  group: ci\n' > "$out" ;;
+  named-4-space) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n    gate:\n        name: Gate\n        runs-on: ubuntu-latest\n        steps:\n          - run: make lint\n' > "$out" ;;
+  matrix-4-space) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n    gate:\n        runs-on: ubuntu-latest\n        strategy:\n            matrix:\n                dir: [a, b]\n        steps:\n          - run: make lint\n' > "$out" ;;
+  crlf) printf 'name: kubernetes-ci\r\non:\r\n  pull_request:\r\njobs:\r\n  gate:\r\n    runs-on: ubuntu-latest\r\n    steps:\r\n      - run: make lint\r\n' > "$out" ;;
+  named) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  matrix) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        dir: [a, b]\n    steps:\n      - run: make lint\n' > "$out" ;;
+  *) printf 'write_gate_workflow: unknown shape %s\n' "$1" >&2; return 2 ;;
+  esac
+}
+
+@test "branch-protection --iac-only accepts a gate job at any indent, quoted, CRLF, or with named steps (#1606)" {
+  # GitHub reports the check as `gate` in every one of these, so refusing one
+  # would deny a consumer protection over its file's layout — and tell it to add
+  # a job it has, or to drop a `name:` that is a STEP's, not the job's
+  local shape
+  for shape in 4-space quoted single-quoted commented-jobs crlf step-name heredoc-name \
+    sibling-named flush-steps trailing-top-level-key; do
+    protection_stubs
+    write_gate_workflow "$shape"
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --visibility public --has-dockerfile false --has-codeql false \
+      --iac-only true --default-branch main
+    [ "$status" -eq 0 ]
+    [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
+  done
+}
+
+@test "branch-protection --iac-only REFUSES a gate job whose reported name is not gate (#1606)" {
+  # the wedge the guard exists to prevent, one level subtler: the job IS `gate`,
+  # but GitHub reports it as `Gate` (a `name:`), `gate (a)`/`gate (b)` (a matrix)
+  # or `gate / <called job>` (a reusable-workflow `uses:`), so requiring `gate`
+  # pins every PR at `expected` forever
+  local shape
+  # including at four-space indent and with a quoted key: the depth and quoting
+  # tolerances must not turn the refusal off
+  for shape in named matrix reusable named-quoted named-single-quoted named-spaced \
+    named-4-space matrix-4-space; do
+    protection_stubs
+    write_gate_workflow "$shape"
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --visibility public --has-dockerfile false --has-codeql false \
+      --iac-only true --default-branch main
+    [ "$status" -eq 1 ]
+    contains "$output" 'carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
+    contains "$output" 'Drop `name:`/`strategy:` from the job'
+    # the step-level carve-out, and the remedy for a reusable call, which dropping
+    # `uses:` alone would leave unrunnable
+    contains "$output" 'its steps may keep their own `name:`/`uses:`'
+    contains "$output" 'inline the called workflow'"'"'s steps into the `gate` job'
+    # not the has-no-gate-job wording: the job is there, its reported name is not
+    lacks "$output" 'has no `gate` job'
+    [ ! -s "$CURL_DATA" ]
+  done
+
+  # and a MARKED file takes the same arm: it has a `gate` job, so the
+  # provenance-refresh message would be a false diagnosis
+  protection_stubs
+  write_gate_workflow named
+  local body
+  body="$(cat "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml")"
+  printf '# claude-bootstrap: rendered from iac/.github/workflows/kubernetes-ci.yml.tmpl @ v1.160.0 sha256:0\n%s\n' \
+    "$body" > "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --visibility public --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
+  lacks "$output" 'provenance marker'
+  [ ! -s "$CURL_DATA" ]
+}
+
+# A per-stage workflow with no `gate` job whose provenance marker sits at exactly
+# line $1 — the boundary the script shares with stamp-marker.zsh's own 10-line
+# idempotency check, so both edges are pinned rather than "somewhere past it".
+write_marker_at_line() {
+  local n=$1 i out="$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  write_per_stage_workflow unmarked
+  {
+    for ((i = 1; i < n; i++)); do printf '# filler %d\n' "$i"; done
+    printf '# claude-bootstrap: rendered from iac/.github/workflows/kubernetes-ci.yml.tmpl @ v1.160.0 sha256:0\n'
+    cat "$out"
+  } > "$out.new"
+  mv "$out.new" "$out"
+  [ "$(awk '/claude-bootstrap: rendered from iac\//{ print NR; exit }' "$out")" -eq "$n" ]
+}
+
+@test "branch-protection --iac-only reads the provenance marker at line 10, but not at line 11 (#1606)" {
+  # the marked/user-owned split routes State D: a marked file is refreshed through
+  # the idempotency reviewer, an unmarked one is the user's. Both EDGES matter —
+  # narrowing the window to line 1 hands a legitimately stamped file (the marker
+  # may follow a leading comment) to the user, and widening it treats a file that
+  # merely QUOTES the marker as the plugin's
+  protection_stubs
+  write_marker_at_line 10
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --visibility public --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'carries the plugin'"'"'s provenance marker but has no `gate` job'
+  [ ! -s "$CURL_DATA" ]
+
+  protection_stubs
+  write_marker_at_line 11
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --visibility public --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'is user-owned and has no `gate` job'
+  lacks "$output" 'provenance marker'
+  [ ! -s "$CURL_DATA" ]
+}
+
+@test "branch-protection --iac-only reads the marker only as a column-0 comment naming iac/ (#1606)" {
+  # a file that MENTIONS the marker — indented, inside a `run:` body, or stamped
+  # from another template — is the user's: reading it as the plugin's would send
+  # State D to refresh a template over a file it does not own
+  local mention
+  for mention in '  # claude-bootstrap: rendered from iac/.github/workflows/kubernetes-ci.yml.tmpl @ v1 sha256:0' \
+    '      run: echo "# claude-bootstrap: rendered from iac/x.tmpl @ v1 sha256:0"' \
+    '# claude-bootstrap: rendered from public/.github/workflows/quality-public.yml.tmpl @ v1 sha256:0'; do
+    protection_stubs
+    write_per_stage_workflow unmarked
+    local body out="$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+    body="$(cat "$out")"
+    printf '%s\n%s\n' "$mention" "$body" > "$out"
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --visibility public --has-dockerfile false --has-codeql false \
+      --iac-only true --default-branch main
+    [ "$status" -eq 1 ]
+    contains "$output" 'is user-owned and has no `gate` job'
+    lacks "$output" 'provenance marker'
+    [ ! -s "$CURL_DATA" ]
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -722,7 +991,7 @@ EOF
   lacks "$section" 'When neither case above holds'
   # the exclusion's CONSEQUENCE, not only its condition. Pinning the condition
   # alone leaves the forbidden actions rewordable — a language repo could be
-  # made to require six IaC contexts from a workflow this path never emitted,
+  # made to require the IaC `gate` context from a workflow this path never emitted,
   # which is the permanent-`expected` state --iac-only exists to prevent.
   contains "$section" 'do not emit this template, write `primary: kubernetes`, or'
   contains "$section" 'pass `--iac-only true`'
@@ -787,7 +1056,7 @@ EOF
   contains "$block" 'it requires the `kubernetes-ci.yml` `gate` context **instead of**'
   # the no-other-primary qualifier the sibling sites carry. This is the site a
   # model reads when COMPOSING the invocation, so without it here the conflict
-  # repo yields `--iac-only true` and requires six contexts from a workflow §3l
+  # repo yields `--iac-only true` and requires the `gate` context from a workflow §3l
   # never rendered — every PR pinned on a permanent `expected`.
   contains "$block" 'no other `primary:` recorded'
   contains "$block" 'settles it `false` whatever the marker says'
@@ -922,7 +1191,7 @@ EOF
 @test "Step 1's State-D gap-fill resolves the IaC condition before branch protection (#1154)" {
   # the re-bootstrap mirror of the Step 4.5 guard, and previously the one prose
   # site of this change with zero coverage. Deleting its branch-protection rule
-  # reproduces the same unflagged PUT — six live contexts swapped for language-app
+  # reproduces the same unflagged PUT — the live `gate` context swapped for language-app
   # contexts nothing reports — just on the re-bootstrap path.
   local block
   # the end address must FOLLOW the start: `#### State D` sits ABOVE this
@@ -951,7 +1220,7 @@ EOF
   contains "$block" 'a recorded `primary: kubernetes` grants nothing on its own'
   # RESOLVED, not merely detected — and the ORDERING that makes it achievable.
   # This tree is ordered and step 3 runs before Q4 is asked in step 6, so keying
-  # on detected languages PUTs the six IaC contexts and only then lets the user
+  # on detected languages PUTs the IaC `gate` context and only then lets the user
   # name a language: a language repo whose rule requires none of its own checks.
   contains "$block" 'the **resolved** language set is empty'
   contains "$block" '**Resolved means after Q4**'
@@ -1119,7 +1388,11 @@ EOF
   local section
   section="$(iac_section)"
   ends_with "$section" '### Idempotency rules (apply for every file write) '
-  contains "$section" '**The final report names** the gate command (the resolved `{{GATE_COMMAND}}`, `make lint` unless one is recorded), the single required `gate` context, and every artifact above that was skipped and why'
+  contains "$section" '**The final report names** the gate command (the resolved `{{GATE_COMMAND}}`, `make lint` unless one is recorded), the single required `gate` context'
+  # …and, since #1606, that the context is NOT required when the call refused:
+  # reporting it as required on a repo with no rule is the failure Step 4b forbids
+  contains "$section" 'that no rule was applied and `gate` is **not yet** required'
+  contains "$section" 'and every artifact above that was skipped and why'
   contains "$section" 'every artifact above that was skipped and why, on a confirmed empty repo too'
   contains "$section" 'Unless Step 4a'"'"'s `install-iac-hooks.zsh` ran and exited 0, it also says the pre-push hook is **not wired** and names `make hooks` as the remedy'
 }
@@ -1238,15 +1511,89 @@ step4a_iac() {
   contains "$setup" '`branch-protection.sh --iac-only true`): `gate`.'
 }
 
-@test "EXPECTED_JOBS is read only by the branch-protection.sh --iac-only tests (#1605)" {
-  # SKILL.md and SETUP.md moved to `gate`; only the script still requires six
-  # (#1606). The regex is bracketed so this test's own line does not match it.
-  local users t
-  users="$(awk '/^@test /{ name = $0 } /[$]EXPECTED_JOB[S]/ && name != "" { print name }' "$BATS_TEST_FILENAME" | sort -u)"
-  [ -n "$users" ]
-  while IFS= read -r t; do
-    starts_with "$t" '@test "branch-protection'
-  done <<< "$users"
+@test "EXPECTED_JOBS equals the rendered workflow's job ids (#1606)" {
+  # the branch-protection tests assert the script against EXPECTED_JOBS, so this
+  # is what ties the required context to a job that actually reports it: rename
+  # the job and this reds, rather than the script requiring a context no
+  # workflow reports
+  run render_iac iac/.github/workflows/kubernetes-ci.yml.tmpl
+  [ "$status" -eq 0 ]
+  local jobs expected
+  jobs="$(yq -r '.jobs | keys | .[]' "$WF" | LC_ALL=C sort | paste -sd, -)"
+  expected="$(printf '%s\n' $EXPECTED_JOBS | LC_ALL=C sort | paste -sd, -)"
+  [ "$jobs" = "$expected" ]
+}
+
+@test "branch-protection.sh names the single gate context, never six IaC jobs (#1606)" {
+  # comment markers stripped so a needle spanning two comment lines can match
+  local protect
+  protect="$(sed -E 's/^[[:space:]]*#[[:space:]]?//' "$PROTECT" | tr -s '[:space:]' ' ')"
+  contains "$protect" 'kubernetes-ci.yml'"'"'s single `gate` job'
+  # the header is the contract the prose sites copy, so it must carry ALL THREE
+  # refusal causes — a reader who finds the file has a `gate` job would otherwise
+  # read the third refusal as undocumented behaviour
+  contains "$protect" 'is absent, has no `gate` job, or has a `gate` job carrying `name:`, `strategy:` or a reusable-workflow `uses:`'
+  # word-bounded, so every rewording of the retired set reds — not only the
+  # three spellings it last had — without banning any word that contains "six"
+  run grep -qiwE 'six' "$PROTECT"
+  [ "$status" -eq 1 ]
+  lacks "$protect" '"render" "schema"'
+  # …and the user-facing how-to that states what the flag requires
+  local howto
+  howto="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/how-to/keep-app-repos-out-of-the-cluster.md")"
+  contains "$howto" '`kubernetes-ci.yml`'"'"'s single `gate` check'
+  lacks "$howto" '`kubernetes-ci.yml`'"'"'s six checks'
+}
+
+@test "bootstrap SKILL.md handles the --iac-only refusal instead of looping on it (#1606)" {
+  # the script's exit 1 names a fix per provenance; the skill that calls it must
+  # act on that fix, or a pre-#1604 repo loops: State D's protection gap blocks
+  # the drift check that would otherwise refresh the stale workflow
+  local skill statd step4b
+  skill="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  statd="$(sed -n '/^#### State D:/,/^   - `branch_protection.state == "missing"`/p' "$SKILL" \
+    | sed -E 's/^[[:space:]]*>?[[:space:]]?//' | tr -s '[:space:]' ' ')"
+  step4b="$(sed -n '/^### 4b\. Branch protection/,/^### 4b\.5\./p' "$SKILL" | tr -s '[:space:]' ' ')"
+  [ -n "$statd" ]
+  [ -n "$step4b" ]
+  contains "$statd" 'When that `--iac-only true` call REFUSES (exit 1, no rule written)'
+  contains "$statd" 'Do not re-invoke `/development:bootstrap` to clear it'
+  # the RATIONALE must stay true of a marked file, which bootstrap does refresh:
+  # an unqualified "it reaches the same refusal" contradicts the script's own
+  # provenance split
+  contains "$statd" 'on an unmarked file the same refusal'
+  # the failure the whole flag exists to prevent: inverting this clause swaps a
+  # GitOps repo's live `gate` context for contexts nothing there reports
+  contains "$statd" 'never fall back to the language-app set'
+  # a marked file is refreshed only through the reviewer, never blind, and at
+  # most once — the two ways the branch could otherwise loop or lose a decision
+  contains "$statd" 'the `bootstrap-idempotency-reviewer`, exactly as step 5b does'
+  contains "$statd" 'it is **never** overwritten blind'
+  contains "$statd" 'repeat the `branch-protection.sh` call **in this same run**'
+  contains "$statd" 'or the repeated call refuses again, take the next bullet — never render a second time'
+  contains "$statd" 'do not overwrite a user'"'"'s file'
+  # the third arm, for a refusal whose message names no provenance: without it a
+  # re-bootstrap binds the marker bullet and loops on render + re-invoke
+  contains "$statd" 'A third message names no provenance at all'
+  contains "$statd" 'take the **second** bullet whatever the file'"'"'s provenance'
+  contains "$statd" 'make **no** working-tree edit here'
+  contains "$skill" 'the one exception being the reviewed, marker-carrying `kubernetes-ci.yml` refresh above'
+  contains "$step4b" 'the message'"'"'s refresh advice does **not** apply in a full run'
+  contains "$step4b" 'One FATAL refusal, on the §3l IaC path only (#1606).'
+  contains "$step4b" 'list the unapplied rule **and** merge settings as an outstanding Step 5 item'
+  contains "$step4b" 'do not retry the script on the same file'
+  # all three refusal causes here too, and that the handling does not vary by arm
+  contains "$step4b" 'its `gate` job carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
+  contains "$step4b" 'Whichever arm fired, the handling below is the same'
+  # …and Step 4.5 must not report the rule as applied after a refusal
+  contains "$skill" 'Reaching this section is never itself evidence'
+  contains "$step4b" 'arming to take its *arming failed* branch'
+  # Step 5's user-facing consequence, not just its heading: replacing it with
+  # "branch protection is still not an outstanding item" would print a checklist
+  # claiming protection is done on a repo that has no rule at all
+  contains "$skill" 'Or unless Step 4b hit its #1606 refusal'
+  contains "$skill" 'neither the rule nor the merge settings were applied'
+  contains "$skill" 'outstanding item quoting the script'"'"'s message'
 }
 
 # ---------------------------------------------------------------------------

@@ -1579,9 +1579,13 @@ something this plugin's skills run, which is the same boundary that keeps
 detection in `development`. A manifests repo has no test suite, so the language-app
 gates — the coverage floor above all — do not apply to it, and bootstrap does not
 render them. Branch protection still runs: `branch-protection.sh --iac-only true`
-**requires those six contexts instead of** the language-app set (which no
-workflow on such a repo would ever report), leaving the protection rule and the
-repo merge settings auto-merge depends on unchanged.
+**requires the single `gate` context instead of** the language-app set (which no
+workflow on such a repo would ever report) — `kubernetes-ci.yml`'s one job, which
+runs those six stages since #1604 (#1606) — leaving the protection rule and the
+repo merge settings auto-merge depends on unchanged. It refuses, before writing
+any rule, when that workflow is absent or has no `gate` job — or when its `gate`
+job carries `name:`, a `strategy:` block or a reusable-workflow `uses:`, each of
+which makes GitHub report the check under another name.
 
 ### `development-opentofu` owns
 
@@ -1595,9 +1599,10 @@ any kind. The two IaC plugins own **disjoint file sets**, so a repo holding both
 **does** detect both topics and runs both **maintenance** pipelines with no
 coordination between them, now that #1160 has registered the marker that makes
 the second topic detectable. The **CI** half is narrower — the two
-bootstrap-rendered workflows will share three job ids, **and** at most one of
-them is rendered per repo, which is what makes that safe; see the job-id
-collision below.
+bootstrap-rendered workflows will share three **names** — since #1604 the
+kubernetes side reports one context, `gate`, so those three are its gate
+**stages** rather than job ids — **and** at most one of them is rendered per
+repo, which is what makes that safe; see the job-id collision below.
 
 **The boundary is the FILE SET, not the resource kind**, and the two statements
 above only agree because of it. Cluster resources *expressed in HCL* — a
@@ -2085,9 +2090,14 @@ describing a flag that had grown a second context set.
 
 **Three of those six ids will collide with the sibling's** — `lint`,
 `config-scan` and `policy` are enumerated byte-identically to the shipped
-kubernetes template's job ids (future tense for the same reason as above: only
-one IaC template exists on disk today), and a required status context is matched
-by **name**. That is a known, accepted collision
+kubernetes template's **stage** names (future tense for the same reason as above:
+only one IaC template exists on disk today), and a required status context is
+matched by **name**. Since #1604 those three are stages of the kubernetes gate
+**script**, not job ids: that template emits one job, `gate`, and `--iac-only
+true` requires that one context (#1606) — so the collision is **latent**, a
+clash of names the kubernetes side no longer reports as contexts. It stays
+recorded because the enumeration above is #1162's specification and the names are
+the ones it will render. That is a known, accepted collision
 rather than an oversight, because **at most one IaC workflow is rendered per
 repo**: a repo with an application language takes neither IaC path, and a
 zero-language repo takes at most one — the path whose marker it carries. A

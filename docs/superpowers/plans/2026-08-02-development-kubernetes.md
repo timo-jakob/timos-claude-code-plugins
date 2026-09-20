@@ -247,9 +247,13 @@ something this plugin's skills run, which is the same boundary that keeps
 detection in `development`. A manifests repo has no test suite, so the language-app
 gates — the coverage floor above all — do not apply to it, and bootstrap does not
 render them. Branch protection still runs: `branch-protection.sh --iac-only true`
-**requires those six contexts instead of** the language-app set (which no
-workflow on such a repo would ever report), leaving the protection rule and the
-repo merge settings auto-merge depends on unchanged.
+**requires the single `gate` context instead of** the language-app set (which no
+workflow on such a repo would ever report) — `kubernetes-ci.yml`'s one job, which
+runs those six stages since #1604 (#1606) — leaving the protection rule and the
+repo merge settings auto-merge depends on unchanged. It refuses, before writing
+any rule, when that workflow is absent or has no `gate` job — or when its `gate`
+job carries `name:`, a `strategy:` block or a reusable-workflow `uses:`, each of
+which makes GitHub report the check under another name.
 ```
 
 - [x] **Step 6: Commit**
