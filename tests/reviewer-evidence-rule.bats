@@ -5,28 +5,32 @@
 #
 # Two halves, and this file guards both:
 #
-#   1. Every read-only reviewer in development-claude-plugin/agents/ (the ones
-#      whose frontmatter is `tools: Read, Grep, Glob`, so they can read and grep
-#      but cannot EXECUTE a linter, a suite, a validator or a version-sync
-#      script) states the evidence rule under a heading naming it, tells the
-#      reviewer to name the deciding command, and gives those lines a slot in its
-#      Reporting Format.
+#   1. Every read-only reviewer in the repo (every tracked `*/agents/*.md`
+#      whose frontmatter tool set normalises to `Read, Grep, Glob`, so it can
+#      read and grep but cannot EXECUTE a linter, a suite, a validator or a
+#      version-sync script) states the evidence rule under a heading naming it,
+#      tells the reviewer to name the deciding command, and gives those lines a
+#      slot in its Reporting Format — unless it is listed, with a reason, in
+#      tests/reviewer-evidence-rule.exemptions (#1644).
 #   2. The conductor's run-the-command-before-consolidating step is stated
 #      EXACTLY ONCE, in development/skills/resolve-issue/reference/review-loop.md,
 #      and docs/explanation/review-loop.md points at it instead of restating it.
 #
 # The roster in half 1 is DERIVED from the frontmatter, never a hard-coded list:
-# a closed list rots the moment a sixth read-only reviewer is added, and the new
+# a closed list rots the moment another read-only reviewer is added, and the new
 # agent would then carry no evidence rule with every test still green. The
-# derived set is additionally compared against the five known today, so ADDING a
-# read-only reviewer is a deliberate, visible edit to this file.
+# derived set is additionally compared against the roster known today, so ADDING
+# a read-only reviewer is a deliberate, visible edit to this file.
 #
-# The sweep stops at `development-claude-plugin/agents/`, which is #1584's stated
-# scope. Roughly thirty agents in OTHER plugins declare the same read-only tool
-# set and carry no evidence rule; widening this roster to `git ls-files
-# '*/agents/*.md'` is #1644, and belongs with the edit that gives them the rule.
+# The sweep is REPO-WIDE (#1644): `git ls-files '*/agents/*.md'`, not a path
+# glob, so a reviewer added under any plugin is in the roster the moment it is
+# tracked. `tests/` is excluded — a fixture agent there is test data, not a
+# shipped reviewer. The set is never implicitly split: a derived agent either
+# carries the rule or is named, with a reason, in the exemption list, and the
+# list is gated both ways (a stale or unreasoned entry reds, and so does an
+# exempted agent that carries the rule anyway).
 #
-# NEEDLES ARE SECTION-SCOPED, NOT FILE-WIDE. These five sections are maintained
+# NEEDLES ARE SECTION-SCOPED, NOT FILE-WIDE. These sections are maintained
 # as byte-identical copies, so the realistic edit is a UNIFORM one, and a
 # file-wide grep cannot tell "the clause is in the evidence rule" from "the
 # clause is anywhere in a 200-line agent". Matching file-wide would let the
@@ -37,8 +41,12 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
+  # git exports these inside hooks and `git rebase --exec`; `-C` does not
+  # override them, so the fixture repo's init/add would hit the REAL index.
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-  AGENT_DIR="$REPO_ROOT/development-claude-plugin/agents"
+  # repo-relative, so the non-vacuity fixture can resolve it inside its own tree
+  EXEMPTIONS_REL='tests/reviewer-evidence-rule.exemptions'
   REFERENCE="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
   EXPLANATION="$REPO_ROOT/docs/explanation/review-loop.md"
   PROFILE="$REPO_ROOT/development-claude-plugin/skills/resolve-profile/SKILL.md"
@@ -49,50 +57,153 @@ setup() {
   SECTION_NAME='The decided pass'
   REF_HEADING="### $SECTION_NAME"
   POINTER_NAME="*$SECTION_NAME*"
-  # The five known read-only reviewers, sorted. Compared against the derived set.
-  EXPECTED_ROSTER="claude-plugin-contract-integrity
-claude-plugin-manifest-check
-claude-plugin-prose-logic
-claude-plugin-script-reviewer
-claude-plugin-test-reviewer"
-  EXPECTED_COUNT=5
+  # The read-only agents known today, repo-relative, in `LC_ALL=C sort` order.
+  # Compared against the derived set, so an addition is a visible edit here.
+  EXPECTED_ROSTER="development-claude-plugin/agents/claude-plugin-contract-integrity.md
+development-claude-plugin/agents/claude-plugin-manifest-check.md
+development-claude-plugin/agents/claude-plugin-prose-logic.md
+development-claude-plugin/agents/claude-plugin-script-reviewer.md
+development-claude-plugin/agents/claude-plugin-test-reviewer.md
+development-go/agents/go-bug-hunter.md
+development-go/agents/go-code-quality.md
+development-go/agents/go-performance-reviewer.md
+development-go/agents/go-resilience-reviewer.md
+development-go/agents/go-security-reviewer.md
+development-go/agents/go-test-reviewer.md
+development-java/agents/java-bug-hunter.md
+development-java/agents/java-code-quality.md
+development-java/agents/java-performance-reviewer.md
+development-java/agents/java-resilience-reviewer.md
+development-java/agents/java-security-reviewer.md
+development-java/agents/java-test-reviewer.md
+development-kubernetes/agents/argocd-advisor.md
+development-kubernetes/agents/kubernetes-reliability-reviewer.md
+development-kubernetes/agents/kubernetes-security-reviewer.md
+development-python/agents/python-bug-hunter.md
+development-python/agents/python-code-quality.md
+development-python/agents/python-performance-reviewer.md
+development-python/agents/python-resilience-reviewer.md
+development-python/agents/python-security-reviewer.md
+development-python/agents/python-test-reviewer.md
+development-swift/agents/bug-hunter.md
+development-swift/agents/code-quality.md
+development-swift/agents/performance-reviewer.md
+development-swift/agents/security-reviewer.md
+development-swift/agents/swift-resilience-reviewer.md
+development-swift/agents/test-reviewer.md
+development/agents/bootstrap-config-consistency.md
+development/agents/bootstrap-idempotency-reviewer.md
+development/agents/bootstrap-security-reviewer.md"
+  EXPECTED_COUNT=35
 }
 
-# Print the basename of every agent in $1 whose frontmatter
-# declares the read-only tool set. One definition, used by the real sweep AND by
-# the non-vacuity fixture below, so the two can never test different rules.
+# Print every tracked agent file in the git work tree $1, repo-relative, sorted.
+# `tests/` is excluded: an agent there is a fixture, not a shipped reviewer.
+agent_files_in() {
+  git -C "$1" ls-files -- '*/agents/*.md' ':(exclude)tests/' | LC_ALL=C sort
+}
+
+# Print the normalised tool set of the agent file $1 (sorted, space-joined, with
+# a trailing space), or nothing when the frontmatter declares no `tools:` key.
+tool_set_of() {
+  awk -F': *' '
+    /^---$/ { n++; if (n == 2) exit; next }
+    n == 1 && /^tools:/ { print $2; exit }
+  ' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+    | grep -v '^$' | LC_ALL=C sort | tr '\n' ' '
+}
+
+# Print the repo-relative path of every agent in the git work tree $1 whose
+# frontmatter declares the read-only tool set. One definition, used by the real
+# sweep AND by the non-vacuity fixtures below, so they can never test different
+# rules.
 #
 # The tool set is NORMALISED (split on commas, trimmed, sorted) rather than
 # matched as a literal line: `tools: Glob, Grep, Read` is the same read-only
 # agent as `tools: Read, Grep, Glob`, and a spelling-exact grep would make a
-# reordered sixth agent invisible to BOTH this sweep and the roster tripwire —
+# reordered new agent invisible to BOTH this sweep and the roster tripwire —
 # it would ship with no evidence rule and the suite would stay green.
-# The glob is `*.md`, not `claude-plugin-*.md`: the tool-set filter already
-# excludes everything that is not a read-only reviewer, and a future reviewer
-# added under another basename would otherwise escape BOTH this sweep and the
-# EXPECTED_ROSTER tripwire that is supposed to make an addition visible.
+# The roster comes from `git ls-files`, not a directory glob, so no plugin and
+# no basename convention can hide a reviewer from it (#1644).
 read_only_agents_in() {
-  local dir="$1" f tools
-  for f in "$dir"/*.md; do
-    [ -e "$f" ] || continue
-    tools="$(awk -F': *' '
-      /^---$/ { n++; if (n == 2) exit; next }
-      n == 1 && /^tools:/ { print $2; exit }
-    ' "$f" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
-      | grep -v '^$' | sort | tr '\n' ' ')"
-    [ "$tools" = "Glob Grep Read " ] || continue
-    basename "$f" .md
-  done | sort
+  local root="$1" f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ "$(tool_set_of "$root/$f")" = "Glob Grep Read " ] || continue
+    printf '%s\n' "$f"
+  done < <(agent_files_in "$root")
 }
 
-# Print the basename of every read-only agent in $1 that is MISSING the evidence
-# rule heading. Empty output = the sweep passes.
-missing_evidence_rule_in() {
-  local dir="$1" a
+# Print the path of every entry in the work tree $1's exemption list, sorted.
+exempt_agents_in() {
+  local file="$1/$EXEMPTIONS_REL"
+  [ -f "$file" ] || return 0
+  grep -vE '^[[:space:]]*(#|$)' "$file" \
+    | sed 's/[[:space:]]*|.*$//; s/^[[:space:]]*//' | LC_ALL=C sort
+}
+
+# Print every derived read-only agent that is NOT exempt: the rule's carriers.
+carriers_in() {
+  local root="$1" a exempt
+  exempt="$(exempt_agents_in "$root")"
   while IFS= read -r a; do
     [ -n "$a" ] || continue
-    grep -qF -- "$HEADING" "$dir/$a.md" || printf '%s\n' "$a"
-  done < <(read_only_agents_in "$dir")
+    printf '%s\n' "$exempt" | grep -qxF -- "$a" && continue
+    printf '%s\n' "$a"
+  done < <(read_only_agents_in "$root")
+}
+
+# Print every carrier in $1 that is MISSING the evidence rule heading. Empty
+# output = the sweep passes.
+missing_evidence_rule_in() {
+  local root="$1" a
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    grep -qF -- "$HEADING" "$root/$a" || printf '%s\n' "$a"
+  done < <(carriers_in "$root")
+}
+
+# Print one line per defect in the work tree $1's exemption list. Empty output =
+# the list is sound. Gated BOTH ways against the derived roster: an entry naming
+# no derived agent is stale (it would silently exempt whatever later takes the
+# path), an entry with no reason is not "an explicit, reasoned exemption", and an
+# exempted agent that carries the rule anyway makes the list lie about the set.
+exemption_problems_in() {
+  local root="$1" file="$1/$EXEMPTIONS_REL" roster line path reason
+  [ -f "$file" ] || { printf 'no exemption list at %s\n' "$EXEMPTIONS_REL"; return 0; }
+  roster="$(read_only_agents_in "$root")"
+  while IFS= read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in
+      *' | '*) ;;
+      *) printf 'malformed (want "<path> | <reason>"): %s\n' "$line"; continue ;;
+    esac
+    path="${line%% | *}"
+    reason="${line#* | }"
+    reason="$(printf '%s' "$reason" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    [ -n "$reason" ] || printf 'no reason given: %s\n' "$path"
+    printf '%s\n' "$roster" | grep -qxF -- "$path" \
+      || printf 'not a derived read-only agent: %s\n' "$path"
+    if [ -f "$root/$path" ] && grep -qF -- "$HEADING" "$root/$path"; then
+      printf 'exempt but carries the rule: %s\n' "$path"
+    fi
+  done < "$file"
+}
+
+# Build a throwaway git work tree under $1 holding every tracked agent file and
+# the exemption list, at their real repo-relative paths, so the SAME roster
+# functions can be driven over a mutated copy. Prints nothing.
+make_fixture_repo() {
+  local dest="$1" f
+  mkdir -p "$dest"
+  git -C "$dest" init -q
+  while IFS= read -r f; do
+    mkdir -p "$dest/$(dirname "$f")"
+    cp -- "$REPO_ROOT/$f" "$dest/$f"
+  done < <(agent_files_in "$REPO_ROOT")
+  mkdir -p "$dest/tests"
+  cp -- "$REPO_ROOT/$EXEMPTIONS_REL" "$dest/$EXEMPTIONS_REL"
+  git -C "$dest" add -A
 }
 
 # The body of one `## `-delimited section of a markdown file, heading included.
@@ -163,65 +274,135 @@ delta a clause that wraps
   [ "$status" -eq 0 ]
 }
 
-@test "#1584 the read-only reviewer roster is derived, non-empty, and is the five known today" {
-  # This is ALSO the non-vacuity control for every loop in this file: a wrong or
-  # missing AGENT_DIR, or a frontmatter change that hides an agent, reds here
-  # rather than silently emptying the sweeps below.
-  [ -d "$AGENT_DIR" ]
-  run read_only_agents_in "$AGENT_DIR"
+@test "#1644 the read-only reviewer roster is derived repo-wide, non-empty, and is the set known today" {
+  # This is ALSO the non-vacuity control for every loop in this file: a broken
+  # `git ls-files`, a wrong REPO_ROOT, or a frontmatter change that hides an
+  # agent reds here rather than silently emptying the sweeps below.
+  run read_only_agents_in "$REPO_ROOT"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
-  [ "$output" = "$EXPECTED_ROSTER" ]
+  [ "$output" = "$EXPECTED_ROSTER" ] || {
+    diff <(printf '%s\n' "$EXPECTED_ROSTER") <(printf '%s\n' "$output") >&2
+    return 1
+  }
   [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq "$EXPECTED_COUNT" ]
+  # repo-wide really means beyond the plugin panel #1584 started from
+  printf '%s\n' "$output" | grep -qv '^development-claude-plugin/'
 }
 
-@test "#1584 every read-only reviewer states the evidence rule under a heading naming it" {
-  [ -d "$AGENT_DIR" ]
-  run missing_evidence_rule_in "$AGENT_DIR"
+@test "#1644 every read-only reviewer states the evidence rule under a heading naming it, unless exempted" {
+  run missing_evidence_rule_in "$REPO_ROOT"
   [ "$status" -eq 0 ]
   # Name the offenders rather than just failing a count.
   [ -z "$output" ] || {
-    printf 'agents missing the evidence rule: %s\n' "$output" >&2
+    printf 'agents missing the evidence rule (add it, or exempt them with a reason): %s\n' "$output" >&2
     return 1
   }
+  # the carriers are the roster minus the exemptions — never an empty set
+  [ -n "$(carriers_in "$REPO_ROOT")" ]
 }
 
-@test "#1584 NON-VACUITY: the same sweep fails an otherwise-identical agent that lacks the section" {
-  # Copy the real agents, strip the section from exactly one, and run the SAME
-  # function. If the sweep were vacuous (a glob that matches nothing, a grep that
-  # always succeeds), this would pass silently and the test above would prove
-  # nothing.
-  fixture="$BATS_TEST_TMPDIR/agents"
-  mkdir -p "$fixture"
-  cp "$AGENT_DIR"/*.md "$fixture/"
-  # the copy must still yield the full roster, or the control proves nothing
-  [ "$(read_only_agents_in "$fixture")" = "$EXPECTED_ROSTER" ]
+@test "#1644 the exemption list is sound: every entry is a derived agent, reasoned, and does not carry the rule" {
+  [ -f "$REPO_ROOT/$EXEMPTIONS_REL" ]
+  run exemption_problems_in "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { printf '%s\n' "$output" >&2; return 1; }
+  # carriers + exemptions partition the roster exactly
+  local carriers exempt
+  carriers="$(carriers_in "$REPO_ROOT" | wc -l | tr -d ' ')"
+  exempt="$(exempt_agents_in "$REPO_ROOT" | wc -l | tr -d ' ')"
+  [ "$exempt" -gt 0 ]
+  [ $((carriers + exempt)) -eq "$EXPECTED_COUNT" ]
+}
 
-  victim="$fixture/claude-plugin-prose-logic.md"
-  # Drop from the evidence-rule heading up to (not including) the next heading.
+@test "#1644 NON-VACUITY: the same sweep fails an agent that lacks the section, and a NEW read-only agent" {
+  # Copy the real agents into a throwaway git tree, mutate it, and run the SAME
+  # functions. If the sweep were vacuous (a pathspec that matches nothing, a grep
+  # that always succeeds), this would pass silently and the tests above would
+  # prove nothing.
+  fixture="$BATS_TEST_TMPDIR/repo"
+  make_fixture_repo "$fixture"
+  # the copy must still yield the full roster and a clean sweep, or the control
+  # proves nothing
+  [ "$(read_only_agents_in "$fixture")" = "$EXPECTED_ROSTER" ]
+  [ -z "$(missing_evidence_rule_in "$fixture")" ]
+
+  # (a) strip the section from one carrier OUTSIDE the plugin panel
+  victim="development-python/agents/python-test-reviewer.md"
   awk -v h="$HEADING" '
     $0 == h { skipping = 1 }
     skipping && /^## / && $0 != h { skipping = 0 }
     !skipping { print }
-  ' "$victim" > "$victim.stripped"
-  mv -- "$victim.stripped" "$victim"
-  run grep -qF -- "$HEADING" "$victim"
+  ' "$fixture/$victim" > "$fixture/$victim.stripped"
+  mv -- "$fixture/$victim.stripped" "$fixture/$victim"
+  run grep -qF -- "$HEADING" "$fixture/$victim"
   [ "$status" -ne 0 ]   # the strip really happened
 
   run missing_evidence_rule_in "$fixture"
   [ "$status" -eq 0 ]
-  [ "$output" = "claude-plugin-prose-logic" ]
+  [ "$output" = "$victim" ]
+
+  # (b) a brand-new read-only agent in a plugin the roster has never seen, with a
+  # reordered tool list and no rule, is swept in the moment it is tracked
+  mkdir -p "$fixture/development-newlang/agents"
+  printf -- '---\nname: newlang-bug-hunter\ntools: Glob,Read , Grep\n---\n\n## Reporting Format\n' \
+    > "$fixture/development-newlang/agents/newlang-bug-hunter.md"
+  git -C "$fixture" add -A
+  run missing_evidence_rule_in "$fixture"
+  [ "$status" -eq 0 ]
+  [ "$output" = "development-newlang/agents/newlang-bug-hunter.md
+$victim" ]
 }
 
-@test "#1584 the evidence rule is stated identically in all five, so it cannot drift apart" {
-  # The five copies are one rule restated per agent (the same shape the severity
-  # bars use). Byte-identity of the section is what keeps five copies one rule.
+@test "#1644 NON-VACUITY: the exemption check reds on a stale, an unreasoned, a malformed and a rule-carrying entry" {
+  fixture="$BATS_TEST_TMPDIR/repo"
+  make_fixture_repo "$fixture"
+  [ -z "$(exemption_problems_in "$fixture")" ]
+  list="$fixture/$EXEMPTIONS_REL"
+
+  # stale: names no derived agent
+  printf 'development-go/agents/go-no-such-reviewer.md | gone\n' >> "$list"
+  run exemption_problems_in "$fixture"
+  [ "$output" = "not a derived read-only agent: development-go/agents/go-no-such-reviewer.md" ]
+
+  # an entry naming an agent that holds Bash is not in the roster either
+  cp -- "$REPO_ROOT/$EXEMPTIONS_REL" "$list"
+  printf 'development/agents/story-readiness.md | holds Bash\n' >> "$list"
+  run exemption_problems_in "$fixture"
+  [ "$output" = "not a derived read-only agent: development/agents/story-readiness.md" ]
+
+  # unreasoned
+  cp -- "$REPO_ROOT/$EXEMPTIONS_REL" "$list"
+  printf 'development-go/agents/go-bug-hunter.md |  \n' >> "$list"
+  run exemption_problems_in "$fixture"
+  printf '%s\n' "$output" | grep -qxF 'no reason given: development-go/agents/go-bug-hunter.md'
+
+  # malformed: no separator at all
+  cp -- "$REPO_ROOT/$EXEMPTIONS_REL" "$list"
+  printf 'development-go/agents/go-bug-hunter.md\n' >> "$list"
+  run exemption_problems_in "$fixture"
+  printf '%s\n' "$output" | grep -qF 'malformed'
+
+  # exempt but carrying the rule — and exempting it really removes it from the
+  # carriers, so the missing-rule sweep would no longer have looked at it
+  cp -- "$REPO_ROOT/$EXEMPTIONS_REL" "$list"
+  printf 'development-go/agents/go-bug-hunter.md | a reason\n' >> "$list"
+  run exemption_problems_in "$fixture"
+  [ "$output" = "exempt but carries the rule: development-go/agents/go-bug-hunter.md" ]
+  run carriers_in "$fixture"
+  printf '%s\n' "$output" | grep -qxF 'development-go/agents/go-bug-hunter.md' && return 1
+  true
+}
+
+@test "#1584 the evidence rule is stated identically in every carrier, so it cannot drift apart" {
+  # The copies are one rule restated per agent (the same shape the severity
+  # bars use). Byte-identity of the section is what keeps them one rule.
   ref=""
   n=0
   while IFS= read -r a; do
     [ -n "$a" ] || continue
     n=$((n + 1))
-    section="$(section_of "$AGENT_DIR/$a.md" "$HEADING")"
+    section="$(section_of "$REPO_ROOT/$a" "$HEADING")"
     [ -n "$section" ]
     if [ -z "$ref" ]; then
       ref="$section"
@@ -231,8 +412,9 @@ delta a clause that wraps
         return 1
       }
     fi
-  done < <(read_only_agents_in "$AGENT_DIR")
-  [ "$n" -eq "$EXPECTED_COUNT" ]
+  done < <(carriers_in "$REPO_ROOT")
+  [ "$n" -eq "$(carriers_in "$REPO_ROOT" | wc -l | tr -d ' ')" ]
+  [ "$n" -gt 0 ]
   [ -n "$ref" ]
 }
 
@@ -244,7 +426,7 @@ delta a clause that wraps
   while IFS= read -r a; do
     [ -n "$a" ] || continue
     n=$((n + 1))
-    section="$(section_of "$AGENT_DIR/$a.md" "$HEADING")"
+    section="$(section_of "$REPO_ROOT/$a" "$HEADING")"
     [ -n "$section" ]
     for needle in \
       'carries `SUGGESTION`' \
@@ -271,11 +453,11 @@ delta a clause that wraps
     do
       needle_once "$a" "$section" "$needle" || return 1
     done
-  done < <(read_only_agents_in "$AGENT_DIR")
-  [ "$n" -eq "$EXPECTED_COUNT" ]
+  done < <(carriers_in "$REPO_ROOT")
+  [ "$n" -gt 0 ]
 }
 
-@test "#1584 each reviewer's Reporting Format gives the two lines a slot" {
+@test "#1584 each carrier's Reporting Format gives the two lines a slot" {
   # Without a slot in the template the rule is advisory: a model filling in the
   # Reporting Format has nowhere to put the two lines the conductor keys on, and
   # emits a capped finding nothing ever settles. Section-scoped to Reporting
@@ -284,17 +466,17 @@ delta a clause that wraps
   while IFS= read -r a; do
     [ -n "$a" ] || continue
     n=$((n + 1))
-    rf="$(section_of "$AGENT_DIR/$a.md" '## Reporting Format')"
-    [ -n "$rf" ]
+    rf="$(section_of "$REPO_ROOT/$a" '## Reporting Format')"
+    [ -n "$rf" ] || { printf '%s: no Reporting Format section\n' "$a" >&2; return 1; }
     printf '%s' "$rf" | grep -qF 'decides: <the command that settles it>' || {
       printf '%s: Reporting Format has no decides: slot\n' "$a" >&2; return 1; }
     printf '%s' "$rf" | grep -qF 'proposed-severity: CRITICAL|WARNING' || {
       printf '%s: Reporting Format has no proposed-severity: slot\n' "$a" >&2; return 1; }
-  done < <(read_only_agents_in "$AGENT_DIR")
-  [ "$n" -eq "$EXPECTED_COUNT" ]
+  done < <(carriers_in "$REPO_ROOT")
+  [ "$n" -gt 0 ]
 }
 
-@test "#1584 every agent OUTSIDE the roster can actually run tools, and carries no evidence rule" {
+@test "#1644 every agent OUTSIDE the roster can actually run tools, and carries no evidence rule" {
   # The rule exists because the agent cannot execute, so an agent holding Bash is
   # rightly outside it. Assert that POSITIVELY: checking only "not in the roster,
   # and has no rule" would silently bless an agent declaring `tools: Read, Grep`
@@ -302,30 +484,33 @@ delta a clause that wraps
   # the EXPECTED_ROSTER tripwire, and ships with no evidence rule while this test
   # reports it as correctly excluded. That is the file's own closed-set rot, one
   # level down.
-  [ -d "$AGENT_DIR" ]
-  roster="$(read_only_agents_in "$AGENT_DIR")"
+  roster="$(read_only_agents_in "$REPO_ROOT")"
+  [ -n "$roster" ]
   n=0
-  for f in "$AGENT_DIR"/*.md; do
-    [ -e "$f" ] || continue
-    printf '%s\n' "$roster" | grep -qxF "$(basename "$f" .md)" && continue
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    printf '%s\n' "$roster" | grep -qxF -- "$f" && continue
     n=$((n + 1))
-    tools="$(awk -F': *' '
-      /^---$/ { c++; if (c == 2) exit; next }
-      c == 1 && /^tools:/ { print $2; exit }
-    ' "$f")"
+    tools="$(tool_set_of "$REPO_ROOT/$f")"
+    # an EMPTY set may only mean "no tools: key": a key the parser could not read
+    # (a YAML block list) must not pass as inherit-everything
+    [ -n "$tools" ] || ! awk '/^---$/ { n++; if (n == 2) exit; next } n == 1 && /^tools:/ { found = 1 } END { exit !found }' "$REPO_ROOT/$f" || {
+      printf '%s declares a tools: key this sweep cannot parse\n' "$f" >&2
+      return 1
+    }
     # either it declares Bash, or it declares no tools: key at all (inheriting
     # everything, which includes Bash)
     if [ -n "$tools" ]; then
       printf '%s' "$tools" | grep -qw 'Bash' || {
         printf '%s is neither read-only-with-the-rule nor Bash-holding: tools: %s\n' \
-          "$(basename "$f")" "$tools" >&2
+          "$f" "$tools" >&2
         return 1
       }
     fi
-    run grep -qF -- "$HEADING" "$f"
+    run grep -qF -- "$HEADING" "$REPO_ROOT/$f"
     [ "$status" -ne 0 ]
-  done
-  # there really are non-roster claude-plugin agents to have checked
+  done < <(agent_files_in "$REPO_ROOT")
+  # there really are non-roster agents to have checked
   [ "$n" -gt 0 ]
 }
 
@@ -434,8 +619,8 @@ delta a clause that wraps
     "$POINTER_NAME" \
     'capped at **Suggestion**' \
     'observation vs. execution' \
-    'have yet to adopt it, so on those runs nothing caps such a claim' \
-    'Closing that split is issue #1644'
+    "ships with every panel's read-only reviewers" \
+    'tests/reviewer-evidence-rule.exemptions'
   do
     printf '%s' "$flat" | grep -qF -- "$needle" || {
       printf 'the explanation page lost the pointer clause: %s\n' "$needle" >&2
@@ -447,6 +632,18 @@ delta a clause that wraps
   # text too, so a re-wrap cannot hide a restatement from this negative.
   run bash -c "printf '%s' \"\$1\" | grep -cF -- '**Decide every \`decides:\` claim before you consolidate (#1584).**'" _ "$flat"
   [ "$output" = "0" ]
+  # #1644: the split is closed, so no text on the WHOLE page (not just this
+  # section) may still describe the reviewer half as partly adopted. The page is
+  # asserted non-empty first: a negative over an empty capture proves nothing.
+  whole="$(flatten < "$EXPLANATION")"
+  [ -n "$whole" ]
+  for stale in 'different rates' 'yet to adopt' 'Closing that split'; do
+    run bash -c "printf '%s' \"\$1\" | grep -ciF -- \"\$2\"" _ "$whole" "$stale"
+    [ "$output" = "0" ] || {
+      printf 'the explanation page still describes a partial adoption: %s\n' "$stale" >&2
+      return 1
+    }
+  done
 }
 
 @test "#1584 the claude-plugin resolve profile points at both halves rather than restating them" {
@@ -478,33 +675,43 @@ delta a clause that wraps
   [ "$output" = "0" ]
 }
 
-@test "#1584 ROSTER TRIPWIRE: MAINTAINING's row states the derived count, and it is the derived count" {
-  # The count is transcribed in prose at three sites while only this file derives
-  # it, so a sixth read-only reviewer would red HERE and leave the prose stale.
-  # Read the figure back OUT of the registry row and compare, the way the sibling
-  # invariants do — three numbers then move together or the PR reds.
-  local maint row derived stated
+@test "#1644 ROSTER TRIPWIRE: MAINTAINING's row states the derived counts, and they are the derived counts" {
+  # The counts are transcribed in prose while only this file derives them, so a
+  # new read-only reviewer (or a new exemption) would red HERE and leave the
+  # prose stale. Read the figures back OUT of the registry row and compare, the
+  # way the sibling invariants do — the numbers then move together or the PR reds.
+  local maint row roster gated stated_roster stated_gated
   maint="$REPO_ROOT/MAINTAINING.md"
   [ -f "$maint" ]
   row="$(grep -F -- '**#1584 evidence rule**' "$maint")"
   [ -n "$row" ] || { echo "MAINTAINING.md has no #1584 evidence rule row" >&2; return 1; }
 
-  derived="$(read_only_agents_in "$AGENT_DIR" | wc -l | tr -d ' ')"
-  [ "$derived" -eq "$EXPECTED_COUNT" ]
+  roster="$(read_only_agents_in "$REPO_ROOT" | wc -l | tr -d ' ')"
+  [ "$roster" -eq "$EXPECTED_COUNT" ]
+  gated="$(carriers_in "$REPO_ROOT" | wc -l | tr -d ' ')"
+  [ "$gated" -gt 0 ]
 
-  # the row states "gated == roster == N"
-  stated="$(printf '%s' "$row" | grep -oE 'gated == roster == [0-9]+' | grep -oE '[0-9]+$')"
-  [ -n "$stated" ] || {
-    echo "the #1584 row states no 'gated == roster == N' figure" >&2; return 1; }
-  [ "$stated" -eq "$derived" ] || {
-    printf 'MAINTAINING says %s, the frontmatter derives %s\n' "$stated" "$derived" >&2
+  # the row states "roster == N" and "gated == M"
+  stated_roster="$(printf '%s' "$row" | grep -oE 'roster == [0-9]+' | grep -oE '[0-9]+$')"
+  stated_gated="$(printf '%s' "$row" | grep -oE 'gated == [0-9]+' | grep -oE '[0-9]+$')"
+  [ -n "$stated_roster" ] || {
+    echo "the #1584 row states no 'roster == N' figure" >&2; return 1; }
+  [ -n "$stated_gated" ] || {
+    echo "the #1584 row states no 'gated == M' figure" >&2; return 1; }
+  [ "$stated_roster" -eq "$roster" ] || {
+    printf 'MAINTAINING says roster %s, the frontmatter derives %s\n' "$stated_roster" "$roster" >&2
+    return 1
+  }
+  [ "$stated_gated" -eq "$gated" ] || {
+    printf 'MAINTAINING says gated %s, roster minus exemptions is %s\n' "$stated_gated" "$gated" >&2
     return 1
   }
 }
 
-@test "#1584 both touched plugins' manifests are in lockstep with the marketplace" {
+@test "#1644 every touched plugin's manifest is in lockstep with the marketplace" {
   market="$REPO_ROOT/.claude-plugin/marketplace.json"
-  for p in development development-claude-plugin; do
+  for p in development development-claude-plugin development-go development-java \
+    development-kubernetes development-python development-swift; do
     pj="$(jq -r .version "$REPO_ROOT/$p/.claude-plugin/plugin.json")"
     mv_="$(jq -r --arg n "$p" '.plugins[] | select(.name == $n) | .version' "$market")"
     # `jq -r` prints the STRING "null" for a missing key, so a non-empty test

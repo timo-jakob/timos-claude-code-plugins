@@ -1,0 +1,14 @@
+# Read-only agents (normalised frontmatter tool set `Glob Grep Read`) that do NOT
+# carry the #1584 evidence rule, each with the reason. #1644.
+#
+# tests/reviewer-evidence-rule.bats gates this file both ways: every entry must
+# name an agent its repo-wide sweep derives, must state a reason, and must NOT
+# carry the rule; every derived agent NOT listed here must carry it. So an entry
+# can neither go stale nor hide an agent that should have the rule.
+#
+# Format: one entry per line, `<repo-relative path> | <reason>`. Blank lines and
+# `#` comments are ignored.
+
+development/agents/bootstrap-config-consistency.md | a /development:bootstrap pre-write check over PLANNED files that do not exist on disk yet; no review loop dispatches it, so no decided pass would run a `decides:` command, and there is no tree for one to run against
+development/agents/bootstrap-idempotency-reviewer.md | a /development:bootstrap pre-write advisor recommending skip/overwrite/merge per conflicting template; no review loop dispatches it, so no decided pass would run a `decides:` command, and it reports recommendations rather than severity-graded findings
+development/agents/bootstrap-security-reviewer.md | a /development:bootstrap pre-write check over PLANNED workflows that do not exist on disk yet; no review loop dispatches it, so no decided pass would run a `decides:` command, and there is no tree for one to run against

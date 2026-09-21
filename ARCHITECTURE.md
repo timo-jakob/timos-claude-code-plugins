@@ -2968,25 +2968,28 @@ or mutation bars it sits beside. What promotes a capped finding is the
 **conductor**, not the reviewer and not the consolidator — the *decided pass*
 runs each `decides:` command against the round's minted tree and rewrites the
 severity only on a real red. `tests/reviewer-evidence-rule.bats` is the guard,
-deriving its roster from the frontmatter the same way the bars test does.
-Extending the reviewer half to the other panels' equally read-only reviewers —
-the conductor half is already generic — is **#1644**.
+deriving its roster **repo-wide** — every tracked `*/agents/*.md` whose
+normalised frontmatter tool set is the read-only one, not this panel's directory
+alone (#1644) — so every panel's read-only reviewers carry the rule, and the
+conductor half, already generic, has a `decides:` line to run on every stack.
+The set is never implicitly split: an agent the sweep derives either carries the
+rule or is named, with its reason, in `tests/reviewer-evidence-rule.exemptions`
+(today the bootstrap skill's pre-write checks, which no review loop dispatches),
+and the guard fails a stale, unreasoned or rule-carrying entry as surely as an
+unexempted agent without the rule.
 
-**Two DESIGN limits are deliberate, and both are filed.** The pass settles a finding on
+**One DESIGN limit is deliberate, and it is filed.** The pass settles a finding on
 the round that *raises* it; a blocker it promoted and the loop then **carries**
 is re-decided by nothing, so it can be retired on a "confirmed" no read-only
 reviewer could observe, or stranded as CARRY-UNACCOUNTED because none may
 confirm or re-raise it — **#1647**, which is a #1583 carry-accounting change as
-much as a #1584 one. And the reviewer half ships only with this panel — **#1644**.
-The pass is strictly better than the simulated verdicts it replaced, but **do
-not read either gap as safe-by-construction**, and the two fail differently.
-On the #1647 gap the CARRY-UNACCOUNTED outcome reaches a human; the *retirement*
-outcome — a promoted blocker dropped from the carry on a "confirmed" no
-read-only reviewer could observe — fails **silently**, which is why the
-reference tells the conductor to treat a `decided: "red"` carry entry as
-unsettled. On #1644 an un-adopted panel's reviewers still emit uncapped
-simulated verdicts that a fix pass acts on: that is the pre-#1584 status quo,
-not a hand-off. A third, smaller limit is wiring rather than design: the pass is
+much as a #1584 one. The pass is strictly better than the simulated verdicts it
+replaced, but **do not read the gap as safe-by-construction**, and its two
+outcomes fail differently. The CARRY-UNACCOUNTED outcome reaches a human; the
+*retirement* outcome — a promoted blocker dropped from the carry on a
+"confirmed" no read-only reviewer could observe — fails **silently**, which is
+why the reference tells the conductor to treat a `decided: "red"` carry entry as
+unsettled. A second, smaller limit is wiring rather than design: the pass is
 a **conductor** step, so it exists in step mode only — a hook-mode round
 (`--review-cmd`, the bats test seam) has nobody between the panel and the
 consolidator, and its tool-verdict findings simply stay capped.

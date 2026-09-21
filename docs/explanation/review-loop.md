@@ -54,15 +54,15 @@ read-only while putting execution in the one step that already runs tools on the
 minted tree. The line it draws is *observation vs. execution*, not subject
 matter — a defect read straight out of the files keeps its full severity.
 
-Two halves, adopted at different rates. The **driver's** half is generic: on any
-repo type, a finding carrying that command gets it run before consolidation. The
+Both halves hold on every stack. The **driver's** half is generic: on any repo
+type, a finding carrying that command gets it run before consolidation. The
 **reviewer's** half — the rule that caps the claim and names the command — ships
-today only with the `development-claude-plugin` panel's read-only
-reviewers; the Python, Go, Java, Swift and Kubernetes panels are equally
-read-only and have yet to adopt it, so on those runs nothing caps such a claim
-and the driver has nothing to run. Closing that split is issue #1644. A second
-limit: the driver settles a claim on the round that *raises* it, and nothing
-re-decides it once the loop carries the finding into later rounds — issue #1647.
+with every panel's read-only reviewers, Python, Go, Java, Swift, Kubernetes and
+plugin alike. The only read-only agents without it are listed, each with its
+reason, in `tests/reviewer-evidence-rule.exemptions` — today the bootstrap
+skill's pre-write checks, which no review loop dispatches. One limit remains:
+the driver settles a claim on the round that *raises* it, and nothing re-decides
+it once the loop carries the finding into later rounds — issue #1647.
 The normative statement — where the verdict is
 recorded, what a command that cannot run decides, and why the severity rewrite
 rather than the recorded verdict is what promotes — is
