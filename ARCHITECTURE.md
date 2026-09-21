@@ -2767,10 +2767,19 @@ fields:
 | `file` | string | repo-relative path |
 | `line` | integer \| null | line number, or `null` for a file-level finding |
 | `title` | string | the finding title (same as the prose title) |
-| `description` | string | one- or two-sentence explanation |
+| `description` | string | one- or two-sentence explanation — plus, on a capped tool-verdict finding (#1584), the two structured lines `decides: <command>` and `proposed-severity: …` appended to this same field, each on its own line; they are the conductor's parse target |
 | `suggested_fix` | string | concrete remediation (may be `""`) |
 | `reviewer` | string | the emitting agent's name (e.g. `python-bug-hunter`) |
 | `round` | integer | the review round from the agent's prompt; `1` when the panel runs standalone |
+
+**One field a reviewer never writes (#1584).** Between the panel and
+consolidation the **conductor** may stamp a tenth field, `decided:
+"red"|"green"`, onto a finding whose claim was a tool run's verdict and whose
+deciding command it ran — the *decided pass*, stated once in
+`development/skills/resolve-issue/reference/review-loop.md`. It is written
+**after** the panel, into the conductor's own aggregate (never the
+`.review/` dispatch sink), so the nine fields above remain exactly what a
+reviewer emits, and `consolidate-findings.zsh` accepts the tenth additively.
 
 **Dimension enum.** The five core dimensions are shared across all languages
 (the #449 enum): `bugs` (`*-bug-hunter`), `security` (`*-security-reviewer`),
@@ -2940,6 +2949,47 @@ a bar reds that test rather than silently leaving this paragraph stale. Giving t
 remaining panel reviewers a bar is not done; it belongs to epic #1431, which filed
 this convention, not to #987, which tracks extending the *scope-bounding* rule
 above.
+
+**The evidence rule (#1584) is a fourth severity-bounding rule, and the first
+carried by *every one* of this panel's read-only reviewers.** It sits under
+`## The evidence rule (a tool's verdict needs the tool run)` in every reviewer
+whose frontmatter is the read-only set `tools: Read, Grep, Glob`, and it is
+byte-identical across them: a finding whose claim IS a tool run's verdict
+carries `SUGGESTION`, whatever the agent's own bar would give it, unless the
+reviewer ran the tool and quotes it. Its falsifier is not a sentence but a pair
+of Description lines — `decides: <command>` and
+`proposed-severity: CRITICAL|WARNING` — and, per the convention above, each
+agent's Reporting Format gives those lines a slot, so the rule is enforceable
+rather than advisory. The line it draws is **observation vs. execution**, not
+subject matter: a defect read out of the artifacts (two manifests disagreeing
+about a version, a changed script with no test file beside it) keeps full
+severity under the agent's own bar, so this rule does not swallow the manifest
+or mutation bars it sits beside. What promotes a capped finding is the
+**conductor**, not the reviewer and not the consolidator — the *decided pass*
+runs each `decides:` command against the round's minted tree and rewrites the
+severity only on a real red. `tests/reviewer-evidence-rule.bats` is the guard,
+deriving its roster from the frontmatter the same way the bars test does.
+Extending the reviewer half to the other panels' equally read-only reviewers —
+the conductor half is already generic — is **#1644**.
+
+**Two DESIGN limits are deliberate, and both are filed.** The pass settles a finding on
+the round that *raises* it; a blocker it promoted and the loop then **carries**
+is re-decided by nothing, so it can be retired on a "confirmed" no read-only
+reviewer could observe, or stranded as CARRY-UNACCOUNTED because none may
+confirm or re-raise it — **#1647**, which is a #1583 carry-accounting change as
+much as a #1584 one. And the reviewer half ships only with this panel — **#1644**.
+The pass is strictly better than the simulated verdicts it replaced, but **do
+not read either gap as safe-by-construction**, and the two fail differently.
+On the #1647 gap the CARRY-UNACCOUNTED outcome reaches a human; the *retirement*
+outcome — a promoted blocker dropped from the carry on a "confirmed" no
+read-only reviewer could observe — fails **silently**, which is why the
+reference tells the conductor to treat a `decided: "red"` carry entry as
+unsettled. On #1644 an un-adopted panel's reviewers still emit uncapped
+simulated verdicts that a fix pass acts on: that is the pre-#1584 status quo,
+not a hand-off. A third, smaller limit is wiring rather than design: the pass is
+a **conductor** step, so it exists in step mode only — a hook-mode round
+(`--review-cmd`, the bats test seam) has nobody between the panel and the
+consolidator, and its tool-verdict findings simply stay capped.
 
 ### Aggregation (per round)
 
@@ -3517,7 +3567,11 @@ reliable but the merging needs semantics:
   rounds surfaced and the human waived — and **may be empty** (`[]`), unlike
   `--promote`, because an early round legitimately has nothing waived yet. A
   matching item is dropped from `suggestions[]` and counted in
-  `summary.adjudicated_dropped` only when **all three** guards hold: it matches
+  `summary.adjudicated_dropped` only when **every** guard below holds — and
+  since #1584 there is one more than the three #1434 shipped: a finding the
+  conductor's *decided pass* marked **red**, on its own stamp or anywhere in its
+  dedup group, is never dropped, because a red is an observed tool verdict
+  rather than a restated opinion. The rest: it matches
   under the **reused #983 matcher** (gather on `file`+`dimension`+line
   proximity) on the **exact normalized-title arm ONLY** — never the
   shared-token or tokenless arms, which exist to fail *toward* the human on a
@@ -3545,7 +3599,29 @@ false_trips,adjudicated_dropped}, blocking[], suggestions[], conflicts[],
 non_converging, false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
 carries `false_trip: bool` (#983), `class` when `--fix-touched` was given
 (#1435), and, when the overlay raised it,
-`promoted: true` (#995). The `blocking` array (Critical first, then
+`promoted: true` (#995). A fourth stamp, **`decided: "red"|"green"` (#1584)**,
+rides on **every** item — `blocking[]` and `suggestions[]` alike — when the
+round decided the claim the merged item is titled from. A `green` record does
+**not** imply the item is a suggestion: the group severity max, the #994
+promotion overlay, and a reviewer-written `WARNING`/`CRITICAL` whose `decides:`
+claim came back green (the decided pass changes no severity on that malformed
+shape) each carry a green-decided finding into `blocking[]`. It records which
+way the conductor's *decided pass* went, and it is a
+**record, not a mechanism** (nothing reads it to set severity, priority or
+blocking, so a `red` whose severity was not rewritten stays a suggestion). Any
+other value, or no field, adds no key, which keeps a run on findings that never
+carry it byte-identical to before it existed. On dedup the **group** decides,
+but only among members sharing the representative normalized title — the dedup
+key omits the title, so a bare harvest would stamp one claim's verdict onto a
+different claim at the same location — and among those `red` beats `green` beats
+absent. An **empty** normalized title is not a match key (every untitled finding
+normalizes to `""`), so an untitled representative contributes only its own
+record. The adjudication drop's fourth guard is deliberately **not** same-claim:
+it consults the unrestricted group verdict, so a red-decided member that is
+neither the representative nor same-titled still protects the merged item from
+being dropped. `green` means **not red**: the command ran clean, *or* could not be run
+at all; which of the two lives in the conductor's `<work-dir>/decided-<R>.log`,
+never in the changelist. The `blocking` array (Critical first, then
 High) is what the loop must clear; `suggestions` ride into the dossier (#563) and
 never loop **unless a human promotes them** via `--promote` (#994), which moves
 the matched ones into `blocking` before any classification runs; `false_trips[]`
@@ -3630,6 +3706,20 @@ same direct-read/no-stamp-gate rule as the promoted term) — so the human can r
 actually clearing things?" straight off the tail. The per-round `history.jsonl`
 line carries `adjudicated_dropped` too, so that question is answerable from one
 file without opening every changelist.
+
+**One work-dir file the CONDUCTOR writes, not the loop (#1584):**
+`<work-dir>/decided-<R>.log`. The *decided pass* appends one entry per
+tool-verdict finding it settled — the finding, the exact command, its exit
+status, the first lines of its output — before invoking the loop for that round.
+It is the evidence behind every severity the pass promoted, and the only place
+`decided: "green"` is resolved into "the command ran clean" vs "the command
+could not be run at all", a distinction the changelist deliberately does not
+carry. Nothing in the loop reads it; it is an audit record.
+**Per ROUND, and written fresh**: the pass truncates `decided-<R>.log` on the
+first entry of round R's **first** pass, rather than appending to whatever a
+previous run left there; a re-entry within the same round appends, since its
+earlier entries are that round's evidence. It is deliberately outside the loop's fresh-start clear, because the loop
+does not own it — the conductor does, and the conductor is what re-creates it.
 
 **Rounds after the first iterate (#1434).** At the **start** of every round the
 loop computes and persists the working-tree identity its reviewers will see

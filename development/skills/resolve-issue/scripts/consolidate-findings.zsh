@@ -16,7 +16,17 @@
 #     blocking[], suggestions[], conflicts[], non_converging, false_trips[],
 #     escalation_reasons[] }  (each blocking[] item also carries false_trip:bool,
 #     promoted:true when the overlay raised it — #995, and class:"…" when
-#     --fix-touched was given — #1435)
+#     --fix-touched was given — #1435. decided:"red"|"green" rides on EVERY item,
+#     blocking[] AND suggestions[], when the round decided the claim the merged
+#     item is titled from — #1584. A "green" record does NOT imply the item is a
+#     suggestion: the group severity max, the #994 promotion overlay, and a
+#     reviewer-written WARNING/CRITICAL whose decides: claim came back green (the
+#     decided pass changes no severity on that malformed shape) each carry a
+#     green-decided finding into blocking[]. One key is INTERNAL and never part
+#     of this shape: `group_red`, GUARD 4's unrestricted group verdict, minted in
+#     the dedup map and stripped in the same projection that applies the
+#     adjudication drop — if you see it in a changelist, that strip was moved or
+#     bypassed)
 #
 # Rules (per #561):
 #   - Severity map: CRITICAL->Critical, WARNING->High, SUGGESTION->Low.
@@ -61,7 +71,7 @@
 #
 #   - Adjudicated re-raises (#1434): with --adjudicated, a Low finding that
 #     re-states a suggestion an EARLIER round already surfaced and waived is
-#     dropped instead of being logged again. Three guards, ALL required —
+#     dropped instead of being logged again. EVERY guard below is required —
 #     narrow on purpose, because the cost of over-dropping is a real defect
 #     silently deleted, while the cost of under-dropping is one more logged
 #     suggestion that never blocked anything:
@@ -73,7 +83,14 @@
 #       2. the incoming finding is itself Low — a re-raise at WARNING or
 #          CRITICAL is never suppressed, whatever an earlier round waived;
 #       3. the entry is still valid, which the LOOP enforces by removing every
-#          adjudication whose file the last fix pass touched before calling this.
+#          adjudication whose file appears in the round's `delta_files` before
+#          calling this — the attested-tree delta, deliberately NOT the narrower
+#          fix-touched set this script also takes as `--fix-touched`;
+#       4. the finding was not decided RED by the conductor's decided pass
+#          (#1584) — neither on its own stamp nor anywhere in its dedup group. A
+#          red is an observed tool verdict, not a restated opinion, and the
+#          decided pass contracts a reachable red-at-Low state (a `decides:`
+#          finding with no `proposed-severity:` line, recorded but not promoted).
 #     The drop runs AFTER the #994 promotion overlay and BEFORE the conflict /
 #     non-convergence classification, so a human-promoted item (now WARNING) is
 #     structurally ineligible by guard 2 rather than by a special case.
@@ -95,6 +112,35 @@
 #     byte-identical to before the field existed. The class is reporting only:
 #     it feeds the loop's residue narration, the escalation histogram and the
 #     telemetry `by_class` counts, and it never changes which items block.
+#
+#   - Decided tool verdicts (#1584): a read-only reviewer (`tools: Read, Grep,
+#     Glob`) cannot run a linter, a suite, a validator or a version check, so a
+#     finding whose claim IS one of those verdicts is capped at SUGGESTION and
+#     names the command that settles it. The CONDUCTOR runs that command on the
+#     minted tree before calling this script, and on a red rewrites `.severity`
+#     to the severity the reviewer proposed. An optional per-finding `decided`
+#     ("red" | "green") records which way it went, and is carried through to the
+#     changelist item so the promotion is auditable there. It is a RECORD, not a
+#     mechanism — nothing here reads it to set severity, priority or blocking, so
+#     a `decided: "red"` whose severity the conductor did NOT rewrite stays a
+#     suggestion, and a `decided: "green"` never demotes anything. Any other
+#     value, or no field at all, adds no key — which is what keeps a run on
+#     findings that never carry it byte-identical to before it existed. On dedup
+#     the GROUP decides — but only among members sharing the representative's
+#     normalized title, since the dedup key omits the title and a bare harvest
+#     would stamp one claim's verdict onto a DIFFERENT claim at the same location.
+#     Among those, red beats green beats absent, because `severity` is already the
+#     group max and reading the field off the representative alone could pair a
+#     promoted Warning with a "green" record. An EMPTY normalized title is not a
+#     match key (every untitled finding normalizes to ""), so an untitled
+#     representative contributes only its own record — the same refusal the
+#     promote, adjudicated and cross-round title arms each make.
+#     `green` means NOT RED — the command ran clean, OR it could not be run at all
+#     (uninstalled, malformed, or it would have written into the tree, which the
+#     conductor settles the same way). Both leave the finding a logged suggestion,
+#     which is the fail-closed direction; WHICH of the two it was lives in the
+#     conductor's `<work-dir>/decided-<R>.log`, never here, so nothing downstream
+#     may read `green` as "the tool passed".
 #
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
@@ -396,12 +442,74 @@ def nearest($c): sort_by(
     description: ((.description // "") | tostring),
     suggested_fix: (.suggested_fix // ""),
     reviewer: (.reviewer // "")
-  } ]
+  }
+  # DECIDED (#1584) — a read-only reviewer cannot run a linter/suite/validator, so
+  # a finding whose claim IS one of those verdicts arrives as a SUGGESTION naming
+  # the command that settles it. The CONDUCTOR runs that command before calling
+  # this script and, on a red, rewrites `.severity` to the reviewer proposed one.
+  # `decided` records WHICH way that went so the promotion is visible in the
+  # changelist — it is a record, never the mechanism: nothing here reads it to
+  # change a severity, a priority or whether an item blocks. Carried through as a
+  # direct per-item field, the same shape `false_trip` (#983), `promoted` (#995)
+  # and `class` (#1435) already use.
+  #
+  # Strictly additive and defaulted: only the two contracted values survive, and a
+  # finding without the field (or with anything else in it — a reviewer-crafted
+  # string must never reach a renderer) gets NO key at all. That is what keeps a
+  # run on findings that never carry it byte-identical to before the field existed.
+  + ( if (.decided == "red") or (.decided == "green")
+      then { decided: .decided } else {} end ) ]
 
 # dedup by file+line+dimension
 | ( group_by([.file, (.line|tostring), .dimension]) | map(
       (sort_by(.description | length) | last) as $rep
     | ([ .[].severity ] | max_by(sevrank(.))) as $sev
+    # The group verdict, not the representative one (#1584). `severity` is already
+    # the MAX over the group, so reading `decided` off $rep alone could pair a
+    # promoted WARNING with a missing (or "green") record whenever the longest
+    # description happened to belong to the undecided member — a changelist that
+    # contradicts itself. `red` wins over `green`, which wins over absent; when no
+    # member carries the field, no key is added.
+    #
+    # SAME-CLAIM ONLY. The dedup key is [file, line, dimension] — the TITLE is not
+    # in it, deliberately (two reviewers wording one defect differently must still
+    # merge). So a bare group harvest would carry a `decided` across two genuinely
+    # DIFFERENT claims at one location: a tool-decided SUGGESTION->WARNING beside a
+    # reviewer-raised CRITICAL emits one CRITICAL item, titled from the CRITICAL,
+    # stamped `decided: "red"` — telling every downstream reader that a
+    # reviewer-raised blocker was tool-decided. Harvesting same-claim only removes
+    # that MISATTRIBUTION; the merged item still carries no record of the
+    # co-located promotion, which is dedup own loss (the key omits the title) and
+    # not this rule to fix. NB: no apostrophes in this block — the jq program is
+    # single-quoted, and one closes it, which zsh then reports as a parse error
+    # on a later pipe rather than anywhere near the quote.
+    # Harvesting only from group members that share the representative
+    # normalized title keeps the stamp attached to the claim it was decided about;
+    # a reworded duplicate of the same claim still matches, which is the same
+    # leniency `normtitle` buys everywhere else in this script.
+    #
+    # AN EMPTY normalized title is NOT a match key. `title` defaults to "" on the
+    # way in, so `normtitle` of every untitled finding is "" and a bare title
+    # comparison is TRUE for every pair of untitled members — reinstating the
+    # cross-claim stamp on exactly that input class. The three other title-keyed
+    # sites here refuse an empty normtitle for the same reason (the promote exact
+    # arm, the adjudicated drop, the cross-round exact arm), so this one does too:
+    # when the representative is untitled, fall back to object identity, which
+    # still keeps the representative own record and nothing else.
+    | ([ .[] | select(if ($rep.title | normtitle) == "" then (. == $rep)
+                      else (.title | normtitle) == ($rep.title | normtitle) end)
+             | .decided // empty ]) as $dec
+    # The UNRESTRICTED group verdict, for GUARD 4 only (#1584). The stamp above is
+    # deliberately same-claim, but the adjudication drop must not be: a red-decided
+    # Low that is NOT the representative and carries a different title loses its
+    # record at the harvest, so a guard reading only the emitted `.decided` would
+    # drop the merged item — deleting an observed tool verdict with
+    # `summary.adjudicated_dropped` as its only trace. Carried as an internal key
+    # and deleted in the SAME projection that applies the drop (see the strip
+    # comment below, which argues why a lone `del` positioned after that block is
+    # the shape to avoid), so it never reaches the output and a run that passes no
+    # flags stays byte-identical.
+    | ([ .[] | .decided // empty ]) as $anydec
     | $rep + {
         severity: $sev,
         priority: prio($sev),
@@ -409,6 +517,11 @@ def nearest($c): sort_by(
         reviewers: ([ .[].reviewer ] | map(select(. != "")) | unique),
         agreement: ([ .[].reviewer ] | map(select(. != "")) | unique | length)
       }
+    | ( if ($dec | index("red")) != null then . + { decided: "red" }
+        elif ($dec | index("green")) != null then . + { decided: "green" }
+        else . end )
+    | ( if ($anydec | index("red")) != null then . + { group_red: true }
+        else . end )
     | del(.reviewer)
   ) ) as $items
 
@@ -503,6 +616,28 @@ def nearest($c): sort_by(
 | ( [ $items | to_entries[]
       | select(.value.priority == "Low")
       | .value as $it
+      # GUARD 4 (#1584): never drop a finding a tool actually decided RED.
+      # Guard 2 (Low only) was sufficient while Low meant "a reviewer opinion an
+      # earlier round waived". It no longer is: the decided pass contracts a
+      # reachable red-at-Low state — a `decides:` finding with no
+      # `proposed-severity:` line, where the verdict is recorded and no severity
+      # changes. A red is an observed tool verdict, not a restated opinion, and
+      # dropping it would leave `summary.adjudicated_dropped` as its only trace —
+      # exactly the "real defect silently deleted" this block calls its worst
+      # outcome.
+      #
+      # `group_red` is what this guard actually rests on. `.decided` is the
+      # SAME-CLAIM stamp and `$dec` is a subset of `$anydec`, so every
+      # `decided: "red"` is by construction also a `group_red` — the first
+      # conjunct can never change the outcome, and is kept only as
+      # defence-in-depth should the harvest above ever be widened or narrowed.
+      # What it is NOT is a second case the other misses: testing the STAMP
+      # ALONE is the broken version, because a red-decided member that is
+      # neither the representative nor same-titled leaves no `.decided` on the
+      # merged item at all, and the item would be dropped with its red.
+      # Both absent keys are null, and null is neither "red" nor true, so an
+      # undecided finding is unaffected and a flagless run stays byte-identical.
+      | select($it.decided != "red" and $it.group_red != true)
       | select([ $adjudicated[]
                  | select((($it.title | normtitle) != "")
                      and (((.title // "") | normtitle) == ($it.title | normtitle))
@@ -511,9 +646,17 @@ def nearest($c): sort_by(
                      and line_near((.line | normline); $it.line)) ] | length > 0)
       | .key ] ) as $adj_idx
 | ( $adj_idx | length ) as $adj_dropped
+# `group_red` is internal to GUARD 4 and is stripped IN THE SAME projection that
+# rebuilds `$items` after the drop — not in a separate step below it. The
+# invariant "this key never reaches a consumer" would otherwise be enforced only
+# by the POSITION of a lone `del`, and the natural next extension of this block
+# (surfacing the dropped items, the way #983 surfaced `false_trips[]`) would be
+# written above it and would emit the key. `del` of an absent key is a no-op that
+# preserves key order, so this is byte-identity-safe for every run that carried
+# no `decided` at all.
 | ( [ $items | to_entries[]
       | select(.key as $i | ($adj_idx | index($i)) == null)
-      | .value ] ) as $items
+      | .value | del(.group_red) ] ) as $items
 
 # conflicts: co-located, opposite-direction dimensions (performance vs code_quality)
 | ( $items | group_by([.file, (.line|tostring)]) | map(

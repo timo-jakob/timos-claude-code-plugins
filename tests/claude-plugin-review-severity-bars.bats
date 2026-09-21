@@ -530,6 +530,51 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # the guard it names must exist — a renamed suite would leave this dangling
   contains "$flat" 'tests/claude-plugin-review-severity-bars.bats'
   [ -f "$REPO_ROOT/tests/claude-plugin-review-severity-bars.bats" ]
+
+  # #1584: the same section now also states the EVIDENCE rule — a fourth
+  # severity-bounding rule, and the first carried by all five read-only
+  # reviewers. It had no guard of its own: renaming the section heading in the
+  # five agents AND in tests/reviewer-evidence-rule.bats (the natural way an
+  # author makes that edit) left this paragraph quoting a heading that no longer
+  # existed, with the whole suite green. Pinned here rather than in a new file,
+  # because this is already the test ARCHITECTURE names for this section.
+  contains "$flat" "## The evidence rule (a tool's verdict needs the tool run)"
+  contains "$flat" 'tools: Read, Grep, Glob'
+  contains "$flat" 'proposed-severity: CRITICAL|WARNING'
+  contains "$flat" 'observation vs. execution'
+  contains "$flat" 'tests/reviewer-evidence-rule.bats'
+  # …and its SEMANTIC claims, which the structural tokens above leave free to be
+  # inverted — the same lesson this test already learned for the bars half. The
+  # promoter claim is the load-bearing one: stating that the CONSOLIDATOR
+  # promotes would contradict that script's own "RECORD, not a mechanism" and
+  # send its next editor to build a promotion path no severity bar governs.
+  contains "$flat" 'unless the reviewer ran the tool and quotes it'
+  contains "$flat" 'it is byte-identical across them'
+  contains "$flat" 'What promotes a capped finding is the **conductor**, not the reviewer and not the consolidator'
+  contains "$flat" 'rewrites the severity only on a real red'
+  # the two deliberate limits must stay recorded with their issues, or the
+  # paragraph reads as though the mechanism is complete
+  contains "$flat" 'DESIGN limits are deliberate, and both are filed'
+  contains "$flat" '#1647'
+  contains "$flat" '#1644'
+  # ARCHITECTURE cites a rule the REFERENCE carries; pin the citation here and
+  # the rule there, so an edit to either side reds rather than leaving this
+  # sentence pointing at text the reference no longer has.
+  contains "$flat" 'the reference tells the conductor to treat a `decided: "red"` carry entry as'
+  # FLATTENED: the cited sentence is hard-wrapped prose, so a line-oriented grep
+  # would pass or fail on where the author's wrap landed.
+  run bash -c "tr '\n' ' ' < \"\$1\" | tr -s ' ' | grep -qF 'treat the entry as a tool-verdict carry'" \
+    _ "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  [ "$status" -eq 0 ]
+  [ -f "$REPO_ROOT/tests/reviewer-evidence-rule.bats" ]
+  # the heading ARCHITECTURE quotes must be the one the agents and the sweep
+  # actually use — read it back out of the sweep rather than re-typing it
+  local swept
+  swept="$(awk -F'"' '/^  HEADING=/ { print $2; exit }' \
+    "$REPO_ROOT/tests/reviewer-evidence-rule.bats")"
+  [ -n "$swept" ]
+  contains "$flat" "$swept"
+  grep -qF -- "$swept" "$REPO_ROOT/development-claude-plugin/agents/claude-plugin-prose-logic.md"
   # it must NOT transcribe a reviewer count: the roster is derived, and a
   # transcribed count goes stale the moment a fourth reviewer gains a bar
   # the SHAPE, not one historical literal: this file already learned twice that a
