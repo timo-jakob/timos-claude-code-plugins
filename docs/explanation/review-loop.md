@@ -41,6 +41,34 @@ carries.
    that round's findings and restarts the boundary; a fix that cannot be made
    green abandons the run rather than shipping.
 
+**A reviewer that cannot run a tool does not get to report its verdict.** Most
+reviewers are read-only by design — they read and grep, they do not execute — so
+a claim like *"the linter would fail this"* or *"the validator reports a
+mismatch"* is reasoning about a tool, not the tool's answer, and this repo has
+had both come back wrong on real rounds. Such a finding is therefore capped at
+**Suggestion**, and names the command that would settle it. Between the panel and
+consolidation the driver **runs** those commands against the same tree the panel
+read, and only a genuine red raises the finding to the severity its reviewer
+proposed; a green leaves it a logged suggestion. That keeps the reviewers
+read-only while putting execution in the one step that already runs tools on the
+minted tree. The line it draws is *observation vs. execution*, not subject
+matter — a defect read straight out of the files keeps its full severity.
+
+Two halves, adopted at different rates. The **driver's** half is generic: on any
+repo type, a finding carrying that command gets it run before consolidation. The
+**reviewer's** half — the rule that caps the claim and names the command — ships
+today only with the `development-claude-plugin` panel's read-only
+reviewers; the Python, Go, Java, Swift and Kubernetes panels are equally
+read-only and have yet to adopt it, so on those runs nothing caps such a claim
+and the driver has nothing to run. Closing that split is issue #1644. A second
+limit: the driver settles a claim on the round that *raises* it, and nothing
+re-decides it once the loop carries the finding into later rounds — issue #1647.
+The normative statement — where the verdict is
+recorded, what a command that cannot run decides, and why the severity rewrite
+rather than the recorded verdict is what promotes — is
+`/development:resolve-issue` §3.5's round protocol, under *The decided pass*, and
+nothing here restates it.
+
 **The gate and the panel run concurrently.** Both only *read* the working tree,
 so a round boundary mints one tree identity, starts the full suite in the
 background and dispatches the panel against that same tree, instead of making
@@ -95,7 +123,8 @@ independent repeat of it. Three kinds of round:
   letting it drop out of the carry; and the list of
   suggestions earlier rounds already surfaced and you already let go, which a
   reviewer must not re-raise. An already-waived suggestion re-raised at
-  Suggestion level is dropped and counted, never silently — but the same finding
+  Suggestion level is dropped and counted, never silently — and one a tool
+  actually decided red is never dropped at all — but the same finding
   re-raised as a **Warning or Critical** is never suppressed, and neither is a
   suggestion in a file the last fix pass touched, because there it may be a new
   observation about new code.

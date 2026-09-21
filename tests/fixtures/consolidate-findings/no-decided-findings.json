@@ -1,0 +1,20 @@
+[
+  {"severity":"WARNING","dimension":"bugs","file":"./src/loader.zsh","line":10,
+   "title":"unchecked exit status","description":"short",
+   "suggested_fix":"capture the status before the next command","reviewer":"script-reviewer"},
+  {"severity":"CRITICAL","dimension":"bugs","file":"src/loader.zsh","line":10,
+   "title":"unchecked exit status","description":"a considerably longer and more detailed description of the same defect",
+   "suggested_fix":"capture the status before the next command","reviewer":"contract-integrity"},
+  {"severity":"WARNING","dimension":"performance","file":"src/render.zsh","line":42,
+   "title":"inline the hot loop","description":"the loop re-reads the manifest per item",
+   "suggested_fix":"hoist the read","reviewer":"performance-reviewer"},
+  {"severity":"SUGGESTION","dimension":"code_quality","file":"src/render.zsh","line":42,
+   "title":"extract a helper for clarity","description":"the loop body is doing three jobs",
+   "suggested_fix":"extract render_one","reviewer":"code-quality"},
+  {"severity":"SUGGESTION","dimension":"tests","file":"tests/render.bats","line":7,
+   "title":"assertion cannot fail","description":"asserts status is 0 after a command that cannot fail",
+   "suggested_fix":"assert the rendered output","reviewer":"test-reviewer"},
+  {"severity":"CRITICAL","dimension":"contract","file":"docs/reference/commands.md",
+   "title":"prose names a flag the script does not accept","description":"the page documents --strict; the script has no such flag",
+   "suggested_fix":"drop the flag from the page","reviewer":"contract-integrity"}
+]

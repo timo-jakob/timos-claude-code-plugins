@@ -1180,3 +1180,385 @@ EOF
   echo "$output" | jq -e '.summary.false_trips == 1' >/dev/null
   [ "$(echo "$output" | jq -r '.false_trips[0].class')" = "incomplete_propagation" ]
 }
+
+# --- #1584: the `decided` tool-verdict record -------------------------------
+#
+# A read-only reviewer (tools: Read, Grep, Glob) cannot run a linter, a suite, a
+# validator or a version check, so a finding whose claim IS one of those verdicts
+# arrives capped at SUGGESTION, naming the command that settles it. The CONDUCTOR
+# runs that command before calling this script and, on a red, rewrites .severity
+# to the severity the reviewer proposed. `decided` records which way that went so
+# the promotion is visible in the changelist. It is a RECORD, never the mechanism.
+
+@test "#1584 decided:red is carried onto the item and the proposed severity is kept" {
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"contract","file":"docs/a.md","line":305,"title":"MD032 — list not surrounded by blank lines","description":"decides: pre-commit run markdownlint --files docs/a.md\nproposed-severity: WARNING","reviewer":"claude-plugin-contract-integrity","decided":"red"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].severity')" = "WARNING" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].priority')" = "High" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
+  # `group_red` is GUARD 4's internal key and must never reach a consumer. This
+  # is the BLOCKING half of that invariant — the union assertion in the GUARD-4
+  # test runs on a fixture whose `.blocking[]` is empty, so it proves only the
+  # suggestions half.
+  echo "$output" | jq -e '.blocking[0] | has("group_red") | not' >/dev/null
+}
+
+@test "#1584 decided:green leaves a tool-verdict finding a logged SUGGESTION" {
+  cat > "$F" <<'EOF'
+[{"severity":"SUGGESTION","dimension":"tests","file":"tests/x.bats","line":7,"title":"the mutation would still pass both suites","description":"decides: zsh development/skills/resolve-issue/scripts/run-gate.zsh --tests-dir tests\nproposed-severity: WARNING","reviewer":"claude-plugin-test-reviewer","decided":"green"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  # green never promotes, and never drops the finding either
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].severity')" = "SUGGESTION" ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].priority')" = "Low" ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].decided')" = "green" ]
+}
+
+@test "#1584 decided is a RECORD, not the mechanism: red on a SUGGESTION does not promote it" {
+  # The conductor promotes by rewriting .severity. A run that stamped the record
+  # but forgot the rewrite must NOT block — otherwise the field quietly becomes a
+  # second, undocumented promotion path that no severity bar governs.
+  cat > "$F" <<'EOF'
+[{"severity":"SUGGESTION","dimension":"contract","file":"docs/b.md","line":12,"title":"version check would mismatch","description":"decides: zsh scripts/check-marketplace-sync.zsh","reviewer":"claude-plugin-manifest-check","decided":"red"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].priority')" = "Low" ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].decided')" = "red" ]
+}
+
+@test "#1584 a finding without decided gets NO key at all" {
+  cat > "$F" <<'EOF'
+[{"severity":"CRITICAL","dimension":"bugs","file":"c.zsh","line":30,"title":"reads the wrong exit status","description":"d","reviewer":"claude-plugin-script-reviewer"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  # `has` distinguishes "absent" from "present and null" — a null would make a
+  # consumer unable to tell an un-decided finding from one this script mangled.
+  echo "$output" | jq -e '.blocking[0] | has("decided") | not' >/dev/null
+}
+
+@test "#1584 an unrecognised decided value is dropped, not carried through" {
+  # The field arrives on model-authored JSON. Anything but the two contracted
+  # values is discarded, so no reviewer-crafted string reaches a renderer.
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"bugs","file":"d.zsh","line":3,"title":"t","description":"d","reviewer":"r","decided":"RED; rm -rf /"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blocking[0] | has("decided") | not' >/dev/null
+}
+
+@test "#1584 on dedup the GROUP decides: red beats absent even when the representative is undecided" {
+  # `severity` is already the group max, so reading `decided` off the
+  # longest-description member alone could pair a promoted WARNING with a missing
+  # record — a changelist that contradicts itself. Here the UNDECIDED finding has
+  # the longer description, so it is the representative.
+  cat > "$F" <<'EOF'
+[
+ {"severity":"SUGGESTION","dimension":"contract","file":"e.md","line":10,"title":"MD032","description":"a considerably longer and more detailed description of the same defect","reviewer":"claude-plugin-prose-logic"},
+ {"severity":"WARNING","dimension":"contract","file":"e.md","line":10,"title":"MD032","description":"short","reviewer":"claude-plugin-contract-integrity","decided":"red"}
+]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  echo "$output" | jq -e '.blocking[0].description | test("considerably longer")' >/dev/null
+  [ "$(echo "$output" | jq -r '.blocking[0].severity')" = "WARNING" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
+  echo "$output" | jq -e '.blocking[0] | has("group_red") | not' >/dev/null
+}
+
+@test "#1584 red beats green within one deduped group" {
+  cat > "$F" <<'EOF'
+[
+ {"severity":"SUGGESTION","dimension":"contract","file":"f.md","line":10,"title":"MD032","description":"short","reviewer":"claude-plugin-prose-logic","decided":"green"},
+ {"severity":"WARNING","dimension":"contract","file":"f.md","line":10,"title":"MD032","description":"a considerably longer and more detailed description","reviewer":"claude-plugin-contract-integrity","decided":"red"}
+]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
+}
+
+@test "#1584 findings that never carry decided produce byte-identical output to the pre-#1584 engine" {
+  # The golden was captured by running the PRE-#1584 engine — this branch's base,
+  # `24bbab1a` — against the same fixture; the SHA is recorded so a later editor
+  # can re-derive it rather than regenerate the golden from the current engine,
+  # which would turn this into "the engine agrees with itself". It exercises
+  # dedup, the severity max, a conflict pair, blocking and suggestions. Any stray
+  # key, reordering or whitespace change fails here.
+  golden="$REPO_ROOT/tests/fixtures/consolidate-findings/no-decided-changelist.golden.json"
+  fixture="$REPO_ROOT/tests/fixtures/consolidate-findings/no-decided-findings.json"
+  [ -f "$golden" ]
+  [ -f "$fixture" ]
+
+  # SELF-GUARDS. Without these the pair can be regenerated into a tautology: an
+  # editor who adds a `decided` to the fixture and re-captures the golden from
+  # the CURRENT engine leaves a green test that no longer tests the AC-3 claim.
+  jq -e 'all(.[]; has("decided") | not)' "$fixture" >/dev/null
+  run grep -cF 'decided' "$golden"
+  [ "$output" = "0" ]
+  # …and the fixture still has to exercise something: dedup (6 findings -> 5
+  # items), a conflict pair, and both buckets. A fixture trimmed to one finding
+  # must not pass as a byte-identity control.
+  [ "$(jq 'length' "$fixture")" -eq 6 ]
+  [ "$(jq '.blocking | length' "$golden")" -eq 3 ]
+  [ "$(jq '.suggestions | length' "$golden")" -eq 2 ]
+  [ "$(jq '.conflicts | length' "$golden")" -eq 1 ]
+
+  run zsh "$S" --findings "$fixture" --round 2
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/actual.json"
+  cmp "$golden" "$BATS_TEST_TMPDIR/actual.json"
+}
+
+@test "#1584 the group verdict is SAME-CLAIM: a different title at one file+line keeps its own record" {
+  # The dedup key is [file, line, dimension] — the TITLE is not in it. A bare
+  # group harvest would stamp the tool-decided promotion onto the co-located
+  # reviewer-raised CRITICAL, telling every reader that blocker was tool-decided
+  # while hiding the promotion that actually happened.
+  cat > "$F" <<'EOF'
+[
+ {"severity":"WARNING","dimension":"contract","file":"docs/a.md","line":120,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint --files docs/a.md","reviewer":"claude-plugin-contract-integrity","decided":"red"},
+ {"severity":"CRITICAL","dimension":"contract","file":"docs/a.md","line":120,"title":"the page documents a flag the script does not accept","description":"a considerably longer and more detailed description of a different defect","reviewer":"claude-plugin-prose-logic"}
+]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  # the representative is the CRITICAL (longest description), and it is NOT the
+  # claim that was decided — so it must carry no record at all
+  [ "$(echo "$output" | jq -r '.blocking[0].title')" = "the page documents a flag the script does not accept" ]
+  echo "$output" | jq -e '.blocking[0] | has("decided") | not' >/dev/null
+}
+
+@test "#1584 an EMPTY title is not a match key: two untitled claims do not cross-stamp" {
+  # `title` defaults to "" on the way in, so normtitle of every untitled finding
+  # is "" — a bare title comparison would be true for every pair of them and
+  # reinstate the cross-claim stamp on exactly that input class. The three other
+  # title-keyed sites in the script refuse an empty normtitle for this reason.
+  cat > "$F" <<'EOF'
+[
+ {"severity":"WARNING","dimension":"contract","file":"docs/c.md","line":120,"description":"decides: pre-commit run markdownlint --files docs/c.md","reviewer":"r1","decided":"red"},
+ {"severity":"CRITICAL","dimension":"contract","file":"docs/c.md","line":120,"description":"a considerably longer and more detailed description of a different, untitled defect","reviewer":"r2"}
+]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].severity')" = "CRITICAL" ]
+  echo "$output" | jq -e '.blocking[0] | has("decided") | not' >/dev/null
+}
+
+@test "#1584 an untitled finding still keeps its OWN decided record when it is the representative" {
+  # The empty-title fallback is object identity, not "no record at all" — the
+  # representative must never lose the verdict decided about itself.
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"contract","file":"docs/d.md","line":4,"description":"decides: pre-commit run markdownlint --files docs/d.md","reviewer":"r1","decided":"red"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
+}
+
+@test "#1584 GUARD 4: --adjudicated never drops a Low that a tool decided RED" {
+  # The decided pass contracts a reachable red-at-SUGGESTION state (the malformed
+  # shapes, where the verdict is recorded but no severity changes). A red is an
+  # observed tool verdict, not a restated opinion, so guard 2 (Low only) is not
+  # enough on its own.
+  cat > "$F" <<'EOF'
+[
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/e.md","line":12,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint --files docs/e.md","reviewer":"r1","decided":"red"},
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/f.md","line":12,"title":"MD013 line too long","description":"an undecided sibling at the same title","reviewer":"r2"}
+]
+EOF
+  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
+[{"file":"docs/e.md","line":12,"dimension":"contract","title":"MD013 line too long"},
+ {"file":"docs/f.md","line":12,"dimension":"contract","title":"MD013 line too long"}]
+EOF
+  con --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  [ "$status" -eq 0 ]
+  # the undecided sibling IS dropped; the decided-red one survives
+  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  # the COUNT is computed separately from the array — pin both, or a mutation
+  # that drops the survivor from `summary.low` alone passes here
+  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].file')" = "docs/e.md" ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].decided')" = "red" ]
+}
+
+@test "#1584 GUARD 4 consults the GROUP, so a red-decided member with a different title still protects the item" {
+  # The `decided` stamp is same-claim, so a red-decided member that is neither
+  # the representative nor same-titled leaves NO `.decided` on the merged item.
+  # A guard reading only `.decided` would drop the item and the red with it —
+  # the verdict deleted with `adjudicated_dropped` as its only trace.
+  cat > "$F" <<'EOF'
+[
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/h.md","line":120,"title":"MD013 line too long","description":"short","reviewer":"r1","decided":"red"},
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/h.md","line":120,"title":"the page documents a flag the script does not accept","description":"a considerably longer description of a different defect","reviewer":"r2"}
+]
+EOF
+  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
+[{"file":"docs/h.md","line":120,"dimension":"contract","title":"the page documents a flag the script does not accept"}]
+EOF
+  con --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
+  # the item carries no same-claim stamp — the protection came from the group
+  echo "$output" | jq -e '.suggestions[0] | has("decided") | not' >/dev/null
+  # and the internal key never reaches the output
+  echo "$output" | jq -e '[.blocking[], .suggestions[]] | map(has("group_red")) | any | not' >/dev/null
+}
+
+@test "#1584 a green-decided member carried into blocking[] by the GROUP SEVERITY MAX" {
+  # The header names three routes by which a `green` record reaches blocking[].
+  # This is the first: same title, so the stamp is harvested; the group max is
+  # WARNING, so the merged item blocks while carrying `decided: "green"`.
+  cat > "$F" <<'EOF'
+[
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/i.md","line":9,"title":"MD032 blank lines","description":"decides: pre-commit run markdownlint --files docs/i.md","reviewer":"r1","decided":"green"},
+ {"severity":"WARNING","dimension":"contract","file":"docs/i.md","line":9,"title":"MD032 blank lines","description":"a considerably longer and more detailed description of the same defect","reviewer":"r2"}
+]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].priority')" = "High" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "green" ]
+  echo "$output" | jq -e '.blocking[0] | has("promoted") | not' >/dev/null
+}
+
+@test "#1584 a green-decided REVIEWER-WRITTEN blocker keeps its severity and its record" {
+  # Route 3 of the three documented ways a `green` record reaches blocking[]:
+  # malformed shape 2 — a `decides:` finding the reviewer already wrote above
+  # SUGGESTION. The decided pass changes no severity there, so the stamp rides on
+  # a blocking item that was never deduped and never promoted.
+  #
+  # Without this case, narrowing the carry-through to
+  #   (.decided == "red") or (.decided == "green" and .severity == "SUGGESTION")
+  # passes the whole suite while silently dropping the record for exactly the
+  # entry class the KNOWN LIMITATION says is recognised BY that stamp.
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"contract","file":"docs/j.md","line":3,"title":"prose names a flag the script does not accept","description":"decides: pre-commit run markdownlint --files docs/j.md","reviewer":"claude-plugin-contract-integrity","decided":"green"}]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].severity')" = "WARNING" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].priority')" = "High" ]
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "green" ]
+  echo "$output" | jq -e '.blocking[0] | has("promoted") | not' >/dev/null
+  echo "$output" | jq -e '.blocking[0] | has("group_red") | not' >/dev/null
+}
+
+@test "#1584 decided rides on a carried SURVIVOR too, not just on a false trip" {
+  # The cross-round reduce rebuilds the item independently on each of its three
+  # exits, and the verified/ambiguous exit is the one a CARRIED tool-verdict
+  # blocker actually takes from round 2 on. Dropping `decided` there (e.g. by
+  # projecting explicit keys, as $prevblk does a few lines above) passes every
+  # other case in this file — and breaks the KNOWN LIMITATION's whole recognition
+  # rule, which tells the conductor to find a carried tool-verdict blocker by its
+  # `"decided": "red"` stamp in verify-<R+1>.json and NOT by the `decides:` line.
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"contract","file":"docs/k.md","line":10,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint --files docs/k.md","reviewer":"r","decided":"red"}]
+EOF
+  cat > "$BATS_TEST_TMPDIR/prev.json" <<'EOF'
+{"round":1,"blocking":[{"file":"docs/k.md","dimension":"contract","line":10,"title":"MD013 line too long","priority":"High","blocking":true}]}
+EOF
+  con --round 2 --prev "$BATS_TEST_TMPDIR/prev.json"
+  [ "$status" -eq 0 ]
+  # exact title => verified survivor, the non_converging arm
+  echo "$output" | jq -e '.blocking[0].non_converging == true' >/dev/null
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
+  echo "$output" | jq -e '.blocking[0] | has("group_red") | not' >/dev/null
+}
+
+@test "#1584 decided rides on a carried AMBIGUOUS survivor too (shared-token title)" {
+  # The verified and ambiguous verdicts share one object construction, but they
+  # reach it by different branches; pin both so a refactor of either is caught.
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"contract","file":"docs/l.md","line":10,"title":"MD013 line far too long here","description":"decides: pre-commit run markdownlint --files docs/l.md","reviewer":"r","decided":"red"}]
+EOF
+  cat > "$BATS_TEST_TMPDIR/prev.json" <<'EOF'
+{"round":1,"blocking":[{"file":"docs/l.md","dimension":"contract","line":10,"title":"MD013 line too long","priority":"High","blocking":true}]}
+EOF
+  con --round 2 --prev "$BATS_TEST_TMPDIR/prev.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blocking[0].non_converging == true' >/dev/null
+  echo "$output" | jq -e '.blocking[0].possible_false_trip == true' >/dev/null
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
+}
+
+@test "#1584 decided rides on a false_trips[] item too, since they are a subset of blocking[]" {
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"bugs","file":"inside.zsh","line":10,"title":"unquoted expansion breaks globbing","description":"decides: zsh -n inside.zsh","reviewer":"r","decided":"red"}]
+EOF
+  cat > "$BATS_TEST_TMPDIR/prev.json" <<'EOF'
+{"round":1,"blocking":[{"file":"inside.zsh","dimension":"bugs","line":10,"title":"missing pipefail before download","priority":"High","blocking":true}]}
+EOF
+  con --round 2 --prev "$BATS_TEST_TMPDIR/prev.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.summary.false_trips == 1' >/dev/null
+  [ "$(echo "$output" | jq -r '.false_trips[0].decided')" = "red" ]
+}
+
+@test "#1584 GUARD 4 does not widen the drop: a decided GREEN Low is still adjudicated away" {
+  # Only `red` is exempt. A green record is "not red" — it must not turn the
+  # adjudication guard into a blanket exemption for anything the pass touched.
+  cat > "$F" <<'EOF'
+[{"severity":"SUGGESTION","dimension":"contract","file":"docs/g.md","line":12,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint --files docs/g.md","reviewer":"r1","decided":"green"}]
+EOF
+  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
+[{"file":"docs/g.md","line":12,"dimension":"contract","title":"MD013 line too long"}]
+EOF
+  con --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 0 ]
+  [ "$(echo "$output" | jq '.summary.low')" -eq 0 ]
+}
+
+@test "#1584 a REWORDED duplicate of the decided claim still contributes its record" {
+  # Same-claim must not mean same-bytes: normtitle's case/whitespace leniency is
+  # what lets two reviewers word one defect differently and still merge.
+  cat > "$F" <<'EOF'
+[
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/b.md","line":9,"title":"MD032   Blank Lines","description":"short","reviewer":"r1","decided":"red"},
+ {"severity":"WARNING","dimension":"contract","file":"docs/b.md","line":9,"title":"md032 blank lines","description":"a considerably longer and more detailed description of the same defect","reviewer":"r2"}
+]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
+}
+
+@test "#1584 decided survives the #994 promotion overlay, so a promoted tool verdict keeps its record" {
+  # The case where the audit trail matters most: a human promotes a waived
+  # tool-verdict suggestion. `promoted` and `decided` must coexist.
+  cat > "$F" <<'EOF'
+[{"severity":"SUGGESTION","dimension":"tests","file":"tests/y.bats","line":11,"title":"weak assertion on the exit status","description":"decides: zsh development/skills/resolve-issue/scripts/run-gate.zsh --tests-dir tests","reviewer":"claude-plugin-test-reviewer","decided":"green"}]
+EOF
+  cat > "$BATS_TEST_TMPDIR/promote.json" <<'EOF'
+[{"file":"tests/y.bats","line":11,"dimension":"tests","title":"weak assertion on the exit status"}]
+EOF
+  printf 'tests/y.bats\n' > "$BATS_TEST_TMPDIR/touched.txt"
+  con --promote "$BATS_TEST_TMPDIR/promote.json" --fix-touched "$BATS_TEST_TMPDIR/touched.txt"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  echo "$output" | jq -e '.blocking[0].promoted == true' >/dev/null
+  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "green" ]
+  # and the #1435 class stamp rides alongside it
+  [ "$(echo "$output" | jq -r '.blocking[0].class')" = "under_assertion" ]
+}
