@@ -769,3 +769,57 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -q -- '^- blockers: 2 (critical: 1, warning: 1) (new: 1, carried: 1), conflicts: 0, suggestions: 0, carried: confirmed 1 / re-raised 1 / unconfirmed 0 of 2$'
 }
+
+# --- #1481: every value flag is guarded ---------------------------------------
+# A bare `$2` under `nounset` aborted a trailing value flag with zsh's raw
+# "parameter not set" and exit 1 — the code this script reserves for bad input
+# — and a flag-shaped value was silently taken as the value. All five value
+# flags, all three arms of the guard. The guard runs in the parse loop, before
+# any file is read, so no changelist is needed.
+
+@test "#1481 a value flag given last is a usage error (exit 2), not zsh's raw nounset abort" {
+  local f
+  for f in --changelist --round --verdict --prev --history; do
+    run --separate-stderr zsh "$S" "$f"
+    [ "$status" -eq 2 ] || { echo "$f last: expected 2, got $status"; return 1; }
+    [ -z "$output" ] || { echo "$f last: stdout not empty"; return 1; }
+    contains "$stderr" "render-progress-block: $f requires a value" \
+      || { echo "$f last: wrong diagnostic: $stderr"; return 1; }
+    lacks "$stderr" "parameter not set" || { echo "$f last: raw nounset abort"; return 1; }
+  done
+}
+
+@test "#1481 a value flag followed by another flag is a usage error naming that flag" {
+  local f
+  for f in --changelist --round --verdict --prev --history; do
+    run --separate-stderr zsh "$S" "$f" --round 1
+    [ "$status" -eq 2 ] || { echo "$f --round: expected 2, got $status"; return 1; }
+    [ -z "$output" ] || { echo "$f --round: stdout not empty"; return 1; }
+    contains "$stderr" "render-progress-block: $f requires a value (got the flag --round)" \
+      || { echo "$f --round: wrong diagnostic: $stderr"; return 1; }
+  done
+}
+
+@test "#1481 an explicit empty value is a usage error (exit 2)" {
+  local f
+  for f in --changelist --round --verdict --prev --history; do
+    run --separate-stderr zsh "$S" "$f" ""
+    [ "$status" -eq 2 ] || { echo "$f '': expected 2, got $status"; return 1; }
+    [ -z "$output" ] || { echo "$f '': stdout not empty"; return 1; }
+    contains "$stderr" "render-progress-block: $f requires a non-empty value" \
+      || { echo "$f '': wrong diagnostic: $stderr"; return 1; }
+  done
+}
+
+@test "#1481 an unset --prev no longer swallows --history as the previous changelist" {
+  # `--prev $VAR` with VAR unset: before the guard `--history` became the prev
+  # path and the history file an unexpected argument. Now the refusal names the
+  # real mistake.
+  echo '{"round":2,"summary":{"blocking":0},"blocking":[]}' > "$CL"
+  echo '{"blocking":0}' > "$BATS_TEST_TMPDIR/h.jsonl"
+  run --separate-stderr zsh "$S" --changelist "$CL" --round 2 --verdict ok \
+    --prev --history "$BATS_TEST_TMPDIR/h.jsonl"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "render-progress-block: --prev requires a value (got the flag --history)"
+}
