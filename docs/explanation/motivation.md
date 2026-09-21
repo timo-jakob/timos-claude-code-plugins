@@ -14,6 +14,10 @@ context like this. So this repo prepares for that now: build the seams,
 gates, and policies today so that as the model gets stronger, the share of
 work it can safely close out without a human grows automatically.
 
+The convictions behind this are stated once, as six pillars, on
+[the philosophy page](philosophy.md). This page is about the current state:
+what ships today and where it still falls short.
+
 ## How the plugins implement this today
 
 What is shipped and aligned with the motivation:
@@ -211,3 +215,20 @@ this section when it lands.
    Security-by-default really wants the container plugin
    (Trivy, SBOM, distroless) shipped. Tracked:
    [#172](https://github.com/timo-jakob/timos-claude-code-plugins/issues/172).
+6. **Three pillars have an open gap epic.** The
+   [philosophy page](philosophy.md) states the family's six pillars and, per
+   pillar, what enforces it today and its gap; it owns that text, so this list
+   does not repeat it. The open ones:
+   [never asks "how"](philosophy.md#pillar-2) —
+   [#1626](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1626);
+   [epics and issues are split when too big](philosophy.md#pillar-5) —
+   [#1625](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1625);
+   [the AI owns a self-optimising loop](philosophy.md#pillar-6) —
+   [#1624](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1624).
+   When one of these epics lands it updates that pillar's *What enforces it
+   today* and *Gap* parts on the philosophy page — including the honest-limit
+   note above the Gap, which the epic falsifies — **and** deletes that pillar's
+   line here, correcting the count in this entry's title; when the last one
+   lands the whole entry goes. Both are pinned in
+   `tests/philosophy-pointers.bats`: drop that pillar's pair with its line, and
+   the whole test with the entry.
