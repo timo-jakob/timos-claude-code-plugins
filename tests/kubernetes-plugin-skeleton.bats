@@ -347,8 +347,12 @@ rstep() {
   contains "$s1" 'reviewer ("{AGENT NAME}")'
   contains "$s1" 'round ({ROUND})'
   # #1644: the decided pass runs a `decides:` command in <worktree_root>, so a
-  # reviewer that read the rendered temp tree must root it at {REPO} instead
+  # reviewer that read the rendered temp tree must root it at {REPO} instead —
+  # and, since no rendered output exists there, a verdict about rendered output
+  # is reproducible only when the render step is folded into the command itself
   contains "$s1" 'for a `decides:` command, the source repository root above ({REPO}) — never the rendered temp tree'
+  contains "$s1" 'Name source paths'
+  contains "$s1" 'fold the render step (`helm template …` / `kustomize build …`) into the command when the verdict is about rendered output'
   # the COUNT word must track the list: a placeholder added without updating it
   # leaves a caller substituting fewer than the skill actually carries
   contains "$s1" 'substituting **all seven** placeholders'
