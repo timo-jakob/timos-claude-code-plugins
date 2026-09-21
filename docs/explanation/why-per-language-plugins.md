@@ -8,18 +8,18 @@ teach Claude Python, Java, or Swift. They encode five things a generic "Claude,
 fix my project" prompt cannot carry:
 
 1. **My experience and my favorites — accumulated over many years.** This is
-   the headline reason. These plugins are opinionated because *I* am: they
-   bake in the tools, policies, and defaults I've converged on across years of
-   building and maintaining software. Claude knowing Java doesn't tell it that
+   the headline reason. These plugins are
+   [opinionated](philosophy.md#pillar-1) because *I* am: they bake in the
+   tools, policies, and defaults I've converged on across years of building
+   and maintaining software. Claude knowing Java doesn't tell it that
    here Gradle with the Kotlin DSL is the only build system (Maven is
    rejected, Groovy DSL must be converted), that Spring Boot 4+ is the
    minimum, that gRPC is for internal service-to-service calls while public
    endpoints are REST/OpenAPI contract-first, that async messaging runs on
    NATS JetStream carrying CloudEvents 1.0 envelopes (a stated position no
    plugin scaffolds yet — see ARCHITECTURE.md), that every linter is
-   set to 120 columns, or that new shell scripts are zsh. Each of those is a
-   decision, not knowledge — one blessed path with one good default, because
-   every extra option is a permanent maintenance and expertise cost. The
+   set to 120 columns, or that new shell scripts are zsh. Each of those is
+   a decision, not knowledge. The
    per-language plugin is where those decisions live once they are mechanized;
    until then they are stated in
    [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md),

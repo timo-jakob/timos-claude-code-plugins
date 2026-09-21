@@ -12,7 +12,8 @@ use Claude for maximum automation — building the seams, gates, and policies
 today so that as the model gets stronger, the share of work it can safely close
 out without a human grows automatically.
 
-Read more: [Motivation & current gaps](docs/explanation/motivation.md) ·
+Read more: [The six pillars](docs/explanation/philosophy.md) ·
+[Motivation & current gaps](docs/explanation/motivation.md) ·
 [Why per-language plugins?](docs/explanation/why-per-language-plugins.md) ·
 [The Claude Approver](docs/explanation/claude-approver.md).
 
