@@ -1334,12 +1334,10 @@ its evidence rule caps any finding whose claim *is* one of those verdicts at
 `SUGGESTION`, carrying two description lines: `decides: <command>` and
 `proposed-severity: CRITICAL|WARNING`. **You are the one who settles them**,
 because this is the step that already runs tools on the minted tree. (This pass
-is repo-type-generic, but the **reviewer** half ships today only with the
-`development-claude-plugin` panel's read-only reviewers — #1644. On any
-other stack no finding carries a `decides:` line yet, so the pass finds nothing
-to run and is a no-op rather than a misfire — but not a safety guarantee: on
-those stacks a reviewer's tool-verdict claim arrives **uncapped** and a fix pass
-acts on it, which is the pre-#1584 status quo.)
+is repo-type-generic, and so is the **reviewer** half: every panel's read-only
+reviewers carry the rule (#1644), so on any stack a tool-verdict claim arrives
+capped with its `decides:` line. A round whose findings carry none leaves the
+pass nothing to run — a no-op, not a misfire.)
 
 **When to run it.** After the boundary's **step 4** has observed the gate's
 completion and **step 5** has judged it green — **never while the gate is

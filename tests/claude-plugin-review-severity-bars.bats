@@ -532,9 +532,9 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   [ -f "$REPO_ROOT/tests/claude-plugin-review-severity-bars.bats" ]
 
   # #1584: the same section now also states the EVIDENCE rule — a fourth
-  # severity-bounding rule, and the first carried by all five read-only
-  # reviewers. It had no guard of its own: renaming the section heading in the
-  # five agents AND in tests/reviewer-evidence-rule.bats (the natural way an
+  # severity-bounding rule, and the first carried by every read-only reviewer
+  # (repo-wide since #1644). It had no guard of its own: renaming the section
+  # heading in the agents AND in tests/reviewer-evidence-rule.bats (the natural way an
   # author makes that edit) left this paragraph quoting a heading that no longer
   # existed, with the whole suite green. Pinned here rather than in a new file,
   # because this is already the test ARCHITECTURE names for this section.
@@ -552,11 +552,14 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'it is byte-identical across them'
   contains "$flat" 'What promotes a capped finding is the **conductor**, not the reviewer and not the consolidator'
   contains "$flat" 'rewrites the severity only on a real red'
-  # the two deliberate limits must stay recorded with their issues, or the
-  # paragraph reads as though the mechanism is complete
-  contains "$flat" 'DESIGN limits are deliberate, and both are filed'
+  # the deliberate limit must stay recorded with its issue, or the paragraph
+  # reads as though the mechanism is complete
+  contains "$flat" 'One DESIGN limit is deliberate, and it is filed'
   contains "$flat" '#1647'
-  contains "$flat" '#1644'
+  # #1644 closed the reviewer-half split: the paragraph must name the committed
+  # exemption list, the one place a read-only agent may go without the rule
+  contains "$flat" 'tests/reviewer-evidence-rule.exemptions'
+  [ -f "$REPO_ROOT/tests/reviewer-evidence-rule.exemptions" ]
   # ARCHITECTURE cites a rule the REFERENCE carries; pin the citation here and
   # the rule there, so an edit to either side reds rather than leaving this
   # sentence pointing at text the reference no longer has.

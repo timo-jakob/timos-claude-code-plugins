@@ -346,6 +346,9 @@ rstep() {
   contains "$s1" 'dimension ("{DIMENSION}")'
   contains "$s1" 'reviewer ("{AGENT NAME}")'
   contains "$s1" 'round ({ROUND})'
+  # #1644: the decided pass runs a `decides:` command in <worktree_root>, so a
+  # reviewer that read the rendered temp tree must root it at {REPO} instead
+  contains "$s1" 'for a `decides:` command, the source repository root above ({REPO}) — never the rendered temp tree'
   # the COUNT word must track the list: a placeholder added without updating it
   # leaves a caller substituting fewer than the skill actually carries
   contains "$s1" 'substituting **all seven** placeholders'
