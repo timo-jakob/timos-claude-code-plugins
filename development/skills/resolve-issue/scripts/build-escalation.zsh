@@ -32,15 +32,31 @@
 emulate -L zsh
 setopt nounset pipefail
 
+# Every value flag is guarded (#1481), the same helper consolidate-findings.zsh
+# and resolve-story-loop.zsh use. A bare `$2` under `nounset` aborts a trailing
+# `--status` with zsh's raw "parameter not set" and exit 1 — the code reserved
+# above for an unreadable status JSON, not a bad call — and the unquoted
+# `--branch $VAR` idiom with VAR unset makes the next flag the value:
+# `--branch --compare-url URL` names the branch `--compare-url` and silently
+# drops the URL from the rendered comment.
+_need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
+  [[ $2 -ge 2 ]] || {
+    print -u2 -- "build-escalation: $1 requires a value"; exit 2 }
+  [[ "$3" != --* ]] || {
+    print -u2 -- "build-escalation: $1 requires a value (got the flag $3)"; exit 2 }
+  [[ -n "$3" ]] || {
+    print -u2 -- "build-escalation: $1 requires a non-empty value"; exit 2 }
+}
+
 local status_file="" issue="" branch="" compare_url="" fmt="comment" grants=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --status) status_file="$2"; shift 2 ;;
-  --issue) issue="$2"; shift 2 ;;
-  --branch) branch="$2"; shift 2 ;;
-  --compare-url) compare_url="$2"; shift 2 ;;
-  --format) fmt="$2"; shift 2 ;;
-  --grants) grants="$2"; shift 2 ;;
+  --status) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
+  --issue) _need_val "$1" $# "${2:-}"; issue="$2"; shift 2 ;;
+  --branch) _need_val "$1" $# "${2:-}"; branch="$2"; shift 2 ;;
+  --compare-url) _need_val "$1" $# "${2:-}"; compare_url="$2"; shift 2 ;;
+  --format) _need_val "$1" $# "${2:-}"; fmt="$2"; shift 2 ;;
+  --grants) _need_val "$1" $# "${2:-}"; grants="$2"; shift 2 ;;
   -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary] [--grants N]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;

@@ -58,14 +58,29 @@
 emulate -L zsh
 setopt nounset pipefail
 
+# Every value flag is guarded (#1481), the same helper consolidate-findings.zsh
+# and resolve-story-loop.zsh use. A bare `$2` under `nounset` aborts a trailing
+# value flag with zsh's raw "parameter not set" and exit 1 — the code this
+# script reserves for bad INPUT, not a bad call — and the unquoted `--prev $VAR`
+# idiom with VAR unset makes the next flag the value: `--prev --history H`
+# would read `--history` as the previous changelist.
+_need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
+  [[ $2 -ge 2 ]] || {
+    print -u2 -- "render-progress-block: $1 requires a value"; exit 2 }
+  [[ "$3" != --* ]] || {
+    print -u2 -- "render-progress-block: $1 requires a value (got the flag $3)"; exit 2 }
+  [[ -n "$3" ]] || {
+    print -u2 -- "render-progress-block: $1 requires a non-empty value"; exit 2 }
+}
+
 local changelist="" round="" verdict="" prev="" hist="" pftc=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --changelist) changelist="$2"; shift 2 ;;
-  --round) round="$2"; shift 2 ;;
-  --verdict) verdict="$2"; shift 2 ;;
-  --prev) prev="$2"; shift 2 ;;
-  --history) hist="$2"; shift 2 ;;
+  --changelist) _need_val "$1" $# "${2:-}"; changelist="$2"; shift 2 ;;
+  --round) _need_val "$1" $# "${2:-}"; round="$2"; shift 2 ;;
+  --verdict) _need_val "$1" $# "${2:-}"; verdict="$2"; shift 2 ;;
+  --prev) _need_val "$1" $# "${2:-}"; prev="$2"; shift 2 ;;
+  --history) _need_val "$1" $# "${2:-}"; hist="$2"; shift 2 ;;
   --possible-false-trip-continued) pftc=1; shift ;;
   -h|--help) print -r -- "usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT [--prev FILE] [--history FILE] [--possible-false-trip-continued]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;

@@ -1117,3 +1117,57 @@ EOF
   echo "$output" | grep -q 'already auto-continued 2 round(s) on an all-ambiguous carried set (#1498)'
   echo "$output" | grep -q '<!-- review-loop-escalation: ESCALATE_NO_CONVERGENCE -->'
 }
+
+# --- #1481: every value flag is guarded ---------------------------------------
+# A bare `$2` under `nounset` aborted a trailing value flag with zsh's raw
+# "parameter not set" and exit 1 — the code this script reserves for an
+# unreadable status JSON — and a flag-shaped value was silently taken as the
+# value. All six value flags, all three arms of the guard. The guard runs in the
+# parse loop, before the status file is read, so no status file is needed.
+
+@test "#1481 a value flag given last is a usage error (exit 2), not zsh's raw nounset abort" {
+  local f
+  for f in --status --issue --branch --compare-url --format --grants; do
+    run --separate-stderr zsh "$S" "$f"
+    [ "$status" -eq 2 ] || { echo "$f last: expected 2, got $status"; return 1; }
+    [ -z "$output" ] || { echo "$f last: stdout not empty"; return 1; }
+    contains "$stderr" "build-escalation: $f requires a value" \
+      || { echo "$f last: wrong diagnostic: $stderr"; return 1; }
+    lacks "$stderr" "parameter not set" || { echo "$f last: raw nounset abort"; return 1; }
+  done
+}
+
+@test "#1481 a value flag followed by another flag is a usage error naming that flag" {
+  local f
+  for f in --status --issue --branch --compare-url --format --grants; do
+    run --separate-stderr zsh "$S" "$f" --issue 7
+    [ "$status" -eq 2 ] || { echo "$f --issue: expected 2, got $status"; return 1; }
+    [ -z "$output" ] || { echo "$f --issue: stdout not empty"; return 1; }
+    contains "$stderr" "build-escalation: $f requires a value (got the flag --issue)" \
+      || { echo "$f --issue: wrong diagnostic: $stderr"; return 1; }
+  done
+}
+
+@test "#1481 an explicit empty value is a usage error (exit 2)" {
+  local f
+  for f in --status --issue --branch --compare-url --format --grants; do
+    run --separate-stderr zsh "$S" "$f" ""
+    [ "$status" -eq 2 ] || { echo "$f '': expected 2, got $status"; return 1; }
+    [ -z "$output" ] || { echo "$f '': stdout not empty"; return 1; }
+    contains "$stderr" "build-escalation: $f requires a non-empty value" \
+      || { echo "$f '': wrong diagnostic: $stderr"; return 1; }
+  done
+}
+
+@test "#1481 an unset --branch no longer swallows --compare-url into the branch name" {
+  # The issue's realistic shape: `--branch $VAR` with VAR unset. Before the
+  # guard a trailing `--compare-url` became the branch name and the comment
+  # rendered at exit 0 with no URL; now it refuses before anything renders.
+  cat > "$ST" <<'EOF'
+{"status":"BUDGET_EXHAUSTED","rounds":3,"max_rounds":3,"history":[],"final_changelist":{"blocking":[]}}
+EOF
+  run --separate-stderr zsh "$S" --status "$ST" --branch --compare-url
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "build-escalation: --branch requires a value (got the flag --compare-url)"
+}
