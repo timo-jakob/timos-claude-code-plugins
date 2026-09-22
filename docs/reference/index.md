@@ -16,7 +16,10 @@ when you already know what you're looking for.
 - [Grafana hand-off contract](telemetry-grafana-handoff.md) — what the separate
   cross-repo reporting repo ingests: the shared directory, the glob, the closed
   `telemetry/v1` envelope, the join keys, and the reference dashboard.
-- [Repo scripts](repo-scripts.md) — the helper scripts under `scripts/`.
+- [Repo scripts](repo-scripts.md) — the helper scripts under `scripts/`, and the
+  scripts bootstrap emits into a target repository.
+- [`.maintenance.yml`](maintenance-yml.md) — the keys bootstrap records in a
+  target repository: `primary:`, `gate:` and `tools:`.
 - [Requirements](requirements.md) — platform and runtime dependencies.
 
 For the authoritative architecture & schema contract, see

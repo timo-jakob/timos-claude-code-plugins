@@ -125,7 +125,7 @@ No file ⇒ no distinction: every detected stack is treated as primary (the
 pre-model behavior). The model is opt-in and backward-compatible.
 
 **The quality toolchain is declared in the same file (#1651).** Beside
-`primary:` (and `gate:` on the IaC path), bootstrap records a `tools:` block —
+`primary:`, bootstrap records a `tools:` block on every path except the IaC path, which records `gate:` instead —
 three independent categories, each with its own set:
 
 ```yaml
@@ -1575,9 +1575,10 @@ kubeconform to a repo that has no manifests.
 A repo declaring `primary: kubernetes` in `.maintenance.yml` **selects this
 plugin for maintenance dispatch**; the primary/auxiliary model already permits a
 topic to be primary, so no new mechanism is needed. The *bootstrap* half is
-narrower, and the two must not be conflated: bootstrap renders the six-check
-workflow and calls `branch-protection.sh --iac-only true` for the kubernetes
-marker with an **empty resolved language set**. There a recorded `primary:` can
+narrower, and the two must not be conflated: bootstrap emits the gate —
+`scripts/k8s-gate.zsh`, the one-job workflow that runs it and the `gate:` key it
+records in `.maintenance.yml` — and calls `branch-protection.sh --iac-only true`
+for the kubernetes marker with an **empty resolved language set**. There a recorded `primary:` can
 **veto** the path (any other value takes the repo off it) but never **grant**
 it, so a declaration alone does not entitle a repo to the pipeline. The mixed
 repo — the marker plus a stray tooling language — is deferred to #1193.
@@ -1592,12 +1593,15 @@ the five agents ship, so the dispatcher now **routes** each finding group to a
 group is now backed by a CI check that enforces the manifests on a PR rather
 than by a plan alone.
 
-"Full pipeline" here means the **six checks** bootstrap's
-`templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` **emits** (#1154) — render → schema →
-lint → policy → config-scan → argocd. Note where they live: the workflow
-is a *bootstrap* template owned by the generic `development` plugin, not
-something this plugin's skills run, which is the same boundary that keeps
-detection in `development`. A manifests repo has no test suite, so the language-app
+"Full pipeline" here means one gate command and the **six stages** it runs —
+render → schema → lint → policy → config-scan → argocd — in `scripts/k8s-gate.zsh`,
+which bootstrap's `templates/iac/scripts/k8s-gate.zsh.tmpl` **emits** (#1603, #1605). The
+command is recorded as `gate:` in `.maintenance.yml` (`make lint` unless the repo
+records another), and `kubernetes-ci.yml`'s one job and `hooks/pre-push` both run
+it. Note where they live: the script and the workflow are each a *bootstrap*
+template owned by the generic `development` plugin, not something this plugin's
+skills run, which is the same boundary that keeps detection in `development`. A
+manifests repo has no test suite, so the language-app
 gates — the coverage floor above all — do not apply to it, and bootstrap does not
 render them. Branch protection still runs: `branch-protection.sh --iac-only true`
 **requires the single `gate` context instead of** the language-app set (which no

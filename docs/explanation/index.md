@@ -18,6 +18,8 @@ behind the plugins. Read these to understand *why* things are the way they are.
 - [The local review loop](review-loop.md) — the pre-push review→fix→test loop
   `/development:resolve-issue` runs before any PR, and the interactive
   escalation that lets a present human grant more rounds or give guidance.
+- [The IaC gate](iac-gate.md) — why a GitOps repository gets one gate command
+  run locally, in the pre-push hook and in one CI job, over rendered output.
 - [Pipeline telemetry](pipeline-telemetry.md) — why the pipelines record
   anything, what is deliberately not collected, and why the sink stays on your
   machine.
