@@ -142,6 +142,48 @@ setup() {
   contains "$section" 'name the pillar in the surrounding prose'
 }
 
+@test "#1630 CLAUDE.md pairs the plugin-file context with the published-site URL" {
+  # PAIR the context with its form inside ONE list item. Two `contains` checks
+  # against the whole flowed section pass a swap of the plugin-file and issue
+  # bullets' payloads, because both strings are still somewhere in the section.
+  # So split the RAW section into list items first — flow() erases the line
+  # starts the split depends on — then flow each item on its own, so a
+  # markdownlint re-flow that wraps the phrase cannot red this.
+  local raw items n item
+  raw="$(section_of "$CLAUDE_MD" '## Pillars are stated once')"
+  [ -n "$raw" ]
+  items="$(printf '%s\n' "$raw" | awk '
+    function close_item() { if (open) print cur; open = 0; cur = "" }
+    /^- / { close_item(); open = 1; cur = $0; next }
+    /^[[:space:]]*$/ { close_item(); next }
+    open { cur = cur " " $0 }
+    END { close_item() }
+  ' | while IFS= read -r line; do flow "$line"; printf '\n'; done)"
+  [ -n "$items" ]
+  # exactly one item holds the context: a second bullet adopting the phrase
+  # reds here rather than the assertions silently checking the first match
+  n="$(printf '%s\n' "$items" | grep -cF 'a skill, an agent or a bootstrap template' || true)"
+  [ "$n" -eq 1 ]
+  item="$(printf '%s\n' "$items" | grep -F 'a skill, an agent or a bootstrap template')"
+  contains "$item" 'https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-N'
+  # the bullet's HOW, not only its WHICH URL: without this needle the link-text
+  # and line-position clause can be deleted or inverted with the suite green
+  contains "$item" "with the pillar's H2 title as link text and the URL ending its line"
+  lacks "$item" 'https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/explanation/philosophy.md'
+  # the other half of the split: the blob-URL bullet must no longer claim the
+  # plugin-file contexts. Reverting it to its pre-#1630 wording ("a skill, an
+  # agent, a bootstrap template or a GitHub issue") keeps every needle above
+  # green while routing a skill to BOTH forms.
+  local blob
+  n="$(printf '%s\n' "$items" | grep -cF 'blob/main/docs/explanation/philosophy.md' || true)"
+  [ "$n" -eq 1 ]
+  blob="$(printf '%s\n' "$items" | grep -F 'blob/main/docs/explanation/philosophy.md')"
+  contains "$blob" 'a GitHub issue'
+  lacks "$blob" 'a skill'
+  lacks "$blob" 'an agent'
+  lacks "$blob" 'bootstrap template'
+}
+
 @test "#1629 CLAUDE.md's never-restate rule exempts ARCHITECTURE.md's position rationales" {
   # The messaging, browser-UI and identity positions each word pillar 1 in their
   # own rationale, and each of those sentences is pinned clause-by-clause by

@@ -271,7 +271,7 @@ issue number. It returns a verdict JSON — a pure judgment, **no** GitHub write
 
 Never guess past a `NEEDS_REFINEMENT` — escalating the ambiguity here is the
 whole point, and it is far cheaper than after five review rounds converge on
-the wrong thing.
+the wrong thing ([unclear requirements are refined with AI guidance](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-4)).
 
 **Division of labour — the gate judges specification, 0a enforces sequencing**
 (#800). One fact, one owner: step 0a (`dependency-precheck.zsh`) is the **sole**
@@ -733,7 +733,8 @@ for when you deliberately want no local review round.
 that terminal is reached, not before. On an interactive run that exited
 `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` the extension is taken FIRST,
 before the escalation terminal, so it is listed here rather than reachable only
-through the file that comes after it:
+through the file that comes after it. The escalation terminal is where the run
+is handed to a human ([an automated state machine](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-3)):
 
 - see `reference/residue.md` § Residue branch — file the remainder, then ship (#1435)
 - see `reference/promotion.md` § Suggestion promotion on convergence — human-curated, opt-in (#994)

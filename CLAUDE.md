@@ -51,9 +51,13 @@ it, so anywhere read on github.com the link lands at the top of the page:
   `docs/how-to/`, `explanation/philosophy.md#pillar-N` from `docs/index.md`;
 - from a repo-root file (`README.md`, `ARCHITECTURE.md`, this file):
   `docs/explanation/philosophy.md#pillar-N`;
-- from anywhere that is none of those — a skill, an agent, a bootstrap
-  template or a GitHub issue, which are read detached from this repo (an
-  installed plugin's cache, a generated repo, an issue body) where no relative
+- from a file shipped inside a plugin — a skill, an agent or a bootstrap
+  template, which an install carries without `docs/`, so no relative path
+  resolves — the published page, whose `#pillar-N` anchor does resolve there,
+  with the pillar's H2 title as link text and the URL ending its line:
+  `https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-N`;
+- from anywhere that is none of those — a GitHub issue, or other text read
+  detached from this repo (a generated repo, an issue body) where no relative
   path to `docs/` resolves — the
   absolute repo URL
   `https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/explanation/philosophy.md`,
