@@ -243,7 +243,7 @@ setup() {
   contains "$body" 'it owns that text, so this list does not repeat it'
 }
 
-@test "#1629 motivation.md's gap entry 6 links the three open pillars to their epics" {
+@test "#1629 motivation.md's gap entry 6 links each open pillar to its epic, and its title counts them" {
   # PAIR each pillar with its own epic in ONE needle. Six independent
   # existence checks pass a swap — pillar 2 pointing at #1624 and pillar 6 at
   # #1626 satisfies all six while contradicting philosophy.md's Gap sections,
@@ -254,6 +254,38 @@ setup() {
   contains "$body" '[never asks "how"](philosophy.md#pillar-2) — [#1626](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1626)'
   contains "$body" '[epics and issues are split when too big](philosophy.md#pillar-5) — [#1625](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1625)'
   contains "$body" '[the AI owns a self-optimising loop](philosophy.md#pillar-6) — [#1624](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1624)'
+  # The title's count, DERIVED from the pairs rather than needled (#1659). The
+  # landing rule drops a pillar's line and corrects the count together; a
+  # literal 'Three pillars' needle would red on that correct edit, while no
+  # check at all lets a half-done one ship. So count the entry's full pairs —
+  # never a bare #pillar-N or [#NNNN] — and match the title's word to them.
+  local entry matched pairs pillars title want
+  # entry 6 alone: up to (not including) the next numbered entry, the next
+  # `## ` heading, or EOF
+  entry="$(awk 'f && (/^[0-9]+\. \*\*/ || /^## /) {exit} /^6\. \*\*/ {f = 1} f' "$MOTIVATION")"
+  [ -n "$entry" ]
+  entry="$(flow "$entry")"
+  matched="$(printf '%s' "$entry" | grep -oE '\]\(philosophy\.md#pillar-[1-6]\) — \[#[0-9]+\]\(' || true)"
+  pairs="$(printf '%s' "$matched" | grep -c . || true)"
+  [ "$pairs" -gt 0 ]
+  # the title counts PILLARS, so the pairs must name distinct ones: a second
+  # pair for an already-listed pillar plus a title bumped to match would
+  # otherwise pass while the page claims one open pillar too many
+  pillars="$(printf '%s\n' "$matched" | grep -oE 'pillar-[1-6]' | LC_ALL=C sort -u | wc -l | tr -d ' ')"
+  [ "$pillars" -eq "$pairs" ]
+  title="$(printf '%s\n' "$entry" | sed -n 's/^6\. \*\*\([^*]*\)\*\*.*/\1/p')"
+  # only the two grammatical forms; a digit, a wrong singular/plural pairing or
+  # a word outside One–Six maps to 0, which the count (> 0 above) never equals
+  case "$title" in
+    'One pillar has an open gap epic.') want=1 ;;
+    'Two pillars have an open gap epic.') want=2 ;;
+    'Three pillars have an open gap epic.') want=3 ;;
+    'Four pillars have an open gap epic.') want=4 ;;
+    'Five pillars have an open gap epic.') want=5 ;;
+    'Six pillars have an open gap epic.') want=6 ;;
+    *) want=0 ;;
+  esac
+  [ "$want" -eq "$pairs" ]
 }
 
 @test "#1629 gap entry 6 says what to do when ONE epic lands, not only when all three do" {
