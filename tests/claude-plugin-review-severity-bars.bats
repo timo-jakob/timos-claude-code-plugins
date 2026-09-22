@@ -31,7 +31,7 @@
 # and round 3 caught the first version of this very sweep scoped to one
 # directory while its comment claimed the tree.
 #
-# Non-vacuity control. Each of the 37 mutations below was APPLIED to the real
+# Non-vacuity control. Each of the 40 mutations below was APPLIED to the real
 # tree and the suite confirmed RED, then reverted — a record of runs, not a
 # claim. Numbering is contiguous and one number is one mutation, so a gap or a
 # duplicate is itself a defect in the record:
@@ -82,6 +82,13 @@
 #  36. as "its 5-round budget", and
 #  37. as the word form "after five rounds" — all three passed round 2's
 #      three-named-spellings ban, which is why it now bans the numeral SHAPE
+#
+# Added by #1493, each applied to all three bar agents in turn (red every time,
+# with the failure naming the agent):
+#  38. rewrite "blocks on `CRITICAL`+`WARNING`" to "blocks on `CRITICAL`" — the
+#      edit both suites passed before this story
+#  39. append a third severity ("+`SUGGESTION`") to the same list
+#  40. move the sentence out of prose-logic's bar section into `## Your Mission`
 #
 # A caveat worth keeping, because it bit twice while building this control: the
 # clauses above are re-wrapped across source lines, so a line-oriented
@@ -296,6 +303,25 @@ _assert_file() {  # _assert_file <path> <test-expr...>
     # case (every row deleted) where naming the agent matters most
     rows="$(printf '%s\n' "$table" | grep -c '^| `' || true)"
     _assert_file "$agent" [ "$rows" -eq 3 ]
+  done
+}
+
+@test "every bar states the loop's blocking severities as CRITICAL+WARNING (#1493)" {
+  # The premise each bar argues from. Only its escalation half is pinned
+  # elsewhere (review-loop-budget-consistency.bats), so rewriting it to "blocks
+  # on `CRITICAL`" left the whole suite green while instructing a reviewer that
+  # WARNINGs do not block — the opposite of consolidate-findings.zsh's rule
+  # (blocking = Critical + High, WARNING → High). The trailing " and escalates"
+  # closes the severity list, so appending a third severity reds too. Scoped to
+  # the bar section, whose heading is read back out of each agent, so the
+  # sentence cannot wander out of the rule it justifies and stay green.
+  local agent heading
+  for agent in "${BAR_AGENTS[@]}"; do
+    _assert_file "$agent" [ -f "$agent" ]
+    heading="$(grep -m1 '^## The .* bar (severity rule' "$agent" || true)"
+    _assert_file "$agent" [ -n "$heading" ]
+    _load_section "$agent" "${heading#\#\# }"
+    _assert_file "$agent" contains "$section_flat" 'The review loop blocks on `CRITICAL`+`WARNING` and escalates'
   done
 }
 
