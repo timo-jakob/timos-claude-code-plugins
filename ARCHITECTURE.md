@@ -4652,16 +4652,19 @@ Rules that carry the contract's weight:
     any sink** (the record still reaches stdout, per the stdout-first rule
     above) and **no fallback to the local default** — a caller that asked for
     `DIR` must never have its records land somewhere it isn't looking.
-  - **No pipeline forwards `--telemetry-dir` yet, and no filed child owns
-    doing so.** It is the emitter's capability, reached today only by invoking
-    `emit-telemetry.zsh` directly; `resolve-story-loop.zsh` and refine-issue's
-    Step 7 still pass at most `--telemetry-file`. Child (d) (#1006) scoped
-    itself to the emitter, and child (f) (#1008) is the hand-off *document* plus
-    a reference dashboard — neither carries the caller wiring. Forwarding a sink
-    flag from every pipeline entry point is per-pipeline instrumentation, so its
-    natural home is the trilogy's **epic 2 (instrument-every-pipeline)**; until
-    a child there claims it, treat the gap as open rather than assuming it
-    landed with (d) or (f).
+  - **Only resolve-issue and its review loop forward `--telemetry-dir` so
+    far.** Since #1226, `/development:resolve-issue <N> --telemetry-dir DIR`
+    (or `--telemetry-file PATH`) passes the flag to the emitter for its own
+    story record **and** to every `resolve-story-loop.zsh` invocation of the
+    run, which forwards it for each loop record — so one run's records all
+    land in `DIR/<repo-slug>.jsonl`. **refine-issue does not**: its Step 7
+    passes no sink flag at all, so its records always land in the local
+    default, and that gap stays open. An **epic** target ignores the flag too
+    until epic mode is instrumented (child (b)). The
+    other pipelines of epic 2 (#741) take the flag as their own children
+    land, under the conventions in *Per-pipeline telemetry instrumentation*
+    below. Read an empty shared directory under any other pipeline as that
+    gap, not as a broken emitter.
 - **Legacy records** (the pre-contract per-pipeline files, which carry no
   `schema` key) are handled by a v0→v1 adapter in child (e)'s rollup
   (`rollup-telemetry.zsh`, below) — **no file migration is performed**, so the
@@ -4690,6 +4693,60 @@ envelope key any more; both are payload builders. **No file migration is
 performed**: records written before a stream's retrofit stay where and as they
 are (`review-loop.jsonl`, `refine-issue.jsonl`), and child (e)'s rollup reads
 them through a v0→v1 adapter.
+
+## Per-pipeline telemetry instrumentation (#1226)
+
+`telemetry/v1` fixes the record; these conventions fix how a **pipeline** is
+instrumented to emit one. They were written down with the first new
+instrumentation on the contract — resolve-issue's story mode (#1226, epic 2
+child (a), epic #741) — so every later child of that epic ((b)–(f): epic mode,
+maintenance, bootstrap, acceptance, approver) is held to one shape rather than
+to whatever the previous copy happened to do. Copy-adaptation without a shared
+pattern is exactly the drift the contract exists to stop.
+
+1. **A payload builder, sited with the skill and named for the stream.** It
+   lives in the pipeline skill's own `scripts/` as
+   `build-<stream>-telemetry-record.zsh` — `build-story-telemetry-record.zsh`
+   for resolve-issue's story mode, beside the review loop's
+   `build-telemetry-record.zsh`, which keeps its name. It is a **payload**
+   builder: it emits no envelope key, and it owns the stream's outcome
+   mapping behind `--print-outcome`, so the mapping is tested code rather than
+   skill prose.
+2. **The builder is pure.** State in (`--state FILE|-`), payload out. It reads
+   no clock, no git and no network. It exits 2 on a usage error and 1 on a state
+   that cannot become a payload — including one whose facts contradict its
+   outcome, which it refuses rather than files under the wrong outcome. So every
+   branch is bats-testable without running the pipeline.
+3. **Sink flags ride in the invocation and are re-passed to every nested
+   invocation.** A skill takes `--telemetry-file PATH` / `--telemetry-dir DIR`
+   in `$ARGUMENTS`, in any position — never an environment variable, never
+   config, following `/development:maintenance`'s Phase 0 precedent. It forwards
+   them to its own emit **and** to every nested pipeline invocation that emits:
+   the first, each resume, each sub-loop. A nested invocation that lost them
+   writes to a different sink, and the emitter exits 0 either way. Sink
+   precedence is the emitter's, never re-implemented.
+4. **`run_id` is pre-minted; `parent_run_id` is threaded.** A pipeline that
+   nests others mints its own `run_id` at its start, in the emitter's format
+   (`<pipeline>-<start ts>-<4 hex>`), before any nested run exists. It passes
+   that id to every nested invocation as `--parent-run-id`, and to its own final
+   emit as `--run-id` with `--ts` = the same start stamp. It also lists the
+   nested records' ids in its own payload, so the join works from either end.
+   A nested pipeline records the ids it emitted in a work-dir **ledger** that
+   survives its own resumes, rather than in a single overwritten sidecar.
+5. **Outcome mapping is disciplined, and a stop before the pipeline's first
+   real step emits nothing.** Each named ending maps onto the 4-value `outcome`,
+   with `failed` as the catch-all for everything unnamed. A pipeline that stops
+   before its first real step emits **no** record: an empty invocation, a usage
+   error, or a target that was never actionable. `outcome` has no value that
+   honestly means "there was nothing to do", and counting such stops would skew
+   the park and failure rates. Where that line falls is each pipeline's to state
+   (resolve-issue: Step 0a).
+6. **Telemetry is never fatal.** Any telemetry failure — an absent or failing
+   emitter, a builder that refuses the state, a sink the emitter rejects —
+   costs the record and prints one advisory line. It never changes the
+   pipeline's exit, verdict or report. The emitter appends nothing on a
+   non-zero exit, so no partial record reaches a sink.
+7. **`tokens` stays `null`.** Never estimated (the contract's reliability rule).
 
 ## Telemetry rollup (#1007)
 
@@ -4854,7 +4911,8 @@ if it later reaches a different terminal status (a run whose human declines the
 grant ends ON its last escalation, so that escalation is its final record, not
 an extra one)** to the repo's shared sink `.claude/telemetry/telemetry.jsonl`
 (git-ignored — the bootstrap gitignore fragments for every language carry
-`.claude/telemetry/`), or to an explicit `--telemetry-file`. Emission is
+`.claude/telemetry/`), or to an explicit `--telemetry-file` or `--telemetry-dir`
+(#1226), forwarded to the emitter with its precedence. Emission is
 **best-effort**: it is skipped when `--repo` is not an existing directory (only
 reachable via the `--no-review` fast path, which short-circuits before the
 `--repo` checks) and when the payload build fails, and any emitter error is
@@ -4867,8 +4925,9 @@ consecutive records of one extended loop (escalate → grant → `--resume`) ove
 and their `wall_s` must not be summed — count records, but derive per-loop
 timing from the last record only. **The v1 envelope carries no ordering key for
 that "last"**: both records share the same `ts` (the loop passes `.t0`), the
-minted `run_id`'s suffix is random rather than monotonic, and `parent_run_id` is
-`null`. So the tiebreaker within a `(repo, issue, ts)` group is the **largest
+minted `run_id`'s suffix is random rather than monotonic, and `parent_run_id`
+names the enclosing resolve-issue run (below), which both records share — it
+tells nothing about their order. So the tiebreaker within a `(repo, issue, ts)` group is the **largest
 `wall_s`** — each record spans from the same logical start, so the longest span
 is the latest. Do not rely on physical file order: the sink is shared with every
 other pipeline now, which makes it a much weaker implicit key than the old
@@ -4878,7 +4937,17 @@ per-pipeline file.
 loop calls `emit-telemetry.zsh` with `--pipeline review-loop`, the `--issue`,
 the status JSON's `repo_type`, `--ts` (the loop's logical start) and `--wall-s`
 — which is **required and always a number** here, never the old nullable field —
-and lets the emitter derive `repo`, mint the `run_id`, and resolve the sink. The
+and lets the emitter derive `repo`, mint the `run_id`, and resolve the sink.
+Under a resolve-issue run (#1226) it also forwards `--parent-run-id` — the run's
+pre-minted id — and the run's `--telemetry-dir`, and appends each emitted
+`run_id` to the `<work-dir>/.telemetry-run-ids` **ledger**. The ledger is
+cleared on a fresh start and appended on every emission, so an extended loop
+keeps its escalation's id beside its final one. The single-id
+`.telemetry-run-id` sidecar below still names only the latest. An in-repo
+`--telemetry-dir` joins the loop-internal exclusion that `--telemetry-file`
+already had: a `.jsonl` file **directly** inside the directory — the emitter's
+own write pattern — is dropped from the review scope, the fix-touched set and
+the scoped findings, and only while the directory is the effective sink. The
 loop's own `status` narrows onto the contract's 4-value `outcome` enum:
 `CONVERGED`, `CONVERGED_WITH_RESIDUE` (#1435) and `SKIPPED` → `success`, every
 `ESCALATE_*` and
@@ -5130,6 +5199,107 @@ pre-contract shape (top-level `ts`/`issue`/`outcome`, no `pipeline`); they are
 not migrated, and child (e)'s rollup is what reads both. Together the streams
 feed the same self-improvement handoff — where refinement helps (fewer review
 rounds later) and where it stalls (parks, unresolved objections).
+
+## Resolve-issue telemetry (#1226)
+
+`/development:resolve-issue` is the family's highest-traffic pipeline. Its
+nested review loops emitted from the start (#1004), but nothing recorded the
+outer question: did this story reach a PR, park, or escalate? Since #1226 a
+**single-issue run that reaches Step 0a** (the dependency precheck) appends
+**exactly one** `kind: "run"` record, `pipeline: "resolve-issue"`. It is the
+first instrumentation built on the conventions in *Per-pipeline telemetry
+instrumentation* above. The procedure is the skill's `reference/telemetry.md`.
+
+**Invocation.** `/development:resolve-issue <issue-number|url>
+[--telemetry-file PATH] [--telemetry-dir DIR] [--no-review]`, the flags in any
+position. `story-telemetry.zsh args` parses them and makes both paths absolute
+once, so every later caller names the same file whatever its cwd. The
+invocation help is printed and the run stops, with no record, on any of: no
+arguments, an unknown flag, a sink flag with no value or a flag-shaped one, a
+repeated sink flag, an empty issue reference, or more than one issue reference.
+A leading `~` in a sink path is expanded first, since a slash command's
+arguments reach the shell unexpanded. `--no-review` is the
+skill's own review-loop switch, handed back as `no_review: true`.
+
+**Mechanics — `story-telemetry.zsh`, three deterministic steps.**
+
+- **`start`** runs once Step 0 has classified the target as a **single issue**,
+  before Step 0a. So an epic never has a run, and its children's loops carry no
+  `loop_args` until epic mode is instrumented (child (b)). `start` stamps the
+  start and pre-mints the `run_id` as `resolve-issue-<ts>-<4 hex>`, the
+  emitter's format. It writes a scratch run file, keyed by the issue number,
+  whose `loop_args` — `--parent-run-id <run_id>` plus exactly the run's sink
+  flags — go on **every** `resolve-story-loop.zsh` invocation of the run: the
+  first, each `--resume`, and the promotion sub-loop. Every call mints a new
+  run and overwrites the file, because `start` cannot tell a fresh invocation
+  from a re-entry. So the skill calls it once per invocation and re-reads the
+  file on re-entry, and a fresh invocation never inherits a run an earlier one
+  left un-emitted. A §0a remediation rung that runs the Single-issue flow on a
+  blocker is its own run, with its own run file and the same sink flags. An
+  epic-kind rung, like any epic, has none.
+- **`emit`** runs at the run's ending. It builds the payload with
+  `build-story-telemetry-record.zsh`, narrows the outcome with its
+  `--print-outcome`, and emits through the shared emitter with `--run-id` = the
+  pre-minted id, `--ts` = the start stamp, `--wall-s` = now − start (clamped at
+  0), and the run's sink flags. It reads each loop work-dir's
+  `.telemetry-run-ids` ledger into `payload.review_loop_run_ids`, then marks the
+  run file `emitted`, so a repeated call cannot append a second record under the
+  same `run_id`.
+- **Never fatal.** Past argument parsing, `emit` always exits 0: any failure
+  prints one advisory and emits nothing.
+
+So every review-loop record of a run carries `parent_run_id` = that run's
+`run_id`, **and** that `run_id` lists it. The join works from either end, and
+all of them land in one sink. The promotion enrichment is the one record outside
+that join: it carries no `parent_run_id`, and is reached through its loop
+record's `run_id`, as it always was.
+
+**Envelope.** `issue` is the story; `pr` is the opened PR, else `null`. The
+`outcome` mapping:
+
+| `outcome` | When |
+|---|---|
+| *(no record)* | the run stopped in Step 0, before the precheck: empty arguments, a usage error, the issue not `OPEN`, the issue outside the session repo, a classification failure, the near-miss halt — or the target is an epic (epic-mode records are child (b)) |
+| `success` | a PR was opened (after `CONVERGED` or `CONVERGED_WITH_RESIDUE`, or after a `--no-review` skip of the loop) |
+| `parked` | the readiness gate returned `NEEDS_REFINEMENT`, or the run ended with its last dependency precheck a rejection — autonomously, on a declined or partial remediation, or on a rejecting re-verification |
+| `escalated` | the run ended on a **loop invocation that exited** `ESCALATE_*` / `BUDGET_EXHAUSTED` |
+| `failed` | any other ending after Step 0a — the last precheck errored, abandoned on a red gate, errored out, or stopped before any loop invocation (a `review-dispatch.zsh plan` failure included, whatever the loop would have called that condition) |
+
+**Payload** — what the envelope cannot carry:
+
+| Key | Value |
+|---|---|
+| `mode` | `"story"`, so (b)'s epic records separate in one query |
+| `dependency_precheck` | `PROCEED` \| `REJECT_BLOCKED` \| `REJECT_CYCLE` — the **last** precheck the run ran, a remediation's re-verification included; `null` only when that precheck errored and decided nothing |
+| `gate_verdict` | `READY` \| `NEEDS_REFINEMENT` \| `null` (the run ended before the gate) |
+| `risk` | the gate's `risk` on `READY`, else `null` |
+| `story_spec_present` | a `story-spec/v1` block was consumed (#577) |
+| `review_loop_run_ids` | the nested review-loop records' `run_id`s, de-duplicated in emission order |
+| `escalation_status` | the `ESCALATE_*` / `BUDGET_EXHAUSTED` exit that terminated the run — set only on an `escalated` run; `null` on every other ending, a converged, skipped or errored loop and an escalation a later grant superseded included |
+| `fallbacks_fired` | which planned same-PR steps no-oped — a set drawn from `acceptance_tests`, `user_docs`, `c4_currency`: whether the same-PR lifecycles actually reach stories |
+
+The builder's state carries a fine-grained ending — `pr-opened`, `gate-parked`,
+`precheck-parked`, `escalated`, `failed` — plus the facts above and `pr`, and
+the builder narrows it. It **refuses a state whose facts contradict that
+ending**, because such a record would validate (payload is open) and then count
+the run under the wrong outcome for good. The consistency rules, all checked on
+every build and all reported at once:
+
+| Ending | Must have | Must not have |
+|---|---|---|
+| `precheck-parked` | a `REJECT_*` `dependency_precheck` | a `gate_verdict` (the gate is never reached) |
+| `gate-parked` | `dependency_precheck: PROCEED`, `gate_verdict: NEEDS_REFINEMENT` | — |
+| `escalated` | a typed `escalation_status`, after `PROCEED` and `READY` | — |
+| `pr-opened` | a positive-integer `pr`, after `PROCEED` and `READY` | — |
+| any ending | — | a `REJECT_*` precheck unless `precheck-parked`; `NEEDS_REFINEMENT` unless `gate-parked`; an `escalation_status` unless `escalated`; a `pr` unless `pr-opened` |
+
+Every field is also type- and enum-checked; a `false` where `null` is meant is
+refused rather than read as absent. `tokens` stays `null`.
+
+A promotion sub-loop, a resumed escalation and the blocking phase all produce
+review-loop records under the same parent, so a query joining on
+`parent_run_id` sees a story's whole review churn. The review-loop metrics above
+are unchanged: they filter `pipeline == "review-loop"`.
 
 ## Review dossier + Approver re-ingest (#563)
 

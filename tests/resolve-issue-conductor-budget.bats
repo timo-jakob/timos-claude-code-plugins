@@ -256,9 +256,13 @@ _all_raw_pointer_count() {
   # arrives unnoticed. (reference/review-loop.md's #1571 note is a PARAGRAPH,
   # not a heading, on purpose: a second `##` there also makes
   # round-boundary-wait.bats' section locator ambiguous.)
+  #
+  # EIGHT since #1226: the new reference/telemetry.md declares ONE `##` section,
+  # *Story telemetry (#1226)*. Its #1226 correction notes in promotion.md,
+  # interactive.md and review-loop.md are PARAGRAPHS, for the reason above.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 7 ]
+  [ "$n" -eq 8 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -305,8 +309,9 @@ _all_raw_pointer_count() {
   # restating, because the session reaches the step and finds no procedure.
   local rows
   rows="$(_all_pointers | grep -c .)"
-  if [ "$rows" -ne 8 ]; then
-    printf 'the skill carries %s pointer(s), expected 8.\n' "$rows" >&2
+  # 8 until #1226 added the two story-telemetry pointers (Step 0 and §7).
+  if [ "$rows" -ne 10 ]; then
+    printf 'the skill carries %s pointer(s), expected 10.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

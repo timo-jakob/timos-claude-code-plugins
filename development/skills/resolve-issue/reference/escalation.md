@@ -69,3 +69,12 @@ Stop / decline, or a `CONFLICT` / `AMBIGUOUS` exit):
    the issue's **comments**, their decision becomes implementation context and
    the next run can converge. No PR exists until it does.
 <!-- /moved: escalation-terminal -->
+
+**Before step 4's stop, emit the run's record (#1226).** The terminal above
+predates story-mode telemetry and sits in a byte-frozen span, so this is
+recorded here: an escalation is one of the run's endings. Emit its single
+`resolve-issue` record (`outcome: escalated`, the typed status in
+`escalation_status`) before stopping. An operational-error stop with no typed
+comment is an ending too, and emits `failed`. The procedure is
+`reference/telemetry.md` step 4. It is never fatal, and an epic child that E3
+drives emits nothing.

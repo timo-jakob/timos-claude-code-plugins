@@ -12,6 +12,13 @@ pinned pre-move commit, and is what keeps this file honest.
 
 ## Suggestion promotion on convergence — human-curated, opt-in (#994)
 
+> **Read the #1226 amendment at the end of this section BEFORE acting on steps
+> 3 and 4.** Two things the frozen text below says or shows are superseded
+> there. The enrichment of step 3 passes the run's `--telemetry-dir` as well as
+> its `--telemetry-file`, where the text below says to pass no
+> `--telemetry-dir`. And every sub-loop invocation of step 4 carries the run's
+> `loop_args`.
+
 <!-- moved: suggestion-promotion -->
 Low suggestions never block, so every one the panel raises is **waived** the
 moment it is surfaced — logged and never actioned. That is the right default,
@@ -545,3 +552,23 @@ orphaned.
    command; the dossier is an audit record, and a hand-built input fabricates
    exactly the history it exists to attest.
 <!-- /moved: suggestion-promotion -->
+
+**The sub-loop and the enrichment now forward the run's sinks (#1226).** Two
+statements in the span above predate story-mode telemetry, and that span is
+byte-frozen, so the correction is recorded here rather than edited into it.
+
+- **Every sub-loop invocation also carries the run's `loop_args`** (Step 0,
+  `reference/telemetry.md`): `--parent-run-id <the run's run_id>` plus exactly
+  the `--telemetry-file` / `--telemetry-dir` the run was given — round 1, each
+  `--resume`, and each recovery re-invoke alike. The step 4 invocation above
+  shows neither. Without them the promotion record is unparented, and under a
+  sink flag it lands in a different sink from the run's other records. When
+  `start` failed there is no run file: pass only the sink flags from the `args`
+  output, with no `--parent-run-id`.
+- **The loop does have a `--telemetry-dir` now.** Step 3's "the loop has no
+  `--telemetry-dir` of its own, so the enrichment must not pass one either" is
+  therefore reversed, by the same mirroring rule it states: pass the
+  enrichment the same `--telemetry-file` **and** the same `--telemetry-dir`
+  the loop was given, and the two records share a sink. The enrichment itself
+  takes **no** `--parent-run-id`: it stays joined to the loop record it enriches
+  by that record's `run_id`, and through it to the resolve-issue run.

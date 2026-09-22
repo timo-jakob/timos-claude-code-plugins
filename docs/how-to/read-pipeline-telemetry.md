@@ -1,9 +1,9 @@
 # Read your pipeline telemetry
 
-The review loop and `/development:refine-issue` — the two pipelines
-instrumented so far, with more joining incrementally — each append one
-`telemetry/v1` JSONL record per run **ending** to a local sink (git-ignored in
-a bootstrapped repo — see below) —
+The review loop, `/development:refine-issue` and `/development:resolve-issue` —
+the three pipelines instrumented so far, with more joining incrementally — each
+append one `telemetry/v1` JSONL record per run **ending** to a local sink
+(git-ignored in a bootstrapped repo — see below) —
 an extended review-loop run (escalate → grant more rounds → resume) appends
 more than one such terminal record, so a "run" here means one ending, not one
 whole loop. `rollup-telemetry.zsh` gives you a one-command
@@ -69,6 +69,35 @@ those normally; `--repo X` **excludes** them and prints a note to stderr naming
 how many were excluded, so mixing old and new files never silently drops data.
 `--repo unknown` is the one exception: it *selects* that bucket instead of
 excluding it.
+
+## Follow one story from outcome to review churn
+
+`/development:resolve-issue` appends one `resolve-issue` record per story run
+that reaches its dependency precheck. The record says whether the run opened a
+PR (`success`), parked at the readiness gate or the precheck (`parked`),
+escalated, or failed. A run that stops before the precheck, such as one on a
+closed issue or a mistyped invocation, appends nothing. Every review-loop **run**
+record the run spawned carries that record's `run_id` as its `parent_run_id`,
+and the story record lists them in `payload.review_loop_run_ids`, so the join
+works from either end. The one review-loop record outside that join is the
+suggestion-promotion enrichment, which is reached through its loop record's
+`run_id` instead:
+
+```bash
+S=.claude/telemetry/telemetry.jsonl
+# the story runs: outcome, PR and how long each took
+jq -c 'select(.kind == "run" and .pipeline == "resolve-issue")
+       | {issue, outcome, pr, wall_s, gate: .payload.gate_verdict}' "$S"
+# every review-loop record of one story run
+jq -c --arg id resolve-issue-1752403000-8f3a \
+  'select(.pipeline == "review-loop" and .parent_run_id == $id)
+   | {run_id, outcome, rounds: .payload.rounds}' "$S"
+```
+
+`payload.fallbacks_fired` says which same-PR steps no-oped on that story
+(`acceptance_tests`, `user_docs`, `c4_currency`) — whether the acceptance-test
+and docs lifecycles actually reach your stories. The full payload is documented
+in ARCHITECTURE.md, *Resolve-issue telemetry*.
 
 ## Machine-readable output
 
@@ -163,11 +192,15 @@ Three things to know before you rely on it:
 - **The slug is not an identity.** It is derived from `repo` and is
   many-to-one (`a/b-c` and `a-b/c` both become `a-b-c.jsonl`), so group by the
   `repo` *field*, never by filename.
-- **No pipeline forwards `--telemetry-dir` yet.** It is the emitter's
-  capability, reached today by invoking `emit-telemetry.zsh` directly; the
-  review-loop and refine-issue callers still write to the local default (or an
-  explicit `--telemetry-file`, when one was given). So an empty shared directory
-  means *that* gap, not a broken emitter.
+- **`/development:resolve-issue` forwards it for you.**
+  `/development:resolve-issue 412 --telemetry-dir ~/telemetry-share` sends the
+  story's record **and** every review-loop record of that run to
+  `~/telemetry-share/<repo-slug>.jsonl`. `--telemetry-file PATH` works the same
+  way and wins when both are given. That holds for a single issue: pointed at an
+  **epic**, resolve-issue ignores the flag for now, and its loops write to the
+  local default. `/development:refine-issue` does **not** forward it yet, so its
+  records always go to the local default. An empty shared directory after an
+  epic or a refine-issue run means *that* gap, not a broken emitter.
 - **The shared directory is `telemetry/v1`-only.** Every line in it carries a
   `schema` key, which is what lets a consumer skip version sniffing entirely.
   The legacy pre-contract files described above stay where they are — **never copy them
@@ -203,8 +236,8 @@ guesses.
 
 - [Pipeline telemetry](../explanation/pipeline-telemetry.md) — why this data is
   collected, what is deliberately left out, and why it stays on your machine.
-- [The local review loop](../explanation/review-loop.md) — one of the two
-  pipelines that emit into the sink this page reads (the other is
-  `/development:refine-issue`).
+- [The local review loop](../explanation/review-loop.md) — one of the three
+  pipelines that emit into the sink this page reads (the others are
+  `/development:refine-issue` and `/development:resolve-issue` itself).
 - `ARCHITECTURE.md`, "The telemetry/v1 contract" and "Telemetry rollup
   (#1007)" — the normative schema and rollup behaviour this page summarizes.

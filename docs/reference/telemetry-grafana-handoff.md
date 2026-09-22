@@ -65,14 +65,16 @@ case-insensitively too.
 
 The mode is filesystem-only — JSONL on a path, never a network transport.
 
-**No pipeline forwards `--telemetry-dir` yet.** It is the *emitter's* capability,
-reached today only by invoking `emit-telemetry.zsh` with the flag directly; the
-review-loop and refine-issue callers still pass at most `--telemetry-file`, so
-their records land in each repo's local default sink — or in an explicit
-`--telemetry-file` when one was given — never in the shared directory. Wiring a sink flag through
-every pipeline entry point is per-pipeline instrumentation and belongs to the
-trilogy's **epic 2**. Read an empty shared directory as *that* gap, not as a
-broken emitter or a broken aggregation service.
+**Only resolve-issue and its review loop forward `--telemetry-dir` so far.**
+`/development:resolve-issue <N> --telemetry-dir DIR` lands the story's
+`resolve-issue` record and every review-loop record of that run in the shared
+directory (#1226) — for a single-issue target; an epic target ignores the flag
+until epic mode is instrumented. Every other pipeline, refine-issue included,
+forwards no sink flag from its invocation, so its records land in each repo's
+local default sink, never in the shared directory. Wiring the flag through the remaining entry points is per-pipeline
+instrumentation and belongs to the trilogy's **epic 2**. For those pipelines,
+read an empty shared directory as *that* gap, not as a broken emitter or a
+broken aggregation service.
 
 | Flag | Script | Meaning for the hand-off |
 | --- | --- | --- |

@@ -317,6 +317,15 @@
 # invocation carried OR ADOPTED a promoted set — an adopting --resume counts),
 # which the payload builder copies through so the documented convergence-rate
 # metrics can exclude a promotion pass.
+# Beside that single-id sidecar, every successful emission also APPENDS its id to
+# `<work-dir>/.telemetry-run-ids` (#1226) — a ledger, one id per line, cleared
+# only on a fresh start. The sidecar answers "which record did THIS exit emit?"
+# and is overwritten by the next terminal exit; the ledger answers "which records
+# did this loop emit at all?", which is what a resolve-issue run lists in its own
+# payload.review_loop_run_ids. An extended loop (escalate -> grant -> --resume)
+# needs both answers, and one file cannot give them.
+# --parent-run-id and --telemetry-dir (#1226) are forwarded to the emitter as
+# given, beside --telemetry-file; the sink precedence is the emitter's.
 #
 # Hooks (run via the shell, with these env vars exported):
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
@@ -365,7 +374,8 @@
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --findings-file FILE [--test-cmd CMD] [--resume] \
 #       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
-#       [--issue N] [--telemetry-file PATH] [--gate-attest TREE_ID] \
+#       [--issue N] [--telemetry-file PATH] [--telemetry-dir DIR] \
+#       [--parent-run-id ID] [--gate-attest TREE_ID] \
 #       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE]  # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
@@ -443,7 +453,7 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
-local carry_accounting=""
+local carry_accounting="" parent_run_id="" telemetry_dir=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -516,6 +526,13 @@ while [[ $# -gt 0 ]]; do
   --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
   --issue) _need_val "$1" $# "${2:-}"; issue="$2"; shift 2 ;;
   --telemetry-file) _need_val "$1" $# "${2:-}"; telemetry_file="$2"; shift 2 ;;
+  # --telemetry-dir / --parent-run-id (#1226): forwarded to the emitter on every
+  # terminal record, so a resolve-issue run's nested loop records land in the
+  # sink the run was given and point back at the run that spawned them. Both go
+  # through _need_val, so an empty value is a usage error rather than a record
+  # silently written to the default sink or silently unparented.
+  --telemetry-dir) _need_val "$1" $# "${2:-}"; telemetry_dir="$2"; shift 2 ;;
+  --parent-run-id) _need_val "$1" $# "${2:-}"; parent_run_id="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
   --resume) resume=1; shift ;;
   -h|--help)
@@ -528,7 +545,8 @@ while [[ $# -gt 0 ]]; do
     print -r -- "                             # confirmed / re_raised / unconfirmed per carried entry (#1583)."
     print -r -- "                             # Hook mode reads <findings-path>.carry.json instead."
     print -r -- "  [--promote FILE]"
-    print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH]"
+    print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--telemetry-dir DIR]"
+    print -r -- "  [--parent-run-id ID]       # the resolve-issue run this loop runs under (#1226)"
     print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote and --carry-accounting"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
@@ -598,6 +616,11 @@ if (( ! resume )) && [[ -n "$work_dir" ]]; then
   # reachable failures
   rm_err=$(rm -f -- "$work_dir/.telemetry-run-id" 2>&1) || \
     print -ru2 -- "resolve-story-loop: could not clear the stale telemetry run-id sidecar at $work_dir/.telemetry-run-id (${rm_err}) — a later read may return a PREVIOUS run's id (#995)"
+  # the ledger (#1226) follows the same rule for the same reason: a fresh run
+  # that inherited a previous run's ids would list them in the parent's
+  # payload.review_loop_run_ids, joining this story to records it never made
+  rm_err=$(rm -f -- "$work_dir/.telemetry-run-ids" 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the stale telemetry run-id ledger at $work_dir/.telemetry-run-ids (${rm_err}) — a parent run may list a PREVIOUS run's ids (#1226)"
 fi
 
 
@@ -794,6 +817,8 @@ emit_and_exit() {
         [[ -n "$issue" ]] && emit_args+=(--issue "$issue")
         [[ -n "$repo_type" && "$repo_type" != "null" ]] && emit_args+=(--repo-type "$repo_type")
         [[ -n "$telemetry_file" ]] && emit_args+=(--telemetry-file "$telemetry_file")
+        [[ -n "$telemetry_dir" ]] && emit_args+=(--telemetry-dir "$telemetry_dir")
+        [[ -n "$parent_run_id" ]] && emit_args+=(--parent-run-id "$parent_run_id")
         # The emitter echoes the record to stdout. The loop's stdout is the
         # status JSON contract, so it is CAPTURED, never printed (stderr stays
         # visible for diagnosis) — and the capture is what makes the minted
@@ -841,6 +866,10 @@ emit_and_exit() {
             # -n guard, and the emitter only requires --run-id to be non-empty —
             # so it would land as a cleanly-validating orphan
             [[ -n "$rid" && "$rid" != *$'\n'* ]] && { { print -r -- "$rid" > "$work_dir/.telemetry-run-id" ; } 2>/dev/null || true }
+            # ...and APPENDED to the ledger (#1226), under the same guard and
+            # the same swallow-everything idiom. Appended, never rewritten: an
+            # extended loop's earlier escalation record is still this loop's.
+            [[ -n "$rid" && "$rid" != *$'\n'* ]] && { { print -r -- "$rid" >> "$work_dir/.telemetry-run-ids" ; } 2>/dev/null || true }
           fi
         fi
       fi
@@ -1006,12 +1035,13 @@ _capture_fix_touched() {   # $1 = base tree id, $2 = round
 }
 
 # Filter $1 IN PLACE, removing every line under the repo-internal work-dir and
-# every line naming a repo-internal --status-file / --findings-file. Both lists
-# are resolved once near the top of the run; when they are empty this is a no-op.
+# every line naming a repo-internal --status-file / --findings-file, plus the
+# in-repo --telemetry-dir sink (#1226, `tdir_active` / `tdir_rel`). All are
+# resolved once near the top of the run; when they are empty this is a no-op.
 _drop_loop_internal_paths() {  # $1 = file of repo-relative paths
   local f="$1"
   [[ -s "$f" ]] || return 0
-  (( ${#loop_internal_files} > 0 )) || [[ -n "$wd_rel" ]] || return 0
+  (( ${#loop_internal_files} > 0 )) || [[ -n "$wd_rel" ]] || (( tdir_active )) || return 0
   local -a lines
   lines=("${(@f)$(<"$f")}")
   # `${(b)…}` alone is NOT enough: it produces the escaped text, but a parameter
@@ -1031,6 +1061,13 @@ _drop_loop_internal_paths() {  # $1 = file of repo-relative paths
     pat="${(b)_f}"
     lines=(${lines:#${~pat}})
   done
+  # the in-repo --telemetry-dir sink (#1226): a `.jsonl` directly inside it.
+  # `[^/]##` needs extendedglob, scoped to this function by localoptions.
+  if (( tdir_active )); then
+    setopt localoptions extendedglob
+    pat="${(b)tdir_rel}[^/]##.jsonl"
+    lines=(${lines:#${~pat}})
+  fi
   if (( ${#lines} )); then
     print -rl -- "${lines[@]}" > "$f"
   else
@@ -1732,6 +1769,26 @@ local history_file="$work_dir/history.jsonl"
 local wd_rel=""
 if [[ "${work_dir:A}" == "${repo:A}"/* ]]; then
   wd_rel="${${work_dir:A}#"${repo:A}"/}/"
+fi
+# An in-repo --telemetry-dir (#1226) is the fourth caller-chosen sink, and the
+# emitter appends to it at every terminal exit exactly as it does to an in-repo
+# --telemetry-file. It is neither a DIRECTORY the loop owns (the work-dir) nor a
+# FILE the loop can name: the sink is DIR/<repo-slug>.jsonl, and deriving that
+# slug here would be a second copy of the emitter's identity derivation, free to
+# drift from the first. So the rule is the emitter's own write pattern — a
+# `.jsonl` file DIRECTLY inside DIR — which is exact for every file the emitter
+# can produce there and leaves a story's nested or non-.jsonl files alone, even
+# when DIR is the repo root itself (`tdir_rel` is then empty, not `/`).
+# Only when DIR is the EFFECTIVE sink: under --telemetry-file the emitter never
+# writes to it, and excluding files there would hide story files for nothing.
+local tdir_active=0 tdir_rel=""
+if [[ -n "$telemetry_dir" && -z "$telemetry_file" ]]; then
+  if [[ "${telemetry_dir:A}" == "${repo:A}" ]]; then
+    tdir_active=1
+  elif [[ "${telemetry_dir:A}" == "${repo:A}"/* ]]; then
+    tdir_active=1
+    tdir_rel="${${telemetry_dir:A}#"${repo:A}"/}/"
+  fi
 fi
 # The work-dir is a DIRECTORY (prefix match, trailing slash); the caller-chosen
 # file paths below (status, findings, telemetry, carry accounting) are single
@@ -2805,14 +2862,21 @@ while (( round <= effective_max )); do
   # residue predicate no longer filtering by file, such a blocker is eligible to
   # SHIP as residue, so the loop would file a follow-up issue against its own
   # state files. Same fact, same three consumers, one definition.
-  if [[ -n "$wd_rel" ]] || (( ${#loop_internal_files} > 0 )); then
+  if [[ -n "$wd_rel" ]] || (( ${#loop_internal_files} > 0 )) || (( tdir_active )); then
     scoped_filtered="$work_dir/.scoped-filtered-$round.json"
     local internal_json="[]"
     internal_json=$(print -rl -- "${loop_internal_files[@]}" \
       | jq -Rsc 'split("\n") | map(select(length > 0))') || internal_json="[]"
+    # the in-repo --telemetry-dir rule (#1226) is the same one
+    # _drop_loop_internal_paths applies: a `.jsonl` DIRECTLY inside the dir
     jq -c --arg wd "$wd_rel" --argjson internal "$internal_json" \
+      --argjson tdon "$tdir_active" --arg td "$tdir_rel" \
       '[ .[] | ((.file // "") | sub("^\\./"; "")) as $p
-         | select( (($wd != "") and ($p | startswith($wd))) or (($internal | index($p)) != null) | not ) ]' \
+         | select( (($wd != "") and ($p | startswith($wd)))
+                   or (($internal | index($p)) != null)
+                   or (($tdon == 1) and ($p | startswith($td))
+                       and ($p[($td | length):] | test("^[^/]+\\.jsonl$")))
+                   | not ) ]' \
       "$scoped" > "$scoped_filtered" || {
       print -u2 -- "resolve-story-loop: work-dir scope filter failed at round $round"; exit 1 }
     mv -- "$scoped_filtered" "$scoped" || {

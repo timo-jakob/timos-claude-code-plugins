@@ -76,9 +76,9 @@
 #                 for SINK SELECTION when --telemetry-file is also given — but
 #                 the operand is still validated either way, so a value that
 #                 exists and is not a directory is a usage error even when it
-#                 would have been shadowed. NOTE: this is the emitter's
-#                 capability; no pipeline forwards it yet — a caller opts in by
-#                 invoking this script directly.
+#                 would have been shadowed. NOTE: only resolve-issue and its
+#                 review loop forward it so far (#1226); every other caller
+#                 opts in by invoking this script directly.
 #
 # Sink precedence: --telemetry-file > --telemetry-dir >
 # <repo-dir>/.claude/telemetry/telemetry.jsonl (the repo's own common sink, the

@@ -32,9 +32,19 @@ conventions for the message, and **`/development:open-pr`** for the
 bot-authored PR. The novel part is the gate → branch → implement → validate
 flow, plus the epic orchestration.
 
-**User input:** $ARGUMENTS — a single issue number / URL, or an epic's.
+**User input:** $ARGUMENTS — a single issue number / URL, or an epic's, plus
+the optional telemetry sink flags `--telemetry-file PATH` / `--telemetry-dir DIR`
+(#1226) and `--no-review` (§3.5), in any position.
 
 ## Step 0 — classify the target
+
+**First, parse `$ARGUMENTS`** with `story-telemetry.zsh args`, each word
+single-quoted; a usage error prints the invocation help and stops. Once the
+target classifies as a **single issue**, stamp the run with `start` before
+Step 0a. Every review-loop invocation of the run then carries the run's
+`loop_args`, and the Single-issue flow emits one `resolve-issue` record at
+whichever ending it reaches. A Step 0 stop emits none, and an epic takes no part:
+see `reference/telemetry.md` § Story telemetry (#1226)
 
 ```bash
 gh issue view <N> --json number,title,body,state,labels,url
@@ -123,7 +133,8 @@ gh issue view <N> --json number,title,body,state,labels,url
 
 Operate on the **session's repo** (`gh repo view --json nameWithOwner`); the
 issue must belong to it. If `$ARGUMENTS` is empty, print the invocation help
-(`/development:resolve-issue <issue-number|url>`) and stop.
+(`/development:resolve-issue <issue-number|url> [--telemetry-file PATH]
+[--telemetry-dir DIR] [--no-review]`) and stop.
 
 ## Single-issue flow
 
@@ -215,6 +226,9 @@ writes — this skill does the posting):
     that could not be read or emitted). Stop the flow and report the script's
     stderr; do not re-run.
 
+Every rejection that ends the run — shape (i), shape (ii) or a cycle — emits the
+run's record (§7) before it stops; so does an exit 1, or a repeated exit 2.
+
 On either rejection **of shape (i)** — a shape (ii) rejection already stopped
 above, and has no remediation — what happens next depends on who is driving:
 
@@ -258,8 +272,8 @@ issue number. It returns a verdict JSON — a pure judgment, **no** GitHub write
   and the Approver) and proceed to step 1.
 - **`NEEDS_REFINEMENT`** → do **not** branch or implement. Ensure the
   `needs-refinement` label exists (idempotent), post the refinement questions as
-  an issue comment, and **stop** — report that the story went back for
-  refinement.
+  an issue comment, emit the run's record (§7), and **stop** — report that the
+  story went back for refinement.
 
   ```bash
   gh label create needs-refinement --color d4c5f9 \
@@ -486,7 +500,7 @@ decision lives in the comment thread — treat it as authoritative implementatio
 context. Make the change. This step is identical across languages because you
 read the repo, not a fixed recipe. If, on reading, the issue is genuinely
 **under-specified** or far larger than its description implies, **stop and say
-so** rather than guessing.
+so** rather than guessing, and emit the run's record (§7) as you stop.
 
 **Sibling-sweep when you fix (#982).** When a change — or a review finding you're
 resolving — targets one instance of a repeating *pattern*, sweep the diff for
@@ -598,8 +612,8 @@ definition of done the tests have to demonstrate, not just the repo's suite
 passing. If the change can't be shown to satisfy them, it isn't done. (With no
 block, the prose acceptance criteria play the same role, as before.)
 
-If it's red, fix it; if you can't, **abandon the PR** and report — a child issue
-is never merged or checked off on a red gate. Keep the test evidence for the PR
+If it's red, fix it; if you can't, **abandon the PR**, emit the run's record
+(§7), and report — a child issue is never merged or checked off on a red gate. Keep the test evidence for the PR
 body.
 
 ### 3.5 Review loop — local, pre-push (do NOT skip unless `--no-review`)
@@ -639,7 +653,9 @@ Pass `--issue <N>` too: the loop appends one `telemetry/v1` record per
 **terminal exit** (none on `AWAITING_FIX` / `STALE_FINDINGS`; an extended
 loop emits one per escalation, plus a final one only if it later reaches a
 different terminal status — a run whose human declines the grant ends ON its
-last escalation, so that record is its final one, not an extra) to the shared sink
+last escalation, so that record is its final one, not an extra) to **the run's
+sink**: the `--telemetry-file` / `--telemetry-dir` it was given (the `loop_args`
+below, #1226), else the repo's shared local default
 `.claude/telemetry/telemetry.jsonl` (git-ignored, #566/#1004) — via the family's
 shared emitter, with the loop's own detail under `payload` and its status
 narrowed onto the cross-pipeline `outcome` enum. Evidence for
@@ -655,7 +671,12 @@ convergence-**rate** recipes exclude it. The mean-rounds and escalation-breakdow
 cuts deliberately **keep** it — a promotion pass genuinely did those rounds
 (ARCHITECTURE.md, *Review-loop telemetry*). Every terminal exit that emits a
 record also drops that record's `run_id` in `<work-dir>/.telemetry-run-id` — the
-join key the promotion enrichment below needs. **Always pass an
+join key the promotion enrichment below needs — and appends it to the
+`<work-dir>/.telemetry-run-ids` ledger the run's own record lists (#1226). **Pass
+the run's `loop_args` (Step 0) on every invocation, promotion sub-loop and every
+`--resume` included**: they parent each loop record to this run and send it to
+the sink the run was given. An epic child that E3 drives here has no run, and
+passes none. **Always pass an
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
 is the loop's resumable state and the status file its verdict — the interactive
 extension below re-invokes the loop with `--resume` on the *same* work-dir, and
@@ -726,11 +747,14 @@ with a status JSON + code:
   On an interactive run, `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first
   enter the **interactive extension** (offer more rounds / guidance) before any
   comment; the others, and all autonomous runs, go straight to the typed comment.
+  Whichever ending the run then reaches, emit the run's record (§7) before
+  stopping. That includes a loop `ERROR` that stops the run.
 
 `--no-review` skips the loop entirely (status `SKIPPED`) — and is **refused
 together with `--promote`** (exit 2), since nothing is consolidated for an
 overlay to reach. Today's fast path,
-for when you deliberately want no local review round.
+for when you deliberately want no local review round. It reaches the loop from
+the invocation: Step 0's `args` reports it as `no_review: true`.
 
 **The procedure behind each terminal is on-demand reading** — take it when
 that terminal is reached, not before. On an interactive run that exited
@@ -895,6 +919,16 @@ Outcomes:
   human admin-merges, since they can't approve their own); report which path ran.
 
 Report the PR URL, that it's bot-authored, and that auto-merge is armed.
+
+### 7. Emit the run's record — at every ending after Step 0a
+
+The Single-issue flow ends in exactly one of five ways — the PR opened here, a
+§0a rejection, a §0b `NEEDS_REFINEMENT`, an escalation terminal (§3.5), or
+anything else after Step 0a (a red gate abandoned, a stop in §2, an errored
+step) — and **each** of them, not only this one, emits the run's single
+`resolve-issue` record before reporting. It is never fatal. A Step 0 stop emits
+none, and neither does an epic child that E3 drives, which has no run:
+see `reference/telemetry.md` § Story telemetry (#1226)
 
 ## Epic flow
 
