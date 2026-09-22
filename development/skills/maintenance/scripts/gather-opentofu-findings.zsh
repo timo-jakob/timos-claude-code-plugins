@@ -239,6 +239,15 @@ tf_hits="$(printf '%s\n' "$tf_hits" | grep -vF "${PRUNE[@]}")" && tf_filter_rc=0
 # BOTH finds, so the `.tf.json` probe's own flag usually catches it; relying on
 # that is relying on a coincidence between two independently-run searches, and
 # it leaves the window where a directory becomes readable between them.
+#
+# AN ACCEPTED IMPRECISION, recorded so it is not re-filed as a defect: `tf_rc` is
+# the status of the UNPRUNED walk (the prune set is applied to the captured list,
+# not to the walk), so a permission error inside `.terraform/`, `node_modules/`,
+# `vendor/` or `.git/` sets this flag too. That can only over-report blindness —
+# a note, never a cleared verdict — and it is kept rather than answered with a
+# pruned probe because the walk sits inside the `gather-opentofu-marker`
+# sentinels, whose three-way parity with the SKILL.md recipe and detect-stack.sh
+# forbids pruning there (marker parity is the reason, not an oversight).
 tf_search_incomplete="false"
 (( tf_rc == 0 )) || tf_search_incomplete="true"
 if [[ -z "$tf_hits" ]] && (( tf_rc != 0 )); then
@@ -479,6 +488,11 @@ if [[ "$has_tf" == "true" ]]; then
     # from that would be an absence of evidence stated as a verified fact —
     # exactly what clears a repo running on the implicit local backend
     # (invariant 2). Report what is actually known instead.
+    # The `tfjson_incomplete` disjunct has NO fixture of its own, and none can
+    # isolate it: the `.tf` walk does not prune, so its error set is a SUPERSET
+    # of the pruned `.tf.json` walk's — any fixture that trips this disjunct
+    # trips `tf_search_incomplete` too. It is kept because the two walks are
+    # independent runs, not because a test exercises it alone.
     # the reason list is BUILT from the conditions that held, for the same
     # reason as the note above: stating all three unconditionally renders
     # "0 unreadable .tf" and asserts .tf.json files on a repo that ships none
@@ -531,6 +545,18 @@ local policy_findings="[]"
 local policy_tests_findings="[]"
 if [[ "$has_policies" == "true" ]]; then
   local -a pf=()
+  # EVERY finding below is ENCODED INTO A SCALAR under its guard, then appended —
+  # never an append whose element IS the guarded jq substitution. That inline
+  # form rests on the append propagating the substitution's status (the form is
+  # not spelled here, because tests/gather-opentofu.bats greps this source for
+  # its absence); if it ever did not, `pf` would gain an
+  # empty element, `jq -s` would fold it to `[]`, and the finding would vanish
+  # into a green `policy: []`. The same scalar-first shape `pkgs_flat` uses; each
+  # of these guards' messages, and `pkgs_flat`'s, has its own row in
+  # tests/gather-opentofu.bats's exit-2 table. (`verify_tail` is scalar-first
+  # too, but falls back to the full text rather than refusing, so it has no
+  # message to pin.)
+  local pf_one
   # Resolved to an ABSOLUTE path, not left as a bare name. It is executed inside
   # a `cd -- "$repo"` subshell, so a bare name would be re-resolved from the
   # repo's directory — and any relative PATH entry (`.`, `bin`,
@@ -551,7 +577,7 @@ if [[ "$has_policies" == "true" ]]; then
   if [[ -n "$conftest_bin" && ! -x "$conftest_bin" ]]; then conftest_bin=""; fi
 
   if [[ -z "$conftest_bin" ]]; then
-    pf+=("$(jq -n --arg v "$CONFTEST_VERSION" '{
+    pf_one="$(jq -n --arg v "$CONFTEST_VERSION" '{
       id: "policy:conftest-unavailable",
       tool: "policy",
       type: "policy_not_evaluated",
@@ -559,7 +585,8 @@ if [[ "$has_policies" == "true" ]]; then
       message: ("policies/conftest/ declares policies but conftest is not on PATH, so they were not evaluated. A declared policy set that cannot be evaluated never skips — reporting it clean would be a green check over unenforced policies."),
       fix: ("Install conftest " + $v + " (the version this gather and the rendered pipeline both pin) and re-run maintenance."),
       files: ["policies/conftest/"]
-    }')") || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the conftest-unavailable finding"; exit 2; }
+    }')" || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the conftest-unavailable finding"; exit 2; }
+    pf+=("$pf_one")
   else
     # A version MISMATCH is a note, never a finding: the consumer repo has done
     # nothing wrong, and the drift is in the maintainer's local toolchain. It
@@ -661,7 +688,7 @@ if [[ "$has_policies" == "true" ]]; then
         local pkgs_flat
         pkgs_flat="$(printf '%s' "$stray_pkgs" | tr '\n' ' ')" || {
           print -r -u2 -- "gather-opentofu-findings.zsh: could not format the stray-package list"; exit 2; }
-        pf+=("$(jq -n --arg pkgs "$pkgs_flat" '{
+        pf_one="$(jq -n --arg pkgs "$pkgs_flat" '{
           id: "policy:package-outside-invoked-namespace",
           tool: "policy",
           type: "policy_not_evaluated",
@@ -669,7 +696,8 @@ if [[ "$has_policies" == "true" ]]; then
           message: ("These Rego packages sit outside the namespace conftest invokes by default (`main`), so nothing evaluates them and they pass everything silently: " + ($pkgs | rtrimstr(" ")) + "."),
           fix: "Move the rules into `main` itself — a `main.*` subpackage is NOT invoked by the default query — or declare the namespaces in a conftest.toml so the step invokes them explicitly.",
           files: ["policies/conftest/"]
-        }')") || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the stray-namespace finding"; exit 2; }
+        }')" || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the stray-namespace finding"; exit 2; }
+        pf+=("$pf_one")
       fi
     fi
 
@@ -728,7 +756,7 @@ if [[ "$has_policies" == "true" ]]; then
       # value is the forwarded diagnostic, so losing it defeats the finding.
       local verify_tail
       verify_tail="$(tail -5 <<<"$verify_out")" || verify_tail="$verify_out"
-      pf+=("$(jq -n --arg rc "$verify_rc" --arg out "$verify_tail" '{
+      pf_one="$(jq -n --arg rc "$verify_rc" --arg out "$verify_tail" '{
         id: "policy:conftest-unavailable",
         tool: "policy",
         type: "policy_not_evaluated",
@@ -736,7 +764,8 @@ if [[ "$has_policies" == "true" ]]; then
         message: ("policies/conftest/ declares policies but conftest resolved to a binary that could not be executed (exit " + $rc + "), so they were not evaluated. A declared policy set that cannot be evaluated never skips — reporting it clean would be a green check over unenforced policies." + (if $out == "" then "" else " The system said: " + $out end)),
         fix: "Repair the conftest installation — a shim whose interpreter is gone or a binary removed between resolution and the run (exit 127), or a binary this machine cannot execute such as a wrong-architecture build or one on a noexec mount (exit 126) — and re-run maintenance.",
         files: ["policies/conftest/"]
-      }')") || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the conftest-unexecutable finding"; exit 2; }
+      }')" || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the conftest-unexecutable finding"; exit 2; }
+      pf+=("$pf_one")
     elif (( verify_rc != 0 )); then
       # single quotes throughout: these strings carry literal backticks for the
       # markdown the finding renders as, and a double-quoted backtick in zsh is
@@ -780,7 +809,7 @@ if [[ "$has_policies" == "true" ]]; then
       else
         evidence="$(tail -20 <<<"$verify_out")" || evidence="$verify_out"
       fi
-      pf+=("$(jq -n --arg t "$kind" --arg m "$msg" --arg f "$fixmsg" \
+      pf_one="$(jq -n --arg t "$kind" --arg m "$msg" --arg f "$fixmsg" \
                     --arg out "$evidence" '{
         id: ("policy:" + $t),
         tool: "policy",
@@ -789,7 +818,8 @@ if [[ "$has_policies" == "true" ]]; then
         message: ($m + " conftest said: " + $out),
         fix: $f,
         files: ["policies/conftest/"]
-      }')") || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the verify finding"; exit 2; }
+      }')" || { print -r -u2 -- "gather-opentofu-findings.zsh: could not encode the verify finding"; exit 2; }
+      pf+=("$pf_one")
     fi
   fi
 
@@ -930,7 +960,11 @@ print -r -- "$payload" || {
   # orchestrator's redirect target, EPIPE from a caller that closed the pipe)
   # would otherwise exit 1 under errexit — a status the contract above does not
   # list, with no message, so the orchestrator records a nameless failure for a
-  # payload that was fully computed
+  # payload that was fully computed.
+  # Deliberately UNTESTED, in the same spirit as the 125 `cd` sentinel: zsh 5.9
+  # on macOS reports `write error: bad file descriptor` for a closed stdout yet
+  # returns 0 from `print`, so closing stdout cannot reach this branch and a
+  # test built on it could not tell the guard's presence from its absence.
   print -r -u2 -- "gather-opentofu-findings.zsh: could not write the payload to stdout"
   exit 2
 }
