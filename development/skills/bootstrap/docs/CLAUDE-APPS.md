@@ -13,8 +13,8 @@ design: [APPROVER-APP.md](APPROVER-APP.md).
 
 | Identity | GitHub App slug pattern | Invocation | Purpose |
 | --- | --- | --- | --- |
-| **Claude Approver** | `claude-approver-<github-login>` | User skill (`/approve`) | Posts pull-request reviews (`APPROVE` / `REQUEST_CHANGES` / commenting). Invoked locally by user when ready to review, never by GitHub Actions. Its `pull_request_review` calls satisfy branch protection's one-approval requirement. |
-| **Claude Maintenance** | `claude-maintenance-<github-login>` | Orchestrator (`/development:maintenance`) | Opens pull requests + pushes commits on behalf of `/development:maintenance`. Distinct identity so the Approver's anti-rubber-stamp gate (*PR author ≠ Approver identity*) fires correctly on machine-authored PRs. |
+| **Claude Approver** | `claude-approver-<owner>` | User skill (`/approve`) | Posts pull-request reviews (`APPROVE` / `REQUEST_CHANGES` / commenting). Invoked locally by user when ready to review, never by GitHub Actions. Its `pull_request_review` calls satisfy branch protection's one-approval requirement. |
+| **Claude Maintenance** | `claude-maintenance-<owner>` | Orchestrator (`/development:maintenance`) | Opens pull requests + pushes commits on behalf of `/development:maintenance`. Distinct identity so the Approver's anti-rubber-stamp gate (*PR author ≠ Approver identity*) fires correctly on machine-authored PRs. |
 
 The two identities are not a stylistic split — they are **load-bearing
 for the Approver's anti-rubber-stamp gate**. If both maintenance and
@@ -91,7 +91,8 @@ flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-a
    (name, URL, permissions, no webhook).
 2. The script writes a tiny HTML page to a temp file containing
    an auto-submitting form POSTing the manifest to
-   `https://github.com/settings/apps/new?state=<state>`.
+   `https://github.com/settings/apps/new?state=<state>` (with `--org`,
+   `https://github.com/organizations/<slug>/settings/apps/new?state=<state>`).
 3. The script starts a one-shot Python HTTP listener on
    `127.0.0.1:18923` to catch the redirect.
 4. The script opens the HTML page in the browser (`open <file>`).
@@ -109,6 +110,51 @@ This runs once per App. Re-running the script with both Apps already
 present is a no-op (prints status). If only one App is present, the
 script only walks the flow for the missing one.
 
+### Owners: personal account or organisation (#1682)
+
+Every App pair belongs to an **owner** — your personal login, or an
+organisation. A machine can hold one entry per owner, so a personal pair
+and an organisation pair live side by side; registering one never
+touches the other.
+
+- **Personal** (the default): the manifest is POSTed to
+  `https://github.com/settings/apps/new` and the Apps are named
+  `<app>-<login>`.
+- **Organisation** — `register-claude-apps.zsh --org <slug>`: the
+  manifest is POSTed to
+  `https://github.com/organizations/<slug>/settings/apps/new`, the Apps
+  are named `<app>-<slug>`, and the entry records
+  `owner_scope: "organization"`. A user-owned private App cannot be
+  installed on an organisation at all, which is why an organisation needs
+  its own pair. **Until #1683**, `install-claude-apps.zsh`, the mint
+  scripts and the bootstrap probes still use only the personal pair, so
+  an organisation pair is registered but not yet installed or minted by
+  bootstrap.
+
+  Creating an App under an organisation needs **organisation-owner
+  rights**. The script says so before the browser opens and checks
+  `gh api orgs/<slug>/memberships/<login>`: a membership that is not an
+  active `admin`, or no membership at all, stops the run there instead of
+  failing on GitHub's page. When the API cannot answer (a token without
+  `read:org`, say) it warns and continues — GitHub still refuses a
+  non-owner in the browser.
+
+**Registering a subset** — `--apps <app>[,<app>]` registers only the
+named Apps (default: both). `--apps claude-maintenance` is the
+**writer-only** registration, for an owner that wants no Approver; its
+registry entry then holds only `claude_maintenance`.
+
+```sh
+register-claude-apps.zsh                                    # personal pair
+register-claude-apps.zsh --org acme-corp                    # acme-corp's pair
+register-claude-apps.zsh --org acme-corp --apps claude-maintenance   # writer only
+register-claude-apps.zsh --list                             # every owner
+```
+
+`--list` shows every owner with its scope and the Apps it has.
+`--import`, `--reset` and `--print-manifest` act on one owner: the
+organisation with `--org <slug>`, your personal login without it.
+
 The redirect listener has a **5-minute timeout** — if the user takes
 longer than that to click Create, the script exits cleanly with a
 "timeout; re-run when ready" message. No state survives on disk.
@@ -119,10 +165,11 @@ When the manifest flow can't run (browser sandbox issues, restricted
 network, you prefer to see the App creation page directly), use the
 manual flow:
 
-1. Open `https://github.com/settings/apps/new` in your browser.
-2. Fill in the App name (use `claude-approver-<github-login>` or
-   `claude-maintenance-<github-login>` so it matches the manifest's
-   convention).
+1. Open `https://github.com/settings/apps/new` in your browser — or,
+   for an organisation, `https://github.com/organizations/<slug>/settings/apps/new`.
+2. Fill in the App name (use `claude-approver-<owner>` or
+   `claude-maintenance-<owner>`, where the owner is your login or the
+   organisation slug, so it matches the manifest's convention).
 3. Homepage URL: any URL you control (the App's profile page link;
    we don't use it functionally).
 4. **Uncheck "Webhook → Active".**
@@ -139,20 +186,22 @@ manual flow:
    ```
 
    The `--import` mode skips the manifest flow entirely and just
-   stores credentials the user already obtained.
+   stores credentials the user already obtained. Add `--org <slug>` to
+   file them under an organisation.
 
 ### Re-running the script
 
-The script is idempotent:
+The script is idempotent, per owner:
 
-- If both Apps are registered (entries present in
-  `~/.config/claude-plugins/apps.json` *and* their private keys are
+- If the selected Apps are registered for the owner (entries present
+  in `~/.config/claude-plugins/apps.json` *and* their private keys are
   in Keychain), it prints the current state and exits.
-- If only one is registered, it walks the manifest flow for the
-  other.
-- `--reset <name>` clears a single App's entries (config + Keychain)
-  so it can be re-registered. Useful after a name collision or a
-  key rotation.
+- If only some are registered, it walks the manifest flow for the
+  rest.
+- `--reset <name> [--org <slug>]` clears a single App's entries
+  (config + Keychain) for one owner so it can be re-registered. Useful
+  after a name collision or a key rotation. An owner left with no App
+  is dropped from the registry.
 
 ## Credential storage
 
@@ -160,30 +209,99 @@ The script is idempotent:
 
 Created with mode `0700` on the directory, `0600` on the file.
 
+The registry is keyed by **owner** (schema 2, #1682). Each owner's entry
+records its scope and **only the Apps that exist for it** — a
+writer-only owner has just `claude_maintenance`:
+
 ```json
 {
-  "schema_version": 1,
-  "claude_approver": {
-    "app_id": 123456,
-    "client_id": "Iv1.abcdef0123456789",
-    "slug": "claude-approver-timo-jakob",
-    "owner_login": "timo-jakob",
-    "owner_scope": "user",
-    "registered_at": "2026-06-06T12:34:56Z"
+  "schema_version": 2,
+  "owners": {
+    "timo-jakob": {
+      "owner_scope": "user",
+      "claude_approver": {
+        "app_id": 123456,
+        "client_id": "Iv1.abcdef0123456789",
+        "slug": "claude-approver-timo-jakob",
+        "owner_login": "timo-jakob",
+        "owner_scope": "user",
+        "registered_at": "2026-06-06T12:34:56Z"
+      },
+      "claude_maintenance": {
+        "app_id": 123457,
+        "client_id": "Iv1.9876543210fedcba",
+        "slug": "claude-maintenance-timo-jakob",
+        "owner_login": "timo-jakob",
+        "owner_scope": "user",
+        "registered_at": "2026-06-06T12:35:42Z"
+      }
+    },
+    "acme-corp": {
+      "owner_scope": "organization",
+      "claude_maintenance": {
+        "app_id": 234567,
+        "client_id": "Iv1.0123456789abcdef",
+        "slug": "claude-maintenance-acme-corp",
+        "owner_login": "acme-corp",
+        "owner_scope": "organization",
+        "registered_at": "2026-09-22T09:00:00Z"
+      }
+    }
   },
-  "claude_maintenance": {
-    "app_id": 123457,
-    "client_id": "Iv1.9876543210fedcba",
-    "slug": "claude-maintenance-timo-jakob",
-    "owner_login": "timo-jakob",
-    "owner_scope": "user",
-    "registered_at": "2026-06-06T12:35:42Z"
-  }
+  "alias_owner": "timo-jakob",
+  "claude_approver":    { "…": "alias of owners[\"timo-jakob\"].claude_approver" },
+  "claude_maintenance": { "…": "alias of owners[\"timo-jakob\"].claude_maintenance" }
 }
 ```
 
+**Compatibility aliases.** The top-level `claude_approver` /
+`claude_maintenance` keys, and the legacy Keychain items
+`claude-plugins.<app>`, mirror owner entries. They exist because the
+consumers — the mint scripts, `install-claude-apps.zsh` and the bootstrap
+probes — still read them; #1683 moves those consumers onto the per-owner
+registry (resolving the owner from the repository) and removes the
+aliases. Each alias records its owner (`owner_login`), and only that
+owner's successful register, import or reset sets, rotates or removes
+it. An **absent** alias is taken only by `alias_owner` — one personal
+login: the legacy pair's owner after a migration, otherwise the first
+personal login whose run succeeds. Any other login (after a `gh auth`
+switch, say) takes none and says so, and an organisation only ever holds
+an alias a schema-1 file already recorded for it.
+`install-claude-apps.zsh`'s `slug` / `client_id` backfill (below) also
+writes only the alias until then, so the next alias sync can undo it —
+which costs one repeated `GET /app` lookup, nothing more.
+
+Owner keys are lower-cased (GitHub logins and organisation slugs are
+case-insensitive), so `--org Acme-Corp` and `--org acme-corp` name one
+owner. A command whose scope contradicts an owner's recorded
+`owner_scope` — `--org <your-own-login>`, say — is refused.
+
 App IDs, Client IDs, and slugs are not secrets. The file is mode `0600`
 anyway to keep all per-user config in one consistent posture.
+
+### Migration from schema 1
+
+Before #1682, `apps.json` held one pair at the top level
+(`schema_version: 1`, no `owners`). The first invocation of any
+`register-claude-apps.zsh` subcommand (bar `--help`) migrates it in
+place, non-destructively:
+
+1. The original is copied to `apps.json.v1.bak` beside it (never
+   overwritten, so it always holds the pre-migration file).
+2. Each Keychain key is copied from `claude-plugins.<app>` to the
+   owner-qualified `claude-plugins.<owner>.<app>` (an owner-qualified key
+   that already exists is kept). A legacy key that is simply absent is
+   reported, and the entry is filed without one — add it with `--import`.
+3. Each entry is filed under its recorded `owner_login` in `owners` —
+   the current `gh` login when none was recorded — and `schema_version`
+   becomes `2`. The top-level keys and the legacy Keychain items stay,
+   as the aliases above, each stamped with the owner it was filed under;
+   the first personal entry's owner becomes `alias_owner`.
+
+The config is written last, so a run that cannot **read** a legacy key
+(a locked Keychain, a denied prompt) stops before writing it, leaving
+the file un-migrated for the next run to retry. A file that already has
+`owners` is left alone — the migration is idempotent.
 
 `client_id` (#223) may be empty or absent on entries created by the
 `--import` flow or by older versions; `install-claude-apps.zsh`
@@ -197,17 +315,24 @@ lookup is needed if GitHub ever drops numeric-ID acceptance.
 
 Each PEM is stored as a generic password:
 
-- Service: `claude-plugins.claude-approver` (or `claude-plugins.claude-maintenance`)
+- Service: `claude-plugins.<owner>.<app>` — e.g.
+  `claude-plugins.timo-jakob.claude-approver`,
+  `claude-plugins.acme-corp.claude-maintenance`
 - Account: `private-key`
 - Password: the full PEM contents, including the
   `-----BEGIN/END RSA PRIVATE KEY-----` lines
+
+The legacy service names `claude-plugins.claude-approver` /
+`claude-plugins.claude-maintenance` are the Keychain half of the
+compatibility aliases above — which owner's key each holds is decided
+there — and are removed by #1683.
 
 This matches the pattern `automate-private.sh` already uses for the
 SonarQube admin password. Retrieval:
 
 ```sh
 security find-generic-password \
-  -s claude-plugins.claude-approver \
+  -s claude-plugins.timo-jakob.claude-approver \
   -a private-key -w
 ```
 
@@ -249,8 +374,9 @@ GitHub Apps can have multiple active private keys at once, so
 rotation is non-disruptive:
 
 1. Generate a new key in the App's settings page.
-2. Run `register-claude-apps.zsh --rotate <name> --pem <new-pem-path>`.
-   The script replaces the Keychain entry and updates `registered_at`.
+2. Run `register-claude-apps.zsh --import <name> --app-id <id> --pem <new-pem-path> [--org <slug>]`.
+   The script replaces the owner's Keychain entry and updates
+   `registered_at`.
 3. There is nothing repo-side to update (#498): tokens are minted from
    the Keychain, so every subsequent mint uses the new key immediately.
 4. Delete the old key from the App's settings page.
@@ -287,22 +413,20 @@ End-to-end testing genuinely creates GitHub Apps under your account,
 so it has side effects. The script supports a few non-destructive
 testing modes:
 
-- `register-claude-apps.zsh --print-manifest claude-approver` — emits
-  the manifest JSON for inspection without making any HTTP calls or
-  opening any browser tab.
-- `register-claude-apps.zsh --list` — prints whichever Apps are
-  registered locally with their IDs and slugs; no network calls.
-- `register-claude-apps.zsh --dry-run` — runs the manifest flow up to
-  but not including the browser open + listener spawn, printing what
-  it *would* do. Useful for verifying state.
+- `register-claude-apps.zsh --print-manifest claude-approver [--org <slug>]`
+  — emits the manifest JSON for inspection without registering anything
+  or opening any browser tab (without `--org` it asks `gh` for your
+  login, its only network call).
+- `register-claude-apps.zsh --list` — prints every owner with the Apps
+  registered for it, their IDs and slugs; no network calls.
 
 Manual end-to-end test:
 
 1. Ensure no entries in `apps.json` (`mv ~/.config/claude-plugins/apps.json{,.bak}`).
 2. Run the script.
 3. Confirm both browser tabs open, click through both flows.
-4. Verify `apps.json` shows both entries.
-5. Verify `security find-generic-password -s claude-plugins.claude-approver -a private-key -w` prints a PEM.
+4. Verify `apps.json` shows both entries under `owners.<your-login>`.
+5. Verify `security find-generic-password -s claude-plugins.<your-login>.claude-approver -a private-key -w` prints a PEM.
 6. Visit `https://github.com/settings/apps` and confirm both Apps exist with the expected permissions.
 
 For routine development, prefer `--print-manifest` plus the `--import`
