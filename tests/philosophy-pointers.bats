@@ -101,7 +101,6 @@ setup() {
   # anchor on the BODY clauses, not the heading alone, so deleting the rule
   # while keeping the heading fails — the idiom of
   # tests/claude-md-architecture-pointer.bats
-  grep -Fq 'docs/explanation/philosophy.md' "$CLAUDE_MD"
   # the two prose clauses go through the flowed SECTION, not a line-scoped
   # grep: needled at the line's wrap, 'state once, link' leaves the word
   # carrying the rule's universality unpinned, so "state once, link only where
@@ -110,6 +109,11 @@ setup() {
   local section
   section="$(flow "$(section_of "$CLAUDE_MD" '## Pillars are stated once')")"
   [ -n "$section" ]
+  # pin the pointer's link text AND target together, as the README test does:
+  # a bare path needle is met by the heading and the backticked link text
+  # alone, so a retargeted or de-linked pointer passed (#1658). Changing the
+  # link text is therefore a deliberate pin change, not a false red
+  contains "$section" '[`docs/explanation/philosophy.md`](docs/explanation/philosophy.md)'
   contains "$section" 'state once, link everywhere (#1432)'
   contains "$section" "do not paraphrase the pillar's wording"
 }
