@@ -130,6 +130,11 @@ on:
       - 'README.md'
       - 'docs/index.md'
       - 'mkdocs.yml'
+      # tests/composition-plugin-skeleton.bats asserts the composition plugin's
+      # manifest, its charter and claude-workspace/v1 clauses, and its registry
+      # rows, plus runs validate-workspace.zsh itself (#1744) — same
+      # non-**-prefixed hazard as every per-plugin line above
+      - 'development-composition/**'
       - '.github/workflows/script-tests.yml'
   push:
     branches: [main]

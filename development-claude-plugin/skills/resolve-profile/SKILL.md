@@ -79,9 +79,12 @@ tiers, and this heading adds only the type-specific exception that follows.
 **One plugin-local override.** A plugin whose version prefix is pinned to a
 shipped-slice label moves only its **patch** digit until the slice itself grows,
 whatever the tiers above would say (MAINTAINING.md states the rule under that
-same name). Today that is `development-kubernetes`, whose `0.3.` prefix
-`tests/kubernetes-plugin-skeleton.bats` asserts, so cutting a minor there means
-moving the label sites in the same PR. Skip for root-only docs.
+same name). **Membership is a condition, not a list**: any plugin whose
+`tests/<topic>-plugin-skeleton.bats` asserts a version prefix is under it, since
+that assertion is what reds when the label and the manifest disagree. Today
+those are `development-kubernetes` (`0.3.`), `development-opentofu` (`0.2.`) and
+`development-composition` (`0.1.`), so cutting a minor on one means moving its
+label sites in the same PR. Skip for root-only docs.
 
 ## Panel
 

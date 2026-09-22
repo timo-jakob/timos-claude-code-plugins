@@ -629,6 +629,90 @@ than work waiting on a known dependency. And as with the sibling, the check
 **pipeline** will not be here — it **will ship** as a bootstrap template in the
 generic `development` plugin, the same boundary that keeps detection there.
 
+## development-composition
+
+Topic plugin for the **composition repo type** — one small repo per
+constellation (≈ a bounded context), which is where services built in separate
+repos meet. It pins each member's **published image** in a
+`.claude-workspace.yaml` constellation manifest, declares the environments those
+images are promoted through, and owns promotion itself. The member repos' code,
+contracts and images stay with their own language plugins: this plugin's
+boundary is what a composition repo can see, and a composition repo depends on
+**no repository** — only on published artifacts. That is what makes a
+constellation testable when a member repo is unavailable or simply not checked
+out.
+
+Like `development-kubernetes` and `development-opentofu`, it **will be able to
+be primary**: a composition repo has no application language of its own, and the
+primary/auxiliary model already allows a topic that slot. It is not there yet —
+the marker (`.claude-workspace.yaml`), the gather script and the dispatcher land
+with
+[#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747).
+Until they do, `primary: composition` in a `.maintenance.yml` is a **stale
+declaration**: it selects nothing, every detected target dispatches as primary,
+and the run's summary notes the declaration — the same sequence
+`primary: kubernetes` and `primary: opentofu` each passed through.
+
+**What's built (v0.1):** the ownership boundary, the `claude-workspace/v1`
+contract, and the validator that enforces it
+([#1744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1744)).
+The rest of epic
+[#687](https://github.com/timo-jakob/timos-claude-code-plugins/issues/687)
+follows: the bootstrap scaffold and the promote-to-prod workflow
+([#1745](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1745)),
+the Renovate image-tag configuration
+([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746)),
+the maintenance dispatch
+([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747)),
+the injection-hardened bump-triage agent
+([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748)),
+and the how-to
+([#1749](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1749)).
+So the plugin ships **no skills and no agents yet** — it ships one script, and
+the two callers that will run it are still open.
+
+### `claude-workspace/v1` and its validator
+
+The manifest declares `members[]` — each with a `name`, its source `repo`, its
+`role`, where its published `contract` lives, and an `image` **pinned by tag**
+(`ghcr.io/acme/orders-api:1.5.0`, optionally with an `@sha256:` digest suffix) —
+and `environments`, each declaring the `github_environment` whose protection
+rules gate it, the `promotes_from` environment it is promoted from (or `null`),
+and its `deploy_target`.
+
+Three rules carry the design. **Pinning is immutable**: a floating tag
+(`:latest`, `:stable`, `:edge`, `:main`, `:master`) or an untagged ref — the
+empty tag `…/api:` counts as untagged — is rejected, because the same manifest
+would otherwise compose different software on two different days. **The
+promotion chain is acyclic**: each `promotes_from` names a declared environment
+and the chain reaches one that promotes from `null`, so a promotion run always
+has a place to start. And **`deploy_target` accepts only `none`** in this release — `compose`
+([#719](https://github.com/timo-jakob/timos-claude-code-plugins/issues/719)) and
+`kubernetes`
+([#720](https://github.com/timo-jakob/timos-claude-code-plugins/issues/720))
+arrive with their renderers. What follows from that is the promise every later
+child inherits: **no run ever reports a deploy that did not happen**.
+
+`validate-workspace.zsh` checks a manifest against that contract and exits
+non-zero with a **named error on the first violation** — naming the member or
+environment at fault where the violation is attributable to one, and otherwise
+describing the document-level defect, so a caller can quote it into a finding.
+Its exit codes are typed rather than collapsed, because the gather's finding is
+keyed on which one it got: `1` a contract violation, `2` its own bad invocation,
+`3` a missing `yq`/`jq`, a `yq` that is not mikefarah's, or a runner that
+otherwise cannot provide what the script needs (a runner problem, never a
+manifest verdict), `4` a manifest file that is missing (whatever should have
+written it did not) or unreadable — the stderr line tells those two apart. Any
+other non-zero status means a tool died before the manifest was judged, and is
+read like `3`; exit `0` is simply no finding. It has exactly two intended
+callers — bootstrap, on the repo it just scaffolded, and the composition
+maintenance gather — and **no validator CI job is ever rendered into a
+composition repo**. The full
+field-by-field specification lives in
+[`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
+(*The `claude-workspace/v1` contract*), which this section summarises rather
+than restates.
+
 ## development-go
 
 Go maintenance — a **full-maintenance tier**, mirroring `development-python` /

@@ -19,7 +19,7 @@ fire; a topic plugin composes alongside the language plugin for that run.
 > services, and build images. Run here it finds exactly **one** container —
 > `tests` (`tests/Dockerfile`, the bats-in-Docker test runner, #263) — which
 > this diagram **declares**, so there is no `detected_not_declared` drift. The
-> twelve **plugins**, by contrast, are the product's real deployable units but
+> thirteen **plugins**, by contrast, are the product's real deployable units but
 > are not Docker/compose-detectable, so they read as `declared_not_detected` —
 > a direction the pipeline **escalates for human judgement, never auto-removes**
 > (removing a declared container is an architectural statement). That asymmetry
@@ -27,6 +27,13 @@ fire; a topic plugin composes alongside the language plugin for that run.
 > machinery: it bounds what they can promise for a marketplace, which has no
 > product-container surface for the detector to see. The capstone that exercises
 > the detector on a real service is child (g) #796.
+>
+> One edge is **declared ahead of its mechanism**, deliberately:
+> `development-composition`'s `dispatches` edge states the intended
+> architecture, but the marker that makes the topic detectable — and with it the
+> gather and dispatcher — lands with #1747. Relations are outside the declared
+> *container* set the `c4/v1` parser compares, so this is a note for readers
+> rather than drift the pipeline can see.
 
 ```mermaid
 C4Container
@@ -52,6 +59,7 @@ C4Container
             Container(development-react, "development-react", "Claude Code plugin", "React framework overlay")
             Container(development-kubernetes, "development-kubernetes", "Claude Code plugin", "Infrastructure-as-code topic — manifests, Helm, Kustomize, Argo CD; may be primary")
             Container(development-opentofu, "development-opentofu", "Claude Code plugin", "Infrastructure-as-code topic — cloud provisioning; OpenTofu + Terraform-compatible HCL; may be primary")
+            Container(development-composition, "development-composition", "Claude Code plugin", "Composition topic — per-constellation deployment repo type; claude-workspace/v1 manifest and promotion; may be primary")
         }
     }
 
@@ -72,6 +80,7 @@ C4Container
     Rel(development, development-react, "dispatches")
     Rel(development, development-kubernetes, "dispatches")
     Rel(development, development-opentofu, "dispatches")
+    Rel(development, development-composition, "dispatches")
     Rel(development-spring, development-java, "composes onto")
     Rel(development-react, development-javascript, "composes onto")
     Rel(development, maint_app, "mints token via")
@@ -81,8 +90,8 @@ C4Container
     UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")
 ```
 
-The **declared container set** is the thirteen `Container(...)` entries above —
-the twelve installed plugins plus the `tests` runner image — recoverable by the
+The **declared container set** is the fourteen `Container(...)` entries above —
+the thirteen installed plugins plus the `tests` runner image — recoverable by the
 `c4/v1` parser (`extract-declared-containers.zsh`) without a Mermaid engine.
 `github` and `maint_app` are `System_Ext` — outside the marketplace's container
 boundary, so outside the system this diagram decomposes and therefore outside

@@ -1,0 +1,17 @@
+{
+  "name": "development-composition",
+  "description": "Composition topic plugin — the per-constellation deployment repo type. A composition repo depends on no repository: it pins its members' published container images in a `.claude-workspace.yaml` constellation manifest, declares the environments they are promoted through, and owns promotion. This plugin owns that manifest's `claude-workspace/v1` contract and the validator that enforces it; it does NOT own the member repos' code, contracts or images, which stay with their language plugins. Like development-kubernetes and development-opentofu it can be PRIMARY, because a composition repo has no application language of its own — but not yet: the marker, gather and dispatch land with #1747, so a `primary: composition` declaration today is stale and selects nothing. This slice (#1744) lands the boundary, the contract and `validate-workspace.zsh` — nothing calls the validator yet: the bootstrap scaffold and promote-to-prod workflow are #1745, the Renovate image-tag config #1746, the topic marker, gather script and maintenance dispatch #1747, the injection-hardened bump-triage agent #1748 and the how-to #1749. Deployment itself stays out: `deploy_target` accepts only `none` until the compose (#719) and Kubernetes (#720) renderers land, and no run ever reports a deploy that did not happen.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Timo Jakob"
+  },
+  "license": "MIT",
+  "keywords": [
+    "composition",
+    "constellation",
+    "deployment",
+    "promotion",
+    "claude-workspace",
+    "topic-plugin"
+  ]
+}

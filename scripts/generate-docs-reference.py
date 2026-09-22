@@ -37,6 +37,7 @@ REFERENCE = ROOT / "docs" / "reference"
 PLUGINS = [
     "development",
     "development-claude-plugin",
+    "development-composition",
     "development-docs",
     "development-go",
     "development-java",
