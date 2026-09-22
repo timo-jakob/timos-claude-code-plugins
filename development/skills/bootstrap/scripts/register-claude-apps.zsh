@@ -442,8 +442,9 @@ write_submit_html() {
   # `claude-plugins.submit.XXXXXX.html.<random>` — the `.html` ends up in
   # the middle and the OS sees it as text/plain. Browsers then show the
   # raw HTML source instead of running the auto-submit JS. Rename to
-  # ensure the file ends in `.html`. See #194.
-  html=$(mktemp -t claude-plugins.submit)
+  # ensure the file ends in `.html`. See #194. The template is a full path
+  # ending in X's because GNU mktemp rejects an X-less `-t` template.
+  html=$(mktemp "${TMPDIR:-/tmp}/claude-plugins.submit.XXXXXX")
   mv "$html" "${html}.html"
   html="${html}.html"
   # Single-quoted heredoc with controlled interpolation.
