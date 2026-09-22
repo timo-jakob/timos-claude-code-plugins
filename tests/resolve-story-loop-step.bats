@@ -287,6 +287,11 @@ converge_clean() {
   # refused before any accumulator write
   [ ! -s "$WD/history.jsonl" ]
   [ ! -s "$WD/changelists.jsonl" ]
+  # ...but AFTER the digest step: this is the one fixture that produces a BLIND
+  # round (scope empty AND findings `[]`), so it pins the `round_scope_empty &&
+  # round_findings_empty` branch that records no digest for it (#1491). Without
+  # that branch the round writes a digest of `[]` before the refusal fires.
+  [ ! -e "$WD/.findings-digest-1" ]
 }
 
 @test "#1485 a story whose only changes are the repo-internal --work-dir is REFUSED, never converged" {
@@ -1846,6 +1851,39 @@ promote_file() {
   # the arm-unique remedy text, so the recovery half cannot be deleted silently
   contains "$stderr" "restore that marker"
   contains "$stderr" "Do NOT invent a code change"
+}
+
+@test "#1491 step mode: a failed scope write on the empty-delta --final re-plan aborts the round" {
+  # Both write_round_scope calls write the same scope.txt, and the re-plan's
+  # descriptor comes from the real review-dispatch.zsh, so no fixture can break
+  # the SECOND write without breaking the first. The RESOLVE_LOOP_DISPATCH_BIN
+  # seam can: this stub delegates every invocation to the real dispatch, and on
+  # the one carrying --final alone replaces scope.txt with a directory, so the
+  # re-derived scope cannot be written. Its descriptor stays valid JSON, so the
+  # `could not read scope_mode after the re-plan` guard just before passes.
+  local real="$REPO_ROOT/development/skills/resolve-issue/scripts/review-dispatch.zsh"
+  local stub="$BATS_TEST_TMPDIR/dispatch-breaks-final-scope.sh"
+  cat > "$stub" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = --final ]; then rm -f "$WD/scope.txt" && mkdir "$WD/scope.txt"; fi
+done
+exec "$real" "\$@"
+EOF
+  chmod +x "$stub"
+  export RESOLVE_LOOP_DISPATCH_BIN="$stub"
+  seed_awaiting                       # round 1 (through the stub): one blocker
+  [ "$(grep -c '' "$WD/history.jsonl")" -eq 1 ]
+  [ "$(grep -c '' "$WD/changelists.jsonl")" -eq 1 ]
+  printf '[]' > "$F"                  # no fix: round 2's delta is empty, carry is not
+  step --resume
+  [ "$status" -eq 1 ]
+  contains "$output" "could not extract scope at round 2"
+  # the stub really did reach the re-plan — not some earlier abort
+  [ -d "$WD/scope.txt" ]
+  # the aborted round added nothing to either accumulator
+  [ "$(grep -c '' "$WD/history.jsonl")" -eq 1 ]
+  [ "$(grep -c '' "$WD/changelists.jsonl")" -eq 1 ]
 }
 
 @test "#1434 step mode: the byte-identical guard is NOT pre-empted by an empty delta" {

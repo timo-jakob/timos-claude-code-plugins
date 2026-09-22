@@ -128,7 +128,14 @@
 #                             that script mints the two identities this diffs, so
 #                             two names would let stub-minted ids be compared by
 #                             real git, which compares nothing.
-#   All three are unset in production.
+#   RESOLVE_LOOP_DISPATCH_BIN pins review-dispatch.zsh (a PATH), the same
+#                             convention as RESOLVE_LOOP_PAYLOAD_BIN. It governs
+#                             EVERY $DISPATCH call — the pre-loop round-1 `plan`,
+#                             the per-round `plan`, the empty-delta re-plan with
+#                             `--final`, and `scope-findings` — so a stub can
+#                             fail one of them and delegate the rest to the real
+#                             script (#1491: the re-plan's scope-write arm).
+#   All four are unset in production.
 #
 # Step mode:
 #   --findings-file  this round's aggregate findings JSON (issue #558 schema,
@@ -428,7 +435,7 @@ typeset -gra BLOCKING_SEVERITIES=(CRITICAL WARNING)   # == Critical + High
 typeset -gr MAX_ROUNDS_SIDECAR_SLACK=16
 
 local self_dir="${0:A:h}"
-local DISPATCH="${self_dir}/review-dispatch.zsh"
+local DISPATCH="${RESOLVE_LOOP_DISPATCH_BIN:-${self_dir}/review-dispatch.zsh}"
 local CONSOLIDATE="${self_dir}/consolidate-findings.zsh"
 local RENDER_PROGRESS="${self_dir}/render-progress-block.zsh"
 local TREE_ID="${self_dir}/git-tree-id.zsh"
@@ -2661,6 +2668,12 @@ while (( round <= effective_max )); do
         (( is_empty_delta )) && empty_delta_note=" Round $round's delta was also EMPTY: if the panel DID run, nothing in the tree changed since round $(( round - 1 )), so the same blockers are simply still unfixed — apply the fixes, or stop and escalate."
         refuse_stale_findings "--findings-file is byte-identical to round $(( round - 1 ))'s consumed findings ($findings_file) — did this round's review panel run? Write each round's aggregate findings to its own path (findings-round-N.json) before --resume.${empty_delta_note}"
       fi
+      # Unreachable in practice, and deliberately untested (#1491): `: >` has
+      # just truncated the destination successfully and `jq -s` has just read
+      # the source, so no fixture can fail it — only a shimmed `cp`, or a fault
+      # mid-copy (a full disk or an I/O error: truncating needs no free space,
+      # copying does). Kept as defence-in-depth — a half-copied sink must never
+      # be consolidated.
       cp -- "$findings_file" "$findings_path" || {
         print -u2 -- "resolve-story-loop: could not copy --findings-file"; exit 1 }
       # Classify the round once, for both records below.
