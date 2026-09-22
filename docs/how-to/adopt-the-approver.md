@@ -9,15 +9,24 @@ operator-facing adoption guide is
 
 ## Steps
 
-1. **Per-org (one-time)** — register both GitHub Apps (Claude Approver +
-   Claude Maintenance); capture App IDs and private keys. The
+1. **Per owner (one-time)** — register both GitHub Apps (Claude Approver +
+   Claude Maintenance) for the account that owns the repo: your personal
+   login, or an organisation with `--org <slug>`. Both pairs can live on one
+   machine; every consumer picks the pair by the **repository's owner**, so
+   inside an organisation repo the organisation's Apps mint, and inside a
+   personal repo your personal ones — no flag. The
    [`development/skills/bootstrap/scripts/register-claude-apps.zsh`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/scripts/register-claude-apps.zsh)
    script walks the manifest flow; see
    [`development/skills/bootstrap/docs/CLAUDE-APPS.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/bootstrap/docs/CLAUDE-APPS.md)
-   for the design and the manual fallback.
+   for the design and the manual fallback. To see what is registered for the
+   repo you are in, run `claude-apps-owner.zsh status` from it (same
+   directory); a missing App is reported with the arguments to pass
+   `register-claude-apps.zsh` (`register-args:`), and a registered App whose
+   key was lost with the command that regenerates it (`fix:`).
 2. **Per-repo** — `/development:bootstrap --claude-approver true`. Bootstrap
-   stores credentials (via `install-claude-apps.zsh`), installs the Apps on
-   the repo, generates the policy + PR template. (**No workflow** — since
+   installs the Apps on the repo (via `install-claude-apps.zsh`; no repo
+   secrets are stored — tokens are minted locally), generates the policy + PR
+   template. (**No workflow** — since
    epic #476 the Approver is user-invoked locally, and
    `claude-approver.yml.tmpl` was removed in #479.)
 3. **Per-policy** — amend `.claude/approver-policy.md` as your team's norms

@@ -17,15 +17,20 @@
 # `export GH_TOKEN=$(cat <path>)` itself, then removes the file.
 #
 # Prerequisites:
-#   - register-claude-apps.zsh has been run on this machine (claude-approver
-#     entry in ~/.config/claude-plugins/apps.json + PEM in Keychain).
+#   - register-claude-apps.zsh has registered claude-approver for the OWNER of the
+#     current repository (#1683): an owners[<owner>] entry in
+#     ~/.config/claude-plugins/apps.json + its key in the Keychain service
+#     claude-plugins.<owner>.claude-approver. The owner is resolved from the repo
+#     (claude-apps-owner.zsh), so an organisation repo mints the organisation's
+#     App and a personal repo the personal one, with no flag.
 #   - install-claude-apps.zsh has been run on the current repo (the App is
 #     installed on this repo so the installation-discovery succeeds).
 #   - Run from inside the target repo's working tree.
 #
 # Exit codes:
 #   0 — success (path printed, or token printed with --stdout)
-#   1 — prerequisite missing (Apps not registered / not installed locally)
+#   1 — prerequisite missing (owner unresolvable, App not registered for the
+#       owner, apps.json still schema 1 — the message names the command)
 #   2 — GitHub API failure (network, expired key, etc.)
 #
 # Stdout (default): the path to a mode-600 temp file holding the token
@@ -46,58 +51,27 @@ if [[ "${1:-}" == "--stdout" ]]; then
   emit_stdout=true
 fi
 
-readonly CONFIG_FILE="${HOME}/.config/claude-plugins/apps.json"
-readonly KEYCHAIN_SERVICE="claude-plugins.claude-approver"
+readonly APP="claude-approver"
+
+# The one owner-resolution answer every Claude Apps consumer shares (#1683).
+# shellcheck source=development/skills/bootstrap/scripts/claude-apps-owner.zsh
+source "${0:A:h}/../../bootstrap/scripts/claude-apps-owner.zsh"
 
 # --- preconditions -----------------------------------------------------------
-
-if [[ ! -f "$CONFIG_FILE" ]]; then
-  print -u2 -- "claude-plugins not registered: $CONFIG_FILE missing."
-  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.zsh"
-  exit 1
-fi
-
-app_id=$(jq -r '.claude_approver.app_id // empty' "$CONFIG_FILE")
-if [[ -z "$app_id" ]]; then
-  print -u2 -- "claude-approver not registered (no entry in $CONFIG_FILE)."
-  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.zsh"
-  exit 1
-fi
-if ! [[ "$app_id" =~ ^[0-9]+$ ]]; then
-  print -u2 -- "claude_approver.app_id is not numeric: $app_id"
-  exit 1
-fi
-
-if ! raw=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "private-key" -w 2>/dev/null); then
-  print -u2 -- "Private key for claude-approver not in Keychain."
-  print -u2 -- "  Run: development/skills/bootstrap/scripts/register-claude-apps.zsh --reset claude-approver"
-  print -u2 -- "  Then re-run register-claude-apps.zsh to re-mint the key."
-  exit 1
-fi
-# macOS `security find-generic-password -w` returns the stored value
-# hex-encoded when it contains newlines. PEM private keys are multi-line
-# by definition, so retrievals come back as a long hex string instead of
-# the original bytes. Detect pure-hex retrievals and decode. The check is
-# conservative — PEMs contain `-` `=` and newlines, none of which appear
-# in hex output, so a stored PEM can never look like the hex form. See
-# #208.
-if [[ "$raw" =~ ^[0-9a-fA-F]+$ ]]; then
-  pem=$(printf '%s' "$raw" | xxd -r -p)
-else
-  pem="$raw"
-fi
 
 command -v gh >/dev/null 2>&1 || { print -u2 -- "gh CLI not on PATH."; exit 1; }
 command -v curl >/dev/null 2>&1 || { print -u2 -- "curl not on PATH."; exit 1; }
 command -v openssl >/dev/null 2>&1 || { print -u2 -- "openssl not on PATH."; exit 1; }
 command -v jq >/dev/null 2>&1 || { print -u2 -- "jq not on PATH."; exit 1; }
 
-# --- discover repo ----------------------------------------------------------
-
-if ! owner_repo=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name' 2>/dev/null); then
-  print -u2 -- "Not in a GitHub-tracked repo, or gh not authenticated."
-  exit 1
-fi
+# The repo's owner picks the pair: owners[<owner>] and
+# claude-plugins.<owner>.claude-approver only. A missing owner or App is an
+# error naming the register command — never a fall-through to another owner's App or to a
+# pre-#1682 top-level key / Keychain item.
+claude_apps_load || exit 1
+app_id=$(claude_apps_app_id "$APP") || exit 1
+pem=$(claude_apps_read_pem "$APP") || exit 1
+owner_repo="$CA_REPO"
 
 # --- build JWT ---------------------------------------------------------------
 
@@ -138,10 +112,21 @@ install_resp=$(curl -sS \
   "https://api.github.com/repos/${owner_repo}/installation" \
   || true)
 
-install_id=$(printf '%s' "$install_resp" | jq -r '.id // empty')
+install_id=$(printf '%s' "$install_resp" | jq -r '.id // empty' 2>/dev/null || true)
 if [[ -z "$install_id" || "$install_id" == "null" ]]; then
-  print -u2 -- "claude-approver App is not installed on ${owner_repo}."
-  print -u2 -- "  Run /development:bootstrap to install."
+  # Only GitHub's own 404 means "not installed" (#1683): callers such as
+  # /development:open-pr key their fallback on that line, so an unreachable
+  # GitHub or a key it rejects must never read as it.
+  if [[ -z "$install_resp" ]]; then
+    print -u2 -- "Could not reach GitHub to look up the claude-approver installation on ${owner_repo} (network?)."
+    print -u2 -- "  Re-run once GitHub is reachable."
+  elif [[ "$(printf '%s' "$install_resp" | jq -r '.message // empty' 2>/dev/null || true)" == "Not Found" ]]; then
+    print -u2 -- "claude-approver App is not installed on ${owner_repo}."
+    print -u2 -- "  Run /development:bootstrap to install."
+  else
+    print -u2 -- "GitHub rejected the claude-approver installation lookup on ${owner_repo} — a key it no longer accepts?"
+    print -u2 -- "  Check the key: install-claude-apps.zsh --verify --fix (inside this repo)."
+  fi
   print -u2 -- "  API response: $install_resp"
   exit 2
 fi

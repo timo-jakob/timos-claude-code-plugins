@@ -2675,8 +2675,9 @@ approval verdicts to GitHub. Unlike the old CI-driven model, approval is now
 **Flow:**
 
 1. User invokes the skill (or it can be called by an orchestrator after CI green).
-2. Skill mints Approver token locally: reads app ID from `~/.config/claude-plugins/apps.json`,
-   fetches private key from system Keychain, calls GitHub API to mint a 1-hour installation token.
+2. Skill mints Approver token locally: reads the app ID registered for the repository's owner
+   (`owners[<owner>]` in `~/.config/claude-plugins/apps.json`, #1683), fetches that owner's private
+   key from system Keychain, calls GitHub API to mint a 1-hour installation token.
 3. Spawns the language-specific `-approver` agent (same agent as CI) with `DRY_RUN=false`.
 4. Agent posts the verdict to GitHub as `claude-approver-bot` using `gh pr review`.
 
@@ -2685,7 +2686,7 @@ approval verdicts to GitHub. Unlike the old CI-driven model, approval is now
 - **No platform lock-in:** Token is minted locally. No Claude platform account or GitHub
   Actions required. Works with any AI coding assistant.
 - **Approver App is user-registered:** Each developer registers their own Approver App
-  via `register-claude-apps.zsh` (one-time setup per machine).
+  via `register-claude-apps.zsh` (once per owner — your login, or an organisation with `--org <slug>`).
 - **Minimal permissions:** Approver App has read-only code access + pull-request review posting.
   Can't push code or modify configuration.
 - **Token lifetime:** 1 hour (GitHub default), auto-expired. Re-mint on demand.

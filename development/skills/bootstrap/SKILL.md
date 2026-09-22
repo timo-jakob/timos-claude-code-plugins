@@ -26,15 +26,42 @@ Supported flags:
   contributor must register a signing key. When set, the orchestrator
   invokes `branch-protection.sh --require-signed-commits true` in Step 4b.
 - `--claude-approver true|false` — install the two Claude GitHub Apps
-  (Claude Approver + Claude Maintenance) on this repo and store the
-  per-repo secrets + variables the Approver workflow needs. **The default is
+  (Claude Approver + Claude Maintenance) on this repo — no repo secrets or
+  variables are stored (#476/#498; both identities mint their tokens locally
+  from the Keychain). **The default is
   auto-detected**: `true` when both Claude Apps are already registered on this
-  machine (`~/.config/claude-plugins/apps.json` plus the matching Keychain
-  private keys — the same check `register-claude-apps.zsh` and the Step 4.5
-  preflight use), else `false`. Rationale: the user who registered the Apps has
-  already opted into the Approver ecosystem, so it is the blessed default *for
-  them*; nobody else pays the App-install + credential-storage commitment by
-  default. An explicit `--claude-approver true|false` overrides the
+  machine **for the target repo's owner** (#1683) — an organisation repo needs
+  the organisation's pair, a personal repo the personal one — else `false`.
+  Probe it from inside the target repo with the helper every consumer shares
+  (the mint scripts, `install-claude-apps.zsh` and the Step 4.5 preflight all
+  use it, so it agrees with `register-claude-apps.zsh --list` for that owner):
+
+  ```bash
+  "<skill-base-dir>/scripts/claude-apps-owner.zsh" status claude-approver claude-maintenance
+  #   0 → true   (both registered: apps.json entry + Keychain key)
+  #   3 → false  (the report names which is not registered or has lost its
+  #               key — a writer-only owner reports "approver: not registered";
+  #               on a `key missing` line, say in the Step 2 plan that the
+  #               Approver was not auto-enabled and quote the `fix:` line)
+  #   4 → false  (the repo has no GitHub owner yet — no .git, no GitHub
+  #               remote, or gh unauthenticated: States A-C below; say so in
+  #               one line)
+  #   1 → stop: apps.json is still schema 1 or unreadable, or the Keychain
+  #       could not be read. Relay the helper's stderr — it names the fix
+  #       (register-claude-apps.zsh --list migrates a schema-1 file)
+  ```
+
+  Run the probe only when it can matter: an explicit `--claude-approver`
+  needs none, and neither does a plugin repo, where the value is forced to
+  `false` (see `--claude-plugin`). **Run it once the repo has its GitHub
+  owner** — after the Step 1 decision tree has taken States A–C through Q1's
+  `gh repo create` and State C's `gh auth login`, and before the Step 2 plan
+  reports the resolved value — never at argument parsing, when a new repo has
+  no owner yet. Exit 4 then means the repo *still* has no GitHub remote.
+
+  Rationale: the user who registered the Apps has already opted into the
+  Approver ecosystem, so it is the blessed default *for them*; nobody else
+  pays the App-install + credential-storage commitment by default. An explicit `--claude-approver true|false` overrides the
   auto-detected default (the preflight still offers `register-claude-apps.zsh`
   when the resolved value is `true` but the Apps aren't registered yet). When the
   resolved value is `true`, the Approver is wired for the repo's Approver-capable
@@ -1725,9 +1752,9 @@ policy file. Warn the user:
 > Approver-capable language (currently Python, Java, or Swift) resolves as this
 > repo's review target. The
 > Claude Approver ships per-language; for other languages the policy file
-> would be a no-op. Re-run with `--claude-approver false` (on a machine where the
-> Apps are registered the default otherwise resolves `true` again), or wait for
-> that language's Approver agent to ship.
+> would be a no-op. Re-run with `--claude-approver false` (where the Apps are
+> registered for this repo's owner the default otherwise resolves `true` again),
+> or wait for that language's Approver agent to ship.
 
 Offer to continue with the Approver skipped (or re-run with
 `--claude-approver false`), or abort. The Step 4.5 install path
@@ -4518,11 +4545,25 @@ open-pr would degrade, bootstrap fixes the prerequisite or stops. Handle each
 bot-path blocker, in order:
 
 1. **Writer App not registered / installed** → **offer to install it** with the
-   same machinery the rest of bootstrap uses: `register-claude-apps.zsh`
-   (registers the App on this machine — the Step 4.5 preflight offers it too)
-   and `install-claude-apps.zsh --writer-only` (installs it on the repo, the
-   `--claude-plugin` extension). Once installed, the finishing flow takes the
-   bot path.
+   same machinery the rest of bootstrap uses, chosen by what
+   `claude-apps-owner.zsh status claude-maintenance` reports for this repo's
+   owner:
+   - `maintenance: not registered` with a `register-args:` line → run
+     `register-claude-apps.zsh` with exactly those arguments (`--org <slug>`
+     for an organisation), then `install-claude-apps.zsh --writer-only`
+     (installs it on the repo, the `--claude-plugin` extension);
+   - exit 0 and the mint says `App is not installed on <repo>` — printed
+     only for GitHub's own 404 (registered, not yet installed) → only
+     `install-claude-apps.zsh --writer-only`; exit 0 with `GitHub rejected the
+     … installation lookup` → `install-claude-apps.zsh --verify --fix`; with
+     `Could not reach GitHub` (a network outage) → blocker 3, retry later;
+   - `maintenance: key missing` → the `fix:` line's
+     `install-claude-apps.zsh --verify --fix` (regenerates the key — never a
+     re-registration, which would collide with the App's own name);
+   - a `note:` line and no `register-args:` (a personal repo owned by another
+     account), or exit 1 / 4 → blocker 3 below, relaying the note or stderr.
+
+   Once installed, the finishing flow takes the bot path.
 2. **Push rejected with the #750 stale `workflows` grant** → the App is
    installed but the installation hasn't accepted `workflows: write`; point the
    user at `install-claude-apps.zsh --verify` (it prints the re-accept steps).
@@ -4821,8 +4862,16 @@ The script will:
 6. For private path (not with `--iac-only true`): verify Docker daemon is
    running; offer to launch Docker.app if not.
 7. When `--claude-approver true`: verify `python3` is present, verify both
-   Claude Apps are registered locally (apps.json + Keychain entries), and
-   offer to run `register-claude-apps.zsh` when missing.
+   Claude Apps are registered locally **for the repo's owner** (the same
+   `claude-apps-owner.zsh status` probe as the auto-detection, #1683), and
+   offer to run `register-claude-apps.zsh` with exactly the missing Apps for
+   that owner (`--org <slug>` for an organisation) when any is missing, then
+   re-probe and stop unless the pair is now registered. It stops instead of
+   offering a registration when none can help — an App that is registered
+   but lost its Keychain key (the `fix:` line names
+   `install-claude-apps.zsh --verify --fix`), or a personal repo owned by
+   another account (the `note:` line) — and on a schema-1 `apps.json`, an
+   unreadable Keychain or an unresolvable owner, with the helper's message.
 
 If preflight fails (user declines installs, or non-macOS host), skip Step 4.5
 entirely and go straight to Step 5 (manual checklist).
@@ -4977,8 +5026,10 @@ top). The step delegates to:
 
 which (idempotent):
 
-- Reads App IDs from `~/.config/claude-plugins/apps.json` and private keys
-  from macOS Keychain (populated by `register-claude-apps.zsh` in Phase 0).
+- Reads the App IDs and private keys registered for **the repo's owner**
+  (`owners[<owner>]` in `~/.config/claude-plugins/apps.json`, Keychain
+  services `claude-plugins.<owner>.<app>` — populated by
+  `register-claude-apps.zsh` in Phase 0, #1683).
 - Opens `https://github.com/apps/<slug>/installations/new` per App so the
   user installs both Apps on the current repo.
 - Stores **no repo secrets or variables** (#476/#498) — both identities
@@ -4995,9 +5046,9 @@ flag will be a no-op:
 > Approver-capable language (currently Python, Java, or Swift) resolves as this
 > repo's review target. The
 > Approver ships per-language; the Apps would be installed but no approve
-> skill would ever invoke them. Re-run with `--claude-approver false` to skip (on
-> a machine where the Apps are registered the default otherwise resolves `true`
-> again), or wait for that language's Approver agent to ship.
+> skill would ever invoke them. Re-run with `--claude-approver false` to skip
+> (where the Apps are registered for this repo's owner the default otherwise
+> resolves `true` again), or wait for that language's Approver agent to ship.
 
 Offer the user to continue with the Approver skipped (or re-run with
 `--claude-approver false`), or abort. Do not silently install Apps that would
@@ -5023,8 +5074,12 @@ writer install runs.
 The result: `/development:open-pr` opens PRs authored by
 `claude-maintenance-<owner>[bot]`; the human approves; squash auto-merge +
 branch deletion (the repo settings Step 4b configured). If the Maintenance App
-isn't registered yet, the Step 4.5 preflight offers `register-claude-apps.zsh`
-first.
+isn't registered for this repo's owner yet, `install-claude-apps.zsh
+--writer-only` stops naming the exact register command
+(`register-claude-apps.zsh [--org <slug>] --apps claude-maintenance`) — run it,
+then re-run the install. (The Step 4.5 preflight does not check the writer: its
+Claude Apps block runs only for `--claude-approver true`, which a plugin repo
+never resolves.)
 
 ## Step 5: Print the Manual-Setup Checklist
 

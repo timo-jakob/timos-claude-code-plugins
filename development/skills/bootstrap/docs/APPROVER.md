@@ -116,9 +116,10 @@ The Approver runs as two distinct GitHub Apps:
   gate (PR author ≠ Approver's bot) fires correctly even on
   maintenance-authored PRs.
 
-Both Apps are registered **once per machine** under your GitHub
-account; subsequent repo bootstraps just install the already-registered
-Apps onto the new repo.
+Both Apps are registered **once per owner** on a machine — your personal
+login, or an organisation with `register-claude-apps.zsh --org <slug>`;
+subsequent repo bootstraps just install the already-registered pair of the
+repo's owner onto the new repo.
 
 To register them, run:
 
@@ -133,10 +134,12 @@ The script:
 2. You click **Create GitHub App** on each.
 3. The script catches the redirect callback on `127.0.0.1:18923`,
    exchanges the temporary code for App credentials, and stashes the
-   App IDs in `~/.config/claude-plugins/apps.json` (mode `0600`) and
-   the private keys in macOS Keychain (service
-   `claude-plugins.claude-approver` and `claude-plugins.claude-maintenance`,
-   account `private-key`).
+   App IDs under your owner's entry in `~/.config/claude-plugins/apps.json`
+   (mode `0600`) and the private keys in macOS Keychain (service
+   `claude-plugins.<owner>.claude-approver` and
+   `claude-plugins.<owner>.claude-maintenance`, account `private-key`). For an
+   organisation's repos, register its own pair with `--org <slug>`: every
+   consumer picks the pair by the repository's owner (#1683).
 
 The full design — permissions, fallback flow, key rotation — is in
 [`CLAUDE-APPS.md`](./CLAUDE-APPS.md). Re-running the script is a no-op
@@ -168,8 +171,11 @@ GitHub with no local record. Recover by:
 
 Once the **One-time (per-machine) setup** above has registered the two Apps,
 bootstrap **auto-detects** the default: `--claude-approver` resolves to `true`
-whenever the Apps are registered on this machine, so on those machines you do
-**not** need to pass the flag — the Approver is wired by default. Pass it
+when both Apps are registered for **this repo's owner**
+(`claude-apps-owner.zsh status` exits 0, #1683), so for those repos you do
+**not** need to pass the flag — the Approver is wired by default. An
+organisation repo on a machine with only your personal pair resolves `false`
+until you register the organisation's pair (`--org <slug>`). Pass the flag
 explicitly only to override:
 
 ```sh
@@ -227,8 +233,9 @@ Once the Approver is set up, the typical PR lifecycle is:
    skill programmatically after CI green.
 
 4. **The skill mints a token and invokes the agent:**
-   - Reads Approver App ID from `~/.config/claude-plugins/apps.json`
-   - Fetches private key from system Keychain
+   - Reads the Approver App ID registered for the repo's owner
+     (`owners[<owner>]` in `~/.config/claude-plugins/apps.json`)
+   - Fetches that owner's private key from system Keychain
    - Calls GitHub API to mint a 1-hour installation token
    - Spawns the language-specific approver agent (same as the old CI workflow,
      now running locally in your control)

@@ -380,9 +380,13 @@ EOF
 fi
 
 # --- Claude Apps preflight (when --claude-approver true) ---------------------
-# Verifies the two Claude GitHub Apps are registered locally
-# (apps.json + Keychain entries). When missing, offers to run
-# register-claude-apps.zsh now so bootstrap doesn't fail mid-flow.
+# Verifies the two Claude GitHub Apps are registered locally FOR THIS REPO'S
+# OWNER (#1683) — an organisation repo needs the organisation's pair, a
+# personal repo the personal one. claude-apps-owner.zsh is the one answer every
+# consumer shares (the mint scripts, install-claude-apps.zsh, bootstrap's
+# auto-detection), so this probe cannot disagree with them or with
+# register-claude-apps.zsh --list. When Apps are missing, offers to register
+# exactly those, for exactly this owner, so bootstrap doesn't fail mid-flow.
 if [[ "$CLAUDE_APPROVER" == "true" ]]; then
 	echo
 	info "Claude Apps preflight (—claude-approver true)…"
@@ -390,32 +394,45 @@ if [[ "$CLAUDE_APPROVER" == "true" ]]; then
 	command -v python3 >/dev/null 2>&1 ||
 		die "python3 required for the Claude Apps manifest flow. Install via Xcode Command Line Tools (xcode-select --install) or 'brew install python'."
 
-	CLAUDE_APPS_CONFIG="${HOME}/.config/claude-plugins/apps.json"
-	apps_ready=true
-	for app in claude-approver claude-maintenance; do
-		key="${app//-/_}"
-		if [[ ! -f "$CLAUDE_APPS_CONFIG" ]] ||
-			! jq -e --arg key "$key" '.[$key].app_id' "$CLAUDE_APPS_CONFIG" >/dev/null 2>&1; then
-			apps_ready=false
-			break
-		fi
-		if ! security find-generic-password -s "claude-plugins.${app}" -a "private-key" -w >/dev/null 2>&1; then
-			apps_ready=false
-			break
-		fi
-	done
-
-	if $apps_ready; then
-		ok "Both Claude Apps registered locally (apps.json + Keychain)"
-	else
-		warn "Claude Apps not yet registered on this machine."
+	apps_rc=0
+	apps_status=$("$SCRIPT_DIR/claude-apps-owner.zsh" status claude-approver claude-maintenance) || apps_rc=$?
+	case "$apps_rc" in
+	0)
+		ok "Both Claude Apps registered locally for $(sed -n 's/^owner: //p' <<<"$apps_status")"
+		;;
+	3)
+		warn "Claude Apps not ready for this repo's owner:"
+		grep -E '^(owner|approver|maintenance|note|fix):' <<<"$apps_status" | sed 's/^/  /'
 		warn "  Bootstrap will need both Apps before --claude-approver true can install them on the repo."
-		if [[ "$ASSUME_YES" == "true" ]] || ask_yn "Run register-claude-apps.zsh now?"; then
-			"$SCRIPT_DIR/register-claude-apps.zsh"
-		else
-			die "Aborted. Run $SCRIPT_DIR/register-claude-apps.zsh, then re-run preflight + bootstrap."
+		register_line="$(sed -n 's/^register-args: //p' <<<"$apps_status")"
+		# A key missing from an App that IS registered (fix:), or someone else's
+		# personal account (note:, no register-args), is not something a
+		# register run can help with — say what can, and stop.
+		if grep -q '^fix: ' <<<"$apps_status" || [[ -z "$register_line" ]]; then
+			die "Resolve the above (the fix:/note: line says how), then re-run preflight + bootstrap."
 		fi
-	fi
+		read -r -a register_args <<<"$register_line"
+		if [[ "$ASSUME_YES" == "true" ]] || ask_yn "Run register-claude-apps.zsh ${register_args[*]} now?"; then
+			"$SCRIPT_DIR/register-claude-apps.zsh" "${register_args[@]}" ||
+				warn "register-claude-apps.zsh exited non-zero — re-checking the registry…"
+			# Trust the probe, not the register run's exit: only a green status
+			# for THIS owner means bootstrap can install and mint.
+			"$SCRIPT_DIR/claude-apps-owner.zsh" status claude-approver claude-maintenance >/dev/null ||
+				die "The Claude Apps are still not registered for this repo's owner after register-claude-apps.zsh — run claude-apps-owner.zsh status to see which."
+			ok "Both Claude Apps registered locally for this repo's owner"
+		else
+			die "Aborted. Run $SCRIPT_DIR/register-claude-apps.zsh ${register_args[*]}, then re-run preflight + bootstrap."
+		fi
+		;;
+	4)
+		die "Claude Apps preflight needs the repo's GitHub owner (see above) — push the repo to GitHub and authenticate gh first."
+		;;
+	*)
+		# 1: apps.json still schema 1, not a JSON object, or the Keychain could not
+		# be read — its message (already on stderr) names the fix. Nothing changed.
+		die "Claude Apps preflight could not read the registry for this repo (see above)."
+		;;
+	esac
 fi
 
 echo

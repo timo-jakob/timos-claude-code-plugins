@@ -45,16 +45,53 @@ call below. Never assign the token to a variable you might `echo`, and never
 TOKEN_FILE=$("<skill-base-dir>/../maintenance/scripts/mint-maintenance-token.zsh" 2>/tmp/mint.err)
 ```
 
+The script mints the writer App of **this repository's owner** (#1683): inside
+an organisation repo, the organisation's App; inside a personal repo, your
+personal one — on the same machine, with no flag.
+
 - **Success** → `$TOKEN_FILE` is the path to a mode-600 file holding a 1-hour
-  installation token for `claude-maintenance-<login>[bot]`. Continue Step 3;
+  installation token for `claude-maintenance-<owner>[bot]`. Continue Step 3;
   remove the file at the end of Step 4.
-- **Failure** (App not registered / not installed on this repo) → **fall back**:
-  tell the user the writer App isn't set up here (so the PR will be authored by
-  *them* and they'll need to merge it themselves — admin-merge, since they can't
-  approve their own PR), point them at the install path
-  (`install-claude-apps.zsh --writer-only` once it ships, or the browser App-install),
-  then open the PR the normal way: `gh pr create ...` (as the user) and **stop**
-  (don't arm auto-merge — there's no approver-able author). Report which path ran.
+- **Failure** → first ask the shared probe why, because two kinds of failure
+  need opposite handling:
+
+  ```bash
+  "<skill-base-dir>/../bootstrap/scripts/claude-apps-owner.zsh" status claude-maintenance
+  ```
+
+  - **A fixable registry state — do NOT open a PR.** `maintenance: key missing`
+    (run the `fix:` line), exit 1 (`apps.json` still schema 1 — run
+    `register-claude-apps.zsh --list` — or the Keychain is locked: unlock it)
+    or exit 4 (no GitHub owner resolvable). Relay the probe's and
+    `/tmp/mint.err`'s message and **stop**: the fix is one command, after which
+    re-running this skill opens the bot PR, whereas a user-authored PR would
+    need an admin merge for nothing.
+  - **A GitHub-side failure — do NOT open a PR either.** Exit 0 (the writer
+    is registered and its key readable) and the mint said anything other than
+    `App is not installed on <repo>` — `Could not reach GitHub …` (a network
+    outage), `GitHub rejected the … installation lookup` (a key GitHub no
+    longer accepts) or `Failed to mint installation token`. The mint prints
+    `App is not installed` **only** for GitHub's own 404, so the two never
+    overlap. Relay `/tmp/mint.err` and stop; re-run this skill once GitHub
+    is reachable, or run `install-claude-apps.zsh --verify --fix` for a
+    rejected key.
+  - **The writer is genuinely absent here** — `maintenance: not registered`
+    (exit 3), or exit 0 **and** `/tmp/mint.err` says `App is not installed on
+    <repo>` → this is the **"writer App not installed"** branch —
+    **fall back**: tell the user the writer App isn't set up here (so the PR
+    will be authored by *them* and they'll need to merge it themselves —
+    admin-merge, since they can't approve their own PR), and relay
+    `/tmp/mint.err` verbatim: for an unregistered owner it names the exact
+    register command
+    (`register-claude-apps.zsh [--org <slug>] --apps claude-maintenance`) —
+    or, for a personal repo owned by another account,
+    that only that account can register its Apps — and for a
+    registered-but-not-installed App the install path is
+    `install-claude-apps.zsh --writer-only`. Then open the PR the normal way:
+    `gh pr create ...` (as the user) and **stop** (don't arm auto-merge —
+    there's no approver-able author). Report which path ran. **Never** mint
+    another owner's App instead: a personal App cannot author PRs on an
+    organisation's repo, and the script refuses to fall through by design.
 
 ## Step 3 — push as the bot, open the PR as the bot
 
@@ -91,7 +128,7 @@ GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr create \
   --title "<title>" --body "<body — include 'Closes #N' when it fixes an issue>"
 ```
 
-Capture the PR number/URL. The PR author is now `claude-maintenance-<login>[bot]`.
+Capture the PR number/URL. The PR author is now `claude-maintenance-<owner>[bot]`.
 
 **Push rejected with `without 'workflows' permission`? Stale installation grant
 (#750).** The Maintenance App is granted `workflows: write` (so a changeset

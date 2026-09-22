@@ -126,10 +126,10 @@ touches the other.
   are named `<app>-<slug>`, and the entry records
   `owner_scope: "organization"`. A user-owned private App cannot be
   installed on an organisation at all, which is why an organisation needs
-  its own pair. **Until #1683**, `install-claude-apps.zsh`, the mint
-  scripts and the bootstrap probes still use only the personal pair, so
-  an organisation pair is registered but not yet installed or minted by
-  bootstrap.
+  its own pair. Every consumer picks the pair by the **owner of the
+  repository it is working in** (see *Which pair a repository uses*
+  below), so an organisation repo gets the organisation's pair with no
+  flag.
 
   Creating an App under an organisation needs **organisation-owner
   rights**. The script says so before the browser opens and checks
@@ -197,7 +197,13 @@ The script is idempotent, per owner:
   in `~/.config/claude-plugins/apps.json` *and* their private keys are
   in Keychain), it prints the current state and exits.
 - If only some are registered, it walks the manifest flow for the
-  rest.
+  rest. An App whose entry is present but whose key is missing is **not**
+  one of them: it still exists on GitHub, and a second App of the same name
+  would be refused, so the run stops and names the key fix
+  (`install-claude-apps.zsh --verify --fix`, below), `--import`, or a
+  `--reset` after deleting the App on GitHub.
+- A Keychain it cannot read (locked, prompt denied) stops the run with an
+  unlock message; it is never taken for a missing key.
 - `--reset <name> [--org <slug>]` clears a single App's entries
   (config + Keychain) for one owner so it can be re-registered. Useful
   after a name collision or a key rotation. An owner left with no App
@@ -247,29 +253,52 @@ writer-only owner has just `claude_maintenance`:
         "registered_at": "2026-09-22T09:00:00Z"
       }
     }
-  },
-  "alias_owner": "timo-jakob",
-  "claude_approver":    { "…": "alias of owners[\"timo-jakob\"].claude_approver" },
-  "claude_maintenance": { "…": "alias of owners[\"timo-jakob\"].claude_maintenance" }
+  }
 }
 ```
 
-**Compatibility aliases.** The top-level `claude_approver` /
-`claude_maintenance` keys, and the legacy Keychain items
-`claude-plugins.<app>`, mirror owner entries. They exist because the
-consumers — the mint scripts, `install-claude-apps.zsh` and the bootstrap
-probes — still read them; #1683 moves those consumers onto the per-owner
-registry (resolving the owner from the repository) and removes the
-aliases. Each alias records its owner (`owner_login`), and only that
-owner's successful register, import or reset sets, rotates or removes
-it. An **absent** alias is taken only by `alias_owner` — one personal
-login: the legacy pair's owner after a migration, otherwise the first
-personal login whose run succeeds. Any other login (after a `gh auth`
-switch, say) takes none and says so, and an organisation only ever holds
-an alias a schema-1 file already recorded for it.
-`install-claude-apps.zsh`'s `slug` / `client_id` backfill (below) also
-writes only the alias until then, so the next alias sync can undo it —
-which costs one repeated `GET /app` lookup, nothing more.
+**Which pair a repository uses (#1683).** Every consumer — the mint
+scripts, `install-claude-apps.zsh`, bootstrap's `--claude-approver`
+auto-detection and its Step 4.5 preflight — resolves the **owner of the
+current repository** (`gh repo view`, lower-cased) and reads only
+`owners[<owner>]` and the Keychain service `claude-plugins.<owner>.<app>`.
+They share one helper, `claude-apps-owner.zsh`, so they cannot disagree
+with each other or with `--list`:
+
+```sh
+claude-apps-owner.zsh status        # run inside the repository
+# owner: acme-corp (organization)
+# approver: not registered
+# maintenance: registered
+# register-args: --org acme-corp --apps claude-approver
+```
+
+Each App is `registered` (an `owners[<owner>]` entry **and** its Keychain
+key — what `--list` shows as `key=present`), `not registered`, or
+`key missing` (the entry without its key). `status` exits 0 when every App
+asked about is registered, 3 when not, 4 when the owner cannot be resolved
+(not a GitHub repo, `gh` unauthenticated), 1 when `apps.json` or the
+Keychain cannot be read or `jq` is missing, and 2 on a usage error.
+`--list` shows a key it cannot read as `key=unreadable`.
+
+A missing owner, or a missing App for it, is an error naming the exact
+register command (`register-claude-apps.zsh [--org <slug>] --apps <app>`)
+— never a fall-through to another owner's App. Two states no register run
+can fix get their own remedy instead:
+
+- **`key missing`** — the App still exists on GitHub, so registering it
+  again would collide with its own name. Regenerate the key with
+  `install-claude-apps.zsh --verify --fix` (the `fix:` line), or `--import`
+  a key you already have.
+- **A personal repo owned by another account** — `register-claude-apps.zsh`
+  registers for your own `gh` login, and a personal App can be registered
+  only by its account, so `status` prints a `note:` saying who can, and no
+  `register-args:`.
+
+The consumers only read: none of them writes `apps.json` or the Keychain,
+except `install-claude-apps.zsh`'s `slug` / `client_id` backfill into
+`owners[<owner>].<app>` and its `--verify --fix` key regeneration into
+`claude-plugins.<owner>.<app>`.
 
 Owner keys are lower-cased (GitHub logins and organisation slugs are
 case-insensitive), so `--org Acme-Corp` and `--org acme-corp` name one
@@ -284,7 +313,9 @@ anyway to keep all per-user config in one consistent posture.
 Before #1682, `apps.json` held one pair at the top level
 (`schema_version: 1`, no `owners`). The first invocation of any
 `register-claude-apps.zsh` subcommand (bar `--help`) migrates it in
-place, non-destructively:
+place, non-destructively. The consumers never do: on a schema-1 file they
+exit non-zero naming `register-claude-apps.zsh --list`, leaving the file and
+the Keychain untouched.
 
 1. The original is copied to `apps.json.v1.bak` beside it (never
    overwritten, so it always holds the pre-migration file).
@@ -294,14 +325,45 @@ place, non-destructively:
    reported, and the entry is filed without one — add it with `--import`.
 3. Each entry is filed under its recorded `owner_login` in `owners` —
    the current `gh` login when none was recorded — and `schema_version`
-   becomes `2`. The top-level keys and the legacy Keychain items stay,
-   as the aliases above, each stamped with the owner it was filed under;
-   the first personal entry's owner becomes `alias_owner`.
+   becomes `2`. No alias is created: the same run then removes the
+   top-level keys and the legacy Keychain items (*Removing the #1682
+   aliases*, below).
 
 The config is written last, so a run that cannot **read** a legacy key
 (a locked Keychain, a denied prompt) stops before writing it, leaving
 the file un-migrated for the next run to retry. A file that already has
 `owners` is left alone — the migration is idempotent.
+
+### Removing the #1682 aliases
+
+A machine migrated by #1682 still carries its compatibility aliases: the
+top-level `claude_approver` / `claude_maintenance` keys, `alias_owner`, and
+the Keychain items `claude-plugins.claude-approver` /
+`claude-plugins.claude-maintenance`. Nothing reads them any more, so the
+next run of any `register-claude-apps.zsh` subcommand (bar `--help` — the
+same hook as the migration) removes them, in an order that makes a failure
+retryable:
+
+1. The Keychain work goes first. An alias its owner (its recorded
+   `owner_login`, else `alias_owner`) has no copy of is kept, not lost: the
+   legacy key is copied to `claude-plugins.<owner>.<app>` when that item is
+   missing, as the schema-1 migration does. Then the legacy item is deleted;
+   one that is already absent is not an error.
+2. Only when all of that succeeded is `apps.json` rewritten, in one write:
+   an alias whose owner has no entry for that App is filed under
+   `owners[<owner>]`, and the top-level keys and `alias_owner` are dropped.
+   Owner entries and owner-qualified keys that already exist are untouched.
+
+When a Keychain read, store or delete fails (a locked Keychain, a denied
+prompt) the run warns, naming the item, and leaves `apps.json` — aliases and
+all — as the marker the next run retries from. So does a legacy key it
+cannot place safely: one no `apps.json` record names an App for, one with no
+recorded owner, one of another App than the owner's entry, or one that
+differs from a key the owner's service already holds for an App the owner
+has no entry for. The warning names the `--import` / `--reset` that
+resolves it. A leftover alias does nothing: no
+consumer reads it. The cleanup is idempotent: on a clean file it does
+nothing.
 
 `client_id` (#223) may be empty or absent on entries created by the
 `--import` flow or by older versions; `install-claude-apps.zsh`
@@ -322,10 +384,10 @@ Each PEM is stored as a generic password:
 - Password: the full PEM contents, including the
   `-----BEGIN/END RSA PRIVATE KEY-----` lines
 
-The legacy service names `claude-plugins.claude-approver` /
-`claude-plugins.claude-maintenance` are the Keychain half of the
-compatibility aliases above — which owner's key each holds is decided
-there — and are removed by #1683.
+No consumer reads the pre-#1682 service names
+`claude-plugins.claude-approver` / `claude-plugins.claude-maintenance`;
+`register-claude-apps.zsh` deletes any that remain (see *Removing the #1682
+aliases*).
 
 This matches the pattern `automate-private.sh` already uses for the
 SonarQube admin password. Retrieval:
@@ -353,8 +415,11 @@ Once registered, each App is *installed* on individual repos via
 `/development:bootstrap --claude-approver true` (which delegates to
 `install-claude-apps.zsh`). That flow:
 
-1. Reads App IDs from `apps.json`.
-2. Installs both Apps on the current repo via the browser install flow.
+1. Reads the App IDs registered for the repo's owner (`owners[<owner>]`
+   in `apps.json`) — the organisation's pair in an organisation repo.
+2. Installs both Apps on the current repo via the browser install flow,
+   telling you to pick that owner — "the organisation `<slug>`" or your
+   personal account — on GitHub's install page.
 3. Stores **no repo secrets or variables** (#476/#498). Both identities
    mint their installation tokens locally from the Keychain
    (`mint-approver-token.zsh` / `mint-maintenance-token.zsh`), so the
@@ -401,7 +466,8 @@ install-claude-apps.zsh --writer-only   # Maintenance App only; no Approver, no 
 ```
 
 Then `/development:open-pr` mints the writer token, pushes the branch as
-the bot, opens the PR as `claude-maintenance-<login>[bot]`, and arms
+the bot, opens the PR as `claude-maintenance-<owner>[bot]` — the writer of
+the repo's owner, so an organisation repo gets the organisation's — and arms
 squash auto-merge with branch deletion. You review and approve; GitHub
 merges it. The repo's merge settings (squash-only, `allow_auto_merge`,
 `delete_branch_on_merge`) are configured by `branch-protection.sh`

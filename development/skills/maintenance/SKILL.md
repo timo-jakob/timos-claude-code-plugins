@@ -785,10 +785,16 @@ re-evaluates: in **`ci` mode** automatically on the next
 skill is next driven (the approval gate does that per stage). The loop
 closes without further user intervention.
 
-**Skip silently** when `~/.config/claude-plugins/apps.json` doesn't
-exist — the Approver isn't set up on this machine, there's nothing
-to ingest. (The **approver-mode detection** just below still runs — it
-is a pure read and records `none` in that case.)
+**Skip silently** when the Approver is not registered for this repo's
+owner (`"<skill-base-dir>/../bootstrap/scripts/claude-apps-owner.zsh" status
+claude-approver` does not exit 0 — the same probe as the mode detection
+below, #1683) — the Approver isn't set up for this repo, there's nothing to
+ingest. (Silently only on exit 3 with `approver: not registered`. With
+`approver: key missing` the App exists but cannot mint: skip ingestion, but
+show the probe's `fix:` line to the user and list it in the Phase 9 summary;
+on exit 1 or 4 the mode detection below relays the helper's fix.) (The
+**approver-mode detection** just below still runs — it is a pure read and
+records `none` in that case.)
 
 ### Approver mode — detect once per run (#642)
 
@@ -802,21 +808,35 @@ checkpoint so every stage's gate reads the same value:
   (pre-#476 `claude-approver.yml`, or any workflow that posts the
   Approver verdict on `check_suite: completed`). The gate re-triggers it
   with a `/approve` comment.
-- **`local`** — the Approver App is registered locally (`apps.json` has
-  `claude_approver`) but there is **no** CI-side workflow — the
+- **`local`** — the Approver App is registered locally **for this repo's
+  owner** (`claude-apps-owner.zsh status claude-approver` exits 0, #1683) but
+  there is **no** CI-side workflow — the
   decentralized default since epic #476 (deployed 2026-07-02). The gate
   drives the language plugin's `approve` skill directly; a `/approve`
   comment would only be noise posted under the user's identity, and
   waiting for a server-side verdict that never comes burns ~10 minutes
   per stage (#642).
-- **`none`** — no `claude_approver` entry at all: the Approver isn't
-  available here; the gate falls back to a human review / native
-  auto-merge as it does today.
+- **`none`** — no Approver registered for this repo's owner (exit 3; a
+  `key missing` Approver is `none` too, and its `fix:` line is relayed as
+  above), or
+  none usable: the owner cannot be resolved (exit 4), or `apps.json` is
+  still schema 1 / the Keychain unreadable (exit 1) — the helper's stderr
+  names the fix; relay it. The Approver isn't available here; the
+  gate falls back to a human review / native auto-merge as it does today.
 
 ```bash
 mode=none
-if [[ -f ~/.config/claude-plugins/apps.json ]] \
-   && jq -e '.claude_approver' ~/.config/claude-plugins/apps.json >/dev/null 2>&1; then
+# The repo's OWNER picks the App pair (#1683) — the same answer the mint
+# scripts use, so `local` here means the approve skill can actually mint.
+# Keep the report: on exit 3 it tells `approver: key missing` (relay its
+# `fix:` line — see the skip rule above) from `approver: not registered`.
+probe_rc=0
+probe_out=$("<skill-base-dir>/../bootstrap/scripts/claude-apps-owner.zsh" \
+  status claude-approver) || probe_rc=$?
+if [[ "$probe_rc" == 3 ]] && grep -q '^approver: key missing' <<<"$probe_out"; then
+  print -r -- "Approver key missing — $(sed -n 's/^fix: //p' <<<"$probe_out")"  # relay; list in Phase 9
+fi
+if (( probe_rc == 0 )); then
   # Registered locally → default to the decentralized model (#476): local.
   mode=local
   # Promote to ci ONLY on the pre-#476 CI-gate signature: a workflow that both
@@ -1730,9 +1750,12 @@ Stages not yet in the record run normally from the restored plan.
 
 ### Identity for PR creation (when Claude Apps registered)
 
-When `~/.config/claude-plugins/apps.json` has a `claude_maintenance`
-entry, mint an installation token before every `gh pr create` call in
-this phase so the new PRs attribute to `claude-maintenance[bot]`:
+When the Maintenance App is registered for this repo's owner
+(`"<skill-base-dir>/../bootstrap/scripts/claude-apps-owner.zsh" status
+claude-maintenance` exits 0 — the per-owner registry, #1683), mint an
+installation token before every `gh pr create` call in this phase so the
+new PRs attribute to `claude-maintenance-<owner>[bot]` — the writer of
+this repo's owner:
 
 ```bash
 # mint returns a mode-600 file PATH, not the token value (#640). Read it
@@ -1761,10 +1784,19 @@ open a PR the Approver couldn't evaluate — worse than skipping. The
 Phase 9 summary should clearly call out the skipped stage with the
 reason.
 
-If `~/.config/claude-plugins/apps.json` doesn't have a
-`claude_maintenance` entry (Claude Apps not registered on this
-machine), open PRs with the user's existing `gh` auth — the Approver
-isn't installed on the repo either, so the identity mismatch is moot.
+If that probe exits 3 with `maintenance: not registered` (no Maintenance
+App for this repo's owner), open PRs with the user's existing `gh` auth.
+**The Approver cannot approve those PRs** — its author allowlist is
+machine-only — so when the recorded `approver_mode` is `local` or `ci` (an
+owner registered with only the Approver, `--apps claude-approver`), gate
+these stages as `none`: a human review, never the approve skill, which would
+wait on a verdict that cannot come. With `maintenance: key missing` the App
+exists but cannot mint: treat it as the failed mint above and relay the
+probe's `fix:` line. Exit 4 (owner unresolvable) or 1 (`apps.json` still
+schema 1, or the Keychain unreadable) is neither: relay its stderr, which
+names the fix (`register-claude-apps.zsh --list` migrates a schema-1 file),
+and stop PR creation **for every remaining stage of this run** — list them
+as skipped in the Phase 9 summary with that message.
 
 ### PR body (every `gh pr create` in this phase)
 
