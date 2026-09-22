@@ -456,7 +456,14 @@ _repo_anchor() {
   # substring lets a path impersonate the cause; the whole point of keying on
   # the cause is that the enum stays closed.
   if [[ $'\n'"${err:l}" == *$'\n'"fatal: not a git repository (or any"* ]]; then
-    print -r -- "$repo"; return 0
+    # ABSOLUTE (`:a`, no symlink resolution), so that every anchor this function
+    # returns — the toplevel above or this fallback — is a path no reader can
+    # take for anything else (#1559). The raw value is not: zsh's `cd` reads a
+    # lone `-` as $OLDPWD and `-N`/`+N` as a directory-stack entry EVEN AFTER
+    # `--`, so `detect --repo -0` would run detection in the caller's cwd while
+    # `_primary` read `-0/.maintenance.yml` — a type from the wrong tree at exit
+    # 0 — and GNU `sed` permutes a dash-leading file operand into its options.
+    print -r -- "${repo:a}"; return 0
   fi
   # Always name a cause. The re-probe can legitimately come back empty — a git
   # that exits 0 printing nothing (the #1582 blank-toplevel shape), or a race in
@@ -860,17 +867,6 @@ cmd_plan() {
   [[ -r "$repo" && -x "$repo" ]] || {
     print -u2 -- "plan: --repo is not a readable directory: $repo"; exit 1
   }
-  # normalise ONLY a path that could be misread as a flag, exactly as
-  # gather-kubernetes-findings.zsh does: `[[ -d ]]` is true for `-fixtures/repo`
-  # (test operators parse no options) but `cd` reads it as an option, and the
-  # failure would then be blamed on detect-stack. Every other relative spelling
-  # is already unambiguous, so nothing else is touched. The doubled-prefix
-  # argument that used to carry this — rewriting them all put `././` into the
-  # emitted `findings_path` for the ordinary `--repo .` — is now HISTORICAL
-  # (pre-#1587): that field is derived from the anchored toplevel, so no
-  # normalisation of `--repo` can reach it. The rule stands on the reason above,
-  # which anchoring does not touch: `cd` and `git -C` still read a leading dash
-  # as an option, and both run on this value.
   # An EXPLICIT empty value is the one shape `need_value`'s arg-count check
   # cannot see, and it is the realistic `--prior-tree "$(<tree-1.txt)"` with the
   # file absent. Left alone it reads downstream as "flag omitted": harmless on a
@@ -892,7 +888,12 @@ cmd_plan() {
   if (( round > 1 && ! final )) && [[ -z "$prior_tree" ]]; then
     die_usage "plan: --round $round needs --prior-tree (the previous round's tree identity), or --final for the closing full sweep"
   fi
-  if [[ "$repo" == -* ]]; then repo="./$repo"; fi
+  # A `--repo` beginning with a dash needs NO `./` rewrite (#1559). Everything
+  # that reads the raw value takes it as a value, never as an option: `[[ -d ]]`
+  # parses no options and `git -C` consumes the next word whole. Anchoring then
+  # replaces it with an absolute path, so no reader below ever sees the dash.
+  # The `./` arm this used to carry went dead with #1587, which is why deleting
+  # it left every dash test green.
   _verify_base "$repo" "$base" || exit 1
   # THE anchoring site for `plan` (#1587). Immediately after `_verify_base`,
   # which has just established that `--repo` is inside a git repository — though
@@ -1071,7 +1072,9 @@ cmd_detect() {
   [[ -r "$repo" && -x "$repo" ]] || {
     print -u2 -- "detect: --repo is not a readable directory: $repo"; exit 1
   }
-  if [[ "$repo" == -* ]]; then repo="./$repo"; fi
+  # No `./` rewrite for a dash-leading `--repo` (#1559): the gates above parse
+  # no options, and `_repo_anchor` returns an ABSOLUTE path on both of its arms
+  # — a NON-git `--repo` included — so nothing below ever reads the raw value.
   # THE anchoring site for `detect` (#1587) — the same rule as `plan`'s, which is
   # what keeps the two AGREEING on a repo, the property this subcommand exists to
   # guarantee. `detect` runs no `_verify_base`, so it is the subcommand that
@@ -1104,8 +1107,7 @@ cmd_scope_findings() {
   done
   [[ -n "$repo" ]] || die_usage "scope-findings: --repo is required"
   [[ -n "$findings" ]] || die_usage "scope-findings: --findings is required"
-  # same leading-dash normalisation as cmd_plan
-  if [[ "$repo" == -* ]]; then repo="./$repo"; fi
+  # a dash-leading --repo needs no rewrite, for cmd_plan's reason (#1559)
   # and the same two directory gates, for the same reason: without them an
   # unreadable --repo is reported by _verify_base as "not a git repository" — a
   # confidently wrong claim about a directory that may be a perfectly good repo
