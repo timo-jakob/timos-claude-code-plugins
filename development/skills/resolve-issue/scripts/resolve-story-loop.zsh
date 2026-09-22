@@ -202,6 +202,20 @@
 #                        and write no findings file" terminal enforceable. The
 #                        `[]` default survives only on a DELTA round, which
 #                        cannot converge anyway;
+#                      * (WIRING-INDEPENDENT) the EMPTY-STORY-DIFF arm (#1485) —
+#                        the round is FULL and its scope is EMPTY: the
+#                        implementation produced no diff, or every change sits
+#                        inside the loop's own state (a repo-internal
+#                        --work-dir, the status/findings/telemetry/
+#                        carry-accounting files) and was filtered out. It fires
+#                        with one wording: ahead of BOTH generic missing-file
+#                        arms (the --resume arm and the FULL-ROUND arm) when the
+#                        panel wrote no findings file (as its contract says it
+#                        must here), and after consolidation —
+#                        before any accumulator is written — when a caller wrote
+#                        an actual `[]` that consolidated to zero blockers. That
+#                        `[]` is "saw nothing", and converging on it would ship
+#                        a story nobody reviewed;
 #                      * --findings-file IS the round's own dispatch
 #                        findings_path — the caller aimed at the internal sink,
 #                        which this script truncates; refused up front so the
@@ -274,7 +288,11 @@
 #                    re-invoking under the --max-rounds it was written under.
 #                    That arm fires only when the carry is EMPTY too, so there
 #                    is nothing to fix there either — and no re-run of the panel
-#                    can clear it.
+#                    can clear it. Nor can one clear the EMPTY-STORY-DIFF arm:
+#                    it is cleared only by implementing the story (§2) so the
+#                    story diff is non-empty, then re-invoking — or, when the
+#                    story genuinely needs no code change, by saying so and
+#                    stopping; never by inventing a change to fill the diff.
 #
 # Telemetry note: an extended run (escalate -> grant -> --resume) appends one
 # record per terminal exit, each spanning from .t0 — so consecutive records of
@@ -307,7 +325,10 @@
 #                 so test its CONTENTS, never its presence. Missing/empty
 #                 output is treated as "no findings" on a DELTA round only; on
 #                 a FULL round it is refused as STALE_FINDINGS (#1434), since
-#                 zero blockers there is the CONVERGED condition. Since #1583,
+#                 zero blockers there is the CONVERGED condition. A full round
+#                 whose $REVIEW_SCOPE_FILE is empty is refused either way, as
+#                 the EMPTY-STORY-DIFF arm (#1485) — missing output and a
+#                 written `[]` alike. Since #1583,
 #                 on a round where $REVIEW_FIX_VERIFICATION holds entries it
 #                 must ALSO write the carry accounting — an array of
 #                 {file, dimension, title, confirmed[], re_raised[],
@@ -1572,6 +1593,16 @@ refuse_stale_findings() {
     "$prev_changelist" "$history_file" "$changelists_file"
 }
 
+# The EMPTY-STORY-DIFF refusal (#1485), worded ONCE. Two sites raise it — the
+# full-round missing-file arm (a panel that honoured its own "empty scope on a
+# full round: report it and write no findings file" contract) and the
+# post-consolidation arm (a caller that wrote `[]` anyway) — and they must advise
+# the same remedy: a second wording there would be one cause with two
+# contradictory refusals, "write []" followed by "re-running cannot clear this".
+refuse_empty_story_diff() {
+  refuse_stale_findings "round $round is a FULL round over an EMPTY story diff — nothing outside the loop's own state (its --work-dir and its status, findings, telemetry and carry-accounting files) differs from $base, so the panel was handed nothing to review: a [] (or no findings file) here means it saw nothing, not that it found nothing, and zero blockers on a full round is the CONVERGED condition. Nothing was implemented, so there is nothing to review or ship: go back to §2 (Implement) and re-invoke once the story diff is non-empty — or, if the story genuinely needs no code change, say so and stop; never invent a change just to make the diff non-empty. Re-running the panel cannot clear this — it would be handed the same empty scope."
+}
+
 # content digest of a findings file, for the stale-findings guard (#974).
 # Prints the hex digest, or NOTHING when no digest tool is available — the
 # guard is a caller-mistake detector, so a toolless environment loses the
@@ -2491,6 +2522,15 @@ while (( round <= effective_max )); do
     mv -- "$adj_tmp" "$adjudicated_file" || {
       print -u2 -- "resolve-story-loop: could not write back $adjudicated_file at round $round"; exit 1 }
   fi
+  # Whether this round's panel was handed an EMPTY scope — derived once, HERE,
+  # for both wirings (#1485). It used to be set only inside the step-mode arm
+  # below, so hook mode never knew it and the empty-story-diff refusal after
+  # consolidation could not fire there. Read AFTER any re-plan above, so it
+  # describes the scope the round actually ran with; the WRITTEN scope, for the
+  # same reason the empty-delta branch reads it — the work-dir filter can leave
+  # it empty while the descriptor's `changed_files` is not.
+  round_scope_empty=0
+  [[ -s "$scope_file" ]] || round_scope_empty=1
   findings_path=$(print -r -- "$rp" | jq -r '.findings_path')
   # (the scope was written by write_round_scope above, before the empty-delta
   # decision that has to read it)
@@ -2524,6 +2564,15 @@ while (( round <= effective_max )); do
     # make the LIKELIER shape of this mistake. A fresh run's round 1 is a FULL
     # round, so a missing/empty --findings-file is refused there too — by the
     # full-round guard further down, not by this --resume arm.
+    # ...except on a FULL round over an EMPTY story diff (#1485), where writing
+    # no file is exactly what the panel's contract says to do — so name that
+    # cause here, before the generic "must still write []" advice can send the
+    # caller into the post-consolidation refusal of the same cause. A resumed
+    # round reaches this whenever a fix pass reverted the story and the closing
+    # sweep was then planned over what is left.
+    if [[ "$scope_mode" == "full" && ! -s "$findings_file" ]] && (( round_scope_empty )); then
+      refuse_empty_story_diff
+    fi
     if (( resume )) && [[ ! -s "$findings_file" ]]; then
       refuse_stale_findings "--findings-file is missing or empty on --resume ($findings_file) — did this round's review panel run? A panel that found nothing must still write []."
     fi
@@ -2620,9 +2669,9 @@ while (( round <= effective_max )); do
       # findings are not empty" would flip BOTH records the wrong way at once —
       # a blind round would record a digest again, and the marker would be
       # cleared, leaving the sweep's waiver disarmed. Same rule the sibling
-      # dispatch applies to its language probe (#1177).
-      round_scope_empty=0; round_findings_empty=0
-      [[ -s "$scope_file" ]] || round_scope_empty=1
+      # dispatch applies to its language probe (#1177). (`round_scope_empty` is
+      # already set for this round, above the wiring split — #1485.)
+      round_findings_empty=0
       jq -e -s 'length == 1 and (.[0] | length == 0)' -- "$findings_path" >/dev/null 2>&1
       rc_empty=$?
       (( rc_empty <= 1 )) || {
@@ -2707,6 +2756,11 @@ while (( round <= effective_max )); do
   # `--findings-file` guards do not apply at all.
   if [[ ! -s "$findings_path" ]]; then
     if [[ "$scope_mode" == "full" ]]; then
+      # An EMPTY scope first (#1485): a panel that wrote nothing here did what
+      # its contract says, and the generic arms below would tell it to write
+      # `[]` — advice that only leads into the post-consolidation refusal of
+      # the same cause. Name the real cause, with its real remedy, up front.
+      (( round_scope_empty )) && refuse_empty_story_diff
       # Branched on the wiring, because the two name DIFFERENT files. In step
       # mode the caller's own --findings-file is what was empty, and pointing
       # them at $findings_path would send them to write into the internal sink
@@ -2788,6 +2842,31 @@ while (( round <= effective_max )); do
   "$CONSOLIDATE" "${consolidate_args[@]}" > "$changelist" || {
     print -u2 -- "resolve-story-loop: consolidate failed at round $round"; exit 1 }
   final_changelist="$changelist"
+  # 3a. a FULL round over an EMPTY story diff is never a clean review (#1485).
+  # Zero blockers on a full round is the CONVERGED condition, and #1434 closed
+  # the half where the panel wrote NO findings file. This is the other half: a
+  # caller that writes an actual `[]` for a round whose scope is empty. Its `[]`
+  # means "saw nothing", not "found nothing", and nothing downstream tests the
+  # scope — the panels' own "empty scope on a full round: report it and write no
+  # findings file" contract was the only thing keeping it from converging.
+  # Two shapes reach it: the implementation produced no diff at all, or every
+  # change sits inside a repo-internal --work-dir (or another loop-owned file)
+  # and the filter strips it. (A panel that honoured that contract and wrote
+  # NOTHING is refused earlier, with the same wording, by the missing-file arm.)
+  #
+  # Keyed on `blocking == 0`, exactly the condition it would otherwise converge
+  # on, and fired HERE — after consolidation, before the carry accounting and
+  # every accumulator write — so a refused round leaves history, changelists and
+  # the carry chain as the previous round left them, like the CARRY-UNACCOUNTED
+  # arm below. Not a re-run-the-panel case: a re-invocation plans the same empty
+  # scope. The remedy is implementation — or, when none is needed, stopping.
+  if [[ "$scope_mode" == "full" ]] && (( round_scope_empty )); then
+    blocking=$(jq '.summary.blocking' -- "$changelist") || {
+      print -u2 -- "resolve-story-loop: could not read summary.blocking at round $round"; exit 1 }
+    [[ "$blocking" == <-> ]] || {
+      print -u2 -- "resolve-story-loop: non-numeric summary.blocking at round $round ($changelist): ${blocking:-<empty>}"; exit 1 }
+    (( blocking == 0 )) && refuse_empty_story_diff
+  fi
   # 3b. carry accounting (#1583) — BEFORE the accumulators and the next carry
   # are written, so a refused round leaves both exactly as the previous round
   # left them (see _carry_account for the ordering argument).

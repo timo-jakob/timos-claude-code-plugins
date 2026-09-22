@@ -15,7 +15,7 @@ check. The text between `<!-- /moved: round-protocol-head -->` and
 `<!-- moved: round-protocol-tail -->` is #1582's reviewer-path rule — the gate
 proves only that no *original* line migrated into it, by asserting the two
 anchors stay adjacent in the pinned commit. And **everything after
-`<!-- /moved: round-protocol-tail -->`** is unproven too: the #1571 correction,
+`<!-- /moved: round-protocol-tail -->`** is unproven too: the #1571 correction, the #1485 empty-story-diff note,
 *The decided pass* (#1584) and *Carry accounting* (#1583) all live there,
 because a byte-frozen span cannot be edited and those rules had to correct or
 extend what it says. Edit either region knowing the byte check does not cover
@@ -1319,6 +1319,28 @@ everything else the procedure above uses it for — the per-blocker `class`
 --fix-touched` stamps, the `by class:` progress row, and the waived-suggestion
 exemption. Only the residue predicate stopped reading it.
 
+**An empty story diff is refused on a written `[]` too (#1485).** Step 1's
+`"full"` plan branch says that the loop refuses a full round with an empty
+scope. Step 2's `STALE_FINDINGS` list states only the no-findings-file half of
+that refusal. Both sit inside the byte-frozen span, so the other half is
+recorded here. It is the **EMPTY-STORY-DIFF** arm. A **full** round whose
+scope is **empty** is refused as `STALE_FINDINGS` whether its findings file is
+absent or an actual `[]` that consolidated to zero blockers, because that `[]`
+means the panel saw nothing. The arm fires in both wirings. It covers an
+implementation that produced no diff, and a story whose only changes sit in the
+loop's own state (a repo-internal `--work-dir`, the status, findings, telemetry
+or carry-accounting files), which the filter strips. Recover exactly as step
+1's `"full"` branch says: go back to **§2 (Implement)**; or, if the story
+genuinely needs no code change, say so and stop, and never invent a change to
+fill the diff. Like several of step 2's own arms, this cause may therefore end
+the run without a re-invocation.
+
+**This note governs wherever step 2's recovery arms would otherwise match.**
+Whether the panel wrote an aggregate or, as its contract says, none at all,
+step 2's arms that re-invoke with the `--findings-file` or re-run the panel look
+like they apply. Take neither. Both plan the same empty scope and are refused
+again.
+
 ### The decided pass — run every `decides:` command before consolidating (#1584)
 
 **Decide every `decides:` claim before you consolidate (#1584).** This is a step
@@ -1676,7 +1698,8 @@ carried entry "…" (…) was neither confirmed nor re-raised by any reviewer
 (unconfirmed by: … | no reviewer reported it)`) and the status JSON lists them
 in `carry_unconfirmed[]` — never in `.blocking` (a record-only re-raise is
 refused by name and populates nothing). Step 2's `STALE_FINDINGS` list above is
-to be read as `#974, #1434, #1435, #1583`, this arm the fourth; like the
+to be read as `#974, #1434, #1435, #1583, #1485`, this arm the fourth (the
+fifth is the EMPTY-STORY-DIFF arm, recorded after the frozen span); like the
 empty-delta, full-round and cadence arms it is wiring-independent and fires in
 hook mode too, where the panel writes the same records to
 `<findings-path>.carry.json`.

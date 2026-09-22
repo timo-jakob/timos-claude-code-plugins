@@ -703,10 +703,13 @@ with a status JSON + code:
   `--findings-tree` you attested disagrees with the working tree, so the panel
   read one tree and you are consolidating against another, or — #1583 — the
   round's carry accounting left a carried entry neither confirmed nor re-raised,
-  the CARRY-UNACCOUNTED arm). Recover **by cause**
+  the CARRY-UNACCOUNTED arm, or — #1485 — a **full** round over an **empty**
+  story diff, even on a written `[]`, the EMPTY-STORY-DIFF arm). Recover **by cause**
   per §3.5's *Each round* step 2 before re-invoking: several causes are **not** cleared by
   re-running the panel — an empty delta with nothing carried, an aliased
-  `--findings-file`, and a panel that reported NOT APPLICABLE on a full round —
+  `--findings-file`, a panel that reported NOT APPLICABLE on a full round, and
+  an empty story diff, which goes back to §2 (Implement) per
+  `reference/review-loop.md`'s #1485 note (that note governs over step 2) —
   while the cadence cause is cleared *only* by re-running it (against the current
   tree) or by discarding the fix that moved the tree, and the carry cause per
   `reference/review-loop.md` § *Carry accounting — confirmed, re-raised,

@@ -267,6 +267,102 @@ converge_clean() {
   contains "$output" "never the dispatch sink"
 }
 
+@test "#1485 a written [] on a FULL round over an EMPTY story diff is REFUSED, never converged" {
+  # The half #1434 left open: the aggregate exists and is `[]`, so the
+  # missing-file arm above does not fire, and zero blockers on a full round is
+  # the CONVERGED condition. Only the round's empty scope says nobody saw
+  # anything.
+  rm -f "$R/app.py"                  # the story diff is now empty
+  printf '[]' > "$F"
+  step
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "round 1 is a FULL round over an EMPTY story diff"
+  contains "$output" "go back to §2 (Implement)"
+  # ...and its second remedy, for a story that needs no code change
+  contains "$output" "say so and stop"
+  contains "$output" "never invent a change"
+  # distinguishable from the missing-file arm, which routes to a different recovery
+  lacks "$output" "is a FULL round and --findings-file is missing or empty"
+  # refused before any accumulator write
+  [ ! -s "$WD/history.jsonl" ]
+  [ ! -s "$WD/changelists.jsonl" ]
+}
+
+@test "#1485 a story whose only changes are the repo-internal --work-dir is REFUSED, never converged" {
+  rm -f "$R/app.py"
+  printf '[]' > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$R/.loop-wd" --findings-file "$F"
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "FULL round over an EMPTY story diff"
+  # the repo really does show the work-dir as changed — so it is the FILTER that
+  # emptied the scope, not an already-empty diff (the test above)
+  git -C "$R" status --porcelain --untracked-files=all | grep -q '^?? \.loop-wd/'
+}
+
+@test "#1485 a story whose only change is its own repo-internal --findings-file is REFUSED, never converged" {
+  # The loop-state-FILE shape, as distinct from the work-dir prefix: the exact
+  # list (_drop_loop_internal_paths) must empty the scope too. A work-dir-prefix
+  # filter alone would leave findings-round-1.json in scope and converge on it.
+  rm -f "$R/app.py"
+  local IF="$R/findings-round-1.json"
+  printf '[]' > "$IF"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$IF"
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "FULL round over an EMPTY story diff"
+  git -C "$R" status --porcelain --untracked-files=all | grep -qx '?? findings-round-1.json'
+}
+
+@test "#1485 a MISSING findings file on a FULL round over an EMPTY story diff names the empty diff, not 'write []'" {
+  # the step-mode twin of the hook-mode contract test: a panel that honoured
+  # "empty scope on a full round: write no findings file" gets the real remedy
+  rm -f "$R/app.py" "$F"
+  step
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "round 1 is a FULL round over an EMPTY story diff"
+  # the SAME wording as the post-consolidation site: one helper, one remedy
+  contains "$output" "say so and stop"
+  contains "$output" "never invent a change"
+  lacks "$output" "is a FULL round and --findings-file is missing or empty"
+}
+
+@test "#1485 a RESUMED full round over an emptied story diff with no findings file names the empty diff, not 'write []'" {
+  # The --resume missing-file arm fires before the full-round one, so it needs
+  # the same guard. Reach a resumed FULL round with an empty scope: round 1
+  # blocks on app.py, the in-session fix REVERTS the story (deletes app.py),
+  # round 2 (delta: the deletion) confirms the carry clean and promotes the
+  # closing sweep, and round 3 IS that sweep — over a story diff that is now
+  # empty. A contract-following panel writes nothing there.
+  seed_awaiting
+  rm -f "$R/app.py"
+  printf '[]' > "$WD/findings-round-2.json"
+  step --resume --findings-file "$WD/findings-round-2.json"
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  step --resume --findings-file "$WD/findings-round-3.json"
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "round 3 is a FULL round over an EMPTY story diff"
+  contains "$output" "say so and stop"
+  lacks "$output" "must still write []"
+  lacks "$output" "is missing or empty on --resume"
+}
+
+@test "#1485 a written [] on a FULL round with a NON-empty story diff still converges" {
+  # the regression guard: the refusal keys on the empty scope, never on `[]` alone
+  printf '[]' > "$F"
+  step
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq -r '.rounds')" = "1" ]
+  lacks "$output" "EMPTY story diff"
+}
+
 @test "#1434 a missing findings file on a DELTA round is refused by the --resume arm, not the FULL-round arm" {
   # The two refusal arms must stay distinguishable: they name different causes
   # and route to different recovery arms in §3.5 step 2. In STEP mode the `[]`

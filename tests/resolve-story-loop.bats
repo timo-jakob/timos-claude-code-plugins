@@ -167,6 +167,66 @@ ambiguous_run() {   # -> ESCALATE_AMBIGUOUS (pre-loop: two languages)
   [ "$(jq '.summary.blocking' "$BATS_TEST_TMPDIR/wd/changelist-2.json")" -eq 0 ]
 }
 
+@test "#1485 hook mode: a FULL round over an EMPTY story diff is refused even on a written []" {
+  # The twin of the no-findings-file arm above: this panel DOES write `[]`, so
+  # only the round's scope tells "found nothing" from "saw nothing". Hook mode
+  # never computed round_scope_empty before #1485, so reverting the hoist makes
+  # this run converge.
+  rm -f "$R/app.py"                  # the story diff is now empty
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    SNAP="$BATS_TEST_TMPDIR" \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope-r$REVIEW_ROUND.txt"; printf "%s" "$REVIEW_SCOPE_MODE" > "$SNAP/mode-r$REVIEW_ROUND.txt"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "round 1 is a FULL round over an EMPTY story diff"
+  contains "$output" "go back to §2 (Implement)"
+  # ...and its second remedy, for a story that needs no code change
+  contains "$output" "say so and stop"
+  contains "$output" "never invent a change"
+  # the fixture really reached the shape: a full round, handed an empty scope
+  [ "$(cat "$BATS_TEST_TMPDIR/mode-r1.txt")" = "full" ]
+  # present first: `! -s` alone also passes when the cp never ran
+  [ -f "$BATS_TEST_TMPDIR/scope-r1.txt" ]
+  [ ! -s "$BATS_TEST_TMPDIR/scope-r1.txt" ]
+  # refused BEFORE any accumulator write, so the round simply re-runs
+  [ ! -s "$BATS_TEST_TMPDIR/wd/history.jsonl" ]
+  [ ! -s "$BATS_TEST_TMPDIR/wd/changelists.jsonl" ]
+}
+
+@test "#1485 hook mode: a story whose only changes are the repo-internal --work-dir is refused too" {
+  # The second reachable shape: the descriptor sees the loop's own state files as
+  # changed, the filter strips them, and the panel is handed nothing.
+  rm -f "$R/app.py"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$R/.loop-wd" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "FULL round over an EMPTY story diff"
+  # the repo really does show the work-dir as changed — so it is the FILTER that
+  # emptied the scope, not an already-empty diff (the test above)
+  git -C "$R" status --porcelain --untracked-files=all | grep -q '^?? \.loop-wd/'
+}
+
+@test "#1485 hook mode: a panel that honours its contract and writes NOTHING on an empty diff gets the empty-diff remedy, not 'write []'" {
+  # Every panel's contract on a full round with an empty scope is "report it and
+  # write no findings file". The generic missing-file arm would answer that with
+  # "a panel that found nothing must still write []" — advice that leads only
+  # into the post-consolidation refusal of the same cause. One cause, one remedy.
+  rm -f "$R/app.py"
+  loop --review-cmd 'true' --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "round 1 is a FULL round over an EMPTY story diff"
+  # the SAME wording as the post-consolidation site: one helper, one remedy
+  contains "$output" "say so and stop"
+  contains "$output" "never invent a change"
+  lacks "$output" "must still write []"
+  lacks "$output" "is a FULL round and --review-cmd produced no findings"
+}
+
 @test "clean story converges in round 1 (exit 0), one-line status JSON" {
   clean_loop
   [ "$status" -eq 0 ]
