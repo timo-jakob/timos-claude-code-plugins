@@ -373,6 +373,8 @@ _gate_clauses() {
     'go|be run to completion at that commit**' \
     'go|by **commit date**, and use the **earliest**' \
     'swift|**not a licence**' \
+    'swift|every SwiftPM repo is a package, deployables included' \
+    'swift|consumed only by other code, run that exercise too' \
     'java|0 — nothing owed' \
     'java|read all **three** of its exits' \
     'java|only exit that halts WITHOUT further checking' \
@@ -390,7 +392,7 @@ _gate_clauses() {
 # Every missing Gate clause, one per line. $1 overrides the repo root so the
 # control can drive THIS accumulator over a planted tree.
 _gate_clause_violations() {
-  local root="${1:-$REPO_ROOT}" rows="${2:-_gate_clauses}" row type needle profile
+  local root="${1:-$REPO_ROOT}" rows="${2:-_gate_clauses}" row type needle profile sec
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     type="${row%%|*}"
@@ -405,7 +407,8 @@ _gate_clause_violations() {
     [ -n "$needle" ] || { printf '%s: empty needle in its _gate_clauses row\n' "$type"; continue; }
     profile="$root/development-$type/skills/resolve-profile/SKILL.md"
     [ -f "$profile" ] || { printf '%s: no profile at %s\n' "$type" "$profile"; continue; }
-    _profile_section "$profile" "Gate" | grep -qF -- "$needle" \
+    sec="$(_profile_section "$profile" "Gate")"
+    printf '%s' "$sec" | grep -qF -- "$needle" \
       || printf '%s: Gate lost <<%s>>\n' "$type" "$needle"
   done < <("$rows")
   return 0   # status-clean on a clean tree — see _panel_restatements
@@ -523,10 +526,11 @@ _profile_section() {
 # nothing and report clean, which is the vacuity this file's header warns about
 # — and the partition tripwire is what turns it back into a red.
 _profiles_without_runner() {
-  local p
+  local p sec
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    _profile_section "$REPO_ROOT/$p" "Gate" | grep -qF -- 'run-gate.zsh --tests-dir' \
+    sec="$(_profile_section "$REPO_ROOT/$p" "Gate")"
+    printf '%s' "$sec" | grep -qF -- 'run-gate.zsh --tests-dir' \
       || printf '%s\n' "$p"
   done < <(_profiles)
   return 0   # status-clean on a clean tree — see _panel_restatements
@@ -628,10 +632,16 @@ _arch_contract_flat() {
 # Print nothing when the six headings appear, emphasised and in order, in the
 # flattened contract section $1; otherwise print what went wrong. Shared by the
 # real assertion and its control.
+#
+# The text reaches awk through ENVIRON, never `-v`: `-v` runs backslash-escape
+# processing over its value, so an escaped character in ARCHITECTURE.md's
+# contract section would be rewritten before `index()` ran and a heading that is
+# there could read as absent.
 _arch_order_violation() {
   local flat="$1" h pos prev=0
   for h in "${HEADINGS[@]}"; do
-    pos="$(awk -v s="$flat" -v n="**$h**" 'BEGIN { print index(s, n) }')"
+    pos="$(_AOV_S="$flat" _AOV_N="**$h**" \
+      awk 'BEGIN { print index(ENVIRON["_AOV_S"], ENVIRON["_AOV_N"]) }')"
     if [ "$pos" -eq 0 ]; then
       printf 'not named in the contract section: %s\n' "$h"
       return 0
@@ -667,7 +677,9 @@ _arch_order_violation() {
 @test "#1504 the claude-plugin profile is in the swept roster" {
   # ...and it is the one this story ships, named explicitly so a sweep that
   # somehow found a different file cannot stand in for it.
-  _profiles | grep -qxF 'development-claude-plugin/skills/resolve-profile/SKILL.md'
+  local roster
+  roster="$(_profiles)"
+  printf '%s' "$roster" | grep -qxF 'development-claude-plugin/skills/resolve-profile/SKILL.md'
 }
 
 @test "#1504 every swept profile names a repo type review-dispatch.zsh can emit" {
@@ -823,15 +835,18 @@ _arch_order_violation() {
     }
   ' "$DISPATCH" > "$planted"
   # the plant really took, measured through the same helper the detector uses
-  _emitted_types "$planted" | grep -qxF rust || {
+  local emitted missing
+  emitted="$(_emitted_types "$planted")"
+  printf '%s' "$emitted" | grep -qxF rust || {
     echo "the plant did not take — _emitted_types found no rust arm" >&2
     return 1
   }
-  _emitted_types "$planted" | grep -qxF kubernetes || {
+  printf '%s' "$emitted" | grep -qxF kubernetes || {
     echo "the plant dropped kubernetes — the fixture is not an ADDED arm" >&2
     return 1
   }
-  _types_without_profile "$planted" | grep -qxF -- 'rust (no development-rust/skills/resolve-profile/SKILL.md)'
+  missing="$(_types_without_profile "$planted")"
+  printf '%s' "$missing" | grep -qxF -- 'rust (no development-rust/skills/resolve-profile/SKILL.md)'
   # ...and the REAL script still passes the same detector
   [ -z "$(_types_without_profile)" ]
 }
@@ -859,9 +874,12 @@ _arch_order_violation() {
   local planted="$BATS_TEST_TMPDIR/no-headings.md"
   grep -v '^## ' "$PROFILE" > "$planted"
   [ "$(_profile_headings "$planted" | grep -c . || true)" -eq 0 ]
-  _order_violation "$planted" | grep -qF -- 'no `## ` headings at all'
+  local got
+  got="$(_order_violation "$planted")"
+  printf '%s' "$got" | grep -qF -- 'no `## ` headings at all'
   # ...and an unreadable path is a violation too, not a clean sweep
-  _order_violation "$BATS_TEST_TMPDIR/definitely-absent.md" | grep -qF -- '<unreadable:'
+  got="$(_order_violation "$BATS_TEST_TMPDIR/definitely-absent.md")"
+  printf '%s' "$got" | grep -qF -- '<unreadable:'
   # ...while the real profile still passes the same detector
   [ -z "$(_order_violation "$PROFILE")" ]
 }
@@ -1019,9 +1037,10 @@ _arch_order_violation() {
   bad="$(_arch_order_violation "$flat")"
   [ -z "$bad" ] || { printf '%s\n' "$bad" >&2; return 1; }
   # ...and the profile carries the same six as `##` headings
-  local h
+  local h headings
+  headings="$(_profile_headings "$PROFILE")"
   for h in "${HEADINGS[@]}"; do
-    _profile_headings "$PROFILE" | grep -qxF -- "$h" || {
+    printf '%s' "$headings" | grep -qxF -- "$h" || {
       printf 'the profile no longer carries the heading: %s\n' "$h" >&2
       return 1
     }
@@ -1205,7 +1224,9 @@ _gate_pair_violations() {
     return 1
   }
   # ...and the split is real: the exemplar HAS a runner, so it is not in the set
-  _profiles_without_runner \
+  local runnerless
+  runnerless="$(_profiles_without_runner)"
+  printf '%s' "$runnerless" \
     | grep -qxF 'development-claude-plugin/skills/resolve-profile/SKILL.md' && {
       echo "the claude-plugin profile's Gate no longer names run-gate.zsh" >&2
       return 1
@@ -1243,15 +1264,46 @@ _gate_pair_violations() {
   # The per-row twin of the row-count tripwire: without it a session resolving a
   # red pair can delete the offending TOKEN from its row and go green, since the
   # row itself survives and the row count is unchanged.
-  local row n=0
+  #
+  # PER TYPE, not only the total (#1557). The total alone is satisfied by a
+  # SWAP: drop `-race` from the go row and append a duplicate token to the python
+  # row, and the sum is still 10 while the go gate's race-detector command is no
+  # longer pinned to its anchor. The split the message names is the thing
+  # enforced, and it is the ONE source for every figure here — the total is
+  # summed from it, and the diagnostic prints it — because the sibling clause
+  # tripwire's assertion and message drifted apart once already (#1561).
+  #
+  # The same swap can also stay INSIDE one row: `go test ./...|go test ./...`
+  # keeps the go count at 2 and every token matches both files, with `-race`
+  # gone. So a row may not repeat a token either — the gate-pair twin of the
+  # duplicate-row refusal in the clause tripwire below.
+  local row n=0 t k want got summed=0 bad=""
+  local -a expect=( 'python 2' 'java 1' 'go 2' 'swift 2' 'kubernetes 3' )
+  local rows toks
+  rows="$(_gate_pairs)"
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     n=$(( n + $(printf '%s' "$row" | tr -cd '|' | wc -c) - 1 ))
-  done < <(_gate_pairs)
-  [ "$n" -eq 10 ] || {
-    printf 'the gate rows carry %s token(s), expected 10.\n' "$n" >&2
-    printf 'python 2, java 1, go 2, swift 2, kubernetes 3. Removing one unpins\n' >&2
-    printf 'that half of its Gate from the anchor that runs the command.\n' >&2
+    toks="$(printf '%s\n' "$row" | cut -d'|' -f3- | tr '|' '\n')"
+    [ "$(printf '%s\n' "$toks" | grep -c . || true)" \
+      -eq "$(printf '%s\n' "$toks" | LC_ALL=C sort -u | grep -c . || true)" ] \
+      || bad+="${row%%|*}: a token repeats in its _gate_pairs row"$'\n'
+  done <<< "$rows"
+  for k in "${expect[@]}"; do
+    t="${k%% *}"; want="${k##* }"
+    summed=$(( summed + want ))
+    got="$(printf '%s\n' "$rows" | awk -F'|' -v t="$t" '$1 == t { s += NF - 2 } END { print s + 0 }')"
+    [ "$got" -eq "$want" ] || bad+="$t: $got token(s), expected $want"$'\n'
+  done
+  # the recorded split must ACCOUNT for every token, or a row for a type absent
+  # from `expect` would be counted by nothing above
+  [ "$n" -eq "$summed" ] \
+    || bad+="the rows carry $n token(s) in all; the recorded split sums to $summed"$'\n'
+  [ -z "$bad" ] || {
+    printf 'gate-pair token counts changed:\n%s' "$bad" >&2
+    printf 'recorded split: %s\n' "${expect[*]}" >&2
+    printf 'Removing a token unpins that half of its Gate from the anchor that\n' >&2
+    printf 'runs the command; record the new split only with that argument.\n' >&2
     return 1
   }
 }
@@ -1263,13 +1315,14 @@ _gate_pair_violations() {
   # stays silent here invites a caller to pass one anyway and skip a re-run it
   # never earned. Derived from the Gate's own content, so a type that later
   # grows a runner stops being required to say this by editing that Gate.
-  local p bad=""
+  local p sec bad=""
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    _profile_section "$REPO_ROOT/$p" "Gate" \
+    sec="$(_profile_section "$REPO_ROOT/$p" "Gate")"
+    printf '%s' "$sec" \
       | grep -qF -- '--gate-attest' \
       || { bad+="$p: Gate never mentions --gate-attest"$'\n'; continue; }
-    _profile_section "$REPO_ROOT/$p" "Gate" \
+    printf '%s' "$sec" \
       | grep -qF -- 'not applicable' \
       || bad+="$p: Gate mentions --gate-attest but not that it is not applicable"$'\n'
   done < <(_profiles_without_runner)
@@ -1362,15 +1415,20 @@ _gate_pair_violations() {
     ' "$REPO_ROOT/development-python/skills/resolve-profile/SKILL.md" > "$planted"
   }
 
+  local sec out
   _plant_in_panel 'Dimensions reviewed: bugs, security.'
-  _profile_section "$planted" "Panel" | grep -qF -- 'Dimensions reviewed' \
+  sec="$(_profile_section "$planted" "Panel")"
+  printf '%s' "$sec" | grep -qF -- 'Dimensions reviewed' \
     || { echo "the dimension plant did not land inside the Panel section" >&2; return 1; }
-  _panel_restatements "$dir" | grep -qF -- "Panel names the dimension 'bugs'"
+  out="$(_panel_restatements "$dir")"
+  printf '%s' "$out" | grep -qF -- "Panel names the dimension 'bugs'"
 
   _plant_in_panel 'Bar: a WARNING and above blocks the round.'
-  _profile_section "$planted" "Panel" | grep -qF -- 'Bar:' \
+  sec="$(_profile_section "$planted" "Panel")"
+  printf '%s' "$sec" | grep -qF -- 'Bar:' \
     || { echo "the bar plant did not land inside the Panel section" >&2; return 1; }
-  _panel_restatements "$dir" | grep -qF -- 'Panel restates a severity bar'
+  out="$(_panel_restatements "$dir")"
+  printf '%s' "$out" | grep -qF -- 'Panel restates a severity bar'
 
   # ...and the real profiles pass the same detector
   [ -z "$(_panel_restatements)" ]
@@ -1415,7 +1473,7 @@ _gate_pair_violations() {
   # ONE source for the figure: the assertion and its diagnostic drifted
   # apart once already (#1561), and the message is the only thing carrying
   # the table's admission argument to whoever trips it.
-  local -r want_rows=162
+  local -r want_rows=164
   n="$(_gate_clauses | grep -c . || true)"
   local uniq
   uniq="$(_gate_clauses | LC_ALL=C sort -u | grep -c . || true)"
@@ -1444,7 +1502,7 @@ _gate_pair_violations() {
   # `#1505 the gate-pair rows carry the exact token count recorded` records its
   # own figure, and DERIVED from the table rather than counted by hand.
   local want row t got bad=""
-  local -a expect=( 'python 9' 'java 8' 'go 51' 'swift 6' 'kubernetes 88' )
+  local -a expect=( 'python 9' 'java 8' 'go 51' 'swift 8' 'kubernetes 88' )
   for row in "${expect[@]}"; do
     t="${row%% *}"; want="${row##* }"
     got="$(_gate_clauses | cut -d'|' -f1 | grep -cxF -- "$t" || true)"
@@ -2040,11 +2098,12 @@ _gate_pair_violations() {
   # Scoped PER HEADING, not per file: a whole-file grep passes on one surviving
   # mention, so the pointer could be deleted from two of the three headings with
   # the check still clean.
-  local p h bad=""
+  local p h sec bad=""
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     for h in "Fix-pass rules" "Documentation expectations" "Residue"; do
-      _profile_section "$REPO_ROOT/$p" "$h" | grep -qF -- '#1502' \
+      sec="$(_profile_section "$REPO_ROOT/$p" "$h")"
+      printf '%s' "$sec" | grep -qF -- '#1502' \
         || bad+="$p / $h: names no evidence source"$'\n'
     done
   done < <(_profiles_without_runner)
@@ -2160,10 +2219,11 @@ _moved_needles() {
   }
   # ...and they name headings the profile actually has, so a renamed heading
   # cannot leave a step pointing into nothing.
-  local h bad=""
+  local h headings bad=""
+  headings="$(_profile_headings "$PROFILE")"
   while IFS= read -r h; do
     [ -n "$h" ] || continue
-    _profile_headings "$PROFILE" | grep -qxF -- "$h" || bad+="$h"$'\n'
+    printf '%s' "$headings" | grep -qxF -- "$h" || bad+="$h"$'\n'
   done < <(grep -o 'profile: `development-<repo_type>:resolve-profile` § .*$' "$CONDUCTOR" \
              | sed 's/^profile: `development-<repo_type>:resolve-profile` § //')
   [ -z "$bad" ] || { printf 'pointer(s) naming no such profile heading:\n%s\n' "$bad" >&2; return 1; }
