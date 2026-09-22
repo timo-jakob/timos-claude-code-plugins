@@ -815,8 +815,10 @@ conftest_free_path() {
   # asserts and of what the script does: the `[[ -f && -r ]]` filter skips the
   # file, so the encryption it might have declared cannot satisfy the check. The
   # script's `could not read the .tf sources` exit is defence-in-depth behind
-  # that filter — the same "deliberately unreachable" shape as the 125 sentinel,
-  # recorded here so the next reader does not add a branch to "fix" it.
+  # that filter, so it is unreachable through file permissions — recorded here
+  # so the next reader does not add a branch to "fix" it. It IS reached through
+  # a failing reader: see "a failing .tf source READ refuses with its own
+  # message, whatever the xargs status".
   if [ "$(id -u)" -eq 0 ]; then skip "root bypasses file permissions"; fi
   root_module
   printf 'terraform {\n  encryption {}\n}\n' > "$W/secret.tf"
@@ -1872,7 +1874,10 @@ EOF
   chmod +x "$STUB/grep"
   run env "PATH=$STUB:$PATH" "$(command -v zsh)" "$GATHER" "$W"
   [ "$status" -eq 2 ]
-  contains "$output" "could not scan the .tf sources for"
+  # the probe's OWN needle, not the prefix every probe shares: the exit contract
+  # tells the classes apart by message, so a refusal naming the wrong probe
+  # must fail this
+  contains "$output" "could not scan the .tf sources for an OpenTofu encryption block"
 }
 
 @test "an emitted finding DISCLOSES a .tf search that did not complete" {
@@ -1941,6 +1946,9 @@ EOF
   run -0 jqr '[.findings_by_tool.policy[] | select(.id == "policy:conftest-unavailable") | .message] | .[0]'
   contains "$output" "exit 126"
   lacks "$output" "exit 127"
+  # the stub prints NOTHING, so this is the empty-$out alternative of the
+  # message's `if $out == ""` — no dangling "The system said: " with no text
+  lacks "$output" "The system said:"
   run -0 jqr '[.findings_by_tool.policy[].type] | join(",")'
   lacks "$output" "policy_tests_failing"
 }
@@ -2007,4 +2015,157 @@ EOF
   run -0 jqr '.notes | join(" ")'
   lacks "$output" "reusable module library"
   lacks "$output" "UNRESOLVED"
+}
+
+# --- the guarded exit-2 messages, one row each (#1429) -----------------------
+# The exit contract asks the reader to tell the exit-2 classes apart BY MESSAGE,
+# and each `|| { print …; exit 2 }` is all that stops a failed jq/tr from being a
+# bare errexit exit 1 with no diagnostic. An unpinned message can be deleted or
+# reworded with nothing noticing — so every one is pinned: the encode/format
+# guards and the `probe` refusals the other tests leave unreached in the table
+# below; the state_encryption encoder and the payload emit by the two class-(b)
+# tests above; the owns-state and OpenTofu-encryption probes by their own tests.
+# The one exception, `could not write the payload to stdout`, is recorded as
+# deliberately untested beside its guard.
+
+# a policy set whose only package sits outside `main`, plus a test fixture
+stray_policy() {
+  mkdir -p "$W/policies/conftest"
+  printf 'package terraform.security\n\ndeny contains msg if {\n  msg := "x"\n}\n' \
+    > "$W/policies/conftest/stray.rego"
+  policy_test
+}
+
+# a conftest that resolves but cannot be executed (exit 126, no output)
+stub_conftest_unexecutable() {
+  printf '#!%s\nif [ "$1" = "--version" ]; then printf "Conftest: v0.69.0\\nOPA: v1.4.2\\n"; exit 0; fi\nexit 126\n' \
+    "$(command -v bash)" > "$STUB/conftest"
+  chmod +x "$STUB/conftest"
+}
+
+# `fail_only <tool> <case-pattern>` — the SELECTIVE stub: exit 5 when the
+# tool's argv matches the pattern, otherwise exec the real tool, so a row
+# reaches exactly one guard and cannot pass because an unrelated call broke.
+# An ABSOLUTE interpreter: the conftest-free PATH carries no bash for `env`.
+fail_only() {
+  local real
+  real="$(command -v "$1")"
+  cat > "$STUB/$1" <<EOF
+#!$(command -v bash)
+case "\$*" in $2) exit 5;; esac
+exec "$real" "\$@"
+EOF
+  chmod +x "$STUB/$1"
+}
+
+# the fixtures a row names
+fx_plain()    { root_module; stub_conftest; }
+fx_absent()   { root_module; policy; policy_test; }
+fx_unexec()   { root_module; policy; policy_test; stub_conftest_unexecutable; }
+fx_untested() { root_module; policy; stub_conftest; }
+fx_stray()    { root_module; stray_policy; stub_conftest; }
+# no provider and no backend, so owns_state rests on the cloud probe alone
+fx_cloud() {
+  printf 'terraform {\n  cloud {\n    organization = "acme"\n  }\n}\n' > "$W/main.tf"
+  stub_conftest
+}
+fx_compile() {
+  root_module
+  policy
+  policy_test
+  stub_conftest 1 "1 error occurred: policies/conftest/deny_public_buckets.rego:3: rego_parse_error: unexpected token" 0.69.0 err
+}
+fx_failing() {
+  root_module
+  policy
+  policy_test
+  stub_conftest 1 "FAIL - policies/conftest/deny_public_buckets_test.rego - data.main.test_denies_public_bucket"
+}
+
+@test "every guarded encode/format failure exits 2 with its OWN message and empty stdout" {
+  # `could not write the payload to stdout` has no row: zsh's `print` returns 0
+  # on a closed stdout (macOS zsh 5.9), so no seam reaches it — the script
+  # records that branch as deliberately untested beside its guard
+  local nc fx tool pat msg rows=0
+  nc="$(conftest_free_path)"
+  while IFS='|' read -r fx tool pat msg; do
+    [ -n "$fx" ] || continue
+    rows=$((rows + 1))
+    printf 'row: %s\n' "$msg"
+    rm -rf "$W" "$STUB"
+    mkdir -p "$W" "$STUB"
+    "$fx"
+    fail_only "$tool" "$pat"
+    # </dev/null: the rows arrive on this loop's stdin, so a gather that ever
+    # read stdin would swallow the remaining rows — the count below catches
+    # that, and this keeps it from happening
+    if [ "$fx" = fx_absent ]; then
+      # deliberately WITHOUT conftest, whatever the host has installed
+      run --separate-stderr env "PATH=$STUB:$nc" "$(command -v zsh)" "$GATHER" "$W" </dev/null
+    else
+      run --separate-stderr env "PATH=$STUB:$PATH" "$(command -v zsh)" "$GATHER" "$W" </dev/null
+    fi
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    contains "$stderr" "$msg"
+  done <<'ROWS'
+fx_absent|jq|*"is not on PATH"*|could not encode the conftest-unavailable finding
+fx_unexec|jq|*"could not be executed"*|could not encode the conftest-unexecutable finding
+fx_plain|jq|"-R ."|could not encode the notes list
+fx_absent|jq|"-s ."|could not encode the policy findings
+fx_untested|jq|*untested-policies*|could not encode the policy_tests finding
+fx_stray|jq|*package-outside-invoked-namespace*|could not encode the stray-namespace finding
+fx_failing|jq|*"conftest said: "*|could not encode the verify finding
+fx_stray|tr|*|could not format the stray-package list
+fx_cloud|grep|*"-- ^[[:space:]]*cloud"*|could not scan the .tf sources for a cloud block
+fx_plain|grep|*kms_encryption_key*|could not scan the .tf sources for a backend-level encryption flag
+fx_plain|grep|*azurerm*|could not scan the .tf sources for a platform-encrypted backend
+fx_compile|grep|"-Eq -- rego_parse_error"*|could not scan the .tf sources for a Rego compile error in conftest's output
+ROWS
+  # every row ran — a loop that ended early would otherwise pass on fewer
+  [ "$rows" -eq 12 ]
+}
+
+@test "a failing .tf source READ refuses with its own message, whatever the xargs status" {
+  # unreachable through file permissions (the [[ -f && -r ]] filter skips an
+  # unreadable file first), so a reader that FAILS is the only seam. The stub
+  # fails only the `awk 1` read and delegates every other awk call. The numeric
+  # code is deliberately NOT pinned: BSD and GNU xargs report a failing child
+  # differently.
+  root_module
+  stub_conftest
+  fail_only awk '"1 "*'
+  run --separate-stderr env "PATH=$STUB:$PATH" "$(command -v zsh)" "$GATHER" "$W"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "could not read the .tf sources under"
+  contains "$stderr" "(xargs/awk exit"
+}
+
+@test "policy_tests is EVALUATED without conftest — the untested-policies finding stands" {
+  # the emit section's comment says policy_tests "evaluates without conftest at
+  # all", and the always-on note names it an EVALUATED key. Moving its block
+  # inside the conftest-present branch would be a plausible tidy-up that
+  # silently drops this high-severity finding on every machine without conftest.
+  root_module
+  policy
+  local nc
+  nc="$(conftest_free_path)"
+  run -0 env "PATH=$nc" "$(command -v zsh)" "$GATHER" "$W"
+  PAYLOAD="$output"
+  run -0 jqr '[.findings_by_tool.policy_tests[].id] | join(",")'
+  contains "$output" "policy_tests:untested-policies"
+  run -0 jqr '[.findings_by_tool.policy[].id] | join(",")'
+  contains "$output" "policy:conftest-unavailable"
+}
+
+@test "every policy finding is encoded into a scalar first, never appended inline" {
+  # the inline append rests on the append propagating the substitution's
+  # status; if it did not, `pf` gains an empty element, `jq -s` folds it to
+  # `[]`, and the finding vanishes into a green `policy: []`. POSITIVE pairing
+  # too, so deleting the appends outright cannot pass this.
+  run grep -cF 'pf+=("$(' "$GATHER"
+  [ "$output" = "0" ]
+  run grep -cF 'pf+=("$pf_one")' "$GATHER"
+  [ "$output" = "4" ]
 }
