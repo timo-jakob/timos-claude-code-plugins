@@ -6,9 +6,15 @@
 # variables (#498) — the App *installation* on the repo is all that's needed
 # for the identities to post reviews and author PRs.
 #
+# The Apps are the pair registered for the OWNER of the current repository
+# (#1683) — an organisation's pair in an organisation repo, the personal pair
+# in a personal one — resolved by claude-apps-owner.zsh, the answer every
+# Claude Apps consumer shares.
+#
 # Prerequisites:
-#   - register-claude-apps.zsh has been run (apps.json entries + Keychain
-#     keys for both claude-approver and claude-maintenance exist)
+#   - register-claude-apps.zsh has registered the Apps for this repo's owner
+#     (owners[<owner>] entries in apps.json + Keychain keys under
+#     claude-plugins.<owner>.<app>)
 #   - gh CLI authenticated against the repo's hosting account
 #   - the script is run from inside the target repo's working tree
 #
@@ -31,11 +37,12 @@ setopt err_exit nounset pipefail
 SCRIPT_DIR="${0:A:h}"
 # shellcheck source=development/skills/bootstrap/scripts/lib.sh
 source "${SCRIPT_DIR}/lib.sh"
+# shellcheck source=development/skills/bootstrap/scripts/claude-apps-owner.zsh
+source "${SCRIPT_DIR}/claude-apps-owner.zsh"
 
 # --- constants ----------------------------------------------------------------
 
-readonly CONFIG_DIR="${HOME}/.config/claude-plugins"
-readonly CONFIG_FILE="${CONFIG_DIR}/apps.json"
+readonly CONFIG_FILE="$CLAUDE_APPS_CONFIG"
 readonly KNOWN_APPS=(claude-approver claude-maintenance)
 
 # CI-era repo config (pre-#476/#498). The Actions-based Approver stored the
@@ -69,52 +76,38 @@ config_key_for() { print -- "${1//-/_}" }
 
 verify_register_run() {
   # Optional app subset (e.g. just claude-maintenance for --writer-only);
-  # defaults to all KNOWN_APPS.
+  # defaults to all KNOWN_APPS. Resolves the repo's owner first — a schema-1
+  # apps.json or an unresolvable owner stops here, naming the fix.
   local check_apps=("$@")
   (( ${#check_apps} )) || check_apps=("${KNOWN_APPS[@]}")
-  if [[ ! -f "$CONFIG_FILE" ]]; then
-    err "register-claude-apps.zsh has not been run yet on this machine."
-    err "  Run: $REGISTER_SCRIPT"
-    exit 1
-  fi
-  local app key
+  claude_apps_load || exit 1
+  local app
   for app in "${check_apps[@]}"; do
-    key=$(config_key_for "$app")
-    if ! jq -e --arg key "$key" '.[$key].app_id' "$CONFIG_FILE" >/dev/null 2>&1; then
-      err "$(app_display_name "$app") not registered locally."
-      err "  Run: $REGISTER_SCRIPT"
-      exit 1
-    fi
-    if ! security find-generic-password \
-            -s "claude-plugins.${app}" \
-            -a "private-key" \
-            -w >/dev/null 2>&1; then
-      err "Private key missing in Keychain for $(app_display_name "$app")."
-      err "  Run: $REGISTER_SCRIPT --reset $app"
-      err "  Then re-run: $REGISTER_SCRIPT"
-      exit 1
-    fi
+    claude_apps_app_id "$app" >/dev/null || exit 1
+    claude_apps_read_pem "$app" >/dev/null || exit 1
   done
-}
-
-get_repo_info() {
-  command -v gh >/dev/null 2>&1 || die "gh CLI not on PATH"
-  gh repo view --json owner,name 2>/dev/null \
-    || die "Not in a GitHub-tracked repo, or gh not authenticated."
 }
 
 # --- per-app fetch -----------------------------------------------------------
 
+# Wait for the user to finish a step in the browser. `read -p` is bash-only; in
+# zsh `-p` means "read from coprocess", so prompt and read on /dev/tty (#196).
+wait_for_enter() {
+  printf '%s' "$1" > /dev/tty
+  read -r _ < /dev/tty
+}
+
+# Both read the loaded owner's entry (claude_apps_load) — never a top-level key.
 app_id_for() {
   local key
   key=$(config_key_for "$1")
-  jq -r --arg key "$key" '.[$key].app_id' "$CONFIG_FILE"
+  jq -r --arg owner "$CA_OWNER" --arg key "$key" '.owners[$owner][$key].app_id' "$CONFIG_FILE"
 }
 
 app_slug_for() {
   local key
   key=$(config_key_for "$1")
-  jq -r --arg key "$key" '.[$key].slug // empty' "$CONFIG_FILE"
+  jq -r --arg owner "$CA_OWNER" --arg key "$key" '.owners[$owner][$key].slug // empty' "$CONFIG_FILE"
 }
 
 # Mint a short-lived App JWT from a PEM (same recipe as
@@ -195,32 +188,19 @@ app_slug_resolve() {
   local client_id
   client_id=$(print -r -- "$resp" | jq -r '.client_id // empty')
   key=$(config_key_for "$app")
-  jq --arg key "$key" --arg slug "$slug" --arg cid "$client_id" \
-    '.[$key].slug = $slug
-     | if $cid != "" then .[$key].client_id = $cid else . end' \
-    "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  jq --arg owner "$CA_OWNER" --arg key "$key" --arg slug "$slug" --arg cid "$client_id" \
+    '.owners[$owner][$key].slug = $slug
+     | if $cid != "" then .owners[$owner][$key].client_id = $cid else . end' \
+    "$CONFIG_FILE" > "$CONFIG_FILE.tmp"
+  mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+  chmod 0600 "$CONFIG_FILE"
   ok "Resolved + backfilled slug for $app: $slug" >&2
 
   print -- "$slug"
 }
 
 app_pem_for() {
-  local raw
-  raw=$(security find-generic-password \
-    -s "claude-plugins.$1" \
-    -a "private-key" \
-    -w)
-  # macOS `security find-generic-password -w` returns the stored value
-  # hex-encoded when it contains newlines. PEM private keys are
-  # multi-line, so we get hex back instead of the original PEM. Decode
-  # if the retrieval looks like pure hex; otherwise pass through. The
-  # check is conservative — PEMs contain `-` `=` newlines, none of
-  # which appear in hex output. See #208.
-  if [[ "$raw" =~ ^[0-9a-fA-F]+$ ]]; then
-    printf '%s' "$raw" | xxd -r -p
-  else
-    printf '%s' "$raw"
-  fi
+  claude_apps_read_pem "$1"
 }
 
 # --- doctor (--verify / --fix) — #234 -----------------------------------------
@@ -234,15 +214,18 @@ regenerate_key_flow() {
   local app="$1" display slug url pem
   display=$(app_display_name "$app")
   slug=$(app_slug_resolve "$app") || slug=""
+  # An organisation's Apps live under its own settings, not yours.
+  local settings="https://github.com/settings/apps"
+  [[ "$CA_OWNER_KIND" == "organization" ]] \
+    && settings="https://github.com/organizations/${CA_OWNER}/settings/apps"
   if [[ -n "$slug" ]]; then
-    url="https://github.com/settings/apps/${slug}"
+    url="${settings}/${slug}"
   else
-    url="https://github.com/settings/apps"
+    url="$settings"
   fi
 
   info "Manual step required for $display — GitHub has no API to mint App keys:"
   print -- "  1. The App settings page opens: $url"
-  print -- "     (Org-owned App? Use https://github.com/organizations/<org>/settings/apps/<slug>)"
   print -- "  2. Scroll to 'Private keys' and click 'Generate a private key'."
   print -- "     Your browser downloads '<slug>.<date>.private-key.pem'."
   print -- "  3. Come back here — the download is picked up automatically."
@@ -250,8 +233,7 @@ regenerate_key_flow() {
     return 1
   fi
   open_browser "$url"
-  printf 'Press Enter once the key has downloaded… ' > /dev/tty
-  read -r _ < /dev/tty
+  wait_for_enter 'Press Enter once the key has downloaded… '
 
   # Newest matching download. (Nom) = null glob, sorted by mtime desc.
   local -a candidates
@@ -275,9 +257,10 @@ regenerate_key_flow() {
   fi
 
   security add-generic-password -U \
-    -s "claude-plugins.${app}" \
+    -s "$(claude_apps_keychain_service "$app")" \
     -a "private-key" \
-    -w "$pem" >/dev/null
+    -w "$pem" >/dev/null \
+    || { err "Could not store the key in the Keychain — unlock it and re-run."; return 1 }
   ok "$display: new key validated and stored in the Keychain."
   warn "Old keys stay valid until deleted — remove the previous one on $url."
   warn "The downloaded file is no longer needed: rm '$pem_path'"
@@ -358,35 +341,39 @@ cmd_verify() {
   require_macos
   require_tools gh jq openssl
 
-  local repo_info owner name repo_nwo
-  repo_info=$(get_repo_info)
-  owner=$(print -- "$repo_info" | jq -r .owner.login)
-  name=$(print  -- "$repo_info" | jq -r .name)
-  repo_nwo="${owner}/${name}"
+  claude_apps_load || exit 1
+  local repo_nwo="$CA_REPO"
 
-  info "═══ Claude Apps doctor: $repo_nwo ═══"
+  info "═══ Claude Apps doctor: $repo_nwo (owner $CA_OWNER, $CA_OWNER_KIND) ═══"
   print
-
-  [[ -f "$CONFIG_FILE" ]] \
-    || die "No apps.json — run $REGISTER_SCRIPT first."
 
   # NOTE: every loop-used variable must be declared here, NOT inside the
   # loop. zsh's `local name` (no assignment) on an already-declared local
   # PRINTS the variable and its value — that pattern leaked a private key
   # to stdout during #234 testing.
-  local problems=0 app display key pem
+  local problems=0 app display key pem krc
   for app in "${KNOWN_APPS[@]}"; do
     display=$(app_display_name "$app")
     key=$(config_key_for "$app")
 
     # 1. Registered locally?
-    if ! jq -e --arg key "$key" '.[$key].app_id' "$CONFIG_FILE" >/dev/null 2>&1; then
-      err "$display: not registered locally — run $REGISTER_SCRIPT."
+    if ! jq -e --arg owner "$CA_OWNER" --arg key "$key" '.owners[$owner][$key].app_id' \
+         "$CONFIG_FILE" >/dev/null 2>&1; then
+      err "$display: not registered for $CA_OWNER — $(claude_apps_register_advice "$app")"
       (( problems++ )) || true
       continue
     fi
 
     # 2. Keychain key present + cryptographically valid for this App?
+    # A Keychain that cannot be READ (locked, prompt denied) is not a missing
+    # key: unlocking it is the fix, and regenerating the key would be wrong.
+    krc=0
+    _ca_keychain_read "$app" || krc=$?
+    if (( krc != 0 && krc != 44 )); then
+      err "$display: could not read the Keychain item $(claude_apps_keychain_service "$app") (security exit $krc) — unlock the Keychain and re-run."
+      (( problems++ )) || true
+      continue
+    fi
     pem=$(app_pem_for "$app" 2>/dev/null) || pem=""
     if [[ -z "$pem" ]] || ! pem_validate_for_app "$app" "$pem"; then
       if [[ -z "$pem" ]]; then
@@ -499,19 +486,24 @@ walk_browser_install() {
   slug=$(app_slug_resolve "$app") || slug=""
   if [[ -z "$slug" ]]; then
     warn "Could not resolve the slug for $(app_display_name "$app")."
-    warn "  Find the App at https://github.com/settings/apps and click Install."
+    if [[ "$CA_OWNER_KIND" == "organization" ]]; then
+      warn "  Find the App at https://github.com/organizations/${CA_OWNER}/settings/apps and click Install."
+    else
+      warn "  Find the App at https://github.com/settings/apps and click Install."
+    fi
     print
-    # `read -p` is bash-only; in zsh `-p` means "read from coprocess". Use
-    # /dev/tty so it works in both shells. See #196.
-    printf 'Press Enter once the install is complete… ' > /dev/tty
-    read -r _ < /dev/tty
+    wait_for_enter 'Press Enter once the install is complete… '
     return
   fi
 
   local install_url="https://github.com/apps/${slug}/installations/new"
   info "Installing $(app_display_name "$app") on $repo_nwo"
   print -- "  When the install page loads:"
-  print -- "    1. Choose your account (not an org)."
+  if [[ "$CA_OWNER_KIND" == "organization" ]]; then
+    print -- "    1. Choose the organisation ${CA_OWNER_LOGIN} (the owner of $repo_nwo)."
+  else
+    print -- "    1. Choose your personal account ${CA_OWNER_LOGIN} (the owner of $repo_nwo)."
+  fi
   print -- "    2. Select 'Only select repositories' and pick $repo_nwo."
   print -- "    3. Click Install (or Update access if the App is already installed)."
   print
@@ -523,8 +515,7 @@ walk_browser_install() {
   # See #197.
   open_browser "$install_url"
   print
-  printf 'Press Enter once the install is complete… ' > /dev/tty
-  read -r _ < /dev/tty
+  wait_for_enter 'Press Enter once the install is complete… '
 }
 
 # --- usage --------------------------------------------------------------------
@@ -562,8 +553,12 @@ Usage:
                                            GitHub has no API for).
   install-claude-apps.zsh --help           Show this help.
 
+The Apps are the pair registered for the owner of the current repository —
+an organisation's in an organisation repo, your personal pair in a personal
+one (#1683).
+
 Prerequisites:
-  - register-claude-apps.zsh has been run on this machine.
+  - register-claude-apps.zsh has registered the Apps for this repo's owner.
   - gh CLI authenticated against the repo's hosting account.
   - Run from inside the target repo's working tree.
 
@@ -618,11 +613,7 @@ main() {
     verify_register_run
   fi
 
-  local repo_info owner name repo_nwo
-  repo_info=$(get_repo_info)
-  owner=$(print -- "$repo_info" | jq -r .owner.login)
-  name=$(print  -- "$repo_info" | jq -r .name)
-  repo_nwo="${owner}/${name}"
+  local owner="$CA_OWNER" repo_nwo="$CA_REPO"
 
   # --- writer-only path (plugin repos) ----------------------------------------
   # Install ONLY the Maintenance App as the writer. No Approver (plugin repos are

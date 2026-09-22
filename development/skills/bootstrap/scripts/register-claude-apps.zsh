@@ -131,15 +131,12 @@ app_events_json() {
 #
 #   {"schema_version": 2,
 #    "owners": {"<owner>": {"owner_scope": "user|organization",
-#                           "claude_approver": {…}, "claude_maintenance": {…}}},
-#    "claude_approver": {…}, "claude_maintenance": {…}}
+#                           "claude_approver": {…}, "claude_maintenance": {…}}}}
 #
 # An owner's entry holds only the Apps that exist for it (a writer-only owner
-# has just claude_maintenance). The two top-level keys are COMPATIBILITY
-# ALIASES of owner entries (who maintains which: claim_aliases, mirror_aliases),
-# kept because the consumers (mint scripts, install-claude-apps.zsh, the
-# bootstrap probes) still read them until #1683 moves them onto the per-owner
-# registry and removes the aliases.
+# has just claude_maintenance). Every consumer — the mint scripts,
+# install-claude-apps.zsh, the bootstrap probes — reads the entry of the
+# current repository's owner, through claude-apps-owner.zsh (#1683).
 
 ensure_config_dir() {
   if [[ ! -d "$CONFIG_DIR" ]]; then
@@ -214,56 +211,11 @@ config_remove_app() {
        then del(.owners[$owner]) else . end'
 }
 
-# An ABSENT alias is taken only by ONE personal owner, recorded as
-# `alias_owner` — set by the migration (the legacy pair's owner) or by the
-# first personal login whose operation SUCCEEDS (mirror_aliases writes it).
-# Returns 0 when <owner> is or may become that owner; writes nothing. A second
-# personal login — after a `gh auth` switch — takes no alias.
-claim_aliases() {
-  local owner="$1" current
-  current=$(jq -r '.alias_owner // ""' "$CONFIG_FILE" 2>/dev/null || true)
-  [[ -z "$current" || "$current" == "$owner" ]] && return 0
-  warn "The compatibility aliases belong to '$current', not '$owner' — it takes none (until #1683 moves the consumers onto the per-owner registry)." >&2
-  return 1
-}
-
-# Keep the legacy top-level keys and Keychain items in step with <owner>'s
-# entry, once its operation has succeeded: set (and the key copied) where the
-# owner has the App, removed where it does not. Each existing alias is kept by
-# the owner it records (its owner_login), so the other owner of a mixed
-# schema-1 pair still rotates its own; an absent alias is taken only when
-# <claim> is 1 (claim_aliases). The claiming owner, left with no App, releases
-# `alias_owner`.
-mirror_aliases() {
-  local owner="$1" claim="$2" app key service pem
-  for app in "${KNOWN_APPS[@]}"; do
-    key=$(config_key_for "$app")
-    jq -e --arg owner "$owner" --arg key "$key" --argjson claim "$claim" \
-      'if .[$key] == null then $claim == 1 else .[$key].owner_login == $owner end' \
-      "$CONFIG_FILE" >/dev/null || continue
-    service=$(legacy_keychain_service_for "$app")
-    if config_has_app "$owner" "$app"; then
-      config_update --arg owner "$owner" --arg key "$key" '.[$key] = .owners[$owner][$key]'
-      pem=$(keychain_read_pem "$(keychain_service_for "$owner" "$app")") \
-        && keychain_store_pem "$service" "$pem"
-    else
-      config_update --arg key "$key" 'del(.[$key])'
-      keychain_delete_pem "$service"
-    fi
-  done
-  (( claim )) && config_update --arg owner "$owner" \
-    'if .owners[$owner] then .alias_owner = $owner else del(.alias_owner) end'
-  return 0
-}
-
 # --- keychain -----------------------------------------------------------------
 #
-# Service names carry the owner: claude-plugins.<owner>.<app>. The legacy
-# claude-plugins.<app> item is kept as an alias of the alias owner's key
-# (see the aliases note above), copied there by mirror_aliases.
+# Service names carry the owner: claude-plugins.<owner>.<app>.
 
-keychain_service_for()        { print -- "claude-plugins.$1.$2" }
-legacy_keychain_service_for() { print -- "claude-plugins.$1" }
+keychain_service_for() { print -- "claude-plugins.$1.$2" }
 
 keychain_store_pem() {
   local service="$1" pem="$2"
@@ -290,8 +242,18 @@ keychain_read_pem() {
   fi
 }
 
-keychain_has_pem() {
-  security find-generic-password -s "$1" -a "private-key" -w >/dev/null 2>&1
+# Print `present`, `missing` (security exit 44, "item not found") or
+# `unreadable` (any other failure: a locked Keychain, a denied prompt). A key
+# that cannot be read is never treated as absent — that would overwrite it or
+# register its App a second time (#1683).
+keychain_state() {
+  local rc=0
+  security find-generic-password -s "$1" -a "private-key" -w >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0)  print -- present ;;
+    44) print -- missing ;;
+    *)  print -- unreadable ;;
+  esac
 }
 
 keychain_delete_pem() {
@@ -307,9 +269,9 @@ keychain_delete_pem() {
 # use of any subcommand: back it up beside itself, copy each Keychain key to
 # its owner-qualified service, then file each entry under its recorded
 # owner_login (lower-cased; the current gh login when none was recorded). The
-# top-level keys and the legacy Keychain items are left where they are — they
-# become aliases, each stamped with the owner it was filed under (see
-# mirror_aliases); the first personal entry's owner becomes `alias_owner`.
+# top-level keys and the pre-#1682 Keychain items claude-plugins.<app> are left
+# for remove_legacy_aliases, which runs straight after and removes them in its
+# retryable order — the migration itself creates no alias.
 #
 # Idempotent: a file that already has `owners` is left alone. The config is
 # written LAST, so a run that dies copying a key leaves the file un-migrated
@@ -342,8 +304,11 @@ migrate_legacy_config() {
     owner=$(jq -r --arg key "$key" '.[$key].owner_login // ""' "$CONFIG_FILE")
     owner="${${owner:-$fallback}:l}"
     service=$(keychain_service_for "$owner" "$app")
-    keychain_has_pem "$service" && continue
-    legacy=$(legacy_keychain_service_for "$app")
+    case "$(keychain_state "$service")" in
+      present)    continue ;;
+      unreadable) die "Could not read the Keychain item $service. Unlock the Keychain and re-run — nothing was migrated." ;;
+    esac
+    legacy="claude-plugins.${app}"
     rc=0
     pem=$(keychain_read_pem "$legacy") || rc=$?
     if (( rc == 0 )); then
@@ -366,11 +331,140 @@ migrate_legacy_config() {
          owner_of($k) as $o
          | ($c[$k].owner_scope // "user") as $s
          | .[$o].owner_scope = $s
-         | .[$o][$k] = ($c[$k] + {owner_login: $o, owner_scope: $s})))
-     | reduce $keys[] as $k (.; .[$k].owner_login = owner_of($k))
-     | [$keys[] | select(($c[.].owner_scope // "user") == "user")] as $personal
-     | if ($personal | length) > 0 then .alias_owner = owner_of($personal[0]) else . end'
+         | .[$o][$k] = ($c[$k] + {owner_login: $o, owner_scope: $s})))'
   ok "Migrated to the per-owner registry." >&2
+}
+
+# --- compatibility-alias removal (#1683) --------------------------------------
+#
+# #1682 kept the pre-registry top-level keys (claude_approver,
+# claude_maintenance), `alias_owner`, and the Keychain items
+# claude-plugins.<app> as aliases of one personal owner, while the consumers
+# still read them. No consumer does any more, so they are removed on the next
+# run of any subcommand (the hook the migration runs from).
+#
+# Nothing is lost on the way. An alias whose owner — its recorded owner_login,
+# else `alias_owner` — has no copy of it is FILED first: a missing owner entry
+# is filed from the top-level one, and a missing owner-qualified key is copied
+# from the legacy item, exactly as the schema-1 migration does. Only then is the
+# legacy item deleted.
+#
+# Order is what makes it retryable: the Keychain work goes FIRST and apps.json
+# is rewritten LAST, in one write. A Keychain read or delete that fails (a
+# locked Keychain, a denied prompt) leaves apps.json as it was — its aliases
+# the marker the next run retries from. A leftover alias does nothing, since
+# nothing reads it. An already-absent legacy item is not an error.
+
+readonly LEGACY_TOP_LEVEL_KEYS='["claude_approver", "claude_maintenance", "alias_owner"]'
+
+# The owner an alias belongs to: its recorded owner_login, else alias_owner,
+# lower-cased; empty when neither is recorded. An empty owner_login counts as
+# unrecorded.
+legacy_alias_owner() {
+  jq -r --arg key "$(config_key_for "$1")" \
+    '(((.[$key] | objects | .owner_login) // "") | select(. != "")) // .alias_owner // ""
+     | ascii_downcase' "$CONFIG_FILE"
+}
+
+remove_legacy_aliases() {
+  [[ -f "$CONFIG_FILE" ]] || return 0
+  jq -e --argjson keys "$LEGACY_TOP_LEVEL_KEYS" 'has("owners") and any(.[$keys[]]; . != null)' \
+    "$CONFIG_FILE" >/dev/null 2>&1 || return 0
+
+  local app key owner legacy target pem rc failed=0 alias_id owner_id
+  for app in "${KNOWN_APPS[@]}"; do
+    key=$(config_key_for "$app")
+    legacy="claude-plugins.${app}"
+    owner=$(legacy_alias_owner "$app")
+    case "$(keychain_state "$legacy")" in
+      missing) ;;   # nothing in the Keychain to keep or delete
+      unreadable)
+        warn "Could not read the legacy Keychain item $legacy — unlock the Keychain and re-run; it and the apps.json aliases stay until then." >&2
+        failed=1; continue ;;
+      present)
+        # Keep (warn, retry next run) anything this cannot place safely: a key
+        # no apps.json record names an App for, one with no recorded owner, or
+        # one whose App differs from the owner's entry — another App's key
+        # under the owner's service would sign as the wrong App.
+        if ! jq -e --arg k "$key" '.[$k] | type == "object"' "$CONFIG_FILE" >/dev/null 2>&1; then
+          warn "The legacy Keychain item $legacy has no apps.json record naming its App — kept, with the aliases. Import it under its owner (register-claude-apps.zsh --import $app --app-id <id> --pem <file>) and re-run." >&2
+          failed=1; continue
+        fi
+        if [[ -z "$owner" ]]; then
+          warn "The legacy Keychain item $legacy belongs to no recorded owner — kept, with the apps.json aliases. Import it under its owner (register-claude-apps.zsh --import $app …) and re-run." >&2
+          failed=1; continue
+        fi
+        alias_id=$(jq -r --arg k "$key" '.[$k].app_id // "" | tostring' "$CONFIG_FILE")
+        owner_id=$(jq -r --arg o "$owner" --arg k "$key" '.owners[$o][$k].app_id // "" | tostring' "$CONFIG_FILE")
+        if [[ -n "$owner_id" && "$owner_id" != "$alias_id" ]]; then
+          warn "The legacy Keychain item $legacy is App ${alias_id:-?}'s key, but $owner's entry names App $owner_id — kept, with the apps.json aliases. Resolve it with --reset or --import, then re-run." >&2
+          failed=1; continue
+        fi
+        target=$(keychain_service_for "$owner" "$app")
+        case "$(keychain_state "$target")" in
+          unreadable)
+            warn "Could not read the Keychain item $target — unlock the Keychain and re-run; the aliases stay until then." >&2
+            failed=1; continue ;;
+          present)
+            # The owner has no entry for this App, so the write below will file
+            # the alias's App against $target — only safe when $target already
+            # holds this very key.
+            if [[ -z "$owner_id" ]]; then
+              # Read both, checking each: two failed reads are two empty
+              # strings, which must never pass as "the same key".
+              local legacy_pem="" target_pem=""
+              rc=0
+              legacy_pem=$(keychain_read_pem "$legacy") || rc=$?
+              (( rc != 0 )) || target_pem=$(keychain_read_pem "$target") || rc=$?
+              if (( rc != 0 )); then
+                warn "Could not read $legacy or $target (security exit $rc) — unlock the Keychain and re-run; the aliases stay until then." >&2
+                failed=1; continue
+              fi
+              if [[ "$legacy_pem" != "$target_pem" ]]; then
+                warn "$target already holds a key, but $owner has no apps.json entry for $(app_display_name "$app") and it differs from $legacy — both kept, with the aliases. Resolve it with --reset or --import, then re-run." >&2
+                failed=1; continue
+              fi
+            fi
+            ;;
+          missing)
+            rc=0
+            pem=$(keychain_read_pem "$legacy") || rc=$?
+            if (( rc != 0 )); then
+              warn "Could not read the legacy Keychain item $legacy (security exit $rc) — unlock the Keychain and re-run; it and the apps.json aliases stay until then." >&2
+              failed=1; continue
+            fi
+            if ! keychain_store_pem "$target" "$pem"; then
+              warn "Could not store $target — unlock the Keychain and re-run; the aliases stay until then." >&2
+              failed=1; continue
+            fi
+            info "Kept the legacy $(app_display_name "$app") key as $target." >&2
+            ;;
+        esac
+        rc=0
+        security delete-generic-password -s "$legacy" -a "private-key" >/dev/null 2>&1 || rc=$?
+        # 44 is `security`'s "item not found": already gone is done.
+        if (( rc != 0 && rc != 44 )); then
+          warn "Could not delete the legacy Keychain item $legacy (security exit $rc) — unlock the Keychain and re-run; apps.json keeps its aliases until then." >&2
+          failed=1
+        fi
+        ;;
+    esac
+  done
+  (( failed == 0 )) || return 0
+
+  # One write: file any alias its owner lacks, then drop the aliases.
+  config_update --argjson keys "$LEGACY_TOP_LEVEL_KEYS" \
+    'reduce ("claude_approver", "claude_maintenance") as $k (.;
+       if (.[$k] | type) == "object" then
+         ((((.[$k].owner_login // "") | select(. != "")) // .alias_owner // "") | ascii_downcase) as $o
+         | if $o != "" and .owners[$o][$k] == null then
+             ((.owners[$o].owner_scope) // .[$k].owner_scope // "user") as $s
+             | .owners[$o].owner_scope = $s
+             | .owners[$o][$k] = (.[$k] + {owner_login: $o, owner_scope: $s})
+           else . end
+       else . end)
+     | delpaths([$keys[] | [.]])'
+  ok "Removed the pre-#1682 compatibility aliases (top-level keys, alias_owner, legacy Keychain items)." >&2
 }
 
 # --- GitHub login -------------------------------------------------------------
@@ -640,8 +734,7 @@ list_apps() {
       key=$(config_key_for "$app")
       id=$(jq -r   --arg owner "$owner" --arg key "$key" '.owners[$owner][$key].app_id' "$CONFIG_FILE")
       slug=$(jq -r --arg owner "$owner" --arg key "$key" '.owners[$owner][$key].slug // ""' "$CONFIG_FILE")
-      pem_state="missing"
-      keychain_has_pem "$(keychain_service_for "$owner" "$app")" && pem_state="present"
+      pem_state=$(keychain_state "$(keychain_service_for "$owner" "$app")")
       printf '    %-22s id=%s slug=%s key=%s\n' \
         "$(app_display_name "$app")" "$id" "${slug:--}" "$pem_state"
     done
@@ -771,6 +864,7 @@ main() {
   require_tools curl jq gh python3 openssl
 
   migrate_legacy_config
+  remove_legacy_aliases
 
   if [[ "$mode" == list ]]; then
     list_apps
@@ -788,12 +882,6 @@ main() {
   [[ -z "$recorded" || "$recorded" == "$scope" ]] \
     || die "$owner is registered with owner_scope '$recorded', not '$scope' — refusing to mix the two (check --org)."
 
-  # Only a personal owner can take an absent compatibility alias (claim_aliases).
-  local claim=0
-  if [[ "$scope" == "user" && "$mode" != print-manifest ]] && claim_aliases "$owner"; then
-    claim=1
-  fi
-
   case "$mode" in
     register)
       SELECTED_APPS=("${KNOWN_APPS[@]}")
@@ -802,12 +890,19 @@ main() {
       local -a pending=()
       local a
       for a in "${SELECTED_APPS[@]}"; do
-        if config_has_app "$owner" "$a" \
-           && keychain_has_pem "$(keychain_service_for "$owner" "$a")"; then
-          dim "  $(app_display_name "$a") for $owner: already registered, skipping."
-        else
-          pending+=("$a")
-        fi
+        local kstate="unregistered"
+        config_has_app "$owner" "$a" && kstate=$(keychain_state "$(keychain_service_for "$owner" "$a")")
+        case "$kstate" in
+          present)
+            dim "  $(app_display_name "$a") for $owner: already registered, skipping." ;;
+          unreadable)
+            die "Could not read the Keychain item $(keychain_service_for "$owner" "$a") — unlock the Keychain and re-run (nothing was registered)." ;;
+          missing)
+            # The App still exists on GitHub: a second manifest flow would
+            # collide with its own name. Regenerate the key instead (#1683).
+            die "$(app_display_name "$a") is registered for $owner but its Keychain key is missing — registering it again would collide with the App's own name on GitHub. Regenerate the key with install-claude-apps.zsh --verify --fix (inside a repo of $owner), --import one you have, or --reset it and delete the App on GitHub first." ;;
+          *) pending+=("$a") ;;
+        esac
       done
 
       if (( ${#pending} > 0 )); then
@@ -845,9 +940,6 @@ main() {
       reset_flow "$app" "$owner"
       ;;
   esac
-
-  # Only once the operation succeeded — a run that died above claimed nothing.
-  [[ "$mode" == print-manifest ]] || mirror_aliases "$owner" "$claim"
   return 0
 }
 

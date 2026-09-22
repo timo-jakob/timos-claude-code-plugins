@@ -46,7 +46,7 @@ When installing:
 
 ## Registration & Installation
 
-### Step 1: Register the App (once per machine)
+### Step 1: Register the App (once per owner)
 
 **Who**: User or admin (one-time setup)
 
@@ -58,8 +58,9 @@ development/skills/bootstrap/scripts/register-claude-apps.zsh
 
 - Creates GitHub App at `github.com/settings/apps/new` (user interactively creates it)
 - Prompts for: app name, description, homepage URL, webhook URL (can be empty)
-- Stores app ID + private key in `~/.config/claude-plugins/apps.json`
-- Saves private key to system Keychain under `claude-plugins.claude-approver`
+- Stores the app ID under the owner's entry in `~/.config/claude-plugins/apps.json`
+  (`owners[<owner>]` — your login, or the organisation with `--org <slug>`)
+- Saves private key to system Keychain under `claude-plugins.<owner>.claude-approver`
 
 **Result**: App registered locally, ready to install on repos.
 
@@ -69,13 +70,16 @@ development/skills/bootstrap/scripts/register-claude-apps.zsh
 **When**: During `/development:bootstrap` setup
 
 ```bash
-development/skills/bootstrap/scripts/install-claude-apps.zsh --approver-only
+development/skills/bootstrap/scripts/install-claude-apps.zsh
 ```
+
+(There is no Approver-only mode: the full install installs both Apps of the
+repo's owner; `--writer-only` installs just the Maintenance App.)
 
 **What it does**:
 
-- Adds Approver App to repo's installed apps
-- Stores app metadata for later token minting
+- Walks the browser install of the repo owner's Apps onto the repo
+- Stores nothing: tokens are minted locally from the Keychain when needed
 
 **Result**: App authorized on this repo, ready to post reviews.
 
@@ -99,8 +103,12 @@ Tokens are minted locally on demand using the `mint-approver-token.zsh` script:
 mint-approver-token.zsh
 ```
 
-- Reads app ID from `~/.config/claude-plugins/apps.json`
-- Fetches private key from Keychain
+- Resolves the **owner of the current repository** and reads that owner's
+  app ID (`owners[<owner>]` in `~/.config/claude-plugins/apps.json`) — the
+  organisation's App in an organisation repo, your personal one otherwise
+  (#1683); an owner with no Approver registered fails with the exact
+  `register-claude-apps.zsh [--org <slug>] --apps claude-approver` command
+- Fetches private key from Keychain (`claude-plugins.<owner>.claude-approver`)
 - Calls GitHub API to get installation token (1 hour lifetime)
 - Writes the token to a mode-600 temp file and prints the **path** (default);
   `--stdout` prints the raw token instead. The path-by-default design keeps the
@@ -156,7 +164,7 @@ via the `/development-python:approve` skill.
 
 ### No Platform Lock-In
 
-- App registration happens once per machine
+- App registration happens once per owner (your login, or an organisation with `--org <slug>`)
 - App can be used by any AI coding assistant (Claude, Copilot, etc.)
 - User stays in control (invokes skill manually or via orchestrator they control)
 

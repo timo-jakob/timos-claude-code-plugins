@@ -4,7 +4,9 @@
 # personal login or an organisation — so both pairs coexist on one machine,
 # registers any subset of the two Apps (--apps), registers under an
 # organisation (--org) only for its owners, and migrates a schema-1 apps.json
-# in place.
+# in place. Since #1683 the compatibility aliases #1682 kept are gone (the top-level
+# keys, alias_owner and the legacy Keychain items claude-plugins.<app>):
+# registration creates none, and the next run removes any a machine carries.
 #
 # The script's `main` is driven for real against stubbed `gh`, `security`,
 # `uname` and `openssl` on PATH; the two interactive steps — opening the
@@ -66,7 +68,10 @@ EOF
   # A file-per-service Keychain: $KC_DIR/<service> holds the password. Like
   # the real `security -w`, a value containing a newline is read back as hex.
   # KC_READ_FAIL=<service> makes reading that one item fail as a locked
-  # Keychain would (exit 51, not 44's "not found").
+  # Keychain would (exit 51, not 44's "not found"); KC_DELETE_FAIL and
+  # KC_ADD_FAIL=<service> do the same to deleting / storing it, and
+  # KC_READ_FAIL_AFTER=<n> fails every item's reads after its first n — as a
+  # Keychain that locks mid-run. Every call is logged to security.log.
   cat > "$bin/security" <<'EOF'
 #!/usr/bin/env bash
 cmd="$1"; shift
@@ -80,14 +85,23 @@ while [ $# -gt 0 ]; do
   esac
 done
 f="$KC_DIR/$svc"
+echo "$cmd $svc" >> "$STUB_DIR/security.log"
 case "$cmd" in
-  add-generic-password)    printf '%s' "$pw" > "$f" ;;
+  add-generic-password)
+    [ "${KC_ADD_FAIL:-}" = "$svc" ] && exit 51
+    printf '%s' "$pw" > "$f" ;;
   find-generic-password)
     [ "${KC_READ_FAIL:-}" = "$svc" ] && exit 51
+    if [ -n "${KC_READ_FAIL_AFTER:-}" ]; then
+      c="$STUB_DIR/reads.$svc"; n=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$c"
+      [ "$n" -gt "$KC_READ_FAIL_AFTER" ] && exit 51
+    fi
     [ -f "$f" ] || exit 44
     if grep -q . <(tail -n +2 "$f"); then od -An -tx1 "$f" | tr -d ' \n'; echo; else cat "$f"; echo; fi
     ;;
-  delete-generic-password) [ -f "$f" ] || exit 44; rm -f "$f" ;;
+  delete-generic-password)
+    [ "${KC_DELETE_FAIL:-}" = "$svc" ] && exit 51
+    [ -f "$f" ] || exit 44; rm -f "$f" ;;
 esac
 EOF
 
@@ -163,12 +177,10 @@ EOF
   grep -q KEY3 "$KC_DIR/claude-plugins.acme-corp.claude-approver"
   grep -q KEY4 "$KC_DIR/claude-plugins.acme-corp.claude-maintenance"
 
-  # The compatibility aliases still mirror the PERSONAL owner, not the org.
-  [ "$(jq -r '.alias_owner' "$CONFIG")" = "octo-dev" ]
-  [ "$(jq -r '.claude_approver.app_id' "$CONFIG")" = "1001" ]
-  [ "$(jq -r '.claude_maintenance.app_id' "$CONFIG")" = "1002" ]
-  grep -q KEY1 "$KC_DIR/claude-plugins.claude-approver"
-  grep -q KEY2 "$KC_DIR/claude-plugins.claude-maintenance"
+  # No compatibility alias is created (#1683): no top-level key, no legacy item.
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-approver" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-maintenance" ]
 
   reg --list
   [ "$status" -eq 0 ]
@@ -187,7 +199,7 @@ EOF
   grep -qx 'api orgs/acme-corp/memberships/octo-dev' "$STUB_DIR/gh.log"
   [ "$(jq -r '.owners["acme-corp"].claude_approver.owner_login' "$CONFIG")" = "acme-corp" ]
   [ "$(jq -r '.owners["acme-corp"].claude_approver.owner_scope' "$CONFIG")" = "organization" ]
-  # An organisation never takes the compatibility aliases.
+  # No registration creates a compatibility alias.
   [ "$(jq -r 'has("alias_owner") or has("claude_approver")' "$CONFIG")" = "false" ]
 }
 
@@ -254,16 +266,20 @@ EOF
   contains "$output" "already registered"
 }
 
-@test "owners: an owner whose Keychain key is gone lists key=missing and is registered again" {
+@test "owners: an owner whose Keychain key is gone lists key=missing and is sent to key regeneration, not re-registered" {
   reg --apps claude-maintenance
   [ "$status" -eq 0 ]
   rm "$KC_DIR/claude-plugins.octo-dev.claude-maintenance"
 
   reg --list
   contains "$output" "key=missing"
+  # The App still exists on GitHub: a second manifest flow would collide with
+  # its own name (#1683), so the run stops and names the key fix.
   reg --apps claude-maintenance
-  [ "$status" -eq 0 ]
-  [ "$(browser_opens)" -eq 2 ]
+  [ "$status" -ne 0 ]
+  contains "$output" "install-claude-apps.zsh --verify --fix"
+  [ "$(browser_opens)" -eq 1 ]
+  [ "$(jq -r '.owners["octo-dev"].claude_maintenance.app_id' "$CONFIG")" = "1001" ]
 }
 
 # --- AC2: register a subset ----------------------------------------------------
@@ -274,7 +290,7 @@ EOF
   [ "$(browser_opens)" -eq 1 ]
   [ "$(jq -r '.owners["octo-dev"] | del(.owner_scope) | keys | join(",")' "$CONFIG")" = "claude_maintenance" ]
   [ ! -e "$KC_DIR/claude-plugins.octo-dev.claude-approver" ]
-  # No Approver alias is invented for a writer-only owner.
+  # No top-level key is invented for a writer-only owner.
   [ "$(jq -r 'has("claude_approver")' "$CONFIG")" = "false" ]
 
   reg --list
@@ -322,18 +338,16 @@ EOF
   cmp -s "$CONFIG.v1.bak" "$BATS_TEST_TMPDIR/original.json"
   [ "$(jq -r .schema_version "$CONFIG")" = "2" ]
   [ "$(jq -r '.owners | keys | join(",")' "$CONFIG")" = "octo-dev" ]
-  [ "$(jq -r '.alias_owner' "$CONFIG")" = "octo-dev" ]
   [ "$(jq -r '.owners["octo-dev"].owner_scope' "$CONFIG")" = "user" ]
   [ "$(jq -r '.owners["octo-dev"].claude_approver.app_id' "$CONFIG")" = "111" ]
   [ "$(jq -r '.owners["octo-dev"].claude_maintenance.app_id' "$CONFIG")" = "222" ]
-  # Keys copied to the owner-qualified services; legacy items kept as aliases.
+  # Keys copied to the owner-qualified services; the legacy items, the
+  # top-level keys and alias_owner are gone — the migration creates no alias.
   [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "LEGACY-APPROVER-PEM" ]
   [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-maintenance")" = "LEGACY-WRITER-PEM" ]
-  [ -e "$KC_DIR/claude-plugins.claude-approver" ]
-  [ -e "$KC_DIR/claude-plugins.claude-maintenance" ]
-  # Legacy top-level keys kept as aliases, unchanged.
-  [ "$(jq -r '.claude_approver.app_id' "$CONFIG")" = "111" ]
-  [ "$(jq -r '.claude_maintenance.app_id' "$CONFIG")" = "222" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-approver" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-maintenance" ]
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
   contains "$output" "octo-dev (user)"
   [ "$(grep -c 'key=present' <<<"$output")" -eq 2 ]
 }
@@ -355,9 +369,12 @@ EOF
   write_legacy_config
   printf -- '-----BEGIN RSA PRIVATE KEY-----\nLEGACY\n-----END RSA PRIVATE KEY-----' \
     > "$KC_DIR/claude-plugins.claude-approver"
+  cp "$KC_DIR/claude-plugins.claude-approver" "$BATS_TEST_TMPDIR/legacy.pem"
   reg --list
   [ "$status" -eq 0 ]
-  cmp -s "$KC_DIR/claude-plugins.claude-approver" "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  # The legacy item itself is removed on the same run (#1683), so compare the
+  # copy with what it held.
+  cmp -s "$BATS_TEST_TMPDIR/legacy.pem" "$KC_DIR/claude-plugins.octo-dev.claude-approver"
 }
 
 @test "owners: migration files a legacy pair under its RECORDED owner, not the current login" {
@@ -377,12 +394,6 @@ EOF
   [ "$(jq -r '.owners | keys | join(",")' "$CONFIG")" = "octo-dev" ]
   [ "$(jq -r '.owners["octo-dev"].claude_approver.owner_login' "$CONFIG")" = "octo-dev" ]
   [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "LEGACY-APPROVER-PEM" ]
-
-  # The alias it was filed under is its owner's to keep in step.
-  printf -- '-----BEGIN RSA PRIVATE KEY-----\nROTATED\n-----END RSA PRIVATE KEY-----\n' > "$BATS_TEST_TMPDIR/k.pem"
-  reg --import claude-approver --app-id 111 --pem "$BATS_TEST_TMPDIR/k.pem"
-  [ "$status" -eq 0 ]
-  grep -q ROTATED "$KC_DIR/claude-plugins.claude-approver"
 }
 
 @test "owners: migration lower-cases a recorded owner_login" {
@@ -393,13 +404,8 @@ EOF
   [ "$status" -eq 0 ]
   # `ls`, not `-e`: a case-insensitive filesystem would match either spelling.
   [ "$(ls "$KC_DIR" | grep -c '^claude-plugins\.octo-dev\.claude-approver$')" -eq 1 ]
-  [ "$(jq -c '[(.owners | keys), .alias_owner]' "$CONFIG")" = '[["octo-dev"],"octo-dev"]' ]
-
-  # The alias it recorded as Octo-Dev is octo-dev's to rotate.
-  printf -- '-----BEGIN RSA PRIVATE KEY-----\nROTATED\n-----END RSA PRIVATE KEY-----\n' > "$BATS_TEST_TMPDIR/k.pem"
-  reg --import claude-approver --app-id 111 --pem "$BATS_TEST_TMPDIR/k.pem"
-  [ "$status" -eq 0 ]
-  grep -q ROTATED "$KC_DIR/claude-plugins.claude-approver"
+  [ "$(jq -c '(.owners | keys)' "$CONFIG")" = '["octo-dev"]' ]
+  [ "$(jq -r '.owners["octo-dev"].claude_approver.owner_login' "$CONFIG")" = "octo-dev" ]
 }
 
 @test "owners: migration of a writer-only legacy file files just that App" {
@@ -408,51 +414,17 @@ EOF
   mv "$CONFIG.tmp" "$CONFIG"
   reg --list
   [ "$status" -eq 0 ]
-  [ "$(jq -c '[(.owners | keys), (.owners["octo-dev"] | del(.owner_scope) | keys), .alias_owner]' "$CONFIG")" = '[["octo-dev"],["claude_maintenance"],"octo-dev"]' ]
+  [ "$(jq -c '[(.owners | keys), (.owners["octo-dev"] | del(.owner_scope) | keys)]' "$CONFIG")" = '[["octo-dev"],["claude_maintenance"]]' ]
 }
 
-@test "owners: migration keeps a recorded organisation scope, which takes no alias" {
+@test "owners: migration keeps a recorded organisation scope" {
   write_legacy_config
   jq '.claude_approver.owner_login = "acme-corp" | .claude_approver.owner_scope = "organization"' "$CONFIG" > "$CONFIG.tmp"
   mv "$CONFIG.tmp" "$CONFIG"
   reg --list
   [ "$status" -eq 0 ]
-  [ "$(jq -c '[.owners["acme-corp"].owner_scope, .alias_owner]' "$CONFIG")" = '["organization","octo-dev"]' ]
-
-  # The organisation's own --org run keeps the alias recorded for it in step.
-  printf -- '-----BEGIN RSA PRIVATE KEY-----\nROTATED\n-----END RSA PRIVATE KEY-----\n' > "$BATS_TEST_TMPDIR/k.pem"
-  reg --import claude-approver --app-id 333 --pem "$BATS_TEST_TMPDIR/k.pem" --org acme-corp
-  [ "$status" -eq 0 ]
-  grep -q ROTATED "$KC_DIR/claude-plugins.claude-approver"
-}
-
-@test "owners: a legacy pair with two owners keeps the other owner's alias through a rotation" {
-  write_legacy_config
-  jq '.claude_maintenance.owner_login = "other-login"' "$CONFIG" > "$CONFIG.tmp"
-  mv "$CONFIG.tmp" "$CONFIG"
-  printf -- '-----BEGIN RSA PRIVATE KEY-----\nROTATED\n-----END RSA PRIVATE KEY-----\n' > "$BATS_TEST_TMPDIR/k.pem"
-  reg --import claude-approver --app-id 111 --pem "$BATS_TEST_TMPDIR/k.pem"
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.claude_maintenance.owner_login' "$CONFIG")" = "other-login" ]
-  [ "$(cat "$KC_DIR/claude-plugins.claude-maintenance")" = "LEGACY-WRITER-PEM" ]
-
-  # The alias owner registering that App itself leaves the other owner's alias.
-  reg --apps claude-maintenance
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.claude_maintenance.owner_login' "$CONFIG")" = "other-login" ]
-  [ "$(cat "$KC_DIR/claude-plugins.claude-maintenance")" = "LEGACY-WRITER-PEM" ]
-
-  # ...while the other owner still rotates its own alias key.
-  export GH_LOGIN="other-login"
-  reg --import claude-maintenance --app-id 333 --pem "$BATS_TEST_TMPDIR/k.pem"
-  [ "$status" -eq 0 ]
-  grep -q ROTATED "$KC_DIR/claude-plugins.claude-maintenance"
-  [ "$(jq -r '.claude_maintenance.app_id' "$CONFIG")" = "333" ]
-
-  # ...and removes it with its own --reset.
-  reg --reset claude-maintenance
-  [ "$status" -eq 0 ]
-  [ ! -e "$KC_DIR/claude-plugins.claude-maintenance" ]
+  [ "$(jq -c '[.owners["acme-corp"].owner_scope, .owners["octo-dev"].owner_scope]' "$CONFIG")" = '["organization","user"]' ]
+  [ "$(cat "$KC_DIR/claude-plugins.acme-corp.claude-approver")" = "LEGACY-APPROVER-PEM" ]
 }
 
 @test "owners: migration keeps an existing owner-qualified key and an existing backup" {
@@ -605,7 +577,7 @@ EOF
 
 # --- per-owner --import / --reset ----------------------------------------------
 
-@test "owners: --import --org files the key under the organisation, leaving the personal aliases alone" {
+@test "owners: --import --org files the key under the organisation, leaving the personal owner alone" {
   reg --apps claude-maintenance
   [ "$status" -eq 0 ]
   printf -- '-----BEGIN RSA PRIVATE KEY-----\nORGKEY\n-----END RSA PRIVATE KEY-----\n' > "$BATS_TEST_TMPDIR/k.pem"
@@ -615,43 +587,8 @@ EOF
   [ "$(jq -r '.owners["acme-corp"].claude_maintenance.app_id' "$CONFIG")" = "4242" ]
   [ "$(jq -r '.owners["acme-corp"].owner_scope' "$CONFIG")" = "organization" ]
   grep -q ORGKEY "$KC_DIR/claude-plugins.acme-corp.claude-maintenance"
-  [ "$(jq -r '.claude_maintenance.app_id' "$CONFIG")" = "1001" ]
-  grep -q KEY1 "$KC_DIR/claude-plugins.claude-maintenance"
-}
-
-@test "owners: a personal --import (key rotation) updates the legacy alias key too" {
-  reg --apps claude-maintenance
-  [ "$status" -eq 0 ]
-  printf -- '-----BEGIN RSA PRIVATE KEY-----\nROTATED\n-----END RSA PRIVATE KEY-----\n' > "$BATS_TEST_TMPDIR/k.pem"
-  reg --import claude-maintenance --app-id 4242 --pem "$BATS_TEST_TMPDIR/k.pem"
-  [ "$status" -eq 0 ]
-  grep -q ROTATED "$KC_DIR/claude-plugins.claude-maintenance"
-}
-
-@test "owners: a failed first run claims no aliases, so the next login that registers gets them" {
-  export CONVERSION="fail"
-  reg --apps claude-maintenance
-  [ "$status" -ne 0 ]
-  export CONVERSION="ok" GH_LOGIN="new-login"
-  reg --apps claude-maintenance
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.alias_owner' "$CONFIG")" = "new-login" ]
-}
-
-@test "owners: a login that takes over released aliases has its existing Apps mirrored" {
-  reg --apps claude-maintenance
-  [ "$status" -eq 0 ]
-  export GH_LOGIN="new-login"
-  reg --apps claude-maintenance
-  [ "$status" -eq 0 ]
-  export GH_LOGIN="octo-dev"
-  reg --reset claude-maintenance
-  [ "$status" -eq 0 ]
-
-  export GH_LOGIN="new-login"
-  reg --apps claude-maintenance
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.claude_maintenance.owner_login' "$CONFIG")" = "new-login" ]
+  [ "$(jq -r '.owners["octo-dev"].claude_maintenance.app_id' "$CONFIG")" = "1001" ]
+  grep -q KEY1 "$KC_DIR/claude-plugins.octo-dev.claude-maintenance"
 }
 
 @test "owners: --import validates its inputs before storing anything" {
@@ -689,8 +626,7 @@ EOF
   [ "$(jq -r '.owners["acme-corp"] | has("claude_maintenance")' "$CONFIG")" = "true" ]
   [ ! -e "$KC_DIR/claude-plugins.acme-corp.claude-approver" ]
   [ -e "$KC_DIR/claude-plugins.octo-dev.claude-approver" ]
-  grep -q KEY1 "$KC_DIR/claude-plugins.claude-approver"
-  [ "$(jq -r '.claude_approver.app_id' "$CONFIG")" = "1001" ]
+  [ "$(jq -r '.owners["octo-dev"].claude_approver.app_id' "$CONFIG")" = "1001" ]
 }
 
 @test "owners: --reset of an App the owner does not have is refused" {
@@ -699,7 +635,7 @@ EOF
   contains "$output" "is not registered for typo-corp"
 }
 
-@test "owners: --reset of the personal owner's last App drops the owner and its aliases" {
+@test "owners: --reset of the personal owner's last App drops the owner" {
   reg --apps claude-maintenance
   [ "$status" -eq 0 ]
   reg --reset claude-maintenance
@@ -714,22 +650,346 @@ EOF
   contains "$output" "No Claude Apps registered."
 }
 
-@test "owners: a second personal login never rewrites the alias owner's aliases" {
-  write_legacy_config
+# --- #1683: the #1682 compatibility aliases are removed ------------------------
+
+# A machine #1682 migrated: owner entries plus the aliases it kept.
+write_aliased_config() {
+  mkdir -p "$HOME/.config/claude-plugins"
+  cat > "$CONFIG" <<'EOF'
+{
+  "schema_version": 2,
+  "owners": {
+    "octo-dev": {"owner_scope": "user",
+      "claude_approver": {"app_id": 111, "slug": "claude-approver-octo-dev", "owner_login": "octo-dev", "owner_scope": "user"},
+      "claude_maintenance": {"app_id": 222, "slug": "claude-maintenance-octo-dev", "owner_login": "octo-dev", "owner_scope": "user"}},
+    "acme-corp": {"owner_scope": "organization",
+      "claude_maintenance": {"app_id": 333, "slug": "claude-maintenance-acme-corp", "owner_login": "acme-corp", "owner_scope": "organization"}}
+  },
+  "alias_owner": "octo-dev",
+  "claude_approver": {"app_id": 111, "slug": "claude-approver-octo-dev", "owner_login": "octo-dev", "owner_scope": "user"},
+  "claude_maintenance": {"app_id": 222, "slug": "claude-maintenance-octo-dev", "owner_login": "octo-dev", "owner_scope": "user"}
+}
+EOF
+  chmod 0600 "$CONFIG"
+  printf 'OWNER-APPROVER'  > "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  printf 'OWNER-WRITER'    > "$KC_DIR/claude-plugins.octo-dev.claude-maintenance"
+  printf 'ORG-WRITER'      > "$KC_DIR/claude-plugins.acme-corp.claude-maintenance"
+  printf 'LEGACY-APPROVER' > "$KC_DIR/claude-plugins.claude-approver"
+  printf 'LEGACY-WRITER'   > "$KC_DIR/claude-plugins.claude-maintenance"
+}
+
+owner_state() {
+  jq -S '.owners' "$CONFIG"
+  (cd "$KC_DIR" && for f in claude-plugins.*.*; do printf '%s=%s\n' "$f" "$(cat "$f")"; done)
+}
+
+@test "aliases: one run removes the top-level keys, alias_owner and both legacy Keychain items" {
+  write_aliased_config
+  local before
+  before="$(owner_state)"
+
   reg --list
   [ "$status" -eq 0 ]
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-approver" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-maintenance" ]
+  # Owner entries and owner-qualified keys are untouched.
+  [ "$(owner_state)" = "$before" ]
+  contains "$output" "Removed the pre-#1682 compatibility aliases"
+  [ -n "$(find "$CONFIG" -perm 0600)" ]
+}
 
-  export GH_LOGIN="new-login"
+# The order (Keychain first, apps.json last) is what this proves: a delete that
+# fails leaves apps.json exactly as it was.
+@test "aliases: a failed Keychain delete warns, keeps the apps.json aliases, and a re-run completes" {
+  write_aliased_config
+  local before_config
+  before_config="$(cat "$CONFIG")"
+  export KC_DELETE_FAIL="claude-plugins.claude-approver"
+
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "Could not delete the legacy Keychain item claude-plugins.claude-approver"
+  [ "$(cat "$CONFIG")" = "$before_config" ]
+  [ -e "$KC_DIR/claude-plugins.claude-approver" ]
+
+  unset KC_DELETE_FAIL
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-approver" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-maintenance" ]
+}
+
+@test "aliases: an already-absent legacy item is not an error" {
+  write_aliased_config
+  rm "$KC_DIR/claude-plugins.claude-approver" "$KC_DIR/claude-plugins.claude-maintenance"
+  reg --list
+  [ "$status" -eq 0 ]
+  lacks "$output" "Could not delete"
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+}
+
+@test "aliases: the cleanup is idempotent — a second run changes nothing and says nothing" {
+  write_aliased_config
+  reg --list
+  [ "$status" -eq 0 ]
+  local before
+  before="$(state_sum)"
+  : > "$STUB_DIR/security.log"
+
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(state_sum)" = "$before" ]
+  lacks "$output" "Removed the pre-#1682"
+  lacks "$output" "Could not delete"
+  run grep -c 'delete-generic-password' "$STUB_DIR/security.log"
+  [ "$output" = "0" ]
+}
+
+@test "aliases: --help removes nothing; --print-manifest removes them and stays valid JSON" {
+  write_aliased_config
+  local before
+  before="$(state_sum)"
+  reg --help
+  [ "$status" -eq 0 ]
+  [ "$(state_sum)" = "$before" ]
+
+  run bash -c 'zsh "$1" --print-manifest claude-approver 2>/dev/null' _ "$DRIVE"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .name <<<"$output")" = "claude-approver-octo-dev" ]
+  [ "$(jq -r 'has("alias_owner")' "$CONFIG")" = "false" ]
+}
+
+@test "aliases: the alias functions are gone from the script" {
+  run grep -nE 'claim_aliases|mirror_aliases|legacy_keychain_service_for|\.alias_owner = ' "$S"
+  [ "$status" -eq 1 ]
+}
+
+@test "aliases: an alias whose owner has no copy of the key is copied there before the legacy item goes" {
+  write_aliased_config
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "LEGACY-APPROVER" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-approver" ]
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+}
+
+@test "aliases: an alias whose owner has no entry for that App is filed under the owner, not dropped" {
+  write_aliased_config
+  jq 'del(.owners["octo-dev"].claude_approver)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.owners["octo-dev"].claude_approver.app_id' "$CONFIG")" = "111" ]
+  [ "$(jq -r '.owners["octo-dev"].claude_approver.owner_login' "$CONFIG")" = "octo-dev" ]
+  [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "LEGACY-APPROVER" ]
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+  contains "$output" "Claude Approver"
+}
+
+@test "aliases: a legacy key that cannot be READ is neither copied nor deleted, and apps.json keeps its aliases" {
+  write_aliased_config
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  local before_config
+  before_config="$(cat "$CONFIG")"
+  export KC_READ_FAIL="claude-plugins.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "Could not read the legacy Keychain item claude-plugins.claude-approver — unlock the Keychain"
+  [ "$(cat "$CONFIG")" = "$before_config" ]
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  [ ! -e "$KC_DIR/claude-plugins.octo-dev.claude-approver" ]
+
+  unset KC_READ_FAIL
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "LEGACY-APPROVER" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-approver" ]
+}
+
+@test "aliases: an alias with no (or an empty) owner_login belongs to alias_owner" {
+  write_aliased_config
+  jq 'del(.claude_approver.owner_login) | .claude_maintenance.owner_login = ""
+      | del(.owners["octo-dev"].claude_approver)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver" "$KC_DIR/claude-plugins.octo-dev.claude-maintenance"
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.owners["octo-dev"].claude_approver.app_id' "$CONFIG")" = "111" ]
+  [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "LEGACY-APPROVER" ]
+  [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-maintenance")" = "LEGACY-WRITER" ]
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+}
+
+@test "aliases: an alias's mixed-case owner is its lower-cased registry key" {
+  write_aliased_config
+  jq '.claude_approver.owner_login = "Octo-Dev" | del(.owners["octo-dev"].claude_approver)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  # `ls`, not `-e`: a case-insensitive filesystem would match either spelling.
+  [ "$(ls "$KC_DIR" | grep -c '^claude-plugins\.octo-dev\.claude-approver$')" -eq 1 ]
+  [ "$(jq -c '.owners | keys' "$CONFIG")" = '["acme-corp","octo-dev"]' ]
+  [ "$(jq -r '.owners["octo-dev"].claude_approver.owner_login' "$CONFIG")" = "octo-dev" ]
+}
+
+@test "aliases: an alias whose owner has no entry at all is filed with scope user" {
+  write_aliased_config
+  jq '.claude_approver.owner_login = "new-owner" | del(.claude_approver.owner_scope)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.owners["new-owner"].owner_scope' "$CONFIG")" = "user" ]
+  [ "$(jq -r '.owners["new-owner"].claude_approver.app_id' "$CONFIG")" = "111" ]
+  [ "$(cat "$KC_DIR/claude-plugins.new-owner.claude-approver")" = "LEGACY-APPROVER" ]
+}
+
+@test "aliases: owner key and legacy item both absent is not an error — the aliases go" {
+  write_aliased_config
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver" "$KC_DIR/claude-plugins.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  lacks "$output" "Could not"
+  [ "$(jq -c 'keys' "$CONFIG")" = '["owners","schema_version"]' ]
+}
+
+@test "aliases: a legacy key with no recorded owner at all is kept, with the aliases" {
+  write_aliased_config
+  jq 'del(.alias_owner) | del(.claude_approver.owner_login)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "belongs to no recorded owner — kept"
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  [ "$(jq -r 'has("claude_approver")' "$CONFIG")" = "true" ]
+}
+
+@test "aliases: a legacy key of another App than the owner's entry is never copied under it" {
+  write_aliased_config
+  jq '.claude_approver.app_id = 999' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  local before_config
+  before_config="$(cat "$CONFIG")"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "is App 999's key, but octo-dev's entry names App 111 — kept"
+  [ ! -e "$KC_DIR/claude-plugins.octo-dev.claude-approver" ]
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  # Kept WITH the aliases: apps.json still names App 999.
+  [ "$(cat "$CONFIG")" = "$before_config" ]
+}
+
+@test "aliases: an owner key that cannot be READ is never overwritten by the legacy key" {
+  write_aliased_config
+  export KC_READ_FAIL="claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "Could not read the Keychain item claude-plugins.octo-dev.claude-approver"
+  [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "OWNER-APPROVER" ]
+  [ -e "$KC_DIR/claude-plugins.claude-approver" ]
+  [ "$(jq -r 'has("alias_owner")' "$CONFIG")" = "true" ]
+}
+
+@test "owners: a key that cannot be READ is key=unreadable in --list, and stops a registration" {
   reg --apps claude-maintenance
   [ "$status" -eq 0 ]
-  contains "$output" "belong to 'octo-dev'"
-  [ "$(jq -r '.alias_owner' "$CONFIG")" = "octo-dev" ]
-  [ "$(jq -r '.claude_approver.app_id' "$CONFIG")" = "111" ]
-  [ "$(jq -r '.claude_maintenance.app_id' "$CONFIG")" = "222" ]
-  [ "$(cat "$KC_DIR/claude-plugins.claude-maintenance")" = "LEGACY-WRITER-PEM" ]
-
-  reg --reset claude-maintenance
+  export KC_READ_FAIL="claude-plugins.octo-dev.claude-maintenance"
+  reg --list
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.claude_maintenance.app_id' "$CONFIG")" = "222" ]
-  [ -e "$KC_DIR/claude-plugins.claude-maintenance" ]
+  contains "$output" "key=unreadable"
+  reg --apps claude-maintenance
+  [ "$status" -ne 0 ]
+  contains "$output" "Could not read the Keychain item claude-plugins.octo-dev.claude-maintenance"
+  [ "$(browser_opens)" -eq 1 ]
+}
+
+@test "aliases: a failed store of the copied key keeps the legacy item and apps.json untouched" {
+  write_aliased_config
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  local before_config
+  before_config="$(cat "$CONFIG")"
+  export KC_ADD_FAIL="claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "Could not store claude-plugins.octo-dev.claude-approver"
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  [ "$(cat "$CONFIG")" = "$before_config" ]
+}
+
+@test "aliases: a legacy key with no apps.json record naming its App is kept" {
+  write_aliased_config
+  jq 'del(.claude_approver)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  rm "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "has no apps.json record naming its App — kept"
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  [ ! -e "$KC_DIR/claude-plugins.octo-dev.claude-approver" ]
+  [ "$(jq -r 'has("alias_owner")' "$CONFIG")" = "true" ]
+}
+
+@test "aliases: another App's legacy key is kept even when the owner's own key is present" {
+  write_aliased_config
+  jq '.claude_approver.app_id = 999' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  local before_config
+  before_config="$(cat "$CONFIG")"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "is App 999's key, but octo-dev's entry names App 111 — kept"
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  [ "$(cat "$KC_DIR/claude-plugins.octo-dev.claude-approver")" = "OWNER-APPROVER" ]
+  [ "$(jq -r '.claude_approver.app_id' "$CONFIG")" = "999" ]
+  [ "$(cat "$CONFIG")" = "$before_config" ]
+}
+
+@test "aliases: an alias whose owner has no entry but a DIFFERENT key under its service is kept" {
+  write_aliased_config
+  jq 'del(.owners["octo-dev"].claude_approver)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "already holds a key, but octo-dev has no apps.json entry for Claude Approver"
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  [ "$(jq -r '.owners["octo-dev"] | has("claude_approver")' "$CONFIG")" = "false" ]
+
+  # The same key under both services is safe: filed, then the alias goes.
+  printf 'LEGACY-APPROVER' > "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.owners["octo-dev"].claude_approver.app_id' "$CONFIG")" = "111" ]
+  [ ! -e "$KC_DIR/claude-plugins.claude-approver" ]
+}
+
+@test "owners: migration stops when the owner-qualified Keychain item cannot be read, leaving schema 1" {
+  write_legacy_config
+  export KC_READ_FAIL="claude-plugins.octo-dev.claude-approver"
+  reg --list
+  [ "$status" -ne 0 ]
+  contains "$output" "nothing was migrated"
+  [ "$(jq -r 'has("owners")' "$CONFIG")" = "false" ]
+  [ ! -e "$KC_DIR/claude-plugins.octo-dev.claude-approver" ]
+}
+
+@test "aliases: two keys that cannot be READ are never taken for the same key" {
+  write_aliased_config
+  jq 'del(.owners["octo-dev"].claude_approver)' "$CONFIG" > "$CONFIG.tmp"
+  mv "$CONFIG.tmp" "$CONFIG"
+  # The same key under both services — but the Keychain locks after each
+  # item's first read (the state probe), so the comparison cannot read either.
+  printf 'LEGACY-APPROVER' > "$KC_DIR/claude-plugins.octo-dev.claude-approver"
+  local before_config
+  before_config="$(cat "$CONFIG")"
+  export KC_READ_FAIL_AFTER=1
+  reg --list
+  [ "$status" -eq 0 ]
+  contains "$output" "Could not read claude-plugins.claude-approver or claude-plugins.octo-dev.claude-approver"
+  [ "$(cat "$KC_DIR/claude-plugins.claude-approver")" = "LEGACY-APPROVER" ]
+  [ "$(cat "$CONFIG")" = "$before_config" ]
 }
