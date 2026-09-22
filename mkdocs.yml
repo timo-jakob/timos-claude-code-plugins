@@ -92,6 +92,7 @@ nav:
       - Amend a C4 diagram: how-to/amend-a-c4-diagram.md
       - Adopt the ops surface: how-to/adopt-the-ops-surface.md
       - Keep app repos out of the cluster: how-to/keep-app-repos-out-of-the-cluster.md
+      - Bootstrap a GitOps repository: how-to/bootstrap-a-gitops-repo.md
       - Adopt the API styleguide: how-to/adopt-the-api-styleguide.md
       - Read your pipeline telemetry: how-to/read-pipeline-telemetry.md
       - Switch fable agents to opus: how-to/switch-fable-agents-to-opus.md
@@ -107,6 +108,7 @@ nav:
       - c4_drift findings: reference/c4-drift-findings.md
       - Grafana hand-off contract: reference/telemetry-grafana-handoff.md
       - Repo scripts: reference/repo-scripts.md
+      - .maintenance.yml: reference/maintenance-yml.md
       - Requirements: reference/requirements.md
       - Personas: personas.md
   - Explanation:
@@ -117,6 +119,7 @@ nav:
       - The C4 architecture docs: explanation/c4-architecture-docs.md
       - The target-repo docs stack: explanation/target-repo-docs-stack.md
       - The local review loop: explanation/review-loop.md
+      - The IaC gate: explanation/iac-gate.md
       - Pipeline telemetry: explanation/pipeline-telemetry.md
       - The Grafana hand-off: explanation/telemetry-grafana-handoff.md
       - Philosophy: explanation/philosophy.md

@@ -751,20 +751,36 @@ rstep() {
   contains "$ARCH_SECTION" 'not* the same as no auto-merge'
 }
 
-@test "ARCHITECTURE.md records the six checks and who owns the pipeline (#1151)" {
+@test "ARCHITECTURE.md records the six-stage gate and who owns the pipeline (#1151, #1607)" {
   # the constraint #1154 will be reviewed against: the workflow is a BOOTSTRAP
   # template owned by the generic development plugin, not something this
   # plugin's skills run — the same boundary that keeps detection in development
   local flat
   flat="$(printf '%s' "$ARCH_SECTION" | tr -s '[:space:]' ' ')"
-  contains "$flat" '**six checks**'
+  # #1607: the gate model replaced the six separate checks — one command,
+  # scripts/k8s-gate.zsh, running six STAGES, recorded as `gate:`. The retired
+  # wording is asserted gone so a regenerate-from-an-older-draft cannot restore it.
+  contains "$flat" '**six stages**'
+  contains "$flat" 'scripts/k8s-gate.zsh'
+  contains "$flat" '`gate:`'
+  lacks "$flat" '**six checks**'
+  lacks "$flat" 'six-check workflow'
+  # …and in EVERY spelling, not only the two it last had: each word-bounded
+  # "six" in the section must be the count of stages. `-w`, so a word merely
+  # containing "six" is never counted; "six-check" IS a word-bounded "six" and
+  # is not "six stages", so it reds.
+  local sixes stages
+  sixes="$(printf '%s\n' "$flat" | grep -oiwE 'six' | awk 'END{print NR}')"
+  stages="$(printf '%s\n' "$flat" | grep -oiwE 'six stages' | awk 'END{print NR}')"
+  [ "$sixes" -ge 1 ]
+  [ "$sixes" -eq "$stages" ]
   contains "$flat" 'render → schema → lint → policy → config-scan → argocd'
   # the count word and the list length must not drift: a seventh step appended
   # to the arrow list would otherwise still satisfy the substring needle while
   # the prose kept saying "six"
   lacks "$flat" 'config-scan → argocd →'
   # and at the head — a PREPENDED stage satisfies the substring needle, the tail
-  # guard and the literal "six checks" all at once
+  # guard and the literal "six stages" all at once
   lacks "$flat" '→ render'
   contains "$flat" 'a *bootstrap* template owned by the generic `development` plugin'
   # #1154 shipped the template, so the deliberately future-tense wording is now
