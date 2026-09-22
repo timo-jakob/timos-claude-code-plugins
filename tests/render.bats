@@ -417,6 +417,15 @@ tools:
   [ "$(cat "$OUT/notes.md")" = "notes" ]
 }
 
+@test "render: #1632 the shipped check-ops-conformance.zsh template renders executable" {
+  # the resilience READMEs run scripts/check-ops-conformance.zsh by path, so the
+  # real template must carry the bit the mirror above copies onto the output
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    common/scripts/check-ops-conformance.zsh
+  [ "$status" -eq 0 ]
+  [ -x "$OUT/common/scripts/check-ops-conformance.zsh" ]
+}
+
 @test "render: #1604 an IaC-shaped tag keep_block was never taught still fails loudly" {
   # KUBERNETES was ADDED to the keep-rules; the loud failure for every other tag stays
   printf '# --- IAC-START ---\nx\n# --- IAC-END ---\n' > "$T/i.tmpl"
