@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
 # The `persona_derivations` story-spec field and the corner-case derivation it
-# records (#1361, slice 1 of epic #1266).
+# records (#1361, slice 1 of epic #1266), plus the `ux` slice (#1362, slice 2).
 #
 # WHY THIS FILE EXISTS: the whole deliverable of #1361 is PROSE — a field added
 # to ARCHITECTURE.md's *Story-spec contract* and a derivation section added to
@@ -189,6 +189,7 @@ json_after() {
   file_has "$ARCH" '`slice` (`corner-cases` \| `ux` \| `consistency`)'
   file_has "$ARCH" '`persona` (a `personas/v1` id, or `null`)'
   file_has "$ARCH" '`basis` (the persona field it came from, with the shape that made it a corner'
+  file_has "$ARCH" 'for `ux`, the condition, e.g. `context — spotty 3G`'
   file_has "$ARCH" '`target` (`test_cases` \| `acceptance_criteria`)'
   file_has "$ARCH" '`ref` (a `test_cases[].id`, or the `acceptance_criteria` string verbatim)'
 }
@@ -280,11 +281,13 @@ json_after() {
 }
 
 
-@test "contract: the staged rollout is stated — corner-cases ships, ux and consistency are reserved" {
+@test "contract: the staged rollout is stated — corner-cases and ux ship, consistency is reserved" {
   run -0 extract "$ARCH" "$DERIV_START" "$SECTION_END_3"
   contains "$output" '**Staged rollout.**'
-  contains "$output" '#1361 ships the `corner-cases` slice only'
-  contains "$output" '`ux` and `consistency` are reserved for #1362 and #1363'
+  contains "$output" '#1361 shipped the `corner-cases` slice and #1362 the `ux` slice'
+  contains "$output" 'landed as an `acceptance_criteria[]` entry'
+  contains "$output" 'a UI/UX consequence the human accepted, derived from a persona'"'"'s `role`, `context`, `proficiency` or `failure_costs`'
+  contains "$output" '`consistency` is reserved for #1363'
 }
 
 @test "contract: the subsection ends where it does today, so an inserted section reds loudly" {
@@ -327,9 +330,11 @@ json_after() {
   contains "$output" 'Its `ref` points *into the same block*'
 }
 
-@test "parity: the producer states the slice-1 boundary, so #1362/#1363 must edit it deliberately" {
-  file_has "$REFINER" '`corner-cases` is the only `slice`'
-  file_has "$REFINER" '`ux` and `consistency` arrive with #1362 and #1363.'
+@test "parity: the producer states the slice boundary, so #1363 must edit it deliberately" {
+  file_has "$REFINER" 'You produce two `slice` values today:'
+  file_has "$REFINER" '`corner-cases` (targeting `test_cases`) and `ux` (#1362, targeting'
+  file_has "$REFINER" '`acceptance_criteria`, recorded only for a consequence the human accepted);'
+  file_has "$REFINER" '`consistency` arrives with #1363.'
 }
 
 # ---------------------------------------------------------------------------
@@ -338,10 +343,9 @@ json_after() {
 
 # The seven derivation tests below extract CORNER_START -> SECTION_END_3, and
 # `extract` prints to EOF at status 0 when its END address never matches. That
-# heading is the LAST `###` in issue-refiner.md, and it sits in the section
-# #1362/#1363 are documented to edit — so without this boundary pin, deleting or
-# promoting it silently widens all seven haystacks to the rest of the file
-# (including the `## Output` JSON copy-template) with every test still green.
+# heading is the last `###` before #1362's UI/UX section — so without this
+# boundary pin, deleting or promoting it silently widens every derivation
+# haystack into that section's prose with every test still green.
 # Mirrors the companion pins on the ARCHITECTURE subsection and the advisory range.
 @test "derivation: the rules region ends where it does today, so a lost end anchor reds loudly" {
   run -0 extract "$REFINER" "$CORNER_START" "$SECTION_END_3"
@@ -497,7 +501,7 @@ json_after() {
   contains "$output" 'it is surface-touching, its `personas[]`'
   contains "$output" '**at least one resolving persona carries a non-empty'
   contains "$output" '`data_traits[]`**'
-  contains "$output" '**`persona_derivations[]` is empty**'
+  contains "$output" '**`persona_derivations[]` holds no `corner-cases` record**'
   contains "$output" 'stated over the mechanism rather than the colloquial name'
   contains "$output" 'All four conditions must hold, and the leading clause gates them'
   contains "$output" 'Read every condition against the block **you are emitting**'
@@ -535,7 +539,7 @@ json_after() {
 
 @test "advisory: the corner-case section ends where it does today" {
   run -0 extract "$REFINER" "$CORNER_START" "$SECTION_END_2"
-  ends_with "$output" '## Output — one JSON object only'
+  ends_with "$output" "## UI/UX consequences from a persona's conditions (#1362)"
 }
 
 # ---------------------------------------------------------------------------
@@ -669,18 +673,18 @@ json_after() {
   json_after "$REFINER" '^## Output — one JSON object only' > "$BATS_TEST_TMPDIR/refiner.json"
   run jq -e '[.proposed_story_spec.persona_derivations[] | select(.target == "test_cases") | .ref] - [.proposed_story_spec.test_cases[].id] | length == 0' "$BATS_TEST_TMPDIR/refiner.json"
   [ "$status" -eq 0 ]
-  # Vacuously true today (the slice-1 template targets only test_cases) and kept
-  # as the forward guard for #1362/#1363 — but load-bearing NOW as the other half
-  # of the partition: without it, retargeting the entry to acceptance_criteria
+  # Live since #1362: the template's `ux` record targets acceptance_criteria, so
+  # this is that record's ref-resolution pin — and the other half of the
+  # partition: without it, retargeting the entry to acceptance_criteria
   # while leaving a test-case id as its ref empties the select above and ships a
   # copy-template whose ref resolves nowhere.
   run jq -e '[.proposed_story_spec.persona_derivations[] | select(.target == "acceptance_criteria") | .ref] - .proposed_story_spec.acceptance_criteria | length == 0' "$BATS_TEST_TMPDIR/refiner.json"
   [ "$status" -eq 0 ]
 }
 
-@test "example: the producer's derivations are all corner-cases today (the slice-1 boundary)" {
+@test "example: the producer's derivations use only the slices shipped today (corner-cases, ux)" {
   json_after "$REFINER" '^## Output — one JSON object only' > "$BATS_TEST_TMPDIR/refiner.json"
-  run jq -e 'all(.proposed_story_spec.persona_derivations[]; .slice == "corner-cases")' "$BATS_TEST_TMPDIR/refiner.json"
+  run jq -e 'all(.proposed_story_spec.persona_derivations[]; .slice == "corner-cases" or .slice == "ux")' "$BATS_TEST_TMPDIR/refiner.json"
   [ "$status" -eq 0 ]
 }
 
@@ -770,5 +774,138 @@ json_after() {
 @test "example: the producer's template covers happy, corner AND error, as the surface rule requires" {
   json_after "$REFINER" '^## Output — one JSON object only' > "$BATS_TEST_TMPDIR/refiner.json"
   run jq -e '(["happy","corner","error"] - [.proposed_story_spec.test_cases[].kind]) | length == 0' "$BATS_TEST_TMPDIR/refiner.json"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Slice 2 (#1362) — UI/UX consequences from a persona's conditions
+# ---------------------------------------------------------------------------
+#
+# Same reason as the rest of this file: the deliverable is prose in
+# issue-refiner.md, so without pins it can be softened with the suite green. The
+# objection rule is pinned hardest, because it is the one place the refiner
+# BLOCKS on persona reasoning — and slice 1's blocking design failed four review
+# rounds. What makes this one sound is that it keys on the HUMAN's waiver (in the
+# cumulative `conversation`), never on the refiner's own prior output; the
+# "needs no memory" pin below exists so that distinction cannot be lost.
+
+UX_START='^## UI/UX consequences from a persona'
+
+@test "ux: the section ends where it does today, so an inserted section reds loudly" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  ends_with "$output" '## Output — one JSON object only'
+}
+
+@test "ux: the turn and the repo-mining steps both point at the persona's conditions" {
+  file_has "$REFINER" '5. **Derive the UI/UX consequences of each referenced persona'
+  file_has "$REFINER" "**Read the referenced persona's conditions, not only its data**"
+  file_has "$REFINER" '`context`, `proficiency` and `failure_costs` (all required `personas/v1`'
+}
+
+@test "ux: all four condition fields are read, together with the persona's kind" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" 'read its `role`, `context`, `proficiency` and `failure_costs` **together with its `kind`**'
+  contains "$output" 'on a story whose `interface_surfaces` is non-empty'
+  contains "$output" 'For each persona in the drafted `personas[]` that resolves against the registry, on a story whose `interface_surfaces` is non-empty'
+}
+
+@test "ux: a docs-averse persona gets discoverability, never documentation (AC 2)" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" 'the affordance must be **discoverable in place**'
+  contains "$output" 'or any non-technical or docs-averse `proficiency` → the affordance must be'
+  contains "$output" 'A consequence that points the persona at documentation does not answer this persona'
+}
+
+@test "ux: an api-consumer's surface is the contract and its error body, not a screen (AC 3)" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" "**An \`api-consumer\` persona's surface is the contract, not a screen.**"
+  contains "$output" 'the **error body**'
+  contains "$output" 'never about layout'
+  contains "$output" 'An `adversarial` persona is the exception: its conditions describe what the surface is attacked under, so they yield no UI/UX consequence or objection'
+  contains "$output" 'A persona of any other kind reaching a story only through a `rest` or `grpc` surface gets the same treatment'
+  contains "$output" 'the error body is a UI surface, and its shape is part of the story'
+}
+
+@test "ux: consequences are proposed, never prescribed as patterns, never imposed" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" '**Propose consequences; do not prescribe patterns.**'
+  contains "$output" '**never redesign the story unilaterally**'
+  contains "$output" 'a `questions` / `recommendations` pair'
+  contains "$output" 'not which component satisfies it — you are not encoding a house style or a design system'
+  contains "$output" 'words the consequence as a ready-to-adopt acceptance criterion and names the persona and the field it came from'
+  contains "$output" 'the question asks whether it applies to this story'
+}
+
+@test "ux: an accepted consequence lands in acceptance_criteria with a verbatim ux record (AC 4)" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" '**Land an accepted consequence in `acceptance_criteria[]`, and tag it.**'
+  contains "$output" '`slice: "ux"`'
+  contains "$output" '`target: "acceptance_criteria"`'
+  contains "$output" '`ref` the criterion string **verbatim**'
+  # The negative half: an unaccepted proposal binding at build time is the
+  # unilateral redesign the scope rules out.
+  contains "$output" '**Never pre-land an unaccepted proposal**'
+  contains "$output" 'in `human_reply`, or in an earlier human turn of `conversation` — every block you emit from then on carries it'
+  contains "$output" 'in the human'"'"'s wording, when they reworded it'
+  contains "$output" '`basis` naming the field and the condition (e.g. `context — spotty 3G`)'
+  contains "$output" '**Never pre-land an unaccepted proposal** in the block or in `proposed_prose`'
+}
+
+@test "ux: an ignored condition is a resolved:false objection that blocks on silence (AC 5)" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" 'append a `resolved_objections` entry with `resolved: false` for that condition'
+  contains "$output" 'neither **addresses** nor **waives**'
+  contains "$output" 'It blocks on **silence**, never on disagreement'
+  contains "$output" "**the human's waive reason as the \`note\`**"
+  contains "$output" 'An *unaccepted* proposal does not address it, whether it sits in `recommendations` or in your own `proposed_prose`.'
+  contains "$output" 'When **you emit a non-null `proposed_story_spec` this turn**, its'
+  contains "$output" 'its `personas[]` is non-empty, and a resolving persona'"'"'s `context` or `proficiency` names a usage condition'
+  contains "$output" 'that has a consequence on at least one classified surface'
+  contains "$output" 'for that condition, with a matching question'
+  contains "$output" 'The matching question is the challenge pair'"'"'s question, not a second one.'
+  contains "$output" 'unless that exact string already arrives in your input `objections`'
+  contains "$output" 'One entry per unaddressed condition, per persona.'
+  contains "$output" 'the human-authored `issue.body`, or an `acceptance_criteria[]` entry in the block you are emitting, speaks to the condition'
+  contains "$output" 'in `human_reply` or in any human turn of `conversation`, that the condition does not apply to this story, or has explicitly rejected the consequence proposed for it'
+  contains "$output" 'When they address it, report the entry `resolved: true` with a note saying how'
+  contains "$output" 'When they waive it, report it `resolved: true` with'
+  contains "$output" 'or has answered the challenge in any other explicit way'
+}
+
+@test "ux: the objection's wording is fixed, so the conductor can correlate it across turns" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" "\`UI/UX: <persona-id>'s <field> names \"<condition>\", which the story neither addresses nor waives.\`"
+  contains "$output" '`<condition>` is copied **verbatim** from the persona'"'"'s field'
+  contains "$output" 'never paraphrased'
+  contains "$output" 'the comma- or semicolon-separated clause that names it, or the whole field when it has no separator'
+}
+
+@test "ux: once per session is keyed on the human's waiver, and needs no memory of the refiner's output" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" '**Raised at most once per session — and that needs no memory.**'
+  contains "$output" "a waiver is the **human's** words, and the conductor's \`conversation\` is cumulative"
+  contains "$output" 'Never report it `resolved: false` again in that session.'
+  contains "$output" 'a waived condition can never trigger again'
+  contains "$output" 'echo the entry `resolved: true` with the same note whenever it still arrives in your input `objections`'
+  contains "$output" 'when it no longer arrives, omit it'
+}
+
+@test "ux: no objection and no recommendation for a none-surface or persona-less story (AC 6)" {
+  run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
+  contains "$output" '**Say nothing at all** — no UI/UX objection, and no UI/UX recommendation — for a `none`-surface story (`interface_surfaces: []`) or one with `personas: []`.'
+  contains "$output" 'recommendation above is the whole response: there are no conditions to read'
+}
+
+@test "ux: the output rules name the UI/UX objection as a new-blocker case" {
+  file_has "$REFINER" 'objection (#1362) is one such blocker, in its fixed wording; its waiver'
+  file_has "$REFINER" 'resolves it with the human'"'"'s reason as the `note`'
+}
+
+# The copy-template is what the model imitates, so it must show a ux record that
+# targets acceptance_criteria — the partition test above already proves its ref
+# resolves in the same block.
+@test "example: the producer's template carries a ux derivation targeting acceptance_criteria (anti-vacuity)" {
+  json_after "$REFINER" '^## Output — one JSON object only' > "$BATS_TEST_TMPDIR/refiner.json"
+  run jq -e '[.proposed_story_spec.persona_derivations[] | select(.slice == "ux")] | length > 0 and all(.[]; .target == "acceptance_criteria")' "$BATS_TEST_TMPDIR/refiner.json"
   [ "$status" -eq 0 ]
 }

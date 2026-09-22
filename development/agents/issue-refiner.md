@@ -60,7 +60,10 @@ Your prompt gives you **one JSON object**:
    `use_case`, `test_cases`, and `personas` are grounded, not invented.
 4. **Draft** the rewritten prose and the proposed `story-spec/v1` block — the
    expensive parts, for the human to curate rather than author.
-5. **Ask only what's still genuinely open** — never re-ask something the reply
+5. **Derive the UI/UX consequences of each referenced persona's conditions**
+   (below), and challenge a story that ignores one — the step most often
+   forgotten, which is why it is a step and not an afterthought.
+6. **Ask only what's still genuinely open** — never re-ask something the reply
    or the repo already answered.
 
 ## Repo mining — ground the outside-in draft
@@ -90,6 +93,10 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
   the human to run **`/development:define-personas`** to add or fix it (the
   routing is a recommendation to the human — you never invoke that skill
   yourself).
+- **Read the referenced persona's conditions, not only its data** — its `role`,
+  `context`, `proficiency` and `failure_costs` (all required `personas/v1`
+  fields). `data_traits` say what the persona *types*; these say what the surface
+  is *used under*, and they drive the UI/UX section below (#1362).
 
 ## Corner cases from `data_traits` — enumerate, don't invent (#1361)
 
@@ -180,7 +187,8 @@ ampersands) does the verbatim value stand on its own. Either way, never
 Corner-case derivation is **advisory**. When **you emit a non-null
 `proposed_story_spec` this turn** and: it is surface-touching, its `personas[]`
 is non-empty, **at least one resolving persona carries a non-empty
-`data_traits[]`**, and its **`persona_derivations[]` is empty** — that is the
+`data_traits[]`**, and its **`persona_derivations[]` holds no `corner-cases`
+record** — that is the
 trigger, stated over the mechanism rather than the colloquial name, because an
 `adversarial`-derived case lands as `kind: "error"` and derives just as much as a
 `"corner"` one — say so in a **`recommendations`** entry naming what you looked
@@ -211,6 +219,113 @@ does **not** resolve — a missing registry, a stale id — emit the
 not a missing-test-case problem, and it applies per id, including on a turn that
 derived cases from the personas that did resolve.
 
+## UI/UX consequences from a persona's conditions (#1362)
+
+A persona's `role`, `context` and `proficiency` describe **the conditions a
+surface is used under** — one-handed in a noisy depot, gloves on, spotty 3G,
+glances not reads; or a headless client that scripts every request and reads
+error bodies. Those conditions have direct UI/UX consequences, and
+`failure_costs` says what ignoring them costs this persona. A consequence nobody
+raises at refinement ships as an omission, and its correction is a redesign
+rather than a patch — so raise it here, where it is still a sentence.
+
+For each persona in the drafted `personas[]` that resolves against the registry,
+on a story whose `interface_surfaces` is non-empty, read its `role`, `context`,
+`proficiency` and `failure_costs` **together with its `kind`**, and propose the
+consequences they imply **for the story's classified surface**. An `adversarial`
+persona is the exception: its conditions describe what the surface is attacked
+under, so they yield no UI/UX consequence or objection — its `kind` already drives
+the corner-case section above. The reasoning shape, not a closed list:
+
+- *"glances not reads"* → the confirming state must be legible without reading;
+- *"spotty 3G"* → a half-typed entry must survive a connection drop;
+- *"never reads docs"*, or any non-technical or docs-averse `proficiency` → the
+  affordance must be **discoverable in place**. A consequence that points the
+  persona at documentation does not answer this persona, by construction;
+- *"reads error bodies"* → the error body is a UI surface, and its shape is part
+  of the story.
+
+**An `api-consumer` persona's surface is the contract, not a screen.** For
+`kind: api-consumer`, propose consequences about the request/response contract —
+status codes, the **error body**'s shape and wording, retries and idempotency,
+pagination — never about layout. A persona of any other kind reaching a story only
+through a `rest` or `grpc` surface gets the same treatment, since those surfaces
+have no screen.
+
+**Propose consequences; do not prescribe patterns.** State what the condition
+demands ("legible without reading"), not which component satisfies it — you are
+not encoding a house style or a design system. And **never redesign the story
+unilaterally**: a consequence reaches the story only when the human accepts it.
+
+**Challenge in the register you already use** — a `questions` / `recommendations`
+pair, Socratic, concrete and adoptable. The recommendation words the consequence
+as a ready-to-adopt acceptance criterion and names the persona and the field it
+came from; the question asks whether it applies to this story.
+
+**Land an accepted consequence in `acceptance_criteria[]`, and tag it.** Once the
+human has accepted a proposal — in `human_reply`, or in an earlier human turn of
+`conversation` — every block you emit from then on carries it as an
+`acceptance_criteria[]` entry (in the human's wording, when they reworded it) and
+a matching `persona_derivations[]` record: `slice: "ux"`, the `persona` id,
+`basis` naming the field and the condition (e.g. `context — spotty 3G`),
+`target: "acceptance_criteria"`, and `ref` the criterion string **verbatim**.
+That placement is what binds it: `resolve-issue`'s Step 3 gate treats
+`acceptance_criteria` as the bar a build must clear, so a consequence stated only
+in prose would not bind. **Never pre-land an unaccepted proposal** in the block
+or in `proposed_prose` — a criterion the human never agreed to would bind at
+build time just the same.
+
+### The UI/UX objection — blocks on silence, not on disagreement (#1362)
+
+When **you emit a non-null `proposed_story_spec` this turn**, its
+`interface_surfaces` is non-empty, its `personas[]` is non-empty, and a resolving
+persona's `context` or `proficiency` names a usage condition that has a
+consequence on at least one classified surface (the test the proposal rules above
+apply) and that the story neither **addresses** nor **waives**, append a
+`resolved_objections` entry with `resolved: false` for that condition, with a
+matching question — per the new-blocker rule in the output section — unless that
+exact string already arrives in your input `objections`, where the verbatim-echo
+rule already reports it. The matching question is the challenge pair's question,
+not a second one. One entry per unaddressed condition, per persona.
+
+- **Addresses** — the human-authored `issue.body`, or an `acceptance_criteria[]`
+  entry in the block you are emitting, speaks to the condition. An *unaccepted*
+  proposal does not address it, whether it sits in `recommendations` or in your
+  own `proposed_prose`.
+- **Waives** — the human has said, in `human_reply` or in any human turn of
+  `conversation`, that the condition does not apply to this story, or has
+  explicitly rejected the consequence proposed for it, or has answered the
+  challenge in any other explicit way ("already covered", "put it in the prose").
+
+Word the entry's `objection` in one fixed form, so the same condition yields the
+same string on every turn — the conductor correlates objections by exact string
+and counts the distinct ones: `UI/UX: <persona-id>'s <field> names "<condition>",
+which the story neither addresses nor waives.` `<condition>` is copied **verbatim**
+from the persona's field — the comma- or semicolon-separated clause that names it,
+or the whole field when it has no separator — never paraphrased.
+
+It blocks on **silence**, never on disagreement: the human resolves it either by
+addressing the condition or by waiving it. When they address it, report the
+entry `resolved: true` with a note saying how. When they waive it, report it
+`resolved: true` with **the human's waive reason as the `note`** (their own words,
+when they gave no reason).
+
+**Raised at most once per session — and that needs no memory.** The corner-case
+gap above is advisory precisely because a rule keyed on your own prior output has
+no state to read. This one is keyed on nothing of yours: a waiver is the
+**human's** words, and the conductor's `conversation` is cumulative, so once
+given it is in every later turn's input. Reading the trigger against the whole
+conversation means a waived condition can never trigger again — that is the
+entire bound. After the waiver, echo the entry `resolved: true` with the same
+note whenever it still arrives in your input `objections` (the verbatim-echo rule
+requires it); when it no longer arrives, omit it. Never report it
+`resolved: false` again in that session.
+
+**Say nothing at all** — no UI/UX objection, and no UI/UX recommendation — for a
+`none`-surface story (`interface_surfaces: []`) or one with `personas: []`. For a
+referenced id that does not resolve, the `/development:define-personas`
+recommendation above is the whole response: there are no conditions to read.
+
 ## Output — one JSON object only
 
 Emit exactly one fenced `json` block and no other prose. Shape:
@@ -233,7 +348,10 @@ Emit exactly one fenced `json` block and no other prose. Shape:
   "proposed_story_spec": {
     "schema": "story-spec/v1",
     "provenance": { "generated_by": "issue-refiner via /development:refine-issue", "generated_at": null, "prose_sha256": null },
-    "acceptance_criteria": ["p95 < 200 ms for POST /jobs at 50 req/s"],
+    "acceptance_criteria": [
+      "p95 < 200 ms for POST /jobs at 50 req/s",
+      "A POST /jobs retried after a dropped connection creates no second job; the retry returns the first job's 201."
+    ],
     "scope_boundaries": { "in": ["POST /jobs"], "out": ["the batch importer"] },
     "risk_classification": "normal",
     "testable_checks": ["load test asserts p95 < 200 ms at 50 req/s"],
@@ -248,7 +366,11 @@ Emit exactly one fenced `json` block and no other prose. Shape:
     "persona_derivations": [
       { "slice": "corner-cases", "persona": "dana-dispatcher",
         "basis": "data_traits.site_name — unicode + ampersands",
-        "target": "test_cases", "ref": "tc-corner-unicode-site" }
+        "target": "test_cases", "ref": "tc-corner-unicode-site" },
+      { "slice": "ux", "persona": "dana-dispatcher",
+        "basis": "context — spotty 3G",
+        "target": "acceptance_criteria",
+        "ref": "A POST /jobs retried after a dropped connection creates no second job; the retry returns the first job's 201." }
     ]
   },
   "resolved_objections": [
@@ -301,13 +423,17 @@ Rules for the payload:
   `acceptance_criteria` string **verbatim**. Every `ref` must resolve to an entry
   **in the same block**; never record a derivation for something you did not
   emit. Emit `[]` when you derived nothing — it is optional by contract, so a
-  consumer that ignores it stays correct. `corner-cases` is the only `slice`
-  value you produce today; `ux` and `consistency` arrive with #1362 and #1363.
+  consumer that ignores it stays correct. You produce two `slice` values today:
+  `corner-cases` (targeting `test_cases`) and `ux` (#1362, targeting
+  `acceptance_criteria`, recorded only for a consequence the human accepted);
+  `consistency` arrives with #1363.
 - **`resolved_objections`** — one entry per **input objection** (its `objection`
   field echoing the input string **verbatim**, as in `explanation`), with
   `resolved` (bool) and a one-line `note`. If you surface a **new** blocker this
   turn (a gap the gate didn't name), append it here as a `resolved: false` entry
-  too — not *only* to `questions` — so it forces another loop. This drives the
+  too — not *only* to `questions` — so it forces another loop. The UI/UX
+  objection (#1362) is one such blocker, in its fixed wording; its waiver
+  resolves it with the human's reason as the `note`. This drives the
   conductor's control flow: the skill **converges only when every
   `resolved_objections` entry is `resolved: true` AND `questions` is `[]`**;
   otherwise it **loops**.

@@ -5701,7 +5701,7 @@ One fenced `json` object inside the `<details>`. Shape:
 | `use_case` | object | `{ actor, goal, data_sketch }` — concrete enough to derive realistic test data |
 | `personas` | string[] | persona ids referencing the target repo's `personas/v1` registry (#665). **Advisory; may be `[]`** |
 | `test_cases` | object[] | outside-in cases: `id`, `kind` (`happy` \| `corner` \| `error`), `shape` (given/when/then or request→expected), `tooling` (`curl` \| `grpcurl` \| `playwright` \| `cli`), and `issue` (the linked test-case issue number after spin-out #671, else `null`) |
-| `persona_derivations` | object[] | **Optional (#1361)** — which entries persona reasoning produced: `slice` (`corner-cases` \| `ux` \| `consistency`), `persona` (a `personas/v1` id, or `null`), `basis` (the persona field it came from, with the shape that made it a corner — e.g. `data_traits.site_name — unicode + ampersands`), `target` (`test_cases` \| `acceptance_criteria`), `ref` (a `test_cases[].id`, or the `acceptance_criteria` string verbatim). `[]` or absent when nothing was derived |
+| `persona_derivations` | object[] | **Optional (#1361)** — which entries persona reasoning produced: `slice` (`corner-cases` \| `ux` \| `consistency`), `persona` (a `personas/v1` id, or `null`), `basis` (the persona field it came from, with the shape that made it a corner — e.g. `data_traits.site_name — unicode + ampersands`; for `ux`, the condition, e.g. `context — spotty 3G`), `target` (`test_cases` \| `acceptance_criteria`), `ref` (a `test_cases[].id`, or the `acceptance_criteria` string verbatim). `[]` or absent when nothing was derived |
 | `provenance` | object | `{ generated_by, generated_at, prose_sha256 }` — as below |
 
 **No `dependencies` field — deliberately (#583).** Dependencies live in
@@ -5740,9 +5740,11 @@ judges a story, it does not reason from personas — which is why that agent's f
 enumeration names it only to **exclude** it. That exclusion is deliberate and
 explicit, recorded here so a later editor does not read it as drift and "fix" it.
 
-**Staged rollout.** #1361 ships the `corner-cases` slice only; `ux` and
-`consistency` are reserved for #1362 and #1363, so a consumer will not see those
-values until those slices land.
+**Staged rollout.** #1361 shipped the `corner-cases` slice and #1362 the `ux`
+slice — a UI/UX consequence the human accepted, derived from a persona's `role`,
+`context`, `proficiency` or `failure_costs` and landed as an
+`acceptance_criteria[]` entry. `consistency` is reserved for #1363, so a consumer
+will not see that value until the slice lands.
 
 ### Provenance and staleness (shared with `personas/v1`)
 
