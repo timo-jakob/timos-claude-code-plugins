@@ -53,7 +53,8 @@ resolve_issue_files() {
   local f
 
   # ONE roster, in declared order — review-loop first because it is the branch
-  # every run takes, then the terminals, then the interactive procedures. This
+  # every run takes, then the terminals, then the interactive procedures, then
+  # the run's own telemetry (#1226), which every ending reaches last. This
   # same array is both what the tripwire compares against AND what is emitted, so
   # there is no second transcription for a maintainer to update in isolation.
   # (An earlier cut had a separate `expected` list: satisfying the tripwire by
@@ -62,7 +63,7 @@ resolve_issue_files() {
   # looking" failure this derivation exists to prevent, restored one indirection
   # later.)
   local -a ordered
-  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md)
+  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md telemetry.md)
 
   for f in "$base"/reference/*.md; do
     [ -e "$f" ] || continue

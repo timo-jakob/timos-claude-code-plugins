@@ -16,7 +16,8 @@ check. The text between `<!-- /moved: round-protocol-head -->` and
 proves only that no *original* line migrated into it, by asserting the two
 anchors stay adjacent in the pinned commit. And **everything after
 `<!-- /moved: round-protocol-tail -->`** is unproven too: the #1571 correction, the #1485 empty-story-diff note,
-*The decided pass* (#1584) and *Carry accounting* (#1583) all live there,
+*The decided pass* (#1584), *Carry accounting* (#1583) and the #1226
+`loop_args` note all live there,
 because a byte-frozen span cannot be edited and those rules had to correct or
 extend what it says. Edit either region knowing the byte check does not cover
 it.
@@ -1300,6 +1301,16 @@ fails the same way.
    *Escalation*. No ordering is restated here on purpose: a partial restatement
    is how the two statements of it came to disagree once already.
 <!-- /moved: round-protocol-tail -->
+
+**Every loop invocation carries the run's `loop_args` (#1226).** The invocation
+template in step 2 above predates story-mode telemetry and sits in a byte-frozen
+span, so this is recorded here: append the run's `loop_args` (Step 0,
+`reference/telemetry.md`) to it — round 1 and every `--resume` alike. They are
+`--parent-run-id <the run's run_id>` plus exactly the sink flags the run was
+given, so every loop record is parented to the run and lands in its sink.
+When `start` failed there is no run file: pass only the sink flags from the
+`args` output, with no `--parent-run-id`. An epic child that E3 drives passes
+nothing.
 
 **Residue condition 2 was removed (#1571).** The procedure above still describes the fix-touched set as an input to the
 **residue decision**. That is no longer true, and the paragraph saying so sits

@@ -3977,3 +3977,296 @@ resume_clean() {   # resume_clean <work-dir> <max-rounds>
   [ "$status" -eq 12 ]
   grep -q -- '- blockers: 1 (critical: 1, warning: 0) (new: 0, carried: 1), conflicts: 0, suggestions: 0, carried: confirmed 1 / re-raised 0 / unconfirmed 0 of 1' "$WD2/progress.md"
 }
+
+# --- #1226: --parent-run-id, --telemetry-dir and the run-id ledger -----------
+# A resolve-issue run pre-mints its own run_id and hands it to every loop
+# invocation as --parent-run-id, together with the sink flags it was given, so
+# every nested review-loop record points back at the run and lands in the same
+# sink. The run then lists the loop's ids from the <work-dir>/.telemetry-run-ids
+# ledger. These pin the loop's half; tests/story-telemetry.bats pins the run's.
+
+PARENT='resolve-issue-1752403000-8f3a'
+
+@test "#1226 --parent-run-id stamps parent_run_id on the terminal record and fills the ledger" {
+  T="$BATS_TEST_TMPDIR/parented.jsonl"
+  WD="$BATS_TEST_TMPDIR/wd"
+  clean_loop --telemetry-file "$T" --parent-run-id "$PARENT" --issue 412
+  [ "$status" -eq 0 ]
+  assert_envelope "$T" success CONVERGED
+  [ "$(jq -r '.parent_run_id' "$T")" = "$PARENT" ]
+  # the ledger names exactly the record the loop emitted
+  [ "$(grep -c '' "$WD/.telemetry-run-ids")" -eq 1 ]
+  [ "$(cat "$WD/.telemetry-run-ids")" = "$(jq -r '.run_id' "$T")" ]
+}
+
+@test "#1226 without --parent-run-id the record stays unparented" {
+  T="$BATS_TEST_TMPDIR/unparented.jsonl"
+  clean_loop --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.parent_run_id' "$T")" = "null" ]
+}
+
+@test "#1226 a resumed escalation keeps the parent, and the ledger keeps BOTH records" {
+  # escalate -> grant -> --resume -> converge on one work-dir. The single-id
+  # sidecar is overwritten by the second exit; the ledger must not be, or the
+  # parent run would lose its escalation record's id.
+  WD="$BATS_TEST_TMPDIR/wd-parented-resume"
+  T="$BATS_TEST_TMPDIR/parented-resume.jsonl"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 \
+    --telemetry-file "$T" --parent-run-id "$PARENT" --issue 412 \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --telemetry-file "$T" --parent-run-id "$PARENT" --issue 412 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$T")" -eq 2 ]
+  [ "$(jq -s --arg p "$PARENT" '[.[] | select(.parent_run_id == $p)] | length' "$T")" -eq 2 ]
+  # the ledger, in emission order, is exactly the sink's two run_ids
+  [ "$(cat "$WD/.telemetry-run-ids")" = "$(jq -r '.run_id' "$T")" ]
+  [ "$(grep -c '' "$WD/.telemetry-run-ids")" -eq 2 ]
+  zsh "$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh" "$T" --require-records
+}
+
+@test "#1226 the promotion sub-loop's record is parented too" {
+  P="$BATS_TEST_TMPDIR/promote-parented.json"
+  cat > "$P" <<'JSON'
+[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
+JSON
+  T="$BATS_TEST_TMPDIR/promote-parented.jsonl"
+  suggestion_loop --promote "$P" --telemetry-file "$T" --parent-run-id "$PARENT" --issue 412
+  [ "$status" -eq 12 ]
+  jq -e '.payload.promotion_phase == true' "$T" >/dev/null
+  [ "$(jq -r '.parent_run_id' "$T")" = "$PARENT" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/wd/.telemetry-run-ids")" = "$(jq -r '.run_id' "$T")" ]
+}
+
+@test "#1226 a fresh run clears a previous run's ledger; a failed emission adds nothing" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  mkdir -p "$WD"
+  printf 'review-loop-1-dead\n' > "$WD/.telemetry-run-ids"
+  local BAD="$BATS_TEST_TMPDIR/a-file"
+  : > "$BAD"
+  # the emitter refuses a --telemetry-dir that names a file (its exit 2)
+  clean_loop --telemetry-dir "$BAD" --parent-run-id "$PARENT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$WD/.telemetry-run-ids" ]
+}
+
+@test "#1226 an empty or dangling --parent-run-id is a usage error, and nothing is emitted" {
+  T="$BATS_TEST_TMPDIR/no-parent.jsonl"
+  clean_loop --telemetry-file "$T" --parent-run-id ''
+  [ "$status" -eq 2 ]
+  contains "$output" "--parent-run-id requires a non-empty value"
+  [ ! -e "$T" ]
+  clean_loop --telemetry-file "$T" --parent-run-id
+  [ "$status" -eq 2 ]
+  [ ! -e "$T" ]
+  # a flag-shaped value is the unquoted-$VAR collapse, not an id
+  clean_loop --parent-run-id --telemetry-file "$T"
+  [ "$status" -eq 2 ]
+  [ ! -e "$T" ]
+  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+}
+
+@test "#1226 an empty --telemetry-dir is a usage error, not a default-sink write" {
+  clean_loop --telemetry-dir ''
+  [ "$status" -eq 2 ]
+  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+}
+
+@test "#1226 --telemetry-dir DIR appends to DIR/<slug>.jsonl and not to the local default" {
+  local TD="$BATS_TEST_TMPDIR/telemetry"
+  git -C "$R" remote add origin https://github.com/timos-platform/tenant-service.git
+  clean_loop --telemetry-dir "$TD" --parent-run-id "$PARENT" --issue 412
+  [ "$status" -eq 0 ]
+  assert_envelope "$TD/timos-platform-tenant-service.jsonl" success CONVERGED
+  [ "$(jq -r '.parent_run_id' "$TD/timos-platform-tenant-service.jsonl")" = "$PARENT" ]
+  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+}
+
+@test "#1226 --telemetry-file beats --telemetry-dir for the loop's record" {
+  local TD="$BATS_TEST_TMPDIR/telemetry"
+  T="$BATS_TEST_TMPDIR/wins.jsonl"
+  clean_loop --telemetry-dir "$TD" --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  assert_envelope "$T" success CONVERGED
+  [ ! -e "$TD" ]
+  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+}
+
+@test "#1226 a --telemetry-dir the emitter refuses never changes the loop's status or exit" {
+  local BAD="$BATS_TEST_TMPDIR/not-a-dir"
+  : > "$BAD"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true' --telemetry-dir "$BAD"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  contains "$stderr" "--telemetry-dir is not a directory"
+  [ ! -s "$BAD" ]
+  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  # a stub-escalating run keeps its typed exit too
+  stuck_loop --telemetry-dir "$BAD"
+  [ "$status" -eq 12 ]
+}
+
+@test "#1226 an in-repo --telemetry-dir sink never enters the review scope, on any round" {
+  # The sink is written at a TERMINAL exit, so the reachable shape is
+  # escalate -> grant -> --resume: round 1 exhausts the budget and appends to
+  # $R/tmp-telemetry/repo.jsonl, then the resumed rounds must not review it.
+  local TD="$R/tmp-telemetry"
+  local WD="$BATS_TEST_TMPDIR/wd-tdir"
+  SNAP="$BATS_TEST_TMPDIR/snap-tdir"
+  mkdir -p "$SNAP"
+  export SNAP
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 \
+    --telemetry-dir "$TD" \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope-r$REVIEW_ROUND.txt"; printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  # non-vacuity: the sink really is an untracked file inside the repo now
+  [ -s "$TD/repo.jsonl" ]
+  git -C "$R" status --porcelain --untracked-files=all | grep -qF 'tmp-telemetry/repo.jsonl'
+  # a genuine story file beside the sink — the exclusion must NOT hide it
+  echo "notes" > "$TD/notes.md"
+  echo "print(2)" > "$R/app.py"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --resume --max-rounds 3 \
+    --telemetry-dir "$TD" \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope-r$REVIEW_ROUND.txt"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  # at least one resumed round was reviewed...
+  [ -e "$SNAP/scope-r2.txt" ]
+  # ...and no round, first or resumed, ever saw the sink
+  run ! grep -qxF 'tmp-telemetry/repo.jsonl' "$SNAP"/scope-r*.txt
+  # while the story file beside it was reviewed
+  cat "$SNAP"/scope-r*.txt | grep -qxF 'tmp-telemetry/notes.md'
+  # the second terminal record landed in the same in-repo sink
+  [ "$(grep -c '' "$TD/repo.jsonl")" -eq 2 ]
+}
+
+@test "#1226 the in-repo telemetry-dir rule is exact: nested and non-.jsonl files stay in scope" {
+  # The rule is the emitter's own write pattern — a .jsonl DIRECTLY inside DIR.
+  # A mutation widening it to a prefix match (the work-dir rule) would hide
+  # these; one narrowing it to nothing would let the sink through (above).
+  local TD="$R/tel"
+  SNAP="$BATS_TEST_TMPDIR/snap-exact"
+  mkdir -p "$TD/sub" "$SNAP"
+  export SNAP
+  echo '{}' > "$TD/sub/fixture.jsonl"
+  echo '{}' > "$TD/data.json"
+  echo '{}' > "$TD/stale.jsonl"
+  loop --telemetry-dir "$TD" \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope.txt"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  grep -qxF 'tel/sub/fixture.jsonl' "$SNAP/scope.txt"
+  grep -qxF 'tel/data.json' "$SNAP/scope.txt"
+  run ! grep -qxF 'tel/stale.jsonl' "$SNAP/scope.txt"
+}
+
+@test "#1226 a --telemetry-dir that IS the repo root excludes only top-level .jsonl files" {
+  SNAP="$BATS_TEST_TMPDIR/snap-root"
+  mkdir -p "$SNAP" "$R/pkg"
+  export SNAP
+  echo '{}' > "$R/root-sink.jsonl"
+  echo '{}' > "$R/pkg/fixture.jsonl"
+  loop --telemetry-dir "$R" \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope.txt"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  grep -qxF 'app.py' "$SNAP/scope.txt"
+  grep -qxF 'pkg/fixture.jsonl' "$SNAP/scope.txt"
+  run ! grep -qxF 'root-sink.jsonl' "$SNAP/scope.txt"
+}
+
+@test "#1226 under --telemetry-file the telemetry-dir is not the sink, so nothing in it is excluded" {
+  local TD="$R/tel"
+  SNAP="$BATS_TEST_TMPDIR/snap-shadowed"
+  mkdir -p "$TD" "$SNAP"
+  export SNAP
+  echo '{}' > "$TD/story.jsonl"
+  loop --telemetry-dir "$TD" --telemetry-file "$BATS_TEST_TMPDIR/elsewhere.jsonl" \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope.txt"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  grep -qxF 'tel/story.jsonl' "$SNAP/scope.txt"
+}
+
+@test "#1226 --help names both new flags" {
+  run zsh "$S" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "--telemetry-dir DIR"
+  contains "$output" "--parent-run-id ID"
+}
+
+@test "#1226 a finding raised ON the in-repo telemetry-dir sink is dropped, never consolidated" {
+  # The third consumer of the rule: the scoped-findings filter. A panel that
+  # reports against the sink (it is in the story diff until it is filtered)
+  # must not block the run — the loop rewrites that file at every terminal exit,
+  # so a blocker on it could never be fixed.
+  local TD="$R/tel"
+  mkdir -p "$TD"
+  echo '{}' > "$TD/repo.jsonl"
+  loop --telemetry-dir "$TD" \
+    --review-cmd 'printf "%s" '"'"'[{"severity":"CRITICAL","dimension":"bugs","file":"tel/repo.jsonl","line":1,"title":"sink","description":"d","reviewer":"r"}]'"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+  # control: the same finding on a NON-sink file in that directory does block
+  echo '{}' > "$TD/data.json"
+  loop --telemetry-dir "$TD" --max-rounds 1 \
+    --review-cmd 'printf "%s" '"'"'[{"severity":"CRITICAL","dimension":"bugs","file":"tel/data.json","line":1,"title":"real","description":"d","reviewer":"r"}]'"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+}
+
+@test "#1226 the findings filter's rule is exact too: a finding on a NESTED .jsonl still blocks" {
+  # The scoped-findings filter is the second copy of the exact rule (jq, not
+  # the zsh glob), so it needs its own nested and repo-root controls.
+  local TD="$R/tel"
+  mkdir -p "$TD/sub"
+  echo '{}' > "$TD/sub/fixture.jsonl"
+  loop --telemetry-dir "$TD" --max-rounds 1 \
+    --review-cmd 'printf "%s" '"'"'[{"severity":"CRITICAL","dimension":"bugs","file":"tel/sub/fixture.jsonl","line":1,"title":"nested","description":"d","reviewer":"r"}]'"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  # DIR is the repo root: only a TOP-LEVEL .jsonl is the sink
+  mkdir -p "$R/pkg"
+  echo '{}' > "$R/pkg/fixture.jsonl"
+  loop --telemetry-dir "$R" --max-rounds 1 --work-dir "$BATS_TEST_TMPDIR/wd-root" \
+    --review-cmd 'printf "%s" '"'"'[{"severity":"CRITICAL","dimension":"bugs","file":"pkg/fixture.jsonl","line":1,"title":"pkg","description":"d","reviewer":"r"}]'"'"' > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+}
+
+@test "#1226 a ledger that cannot be cleared on a fresh start says so, and changes nothing else" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  mkdir -p "$WD/.telemetry-run-ids"      # a directory where the ledger file goes
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true' \
+    --telemetry-file "$BATS_TEST_TMPDIR/ledger-clear.jsonl"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  contains "$stderr" "could not clear the stale telemetry run-id ledger"
+}
+
+@test "#1226 an OUT-of-repo --telemetry-dir excludes nothing from the review scope" {
+  # the exclusion is for an in-repo sink only; an external one must leave the
+  # repo's own top-level .jsonl files in scope
+  SNAP="$BATS_TEST_TMPDIR/snap-ext"
+  mkdir -p "$SNAP"
+  export SNAP
+  echo '{}' > "$R/root.jsonl"
+  loop --telemetry-dir "$BATS_TEST_TMPDIR/ext-telemetry" \
+    --review-cmd 'cp "$REVIEW_SCOPE_FILE" "$SNAP/scope.txt"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  grep -qxF 'root.jsonl' "$SNAP/scope.txt"
+}

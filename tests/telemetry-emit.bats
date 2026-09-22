@@ -116,7 +116,7 @@ emit_dir_split() { run --separate-stderr zsh "$S" --repo-dir "$RD" --telemetry-d
   [ "$status" -eq 0 ]
   starts_with "$output" "usage"
   contains "$output" "emit-telemetry.zsh"
-  # No pipeline forwards --telemetry-dir, so --help is a caller's only discovery
+  # Only resolve-issue forwards --telemetry-dir (#1226), so --help is most callers' only discovery
   # path for it: a usage block that drifts from the implemented precedence must
   # go red rather than quietly hiding the flag.
   contains "$output" "--telemetry-dir"

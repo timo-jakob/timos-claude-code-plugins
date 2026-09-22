@@ -68,12 +68,16 @@ three apart without matching on wording.)
 # the Node ops-api payload (#936) — 15 story cases + 2 harness cases
 bats tests/acceptance/rest tests/acceptance/cli
 
+# resolve-issue story-mode telemetry (#1226) — 13 story cases, offline:
+# drives story-telemetry.zsh and the review loop against a scratch repo
+bats tests/acceptance/cli/resolve-issue-story-telemetry.bats
+
 # the org API styleguide ruleset (#689 + #944) — 40 cases:
 #   9 + 13 story, 15 clause-isolating, 2 #1330 premise, 1 seed-lint
 bats tests/acceptance/cli/api-styleguide.bats
 ```
 
-**The styleguide suite is the one file here that stands up no service.** It
+**The styleguide suite stands up no service.** It
 lints committed fixtures with `npx --yes @stoplight/spectral-cli@<pinned>`, so
 it needs `node`, `npx`, `jq` and network access on the first run (to fetch
 spectral) — but none of the sandbox machinery below. It pins spectral to an
@@ -81,6 +85,12 @@ exact version rather than the shipped job's floating `@6`, because an upstream
 minor can retire an inherited `spectral:oas` rule and change these fixtures'
 verdicts with no change in this repo. Note that the `bats tests/acceptance/cli`
 invocation above also runs it.
+
+**The story-telemetry suite stands up no service either.** It needs only `zsh`,
+`jq` and `git`, runs fully offline against a scratch repo (detection stubbed,
+nothing reaching GitHub), and is likewise also run by the
+`bats tests/acceptance/cli` invocation above. The requirements below are the
+Node payload's.
 
 Requirements: `node` (24+), `npm`, `curl`, `jq`, `zsh`, `pgrep` (procps), and
 network access on the first run. `pgrep` is what the in-use refusal above is

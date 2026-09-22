@@ -12,6 +12,11 @@ pinned pre-move commit, and is what keeps this file honest.
 
 ## Interactive remediation — offer to clear the blockage (#586, #587)
 
+> **Read the #1226 amendment at the end of this section BEFORE running a rung.**
+> A rung that runs the Single-issue flow is its own telemetry run: it calls
+> `start` before its step 0a, which the frozen text below does not say. An
+> epic-kind rung has no run.
+
 <!-- moved: interactive-remediation -->
 Applies **only** with a human present, and only to a **shape (i)**
 `REJECT_BLOCKED` — one that actually enumerated an **OPEN** blocker:
@@ -214,12 +219,29 @@ Then, per the chosen option:
   what the gate exists to prevent.
 <!-- /moved: interactive-remediation -->
 
+**Each single-issue rung is its own telemetry run (#1226).** The span above has
+each blocker's run start "at its own step 0a". It predates story-mode telemetry
+and is byte-frozen, so the amendment is recorded here. It applies only to a rung
+that runs the **Single-issue flow**. An **epic-kind** rung runs the Epic flow
+and, like any epic, has no run: it calls no `start`, its children's loops get
+no `loop_args`, and it emits no record (`reference/telemetry.md`, step 1).
+Before a single-issue rung's step 0a, it calls `story-telemetry.zsh start`
+with its **own** run file,
+`<scratch>/story-run-<blocker>.json`, and the **same** sink flags the named
+issue's run was given. Its loops take **its** `loop_args`, never the named
+issue's, and it emits its own record at its own ending. The named issue's run
+file is never touched by a rung, so the named issue's own record is unaffected
+(`reference/telemetry.md`, step 2).
+
 ## Interactive extension (#562-resume)
 
 > **Read the #1576 amendment at the end of this section BEFORE acting on step
 > 5.** The grant is recorded to the work-dir by `record-grant.zsh` — a step the
 > frozen text below does not mention — and step 5's "buys only two" on a granted
 > closing sweep is superseded there.
+>
+> **Read the #1226 amendment there too:** step 5's resume invocation also
+> carries the run's `loop_args`, which the frozen template below does not show.
 
 <!-- moved: interactive-extension -->
 **Interactive extension (human present, `BUDGET_EXHAUSTED` /
@@ -435,6 +457,12 @@ alongside the summary so the human still sees the story's full cost:
    diff-so-far and any guidance are already on the issue; the human can resume
    later with `/development:resolve-issue <N>`.
 <!-- /moved: interactive-extension -->
+
+**A granted resume carries the run's `loop_args` too (#1226).** The resume
+invocation in step 5 above predates story-mode telemetry and sits in a
+byte-frozen span, so this is recorded here: append the run's `loop_args` (Step
+0, `reference/telemetry.md`) to it, so the post-grant record is parented to the
+same resolve-issue run and lands in the same sink as the escalation it follows.
 
 **The granted ceiling is written to the work-dir, not remembered (#1576).** Step
 5 above says "ceiling raised by 3", and for a long time nothing enforced it: the
