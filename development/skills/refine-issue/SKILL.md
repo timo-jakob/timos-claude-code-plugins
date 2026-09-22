@@ -429,9 +429,11 @@ resumes (Step 0) instead of losing the conversation. Mirrors resolve-issue's
 typed escalation (#564), for the human-present refinement loop. Three types:
 
 - **`needs-decision`** — an absent stakeholder / upstream decision blocks a
-  testable spec. The state names the `decision` and its `owner`.
+  testable spec. The state names the `decision` and its `owner`
+  ([unclear requirements are refined with AI guidance](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-4)).
 - **`split-recommended`** — the story is really an epic; it can't be one bounded
-  spec. The state lists the `candidate_children`.
+  spec. The state lists the `candidate_children`
+  ([epics and issues are split when too big](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-5)).
 - **`deferred`** — the human pauses without converging: either from this loop
   (the `conversation` so far is preserved) or from Step 5, after a re-gate the
   story still fails (the block is written, so there is no resume state to keep).

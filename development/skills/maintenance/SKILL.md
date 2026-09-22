@@ -2299,7 +2299,8 @@ After pushing and opening the PR:
      (a topic group whose plugin declined a CI-fixer in v1) **or the named
      agent cannot be spawned** (it isn't installed in this plugin family —
      a topic may name a *language* plugin's fixer, e.g. `react` reuses
-     `js-ci-fixer`), **escalate this PR to the user** instead of fixing:
+     `js-ci-fixer`), **escalate this PR to the user** instead of fixing
+     ([an automated state machine](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-3)):
      leave it open, record it in the Phase 9 summary as needing manual
      attention, and move to the next stage without merging. **Never
      substitute a different fixer** — an installed fixer for another

@@ -1004,7 +1004,8 @@ while Python only printed a TODO.
   **Gradle + Kotlin DSL only** — Maven (`pom.xml`) isn't supported. Migrate
   to Gradle with a `build.gradle.kts`, then re-run /development:bootstrap."
   (Any non-Java languages detected still bootstrap normally.) Carry the
-  rejection into the Step 5 checklist as a blocking item.
+  rejection into the Step 5 checklist as a blocking item
+  ([opinionated](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-1)).
 - **`gradle_dsl == "groovy"`** → Java is supported, but the build must be
   converted; **Step 4c** offers the Groovy→Kotlin conversion.
 - **`gradle_dsl == "kotlin"`** → proceed normally.
