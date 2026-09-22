@@ -1119,10 +1119,10 @@ EOF
   # absent (this file says so at the zero-padded-round case), hence its removal.
   #
   # What this case pins TODAY: `--repo .` yields the same absolute, root-anchored
-  # findings_path an absolute `--repo` does. The dash-normalisation arm keeps its
+  # findings_path an absolute `--repo` does. A dash-prefixed `--repo` keeps its
   # own coverage in the four-spelling case in the #1587 section.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    bash -c "cd '$R' && zsh '$S' plan --repo . --base main"
+    bash -c 'cd "$1" && zsh "$2" plan --repo . --base main' _ "$R" "$S"
   [ "$status" -eq 0 ]
   local root; root="$(git -C "$R" rev-parse --show-toplevel)"
   [ "$(echo "$output" | jq -r .findings_path)" = "$root/.review/findings-round-1.json" ]
@@ -1183,10 +1183,15 @@ EOF
 }
 
 @test "scope-findings: #1177 a --repo beginning with a dash is scoped, not misattributed" {
-  # the plan half has this test; the scope-findings copy of the normalisation had
-  # none, so deleting it left the suite green while the path that decides which
-  # findings survive the round failed with "not a git repository"
-  local dashrepo="$BATS_TEST_TMPDIR/-dash-scope"
+  # the plan half has this test. scope-findings reads the raw --repo in gates of
+  # its own before anchoring, so it needs its own: a dash-unsafe reader there
+  # fails the path that decides which findings survive the round with "not a git
+  # repository"
+  local name='-dash-scope'
+  # precondition: the name must BEGIN with a dash, or no dash-leading --repo ever
+  # reaches the script and this test covers nothing — fail loudly on such a rename
+  [ "${name#-}" != "$name" ]
+  local dashrepo="$BATS_TEST_TMPDIR/$name"
   mkdir -p "$dashrepo"
   git -C "$dashrepo" init -q
   git -C "$dashrepo" config user.email t@example.com
@@ -1198,7 +1203,8 @@ EOF
   echo new > "$dashrepo/app.py"
   local findings="$BATS_TEST_TMPDIR/f.json"
   printf '[{"file":"app.py","title":"x"},{"file":"other.py","title":"y"}]\n' > "$findings"
-  run bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' scope-findings --repo -dash-scope --base main --findings '$findings'"
+  run bash -c 'cd "$1" && zsh "$2" scope-findings --repo "$3" --base main --findings "$4"' \
+    _ "$BATS_TEST_TMPDIR" "$S" "$name" "$findings"
   [ "$status" -eq 0 ]
   # the LENGTH, not just the status: a regression returning [] for everything
   # would pass a status-only assertion
@@ -1280,11 +1286,18 @@ EOF
 }
 
 @test "plan: #1177 a --repo beginning with a dash is planned, not blamed on detect-stack" {
-  # `[[ -d ]]` passes for `-dash-repo` (test operators parse no options) but `cd`
-  # reads it as a flag, so without the ./ normalisation the run fails with
-  # "detect-stack failed" — naming the wrong culprit entirely. The sibling
-  # gather script carries exactly this test.
-  local dashrepo="$BATS_TEST_TMPDIR/-dash-repo"
+  # `[[ -d ]]` passes for a dash-prefixed name (test operators parse no options),
+  # but a reader that DOES parse options — an external such as `stat` given it as
+  # an operand — takes it as a flag, and the run fails naming the wrong culprit.
+  # What this pins is the readers BEFORE `_repo_anchor`: every one of them is
+  # dash-safe today (#1559), and a reader added after anchoring is safe by
+  # construction, since the anchor is absolute. The sibling gather script carries
+  # exactly this test.
+  local name='-dash-repo'
+  # precondition: the name must BEGIN with a dash, or no dash-leading --repo ever
+  # reaches the script and this test covers nothing — fail loudly on such a rename
+  [ "${name#-}" != "$name" ]
+  local dashrepo="$BATS_TEST_TMPDIR/$name"
   mkdir -p "$dashrepo"
   git -C "$dashrepo" init -q
   git -C "$dashrepo" config user.email t@example.com
@@ -1294,7 +1307,7 @@ EOF
   git -C "$dashrepo" commit -qm base
   git -C "$dashrepo" branch -M main
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' plan --repo -dash-repo --base main"
+    bash -c 'cd "$1" && zsh "$2" plan --repo "$3" --base main' _ "$BATS_TEST_TMPDIR" "$S" "$name"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .repo_type)" = "python" ]
 }
@@ -1610,30 +1623,132 @@ detect() {  # $1 = languages json ; rest = extra flags
 }
 
 @test "detect: #1504 a --repo beginning with a dash is detected, not misattributed" {
-  # `cmd_detect` carries `if [[ "$repo" == -* ]]; then repo="./$repo"; fi`. Both
-  # siblings gained a regression test for their copy precisely because deleting
-  # it left the suite green. Without it a `--repo -weird` reaches `_primary`,
-  # whose `sed -nE … "$repo/.maintenance.yml"` reads the path as an option
-  # bundle: the tiebreak silently vanishes and detect escalates exit 3 where
-  # plan returns a type — breaking the one property this block calls
-  # load-bearing.
-  local dash="$BATS_TEST_TMPDIR/-detect-dash"
+  # A NON-git fixture, so `detect` takes `_repo_anchor`'s fallback — the one arm
+  # that returned the RAW value before #1559 made it absolute. Given the raw
+  # value, `_primary` hands GNU `sed` a dash-leading file operand, which it
+  # permutes into its options; `_primary` then fails and detect refuses at exit
+  # 1 ("could not read the .maintenance.yml primary key") where plan returns a
+  # type. BSD sed stops option parsing at the script, so on macOS this test is
+  # green either way — the three directory-stack cases below
+  # (`_detect_dirstack_name`) are the platform-independent pins.
+  local name='-detect-dash'
+  # precondition: the name must BEGIN with a dash, or no dash-leading --repo ever
+  # reaches the script and this test covers nothing — fail loudly on such a rename
+  [ "${name#-}" != "$name" ]
+  local dash="$BATS_TEST_TMPDIR/$name"
   mkdir -p "$dash"
   printf 'primary: go\n' > "$dash/.maintenance.yml"
-  # RELATIVE, from inside the tmpdir: an absolute path never enters the
-  # `[[ "$repo" == -* ]]` arm, so an absolute fixture leaves the normalisation
-  # deletable with this test still green. The plan sibling above builds it this
-  # way for exactly that reason.
+  # RELATIVE, from inside the tmpdir: an absolute path never begins with a dash,
+  # so an absolute fixture would exercise nothing. The plan sibling above builds
+  # it this way for exactly that reason.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python","go"]}' \
-    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' detect --repo -detect-dash"
+    bash -c 'cd "$1" && zsh "$2" detect --repo "$3"' _ "$BATS_TEST_TMPDIR" "$S" "$name"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
 }
 
+# zsh's `cd` reads a lone `-` as $OLDPWD and `-N`/`+N` as a directory-stack
+# entry EVEN AFTER `--`, so any of the three reaching `_detect_json` raw would
+# run detection in some OTHER directory while `_primary` still read
+# `<name>/.maintenance.yml` — a type from the wrong tree at exit 0.
+# `_repo_anchor`'s fallback returns an absolute path, which is what stops all
+# three (#1559). One case per shape, because a fix that handled only a leading
+# dash — the `./` rewrite this story deleted — would pass `-0` and still send
+# `+0` to the stack. The shared stub cannot see any of this (it ignores its
+# cwd), so this one reports languages ONLY from a directory carrying the
+# fixture's marker.
+#
+# OLDPWD is deliberately NOT pinned from outside, because it cannot be: zsh
+# RE-INITIALISES OLDPWD to its own startup `$PWD` and ignores an inherited
+# value — `OLDPWD=… zsh -fc 'print -r -- $OLDPWD'` prints the startup directory,
+# not the pinned one. Earlier cuts of this helper passed one anyway, first
+# through `env` (which bash's own `cd` then rewrote) and then to a decoy
+# directory, and the comment claimed an isolation none of them delivered.
+#
+# What makes a raw value RED is the LANDING, and it is the same directory for
+# all three spellings: `-` resolves through OLDPWD, which is the startup `$PWD`;
+# `-0`/`+0` resolve through a directory stack whose entry 0 is that same
+# directory. That directory is `$start`, which carries no `.detect-marker`, so
+# the cwd-reading stub answers `{"languages":[]}` and `_repo_type` escalates
+# exit 3 against this helper's `[ "$status" -eq 0 ]` — the fixture's own marker
+# is never reached. Two limits ride along, per shape, recorded rather than
+# papered over: a resolved landing and a "`cd` never moved" landing are the same
+# directory, so the assertions cannot tell them apart; and a zsh whose `cd --`
+# stopped consuming these spellings would resolve each relative to `$start`,
+# where the fixture lives, and stay green.
+#
+# NEITHER limit is closable at this call shape, so do not try. The first is an
+# identity — zsh's OLDPWD *is* its startup `$PWD`. The second would need the
+# fixture out of `$start`, but `--repo` is passed as the bare relative name and
+# `_repo_anchor` resolves it with `${repo:a}` against `$start`, so moving the
+# fixture stops the PASSING path resolving at all. In particular do not "fix"
+# that by passing an absolute `--repo`: an absolute path never begins with a
+# dash, which makes all three cases vacuous (the #1504 sibling above says so).
+_detect_dirstack_name() {
+  local name="$1"
+  # ONE binding for the directory the run starts in: it is the `cd` target
+  # below, the subject of the precondition, and the landing every raw spelling
+  # resolves to. Spelling it three times is how the guard and the target drift
+  # apart while both still look right.
+  local start="$BATS_TEST_TMPDIR"
+  local dir="$start/$name"
+  mkdir -p "$dir"
+  # precondition: the marker lives ONLY in the fixture, never in `$start` —
+  # that asymmetry is the whole discriminator, and a marker in `$start` makes
+  # the raw-fallback mutation go green.
+  [ "$dir" != "$start" ]
+  [ ! -e "$start/.detect-marker" ]
+  : > "$dir/.detect-marker"
+  printf 'primary: go\n' > "$dir/.maintenance.yml"
+  local stub="$start/detect-cwd-stub.sh"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'if [ -e .detect-marker ]; then echo "$DETECT_LANGS_JSON"; else echo "{\"languages\":[]}"; fi' \
+    > "$stub"
+  chmod +x "$stub"
+  # negative control: only the marker-present arm runs on the green path, so a
+  # stub that stopped reading its cwd would keep all three tests green AND hide
+  # the raw-fallback regression. Pin the OTHER arm here, where it is cheap.
+  [ "$(cd "$start" && DETECT_LANGS_JSON='{"languages":["python","go"]}' "$stub")" = '{"languages":[]}' ]
+  run env DETECT_STACK_BIN="$stub" DETECT_LANGS_JSON='{"languages":["python","go"]}' \
+    bash -c 'cd "$1" && zsh "$2" detect --repo "$3"' _ "$start" "$S" "$name"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+}
+
+@test "detect: #1559 a -N directory-stack name outside git is detected from ITS tree" {
+  local name='-0'
+  # precondition: `-` then digits ONLY, the shape zsh's `cd` takes for a stack
+  # entry; any other rename leaves `cd --` reading it as a path
+  [ "${name#-}" != "$name" ]
+  [ -n "${name#-}" ]
+  [ -z "$(printf '%s' "${name#-}" | tr -d 0-9)" ]
+  _detect_dirstack_name "$name"
+}
+
+@test "detect: #1559 a +N directory-stack name outside git is detected from ITS tree" {
+  local name='+0'
+  # precondition: `+` then digits ONLY — the shape a dash-only fix never sees
+  [ "${name#+}" != "$name" ]
+  [ -n "${name#+}" ]
+  [ -z "$(printf '%s' "${name#+}" | tr -d 0-9)" ]
+  _detect_dirstack_name "$name"
+}
+
+@test "detect: #1559 a lone - outside git is detected from ITS tree, not OLDPWD" {
+  local name='-'
+  # precondition: exactly `-`, the one spelling zsh's `cd` takes for $OLDPWD
+  [ "$name" = "-" ]
+  _detect_dirstack_name "$name"
+}
+
 @test "detect: #1504 agrees with plan on a DASH-named repo too" {
-  # The agreement property above only ever exercises \$R, so it cannot see the
-  # normalisation gap. This closes it on the fixture that has one.
-  local dash="$BATS_TEST_TMPDIR/-agree-dash"
+  # The agreement property above only ever exercises \$R, so it never passes a
+  # dash-leading --repo. This closes that gap.
+  local name='-agree-dash'
+  # precondition: the name must BEGIN with a dash, or no dash-leading --repo ever
+  # reaches the script and this test covers nothing — fail loudly on such a rename
+  [ "${name#-}" != "$name" ]
+  local dash="$BATS_TEST_TMPDIR/$name"
   mkdir -p "$dash"
   git -C "$dash" init -q
   git -C "$dash" config user.email t@example.com
@@ -1643,14 +1758,14 @@ detect() {  # $1 = languages json ; rest = extra flags
   git -C "$dash" commit -qm base
   git -C "$dash" branch -M main
   # Both invocations RELATIVE, from inside the tmpdir — with an absolute path
-  # neither subcommand's dash arm is entered, and this degenerates into a
+  # neither subcommand sees a dash-leading value, and this degenerates into a
   # duplicate of the plain agreement property above.
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["java","python"]}' \
-    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' plan --repo -agree-dash --base main"
+    bash -c 'cd "$1" && zsh "$2" plan --repo "$3" --base main' _ "$BATS_TEST_TMPDIR" "$S" "$name"
   [ "$status" -eq 0 ]
   local from_plan; from_plan="$(echo "$output" | jq -r .repo_type)"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["java","python"]}' \
-    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' detect --repo -agree-dash"
+    bash -c 'cd "$1" && zsh "$2" detect --repo "$3"' _ "$BATS_TEST_TMPDIR" "$S" "$name"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .repo_type)" = "$from_plan" ]
   [ "$from_plan" = "java" ]
@@ -2409,7 +2524,7 @@ _anchor_fixture() {
 
   # 2. `.` from inside the repo
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["go","python"]}' \
-    bash -c "cd '$AR' && zsh '$S' plan --repo . --base main"
+    bash -c 'cd "$1" && zsh "$2" plan --repo . --base main' _ "$AR" "$S"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .findings_path)" = "$want" ]
 
@@ -2419,9 +2534,13 @@ _anchor_fixture() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .findings_path)" = "$want" ]
 
-  # 4. a DASH-prefixed relative path — the spelling with its own normalisation
-  # arm, so it needs its own case or that arm could regress unseen.
-  local dash="$BATS_TEST_TMPDIR/-anchor-dash"
+  # 4. a DASH-prefixed relative path — the one spelling an option-parsing reader
+  # of the raw value would break, so it needs its own case.
+  local name='-anchor-dash'
+  # precondition: the name must BEGIN with a dash, or no dash-leading --repo ever
+  # reaches the script and this test covers nothing — fail loudly on such a rename
+  [ "${name#-}" != "$name" ]
+  local dash="$BATS_TEST_TMPDIR/$name"
   mkdir -p "$dash"
   git -C "$dash" init -q
   git -C "$dash" config user.email t@example.com
@@ -2432,7 +2551,7 @@ _anchor_fixture() {
   git -C "$dash" branch -M main
   local dashroot; dashroot="$(git -C "$dash" rev-parse --show-toplevel)"
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' plan --repo -anchor-dash --base main"
+    bash -c 'cd "$1" && zsh "$2" plan --repo "$3" --base main' _ "$BATS_TEST_TMPDIR" "$S" "$name"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .findings_path)" = "$dashroot/.review/findings-round-1.json" ]
 }
