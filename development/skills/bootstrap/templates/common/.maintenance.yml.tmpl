@@ -9,3 +9,11 @@ primary: {{PRIMARY}}
 # bootstrap keeps a recorded value and renders it into both.
 gate: {{GATE_COMMAND}}
 # --- KUBERNETES-END ---
+# --- TOOLCHAIN-START ---
+# The quality toolchain /development:bootstrap resolved (#1651). A recorded value wins on every
+# re-run: static_analysis sonarcloud | sonarqube, vulnerabilities snyk | trivy, code_scanning codeql | none.
+tools:
+  static_analysis: {{STATIC_ANALYSIS}}
+  vulnerabilities: {{VULNERABILITIES}}
+  code_scanning: {{CODE_SCANNING}}
+# --- TOOLCHAIN-END ---

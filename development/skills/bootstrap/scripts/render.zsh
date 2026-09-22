@@ -59,6 +59,14 @@
 #                                 IaC gate command (#1604); a blank or
 #                                 multi-line value is a usage error (exit 2),
 #                                 since it would render a gate that runs nothing
+#   --static-analysis <s>         {{STATIC_ANALYSIS}}  } the RESOLVED toolchain
+#   --vulnerabilities <s>         {{VULNERABILITIES}}  } (resolve-tools.zsh, #1651)
+#   --code-scanning <s>           {{CODE_SCANNING}}    } recorded in .maintenance.yml's
+#                                 `tools:` block. No defaults — the block sits in
+#                                 the TOOLCHAIN block (kept unless --primary is
+#                                 `kubernetes`), so a language-path render that
+#                                 forgot them trips the leftover check; a blank
+#                                 value is a usage error (exit 2)
 #   --coverage-threshold <n>      {{COVERAGE_THRESHOLD}} (default: 90)
 #   --python-version <x.y>        {{PYTHON_VERSION}} (default: 3.12; the
 #                                 compact form {{PYTHON_VERSION_COMPACT}} is
@@ -153,6 +161,12 @@ while (($# > 0)); do
 		[[ "${2-}" == *[![:space:]]* && "${2-}" != *$'\n'* ]] ||
 			{ print -u2 -- "render.zsh: --gate-command needs a non-blank, single-line value" && usage; }
 		vals[GATE_COMMAND]="$2" && shift 2
+		;;
+	--static-analysis | --vulnerabilities | --code-scanning)
+		# a blank value would render a null key that records nothing (#1651)
+		[[ "${2-}" == *[![:space:]]* ]] ||
+			{ print -u2 -- "render.zsh: $1 needs a non-blank value" && usage; }
+		key="${${1#--}//-/_}" && vals[${key:u}]="$2" && shift 2
 		;;
 	--coverage-threshold) vals[COVERAGE_THRESHOLD]="$2" && shift 2 ;;
 	--python-version) vals[PYTHON_VERSION]="$2" && shift 2 ;;
@@ -276,6 +290,8 @@ keep_block() {
 	SURFACE_WEB_UI) has_surface web_ui ;;
 	SURFACE_GRPC) has_surface grpc ;;
 	KUBERNETES) [[ "${vals[PRIMARY]:-}" == "kubernetes" ]] ;;
+	# §3l renders no quality workflow, so it declares no toolchain (#1651)
+	TOOLCHAIN) [[ "${vals[PRIMARY]:-}" != "kubernetes" ]] ;;
 	*) return 2 ;; # unknown tag — the caller fails loudly
 	esac
 }

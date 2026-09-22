@@ -279,11 +279,126 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary python --languages python \
+    --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql \
     common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
   [ "$(yq -r '.primary' "$OUT/common/.maintenance.yml")" = "python" ]
   run ! grep -q '^gate:' "$OUT/common/.maintenance.yml"
   run ! grep -q 'KUBERNETES' "$OUT/common/.maintenance.yml"
+}
+
+# --- #1651: the declared toolchain in .maintenance.yml's tools: block -------------
+
+@test "render: #1651 the toolchain flags fill .maintenance.yml's tools: block exactly" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary java --languages java \
+    --static-analysis sonarcloud --vulnerabilities snyk --code-scanning none \
+    common/.maintenance.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(yq -o=json -I=0 '.tools' "$OUT/common/.maintenance.yml")" = \
+    '{"static_analysis":"sonarcloud","vulnerabilities":"snyk","code_scanning":"none"}' ]
+  run ! grep -qE '\{\{(STATIC_ANALYSIS|VULNERABILITIES|CODE_SCANNING)\}\}' "$OUT/common/.maintenance.yml"
+}
+
+@test "render: #1651 a language-path render that forgot a toolchain flag trips the leftover check" {
+  # each of the three in turn: none has a default to fall back on
+  local -a all=(--static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql)
+  local i
+  for i in 0 2 4; do
+    local -a flags=("${all[@]:0:i}" "${all[@]:i+2}")
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary java --languages java \
+      "${flags[@]}" common/.maintenance.yml.tmpl
+    [ "$status" -eq 1 ]
+    local omitted="${all[i]#--}"
+    omitted="${omitted//-/_}"
+    contains "$output" "{{$(printf '%s' "$omitted" | tr '[:lower:]' '[:upper:]')}}"
+  done
+}
+
+@test "render: #1651 a blank toolchain flag is a usage error that writes nothing" {
+  # a blank value would render `code_scanning: ` — a null that records nothing
+  printf 'cs: {{CODE_SCANNING}}\n' > "$T/c.tmpl"
+  local flag
+  for flag in --static-analysis --vulnerabilities --code-scanning; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" "$flag" ' ' c.tmpl
+    [ "$status" -eq 2 ]
+    contains "$output" "$flag needs a non-blank value"
+    [ ! -e "$OUT/c" ]
+  done
+}
+
+@test "render: #1651 the §3l IaC path renders no tools: block and needs no toolchain flag" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary kubernetes --languages "" \
+    common/.maintenance.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.tools' "$OUT/common/.maintenance.yml")" = null ]
+  run ! grep -q 'TOOLCHAIN' "$OUT/common/.maintenance.yml"
+}
+
+@test "render: #1651 TOOLCHAIN block is kept for every primary but kubernetes, and with no --primary" {
+  printf 'a: 1\n# --- TOOLCHAIN-START ---\ntools: yes\n# --- TOOLCHAIN-END ---\n' > "$T/t.tmpl"
+  local primary
+  for primary in python java claude-plugin kubernetes-operator; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary "$primary" t.tmpl
+    [ "$status" -eq 0 ]
+    grep -qx 'tools: yes' "$OUT/t"
+  done
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" t.tmpl
+  [ "$status" -eq 0 ]
+  grep -qx 'tools: yes' "$OUT/t"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary kubernetes t.tmpl
+  [ "$status" -eq 0 ]
+  run ! grep -q 'tools: yes' "$OUT/t"
+  grep -qx 'a: 1' "$OUT/t"
+}
+
+@test "render: #1651 a declare-nothing .maintenance.yml is today's file plus the appended tools: block" {
+  local vis sa v cs
+  for vis in public private; do
+    if [ "$vis" = public ]; then sa=sonarcloud v=snyk cs=codeql; else sa=sonarqube v=trivy cs=none; fi
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary python --languages python \
+      --visibility "$vis" --static-analysis "$sa" --vulnerabilities "$v" --code-scanning "$cs" \
+      common/.maintenance.yml.tmpl
+    [ "$status" -eq 0 ]
+    # the pre-#1651 render, byte for byte, then the block holding the visibility default
+    [ "$(cat "$OUT/common/.maintenance.yml")" = "# Declares this repo's PRIMARY type for /development:maintenance.
+# The primary stack gets the full pipeline (its app-grade gates: coverage floor,
+# dependency upgrades, ...); everything else detected is AUXILIARY and gets a
+# mechanical/lint-level treatment only. See ARCHITECTURE.md \"Primary / auxiliary
+# model\" in the development plugin family.
+primary: python
+# --- TOOLCHAIN-START ---
+# The quality toolchain /development:bootstrap resolved (#1651). A recorded value wins on every
+# re-run: static_analysis sonarcloud | sonarqube, vulnerabilities snyk | trivy, code_scanning codeql | none.
+tools:
+  static_analysis: $sa
+  vulnerabilities: $v
+  code_scanning: $cs
+# --- TOOLCHAIN-END ---" ]
+  done
+}
+
+@test "render: #1651 the toolchain flags change no rendered file but .maintenance.yml" {
+  # Every other template renders byte-identically with and without the three
+  # flags, on both visibilities — so a declare-nothing repo's quality workflows,
+  # configs and docs are exactly today's.
+  local -a files=()
+  local f
+  while IFS= read -r f; do files+=("$f"); done < <(cd "$REAL_TEMPLATES" &&
+    find common public private -type f -name '*.tmpl' | grep -v '^common/.maintenance.yml.tmpl$' | LC_ALL=C sort)
+  [ "${#files[@]}" -gt 20 ]
+  local vis
+  for vis in public private; do
+    local base=(--templates "$REAL_TEMPLATES" --project-name demo --project-slug acme/demo
+      --project-key acme_demo --org-key acme --languages "python java" --primary python
+      --security-contact-email "" --acceptance-interfaces "cli, rest" --cli-entry-point demo
+      --approver-lang python --xcode-scheme Demo --docker true --visibility "$vis")
+    run zsh "$SCRIPT" "${base[@]}" --out "$OUT/$vis-without" "${files[@]}"
+    [ "$status" -eq 0 ]
+    run zsh "$SCRIPT" "${base[@]}" --out "$OUT/$vis-with" \
+      --static-analysis sonarqube --vulnerabilities trivy --code-scanning none "${files[@]}"
+    [ "$status" -eq 0 ]
+    diff -r "$OUT/$vis-without" "$OUT/$vis-with"
+  done
 }
 
 @test "render: #1604 the output carries the template's executable bit, in both directions" {

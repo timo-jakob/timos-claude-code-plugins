@@ -124,6 +124,27 @@ primary: claude-plugin   # a language (python) or a topic (claude-plugin)
 No file ⇒ no distinction: every detected stack is treated as primary (the
 pre-model behavior). The model is opt-in and backward-compatible.
 
+**The quality toolchain is declared in the same file (#1651).** Beside
+`primary:` (and `gate:` on the IaC path), bootstrap records a `tools:` block —
+three independent categories, each with its own set:
+
+```yaml
+tools:
+  static_analysis: sonarcloud   # sonarcloud | sonarqube
+  vulnerabilities: snyk         # snyk | trivy
+  code_scanning: codeql         # codeql | none
+```
+
+Visibility supplies only the defaults (public → `sonarcloud` / `snyk` /
+`codeql`, private → `sonarqube` / `trivy` / `none`); a recorded value wins on
+every re-run, as with `primary:` and `gate:`. The resolver and its ordered
+validation live in one script, `development/skills/bootstrap/scripts/resolve-tools.zsh`,
+whose one merit-based rejection is a public repo with `static_analysis:
+sonarqube` — SonarQube runs on a self-hosted runner, and a public repo never
+gets one. Until composable workflow rendering ships (#1670) the script also
+refuses, after validating it, any toolchain other than its visibility default;
+`/development:maintenance` does not read `tools:` yet (#1672).
+
 **Mechanism.** The orchestrator reads `.maintenance.yml` and tags each dispatch
 via the payload's `dispatch_mode` (`"primary"` | `"auxiliary"`). The language /
 topic plugin honors it — *auxiliary* means **delegate with a policy override**
