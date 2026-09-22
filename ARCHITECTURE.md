@@ -22,6 +22,7 @@ development-docs         ← topic: documentation (C4 architecture docs; marker 
 development-react        ← topic: React framework (composes with development-javascript)
 development-kubernetes   ← topic: infrastructure-as-code (manifests, Helm, Kustomize, Argo CD; may be primary)
 development-opentofu     ← topic: infrastructure-as-code (cloud provisioning; OpenTofu + Terraform-compatible HCL; may be primary)
+development-composition  ← topic: composition repo type (constellation manifest + promotion; marker .claude-workspace.yaml registered with #1747; may be primary)
 development-…            ← future topics: …
 ```
 
@@ -34,7 +35,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`, future: `development-container` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, a `.claude-workspace.yaml` constellation manifest, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`, `development-composition` (marker registration lands with #1747), future: `development-container` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -1403,12 +1404,19 @@ consumer. Patterns we lean on, ranked by leverage:
    design-system, contracts}`) and launch Claude from the parent.
    `Read` / `Grep` / `Bash` cross repo boundaries trivially when invoked
    above them. Cheap, works for tens of repos.
-3. **Workspace manifest.** A small file (e.g. `.claude-workspace.yaml`)
-   declaring the constellation: which repos belong, their roles, where
-   their contracts live. Lets a skill validate that a breaking change
-   has been propagated to all consumers, and lets bootstrap learn
-   "this repo is part of constellation X" so it can apply
-   constellation-specific conventions.
+3. **Workspace manifest.** A small file declaring the constellation:
+   which repos belong, their roles, where their contracts live. Lets a
+   skill validate that a breaking change has been propagated to all
+   consumers, and lets a constellation's conventions be applied from one
+   place. **Realized as `.claude-workspace.yaml`** — see *The
+   `claude-workspace/v1` contract* — with one placement rule that the
+   generic description above leaves open: the manifest lives in the
+   **composition repo**, never in a member repo, and its presence there
+   *is* the composition topic marker (**registered with #1747**; until that
+   lands nothing detects it). Once registered, a member repo carrying one
+   would be detected as a composition repo. `claude-workspace/v1` realizes the
+   constellation and promotion halves; consumer-propagation checking is
+   not part of it.
 4. **MCP server for cross-repo indexing.** Indexes contracts across the
    org's repos and answers "who consumes `POST /orders`?" or "which
    services depend on `@design-system/button`?" Higher build cost; the
@@ -2147,6 +2155,225 @@ both workflows and therefore owns disambiguating the three ids. Until the halt l
 the collision is bounded by the absence of an `opentofu` marker rather than by a
 check. Do not "fix" any of this by renaming the ids here — #1162 renders them
 exactly as enumerated.
+
+### `development-composition` owns
+
+The **composition repo type** — one small repo per constellation (≈ a bounded
+context) that is where separately-built services meet. It owns that repo's
+`.claude-workspace.yaml` constellation manifest and the `claude-workspace/v1`
+contract below, the promotion machinery that moves a pinned set of images
+through the declared environments, and the `deploy/` and `e2e/` sockets the
+deploy-test epics fill.
+
+It does **not** own the member repos: their code, their published contracts and
+the images they build stay with their own language and topic plugins. The
+boundary is what the composition repo can *see* — **only published artifacts**.
+A composition repo depends on **no repository**; it reads pinned image tags and
+the contracts those images publish, which is what makes the constellation
+testable when a member repo is unavailable, renamed, or simply not checked out.
+
+Like [`development-kubernetes` owns](#development-kubernetes-owns) and
+[`development-opentofu` owns](#development-opentofu-owns), it **can be
+primary**: a composition repo has no application language of its own, and the
+primary/auxiliary model already permits a topic to hold that slot, so no new
+mechanism is needed. **It is not primary-capable yet, and the difference is not
+cosmetic.** The marker (`.claude-workspace.yaml`), the gather script and the
+dispatcher are #1747's work; until they land, `composition` is not in the
+detected+supported set, so a `.maintenance.yml` declaring `primary: composition`
+today is a **stale declaration** in the sense of `dispatch_mode` below — it
+selects nothing, every target dispatches as `"primary"`, and the Phase 9 summary
+notes the declaration. Once #1747 registers the marker it selects this plugin
+like any other. That is the same sequence `primary: kubernetes` and
+`primary: opentofu` each passed through.
+
+**Deployment is deliberately absent, and says so rather than pretending.**
+`deploy_target` accepts exactly one value, `none`, until the compose (#719) and
+Kubernetes (#720) renderers land; **deployment** manifests (compose or
+Kubernetes) are *rendered* from OCI-attached deploy-specs by composition-owned
+renderers, never hand-authored in the composition repo. The constellation
+manifest itself *is* authored there — it is the input to that rendering, not
+its output. The rule that follows from it is the one every later child
+inherits: **no run ever reports a deploy that did not happen**. A promotion with
+no renderer still records what it promoted — it just never claims it deployed
+it.
+
+**What is shipped today is the contract and its validator.** #1744 landed this
+boundary, the `claude-workspace/v1` specification below and
+`development-composition/scripts/validate-workspace.zsh`. Nothing calls that
+validator yet: bootstrap's scaffold and the promote-to-prod workflow are #1745,
+the Renovate image-tag configuration #1746, the topic marker, gather and
+dispatch #1747, the injection-hardened bump-triage agent #1748, and the
+how-to #1749. The validator has exactly **two** intended callers — bootstrap, on
+the repo it has just scaffolded, and the composition maintenance gather.
+
+**What the gather files is keyed on WHICH failure, never on "non-zero".** The
+exits are typed (below) precisely so the two defects a caller would otherwise
+conflate stay apart, so a rule of *any failure becomes a manifest finding* would
+throw that away on its first use:
+
+| Exit | The gather's finding |
+| --- | --- |
+| `0` | **no finding** — the manifest conforms |
+| `1` | a `claude-workspace/v1` **contract** finding, quoting the named member or environment verbatim — or, where the violation is attributable to neither (a parse failure, a missing or mistyped top-level key, an unusable environment name), quoting the document-level error line as it stands, still as a contract finding |
+| `4` | a **missing-manifest** finding against whatever should have written it — never "the manifest is invalid". For the *gather* this is in practice the **unreadable** case, since the manifest's presence is the marker that dispatched it at all; for bootstrap it is the missing-file case. The **stderr line** tells them apart — `manifest not found` blames whatever should have written it, `manifest not readable` blames the file's own mode |
+| `3` | a **tool-availability** escalation about the runner — never a manifest finding, whether or not the manifest had already been read when the tool failed |
+| `2` | a **bug in the gather's own invocation**, not a finding about the repo at all |
+| *any other non-zero status* | treated as `3` — the script exits only with `0`, `1`, `2`, `3` and `4`, so anything else means a tool died under `err_exit` and the manifest was never judged. Never a contract finding |
+
+**Bootstrap's branch is the mirror image**, and is owed the same explicitness:
+exit `0` completes the scaffold; exit `1` **fails the bootstrap run**, quoting
+the named error, because the scaffold it just wrote is the thing that is wrong;
+exit `4` is a bootstrap bug — per the row above, `manifest not found` means the
+scaffold did not write the manifest and `manifest not readable` that it wrote
+it unreadably; exits `2`
+and `3` are the run's own invocation and environment, escalated, never reported
+as a bad scaffold; **any other status is treated as `3`** — the manifest was
+never judged, so the run escalates the environment failure. What it must never
+do is complete the scaffold and report success for a manifest no run judged,
+whether or not an error was printed.
+
+**No validator CI job is ever rendered into a composition repo**; that is epic #687's stated boundary, and a later child
+adding one would be widening the epic rather than completing it.
+
+### The `claude-workspace/v1` contract
+
+`.claude-workspace.yaml` at a composition repo's root is the **constellation
+manifest** — the realization of cross-repo leverage-stack item 3 (*Workspace
+manifest*, above). It declares which repos belong to the constellation, which
+image version each contributes, and the environments those images are promoted
+through. It is the single input to promotion and, later, to the renderers.
+
+`development-composition/scripts/validate-workspace.zsh` is the executable half
+of this specification: it exits **0** on a conforming manifest and **1** with a
+named error on the first violation — naming the offending member or environment
+where the violation is attributable to one, and otherwise the document-level
+defect (a parse failure, a missing or mistyped top-level key) — so a caller can
+quote it verbatim into a finding. **First** is a defined position, so a later
+check has a place to go and the same manifest always yields the same error:
+document shape — including each `members[]` entry and each `environments`
+value being a mapping — then `members[]` in declaration order, then
+`environments`, its whole-mapping checks first (names usable, each declared
+once) and then each environment in declaration order, then the promotion-chain
+walk. The other non-zero exits are
+**not** verdicts about the manifest at all. Its exit codes
+are typed rather than collapsed into "failed": `1` a contract violation, `2` a
+usage error, `3` a required tool (`yq`/`jq`) missing **or unusable**, or a runner that
+otherwise cannot provide what the script needs (a temporary file, a working
+`jq`/`yq` mid-run), `4` the
+manifest file does not exist or cannot be read. The last two matter to its
+callers: a missing manifest means bootstrap never wrote one, which is a
+different defect from a manifest it wrote badly, and a missing tool is not a
+verdict about the manifest at all. **`3` covers the wrong `yq` as well as no
+`yq`** — Debian/Ubuntu's `yq` package is kislyuk's python-yq, a different query
+language that rejects the JSON output this validator reads, and blaming the
+manifest for that would send a repo chasing a defect it does not have.
+
+```yaml
+members:
+  - name: orders-ui
+    repo: acme/orders-ui
+    role: web-ui
+    contract: contracts/v1/openapi.yaml
+    image: ghcr.io/acme/orders-ui:2.3.1
+  - name: orders-api
+    repo: acme/orders-api
+    role: rest-api
+    contract: contracts/v1/openapi.yaml
+    image: ghcr.io/acme/orders-api:1.5.0
+
+environments:
+  staging:
+    github_environment: staging
+    promotes_from: null
+    deploy_target: none
+  production:
+    github_environment: production
+    promotes_from: staging
+    deploy_target: none
+```
+
+**Every required field's value is a non-empty, non-whitespace string** — with
+one documented exception, `promotes_from`, whose `null` is an *answer* rather
+than a value (see `environments` below). A key
+that is present but empty is the same defect as an absent one — it is what a
+template renders from an unset variable — and a mapping or list where a string
+is required is a defect of the same class. Both are named errors.
+
+**`members[]`** — a non-empty list; each entry declares, all **required**:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | the member's name within the constellation, a **single-line** string, **unique** among its members, and the name every error about it quotes — two members sharing one would leave every such error naming an offender the reader cannot locate |
+| `repo` | the member's source repository (`owner/name`) — provenance only; nothing reads it to fetch code |
+| `role` | what the member contributes to the constellation (`web-ui`, `rest-api`, …) |
+| `contract` | where that member's published contract lives *inside its own published image* (e.g. `contracts/v1/openapi.yaml`) — resolved in the image, never by fetching the member repo |
+| `image` | the published image, **pinned by tag** |
+
+**The tag-pinning rule.** `image` must be `name:tag`, optionally followed by
+`@sha256:<64 lowercase hex digits>`, the algorithm prefix matched literally.
+**Surrounding whitespace is trimmed before any of this is read**, so a padded
+immutable tag is valid. Five classes of shape are invalid: an **untagged** ref,
+a ref with no **name** portion (`/:1.0` — what a template renders with its image
+name unset), a **floating** tag, a bad digest suffix, and a ref carrying
+**whitespace** anywhere that survives the trim (`…orders-api: latest` would
+otherwise pin a tag no floating-tag rule matches) — the last with three named
+errors of its own (a bare `@`, a non-`sha256` algorithm, and a malformed hex
+body), since the fix differs for each.
+*Untagged* covers both `ghcr.io/acme/orders-ui` and the empty tag
+`ghcr.io/acme/orders-ui:` — one shape, because the defect and the fix are the
+same — and a registry port is not a tag: `localhost:5000/acme/api` is untagged,
+because the tag is read after the last `/`, not after the last `:`.
+**Floating** means one of `latest`, `stable`, `edge`, `main`, `master`: the set
+is closed and stated here so the validator and this specification cannot drift
+apart. A floating tag defeats the manifest's whole purpose — the same file would
+compose different software on two different days — and an untagged ref leaves
+the version implicit, which is the same defect without the appearance of a
+choice. A digest suffix is *allowed but not required*: a member may already be
+pinned to `image:tag@sha256:…`, and promotion must record it with exactly one
+`@sha256:` suffix rather than appending a second.
+
+**`environments`** — a non-empty mapping of environment name to declaration;
+each declares, all **required**:
+
+| Field | Meaning |
+| --- | --- |
+| `github_environment` | the GitHub Environment whose protection rules gate this environment's promotion |
+| `promotes_from` | another **declared** environment, or `null` when it promotes from nothing (the head of the chain) |
+| `deploy_target` | what promotion hands off to — **`none` is the only accepted value in this release**; `compose` (#719) and `kubernetes` (#720) arrive with their renderers |
+
+`promotes_from` is validated against the **declared** environment names, so a
+`production` promoting from an undeclared `qa` is a named error listing what
+*is* declared — the chain is only meaningful if every rung exists. The key is
+**required even when the answer is nothing**, and `null` is the only spelling of
+nothing: an explicit `null` is an answer, a missing key is an omission, and an
+**empty string** is neither — it is what a template renders from an unset
+variable, so it is a named error rather than a silent head of the chain.
+
+Each environment is **declared exactly once, under a non-empty single-line
+name**. YAML resolves a duplicated key before any validator sees it, so one
+`staging:` declaration would silently override the other; an empty name would
+drop out of the roster and be validated by nothing while still being counted in
+the success line. Both are named errors.
+
+**The chain must be acyclic, with at least one `null` head.** An environment
+naming **itself** is the shortest cycle, but not the only one: `staging`
+promoting from `production` while `production` promotes from `staging` names
+only declared environments and still describes a promotion order no run can
+start, which is what a `null` head is *for*. Both are named errors, and a cycle
+of any length is reported with its environments in order.
+
+**v1 defines no schema-version key**, deliberately: the contract is versioned in
+its name, and the validator validates `claude-workspace/v1` unconditionally. One
+appearing in a manifest is an undeclared key like any other and is *ignored*,
+never rejected. A future v2 is distinguished by the keys it adds rather than by
+a version field — so a v2 key must be one a v1 validator can ignore, which the
+forward-compatibility rule below already guarantees.
+
+The manifest is a **contract, not a schema registry**: a manifest may carry keys
+this version does not name, and the validator ignores them, so a later child can
+add a field without every already-scaffolded repo turning red. What it may not
+do is omit a required one, or give `deploy_target` a value this release cannot
+honour — which would be a promise the repo has no mechanism to keep.
 
 ## Build policy — Gradle + Kotlin DSL only (Java/Spring)
 

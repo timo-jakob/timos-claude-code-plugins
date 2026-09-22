@@ -97,7 +97,7 @@ setup() {
   # ones already found, so removing a mapping without removing its usage reds
   # the suite rather than silently dropping the character from the PDF again.
   local codepoint
-  for codepoint in 2194 2260 2265 26A0 FE0F 1F3D7 1F4A1 1F4D6 1F4DA 1F527 1F916; do
+  for codepoint in 2194 2248 2260 2265 26A0 FE0F 1F3D7 1F4A1 1F4D6 1F4DA 1F527 1F916; do
     contains "$(cat "$REPO_ROOT/$HEADER")" "\\DeclareUnicodeFallback{\"$codepoint}"
   done
 }
