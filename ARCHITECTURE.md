@@ -4205,7 +4205,21 @@ the CONVERGED condition, so an absent aggregate must never be read as a clean
 review. Where no `--findings-file` is passed (hook mode, and the loop reading
 `findings_path` itself), the `[]` default survives only on a delta round, which
 cannot converge anyway; in step mode the missing/empty arm refuses it first, on
-every round it can reach.
+every round it can reach. Since #1485 another wiring-independent arm,
+**EMPTY-STORY-DIFF**, closes the other half of that terminal. It covers a full
+round whose scope is **empty**. Either the implementation produced no diff, or
+every change sits in loop-owned state (a repo-internal `--work-dir`, the
+status, findings, telemetry or carry-accounting files) and was filtered out. It
+always fires with one wording. When the panel wrote no findings file, as its
+contract says it must here, the arm fires ahead of both generic missing-file
+arms (step mode's `--resume` arm and the full-round arm), so their "write `[]`"
+advice is never given for this cause. When the caller
+wrote an actual `[]` that consolidated to zero blockers, it fires after
+consolidation and before any accumulator is written, like CARRY-UNACCOUNTED:
+that `[]` means the panel saw nothing, so the loop refuses it rather than
+converging. Re-running the panel plans the same empty scope and cannot clear it.
+The remedy is implementation (§2); or, when the story genuinely needs no code
+change, say so and stop, and never invent a change to fill the diff.
 
 **A missing aggregate has a second cause the refusal cannot distinguish**, and
 the session — not the loop — owns telling them apart: a panel that *did* run and
