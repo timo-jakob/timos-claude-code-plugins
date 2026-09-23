@@ -816,11 +816,9 @@ Branch on the exit code **and** stdout:
   this script accepts (#1670), and branch protection (Step 4b), the Step 4.5
   preflight and State D's GitHub-side gap-fill take its `static_analysis`,
   `vulnerabilities` and `code_scanning` values as flags (#1671) — never
-  re-derived from visibility. Step 4.5's per-path automation is still split by
-  visibility until [#1769](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1769),
-  so it automates only part of some toolchains: its *Which toolchains it
-  covers* table says which script runs and which `SETUP.md` sections stay
-  Step 5 items.
+  re-derived from visibility. Step 4.5's per-tool automation runs each setup
+  script under its own trigger from these same lines (#1769): its *Per-tool
+  automation* table says which.
 - **exit 1** → stdout is empty; relay the one stderr message verbatim and
   **stop**. It is either a **validation** step (a missing or unsupported
   `--visibility`, a malformed `tools:`, an unsupported value, a public repo
@@ -875,14 +873,15 @@ Bootstrap plan:
                     further prompt guards the finish; confirming the plan
                     authorizes it.
   Setup automation: on this macOS + Homebrew host, runs after the finish
-                    (Step 4.5) — the setup its *Which toolchains it covers*
-                    row automates for this toolchain (SonarCloud/Snyk or local
-                    SonarQube setup, GitHub Actions secrets, branch protection[,
-                    self-hosted runner when CI runner is self-hosted]), naming
-                    what that row leaves as SETUP.md steps. Prompts only for its remaining
+                    (Step 4.5) — the per-tool setup scripts whose triggers this
+                    toolchain meets (SonarCloud or local SonarQube setup[,
+                    Snyk setup when vulnerabilities is snyk][, self-hosted
+                    runner when CI runner is self-hosted], GitHub Actions
+                    secrets, the GitHub security toggles); branch protection
+                    is Step 4b's alone. Prompts only for its remaining
                     interactive steps — browser imports/auth, token pastes, and
                     the scripts' per-step Y/N confirmations (e.g. runner
-                    registration, branch protection)[, plus the Claude
+                    registration, Snyk auth)[, plus the Claude
                     App-install click when --claude-approver]; degrades to
                     SETUP.md on failure. Confirming the plan authorizes it too.
                     (Omit this line on a non-macOS host — automation can't run
@@ -950,7 +949,7 @@ further prompt" scopes to the finish, not to those (see the Step 4 intro for the
 authoritative retained set). The Step
 4.5 setup automation, by contrast, **is** covered by this approval: it runs by
 default on a supported host, prompting only for its own irreducible steps (e.g.
-the SonarCloud import / token paste on the public path, the App-install click
+the SonarCloud import / token paste when `static_analysis` is `sonarcloud`, the App-install click
 under `--claude-approver`, and the scripts' per-step Y/N confirmations), not for
 a separate "whether to run automation" opt-in.
 
@@ -1112,7 +1111,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{PROJECT_SLUG}}` | `<owner>/<repo>` — full GitHub path. Use in URL contexts (`ghcr.io/<slug>`, `github.com/<slug>/security/advisories/new`, `scorecard.dev/viewer/?uri=github.com/<slug>`, cosign `--certificate-identity-regexp`). From `gh repo view --json nameWithOwner` or `<github_repo>` field of `detect-stack.sh`. |
 | `{{PAGES_URL}}` | the repo's GitHub Pages site URL — **derived automatically** from `{{PROJECT_SLUG}}` (`owner/repo` → `https://owner.github.io/repo/`), never passed as a flag. Used by `mkdocs.yml.tmpl`'s `site_url` (§3h). |
 | `{{PROJECT_KEY}}` | for Sonar — usually `<github-org>_<repo>` (SonarCloud convention) or `<repo>` (SonarQube) |
-| `{{ORG_KEY}}` | initial value: `<github-org>`. **`automate-public.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
+| `{{ORG_KEY}}` | initial value: `<github-org>`. **`setup-sonarcloud.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated **resolved** languages; **empty on the §3l IaC path** (`--languages ""`) |
 | `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, `is_kubernetes` is `true` (or the user confirmed Q4's empty-repo question) **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → `kubernetes` (the IaC/GitOps repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
@@ -1352,7 +1351,7 @@ in the same PR:
 | `SWIFT_SWIFTPM` | swift detected AND `language_meta.swift.build_system == "swiftpm"` |
 | `SWIFT_XCODE` | swift detected AND `language_meta.swift.build_system == "xcode"` |
 | `DOCKER` | Dockerfile detected |
-| `PUBLIC` | visibility == public — wraps only `SETUP.md`'s public-only parts (the `automate-public.sh` callout, OpenSSF Scorecard, the Snyk import-while-public sentence) |
+| `PUBLIC` | visibility == public — wraps only `SETUP.md`'s public-only parts (OpenSSF Scorecard, the Snyk import-while-public sentence) |
 | `SONARCLOUD` | `--static-analysis sonarcloud` (the `sonarcloud` job + noop, `SETUP.md` §2) |
 | `SONARQUBE` | `--static-analysis sonarqube` (the `sonarqube` job + noop, `SETUP.md` §3) |
 | `SELF_HOSTED` | `self_hosted_runner` — `--static-analysis sonarqube` (the self-hosted `semgrep` shape, `SETUP.md`'s self-hosted-runner section) |
@@ -4074,10 +4073,11 @@ force-push or deletion, and the repo-level `allow_auto_merge` /
 `delete_branch_on_merge` settings **Step 4e's auto-merge arming depends on**.
 Never skip the script on this path; skipping it would leave the default branch
 unprotected and put every IaC bootstrap into Step 4e's *arming failed* branch.
-**And do not let Step 4.5 undo it**: the per-path `automate-*.sh` scripts
-re-invoke `branch-protection.sh` without `--iac-only`, whose PUT would replace
-this rule with the language-app contexts. Step 4.5 skips that automation
-entirely on this path — see its IaC branch.
+**And do not let Step 4.5 undo it**: no Step 4.5 step calls
+`branch-protection.sh` (#1769), and on this path Step 4.5 runs none of its
+per-tool scripts either — see its IaC branch. A later standalone run of
+`branch-protection.sh` without `--iac-only` would replace this rule with the
+language-app contexts, so never run it that way here.
 
 When the resolved language set is non-empty — detected, or declared in Q4 —
 the repo is not on this path, **whatever `.maintenance.yml` records** (the
@@ -4339,7 +4339,7 @@ pre-existing files and that running these commands after installing pre-commit
 closes the gap. **If the Step 4.5 preflight later installs `pre-commit`** (it
 batch-installs the missing tools, pre-commit among them), return to 4a (hook
 installation) and here (normalization) **immediately after that batch-install,
-before the per-path automation and its CI re-trigger** — so the normalization
+before the per-tool automation and its CI re-trigger** — so the normalization
 fixups ride the bot PR the re-trigger then drives green. Push those fixups to
 the open bot PR branch; if the PR has already merged (the gap-fill case where
 the drive ran right after 4e), land them through the normal 4d/4e finishing flow
@@ -4944,17 +4944,18 @@ approval is their consent, exactly as it is for the Step 4e/4f finishing flow
 (the Step 2 plan template discloses the automation on its `Setup automation:`
 line, so the approval names what it authorizes). There is no separate "do you
 want to run the automation?" opt-in: preflight validates the host, and if it
-passes, the path automation runs. It is not prompt-free, though — the
+passes, the per-tool automation runs. It is not prompt-free, though — the
 interactions that remain are the irreducible ones: the external actions (the
 SonarCloud browser import + token paste, the App-install click), the preflight's
 own install/auth offers (brew install, `gh auth login`,
-`register-claude-apps.zsh`), the automate scripts' own per-step Y/N confirmations
-for high-consequence actions (self-hosted runner registration, branch
-protection, Snyk auth), and the per-asset confirmations kept elsewhere (the Step
+`register-claude-apps.zsh`), the setup scripts' own per-step Y/N confirmations
+for high-consequence actions (self-hosted runner registration, Snyk auth), and
+the per-asset confirmations kept elsewhere (the Step
 4c build-file edits — Java and Python — the idempotency file-overwrite rule; see
 the Step 4 intro for the authoritative retained set). Removing that separate
 opt-in is this step's change; tightening the scripts' per-step confirmations is
-out of scope here — the scripts' confirmations are unchanged. The manual `SETUP.md`
+out of scope here; the one confirmation that went away is the branch-protection
+re-apply's, with the re-apply itself (#1769). The manual `SETUP.md`
 path is the **degrade-on-failure** fallback, not a co-equal opt-out.
 
 ### Preflight check
@@ -5013,38 +5014,48 @@ The script will:
 If preflight fails (user declines installs, or non-macOS host), skip Step 4.5
 entirely and go straight to Step 5 (manual checklist).
 
-### Per-path automation
+### Per-tool automation
 
-If preflight passed, run the path-specific automation — it is covered by the
+If preflight passed, run the per-tool setup scripts — they are covered by the
 Step 2 plan approval, not a separate opt-in prompt.
 
-**Which toolchains it covers (#1671, until #1769).** The two scripts are still
-split by visibility, and each automates a fixed subset of the tools. Decide
-from the resolved toolchain, never from visibility alone:
+**Which script runs is decided by the resolved toolchain (#1769).** Each
+operation has exactly one script, and each script runs under its own trigger —
+read the triggers from `resolve-tools.zsh`'s `key=value` output
+(`static_analysis`, `vulnerabilities`, `self_hosted_runner`), never from
+visibility alone. Run them in this order, skipping each whose trigger does not
+hold:
 
-| Resolved toolchain | Run | What stays a Step 5 item |
+| Step 4.5 script | What it does | Runs iff |
 | --- | --- | --- |
-| public (`sonarcloud`), `snyk` | `automate-public.sh` | nothing |
-| public (`sonarcloud`), `trivy` | `automate-public.sh` (it skips its Snyk steps) | nothing — `trivy-fs` needs no account or secret |
-| private, `sonarqube`, `trivy` | `automate-private.sh` | nothing |
-| private, `sonarqube`, `snyk` | `automate-private.sh` | `SETUP.md`'s Snyk section, `SNYK_TOKEN` included — the script sets up no Snyk |
-| private, `sonarcloud` (either tool) | **neither** — `automate-private.sh` refuses `sonarcloud`; run `install-claude-apps.zsh` directly when `--claude-approver` resolved `true` | `SETUP.md`'s SonarCloud section and, on `snyk`, its Snyk section; Dependabot alerts and automated security fixes (repo Settings → Code security), which `automate-private.sh` would have enabled; branch protection is already applied by Step 4b |
+| `setup-sonarcloud.sh` | SonarCloud import walkthrough, org-slug resolution, Quality Gate (with the `Sonar way` fallback), `SONAR_TOKEN` | `static_analysis` is `sonarcloud` — public or private |
+| `setup-sonarqube.sh` | `docker compose up`, health wait, Keychain admin password, project, analysis token, Quality Gate, `SONAR_TOKEN` + `SONAR_HOST_URL` | `static_analysis` is `sonarqube` |
+| `register-runner.sh` | self-hosted runner download, registration, launchd service | `self_hosted_runner` is `true` |
+| `setup-snyk.sh` | `snyk auth --auth-type=token`, `SNYK_TOKEN`, the GitHub-integration project import, the auto-Fix-PR and PR-status-check manual-step notices | `vulnerabilities` is `snyk` — whatever the visibility or Dockerfile |
+| `enable-github-security.sh` | Dependabot alerts + automated security fixes always; secret scanning + push protection + Private Vulnerability Reporting iff public; the GitHub Advanced Security note iff private | every non-IaC repo |
+| `install-claude-apps.zsh` | the Claude Apps install (the *`--claude-approver true` extension* below) | `--claude-approver` resolved `true` and an Approver-capable language resolves (§3e's `{{APPROVER_LANG}}`) |
 
-A Step 5 item named here is **outstanding work**, not a failure: report it as
-such, beside Step 4b's branch-protection result.
+So a public SonarCloud + trivy repo runs `setup-sonarcloud.sh` and
+`enable-github-security.sh` only (`trivy-fs` needs no account or secret), and a
+private SonarCloud + Snyk repo runs `setup-sonarcloud.sh`, `setup-snyk.sh` and
+`enable-github-security.sh` — no `register-runner.sh` and no
+`setup-sonarqube.sh`, since neither of their triggers holds.
 
-> **The §3l IaC path skips this section entirely.** Two reasons, and the first
-> is destructive: `automate-public.sh` / `automate-private.sh` both re-invoke
-> `branch-protection.sh` **without `--iac-only`**, and that PUT *replaces* the
-> rule — so the `gate` context Step 4b required would be
-> swapped back for language-app contexts nothing on this repo reports, pinning
-> every PR on the permanent `expected` state §3l exists to prevent. Second,
-> everything else these scripts configure — the SonarCloud/SonarQube project,
-> the Sonar gate, `SONAR_TOKEN`, Snyk auth and `SNYK_TOKEN`, the self-hosted
-> runner — has **no consumer** on this path: §3l emits no
+**No Step 4.5 step applies branch protection.** Step 4b is the only step that
+applies it, once, with the resolved toolchain — or reports why it could not;
+none of these scripts calls `branch-protection.sh`, so Step 4.5 never re-writes
+the rule. Report Step 4b's actual outcome, a 403 fallback included, beside this
+step's.
+
+> **The §3l IaC path runs none of the per-tool steps.** Everything these
+> scripts configure — the SonarCloud/SonarQube project, the Sonar gate,
+> `SONAR_TOKEN`, Snyk auth and `SNYK_TOKEN`, the self-hosted runner —
+> has **no consumer** on this path: §3l emits no
 > `sonar-project.properties`, no `.snyk`, and no workflow that reads either
-> secret. So on the IaC path: run no `automate-*.sh`, and report that branch
-> protection was already applied by Step 4b with `--iac-only true` — **unless
+> secret. So on the IaC path:
+> run no per-tool script — `enable-github-security.sh` included, which this
+> path has never run (its toggles stay a repo-Settings choice) — and report that
+> branch protection was already applied by Step 4b with `--iac-only true` — **unless
 > Step 4b hit its #1606 refusal or its 403 fallback**, in which case report it as
 > **not** applied and carry Step 4b's outstanding Step 5 item (the rule **and**
 > the merge settings) instead. Reaching this section is never itself evidence
@@ -5063,86 +5074,73 @@ such, beside Step 4b's branch-protection result.
 > Docker-daemon check, which exists for image/Trivy/SonarQube consumers this path
 > never emits.
 
-**Public path:**
+**The invocations**, each run from the target repo's root and only under its
+trigger above:
 
 ```bash
-"<skill-base-dir>/scripts/automate-public.sh" \
+# static_analysis = sonarcloud
+"<skill-base-dir>/scripts/setup-sonarcloud.sh" \
   --project-key "<PROJECT_KEY>" \
   --org-key "<ORG_KEY>" \
-  --project-name "<PROJECT_NAME>" \
-  --default-branch "<DEFAULT_BRANCH>" \
-  --static-analysis "<static_analysis from resolve-tools.zsh>" \
-  --vulnerabilities "<vulnerabilities from resolve-tools.zsh>" \
-  --has-dockerfile "<true|false>" \
-  --has-ko "<true|false — root .ko.yaml, #875>" \
-  --has-codeql "<true exactly when resolve-tools.zsh's code_scanning is codeql, else false>" \
-  --codeql-languages "<space-separated languages, e.g. 'python javascript'>" \
-  --claude-approver "<true|false>" \
-  --require-signed-commits "<Step 4b's signing value>"
-```
+  --project-name "<PROJECT_NAME>"
 
-Both `automate-*.sh` scripts take `--static-analysis` and `--vulnerabilities`
-as **required** flags and forward them, with `--require-signed-commits`,
-unchanged to their branch-protection re-apply, so it reproduces Step 4b's whole
-rule, signatures included — an interim bridge until #1769 retires both scripts
-(#1671).
-
-`--codeql-languages` must be passed whenever `--has-codeql=true`. CodeQL's
-`analyze` job runs as a matrix per language and GitHub reports each one
-as `analyze (<lang>)`. Without the language list, the script can't build
-the right required-status-check contexts and CodeQL checks would never
-register as required.
-
-This walks the user through:
-
-- Opening SonarCloud, signing in via GitHub, importing the repo (one-time
-  human step — the only browser action required).
-- Pasting their SonarCloud user token.
-- Best-effort creating + assigning the "Zero Tolerance" Sonar Quality Gate;
-  falls back to `Sonar way` on SonarCloud free (custom-gate assignment is
-  paywalled). See *Guiding Principles → Zero Tolerance standard* for the
-  layered-enforcement model.
-- Running `snyk auth --auth-type=token` (token-mode, not OAuth — required for
-  GitHub Actions secrets).
-- Storing `SONAR_TOKEN` and `SNYK_TOKEN` as GitHub Actions secrets via `gh`.
-- Optional: `snyk monitor` for continuous monitoring on snyk.io.
-- Applying branch protection.
-
-**Private path:**
-
-```bash
-"<skill-base-dir>/scripts/automate-private.sh" \
+# static_analysis = sonarqube
+"<skill-base-dir>/scripts/setup-sonarqube.sh" \
   --project-key "<PROJECT_KEY>" \
-  --project-name "<PROJECT_NAME>" \
-  --default-branch "<DEFAULT_BRANCH>" \
-  --static-analysis "<static_analysis from resolve-tools.zsh>" \
-  --vulnerabilities "<vulnerabilities from resolve-tools.zsh>" \
-  --has-dockerfile "<true|false>" \
-  --has-ko "<true|false — root .ko.yaml, #875>" \
-  --claude-approver "<true|false>" \
-  --require-signed-commits "<Step 4b's signing value>"
+  --project-name "<PROJECT_NAME>"
+
+# self_hosted_runner = true
+"<skill-base-dir>/scripts/register-runner.sh"
+
+# vulnerabilities = snyk
+"<skill-base-dir>/scripts/setup-snyk.sh"
+
+# every non-IaC repo
+"<skill-base-dir>/scripts/enable-github-security.sh" --visibility "<public|private>"
+
+# --claude-approver resolved true and an Approver-capable language resolves
+"<skill-base-dir>/scripts/install-claude-apps.zsh"
 ```
 
-This handles:
+`enable-github-security.sh` is the one script that takes visibility, because
+GitHub prices the features it toggles per visibility, not per tool.
 
-- `docker compose up -d` on the generated `infra/sonarqube/docker-compose.yml`.
-- Waiting for SonarQube to become healthy (`/api/system/status` polling).
-- Generating a random admin password, storing it in the macOS Keychain
-  (`security` command, service `sonarqube-local-admin`).
-- Changing the SonarQube admin password from `admin/admin` to the generated
-  one via API.
-- Creating the project, minting an analysis token, creating + assigning the
-  "Zero Tolerance" Sonar Quality Gate (custom gates are unrestricted on
-  self-hosted SonarQube CE).
-- Setting `SONAR_TOKEN` and `SONAR_HOST_URL` as GitHub Actions secrets.
-- Downloading and registering a self-hosted GitHub Actions runner as a
-  launchd service.
-- Applying branch protection.
+**A slug `setup-sonarcloud.sh` patched must reach the PR.** When the SonarCloud
+org slug differs from the GitHub owner, the script rewrites
+`sonar.organization` in `sonar-project.properties` — in the working tree, after
+Step 4e already pushed the bot PR. So when `git status` shows that file modified
+after the script ran, land it the way Step 4a.5 lands its late fixups (push to
+the open bot PR branch, or a `chore/` delta once it has merged) **before** the
+CI re-trigger below; otherwise the re-triggered SonarCloud check runs on the
+unpatched slug and stays red.
 
-If an automation step fails — or the user declines one of the irreducible
-external actions (the SonarCloud import / token paste) — degrade to the manual
-instructions in `SETUP.md` for the remaining **automate-script** steps, with a
-clear one-line reason. Degrading exits the per-path scripts only; it does **not**
+What remains interactive, script by script: `setup-sonarcloud.sh` opens
+SonarCloud for the one-time import (the only browser action it needs) and waits
+for the user-token paste; it best-effort creates and assigns the "Zero
+Tolerance" Sonar Quality Gate and falls back to `Sonar way` on SonarCloud free
+(custom-gate assignment is paywalled — see *Guiding Principles → Zero Tolerance
+standard* for the layered-enforcement model). `setup-sonarqube.sh` needs no
+input: it stores the generated admin password in the macOS Keychain (`security`
+command, service `sonarqube-local-admin`), and custom gates are unrestricted on
+self-hosted SonarQube CE. `register-runner.sh` asks Y/N before registering the
+runner. `setup-snyk.sh` asks before running `snyk auth --auth-type=token`
+(token mode, not OAuth — GitHub Actions cannot refresh OAuth) and, when the
+Snyk org has no GitHub integration yet, opens its integrations page and asks
+again, up to three times.
+
+If a script fails — or the user declines one of its irreducible external
+actions (the SonarCloud import / token paste, Snyk auth, the runner
+registration, which `register-runner.sh` declines with exit 0) — degrade **that
+script's tool only** to its `SETUP.md` section, with a clear one-line reason, and
+carry on with the next table row whose trigger holds: the scripts are
+independent, so a declined Snyk auth never skips `enable-github-security.sh` or
+the Apps install. A declined runner falls back to SETUP.md's runner section (3.3), and Step 5 names it as
+why the self-hosted checks stay queued. An `install-claude-apps.zsh` that fails,
+or whose App-install click the user declines, has no `SETUP.md` section, so
+report it as an outstanding Step 5 item naming the command; the
+no-Approver-language skip (below) is not outstanding work and gets no Step 5
+item. Degrading ends
+the failed script only; it does **not**
 skip the re-trigger + deferred-4f-drive blocks below — those still run **iff this
 run stored any token-gated secret before failing** (the re-trigger's
 precondition). If the failure came *before* any secret was stored, leave both to
@@ -5179,12 +5177,13 @@ at the end of whichever path completed the merge.
 
 ### `--claude-approver true` extension
 
-When the orchestrator was invoked with `--claude-approver true`, whichever
-automate script runs (the *Which toolchains it covers* table; where it runs
-neither, it runs the delegate below directly) adds a Claude Apps install step **after
-branch protection and before printing the summary** (no extra flag plumbing
-needed by the orchestrator — the scripts pick up the flag passed at the
-top). The step delegates to:
+When `--claude-approver` resolved `true`, Step 4.5 runs the Claude Apps install
+as its last per-tool step (the *Per-tool automation* table), directly — no
+setup script wraps it, so it runs whatever the toolchain and visibility — but
+only when an Approver-capable language resolves, and never on the §3l IaC path.
+When none resolves, skip it here without asking: §3e's *No-approver-language
+skip* already warned the user and took their choice, and Apps no approve skill
+would ever invoke are never installed. The step is:
 
 ```bash
 "<skill-base-dir>/scripts/install-claude-apps.zsh"
@@ -5203,29 +5202,12 @@ which (idempotent):
   before #476 it flags the leftover CI-era secrets/variables;
   `--verify --fix` deletes the unambiguous ones.
 
-**No-approver-language warning.** If `--claude-approver` resolves `true` but no
-Approver-capable language resolves as the review target (no `python`/`java`/`swift`
-in scope — see §3e's `{{APPROVER_LANG}}` resolution), warn the user the
-flag will be a no-op:
-
-> `--claude-approver` resolved `true` (explicitly or auto-detected) but no
-> Approver-capable language (currently Python, Java, or Swift) resolves as this
-> repo's review target. The
-> Approver ships per-language; the Apps would be installed but no approve
-> skill would ever invoke them. Re-run with `--claude-approver false` to skip
-> (where the Apps are registered for this repo's owner the default otherwise
-> resolves `true` again), or wait for that language's Approver agent to ship.
-
-Offer the user to continue with the Approver skipped (or re-run with
-`--claude-approver false`), or abort. Do not silently install Apps that would
-never be invoked.
-
 ### `--claude-plugin true` extension — install the WRITER App
 
 When `--claude-plugin true` was set, the repo is **human-only approval** (no
 Approver — §3e was skipped). Instead, install just the **writer** (the Claude
 Maintenance App) so Claude's PRs are bot-authored and the human can approve them.
-After branch protection, delegate to:
+After the per-tool steps, delegate to:
 
 ```bash
 "<skill-base-dir>/scripts/install-claude-apps.zsh" --writer-only

@@ -422,7 +422,10 @@ setup_parts() { # <vis> <sa> <v> <cs> -> "needle<TAB>0|1" lines
     '## 2. SonarCloud setup' "$cloud" \
     '### 2.3 Create the Zero Tolerance Quality Gate' "$cloud" \
     '| `SNYK_TOKEN` | Yes | from step 2b.1 below |' "$((cloud && snyk))" \
-    '`scripts/automate-public.sh` runs most of' "$((cloud && pub))" \
+    '`<skill-base-dir>/scripts/setup-sonarcloud.sh`' "$cloud" \
+    '`<skill-base-dir>/scripts/setup-snyk.sh` runs' "$snyk" \
+    '`<skill-base-dir>/scripts/setup-sonarqube.sh`' "$qube" \
+    '`<skill-base-dir>/scripts/register-runner.sh`' "$qube" \
     '## 2a. OpenSSF Scorecard — supply-chain health badge' "$pub" \
     '## 2b. Snyk setup' "$snyk" \
     '### 2b.1 Sign up for Snyk, import the repo, configure PR checks' "$snyk" \

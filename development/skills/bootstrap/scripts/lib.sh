@@ -31,8 +31,9 @@ die() {
 # capture (e.g. `value=$(ask_secret ...)`). See #196.
 
 # Ask a yes/no question. Default Y unless second arg is "n".
-# In a non-interactive context (stdin not a TTY) returns false — callers must
-# pass --assume-yes if they want to skip prompts during automation.
+# In a non-interactive context (stdin not a TTY) returns false: a script run
+# without a terminal answers every prompt "no" (only preflight.sh offers
+# --assume-yes).
 ask_yn() {
 	local prompt="$1" default="${2:-y}" answer
 	local hint="[Y/n]"
@@ -102,7 +103,7 @@ require_brew() {
 }
 
 # Fail fast if any of the given tools is missing from PATH. Used by the
-# automate-*.sh entry points so users see a clear "run preflight first"
+# Step 4.5 setup scripts so users see a clear "run preflight first"
 # message instead of a confusing later failure deep in the API flow.
 # Args: list of binary names (e.g. `require_tools curl jq gh snyk`).
 require_tools() {

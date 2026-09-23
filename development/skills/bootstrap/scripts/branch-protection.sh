@@ -264,8 +264,7 @@ if [[ "$IAC_ONLY" != "true" ]]; then
 	# workflow ever reports — the permanent stuck-on-`expected` state the Snyk note
 	# below exists to avoid. So gate the ko half on the workflow file actually
 	# being present. branch-protection.sh always runs from the target repo root
-	# (the automate-*.sh callers set REPO_ROOT=$(pwd) and never cd), so the path is
-	# repo-relative.
+	# (bootstrap's Step 4b invokes it there), so the path is repo-relative.
 	image_required="false"
 	[[ "$HAS_DOCKERFILE" == "true" ]] && image_required="true"
 	[[ "$HAS_KO" == "true" && -f .github/workflows/ko-image.yml ]] && image_required="true"

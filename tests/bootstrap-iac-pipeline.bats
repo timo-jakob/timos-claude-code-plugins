@@ -1141,22 +1141,35 @@ write_marker_at_line() {
   contains "$block" 'REPLACE the `gate` context'
 }
 
-@test "Step 4.5 skips the per-path automation that would UNDO --iac-only (#1154)" {
-  # the highest-leverage prose gap in the change: automate-public.sh /
-  # automate-private.sh re-invoke branch-protection.sh WITHOUT the flag, and
-  # that PUT *replaces* the rule — so deleting this block leaves every IaC
-  # bootstrap ending with the language-app contexts required again, three steps
-  # after the code this suite otherwise covers.
+@test "Step 4.5 never re-applies branch protection, and the IaC path runs none of its per-tool steps (#1154, #1769 AC3)" {
+  # Step 4b's --iac-only rule survives only while nothing later PUTs the rule
+  # again: a branch-protection.sh re-apply without the flag REPLACES the `gate`
+  # context with language-app contexts nothing on an IaC repo reports. #1769
+  # took the re-apply out of Step 4.5 altogether, and §3l runs no setup script.
   local block
-  block="$(sed -n '/^### Per-path automation/,/^## Step 5/p' "$SKILL" | tr -s '[:space:]' ' ')"
+  block="$(sed -n '/^### Per-tool automation/,/^## Step 5/p' "$SKILL" | tr -s '[:space:]' ' ')"
   [ -n "$block" ]
   ends_with "$block" '## Step 5: Print the Manual-Setup Checklist '
-  contains "$block" 'The §3l IaC path skips this section entirely'
-  contains "$block" 'automate-public.sh'
-  contains "$block" 'without `--iac-only`'
-  contains "$block" 'run no `automate-*.sh`'
+  contains "$block" '**No Step 4.5 step applies branch protection.**'
+  contains "$block" 'none of these scripts calls `branch-protection.sh`'
+  # no invocation of it anywhere in the step, in any form
+  lacks "$block" 'scripts/branch-protection.sh"'
+  lacks "$block" 'scripts/branch-protection.sh '
+  lacks "$block" 'Applying branch protection'
+  contains "$block" 'The §3l IaC path runs none of the per-tool steps.'
+  contains "$block" 'run no per-tool script'
+  # the destructive-re-invoke reason is gone with the re-invoke; the
+  # no-consumer reason stays
+  lacks "$block" 'is destructive'
+  contains "$block" 'has **no consumer** on this path'
   # the scope of the skip, or a model cannot tell whether the preflight runs
   contains "$block" 'Scope: this section only'
+  # a declined runner degrades like any other decline, and the no-Approver-language
+  # skip is silent and leaves no Step 5 item (#1769)
+  contains "$block" 'which `register-runner.sh` declines with exit 0'
+  contains "$block" 'skip it here without asking'
+  contains "$block" 'An `install-claude-apps.zsh` that fails, or whose App-install click the user declines, has no `SETUP.md` section, so report it as an outstanding Step 5 item naming the command'
+  contains "$block" 'no-Approver-language skip (below) is not outstanding work and gets no Step 5 item'
   # the hardcoded --has-codeql "true" contradicted §3l, which emits no codeql.yml
   lacks "$block" '--has-codeql "true"'
 }
@@ -1429,13 +1442,13 @@ step4a_iac() {
 
 @test "Step 4.5 runs the preflight with --iac-only true on the IaC path (#1605)" {
   local block quote
-  block="$(sed -n '/^### Preflight check/,/^### Per-path automation/p' "$SKILL" | tr -s '[:space:]' ' ')"
-  ends_with "$block" '### Per-path automation '
+  block="$(sed -n '/^### Preflight check/,/^### Per-tool automation/p' "$SKILL" | tr -s '[:space:]' ' ')"
+  ends_with "$block" '### Per-tool automation '
   contains "$block" '--iac-only "<true on the §3l IaC path, else false>"'
   contains "$block" 'With `--iac-only true` the list is `gh`, `jq`, `git` and the gate'"'"'s tools'
-  quote="$(sed -n '/^> \*\*The §3l IaC path skips this section entirely/,/^\*\*Public path:\*\*/p' "$SKILL" \
+  quote="$(sed -n '/^> \*\*The §3l IaC path runs none of the per-tool steps/,/^\*\*The invocations\*\*/p' "$SKILL" \
     | tr -s '[:space:]' ' ')"
-  ends_with "$quote" '**Public path:** '
+  ends_with "$quote" '**The invocations**, each run from the target repo'"'"'s root and only under its '
   contains "$quote" 'still runs, **with `--iac-only true` and neither toolchain flag**'
 }
 
@@ -1453,7 +1466,7 @@ step4a_iac() {
   sections+=("$(sed -n '/^   \*\*The IaC set (#1154, #1604) is the third not-blind set\.\*\*/,/^   \*\*The ops-major migration/p' "$SKILL" | tr -s '[:space:]' ' ')")
   sections+=("$(sed -n '/^\*\*On the §3l IaC path the plan takes a different shape\*\*/,/^A GitOps repo may still carry a Dockerfile/p' "$SKILL" | tr -s '[:space:]' ' ')")
   sections+=("$(step4a_iac)")
-  sections+=("$(sed -n '/^> \*\*The §3l IaC path skips this section entirely/,/^\*\*Public path:\*\*/p' "$SKILL" | tr -s '[:space:]' ' ')")
+  sections+=("$(sed -n '/^> \*\*The §3l IaC path runs none of the per-tool steps/,/^\*\*The invocations\*\*/p' "$SKILL" | tr -s '[:space:]' ' ')")
   sections+=("$(sed -n '/^For the \*\*IaC path\*\*/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')")
   # END-ANCHORS, one per section, so no range silently ran to EOF — which would
   # judge the rest of SKILL.md (where the language path's pre-commit prose
@@ -1467,7 +1480,7 @@ step4a_iac() {
   ends_with "${sections[3]}" 'A GitOps repo may still carry a Dockerfile (a tooling image, say). On this path '
   contains "${sections[3]}" 'Setup automation: preflight only (--iac-only true) — verifies and batch-installs gh, jq, git and the gate'"'"'s tools'
   ends_with "${sections[4]}" '**Every other path:** if `pre-commit` is installed on the user'"'"'s machine, run: '
-  ends_with "${sections[5]}" '**Public path:** '
+  ends_with "${sections[5]}" '**The invocations**, each run from the target repo'"'"'s root and only under its '
   ends_with "${sections[6]}" '## Important Rules '
   local s n
   for s in "${sections[@]}"; do

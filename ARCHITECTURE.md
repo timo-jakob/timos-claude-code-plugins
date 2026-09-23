@@ -151,9 +151,9 @@ one as `render.zsh`'s per-tool block tags, and the runner self-hosted iff
 `sonarqube` — and branch protection and the setup preflight take the resolved
 toolchain rather than visibility (#1671): `branch-protection.sh` requires the
 context set of #1670's D1 rule, and `preflight.sh` checks each resolved tool's
-prerequisites. The Step 4.5 setup automation is still split by visibility
-until #1769, so a private `sonarcloud` toolchain and a private `snyk` one leave
-their SonarCloud or Snyk setup as `SETUP.md` steps the bootstrap report lists.
+prerequisites. The Step 4.5 setup automation runs one script per tool, each
+under its own trigger (#1769); `enable-github-security.sh` is the only one keyed
+on visibility, and no Step 4.5 step re-applies branch protection.
 `/development:maintenance` does not read `tools:` yet (#1672).
 
 **Mechanism.** The orchestrator reads `.maintenance.yml` and tags each dispatch
@@ -1470,7 +1470,9 @@ per-language policy templates.
   model" below).
 - Shared scripts that operate on detected state without language
   knowledge: `detect-stack.sh`, `merge-gitignore.sh`,
-  `branch-protection.sh`, `preflight.sh`, the `automate-*.sh` family.
+  `branch-protection.sh`, `preflight.sh`, and Step 4.5's per-tool setup scripts
+  (`setup-sonarcloud.sh`, `setup-sonarqube.sh`, `register-runner.sh`,
+  `setup-snyk.sh`, `enable-github-security.sh`).
 - Policy text: Zero Tolerance standard definitions (the 90/0/A thresholds
   and the layered enforcement model — Sonar gate + CI `coverage-floor` +
   pre-push hook), security thresholds, `.snyk` ignore conventions.
