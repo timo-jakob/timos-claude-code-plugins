@@ -65,10 +65,10 @@ wait_for_sonar_up "$SONAR_HOST" 300
 echo
 info "═══ Admin password ═══"
 
-# Check Keychain first — if we've already run, reuse the stored password.
+# Check Keychain first — if we've already run, reuse the stored password. One
+# lookup captures it; nothing of it reaches the output.
 ADMIN_PW=""
-if security find-generic-password -s "$KEYCHAIN_SERVICE" -a "admin" -w >/dev/null 2>&1; then
-	ADMIN_PW=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "admin" -w 2>/dev/null)
+if ADMIN_PW=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "admin" -w 2>/dev/null); then
 	ok "Reusing admin password from Keychain (service=$KEYCHAIN_SERVICE)"
 else
 	ADMIN_PW=$(openssl rand -base64 24 | tr -d '/+=' | head -c 28)
