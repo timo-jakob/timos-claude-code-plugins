@@ -73,11 +73,12 @@ setup() {
   # the anchors something LINKS (four of the six today), so the other two are
   # checked by nothing; a duplicate id would silently shadow one.
   local n
-  # grep -oE, not -c: `-c` counts matching LINES, so two anchors on one heading
-  # would read as 1 and pass while the rendered page shadows an id. The ERE
-  # form also avoids `\+`, a GNU-only BRE extension that BSD grep (macOS, this
-  # repo's primary platform) reads as a literal plus.
-  n="$(grep -oE '^## .*\{#pillar-[0-9]+\}' "$PHILOSOPHY" | wc -l | tr -d ' ')"
+  # Count ANCHORS on `## ` lines, not the lines themselves: the second grep's
+  # -o emits every anchor a heading carries, so `## X {#pillar-3} {#pillar-7}`
+  # reads as 2 and the count reds. The ERE form also avoids `\+`, a GNU-only
+  # BRE extension that BSD grep (macOS, this repo's primary platform) reads as
+  # a literal plus.
+  n="$(grep -E '^## ' "$PHILOSOPHY" | grep -oE '\{#pillar-[0-9]+\}' | wc -l | tr -d ' ')"
   [ "$n" -eq 6 ]
   local i
   for i in 1 2 3 4 5 6; do
@@ -306,6 +307,9 @@ setup() {
   # the rule's other half: without this, deleting the retirement clause leaves
   # an entry that never goes away once all its gaps close
   contains "$body" 'when the last one lands the whole entry goes'
+  # retiring the entry names every assertion over it, not just one test (#1661)
+  contains "$body" 'with the entry every assertion over it'
+  lacks "$body" 'the whole test with the entry'
 }
 
 @test "#1629 each gap-6 pillar link points at the pillar whose text it names" {
