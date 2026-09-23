@@ -1,0 +1,7 @@
+analyze (python)
+image
+license-fs
+pre-commit
+semgrep
+sonarcloud
+test-and-coverage

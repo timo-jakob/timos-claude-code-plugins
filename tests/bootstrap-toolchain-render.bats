@@ -584,11 +584,14 @@ setup_parts() { # <vis> <sa> <v> <cs> -> "needle<TAB>0|1" lines
     grep -q 'GitHub Advanced Security' "$f"
   done
   grep -q 'on a private repo Code scan, which has only `none` there' "$skill"
-  # until #1671, bootstrap stops at its plan for a non-default toolchain — in
-  # Resolve the toolchain, the one place the rule lives
+  # #1671 lifted the non-default-toolchain stop: every exit 0 is resolved, and
+  # no doc still promises a finish "until #1671" / "once #1671"
   sed -n '/^### Resolve the toolchain (#1651)/,/^## Step 2:/p' "$skill" |
-    grep -qF -- '- **exit 0, any other toolchain** → valid'
-  sed -n '/^### Resolve the toolchain (#1651)/,/^## Step 2:/p' "$skill" |
-    grep -qF 'stop before rendering — write nothing'
+    grep -qF -- '- **exit 0** → resolved, whether or not it is the visibility default'
+  run ! grep -qF 'stop before rendering — write nothing' "$skill"
+  run ! grep -qF -- '- **exit 0, any other toolchain**' "$skill"
+  for f in "$skill" "$arch" "$ref" "$REPO_ROOT/docs/reference/plugins.md"; do
+    run ! grep -nE '(until|once) \[?#1671' "$f"
+  done
   run ! grep -qF "skips this step, and Step" "$skill"
 }

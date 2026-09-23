@@ -148,10 +148,13 @@ nor test (#1670). Every other combination is composed per tool (#1670) — the
 file-level artifact map in
 `development/skills/bootstrap/scripts/toolchain-templates.zsh`, the job-level
 one as `render.zsh`'s per-tool block tags, and the runner self-hosted iff
-`sonarqube` — but bootstrap stops at its plan for any toolchain other than the
-visibility default until #1671, because branch protection and the setup
-automation still key on visibility. `/development:maintenance` does not read
-`tools:` yet (#1672).
+`sonarqube` — and branch protection and the setup preflight take the resolved
+toolchain rather than visibility (#1671): `branch-protection.sh` requires the
+context set of #1670's D1 rule, and `preflight.sh` checks each resolved tool's
+prerequisites. The Step 4.5 setup automation is still split by visibility
+until #1769, so a private `sonarcloud` toolchain and a private `snyk` one leave
+their SonarCloud or Snyk setup as `SETUP.md` steps the bootstrap report lists.
+`/development:maintenance` does not read `tools:` yet (#1672).
 
 **Mechanism.** The orchestrator reads `.maintenance.yml` and tags each dispatch
 via the payload's `dispatch_mode` (`"primary"` | `"auxiliary"`). The language /

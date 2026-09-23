@@ -13,8 +13,22 @@
 # Usage:
 #   automate-private.sh --project-key KEY --project-name NAME \
 #                       --default-branch main \
+#                       --static-analysis sonarqube \
+#                       --vulnerabilities snyk|trivy \
 #                       --has-dockerfile true|false \
-#                       [--has-ko true|false]
+#                       [--has-ko true|false] \
+#                       [--sonar-host URL] \
+#                       [--claude-approver true|false] \
+#                       [--require-signed-commits true|false]
+#
+# --static-analysis / --vulnerabilities are the resolved toolchain
+# (resolve-tools.zsh). Both are validated before any external call and
+# forwarded UNCHANGED, with --require-signed-commits, to the branch-protection.sh
+# re-apply below, so it reproduces Step 4b's whole rule, signatures included
+# — an interim bridge until #1769 retires this script
+# (#1671). --static-analysis accepts only sonarqube here, the one analyser this
+# script sets up. It sets up no Snyk: with --vulnerabilities snyk, SNYK_TOKEN
+# stays a manual SETUP.md step, which bootstrap's Step 4.5 lists.
 
 set -euo pipefail
 
@@ -26,13 +40,26 @@ source "$SCRIPT_DIR/lib.sh"
 PROJECT_KEY=""
 PROJECT_NAME=""
 DEFAULT_BRANCH="main"
+STATIC_ANALYSIS=""
+VULNERABILITIES=""
 HAS_DOCKERFILE="false"
+REQUIRE_SIGNED_COMMITS="false"
 HAS_KO="false"
 SONAR_HOST="http://localhost:9000"
 CLAUDE_APPROVER="false"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+	--static-analysis)
+		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+		STATIC_ANALYSIS="$2"
+		shift 2
+		;;
+	--vulnerabilities)
+		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+		VULNERABILITIES="$2"
+		shift 2
+		;;
 	--project-key)
 		PROJECT_KEY="$2"
 		shift 2
@@ -43,6 +70,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--default-branch)
 		DEFAULT_BRANCH="$2"
+		shift 2
+		;;
+	--require-signed-commits)
+		[[ $# -ge 2 ]] || die "--require-signed-commits must be true or false (Step 4b's value)"
+		REQUIRE_SIGNED_COMMITS="$2"
 		shift 2
 		;;
 	--has-dockerfile)
@@ -67,6 +99,19 @@ done
 
 [[ -n "$PROJECT_KEY" ]] || die "--project-key required"
 [[ -n "$PROJECT_NAME" ]] || die "--project-name required"
+# before any external call: a bad value would otherwise surface only at the
+# branch-protection re-apply, after SonarQube and the runner have been set up
+[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
+	die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
+	die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+[[ "$REQUIRE_SIGNED_COMMITS" =~ ^(true|false)$ ]] ||
+	die "--require-signed-commits must be true or false (Step 4b's value)"
+# This script sets up a local SonarQube alone (its compose file is rendered only
+# for sonarqube), so a private sonarcloud toolchain is refused here, by name,
+# rather than dying later on a missing compose file (#1671, until #1769).
+[[ "$STATIC_ANALYSIS" == "sonarqube" ]] ||
+	die "--static-analysis sonarcloud is not automated by automate-private.sh (it sets up SonarQube only) — follow SETUP.md's SonarCloud section instead"
 
 # Tools the private-path automation directly invokes. Fail-fast with a
 # preflight-pointer instead of a confusing later failure. (`security` and
@@ -270,7 +315,9 @@ echo
 info "═══ Branch protection ═══"
 if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; then
 	"$SCRIPT_DIR/branch-protection.sh" \
-		--visibility private \
+		--static-analysis "$STATIC_ANALYSIS" \
+		--vulnerabilities "$VULNERABILITIES" \
+		--require-signed-commits "$REQUIRE_SIGNED_COMMITS" \
 		--has-dockerfile "$HAS_DOCKERFILE" \
 		--has-ko "$HAS_KO" \
 		--has-codeql "false" \

@@ -4,14 +4,28 @@
 #   2. Collect SONAR_TOKEN, create Zero Tolerance Quality Gate, assign to project
 #   3. snyk auth (token mode) → read token from snyk config → store as GH secret
 #   4. snyk monitor — onboard repo for continuous monitoring
+#      (steps 3-4 only when --vulnerabilities snyk)
 #   5. Apply branch protection
 #
 # Usage:
 #   automate-public.sh --project-key KEY --org-key ORG --project-name NAME \
 #                      --default-branch main \
+#                      --static-analysis sonarcloud \
+#                      --vulnerabilities snyk|trivy \
 #                      --has-dockerfile true|false \
 #                      [--has-ko true|false] \
-#                      --has-codeql true|false
+#                      --has-codeql true|false \
+#                      [--codeql-languages "python javascript ..."] \
+#                      [--claude-approver true|false] \
+#                      [--require-signed-commits true|false]
+#
+# --static-analysis / --vulnerabilities are the resolved toolchain
+# (resolve-tools.zsh). Both are validated before any external call and
+# forwarded UNCHANGED, with --require-signed-commits, to the branch-protection.sh
+# re-apply below, so it reproduces Step 4b's whole rule, signatures included
+# — an interim bridge until #1769 retires this script
+# (#1671). --static-analysis accepts only sonarcloud here: this script onboards
+# SonarCloud alone, and a public repository never resolves sonarqube.
 
 set -euo pipefail
 
@@ -26,7 +40,10 @@ PROJECT_KEY=""
 ORG_KEY=""
 PROJECT_NAME=""
 DEFAULT_BRANCH="main"
+STATIC_ANALYSIS=""
+VULNERABILITIES=""
 HAS_DOCKERFILE="false"
+REQUIRE_SIGNED_COMMITS="false"
 HAS_KO="false"
 HAS_CODEQL="false"
 CODEQL_LANGUAGES=""
@@ -34,6 +51,16 @@ CLAUDE_APPROVER="false"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+	--static-analysis)
+		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+		STATIC_ANALYSIS="$2"
+		shift 2
+		;;
+	--vulnerabilities)
+		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+		VULNERABILITIES="$2"
+		shift 2
+		;;
 	--project-key)
 		PROJECT_KEY="$2"
 		shift 2
@@ -48,6 +75,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--default-branch)
 		DEFAULT_BRANCH="$2"
+		shift 2
+		;;
+	--require-signed-commits)
+		[[ $# -ge 2 ]] || die "--require-signed-commits must be true or false (Step 4b's value)"
+		REQUIRE_SIGNED_COMMITS="$2"
 		shift 2
 		;;
 	--has-dockerfile)
@@ -77,10 +109,25 @@ done
 [[ -n "$PROJECT_KEY" ]] || die "--project-key required"
 [[ -n "$ORG_KEY" ]] || die "--org-key required"
 [[ -n "$PROJECT_NAME" ]] || die "--project-name required"
+# before any external call: a bad value would otherwise surface only at the
+# branch-protection re-apply, after the SonarCloud and Snyk steps have run
+[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
+	die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
+	die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+[[ "$REQUIRE_SIGNED_COMMITS" =~ ^(true|false)$ ]] ||
+	die "--require-signed-commits must be true or false (Step 4b's value)"
+# This script onboards SonarCloud only; resolve-tools.zsh already refuses
+# sonarqube on a public repository, so reaching here with it is a caller slip.
+[[ "$STATIC_ANALYSIS" == "sonarcloud" ]] ||
+	die "--static-analysis sonarqube is not automated by automate-public.sh (a public repository uses sonarcloud)"
 
-# Tools the public-path automation directly invokes. Fail-fast with a
-# preflight-pointer instead of a confusing later failure.
-require_tools curl jq gh snyk
+# Tools the public-path automation directly invokes — snyk only when the
+# resolved vulnerabilities tool is snyk, which is also exactly when preflight
+# installs it. Fail-fast with a preflight-pointer instead of a later failure.
+public_tools=(curl jq gh)
+[[ "$VULNERABILITIES" == "snyk" ]] && public_tools+=(snyk)
+require_tools "${public_tools[@]}"
 
 SONAR_HOST="https://sonarcloud.io"
 
@@ -167,15 +214,19 @@ info "Storing SONAR_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
 gh_secret_set_both SONAR_TOKEN "$SONAR_TOKEN"
 ok "SONAR_TOKEN set (Actions + Dependabot)"
 
-# --- Snyk ---------------------------------------------------------------------
-echo
-info "═══ Snyk setup ═══"
+# --- Snyk (only when the resolved vulnerabilities tool is snyk, #1671) --------
+# A trivy toolchain needs no account, token or secret here: trivy-fs runs in CI
+# with no credentials, so this whole section — auth, SNYK_TOKEN, the GitHub-
+# integration import and the manual notices — belongs to snyk alone.
+if [[ "$VULNERABILITIES" == "snyk" ]]; then
+	echo
+	info "═══ Snyk setup ═══"
 
-# Use token-based auth, not OAuth — GitHub Actions can't run OAuth refresh.
-if snyk config get api >/dev/null 2>&1 && [[ -n "$(snyk config get api 2>/dev/null)" ]]; then
-	ok "Snyk already authenticated"
-else
-	cat <<EOF
+	# Use token-based auth, not OAuth — GitHub Actions can't run OAuth refresh.
+	if snyk config get api >/dev/null 2>&1 && [[ -n "$(snyk config get api 2>/dev/null)" ]]; then
+		ok "Snyk already authenticated"
+	else
+		cat <<EOF
 
 I'll run 'snyk auth --auth-type=token'. Your browser will open. Approve the
 request. The CLI will then write a long-lived API token to:
@@ -185,144 +236,149 @@ We need the token-mode (not OAuth) because GitHub Actions can't refresh OAuth
 tokens — a static API token is what the workflow uses.
 
 EOF
-	ask_yn "Run 'snyk auth --auth-type=token' now?" || die "Snyk auth declined"
-	snyk auth --auth-type=token
-fi
+		ask_yn "Run 'snyk auth --auth-type=token' now?" || die "Snyk auth declined"
+		snyk auth --auth-type=token
+	fi
 
-SNYK_TOKEN=$(snyk config get api 2>/dev/null || true)
-[[ -n "$SNYK_TOKEN" ]] || die "Could not read Snyk API token from local config"
-ok "Read Snyk token from local config"
+	SNYK_TOKEN=$(snyk config get api 2>/dev/null || true)
+	[[ -n "$SNYK_TOKEN" ]] || die "Could not read Snyk API token from local config"
+	ok "Read Snyk token from local config"
 
-info "Storing SNYK_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
-gh_secret_set_both SNYK_TOKEN "$SNYK_TOKEN"
-ok "SNYK_TOKEN set (Actions + Dependabot)"
+	info "Storing SNYK_TOKEN as a GitHub secret (Actions + Dependabot scopes)…"
+	gh_secret_set_both SNYK_TOKEN "$SNYK_TOKEN"
+	ok "SNYK_TOKEN set (Actions + Dependabot)"
 
-# --- Register the project with Snyk via the GitHub integration ----------------
-# Why not `snyk monitor --all-projects`? Because CLI-registered Snyk projects
-# always count as PRIVATE tests against the org's monthly quota — Snyk has no
-# way to discover the underlying GitHub repo from a local `pip install` graph,
-# so it categorizes them as private regardless of GitHub repo visibility. For
-# public repos with a GitHub integration, the GitHub-typed project gets
-# UNLIMITED testing AND continuous re-scanning on every commit AND PR-level
-# status checks AND auto-fix PRs — all things CLI monitoring can't do.
-#
-# Flow:
-#   1. Discover the user's Snyk org from their CLI config.
-#   2. Check whether the org has an active GitHub integration.
-#   3. If yes → POST to the integration's import endpoint with this repo.
-#   4. If no → open the Snyk integrations page in the browser, ask the user
-#      to set up the integration, then re-check. Up to 3 tries; halt the
-#      bootstrap on the third failure (don't fall back to broken CLI
-#      registration — that's the trap we're trying to climb out of).
+	# --- Register the project with Snyk via the GitHub integration ----------------
+	# Why not `snyk monitor --all-projects`? Because CLI-registered Snyk projects
+	# always count as PRIVATE tests against the org's monthly quota — Snyk has no
+	# way to discover the underlying GitHub repo from a local `pip install` graph,
+	# so it categorizes them as private regardless of GitHub repo visibility. For
+	# public repos with a GitHub integration, the GitHub-typed project gets
+	# UNLIMITED testing AND continuous re-scanning on every commit AND PR-level
+	# status checks AND auto-fix PRs — all things CLI monitoring can't do.
+	#
+	# Flow:
+	#   1. Discover the user's Snyk org from their CLI config.
+	#   2. Check whether the org has an active GitHub integration.
+	#   3. If yes → POST to the integration's import endpoint with this repo.
+	#   4. If no → open the Snyk integrations page in the browser, ask the user
+	#      to set up the integration, then re-check. Up to 3 tries; halt the
+	#      bootstrap on the third failure (don't fall back to broken CLI
+	#      registration — that's the trap we're trying to climb out of).
 
-# Small helper: hit the Snyk REST API with the user's token.
-SNYK_API='https://api.snyk.io/v1'
-snyk_api() {
-	local method="$1" path="$2"
-	shift 2
-	curl -sS -X "$method" \
-		-H "Authorization: token $SNYK_TOKEN" \
-		-H "Content-Type: application/json" \
-		-w '\nHTTP_STATUS=%{http_code}\n' \
-		"$SNYK_API$path" "$@"
-}
+	# Small helper: hit the Snyk REST API with the user's token.
+	SNYK_API='https://api.snyk.io/v1'
+	snyk_api() {
+		local method="$1" path="$2"
+		shift 2
+		curl -sS -X "$method" \
+			-H "Authorization: token $SNYK_TOKEN" \
+			-H "Content-Type: application/json" \
+			-w '\nHTTP_STATUS=%{http_code}\n' \
+			"$SNYK_API$path" "$@"
+	}
 
-# Discover the org (prefer the user's CLI default, else the first org listed).
-SNYK_ORG_SLUG=$(snyk config get org 2>/dev/null | tr -d '[:space:]' || true)
-if [[ -z "$SNYK_ORG_SLUG" ]]; then
-	SNYK_ORG_SLUG=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d' | jq -r '.orgs[0].slug // empty')
-fi
-[[ -n "$SNYK_ORG_SLUG" ]] || die "Could not discover Snyk org (check 'snyk config get org' or your token's org assignments)"
+	# Discover the org (prefer the user's CLI default, else the first org listed).
+	SNYK_ORG_SLUG=$(snyk config get org 2>/dev/null | tr -d '[:space:]' || true)
+	if [[ -z "$SNYK_ORG_SLUG" ]]; then
+		SNYK_ORG_SLUG=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d' | jq -r '.orgs[0].slug // empty')
+	fi
+	[[ -n "$SNYK_ORG_SLUG" ]] || die "Could not discover Snyk org (check 'snyk config get org' or your token's org assignments)"
 
-orgs_resp=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d')
-SNYK_ORG_ID=$(printf '%s' "$orgs_resp" | jq -r --arg s "$SNYK_ORG_SLUG" '.orgs[] | select(.slug == $s) | .id // empty' | head -1)
-[[ -n "$SNYK_ORG_ID" ]] || die "Could not resolve Snyk org ID for slug '$SNYK_ORG_SLUG'"
-ok "Snyk org: $SNYK_ORG_SLUG (id=$SNYK_ORG_ID)"
+	orgs_resp=$(snyk_api GET /orgs | sed '/^HTTP_STATUS=/d')
+	SNYK_ORG_ID=$(printf '%s' "$orgs_resp" | jq -r --arg s "$SNYK_ORG_SLUG" '.orgs[] | select(.slug == $s) | .id // empty' | head -1)
+	[[ -n "$SNYK_ORG_ID" ]] || die "Could not resolve Snyk org ID for slug '$SNYK_ORG_SLUG'"
+	ok "Snyk org: $SNYK_ORG_SLUG (id=$SNYK_ORG_ID)"
 
-# Detect the GitHub integration on this org.
-detect_github_integration() {
-	local resp
-	resp=$(snyk_api GET "/org/$SNYK_ORG_ID/integrations" | sed '/^HTTP_STATUS=/d')
-	printf '%s' "$resp" | jq -r '.github // empty'
-}
+	# Detect the GitHub integration on this org.
+	detect_github_integration() {
+		local resp
+		resp=$(snyk_api GET "/org/$SNYK_ORG_ID/integrations" | sed '/^HTTP_STATUS=/d')
+		printf '%s' "$resp" | jq -r '.github // empty'
+	}
 
-GH_INT_ID=$(detect_github_integration)
-attempt=1
-while [[ -z "$GH_INT_ID" && $attempt -le 3 ]]; do
-	warn "Snyk's GitHub integration isn't connected for org '$SNYK_ORG_SLUG' (attempt $attempt of 3)."
-	info "Opening Snyk's integrations page. In the browser:"
-	info "  1. Find the GitHub integration."
-	info "  2. Click 'Connect' (or 'Add integration → GitHub')."
-	info "  3. Complete the OAuth flow."
-	info "  4. Come back here and confirm."
-	echo
-	open "https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations" 2>/dev/null ||
-		warn "Could not auto-open the browser. Visit: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
-	echo
-	ask_yn "Done setting up the GitHub integration?" || true
 	GH_INT_ID=$(detect_github_integration)
-	attempt=$((attempt + 1))
-done
-[[ -n "$GH_INT_ID" ]] || die "Snyk GitHub integration still missing after 3 attempts. Set it up manually at https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations and re-run /development:bootstrap."
-ok "Snyk GitHub integration: $GH_INT_ID"
+	attempt=1
+	while [[ -z "$GH_INT_ID" && $attempt -le 3 ]]; do
+		warn "Snyk's GitHub integration isn't connected for org '$SNYK_ORG_SLUG' (attempt $attempt of 3)."
+		info "Opening Snyk's integrations page. In the browser:"
+		info "  1. Find the GitHub integration."
+		info "  2. Click 'Connect' (or 'Add integration → GitHub')."
+		info "  3. Complete the OAuth flow."
+		info "  4. Come back here and confirm."
+		echo
+		open "https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations" 2>/dev/null ||
+			warn "Could not auto-open the browser. Visit: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
+		echo
+		ask_yn "Done setting up the GitHub integration?" || true
+		GH_INT_ID=$(detect_github_integration)
+		attempt=$((attempt + 1))
+	done
+	[[ -n "$GH_INT_ID" ]] || die "Snyk GitHub integration still missing after 3 attempts. Set it up manually at https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations and re-run /development:bootstrap."
+	ok "Snyk GitHub integration: $GH_INT_ID"
 
-# Import this repo via the integration. Snyk runs the actual scan
-# asynchronously and creates Open Source + Code (and Dockerfile if detected)
-# projects under the GitHub-typed target. Public repos: unlimited testing.
-gh_repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-gh_owner=${gh_repo%%/*}
-gh_name=${gh_repo##*/}
-gh_branch=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+	# Import this repo via the integration. Snyk runs the actual scan
+	# asynchronously and creates Open Source + Code (and Dockerfile if detected)
+	# projects under the GitHub-typed target. Public repos: unlimited testing.
+	gh_repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+	gh_owner=${gh_repo%%/*}
+	gh_name=${gh_repo##*/}
+	gh_branch=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
 
-info "Importing $gh_repo into Snyk via the GitHub integration…"
-import_body=$(jq -n \
-	--arg owner "$gh_owner" \
-	--arg name "$gh_name" \
-	--arg branch "$gh_branch" \
-	'{ target: { owner: $owner, name: $name, branch: $branch } }')
+	info "Importing $gh_repo into Snyk via the GitHub integration…"
+	import_body=$(jq -n \
+		--arg owner "$gh_owner" \
+		--arg name "$gh_name" \
+		--arg branch "$gh_branch" \
+		'{ target: { owner: $owner, name: $name, branch: $branch } }')
 
-import_resp=$(snyk_api POST "/org/$SNYK_ORG_ID/integrations/$GH_INT_ID/import" --data "$import_body")
-import_status=$(printf '%s' "$import_resp" | sed -n 's/^HTTP_STATUS=//p')
-case "$import_status" in
-201 | 202)
-	ok "Import job accepted by Snyk (HTTP $import_status). The project appears at app.snyk.io within ~1 minute."
-	;;
-409)
-	ok "Project was already imported (HTTP 409). Snyk will continue monitoring it."
-	;;
-*)
-	warn "Unexpected response from Snyk import (HTTP $import_status). Response body:"
-	printf '%s\n' "$import_resp" | sed '/^HTTP_STATUS=/d' | head -10
-	warn "The integration is set up; you can import manually via 'Import GitHub Projects' on the Snyk integrations page."
-	;;
-esac
+	import_resp=$(snyk_api POST "/org/$SNYK_ORG_ID/integrations/$GH_INT_ID/import" --data "$import_body")
+	import_status=$(printf '%s' "$import_resp" | sed -n 's/^HTTP_STATUS=//p')
+	case "$import_status" in
+	201 | 202)
+		ok "Import job accepted by Snyk (HTTP $import_status). The project appears at app.snyk.io within ~1 minute."
+		;;
+	409)
+		ok "Project was already imported (HTTP 409). Snyk will continue monitoring it."
+		;;
+	*)
+		warn "Unexpected response from Snyk import (HTTP $import_status). Response body:"
+		printf '%s\n' "$import_resp" | sed '/^HTTP_STATUS=/d' | head -10
+		warn "The integration is set up; you can import manually via 'Import GitHub Projects' on the Snyk integrations page."
+		;;
+	esac
 
-# --- Snyk auto-Fix-PRs (manual UI step on free plans) ------------------------
-# We cannot enable autoFixPR via the v1/REST API on free plans — Snyk gates
-# the v1 integrations endpoint behind paid-plan entitlement (returns 403
-# "not entitled for API access"), and the REST API does not expose an
-# equivalent settings endpoint at all (verified 2026-06-05 against
-# api.snyk.io/rest/orgs/{id}/integrations → 404). UI is the only path on
-# free. Surface this clearly to the user instead of failing silently.
-echo
-info "═══ Manual step: enable Snyk auto-Fix-PRs ═══"
-info "Snyk's API doesn't expose the auto-Fix-PR toggle on free plans. To"
-info "make Snyk open PRs when new vulnerabilities are detected:"
-info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
-info "  2. Click the GitHub integration → 'Edit Settings'."
-info "  3. Toggle 'Automatic Fix PRs' ON; set max open PRs to 5."
-info "  4. Leave 'Automatic Upgrade PRs' OFF (Dependabot handles upgrades)."
-info "See SETUP.md section 2b.2 for the full recipe."
+	# --- Snyk auto-Fix-PRs (manual UI step on free plans) ------------------------
+	# We cannot enable autoFixPR via the v1/REST API on free plans — Snyk gates
+	# the v1 integrations endpoint behind paid-plan entitlement (returns 403
+	# "not entitled for API access"), and the REST API does not expose an
+	# equivalent settings endpoint at all (verified 2026-06-05 against
+	# api.snyk.io/rest/orgs/{id}/integrations → 404). UI is the only path on
+	# free. Surface this clearly to the user instead of failing silently.
+	echo
+	info "═══ Manual step: enable Snyk auto-Fix-PRs ═══"
+	info "Snyk's API doesn't expose the auto-Fix-PR toggle on free plans. To"
+	info "make Snyk open PRs when new vulnerabilities are detected:"
+	info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
+	info "  2. Click the GitHub integration → 'Edit Settings'."
+	info "  3. Toggle 'Automatic Fix PRs' ON; set max open PRs to 5."
+	info "  4. Leave 'Automatic Upgrade PRs' OFF (Dependabot handles upgrades)."
+	info "See SETUP.md section 2b.2 for the full recipe."
 
-echo
-info "═══ Manual step: configure Snyk PR status checks ═══"
-info "Third-party CVEs change without our code changing, so they must not"
-info "gate a build — handle them via daily monitoring + auto-Fix-PRs instead."
-info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
-info "  2. GitHub integration → 'Pull request status checks'."
-info "  3. 'Open Source security and licenses' → DISABLE (drops security/snyk)."
-info "  4. 'Code analysis' → DISABLE (drops code/snyk — CodeQL covers SAST; Snyk Code's free-tier cap breaks the Approver, #387)."
-info "See SETUP.md section 2b.1 for the rationale."
+	echo
+	info "═══ Manual step: configure Snyk PR status checks ═══"
+	info "Third-party CVEs change without our code changing, so they must not"
+	info "gate a build — handle them via daily monitoring + auto-Fix-PRs instead."
+	info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
+	info "  2. GitHub integration → 'Pull request status checks'."
+	info "  3. 'Open Source security and licenses' → DISABLE (drops security/snyk)."
+	info "  4. 'Code analysis' → DISABLE (drops code/snyk — CodeQL covers SAST; Snyk Code's free-tier cap breaks the Approver, #387)."
+	info "See SETUP.md section 2b.1 for the rationale."
+else
+	echo
+	info "═══ Snyk setup skipped ═══"
+	dim "  The resolved vulnerabilities tool is trivy: trivy-fs needs no account or secret."
+fi
 
 # --- GitHub Security & Quality features --------------------------------------
 # All four are free on public repos. Each `gh api` call is idempotent — running
@@ -371,7 +427,9 @@ echo
 info "═══ Branch protection ═══"
 if ask_yn "Apply Zero-Tolerance branch protection on '$DEFAULT_BRANCH' now?"; then
 	"$SCRIPT_DIR/branch-protection.sh" \
-		--visibility public \
+		--static-analysis "$STATIC_ANALYSIS" \
+		--vulnerabilities "$VULNERABILITIES" \
+		--require-signed-commits "$REQUIRE_SIGNED_COMMITS" \
 		--has-dockerfile "$HAS_DOCKERFILE" \
 		--has-ko "$HAS_KO" \
 		--has-codeql "$HAS_CODEQL" \
@@ -402,14 +460,22 @@ else
 	gate_summary="Sonar way (Free-plan fallback; see warning above) — coverage-floor CI step enforces 90%"
 fi
 
+# the Snyk half of the summary exists only where the Snyk section ran
+secrets_set="SONAR_TOKEN"
+monitoring="trivy-fs in CI (no account or secret)"
+if [[ "$VULNERABILITIES" == "snyk" ]]; then
+	secrets_set="SONAR_TOKEN, SNYK_TOKEN"
+	monitoring=$(snyk config get api >/dev/null 2>&1 && echo "Snyk authenticated" || echo "Snyk auth pending")
+fi
+
 cat <<EOF
 
   Project       $PROJECT_KEY
   Sonar gate    $gate_summary
   Coverage 90%  Enforced by the 'coverage-floor' CI step (diff-cover) + pre-push hook,
                 regardless of which Sonar gate is active on the project.
-  Secrets set   SONAR_TOKEN, SNYK_TOKEN  (Actions + Dependabot scopes)
-  Monitoring    $(snyk config get api >/dev/null 2>&1 && echo "Snyk authenticated" || echo "Snyk auth pending")
+  Secrets set   $secrets_set  (Actions + Dependabot scopes)
+  Monitoring    $monitoring
 
   Next: push a branch and open a PR — CI will run on the new workflows.
 EOF

@@ -3,7 +3,8 @@
 # branch via the GitHub API. Idempotent (PUT replaces the rule each time).
 #
 # Usage:
-#   branch-protection.sh --visibility public|private \
+#   branch-protection.sh --static-analysis sonarcloud|sonarqube \
+#                        --vulnerabilities snyk|trivy \
 #                        --has-dockerfile true|false \
 #                        [--has-ko true|false] \
 #                        --has-codeql true|false \
@@ -18,7 +19,8 @@
 # claude-plugin primary, settles it false whatever the marker says; the mixed
 # repo (marker plus a stray tooling language) is #1193. There, the language-app
 # quality workflow is not rendered at all, so its checks — test-and-coverage,
-# sonarcloud, semgrep, pre-commit, license-fs — would be required contexts that no
+# semgrep, pre-commit, license-fs, the static-analysis job and trivy-fs — would
+# be required contexts that no
 # workflow ever reports, pinning every PR on the permanent `expected` state. The
 # repo's one check is kubernetes-ci.yml's single `gate` job instead. Everything
 # else the rule applies (PR required, linear history, no force-push/deletion, and
@@ -29,9 +31,18 @@
 # `uses:` (GitHub then reports the check under that name, one leg per matrix
 # entry, or `gate / <called job>`), since the `gate` context would never report.
 #
-# --codeql-languages is required when --has-codeql=true. CodeQL's analyze
-# job runs as a matrix per language and GitHub reports each one as
-# `analyze (<lang>)`, so a bare `analyze` context never resolves.
+# --static-analysis and --vulnerabilities are the RESOLVED toolchain
+# (resolve-tools.zsh's `static_analysis` / `vulnerabilities`, #1671). The
+# language-app context set follows #1670 D1 — toolchain plus stack, with no
+# visibility term — so this script neither accepts nor derives visibility: a
+# `--visibility` exits 1 naming the two flags that replaced it. Neither flag is
+# required or read under --iac-only true, whose context set is `gate` alone.
+#
+# --has-codeql is true exactly when the resolved `code_scanning` is `codeql`;
+# CodeQL's public-only rule is enforced at the plan (resolve-tools.zsh step 4,
+# #1670 D8), not here. --codeql-languages is required when --has-codeql=true.
+# CodeQL's analyze job runs as a matrix per language and GitHub reports each one
+# as `analyze (<lang>)`, so a bare `analyze` context never resolves.
 #
 # Requires: gh CLI authenticated, repository admin permission. On 403 the
 # script falls back to printing manual instructions.
@@ -42,7 +53,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-VISIBILITY=""
+STATIC_ANALYSIS=""
+VULNERABILITIES=""
 HAS_DOCKERFILE="false"
 HAS_KO="false"
 HAS_CODEQL="false"
@@ -54,7 +66,17 @@ REQUIRE_SIGNED_COMMITS="false"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--visibility)
-		VISIBILITY="$2"
+		# no alias: the context set follows the toolchain, never visibility (#1671)
+		die "--visibility is no longer accepted — pass the resolved toolchain instead: --static-analysis sonarcloud|sonarqube and --vulnerabilities snyk|trivy"
+		;;
+	--static-analysis)
+		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+		STATIC_ANALYSIS="$2"
+		shift 2
+		;;
+	--vulnerabilities)
+		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+		VULNERABILITIES="$2"
 		shift 2
 		;;
 	--has-dockerfile)
@@ -89,12 +111,19 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-[[ "$VISIBILITY" =~ ^(public|private)$ ]] || die "--visibility must be public or private"
-# validated like --visibility, not merely compared: an unvalidated flag silently
-# falls through to the language-app context set on any value but the literal
-# "true" — `True`, `yes`, or a following flag swallowed as the value — and that
-# is exactly the permanent-`expected` state --iac-only exists to prevent
+# validated, not merely compared: an unvalidated flag silently falls through to
+# the language-app context set on any value but the literal "true" — `True`,
+# `yes`, or a following flag swallowed as the value — and that is exactly the
+# permanent-`expected` state --iac-only exists to prevent
 [[ "$IAC_ONLY" =~ ^(true|false)$ ]] || die "--iac-only must be true or false"
+# The toolchain names the language-app contexts, so it is required exactly on
+# that path — and never read on the IaC path, which requires `gate` alone.
+if [[ "$IAC_ONLY" != "true" ]]; then
+	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
+		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
+		die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+fi
 
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 [[ -n "$REPO" ]] || die "Could not determine current repo from gh"
@@ -137,7 +166,7 @@ fi
 # --- the infrastructure-as-code path takes an entirely different check set ----
 # Not an addition to the language-app set but a REPLACEMENT: on this path
 # quality-*.yml is not rendered, so every context above would sit at `expected`
-# forever and block each PR. The visibility case below is skipped for the same
+# forever and block each PR. The toolchain contexts below are skipped for the same
 # reason — its contexts come from that same unrendered workflow.
 if [[ "$IAC_ONLY" == "true" ]]; then
 	# Gated on the job actually being ON DISK, like `no-cluster-deploy` above and
@@ -255,38 +284,40 @@ if [[ "$IAC_ONLY" != "true" ]]; then
 		warn "not both."
 	fi
 
-	case "$VISIBILITY" in
-	public)
-		# Note: `snyk-code` and `snyk-open-source` are NOT workflow jobs in the
-		# current public template. Snyk runs via the GitHub integration, which
-		# reports a single `security/snyk` check on the PR rather than per-rule
-		# GitHub Actions status checks — see quality-public.yml.tmpl's `# ---
-		# Snyk source-code + open-source scans ---` comment block. Listing
-		# them here would produce a permanent stuck-on-expected state.
-		checks+=("sonarcloud" "license-fs")
-		[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
-		if [[ "$HAS_CODEQL" == "true" ]]; then
+	# --- the toolchain's contexts (#1670 D1) -----------------------------------
+	# `license-fs` runs on every combination. The analyser's job is named for
+	# the analyser (`sonarcloud` / `sonarqube`). `trivy-fs` exists only when the
+	# resolved vulnerabilities tool is Trivy: Snyk has NO CI job — it runs via
+	# the GitHub integration, which reports `security/snyk` rather than a GitHub
+	# Actions status check (see the quality templates' `# --- Snyk source-code +
+	# open-source scans ---` comment block), so requiring a Snyk context would
+	# produce a permanent stuck-on-expected state.
+	checks+=("license-fs" "$STATIC_ANALYSIS")
+	[[ "$VULNERABILITIES" == "trivy" ]] && checks+=("trivy-fs")
+	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
+	if [[ "$HAS_CODEQL" == "true" ]]; then
+		# Gated on codeql.yml actually being ON DISK, like `image`/ko-image and
+		# `no-cluster-deploy` above: a context no workflow reports wedges every
+		# PR at `expected`. Warn and drop rather than refuse.
+		if [[ ! -f .github/workflows/codeql.yml ]]; then
+			warn "--has-codeql=true but .github/workflows/codeql.yml is absent —"
+			warn "NOT requiring any \`analyze (<lang>)\` check (no workflow would ever"
+			warn "report it). Re-run /development:bootstrap to render CodeQL."
+		elif [[ -n "$CODEQL_LANGUAGES" ]]; then
 			# CodeQL's `analyze` job is a matrix over `language`, so GitHub
 			# reports one check per language as `analyze (<lang>)`. The bare
 			# `analyze` context never resolves to a real check — must be
 			# language-suffixed.
-			if [[ -n "$CODEQL_LANGUAGES" ]]; then
-				for lang in $CODEQL_LANGUAGES; do
-					checks+=("analyze ($lang)")
-				done
-			else
-				warn "--has-codeql=true but --codeql-languages was not provided."
-				warn "Skipping CodeQL contexts — without language list, the bare"
-				warn "'analyze' context would never resolve. Pass --codeql-languages"
-				warn "\"python javascript ...\" (space-separated) to enable them."
-			fi
+			for lang in $CODEQL_LANGUAGES; do
+				checks+=("analyze ($lang)")
+			done
+		else
+			warn "--has-codeql=true but --codeql-languages was not provided."
+			warn "Skipping CodeQL contexts — without language list, the bare"
+			warn "'analyze' context would never resolve. Pass --codeql-languages"
+			warn "\"python javascript ...\" (space-separated) to enable them."
 		fi
-		;;
-	private)
-		checks+=("sonarqube" "trivy-fs" "license-fs")
-		[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
-		;;
-	esac
+	fi
 fi
 
 # --- assemble JSON payload ----------------------------------------------------

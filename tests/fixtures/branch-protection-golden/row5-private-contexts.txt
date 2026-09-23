@@ -1,0 +1,7 @@
+image
+license-fs
+pre-commit
+semgrep
+sonarqube
+test-and-coverage
+trivy-fs

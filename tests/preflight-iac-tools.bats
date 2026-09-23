@@ -127,7 +127,7 @@ checked_tools() {
 @test "preflight --iac-only true checks gh, jq, git and the gate's tools, and nothing from the language-app batch (#1605)" {
   preflight_stubs
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "" --has-dockerfile false --iac-only true --assume-yes
+    --languages "" --has-dockerfile false --iac-only true --assume-yes
   [ "$status" -eq 0 ]
   local checked expected t
   checked="$(checked_tools "$output")"
@@ -141,15 +141,15 @@ checked_tools() {
   # positive control: the stub did record this run's installs, so the lacks above
   # are not passing on an empty file
   contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nhelm\n'
-  # a private IaC repo needs no Docker: with no docker on PATH and no TTY, the
-  # Docker check would exit non-zero
+  # an IaC repo needs no Docker even when handed a toolchain that would (sonarqube,
+  # trivy): with no docker on PATH and no TTY, the Docker check would exit non-zero
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility private --languages "" --has-dockerfile false --iac-only true --assume-yes </dev/null
+    --static-analysis sonarqube --vulnerabilities trivy --languages "" --has-dockerfile false --iac-only true --assume-yes </dev/null
   [ "$status" -eq 0 ]
   lacks "$output" 'Checking Docker'
   # …nor does one that carries a tooling Dockerfile
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "" --has-dockerfile true --iac-only true --assume-yes </dev/null
+    --languages "" --has-dockerfile true --iac-only true --assume-yes </dev/null
   [ "$status" -eq 0 ]
   lacks "$output" 'Checking Docker'
 }
@@ -161,7 +161,7 @@ checked_tools() {
   mkdir -p .claude-plugin
   printf '{}\n' > .claude-plugin/marketplace.json
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "swift python go" --has-dockerfile false --iac-only true --assume-yes
+    --languages "swift python go" --has-dockerfile false --iac-only true --assume-yes
   [ "$status" -eq 0 ]
   local checked expected t
   checked="$(checked_tools "$output")"
@@ -174,7 +174,7 @@ checked_tools() {
   # above are not passing on inputs that add nothing
   : > "$BREW_INSTALLS"
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "swift python go" --has-dockerfile false --assume-yes
+    --static-analysis sonarcloud --vulnerabilities snyk --languages "swift python go" --has-dockerfile false --assume-yes
   [ "$status" -eq 0 ]
   for t in swiftlint swiftformat ruff golangci-lint parallel; do
     contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\n'"$t"$'\n'
@@ -192,7 +192,7 @@ checked_tools() {
     printf '#!/bin/sh\necho "%s"\n' "$v" > "$STUB_BIN/yq"
     chmod +x "$STUB_BIN/yq"
     run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-      --visibility public --languages "" --has-dockerfile false --iac-only true --assume-yes
+      --languages "" --has-dockerfile false --iac-only true --assume-yes
     [ "$status" -ne 0 ]
     contains "$output" 'yq — missing (mikefarah v4 required'
     contains "$output" "if Homebrew's python-yq is installed, 'brew unlink python-yq' before installing"
@@ -206,7 +206,7 @@ checked_tools() {
     printf '#!/bin/sh\necho "%s"\n' "$v" > "$STUB_BIN/yq"
     chmod +x "$STUB_BIN/yq"
     run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-      --visibility public --languages "" --has-dockerfile false --iac-only true --assume-yes
+      --languages "" --has-dockerfile false --iac-only true --assume-yes
     [ "$status" -eq 0 ]
     contains "$output" 'yq (mikefarah v4)'
     lacks $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nyq\n'
@@ -224,7 +224,7 @@ checked_tools() {
   printf '#!/bin/sh\necho "yq 3.4.3"\n' > "$late/yq"
   chmod +x "$late/yq"
   run --separate-stderr env PATH="$STUB_BIN:$late:$HIDE_BIN:/usr/bin:/bin" bash "$PREFLIGHT" \
-    --visibility public --languages "" --has-dockerfile false --iac-only true --assume-yes
+    --languages "" --has-dockerfile false --iac-only true --assume-yes
   [ "$status" -eq 0 ]
   contains "$output" 'yq — missing (mikefarah v4 required'
   contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nyq\n'
@@ -240,7 +240,7 @@ checked_tools() {
   printf '#!/bin/sh\necho "parallel from moreutils"\nexit 1\n' > "$STUB_BIN/parallel"
   chmod +x "$STUB_BIN/parallel"
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "" --has-dockerfile false --assume-yes
+    --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false --assume-yes
   [ "$status" -ne 0 ]
   contains "$output" 'parallel — missing (GNU parallel required'
   contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nparallel\n'
@@ -249,7 +249,7 @@ checked_tools() {
   rm "$STUB_BIN/parallel"
   : > "$BREW_INSTALLS"
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "" --has-dockerfile false --assume-yes
+    --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false --assume-yes
   [ "$status" -eq 0 ]
   contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nparallel\n'
   lacks "$stderr" 'still not GNU parallel'
@@ -258,7 +258,7 @@ checked_tools() {
 @test "preflight without --iac-only still checks the language-app batch, and a bad --iac-only value is refused (#1605)" {
   preflight_stubs
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "" --has-dockerfile false --assume-yes
+    --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false --assume-yes
   [ "$status" -eq 0 ]
   local checked
   checked="$(checked_tools "$output")"
@@ -267,7 +267,7 @@ checked_tools() {
   lacks $'\n'"$checked"$'\n' $'\nhelm\n'
   # an EXPLICIT false — what Step 4.5 passes on every language repo — is the same path
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --visibility public --languages "" --has-dockerfile false --iac-only false --assume-yes
+    --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false --iac-only false --assume-yes
   [ "$status" -eq 0 ]
   checked="$(checked_tools "$output")"
   contains $'\n'"$checked"$'\n' $'\npre-commit\n'
@@ -277,7 +277,7 @@ checked_tools() {
   # the validation guards
   local v
   for v in yes truex xtrue True; do
-    run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" --visibility public --iac-only "$v"
+    run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" --iac-only "$v"
     [ "$status" -eq 1 ]
     contains "$stderr" '--iac-only must be true or false'
   done

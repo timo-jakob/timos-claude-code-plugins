@@ -312,10 +312,21 @@ flow. Stop and ask for input wherever marked; do not guess.
    bootstrap clearly didn't complete. **Off the §3l path (once Q4 has settled
    it — a repo with no detected language asks Q4 first, as step 4's IaC set
    does), take the toolchain gate first** — the same one step 4 states (*Resolve the toolchain*'s step 1,
-   no toolchain flags, never Q3a): on an exit 1 or a toolchain other than the
-   visibility default, offer **none** of the GitHub-side gap-fill below and
-   report *Resolve the toolchain*'s #1671 stop instead, since every item here
-   keys on visibility:
+   no toolchain flags, never Q3a): on an exit 1, offer **none** of the
+   GitHub-side gap-fill below and relay its message instead. On an exit 0 its
+   `key=value` output is the toolchain the gap-fill below keys on (#1671),
+   never re-derived from visibility. Every gap-fill call of
+   `branch-protection.sh` is **Step 4b's full invocation** — every stack flag
+   (`--has-dockerfile`, `--has-ko`, `--has-codeql` true exactly when
+   `code_scanning` is `codeql`, `--codeql-languages`), `--iac-only`,
+   `--default-branch` and `--require-signed-commits` with *Step 4b's signing
+   value* — plus
+   `--static-analysis <static_analysis>` and
+   `--vulnerabilities <vulnerabilities>`, because its PUT replaces the whole
+   rule: a flag left out is a context silently dropped, and a signing value
+   left out clears the signature requirement. **On the §3l path pass
+   neither toolchain flag**: the script's `--iac-only true` mode neither
+   requires nor reads them:
 
    > **The IaC set is NOT blind-renderable.** `detect-stack.sh` lists
    > `.github/workflows/kubernetes-ci.yml` as a candidate on the
@@ -411,17 +422,25 @@ flow. Stop and ask for input wherever marked; do not guess.
      `branch_protection.required_signatures == false` AND the original
      bootstrap was invoked with `--signed-commits` (or the user asks for
      it now) → offer "Enable required-signatures on the branch protection
-     rule." This calls `branch-protection.sh --require-signed-commits true`
-     against the existing rule; no contexts list rebuild needed. The
+     rule." This is Step 4b's **full** invocation (above) plus
+     `--require-signed-commits true` — never the bare flag: the script's PUT
+     rebuilds the whole context list from its flags every time, so a call
+     missing them drops contexts or, off the §3l path, is refused. The
      signing-key contributor warning applies as in Step 4b.
-   - Expected secrets not in `secrets.names` (public: `SONAR_TOKEN`,
-     `SNYK_TOKEN`; private: `SONAR_TOKEN`, `SONAR_HOST_URL`) → offer "Store
-     missing secrets: \<list\>." **On the §3l IaC path the expected-secret set
-     is empty** — that path emits no `sonar-project.properties`, no `.snyk`, and
-     no workflow reading either secret, so their absence is not a gap.
-   - `visibility == "public"` AND `sonar_project_exists == false` → offer
-     "Set up the SonarCloud project." **Not on the §3l IaC path**, for the same
-     reason: there is no Sonar analysis to have a project for.
+   - Expected secrets not in `secrets.names` → offer "Store missing secrets:
+     \<list\>." The expected set follows the resolved toolchain, never
+     visibility: `SONAR_TOKEN` always, `SONAR_HOST_URL` iff `static_analysis`
+     is `sonarqube`, `SNYK_TOKEN` iff `vulnerabilities` is `snyk`. **On the §3l
+     IaC path the expected-secret set is empty** — that path emits no
+     `sonar-project.properties`, no `.snyk`, and no workflow reading either
+     secret, so their absence is not a gap.
+   - `static_analysis == sonarcloud` AND `sonar_project_exists` is not `true`
+     → offer "Set up the SonarCloud project." `false` means the project is
+     missing; `null` means unknown, which is **always** the case on a private
+     repository (detect-stack's anonymous probe cannot see a private project),
+     so there phrase it as "confirm or set up the SonarCloud project". **Not on
+     the §3l IaC path**, for the same reason: there is no Sonar analysis to have
+     a project for.
 
    Gap-fill actions invoke only the specific Step 4 sub-scripts they need
    (e.g., `branch-protection.sh`, `gh secret set`); they do NOT touch files
@@ -469,12 +488,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    **The toolchain gates the gap-fill, and step 5b's re-render, first (#1651).**
    Off the §3l path (once the IaC set's Q4 below has settled it), run
    *Resolve the toolchain*'s step 1 before rendering anything here — no
-   toolchain flags, never Q3a — and take its branch: an exit 1, or a toolchain
-   other than the visibility default (*Resolve the toolchain*'s stop, until
-   #1671), renders **nothing** — a recorded toolchain must never be rendered
-   blind as the visibility default, nor handed to step 3's visibility-keyed
-   branch-protection gap-fill — and an exit 0 on the default supplies the
-   toolchain flags **every** render here passes. That result is this run's
+   toolchain flags, never Q3a — and take its branch: an exit 1 renders
+   **nothing** — a recorded toolchain must never be rendered blind as the
+   visibility default — and an exit 0 supplies the toolchain flags **every**
+   render here passes, and step 3's branch-protection gap-fill with them. That result is this run's
    toolchain: a gap-fill run does not re-ask Q3a later, and its `--record`
    (*Recording it*) runs as in Step 3. The quality workflows,
    the pre-commit config and `SETUP.md` are composed from them (#1670); the
@@ -637,11 +654,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    the reviewer only when there's something to classify. **Off the §3l path
    (settled by Q4 first, exactly as step 3 says), take the toolchain gate
    first** — the one steps 3 and 4 state, unless this
-   run already took it there: on an exit 1 or a toolchain other than the
-   visibility default, take *Resolve the toolchain*'s branch and stop before
-   the detector. An empty `missing_artifacts` then proves nothing — it was
-   scoped to a toolchain bootstrap cannot finish, or to none — so this run
-   never reports "toolchain is current", and renders or stamps nothing:
+   run already took it there: on an exit 1, take *Resolve the toolchain*'s
+   branch and stop before the detector. An empty `missing_artifacts` then
+   proves nothing — it was scoped to no toolchain — so this run never reports
+   "toolchain is current", and renders or stamps nothing:
 
    a. **Run the drift detector** — the same marker-sha256 mechanism
       `/development:maintenance` uses. Don't re-roll the comparison by hand,
@@ -795,18 +811,16 @@ empty or null `tools:` records nothing, like `gate:`. Reading an existing
 
 Branch on the exit code **and** stdout:
 
-- **exit 0, the visibility default** (public `sonarcloud` / `snyk` / `codeql`,
-  private `sonarqube` / `trivy` / `none`) → resolved; carry the lines into the
-  Step 2 plan and Step 3.
-- **exit 0, any other toolchain** → valid, and the templates compose it (#1670),
-  but bootstrap **cannot finish it yet**: branch protection (Step 4b), the Step
-  4.5 preflight and automation, and State D's GitHub-side gap-fill still key on
-  visibility, so they would require checks no rendered job reports and wedge
-  every PR. Until [#1671](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1671)
-  makes them follow the toolchain, show the Step 2 plan with its `Toolchain:`
-  and `CI runner:` lines, say that this toolchain is supported from #1671 on,
-  and **stop before rendering — write nothing**. This stop is the one place the
-  rule lives; every other step is reached only past it.
+- **exit 0** → resolved, whether or not it is the visibility default; carry the
+  lines into the Step 2 plan and Step 3. The templates compose every toolchain
+  this script accepts (#1670), and branch protection (Step 4b), the Step 4.5
+  preflight and State D's GitHub-side gap-fill take its `static_analysis`,
+  `vulnerabilities` and `code_scanning` values as flags (#1671) — never
+  re-derived from visibility. Step 4.5's per-path automation is still split by
+  visibility until [#1769](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1769),
+  so it automates only part of some toolchains: its *Which toolchains it
+  covers* table says which script runs and which `SETUP.md` sections stay
+  Step 5 items.
 - **exit 1** → stdout is empty; relay the one stderr message verbatim and
   **stop**. It is either a **validation** step (a missing or unsupported
   `--visibility`, a malformed `tools:`, an unsupported value, a public repo
@@ -861,9 +875,11 @@ Bootstrap plan:
                     further prompt guards the finish; confirming the plan
                     authorizes it.
   Setup automation: on this macOS + Homebrew host, runs after the finish
-                    (Step 4.5) — SonarCloud/Snyk (or local SonarQube) setup,
-                    GitHub Actions secrets, branch protection[, self-hosted
-                    runner when CI runner is self-hosted]. Prompts only for its remaining
+                    (Step 4.5) — the setup its *Which toolchains it covers*
+                    row automates for this toolchain (SonarCloud/Snyk or local
+                    SonarQube setup, GitHub Actions secrets, branch protection[,
+                    self-hosted runner when CI runner is self-hosted]), naming
+                    what that row leaves as SETUP.md steps. Prompts only for its remaining
                     interactive steps — browser imports/auth, token pastes, and
                     the scripts' per-step Y/N confirmations (e.g. runner
                     registration, branch protection)[, plus the Claude
@@ -879,10 +895,7 @@ source in parentheses — for example `static analysis sonarcloud (default) ·
 vulnerabilities snyk (recorded) · code scanning codeql (chosen)` — and derive
 `CI runner:` from `self_hosted_runner` alone: `self-hosted` exactly when it is
 `true`, else `github-hosted`. The `Will create:` list's tool-scoped files come
-from `toolchain-templates.zsh` for that same toolchain (Step 3). On a toolchain
-other than the visibility default, show the plan with both lines and stop there
-(*Resolve the toolchain*, until #1671): there is nothing to confirm, because
-nothing will be rendered.
+from `toolchain-templates.zsh` for that same toolchain (Step 3).
 
 **On the §3l IaC path the plan takes a different shape**, and the difference is
 load-bearing: this block is the consent gate, so promising a coverage gate and a
@@ -1012,7 +1025,7 @@ Inputs to each agent are provided **in the agent's prompt**, not on disk
   permission blocks + the runner choice (`ubuntu-latest` vs `self-hosted`).
 - Consistency reviewer: full text of `sonar-project.properties`, the planned
   workflow file, `SETUP.md`, and the `checks` array `branch-protection.sh`
-  would use given current detection results. **On the §3l IaC path there is no
+  would use given the resolved toolchain and the detection results. **On the §3l IaC path there is no
   `sonar-project.properties`** — pass `kubernetes-ci.yml` and the `--iac-only`
   checks array (the single `gate` context) instead, and tell the reviewer the Sonar
   cross-references are intentionally absent, or it reports a plan that is
@@ -4050,9 +4063,10 @@ targets first. When Step 4a found the hook already wired, it says instead that t
 hook is wired and rejects pushes until the gate command passes.
 
 **Branch protection still runs — with the IaC context set.** Call Step 4b's
-`branch-protection.sh` with `--iac-only true`. That swaps the language-app
+`branch-protection.sh` with `--iac-only true` and neither toolchain flag
+(`--static-analysis`, `--vulnerabilities`). That swaps the language-app
 contexts (`test-and-coverage`, `semgrep`, `pre-commit`, `no-cluster-deploy`,
-plus the visibility-specific Sonar/Trivy/CodeQL/image contexts) for the single
+plus the toolchain-specific Sonar/Trivy/CodeQL and the image contexts) for the single
 `gate` context above — required contexts no workflow reports would
 pin every PR on a permanent `expected` state — while everything else the script
 applies is unchanged and still needed here: PR-required, linear history, no
@@ -4341,25 +4355,45 @@ approval):
 
 ```bash
 "<skill-base-dir>/scripts/branch-protection.sh" \
-  --visibility "<public|private>" \
+  --static-analysis "<static_analysis from resolve-tools.zsh — OMIT on the §3l IaC path>" \
+  --vulnerabilities "<vulnerabilities from resolve-tools.zsh — OMIT on the §3l IaC path>" \
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — whether a root .ko.yaml exists (Go ko image path, #875)>" \
-  --has-codeql "<true|false — whether codeql.yml was generated>" \
+  --has-codeql "<true exactly when resolve-tools.zsh's code_scanning is codeql, else false>" \
   --codeql-languages "<SPACE-separated CodeQL language list, e.g. 'python javascript', when has-codeql=true — NOT the comma-separated {{CODEQL_LANGUAGES}} form; the script splits on whitespace>" \
   --iac-only "<true on the §3l IaC path — the kubernetes topic marker with an empty RESOLVED language set (after Q4) and no other `primary:` recorded, or a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
   --default-branch "<DEFAULT_BRANCH>" \
-  --require-signed-commits "<true if --signed-commits was passed at invocation, else false>"
+  --require-signed-commits "<Step 4b's signing value — below>"
 ```
+
+**Step 4b's signing value** is the one derivation every
+`--require-signed-commits` in this skill passes: `true` when `--signed-commits`
+was passed at invocation or `github_state.branch_protection.required_signatures`
+is `true`; `false` when neither holds and either that field is `false` or no
+rule exists yet (`branch_protection.state` is `missing`, or there is no
+`github_state`). When the setting could not be read — the field is `null`, or
+`state` is `forbidden` or `unknown` — and the flag was not passed, **ask the
+user** whether signed commits are required, once per run — never default to
+`false`, because the script clears the requirement on anything but `true`.
 
 The script applies a single protection rule that:
 
 - Requires PR before merge.
 - Requires status checks — the script computes the exact contexts from
-  the flags above (visibility, has-dockerfile, has-codeql, codeql-languages),
-  so they line up with the jobs the generated workflow produces. With
+  the flags above (the resolved toolchain, has-dockerfile, has-codeql,
+  codeql-languages), so they line up with the jobs the generated workflow
+  produces: `test-and-coverage`, `semgrep`, `pre-commit` and `license-fs`
+  always, the `static_analysis` job, `trivy-fs` iff `vulnerabilities` is
+  `trivy`, `image` when there is a Dockerfile (or a ko lane whose
+  `ko-image.yml` is on disk), `analyze (<lang>)` per language when
+  `--has-codeql` is true **and** `codeql.yml` is on disk, and
+  `no-cluster-deploy` when both of its halves are on disk (#1670 D1). The toolchain always comes from
+  *Resolve the toolchain*'s `key=value` output, never from visibility — the
+  script accepts no visibility at all. With
   `--iac-only true` it requires the `kubernetes-ci.yml` `gate` context **instead of**
   the language-app set, because §3l renders no `quality-*.yml` for those
-  contexts to come from. Everything else in this list still applies on that
+  contexts to come from — so that path passes neither toolchain flag, and the
+  script neither requires nor reads them there. Everything else in this list still applies on that
   path — the merge settings below above all, which Step 4e's arming needs.
 - Requires linear history.
 - Blocks force-push and deletion.
@@ -4395,8 +4429,16 @@ never wedged at `expected`. Watch for that warning on a non-IaC path: it means
 the direct-to-cluster gate is **not enforced**. Render the pair (§3a) and re-run
 the script; if you cannot, list it as an outstanding Step 5 item rather than
 reporting the context as required. Never infer from exit 0 alone that every
-context in §3a's list was applied — two of them (`image`, `no-cluster-deploy`)
-are computed from on-disk probes, not from the flags.
+context in §3a's list was applied — three of them (`image` on the ko lane,
+`no-cluster-deploy`, and `analyze (<lang>)`) are computed from on-disk probes,
+not from the flags alone.
+
+**A third, for CodeQL (#1671).** With `--has-codeql true` the script also exits
+0 after `WARN`ing that `.github/workflows/codeql.yml` is absent, having applied
+the rule **without** any `analyze (<lang>)` context. Watch for it the same way:
+it means CodeQL is **not** a required check. Render `codeql.yml` (§3b) and
+re-run the script, or list it as an outstanding Step 5 item; never report the
+`analyze` contexts as required after that warning.
 
 **One FATAL refusal, on the §3l IaC path only (#1606).** With `--iac-only true`
 the script exits **1** before writing anything — neither the rule nor the merge
@@ -4912,7 +4954,7 @@ protection, Snyk auth), and the per-asset confirmations kept elsewhere (the Step
 4c build-file edits — Java and Python — the idempotency file-overwrite rule; see
 the Step 4 intro for the authoritative retained set). Removing that separate
 opt-in is this step's change; tightening the scripts' per-step confirmations is
-out of scope here — the automate scripts are unchanged. The manual `SETUP.md`
+out of scope here — the scripts' confirmations are unchanged. The manual `SETUP.md`
 path is the **degrade-on-failure** fallback, not a co-equal opt-out.
 
 ### Preflight check
@@ -4922,7 +4964,8 @@ anything missing:
 
 ```bash
 "<skill-base-dir>/scripts/preflight.sh" \
-  --visibility "<public|private>" \
+  --static-analysis "<static_analysis from resolve-tools.zsh — OMIT on the §3l IaC path>" \
+  --vulnerabilities "<vulnerabilities from resolve-tools.zsh — OMIT on the §3l IaC path>" \
   --languages "<space-separated detected languages>" \
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — root .ko.yaml, #875>" \
@@ -4943,15 +4986,18 @@ The script will:
 1. Refuse to run on non-macOS hosts.
 2. Refuse to run without Homebrew.
 3. List missing tools (`gh`, `jq`, `pre-commit`, `gitleaks`, `semgrep`,
-   `sonar-scanner`, plus path-specific: `snyk` for public, `trivy` + Docker for
-   private, plus language-specific linters, plus `parallel` on claude-plugin
-   repos — the bats review-loop gate parallelises via it, #980). With
-   `--iac-only true` the list is `gh`, `jq`, `git` and the gate's tools (`helm`,
-   `kustomize`, `kubeconform`, `kube-linter`, `kyverno`, `trivy`, `yq`) instead.
+   `sonar-scanner`, plus per resolved tool: `snyk` for `snyk`, `trivy` for
+   `trivy` — whatever the visibility or Dockerfile — plus language-specific
+   linters, plus `parallel` on claude-plugin repos — the bats review-loop gate
+   parallelises via it, #980). With `--iac-only true` the list is `gh`, `jq`,
+   `git` and the gate's tools (`helm`, `kustomize`, `kubeconform`,
+   `kube-linter`, `kyverno`, `trivy`, `yq`) instead.
 4. Offer to `brew install` all missing pieces in one batch.
 5. Verify `gh auth status`; offer to run `gh auth login` if not authenticated.
-6. For private path (not with `--iac-only true`): verify Docker daemon is
-   running; offer to launch Docker.app if not.
+6. When `static_analysis` is `sonarqube`, `vulnerabilities` is `trivy`, or the
+   repo has a Dockerfile (never with `--iac-only true`): verify the Docker
+   daemon is running and the docker compose plugin is present; offer to launch
+   Docker.app if not.
 7. When `--claude-approver true`: verify `python3` is present, verify both
    Claude Apps are registered locally **for the repo's owner** (the same
    `claude-apps-owner.zsh status` probe as the auto-detection, #1683), and
@@ -4972,6 +5018,21 @@ entirely and go straight to Step 5 (manual checklist).
 If preflight passed, run the path-specific automation — it is covered by the
 Step 2 plan approval, not a separate opt-in prompt.
 
+**Which toolchains it covers (#1671, until #1769).** The two scripts are still
+split by visibility, and each automates a fixed subset of the tools. Decide
+from the resolved toolchain, never from visibility alone:
+
+| Resolved toolchain | Run | What stays a Step 5 item |
+| --- | --- | --- |
+| public (`sonarcloud`), `snyk` | `automate-public.sh` | nothing |
+| public (`sonarcloud`), `trivy` | `automate-public.sh` (it skips its Snyk steps) | nothing — `trivy-fs` needs no account or secret |
+| private, `sonarqube`, `trivy` | `automate-private.sh` | nothing |
+| private, `sonarqube`, `snyk` | `automate-private.sh` | `SETUP.md`'s Snyk section, `SNYK_TOKEN` included — the script sets up no Snyk |
+| private, `sonarcloud` (either tool) | **neither** — `automate-private.sh` refuses `sonarcloud`; run `install-claude-apps.zsh` directly when `--claude-approver` resolved `true` | `SETUP.md`'s SonarCloud section and, on `snyk`, its Snyk section; Dependabot alerts and automated security fixes (repo Settings → Code security), which `automate-private.sh` would have enabled; branch protection is already applied by Step 4b |
+
+A Step 5 item named here is **outstanding work**, not a failure: report it as
+such, beside Step 4b's branch-protection result.
+
 > **The §3l IaC path skips this section entirely.** Two reasons, and the first
 > is destructive: `automate-public.sh` / `automate-private.sh` both re-invoke
 > `branch-protection.sh` **without `--iac-only`**, and that PUT *replaces* the
@@ -4990,7 +5051,8 @@ Step 2 plan approval, not a separate opt-in prompt.
 > that the rule was written. (The
 > `--claude-approver` extension below is likewise moot — a manifests repo has no
 > Approver-capable language.) **Scope: this section only.** The *preflight
-> check* above still runs, **with `--iac-only true`**: it then requires `gh`, `jq`
+> check* above still runs, **with `--iac-only true` and neither toolchain flag**
+> (`--static-analysis`, `--vulnerabilities`): it then requires `gh`, `jq`
 > and `git` plus the gate's tools (`helm`, `kustomize`, `kubeconform`,
 > `kube-linter`, `kyverno`, `trivy`, `yq`) — what `make lint` and the pre-push
 > hook run locally — and none of the language-app scanners, so its one
@@ -5009,12 +5071,21 @@ Step 2 plan approval, not a separate opt-in prompt.
   --org-key "<ORG_KEY>" \
   --project-name "<PROJECT_NAME>" \
   --default-branch "<DEFAULT_BRANCH>" \
+  --static-analysis "<static_analysis from resolve-tools.zsh>" \
+  --vulnerabilities "<vulnerabilities from resolve-tools.zsh>" \
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — root .ko.yaml, #875>" \
-  --has-codeql "<true|false — whether codeql.yml was generated>" \
+  --has-codeql "<true exactly when resolve-tools.zsh's code_scanning is codeql, else false>" \
   --codeql-languages "<space-separated languages, e.g. 'python javascript'>" \
-  --claude-approver "<true|false>"
+  --claude-approver "<true|false>" \
+  --require-signed-commits "<Step 4b's signing value>"
 ```
+
+Both `automate-*.sh` scripts take `--static-analysis` and `--vulnerabilities`
+as **required** flags and forward them, with `--require-signed-commits`,
+unchanged to their branch-protection re-apply, so it reproduces Step 4b's whole
+rule, signatures included — an interim bridge until #1769 retires both scripts
+(#1671).
 
 `--codeql-languages` must be passed whenever `--has-codeql=true`. CodeQL's
 `analyze` job runs as a matrix per language and GitHub reports each one
@@ -5044,9 +5115,12 @@ This walks the user through:
   --project-key "<PROJECT_KEY>" \
   --project-name "<PROJECT_NAME>" \
   --default-branch "<DEFAULT_BRANCH>" \
+  --static-analysis "<static_analysis from resolve-tools.zsh>" \
+  --vulnerabilities "<vulnerabilities from resolve-tools.zsh>" \
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — root .ko.yaml, #875>" \
-  --claude-approver "<true|false>"
+  --claude-approver "<true|false>" \
+  --require-signed-commits "<Step 4b's signing value>"
 ```
 
 This handles:
@@ -5105,8 +5179,9 @@ at the end of whichever path completed the merge.
 
 ### `--claude-approver true` extension
 
-When the orchestrator was invoked with `--claude-approver true`, both
-automate scripts run an additional Claude Apps install step **after
+When the orchestrator was invoked with `--claude-approver true`, whichever
+automate script runs (the *Which toolchains it covers* table; where it runs
+neither, it runs the delegate below directly) adds a Claude Apps install step **after
 branch protection and before printing the summary** (no extra flag plumbing
 needed by the orchestrator — the scripts pick up the flag passed at the
 top). The step delegates to:

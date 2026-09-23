@@ -1530,14 +1530,14 @@ EOF
   chmod +x "$STUB_BIN/gh" "$STUB_BIN/curl"
 }
 
-@test "branch-protection requires no-cluster-deploy on the PUBLIC path (#1206)" {
+@test "branch-protection requires no-cluster-deploy with the sonarcloud + snyk toolchain (#1206)" {
   protection_stubs
   touch "$W/.github/workflows/no-cluster-deploy.yml"
   mkdir -p "$W/scripts"
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1545,14 +1545,14 @@ EOF
   contains "$contexts" 'test-and-coverage'
 }
 
-@test "branch-protection requires no-cluster-deploy on the PRIVATE path (#1206)" {
+@test "branch-protection requires no-cluster-deploy with the sonarqube + trivy toolchain (#1206)" {
   protection_stubs
   touch "$W/.github/workflows/no-cluster-deploy.yml"
   mkdir -p "$W/scripts"
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility private --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarqube --vulnerabilities trivy --has-dockerfile false --has-codeql false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1567,7 +1567,7 @@ EOF
   protection_stubs
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1594,7 +1594,7 @@ EOF
   stage_iac_workflow
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 0 ]
   local contexts expected
@@ -1612,7 +1612,7 @@ EOF
   stage_iac_workflow
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 0 ]
   local contexts expected
@@ -1631,7 +1631,7 @@ EOF
   touch "$W/.github/workflows/no-cluster-deploy.yml"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1646,7 +1646,7 @@ EOF
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1664,7 +1664,7 @@ EOF
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   CURL_HTTP_STATUS=403 run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
   [ "$status" -eq 0 ]
   # pin the BRANCH first: the script prints its whole check list before the PUT
   # on every path, so a bare needle on $output matches the 200 path too and

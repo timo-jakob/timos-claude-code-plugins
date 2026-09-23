@@ -55,12 +55,12 @@ Walk through every cross-reference and verify both sides agree:
      placeholder text. The same value is used in workflow `branches:`
      filters, branch-protection rules, and `CONTRIBUTING.md`.
 
-7. **Public vs private path purity**
-   - Public-path files (workflows, .snyk, sonar properties for SonarCloud)
-     don't appear if visibility is private.
-   - Private-path files (SonarQube docker-compose, runner README,
-     `trivy.yaml`) don't appear if visibility is public.
-   - Common files appear in both.
+7. **Toolchain purity**
+   - Which tool-scoped files are planned is `toolchain-templates.zsh`'s
+     decision, not yours: do not re-check it, and never flag a tool-scoped
+     file as out of place because of the repository's visibility — a private
+     repository resolving `sonarcloud` or `snyk` legitimately carries the
+     SonarCloud properties or `.snyk`.
 
 8. **Placeholder substitution**
    - No `{{...}}` text remains anywhere in the planned final content
