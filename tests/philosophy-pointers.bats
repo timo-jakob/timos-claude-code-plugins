@@ -72,6 +72,11 @@ setup() {
   # CLAUDE.md advertises the range #pillar-1 … #pillar-6. mkdocs validates only
   # the anchors something LINKS (four of the six today), so the other two are
   # checked by nothing; a duplicate id would silently shadow one.
+  # Both halves of that promise are checked here: philosophy.md defines the
+  # anchors, and CLAUDE.md advertises exactly the range they span (#1660).
+  # CLAUDE.md is outside mkdocs' docs_dir, so without the second half either
+  # bound could move — `#pillar-0` or `#pillar-8` — and every session would be
+  # told to link an anchor that does not exist.
   local n
   # grep -oE, not -c: `-c` counts matching LINES, so two anchors on one heading
   # would read as 1 and pass while the rendered page shadows an id. The ERE
@@ -85,6 +90,14 @@ setup() {
     hits="$(grep -oF "{#pillar-$i}" "$PHILOSOPHY" | wc -l | tr -d ' ')"
     [ "$hits" -eq 1 ]
   done
+  # the advertised range, its upper bound taken from the anchors counted above
+  # rather than written as a literal, so the needle follows philosophy.md. It
+  # keeps the backticks, the ellipsis and both parentheses, so moving either
+  # bound — not only the upper one — fails
+  local section
+  section="$(flow "$(section_of "$CLAUDE_MD" '## Pillars are stated once')")"
+  [ -n "$section" ]
+  contains "$section" "(\`#pillar-1\` … \`#pillar-$n\`)"
 }
 
 # --- README ------------------------------------------------------------------
