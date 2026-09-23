@@ -362,6 +362,10 @@ sonarqube_fixture() {
   log="$(cat "$CALLS")"
   contains "$log" "docker compose up -d @$W/infra/sonarqube"
   contains "$log" 'curl GET http://localhost:9000/api/system/status'
+  # the Keychain miss is looked up once, then one password is stored (#1789)
+  [ "$(grep -c '^security find-generic-password ' "$CALLS")" -eq 1 ]
+  grep -qx 'security find-generic-password -s sonarqube-local-admin -a admin -w' "$CALLS"
+  [ "$(grep -c '^security add-generic-password ' "$CALLS")" -eq 1 ]
   # the one generated password is both stored and set
   contains "$log" 'security add-generic-password -U -s sonarqube-local-admin -a admin -w stubpwstubpwstubpwstubpwstub'
   contains "$log" 'curl POST http://localhost:9000/api/users/change_password login=admin previousPassword=admin password=stubpwstubpwstubpwstubpwstub auth=admin:admin'
@@ -382,8 +386,9 @@ sonarqube_fixture() {
   lacks "$log" '-b tok-admin'
   contains "$log" 'gh secret set SONAR_HOST_URL -b http://localhost:9000'
   contains "$log" 'gh secret set SONAR_HOST_URL --app dependabot -b http://localhost:9000'
-  # the generated password never reaches stdout
+  # the generated password never reaches stdout or stderr
   lacks "$output" 'stubpwstubpw'
+  lacks "$stderr" 'stubpwstubpw'
   # the runner is register-runner.sh's; the GitHub toggles enable-github-security.sh's
   lacks "$log" 'registration-token'
   lacks "$log" 'vulnerability-alerts'
@@ -400,6 +405,11 @@ sonarqube_fixture() {
   log="$(cat "$CALLS")"
   contains "$output" 'Reusing admin password from Keychain'
   lacks "$output" 'stored-pw-4711'
+  lacks "$stderr" 'stored-pw-4711'
+  # one lookup, for the stored entry, and its value is the one used (#1789)
+  [ "$(grep -c '^security find-generic-password ' "$CALLS")" -eq 1 ]
+  grep -qx 'security find-generic-password -s sonarqube-local-admin -a admin -w' "$CALLS"
+  contains "$log" 'curl POST http://sq.example:9000/api/projects/create project=k name=n auth=admin:stored-pw-4711'
   lacks "$log" 'add-generic-password'
   lacks "$log" 'change_password'
   contains "$log" 'curl GET http://sq.example:9000/api/system/status'
