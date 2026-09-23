@@ -114,7 +114,7 @@ require_tools() {
 		err "Required tool(s) not on PATH: ${missing[*]}"
 		err ""
 		err "Run preflight first to install them all in one step:"
-		err "  $SCRIPT_DIR/preflight.sh --visibility <public|private> \\"
+		err "  $SCRIPT_DIR/preflight.sh --static-analysis <sonarcloud|sonarqube> --vulnerabilities <snyk|trivy> \\"
 		err "    --languages \"<detected langs>\" --has-dockerfile <true|false>"
 		err ""
 		err "Or install manually via: brew install ${missing[*]}"

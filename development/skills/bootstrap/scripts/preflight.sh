@@ -3,12 +3,22 @@
 # and offer to brew-install anything missing.
 #
 # Usage:
-#   preflight.sh --visibility public|private \
+#   preflight.sh --static-analysis sonarcloud|sonarqube \
+#                --vulnerabilities snyk|trivy \
 #                --languages "swift javascript python go" \
 #                --has-dockerfile true|false \
 #                [--has-ko true|false] \
 #                [--iac-only true|false] \
 #                [--assume-yes]
+#
+#   --static-analysis / --vulnerabilities   the RESOLVED toolchain
+#                     (resolve-tools.zsh, #1671). The prerequisites follow it,
+#                     never visibility — this script neither accepts nor derives
+#                     visibility, and `--visibility` exits 1 naming these two
+#                     flags. `snyk` needs snyk-cli, `trivy` needs trivy, and
+#                     `sonarqube` (like `trivy` or a Dockerfile) needs the
+#                     Docker daemon + compose plugin. Required unless
+#                     --iac-only true, where neither is required or read.
 #
 #   --iac-only true   the §3l IaC path (#1605): require `gh jq git` plus the
 #                     gate's toolchain (iac_brews below) and no other brew
@@ -27,7 +37,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 # --- parse args ---------------------------------------------------------------
-VISIBILITY=""
+STATIC_ANALYSIS=""
+VULNERABILITIES=""
 LANGUAGES=""
 HAS_DOCKERFILE="false"
 ASSUME_YES="false"
@@ -37,7 +48,17 @@ IAC_ONLY="false"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--visibility)
-		VISIBILITY="$2"
+		# no alias: the prerequisites follow the toolchain, never visibility (#1671)
+		die "--visibility is no longer accepted — pass the resolved toolchain instead: --static-analysis sonarcloud|sonarqube and --vulnerabilities snyk|trivy"
+		;;
+	--static-analysis)
+		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+		STATIC_ANALYSIS="$2"
+		shift 2
+		;;
+	--vulnerabilities)
+		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+		VULNERABILITIES="$2"
 		shift 2
 		;;
 	--languages)
@@ -72,8 +93,14 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-[[ "$VISIBILITY" =~ ^(public|private)$ ]] || die "--visibility must be public or private"
 [[ "$IAC_ONLY" =~ ^(true|false)$ ]] || die "--iac-only must be true or false"
+# the toolchain names the language-app prerequisites; the IaC path never reads it
+if [[ "$IAC_ONLY" != "true" ]]; then
+	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
+		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
+		die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+fi
 
 # --- preconditions ------------------------------------------------------------
 require_macos
@@ -100,12 +127,14 @@ else
 		"sonar-scanner" # Sonar CLI
 	)
 
-	# Path-specific
-	case "$VISIBILITY" in
-	public)
+	# Tool-specific: the resolved vulnerabilities tool, whatever the visibility
+	# or Dockerfile. sonarqube adds no formula — its prerequisite is the Docker
+	# daemon + compose plugin checked below.
+	case "$VULNERABILITIES" in
+	snyk)
 		required_brews+=("snyk-cli") # provides the `snyk` binary
 		;;
-	private)
+	trivy)
 		required_brews+=("trivy")
 		;;
 	esac
@@ -265,10 +294,11 @@ else
 	fi
 fi
 
-# --- docker (private path or any project with a Dockerfile) ------------------
+# --- docker (SonarQube, Trivy, or any project with a Dockerfile) -------------
 needs_docker="false"
 # never on the IaC path: its Docker consumers (image, Trivy image, SonarQube) are never emitted there
-if [[ "$IAC_ONLY" != "true" ]] && [[ "$VISIBILITY" == "private" || "$HAS_DOCKERFILE" == "true" ]]; then
+if [[ "$IAC_ONLY" != "true" ]] &&
+	[[ "$STATIC_ANALYSIS" == "sonarqube" || "$VULNERABILITIES" == "trivy" || "$HAS_DOCKERFILE" == "true" ]]; then
 	needs_docker="true"
 fi
 
@@ -305,7 +335,7 @@ if [[ "$needs_docker" == "true" ]]; then
 
 	missing)
 		echo
-		info "Docker is required (for SonarQube container ${VISIBILITY:++ }${VISIBILITY:+image scanning}) but not installed."
+		info "Docker is required (for the SonarQube container, Trivy or image builds) but not installed."
 		cat <<'EOF'
 
 Choose how to install Docker:

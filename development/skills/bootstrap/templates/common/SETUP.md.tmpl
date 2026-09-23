@@ -566,10 +566,16 @@ Disable it on `{{DEFAULT_BRANCH}}`:
 ```sh
 # Re-run branch-protection.sh without the flag
 "<skill-base-dir>/scripts/branch-protection.sh" \
-  --visibility <public|private> \
+  --static-analysis <sonarcloud|sonarqube> \
+  --vulnerabilities <snyk|trivy> \
   --has-dockerfile <true|false> \
+  --has-ko <true|false> \
   --has-codeql <true|false> \
+  --codeql-languages "<langs>" \
+  --iac-only false \
   --default-branch {{DEFAULT_BRANCH}}
+  # (an infrastructure repo recording `primary: kubernetes`: pass --iac-only true
+  #  and drop --static-analysis / --vulnerabilities, or the rule loses `gate`)
   # (note: --require-signed-commits omitted — defaults to false)
 ```
 

@@ -14,7 +14,8 @@ install the equivalent tools by hand.
 
 - `gh` CLI authenticated (`gh auth login`) — for repo metadata, secret storage,
   branch protection, and self-hosted runner registration.
-- Docker (private-repo bootstrap only) — runs SonarQube CE locally via
+- Docker (only when the declared toolchain uses SonarQube or Trivy, or the
+  repository has a Dockerfile) — runs SonarQube CE locally via
   `docker compose`. The preflight script detects three setups:
   - **Docker Desktop** — recommended for most users; offered as a brew cask
     (`brew install --cask docker`). Bundles the compose v2 plugin. Free for

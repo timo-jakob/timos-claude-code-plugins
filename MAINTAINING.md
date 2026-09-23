@@ -367,7 +367,7 @@ find development/skills/bootstrap/scripts -name "*.sh" -exec bash -n {} \;
 
 # Run preflight in dry-run mode
 ./development/skills/bootstrap/scripts/preflight.sh \
-  --visibility public --languages "" --has-dockerfile false
+  --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false
 ```
 
 If you can spin up a test project, run `/development:bootstrap` against it

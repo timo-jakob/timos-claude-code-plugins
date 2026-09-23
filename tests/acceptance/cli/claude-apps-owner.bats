@@ -76,7 +76,7 @@ add_1682_aliases() {
   in_org_repo "acme-corp"
   [ "$(status_registered)" = "$(list_registered acme-corp)" ]
   [ "$(status_registered)" = "maintenance" ]
-  run --separate-stderr bash "$PREFLIGHT" --visibility private --languages "" \
+  run --separate-stderr bash "$PREFLIGHT" --languages "" \
     --has-dockerfile false --iac-only true --claude-approver true </dev/null
   [ "$status" -ne 0 ]
   contains "$output" "approver: not registered"

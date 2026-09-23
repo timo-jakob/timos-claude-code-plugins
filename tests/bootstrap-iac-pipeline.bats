@@ -529,7 +529,7 @@ EOF
   # every PR on checks no rendered workflow reports.
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 0 ]
   local contexts expected
@@ -554,7 +554,7 @@ EOF
   # mid-run or told the user to hand-require the language-app set.
   protection_stubs
   CURL_HTTP_STATUS=403 run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   # a hand-applied rule is a legitimate outcome, so this must NOT be a failure
   [ "$status" -eq 0 ]
@@ -587,7 +587,7 @@ EOF
   # equality above would never see it.
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile true --has-ko true --has-codeql true \
+    --has-dockerfile true --has-ko true --has-codeql true \
     --codeql-languages "python javascript" --iac-only true --default-branch main
   [ "$status" -eq 0 ]
   local contexts
@@ -597,10 +597,10 @@ EOF
   lacks "$contexts" 'analyze ('
 }
 
-@test "branch-protection --iac-only on the PRIVATE path drops Sonar and Trivy too (#1154)" {
+@test "branch-protection --iac-only drops Sonar and Trivy even when a toolchain is passed (#1154, #1671)" {
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility private --has-dockerfile false --has-codeql false \
+    --static-analysis sonarqube --vulnerabilities trivy --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 0 ]
   local contexts
@@ -616,14 +616,14 @@ EOF
   # rather than its value would pass both
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false \
     --iac-only false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
   # EXACT, in the order the script builds it: #1606 swapped only the IaC set, and
   # the language-app set must come through that change byte-for-byte
-  [ "$contexts" = "test-and-coverage,semgrep,pre-commit,sonarcloud,license-fs" ]
+  [ "$contexts" = "test-and-coverage,semgrep,pre-commit,license-fs,sonarcloud" ]
   lacks "$contexts" 'gate'
   contains "$contexts" 'test-and-coverage'
   contains "$contexts" 'sonarcloud'
@@ -634,10 +634,10 @@ EOF
 @test "branch-protection rejects an --iac-only value that is neither true nor false (#1154)" {
   # unvalidated, `--iac-only True` silently takes the language-app path — the
   # exact permanent-`expected` failure the flag exists to prevent, with no
-  # diagnostic. --visibility is validated for the same reason.
+  # diagnostic. --static-analysis / --vulnerabilities are validated for the same reason.
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only True --default-branch main
   [ "$status" -ne 0 ]
   contains "$output" '--iac-only must be true or false'
@@ -650,7 +650,7 @@ EOF
   # bootstrap into Step 4e's "arming failed" branch
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 0 ]
   local rule
@@ -667,13 +667,13 @@ EOF
   # the flag must be additive: every existing repo keeps the language-app set
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
   # the same exact set as the explicit `false` above: a default keyed on the
   # flag's presence would diverge here
-  [ "$contexts" = "test-and-coverage,semgrep,pre-commit,sonarcloud,license-fs" ]
+  [ "$contexts" = "test-and-coverage,semgrep,pre-commit,license-fs,sonarcloud" ]
 }
 
 @test "branch-protection --iac-only REFUSES when kubernetes-ci.yml is absent, before any rule is written (#1606)" {
@@ -682,7 +682,7 @@ EOF
   protection_stubs
   rm "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" '.github/workflows/kubernetes-ci.yml` is absent'
@@ -732,7 +732,7 @@ write_per_stage_workflow() {
   protection_stubs
   write_per_stage_workflow marked
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'carries the plugin'"'"'s provenance marker but has no `gate` job'
@@ -747,7 +747,7 @@ write_per_stage_workflow() {
   protection_stubs
   write_per_stage_workflow unmarked
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'is user-owned and has no `gate` job'
@@ -767,7 +767,7 @@ write_per_stage_workflow() {
   sed -i.bak -E 's/^  gate:[[:space:]]*$/  gate:  # the one job/' "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   grep -q '^  gate:  # the one job$' "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 0 ]
   [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
@@ -817,7 +817,7 @@ write_gate_workflow() {
     protection_stubs
     write_gate_workflow "$shape"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-      --visibility public --has-dockerfile false --has-codeql false \
+      --has-dockerfile false --has-codeql false \
       --iac-only true --default-branch main
     [ "$status" -eq 0 ]
     [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
@@ -837,7 +837,7 @@ write_gate_workflow() {
     protection_stubs
     write_gate_workflow "$shape"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-      --visibility public --has-dockerfile false --has-codeql false \
+      --has-dockerfile false --has-codeql false \
       --iac-only true --default-branch main
     [ "$status" -eq 1 ]
     contains "$output" 'carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
@@ -860,7 +860,7 @@ write_gate_workflow() {
   printf '# claude-bootstrap: rendered from iac/.github/workflows/kubernetes-ci.yml.tmpl @ v1.160.0 sha256:0\n%s\n' \
     "$body" > "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
@@ -892,7 +892,7 @@ write_marker_at_line() {
   protection_stubs
   write_marker_at_line 10
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'carries the plugin'"'"'s provenance marker but has no `gate` job'
@@ -901,7 +901,7 @@ write_marker_at_line() {
   protection_stubs
   write_marker_at_line 11
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --visibility public --has-dockerfile false --has-codeql false \
+    --has-dockerfile false --has-codeql false \
     --iac-only true --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'is user-owned and has no `gate` job'
@@ -923,7 +923,7 @@ write_marker_at_line() {
     body="$(cat "$out")"
     printf '%s\n%s\n' "$mention" "$body" > "$out"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-      --visibility public --has-dockerfile false --has-codeql false \
+      --has-dockerfile false --has-codeql false \
       --iac-only true --default-branch main
     [ "$status" -eq 1 ]
     contains "$output" 'is user-owned and has no `gate` job'
@@ -1436,7 +1436,7 @@ step4a_iac() {
   quote="$(sed -n '/^> \*\*The §3l IaC path skips this section entirely/,/^\*\*Public path:\*\*/p' "$SKILL" \
     | tr -s '[:space:]' ' ')"
   ends_with "$quote" '**Public path:** '
-  contains "$quote" 'still runs, **with `--iac-only true`**'
+  contains "$quote" 'still runs, **with `--iac-only true` and neither toolchain flag**'
 }
 
 @test "no IaC-path section describes the pre-commit framework as installed or enforced (#1605)" {

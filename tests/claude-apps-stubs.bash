@@ -256,6 +256,6 @@ if [[ -n "${REGISTER_WORKS:-}" ]]; then
 fi
 EOF
   chmod +x "$dir"/*
-  run --separate-stderr bash "$dir/preflight.sh" --visibility public --languages "" \
+  run --separate-stderr bash "$dir/preflight.sh" --languages "" \
     --has-dockerfile false --iac-only true --claude-approver true --assume-yes </dev/null
 }
