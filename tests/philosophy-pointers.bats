@@ -78,11 +78,15 @@ setup() {
   # bound could move — `#pillar-0` or `#pillar-8` — and every session would be
   # told to link an anchor that does not exist.
   local n
-  # grep -oE, not -c: `-c` counts matching LINES, so two anchors on one heading
-  # would read as 1 and pass while the rendered page shadows an id. The ERE
-  # form also avoids `\+`, a GNU-only BRE extension that BSD grep (macOS, this
-  # repo's primary platform) reads as a literal plus.
-  n="$(grep -oE '^## .*\{#pillar-[0-9]+\}' "$PHILOSOPHY" | wc -l | tr -d ' ')"
+  # Count ANCHORS on `## ` lines, then anchored `## ` LINES; each count misses
+  # what the other catches. The anchor count reds an extra anchor on a heading
+  # (`{#pillar-7}`), which a line count reads as 1; the line count reds an
+  # anchor MOVED onto another pillar's heading, which leaves the anchor count
+  # at 6. The ERE form also avoids `\+`, a GNU-only BRE extension that BSD grep
+  # (macOS, this repo's primary platform) reads as a literal plus.
+  n="$(grep -E '^## ' "$PHILOSOPHY" | grep -oE '\{#pillar-[0-9]+\}' | wc -l | tr -d ' ')"
+  [ "$n" -eq 6 ]
+  n="$(grep -cE '^## .*\{#pillar-[0-9]+\}' "$PHILOSOPHY" || true)"
   [ "$n" -eq 6 ]
   local i
   for i in 1 2 3 4 5 6; do
@@ -319,6 +323,11 @@ setup() {
   # the rule's other half: without this, deleting the retirement clause leaves
   # an entry that never goes away once all its gaps close
   contains "$body" 'when the last one lands the whole entry goes'
+  # the retirement clause must enumerate every assertion over the entry: more
+  # than one test asserts over it, so "the whole test" ships a red suite
+  contains "$body" 'with the entry every assertion over it'
+  contains "$body" 'drop that pillar'"'"'s pair with its line, and with the entry every assertion over it — the pairs test, the landing-rule test, the two delegation needles in the `delegates the convictions` test, which quote this entry, and the gap-6 pillar-link test, which then guards nothing'
+  lacks "$body" 'the whole test with the entry'
 }
 
 @test "#1629 each gap-6 pillar link points at the pillar whose text it names" {

@@ -231,4 +231,7 @@ this section when it lands.
    line here, correcting the count in this entry's title; when the last one
    lands the whole entry goes. Both are pinned in
    `tests/philosophy-pointers.bats`: drop that pillar's pair with its line, and
-   the whole test with the entry.
+   with the entry every assertion over it — the pairs test, the landing-rule
+   test, the two delegation needles in the `delegates the convictions` test,
+   which quote this entry, and the gap-6 pillar-link test, which then guards
+   nothing.
