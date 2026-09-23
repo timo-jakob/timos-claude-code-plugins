@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--has-ko)
-		# Accepted for call-signature parity with the automate-*.sh scripts, but
+		# Accepted for call-signature parity with branch-protection.sh, but
 		# intentionally unused: ko builds run only in CI (the ko-image workflow),
 		# never during local bootstrap, so a ko-only Go repo needs no local Docker
 		# daemon and adds nothing to the toolchain preflight. Consume + discard.

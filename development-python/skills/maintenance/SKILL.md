@@ -642,7 +642,7 @@ doesn't carry Python-specific scope:
   support for `venv/`, `env/`, or `VIRTUAL_ENV`). Bootstrapped projects
   standardize on `.venv/`.
 - **`pip install -e ".[dev]"` is the recreate's install command** —
-  matches `automate-public.sh`'s bootstrap step. Future iterations
+  matches the editable dev install bootstrap sets up. Future iterations
   could detect `uv.lock` / `poetry.lock` and prefer the lock-respecting
   install, but for v1 pip is the floor.
 

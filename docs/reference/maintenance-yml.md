@@ -99,10 +99,10 @@ set of values:
   private repository needs GitHub Advanced Security. Every other combination is valid,
   and bootstrap composes the quality workflows from the tools you declare, running them
   on a self-hosted runner exactly when `static_analysis` is `sonarqube`.
-- **Current limits.** Branch protection and the setup preflight follow the declared tools,
-  but the setup automation is still split by visibility, so on a private repository it
-  does not set up SonarCloud or Snyk: bootstrap lists those `SETUP.md` sections as
-  outstanding steps instead
+- **Setup automation follows the declared tools too.** Branch protection, the setup
+  preflight and the setup automation all follow `tools:`: bootstrap's Step 4.5 runs
+  each tool's setup script under that tool's trigger rather than by visibility;
+  only the GitHub security toggles still follow visibility
   ([#1769](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1769)).
-  `/development:maintenance` does not read `tools:` yet
+- **Current limits.** `/development:maintenance` does not read `tools:` yet
   ([#1672](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1672)).

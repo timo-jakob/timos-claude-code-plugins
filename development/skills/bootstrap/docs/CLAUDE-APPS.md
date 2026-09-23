@@ -389,7 +389,7 @@ No consumer reads the pre-#1682 service names
 `register-claude-apps.zsh` deletes any that remain (see *Removing the #1682
 aliases*).
 
-This matches the pattern `automate-private.sh` already uses for the
+This matches the pattern `setup-sonarqube.sh` already uses for the
 SonarQube admin password. Retrieval:
 
 ```sh
