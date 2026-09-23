@@ -31,14 +31,16 @@
 #      non-empty, is a mapping whose keys are only the three categories.
 #   2. every recorded and flag value is in its category's set.
 #   3. each category resolves recorded → chosen → default.
-#   4. a PUBLIC repo whose resolved static_analysis is sonarqube is rejected,
-#      whatever its source — SonarQube runs on a self-hosted runner, and a public
-#      repo must never have one.
-#   5. TEMPORARY GUARD, removed by #1670 (composable workflow rendering): a
-#      toolchain that differs from its visibility default cannot be rendered yet.
-# Steps 1-4 leave stdout empty. Step 5 still prints the full key=value lines,
-# because steps 1-4 passed and the values are valid — that is what lets the
-# Step 2 plan show the Toolchain: line with its sources before bootstrap stops.
+#   4. two combinations are rejected, whatever their values' source:
+#      - a PUBLIC repo whose resolved static_analysis is sonarqube — SonarQube
+#        runs on a self-hosted runner, and a public repo must never have one;
+#      - a PRIVATE repo whose resolved code_scanning is codeql (#1670) — CodeQL on
+#        a private repository needs GitHub Advanced Security, which we do not
+#        have, so it could be neither run nor tested.
+#      Neither combination reaches rendering, so no template carries a branch
+#      for either.
+# A failing step leaves stdout empty. Every other resolution is renderable: the
+# quality workflows are composed per tool from these values (#1670).
 #
 # On success (exit 0) stdout carries, one per line:
 #   static_analysis=<v>  static_analysis_source=recorded|chosen|default
@@ -196,10 +198,13 @@ done
 self_hosted_runner=false
 [[ "${resolved[static_analysis]}" == sonarqube ]] && self_hosted_runner=true
 
-# --- step 4: never a self-hosted runner on a public repository ------------------
+# --- step 4: the two combinations that never reach rendering --------------------
 
 if [[ "$visibility" == public && "${resolved[static_analysis]}" == sonarqube ]]; then
 	fail "tools.static_analysis: sonarqube is not supported on a public repository — SonarQube runs on a self-hosted runner, and a public repository must never have one (fork pull requests could run code on it). Declare static_analysis: sonarcloud, or make the repository private."
+fi
+if [[ "$visibility" == private && "${resolved[code_scanning]}" == codeql ]]; then
+	fail "tools.code_scanning: codeql is not supported on a private repository — CodeQL on a private repository needs GitHub Advanced Security. Declare code_scanning: none, or make the repository public."
 fi
 
 emit() {
@@ -209,21 +214,6 @@ emit() {
 	done
 	print -r -- "self_hosted_runner=$self_hosted_runner"
 }
-
-# --- step 5: TEMPORARY GUARD until #1670 ships composable rendering -------------
-
-typeset -A default_set
-if [[ "$visibility" == public ]]; then
-	default_set=("${(@kv)public_default}")
-else
-	default_set=("${(@kv)private_default}")
-fi
-triple="${resolved[static_analysis]}/${resolved[vulnerabilities]}/${resolved[code_scanning]}"
-default_triple="${default_set[static_analysis]}/${default_set[vulnerabilities]}/${default_set[code_scanning]}"
-if [[ "$triple" != "$default_triple" ]]; then
-	emit
-	fail "toolchain $triple is valid but cannot be rendered yet — until composable workflow rendering ships, a $visibility repository renders only $default_triple. Nothing was rendered."
-fi
 
 # --- --record: write the resolved values without touching an existing line -----
 

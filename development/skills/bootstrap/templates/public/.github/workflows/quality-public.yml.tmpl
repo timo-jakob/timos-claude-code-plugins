@@ -1,10 +1,12 @@
 # Quality + security pipeline for PUBLIC repositories.
-# Runs on github-hosted runners. Uses SonarCloud for static analysis +
-# coverage. Snyk's GitHub App handles SAST + Open Source as PR-time
-# advisory checks (and Snyk's auto-Fix-PR flow for OSS — see SETUP.md
-# section 2.6). This workflow only runs the `image` channel: Snyk
-# container scan on the built Docker image, which the GitHub App can't
-# see.
+# Composed from the repo's resolved quality toolchain (.maintenance.yml's
+# `tools:`, #1651/#1670): SonarCloud for static analysis + coverage (a public
+# repository never gets SonarQube's self-hosted runner, so it always runs on
+# GitHub-hosted runners), and the vulnerability scanner it declares. With Snyk,
+# Snyk's GitHub App handles SAST + Open Source out of CI (and its auto-Fix-PR
+# flow for OSS — see SETUP.md's Snyk section), and this workflow runs only the
+# `image` channel's Snyk container scan, which the App can't see. With Trivy,
+# the `trivy-fs` job scans the filesystem and the `image` job scans the image.
 #
 # Image publishing: built image is scanned (`image` job), then pushed to
 # GitHub Container Registry (ghcr.io/<owner>/<repo>) on merge to main +
@@ -62,7 +64,7 @@ jobs:
 
   # --- LINUX_TESTS-START -------------------------------------------------------
   test-and-coverage:
-    runs-on: ubuntu-latest
+    runs-on: {{RUNNER}}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -211,7 +213,7 @@ jobs:
   # --- LINUX_TESTS-END ---------------------------------------------------------
   # --- SWIFT-START -----------------------------------------------------------
   # Swift tests need a macOS runner (xcodebuild/xcrun are macOS-only) — free
-  # minutes for public repos. This job REPLACES the Linux test-and-coverage
+  # minutes for public repos on GitHub-hosted macOS. This job REPLACES the Linux test-and-coverage
   # job on Swift-only repos: its `name:` is the same `test-and-coverage`
   # context, so branch protection's required checks are unchanged. When the
   # Linux job was stripped (Swift-only), point the sonarcloud job's `needs:`
@@ -220,7 +222,7 @@ jobs:
   # and give this job's artifact a distinct name plus a second download step).
   test-and-coverage-swift:
     name: test-and-coverage
-    runs-on: macos-latest
+    runs-on: {{SWIFT_RUNNER}}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -297,7 +299,7 @@ jobs:
   # --- SonarCloud -----------------------------------------------------------
   sonarcloud:
     needs: test-and-coverage
-    runs-on: ubuntu-latest
+    runs-on: {{RUNNER}}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -318,13 +320,34 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
 
+  # --- TRIVY-START -----------------------------------------------------------
+  # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.
+  # Scoped to vuln/secret/misconfig only; license scanning is a separate job
+  # for clearer triage (was this PR blocked by a CVE or by a license?).
+  trivy-fs:
+    runs-on: {{RUNNER}}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "vuln,secret,misconfig"
+          ignore-unfixed: false
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
+  # --- TRIVY-END -------------------------------------------------------------
+
+  # --- SNYK-START ------------------------------------------------------------
   # --- Snyk source-code + open-source scans -----------------------------------
   # NOT a CI job. Snyk runs via the **Snyk GitHub integration** (App), never
   # against SNYK_TOKEN in CI — a `snyk test`/`snyk code test` job would be
   # redundant with the integration and double-count the monthly test quota.
   #
-  # Two integration features (configured in the Snyk Web UI — see SETUP.md
-  # §2.5–2.6) do the work, and they are deliberately split:
+  # Two integration features (configured in the Snyk Web UI — see SETUP.md's
+  # Snyk setup section) do the work, and they are deliberately split:
   #
   #   1. Pull request status checks
   #      Snyk → Settings → Integrations → GitHub → Pull request status checks
@@ -335,13 +358,12 @@ jobs:
   #            Snyk monitoring → auto-fix PRs → the maintenance pipeline, plus
   #            Dependabot. (Leaving this ON yields the `security/snyk` check.)
   #        Code analysis                     → DISABLE
-  #            SAST on our OWN code is already covered by CodeQL (the required
-  #            `analyze (<lang>)` checks). Snyk Code adds no incremental
-  #            coverage on the free tier, where its monthly test cap makes
-  #            `code/snyk` go ERROR ("Code test limit reached") — and that
-  #            advisory legacy status used to silently skip the Claude Approver
-  #            (#387). Disabling it drops the `code/snyk` check; CodeQL stays
-  #            the SAST gate.
+  #            SAST on our OWN code is already covered by {{SAST_GATE}}.
+  #            Snyk Code adds no incremental coverage on the free tier, where
+  #            its monthly test cap makes `code/snyk` go ERROR ("Code test
+  #            limit reached") — and that advisory legacy status used to
+  #            silently skip the Claude Approver (#387). Disabling it drops
+  #            the `code/snyk` check; the SAST gate stays as it is.
   #
   #   2. Continuous monitoring + Automatic Fix PRs
   #      Daily re-test of the imported target; when a vulnerable dependency has
@@ -352,13 +374,14 @@ jobs:
   # The `image` job below stays a CI job because the integration only scans the
   # Dockerfile statically — it doesn't build the image and inspect installed
   # packages.
+  # --- SNYK-END --------------------------------------------------------------
 
   # --- License compliance (dependencies) ------------------------------------
   # Uses Trivy as an open-source license scanner. Catches deps shipping
   # incompatible licenses (AGPL/SSPL → HIGH severity, blocks CI by default).
   # Policy customizable via trivy.yaml.
   license-fs:
-    runs-on: ubuntu-latest
+    runs-on: {{RUNNER}}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -398,7 +421,7 @@ jobs:
   # `push-and-sign` never runs on PRs, so it is NOT a required check and
   # needs no noop mirror.
   image:
-    runs-on: ubuntu-latest
+    runs-on: {{RUNNER}}
     permissions:
       contents: read
     steps:
@@ -425,7 +448,12 @@ jobs:
             echo "Non-PR event ($EVENT_NAME) — scanning the image."
             exit 0
           fi
+          # --- SNYK-START ---
           container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$|(^|/)\.snyk$'
+          # --- SNYK-END ---
+          # --- TRIVY-START ---
+          container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$|(^|/)trivy\.ya?ml$'
+          # --- TRIVY-END ---
           if ! changed=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null); then
             echo "do_scan=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Could not compute the PR diff against $BASE_SHA — scanning to be safe."
@@ -494,6 +522,22 @@ jobs:
           tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      # --- TRIVY-START -------------------------------------------------------
+      - name: Trivy image vulnerability scan
+        if: steps.scan_decision.outputs.do_scan == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: "image"
+          image-ref: ${{ steps.pick.outputs.tag }}
+          scanners: "vuln,secret,misconfig"
+          ignore-unfixed: false
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+          trivy-config: trivy.yaml
+      # --- TRIVY-END ---------------------------------------------------------
+
+      # --- SNYK-START --------------------------------------------------------
       - name: Snyk container scan
         if: steps.scan_decision.outputs.do_scan == 'true'
         uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
@@ -526,6 +570,7 @@ jobs:
           path: snyk-container.json
           if-no-files-found: error
           retention-days: 90
+      # --- SNYK-END ----------------------------------------------------------
 
       # NOTE: image-level license scan intentionally omitted. Trivy's
       # `restricted` classification flags every transitive Debian GPL/LGPL
@@ -544,7 +589,7 @@ jobs:
   push-and-sign:
     needs: image
     if: github.event_name == 'push' || github.event_name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: {{RUNNER}}
     permissions:
       contents: read
       packages: write    # ghcr.io push
@@ -654,7 +699,7 @@ jobs:
 
   # --- Semgrep (free OSS rules) ---------------------------------------------
   semgrep:
-    runs-on: ubuntu-latest
+    runs-on: {{RUNNER}}
     container:
       # Pinned. Matches the pre-commit hook's semgrep version so local + CI
       # behave identically. Bump in lockstep with `.pre-commit-config.yaml`.
@@ -670,7 +715,7 @@ jobs:
   # --no-verify` or pushed from a machine without pre-commit installed.
   # Runs the exact same hooks as locally.
   pre-commit:
-    runs-on: ubuntu-latest
+    runs-on: {{RUNNER}}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -679,3 +724,9 @@ jobs:
         with:
           python-version: "{{PYTHON_VERSION}}"
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+      # --- TRIVY-START -------------------------------------------------------
+        # GitHub-hosted runners carry no trivy binary for the local trivy-fs hook;
+        # the trivy-fs job above runs the same scan, so skip the hook here.
+        env:
+          SKIP: trivy-fs
+      # --- TRIVY-END ---------------------------------------------------------

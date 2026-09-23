@@ -2,9 +2,11 @@
 
 The bootstrap skill wrote the config files and workflows. Some setup steps
 require human action — account creation, token storage, runner registration —
-and are listed below. Each section below belongs to a tool this repository's
-quality toolchain uses (`.maintenance.yml`'s `tools:`); sections for tools it
-does not use are not part of this file.
+and are listed below.
+
+> Sections marked **PUBLIC** apply only to public repositories using SonarCloud
+> + Snyk. Sections marked **PRIVATE** apply only to private repositories using
+> self-hosted SonarQube + Trivy. Sections without a label apply to both.
 
 > 🤖 **macOS users**: most of these steps can be automated. The bootstrap skill
 > offers to run `scripts/automate-public.sh` or `scripts/automate-private.sh`
@@ -41,19 +43,12 @@ Cross-language:
 ```sh
 brew install gitleaks
 brew install semgrep         # or: pip install semgrep
+brew install trivy           # PRIVATE only — for local container scanning
 ```
-<!-- --- TRIVY-START --- -->
-
-```sh
-brew install trivy           # for local container scanning
-```
-<!-- --- TRIVY-END --- -->
 
 ---
-<!-- --- SONARCLOUD-START --- -->
 
-## 2. SonarCloud setup
-<!-- --- PUBLIC-START --- -->
+## 2. **PUBLIC** — SonarCloud setup
 
 > 🤖 **Automated alternative**: `scripts/automate-public.sh` runs most of
 > section 2 end-to-end. Run it after `preflight.sh` confirms your toolchain.
@@ -79,7 +74,6 @@ brew install trivy           # for local container scanning
 >
 > Total interactive time: ~3-5 minutes. The script's other operations
 > total ~30 seconds.
-<!-- --- PUBLIC-END --- -->
 
 ### 2.1 Create the project
 
@@ -91,21 +85,12 @@ brew install trivy           # for local container scanning
 ### 2.2 Add secrets to GitHub
 
 In repo Settings → Secrets and variables → Actions → New repository secret:
-<!-- --- SNYK-START --- -->
 
 | Name | Required? | Value |
 |---|---|---|
 | `SONAR_TOKEN` | Yes | from step 2.1 |
-| `SNYK_TOKEN` | Yes | from step 2b.1 below |
+| `SNYK_TOKEN` | Yes | from step 2.5 below |
 | `SEMGREP_APP_TOKEN` | **Optional** | only needed if you connect Semgrep AppSec Platform for managed rules / dashboards. CI runs the free OSS ruleset without it; the env var is read defensively (`${{ secrets.SEMGREP_APP_TOKEN }}`) and won't fail when unset. |
-<!-- --- SNYK-END --- -->
-<!-- --- TRIVY-START --- -->
-
-| Name | Required? | Value |
-|---|---|---|
-| `SONAR_TOKEN` | Yes | from step 2.1 |
-| `SEMGREP_APP_TOKEN` | **Optional** | only needed if you connect Semgrep AppSec Platform for managed rules / dashboards. CI runs the free OSS ruleset without it; the env var is read defensively (`${{ secrets.SEMGREP_APP_TOKEN }}`) and won't fail when unset. |
-<!-- --- TRIVY-END --- -->
 
 ### 2.3 Create the Zero Tolerance Quality Gate
 
@@ -113,8 +98,8 @@ In repo Settings → Secrets and variables → Actions → New repository secret
 # Set these once for the snippet below:
 export SONAR_TOKEN=<the token from 2.1>
 export SONAR_HOST=https://sonarcloud.io
-export ORG_KEY={{ORG_KEY}}
-export PROJECT_KEY={{PROJECT_KEY}}
+export ORG_KEY=acme
+export PROJECT_KEY=acme_demo
 
 # Create the gate
 GATE_ID=$(curl -sS -u "$SONAR_TOKEN:" -X POST \
@@ -155,28 +140,24 @@ curl -sS -u "$SONAR_TOKEN:" -X POST \
 Verify in the SonarCloud UI: **Quality Gates** → "Zero Tolerance" → it should
 show the 10 conditions above. The project should now show this gate.
 
----
-<!-- --- SONARCLOUD-END --- -->
-<!-- --- PUBLIC-START --- -->
-
-## 2a. OpenSSF Scorecard — supply-chain health badge
+### 2.4 OpenSSF Scorecard — supply-chain health badge
 
 The generated `.github/workflows/scorecard.yml` runs weekly and publishes
-a score to <https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_SLUG}}>.
+a score to <https://scorecard.dev/viewer/?uri=github.com/acme/demo>.
 Nothing to set up — the workflow uses GitHub's OIDC token to publish, no
 secrets needed.
 
-After the first scheduled run (or push to `{{DEFAULT_BRANCH}}`), the score
+After the first scheduled run (or push to `main`), the score
 is available in three places:
 
-- `https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_SLUG}}` — public landing page with per-check breakdown
+- `https://scorecard.dev/viewer/?uri=github.com/acme/demo` — public landing page with per-check breakdown
 - The repo's **Security** tab → **Code scanning** → filter by tool "Scorecard"
 - The **Actions** run summary
 
 **Add the badge to your README** (optional but recommended for OSS):
 
 ```markdown
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/{{PROJECT_SLUG}}/badge)](https://scorecard.dev/viewer/?uri=github.com/{{PROJECT_SLUG}})
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/acme/demo/badge)](https://scorecard.dev/viewer/?uri=github.com/acme/demo)
 ```
 
 The score is **not gated as a required check** — Scorecard is a periodic
@@ -184,39 +165,32 @@ informational signal, not a per-PR gate. Improvements should happen
 through normal PRs that address whichever specific checks are red (the
 Code scanning view shows each failing check with a fix recommendation).
 
----
-<!-- --- PUBLIC-END --- -->
-<!-- --- SNYK-START --- -->
-
-## 2b. Snyk setup
-
-### 2b.1 Sign up for Snyk, import the repo, configure PR checks
+### 2.5 Sign up for Snyk, import the repo, configure PR checks
 
 1. Go to [snyk.io](https://snyk.io), sign in with GitHub.
 2. Account Settings → Auth Token → copy.
 3. Add as repo secret `SNYK_TOKEN`.
 4. Import this repo as a Snyk target (Add project → GitHub → select the repo).
-   <!-- --- PUBLIC-START --- -->
    Import while the repo is **public** so its tests count as unlimited
    public-project tests, not against the private-test quota.
-   <!-- --- PUBLIC-END --- -->
 5. Configure **Pull request status checks**
    (Settings → Integrations → GitHub → Pull request status checks):
    - **Open Source security and licenses → DISABLE.** Third-party CVEs change
      without our code changing (a clean release goes vulnerable when a new CVE
      lands), so they must not gate a build. They're handled by daily
-     monitoring → auto-fix PRs → the maintenance pipeline (§2b.2), plus
+     monitoring → auto-fix PRs → the maintenance pipeline (§2.6), plus
      Dependabot. Disabling removes the `security/snyk` check.
    - **Code analysis → DISABLE.** SAST on our own code is already covered by
-     {{SAST_GATE}}. Snyk Code adds no incremental coverage on the free tier —
-     where it carries a **monthly test cap**: once exhausted it posts
-     `code/snyk` as `Code test limit reached` (ERROR). Because `code/snyk` is a
-     legacy commit status, that quota error used to pollute the combined commit
-     status and silently skip the Claude Approver, even though `code/snyk` is
-     advisory (never a required check). Disabling it removes the `code/snyk`
-     check entirely and leaves the SAST gate as it is (#387).
+     **CodeQL** (the required `analyze (<lang>)` checks). Snyk Code adds no
+     incremental coverage on the free tier — where it carries a **monthly test
+     cap**: once exhausted it posts `code/snyk` as `Code test limit reached`
+     (ERROR). Because `code/snyk` is a legacy commit status, that quota error
+     used to pollute the combined commit status and silently skip the Claude
+     Approver, even though `code/snyk` is advisory (never a required check).
+     Disabling it removes the `code/snyk` check entirely and keeps CodeQL as
+     the SAST gate (#387).
 
-### 2b.2 Enable Snyk auto-Fix-PRs (manual UI step)
+### 2.6 Enable Snyk auto-Fix-PRs (manual UI step)
 
 Snyk's integration-settings API requires paid plan entitlement, so this
 is a one-time manual step in the Snyk Web UI on free plans:
@@ -230,7 +204,7 @@ is a one-time manual step in the Snyk Web UI on free plans:
    version upgrades.
 6. On the imported project (Project → Settings), set the **test frequency**
    to **Daily**. This re-tests for new CVEs without a code change — the
-   mechanism that replaces the disabled `security/snyk` PR check (§2b.1).
+   mechanism that replaces the disabled `security/snyk` PR check (§2.5).
 
 After this, when Snyk detects a vulnerable dependency with a known fix,
 it opens a PR with branch name starting `snyk-fix-…`. The maintenance
@@ -242,10 +216,8 @@ pipeline's triage agent handles these alongside Dependabot PRs.
 > automate this via the v1 API in a future iteration; see issue #87.
 
 ---
-<!-- --- SNYK-END --- -->
-<!-- --- SONARQUBE-START --- -->
 
-## 3. SonarQube setup (self-hosted)
+## 3. **PRIVATE** — SonarQube + Trivy setup
 
 > 🤖 **Automated alternative**: `scripts/automate-private.sh` runs most of
 > section 3 end-to-end. Run it after `preflight.sh` confirms your toolchain.
@@ -286,10 +258,9 @@ first login — pick something strong and store it somewhere safe.
 ### 3.2 Create the project and mint a token
 
 In SonarQube UI:
-1. **Create project** → manual → key: `{{PROJECT_KEY}}` → name: `{{PROJECT_NAME}}`.
+1. **Create project** → manual → key: `acme_demo` → name: `demo`.
 2. Choose **With GitHub Actions** as the analysis method.
 3. Generate a **Project Analysis Token** — copy it. This is your `SONAR_TOKEN`.
-<!-- --- SELF_HOSTED-START --- -->
 
 ### 3.3 Register a self-hosted runner
 
@@ -302,7 +273,6 @@ See `infra/github-runner/README.md` for full instructions. Summary:
 2. Follow the copy-pasted commands on the host running SonarQube.
 3. Run `./svc.sh install && ./svc.sh start` so it runs as a service.
 4. Confirm the runner shows as "Idle" in GitHub Settings → Actions → Runners.
-<!-- --- SELF_HOSTED-END --- -->
 
 ### 3.4 Add GitHub Actions secrets
 
@@ -320,7 +290,7 @@ The API is the same as SonarCloud but without `organization`:
 ```sh
 export SONAR_TOKEN=<token from 3.2>
 export SONAR_HOST=http://localhost:9000
-export PROJECT_KEY={{PROJECT_KEY}}
+export PROJECT_KEY=acme_demo
 
 GATE_ID=$(curl -sS -u "$SONAR_TOKEN:" -X POST \
   "$SONAR_HOST/api/qualitygates/create?name=Zero%20Tolerance" \
@@ -354,7 +324,6 @@ curl -sS -u "$SONAR_TOKEN:" -X POST \
 ```
 
 ---
-<!-- --- SONARQUBE-END --- -->
 
 ## 3b. License compliance policy
 
@@ -516,12 +485,12 @@ was scraped.
 ## 3g. Signed commits (only if bootstrap ran with `--signed-commits`)
 
 If bootstrap was invoked with `--signed-commits`, the branch protection
-rule on `{{DEFAULT_BRANCH}}` requires every landing commit to be
+rule on `main` requires every landing commit to be
 cryptographically signed (GPG or SSH key) and verified by GitHub.
 
 **This adds setup friction for every contributor** — a one-time
 key-generation-and-registration step per machine. The payoff is that
-"Author: X" lines on `{{DEFAULT_BRANCH}}` become evidence rather than
+"Author: X" lines on `main` become evidence rather than
 unverified claims.
 
 ### Per-contributor setup (SSH key — recommended)
@@ -561,7 +530,7 @@ Same workflow, more setup steps; the resulting verification is equivalent.
 
 ### What if the rule is too strict?
 
-Disable it on `{{DEFAULT_BRANCH}}`:
+Disable it on `main`:
 
 ```sh
 # Re-run branch-protection.sh without the flag
@@ -569,7 +538,7 @@ Disable it on `{{DEFAULT_BRANCH}}`:
   --visibility <public|private> \
   --has-dockerfile <true|false> \
   --has-codeql <true|false> \
-  --default-branch {{DEFAULT_BRANCH}}
+  --default-branch main
   # (note: --require-signed-commits omitted — defaults to false)
 ```
 
@@ -598,7 +567,7 @@ for the position and its rationale.
 
 `scripts/check-no-cluster-deploy.zsh` enforces the application-repo half, and
 the `no-cluster-deploy` workflow runs it on every pull request targeting
-`{{DEFAULT_BRANCH}}`. It scans
+`main`. It scans
 `.github/workflows/**` and **fails** on a step whose `run:` body invokes a
 cluster-writing command, naming the workflow file, the job, the step (or its
 index when the step is unnamed) and the command.
@@ -723,29 +692,24 @@ a cluster:
 
 ---
 
-## 4. GitHub branch protection on `{{DEFAULT_BRANCH}}`
+## 4. GitHub branch protection on `main`
 
 > 🤖 **Automated alternative**: `scripts/branch-protection.sh` applies the rules
 > below in one call. The automation scripts above invoke it automatically;
 > you can also run it standalone.
 
 The bootstrap skill offers to apply these automatically via `gh api`. If you
-want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_BRANCH}}`:
+want to do it manually: repo Settings → Branches → Add rule for `main`:
 
 - [x] Require a pull request before merging (1 approval, dismiss stale reviews)
-- [x] Require status checks to pass before merging — these **exact contexts**,
-  one per check this repository's quality toolchain and stack report on a pull
-  request:
-  <!-- --- TOOLCHAIN-START --- -->
-  {{REQUIRED_CONTEXTS}}
-  <!-- --- TOOLCHAIN-END --- -->
-  - **`no-cluster-deploy` (§3h)**, listed above, is required on every application repository only **when BOTH `.github/workflows/no-cluster-deploy.yml` and `scripts/check-no-cluster-deploy.zsh` are on disk** (absent, the script warns and omits the context, exactly as it does for `image`/`ko-image.yml`, so a repo predating the gate is never wedged at `expected`). Unlike `image`, it carries **no path filter at all** — a required check whose workflow a `paths:` filter skipped sits at `expected` forever and wedges every PR that misses those paths. It is a static scan of `.github/workflows/**`, so running it unconditionally costs seconds. It is **not** in the IaC set below: an infrastructure repo is the one place a cluster write belongs.
-  - **IaC** (the kubernetes topic marker — or bootstrap's explicit empty-GitOps-repo confirmation — with no application language and no other `primary:` recorded in `.maintenance.yml` — `branch-protection.sh --iac-only true`): `gate`. This single context **replaces** the list above rather than adding to it: that path emits no `quality-*.yml`, so every language-app context would sit at `expected` forever and block each PR. It comes from `.github/workflows/kubernetes-ci.yml`'s one job, which runs the repo's gate command (`make lint` → `scripts/k8s-gate.zsh`, whose stages validate the **rendered** manifests rather than the templates).
-  - **`image` is path-conditional (#386):** it is listed above when the repository has a Dockerfile; a Go repository that publishes with ko (a root `.ko.yaml`) reports `image` from `ko-image.yml` instead, so require it there too. Keep it required, but the job only runs the container build+scan when the PR touches container files (`Dockerfile*`, `.dockerignore`, compose files, the scanner policy `.snyk`/`trivy.yaml`). On an app/dependency PR that touches none of those, the `image` job ends green *without* scanning — so a pre-existing base-image CVE the change can't influence never blocks it ("working on the app → app checks, working on the image → container checks"). A PR that does touch container files gets the full scan gate. Non-PR events (push to the default branch, release, weekly schedule) always scan + publish.
-  - **Not required:** `push-and-sign` (the GHCR publish job) runs only on push/release events — it never produces a PR check, so it is never in the required list. `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).
-  <!-- --- SNYK-START --- -->
-  - **Not required either — Snyk's checks:** Snyk's `security/snyk` (Open Source) is an **advisory** PR check, not a workflow job — leave it unchecked here (matching `branch-protection.sh`, which never adds it). `code/snyk` (Snyk Code) is **disabled** per §2b.1 (SAST is covered by {{SAST_GATE}}), so it isn't produced at all; if you leave it on, it's advisory too and the Approver excludes it from its green gate (#387).
-  <!-- --- SNYK-END --- -->
+- [x] Require status checks to pass before merging — the **exact contexts**
+  `branch-protection.sh` applies (it's the source of truth; this list mirrors it):
+  - **PUBLIC**: `test-and-coverage`, `sonarcloud`, `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, `analyze (<language>)` (one per CodeQL language), `image` (only if a Dockerfile is present)
+  - **PRIVATE**: `test-and-coverage`, `sonarqube`, `trivy-fs`, `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, `image` (only if a Dockerfile is present)
+  - **`no-cluster-deploy` (§3h)** is required on both application paths **when BOTH `.github/workflows/no-cluster-deploy.yml` and `scripts/check-no-cluster-deploy.zsh` are on disk** (absent, the script warns and omits the context, exactly as it does for `image`/`ko-image.yml`, so a repo predating the gate is never wedged at `expected`). Unlike `image`, it carries **no path filter at all** — a required check whose workflow a `paths:` filter skipped sits at `expected` forever and wedges every PR that misses those paths. It is a static scan of `.github/workflows/**`, so running it unconditionally costs seconds. It is **not** in the IaC set below: an infrastructure repo is the one place a cluster write belongs.
+  - **IaC** (the kubernetes topic marker — or bootstrap's explicit empty-GitOps-repo confirmation — with no application language and no other `primary:` recorded in `.maintenance.yml` — `branch-protection.sh --iac-only true`): `gate`. This single context **replaces** the two above rather than adding to them: that path emits no `quality-*.yml`, so every language-app context would sit at `expected` forever and block each PR. It comes from `.github/workflows/kubernetes-ci.yml`'s one job, which runs the repo's gate command (`make lint` → `scripts/k8s-gate.zsh`, whose stages validate the **rendered** manifests rather than the templates).
+  - **`image` is path-conditional (#386):** keep it required, but the job only runs the container build+scan when the PR touches container files (`Dockerfile*`, `.dockerignore`, compose files, the scanner policy `.snyk`/`trivy.yaml`). On an app/dependency PR that touches none of those, the `image` job ends green *without* scanning — so a pre-existing base-image CVE the change can't influence never blocks it ("working on the app → app checks, working on the image → container checks"). A PR that does touch container files gets the full scan gate. Non-PR events (push to the default branch, release, weekly schedule) always scan + publish.
+  - **Not required:** `push-and-sign` (the GHCR publish job) runs only on push/release events — it never produces a PR check, so it is never in the required list. Snyk's `security/snyk` (Open Source) is an **advisory** PR check, not a workflow job — leave it unchecked here (matching `branch-protection.sh`, which never adds it). `code/snyk` (Snyk Code) is **disabled** per §2.5 (CodeQL covers SAST), so it isn't produced at all; if you leave it on, it's advisory too and the Approver excludes it from its green gate (#387). `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).
 - [x] Require branches to be up to date before merging
 - [x] Require linear history
 - [x] Do not allow bypassing the above settings
@@ -758,30 +722,20 @@ want to do it manually: repo Settings → Branches → Add rule for `{{DEFAULT_B
 ## 5. Container image publishing (only if Dockerfile present)
 
 The generated workflows build, scan, and publish your container image to
-**GitHub Container Registry** (`ghcr.io/{{PROJECT_SLUG}}`). Publish events:
+**GitHub Container Registry** (`ghcr.io/acme/demo`). Publish events:
 
 | Trigger | Tags applied | Platforms |
 |---|---|---|
-| Push to `{{DEFAULT_BRANCH}}` (merge) | `latest`, `sha-<7>`, `{{DEFAULT_BRANCH}}` | `linux/amd64` + `linux/arm64` |
+| Push to `main` (merge) | `latest`, `sha-<7>`, `main` | `linux/amd64` + `linux/arm64` |
 | GitHub Release `v1.2.3` | `1.2.3`, `1.2`, `1`, `latest` (if not prerelease) | `linux/amd64` + `linux/arm64` |
 | PR | **Built + scanned but not pushed** — verifies image is clean without polluting the registry | `linux/amd64` only (fast feedback) |
 
 The work is split across two jobs (least privilege — #547): the `image` job
-builds and scans with read-only permissions, and the `push-and-sign` job
-(`needs: image`, push and release events only) logs in to GHCR, pushes, and
-signs — it is the only job holding `packages: write` + `id-token: write`, and
-it never runs on PRs. The scan gates the push: a vulnerable image never
-reaches the registry.
-<!-- --- SNYK-START --- -->
-
-The `image` job's scanner is **Snyk container** (`snyk container test`, which
-reads its ignores from `.snyk`).
-<!-- --- SNYK-END --- -->
-<!-- --- TRIVY-START --- -->
-
-The `image` job's scanner is **Trivy** (an image scan configured by
-`trivy.yaml`).
-<!-- --- TRIVY-END --- -->
+builds and scans (Snyk container for public repos, Trivy for private) with
+read-only permissions, and the `push-and-sign` job (`needs: image`, push and
+release events only) logs in to GHCR, pushes, and signs — it is the only job
+holding `packages: write` + `id-token: write`, and it never runs on PRs. The
+scan gates the push: a vulnerable image never reaches the registry.
 
 ### Multi-arch builds
 
@@ -794,7 +748,7 @@ amd64 is a reasonable proxy for arm64 too.
 
 The arm64 build uses QEMU emulation on a single x86 runner, which is slower
 than native arm64 but free on GitHub-hosted `ubuntu-latest`. If build time
-becomes a problem on GitHub-hosted runners, switch to a matrix using
+becomes a problem on the public path, switch to a matrix using
 `runs-on: ubuntu-24.04-arm` for native arm64 (also free for public repos).
 
 ### SBOM + provenance attestations
@@ -816,18 +770,18 @@ artifacts in the registry that reference the image by digest.
 **Inspect the SBOM** from the registry:
 ```sh
 # Pretty-print SBOM via Buildx
-docker buildx imagetools inspect ghcr.io/{{PROJECT_SLUG}}:latest \
+docker buildx imagetools inspect ghcr.io/acme/demo:latest \
   --format '{{ json .SBOM }}' | jq .
 
 # Or download via oras
-oras discover ghcr.io/{{PROJECT_SLUG}}:latest
+oras discover ghcr.io/acme/demo:latest
 ```
 
 **Verify provenance** with cosign or slsa-verifier:
 ```sh
 # Install once: brew install cosign slsa-verifier
-slsa-verifier verify-image ghcr.io/{{PROJECT_SLUG}}:latest \
-  --source-uri github.com/{{PROJECT_SLUG}}
+slsa-verifier verify-image ghcr.io/acme/demo:latest \
+  --source-uri github.com/acme/demo
 ```
 
 **Verify the image signature** (every published image is signed by cosign
@@ -837,13 +791,13 @@ using GitHub's OIDC token — no key management required):
 # Install once: brew install cosign
 
 # Verify by tag — checks the image was signed by this repo's workflow
-cosign verify ghcr.io/{{PROJECT_SLUG}}:latest \
-  --certificate-identity-regexp "^https://github.com/{{PROJECT_SLUG}}/" \
+cosign verify ghcr.io/acme/demo:latest \
+  --certificate-identity-regexp "^https://github.com/acme/demo/" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
 # Or verify by immutable digest (safer for production pulls)
-cosign verify ghcr.io/{{PROJECT_SLUG}}@sha256:<digest> \
-  --certificate-identity-regexp "^https://github.com/{{PROJECT_SLUG}}/" \
+cosign verify ghcr.io/acme/demo@sha256:<digest> \
+  --certificate-identity-regexp "^https://github.com/acme/demo/" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 ```
 
@@ -924,16 +878,8 @@ The same `push` and `build-push-action` steps will handle both registries.
 
 1. Commit the bootstrap output: `git add . && git commit -m "Bootstrap quality + security toolchain"`.
 2. Push to a feature branch and open a PR.
-3. Watch CI — all checks should run. The first run takes longer:
-   <!-- --- SONARCLOUD-START --- -->
-   SonarCloud needs to index the project.
-   <!-- --- SONARCLOUD-END --- -->
-   <!-- --- SONARQUBE-START --- -->
-   SonarQube needs to index the project.
-   <!-- --- SONARQUBE-END --- -->
-   <!-- --- SNYK-START --- -->
-   Snyk also pulls the imported project's dependency graphs on its first test.
-   <!-- --- SNYK-END --- -->
+3. Watch CI — all checks should run. The first run takes longer (SonarCloud/Sonar
+   needs to index the project; Snyk pulls dep graphs).
 4. If anything fails, fix it locally — `pre-commit run --all-files` reproduces
    most of the checks, and the agent guidance in `CLAUDE.md` keeps Claude Code
    honest while you work.

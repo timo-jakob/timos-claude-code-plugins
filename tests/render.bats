@@ -215,11 +215,132 @@ EOF
   run ! grep -q 'plugin: yes' "$OUT/c"
 }
 
-@test "render: PRIVATE block follows --visibility" {
-  printf '# --- PRIVATE-START ---\npriv: yes\n# --- PRIVATE-END ---\n' > "$T/p.tmpl"
+@test "render: #1670 PUBLIC block follows --visibility, and PRIVATE is no longer a tag" {
+  printf '# --- PUBLIC-START ---\npub: yes\n# --- PUBLIC-END ---\n' > "$T/p.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" p.tmpl
+  [ "$status" -eq 0 ]
+  grep -q 'pub: yes' "$OUT/p"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private p.tmpl
   [ "$status" -eq 0 ]
-  grep -q 'priv: yes' "$OUT/p"
+  run ! grep -q 'pub: yes' "$OUT/p"
+  # the retired tag now fails loudly, like any unknown tag
+  printf '# --- PRIVATE-START ---\npriv: yes\n# --- PRIVATE-END ---\n' > "$T/q.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private q.tmpl
+  [ "$status" -eq 1 ]
+  contains "$output" "unknown block tag 'PRIVATE'"
+}
+
+@test "render: #1670 each per-tool tag is kept iff its tool is resolved, and all strip with no toolchain flag" {
+  local tag
+  for tag in SONARCLOUD SONARQUBE SELF_HOSTED SNYK TRIVY CODEQL; do
+    printf 'a: 1\n# --- %s-START ---\nkept: %s\n# --- %s-END ---\n' "$tag" "$tag" "$tag" > "$T/$tag.tmpl"
+  done
+  local -a files=(SONARCLOUD.tmpl SONARQUBE.tmpl SELF_HOSTED.tmpl SNYK.tmpl TRIVY.tmpl CODEQL.tmpl)
+  kept() {
+    local k="" t
+    for t in SONARCLOUD SONARQUBE SELF_HOSTED SNYK TRIVY CODEQL; do
+      if grep -q "kept: $t" "$OUT/$t"; then k="$k $t"; fi
+    done
+    printf '%s' "${k# }"
+  }
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility public \
+    --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql "${files[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(kept)" = "SONARCLOUD SNYK CODEQL" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private \
+    --static-analysis sonarqube --vulnerabilities trivy --code-scanning none "${files[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(kept)" = "SONARQUBE SELF_HOSTED TRIVY" ]
+  # the §3l IaC path passes no toolchain: every tool block strips, nothing fails
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" "${files[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(kept)" = "" ]
+  grep -qx 'a: 1' "$OUT/SNYK"
+}
+
+@test "render: #1670 a toolchain value outside its set, or a rejected combination, is a usage error" {
+  printf 'x: 1\n' > "$T/x.tmpl"
+  local flag bad want
+  for flag in --static-analysis --vulnerabilities --code-scanning; do
+    case "$flag" in
+    --static-analysis) bad=sonarcube want="sonarcloud | sonarqube" ;;
+    --vulnerabilities) bad=snik want="snyk | trivy" ;;
+    --code-scanning) bad=cdoeql want="codeql | none" ;;
+    esac
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" "$flag" "$bad" x.tmpl
+    [ "$status" -eq 2 ]
+    contains "$output" "$flag must be one of $want, got: $bad"
+    [ ! -e "$OUT/x" ]
+  done
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility public --static-analysis sonarqube x.tmpl
+  [ "$status" -eq 2 ]
+  contains "$output" "public + sonarqube is never rendered"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private --code-scanning codeql x.tmpl
+  [ "$status" -eq 2 ]
+  contains "$output" "private + codeql is never rendered"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility internal x.tmpl
+  [ "$status" -eq 2 ]
+  contains "$output" "--visibility must be public or private"
+  [ ! -e "$OUT/x" ]
+}
+
+@test "render: #1670 RUNNER, SWIFT_RUNNER and SAST_GATE derive from the toolchain, and only from a passed flag" {
+  printf 'r: {{RUNNER}}\ns: {{SWIFT_RUNNER}}\ng: {{SAST_GATE}}\n' > "$T/d.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private \
+    --static-analysis sonarqube --vulnerabilities trivy --code-scanning none d.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/d")" = "$(printf 'r: self-hosted\ns: [self-hosted, macos]\ng: the required `semgrep` check')" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages python --static-analysis sonarcloud \
+    --vulnerabilities snyk --code-scanning codeql d.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/d")" = "$(printf 'r: ubuntu-latest\ns: macos-latest\ng: CodeQL'"'"'s required `analyze (<lang>)` checks')" ]
+  # codeql with no CodeQL language to analyse: no analyze leg exists, so semgrep gates
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "" --static-analysis sonarcloud \
+    --vulnerabilities snyk --code-scanning codeql d.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 3p "$OUT/d")" = 'g: the required `semgrep` check' ]
+  # no toolchain: never a guessed runner — the leftover check names each one
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" d.tmpl
+  [ "$status" -eq 1 ]
+  contains "$output" "{{RUNNER}}"
+  contains "$output" "{{SWIFT_RUNNER}}"
+  contains "$output" "{{SAST_GATE}}"
+  # nor from part of the toolchain, whichever flag is missing: a partial one would
+  # strip the missing tool's blocks
+  local -a all=(--static-analysis sonarcloud --vulnerabilities snyk --code-scanning none)
+  local i
+  for i in 0 2 4; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" "${all[@]:0:i}" "${all[@]:i+2}" d.tmpl
+    [ "$status" -eq 1 ]
+    contains "$output" "{{RUNNER}}"
+  done
+}
+
+@test "render: #1670 REQUIRED_CONTEXTS lists D1's contexts plus no-cluster-deploy, one bullet each" {
+  printf 'before\n{{REQUIRED_CONTEXTS}}\nafter\n' > "$T/c.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "python javascript" --docker true \
+    --static-analysis sonarcloud --vulnerabilities trivy --code-scanning codeql c.tmpl
+  [ "$status" -eq 0 ]
+  local want
+  want="$(printf 'before\n'; printf '  - `%s`\n' test-and-coverage sonarcloud trivy-fs semgrep license-fs \
+    pre-commit no-cluster-deploy 'analyze (python)' 'analyze (javascript-typescript)' image; printf 'after')"
+  [ "$(cat "$OUT/c")" = "$want" ]
+  # snyk has no CI job, codeql none has no analyze leg, no Dockerfile no image
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages python --visibility private \
+    --static-analysis sonarqube --vulnerabilities snyk --code-scanning none c.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^  - ' "$OUT/c")" -eq 6 ]
+  run ! grep -qE 'trivy-fs|analyze|image' "$OUT/c"
+  grep -qx '  - `sonarqube`' "$OUT/c"
+  # without the full toolchain it is never guessed — whichever flag is missing
+  local -a all=(--static-analysis sonarqube --vulnerabilities snyk --code-scanning none)
+  local i
+  for i in 0 2 4; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages python --visibility private \
+      "${all[@]:0:i}" "${all[@]:i+2}" c.tmpl
+    [ "$status" -eq 1 ]
+    contains "$output" "{{REQUIRED_CONTEXTS}}"
+  done
 }
 
 @test "render: DOCKER block follows --docker" {
@@ -377,28 +498,16 @@ tools:
   done
 }
 
-@test "render: #1651 the toolchain flags change no rendered file but .maintenance.yml" {
-  # Every other template renders byte-identically with and without the three
-  # flags, on both visibilities — so a declare-nothing repo's quality workflows,
-  # configs and docs are exactly today's.
-  local -a files=()
-  local f
-  while IFS= read -r f; do files+=("$f"); done < <(cd "$REAL_TEMPLATES" &&
-    find common public private -type f -name '*.tmpl' | grep -v '^common/.maintenance.yml.tmpl$' | LC_ALL=C sort)
-  [ "${#files[@]}" -gt 20 ]
-  local vis
-  for vis in public private; do
-    local base=(--templates "$REAL_TEMPLATES" --project-name demo --project-slug acme/demo
-      --project-key acme_demo --org-key acme --languages "python java" --primary python
-      --security-contact-email "" --acceptance-interfaces "cli, rest" --cli-entry-point demo
-      --approver-lang python --xcode-scheme Demo --docker true --visibility "$vis")
-    run zsh "$SCRIPT" "${base[@]}" --out "$OUT/$vis-without" "${files[@]}"
-    [ "$status" -eq 0 ]
-    run zsh "$SCRIPT" "${base[@]}" --out "$OUT/$vis-with" \
-      --static-analysis sonarqube --vulnerabilities trivy --code-scanning none "${files[@]}"
-    [ "$status" -eq 0 ]
-    diff -r "$OUT/$vis-without" "$OUT/$vis-with"
-  done
+@test "render: #1670 an IaC-path render (no toolchain flags) of SETUP.md and the pre-commit config still succeeds" {
+  # §3l renders SETUP.md with --primary kubernetes and no toolchain: its §4 list
+  # sits in the TOOLCHAIN block, and every tool block strips
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary kubernetes --languages "" \
+    --project-name demo --project-slug acme/demo --project-key acme_demo --org-key acme \
+    common/SETUP.md.tmpl common/.pre-commit-config.yaml.tmpl
+  [ "$status" -eq 0 ]
+  # (§2a Scorecard stays: it is PUBLIC-scoped, and §3l keeps scorecard.yml)
+  run ! grep -qE '^## (2|2b|3)\. ' "$OUT/common/SETUP.md"
+  run ! grep -q 'trivy-fs' "$OUT/common/.pre-commit-config.yaml"
 }
 
 @test "render: #1604 the output carries the template's executable bit, in both directions" {
@@ -499,6 +608,7 @@ EOF
   args=(--templates "$REAL_TEMPLATES"
     --project-name tick --project-slug o/tick --project-key o_tick --org-key o
     --languages "java" --docker true --security-contact-email ""
+    --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql
     public/.github/workflows/quality-public.yml.tmpl
     common/.github/SECURITY.md.tmpl
     common/.pre-commit-config.yaml.tmpl)
@@ -511,6 +621,7 @@ EOF
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
     --project-name tick --project-slug o/tick --project-key o_tick --org-key o \
     --languages "java" --docker true \
+    --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql \
     public/.github/workflows/quality-public.yml.tmpl
   [ "$status" -eq 0 ]
   Q="$OUT/public/.github/workflows/quality-public.yml"
@@ -530,6 +641,7 @@ EOF
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
     --project-name svc --project-slug o/svc --project-key o_svc --org-key o \
     --languages "go" \
+    --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql \
     public/.github/workflows/quality-public.yml.tmpl
   [ "$status" -eq 0 ]
   Q="$OUT/public/.github/workflows/quality-public.yml"

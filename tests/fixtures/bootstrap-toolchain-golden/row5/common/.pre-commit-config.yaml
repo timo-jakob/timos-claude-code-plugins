@@ -1,0 +1,132 @@
+# Pre-commit hooks — run locally before each commit to enforce shift-left.
+# Install with: pip install pre-commit && pre-commit install
+# Run on all files: pre-commit run --all-files
+#
+# Language-specific blocks below are gated by the bootstrap skill — only the
+# blocks matching python are kept; the rest are stripped.
+
+repos:
+  # --- universal hooks -------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # mkdocs.yml uses MkDocs' custom YAML tags (e.g.
+        # `!!python/name:pymdownx.superfences.fence_code_format` for Mermaid),
+        # which check-yaml's safe loader can't construct. yamllint (below)
+        # still lints it for style; excluding it here only skips tag
+        # construction, not validation. (#777)
+        exclude: ^mkdocs\.yml$
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # --- YAML lint -------------------------------------------------------------
+  # Style + correctness for all YAML, using the repo's .yamllint config
+  # (line-length 120, GitHub Actions `on:` allowed). Complements check-yaml,
+  # which only validates syntax.
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        # --strict: warnings fail the hook — zero-warnings policy (#781). The
+        # .yamllint comments rule accepts Renovate's one-space pin style, so
+        # strict mode stays green across dependency-bot updates.
+        args: [--strict]
+
+  # --- secret scanning -------------------------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # --- static analysis (cross-language) --------------------------------------
+  - repo: https://github.com/returntocorp/semgrep
+    rev: v1.163.0
+    hooks:
+      - id: semgrep
+        args: ["--config=auto", "--error", "--quiet"]
+
+  # --- PYTHON-START ----------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
+    hooks:
+      - id: ruff
+        args: ["--fix", "--exit-non-zero-on-fix"]
+      - id: ruff-format
+
+  # Coverage floor — local mirror of the CI `coverage-floor` step. Same
+  # `diff-cover` invocation, same 90%-on-new-code threshold; catches the
+  # bar locally before push instead of after CI rejects the PR.
+  #
+  # Stage is `pre-push`, not `pre-commit` — diff-cover reads coverage.xml
+  # and compares against origin/main, which only makes sense
+  # at push time.
+  #
+  # Contract: assumes a recent `pytest --cov --cov-report=xml` produced
+  # `coverage.xml` in the worktree. If it's missing, the hook fails with
+  # a clear message — run pytest first.
+  #
+  # Worktree guard (#518): in a git worktree that reuses the main checkout's
+  # venv, an editable install (`pip install -e`) resolves imports to the MAIN
+  # checkout, so coverage.xml records that tree's paths and diff-cover counts
+  # the worktree's changed lines as 0% covered — a false NOT-COVERED verdict.
+  # A coverage figure computed against the wrong tree must be withheld, not
+  # emitted: the entry first verifies the report's <source> lives inside THIS
+  # worktree, and otherwise fails with the remedy (a per-worktree venv)
+  # instead of a bogus number. A relative or absent <source> can't be proven
+  # wrong, so it falls through to diff-cover's own handling.
+  - repo: local
+    hooks:
+      - id: coverage-floor
+        name: Coverage floor (90% on new code) — requires recent pytest --cov-report=xml
+        entry: >-
+          bash -c 'base=origin/main;
+          if git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 &&
+          [ -z "$(git diff --name-only --diff-filter=d "$base...HEAD" -- "*.py")" ];
+          then exit 0; fi;
+          top="$(git rev-parse --show-toplevel)";
+          src="$(sed -n "s|.*<source>\(.*\)</source>.*|\1|p" coverage.xml 2>/dev/null | head -n 1)";
+          case "$src" in
+          ""|.|"$top"|"$top"/*) ;;
+          /*) echo "coverage-floor: coverage.xml was recorded against $src — not this worktree ($top)." >&2;
+          echo "Its numbers cannot judge this tree (stale or shared-venv editable install, #518). Create a venv" >&2;
+          echo "in THIS worktree (python -m venv .venv && .venv/bin/pip install -e .), re-run" >&2;
+          echo "pytest --cov --cov-report=xml, then push again." >&2;
+          exit 1;;
+          esac;
+          exec diff-cover coverage.xml --compare-branch=origin/main --fail-under=90'
+        language: python
+        additional_dependencies: ["diff-cover>=9"]
+        pass_filenames: false
+        # Run ONLY when this branch's diff vs origin/main touches
+        # Python — the guard at the top of `entry` no-ops (exit 0) when it
+        # doesn't, so a docs/config/YAML-only push needs no coverage.xml (no test
+        # build just to push a comment). We key on the origin/<default>...HEAD
+        # diff, NOT pre-commit's `files:` filter: on a brand-new branch push git
+        # reports the remote ref as all-zeros, so pre-commit diffs against the
+        # empty tree and EVERY .py counts as "added" — `files: \.py$` then
+        # over-fires and demands a vacuous report (#713). The entry guard uses
+        # the same diff-base as CI + ensure-coverage-precondition.zsh, so local
+        # and CI agree. `always_run` (not `files:`) so the guard always decides.
+        always_run: true
+        stages: [pre-push]
+  # --- PYTHON-END ------------------------------------------------------------
+
+  # --- PRIVATE-START ---------------------------------------------------------
+  # Trivy filesystem scan — kept private-only because public repos run Snyk in
+  # CI, and Snyk locally requires authentication. Trivy is unauthenticated and
+  # fast enough to gate pre-commit on. Install: brew install trivy.
+  - repo: local
+    hooks:
+      - id: trivy-fs
+        name: Trivy filesystem scan
+        entry: trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --quiet .
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+  # --- PRIVATE-END -----------------------------------------------------------

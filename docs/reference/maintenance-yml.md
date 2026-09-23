@@ -93,10 +93,15 @@ set of values:
 - **On a re-run.** A recorded value wins over the visibility default. Bootstrap appends a
   missing `tools:` block, adds only the keys missing from a partial block, and leaves a
   complete block byte-identical. An absent, empty or `null` `tools:` records nothing.
-- **One rejected combination:** `static_analysis` set to `sonarqube` on a public repository.
-  SonarQube runs on a self-hosted runner, and a public repository never gets one.
-- **Current limits.** Bootstrap can render only the visibility default today, so it
-  stops before writing anything when the recorded toolchain differs from that default
-  ([#1670](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1670)).
+- **Two rejected combinations:** `static_analysis` set to `sonarqube` on a public
+  repository — SonarQube runs on a self-hosted runner, and a public repository never gets
+  one — and `code_scanning` set to `codeql` on a private repository, since CodeQL on a
+  private repository needs GitHub Advanced Security. Every other combination is valid,
+  and bootstrap composes the quality workflows from the tools you declare, running them
+  on a self-hosted runner exactly when `static_analysis` is `sonarqube`.
+- **Current limits.** Bootstrap finishes only the visibility default today: for any other
+  toolchain it shows its plan and stops, because branch protection and the setup
+  automation still follow visibility
+  ([#1671](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1671)).
   `/development:maintenance` does not read `tools:` yet
   ([#1672](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1672)).

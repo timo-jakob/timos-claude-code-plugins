@@ -140,11 +140,18 @@ Visibility supplies only the defaults (public → `sonarcloud` / `snyk` /
 `codeql`, private → `sonarqube` / `trivy` / `none`); a recorded value wins on
 every re-run, as with `primary:` and `gate:`. The resolver and its ordered
 validation live in one script, `development/skills/bootstrap/scripts/resolve-tools.zsh`,
-whose one merit-based rejection is a public repo with `static_analysis:
+which rejects two combinations: a public repo with `static_analysis:
 sonarqube` — SonarQube runs on a self-hosted runner, and a public repo never
-gets one. Until composable workflow rendering ships (#1670) the script also
-refuses, after validating it, any toolchain other than its visibility default;
-`/development:maintenance` does not read `tools:` yet (#1672).
+gets one — and a private repo with `code_scanning: codeql`, since CodeQL on a
+private repository needs GitHub Advanced Security, which we could neither run
+nor test (#1670). Every other combination is composed per tool (#1670) — the
+file-level artifact map in
+`development/skills/bootstrap/scripts/toolchain-templates.zsh`, the job-level
+one as `render.zsh`'s per-tool block tags, and the runner self-hosted iff
+`sonarqube` — but bootstrap stops at its plan for any toolchain other than the
+visibility default until #1671, because branch protection and the setup
+automation still key on visibility. `/development:maintenance` does not read
+`tools:` yet (#1672).
 
 **Mechanism.** The orchestrator reads `.maintenance.yml` and tags each dispatch
 via the payload's `dispatch_mode` (`"primary"` | `"auxiliary"`). The language /

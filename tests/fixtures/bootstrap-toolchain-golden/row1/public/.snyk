@@ -1,0 +1,9 @@
+# Snyk policy file.
+# Docs: https://docs.snyk.io/manage-issues/policies/the-.snyk-file
+#
+# Use `ignore` to silence findings only with justification + an expiration date.
+# Long-lived ignores are a smell — prefer fixing the underlying issue.
+
+version: v1.25.0
+ignore: {}
+patch: {}

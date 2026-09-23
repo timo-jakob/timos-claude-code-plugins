@@ -1,0 +1,55 @@
+# OpenSSF Scorecard — supply-chain security health check.
+# Runs ~20 automated checks (branch protection, signed releases, dangerous
+# workflow patterns, pinned dependencies, code-review coverage, etc.) and
+# publishes the score to scorecard.dev plus a SARIF report visible in the
+# repo's Security tab.
+#
+# Public repos only — Scorecard publishes a public score tied to the repo
+# URL and isn't designed for private repos.
+
+name: OpenSSF Scorecard
+
+on:
+  branch_protection_rule:     # re-score when protection rules change
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "30 6 * * 1"      # weekly Monday 06:30 UTC (offset from other scans)
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # upload SARIF to code scanning
+      id-token: write          # publish results via OIDC to scorecard.dev
+      contents: read           # read repo content
+      actions: read            # read workflow definitions
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish to https://scorecard.dev — makes the badge URL work.
+          publish_results: true
+
+      - name: Upload SARIF artifact (for download from this workflow run)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 30
+
+      - name: Upload SARIF to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4
+        with:
+          sarif_file: results.sarif
+          category: scorecard

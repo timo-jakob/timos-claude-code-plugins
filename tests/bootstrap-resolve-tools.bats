@@ -4,9 +4,10 @@
 # .maintenance.yml's `tools:` block rather than a consequence of visibility. The
 # contract pinned here: per-category resolution (recorded → chosen → default),
 # the ordered validation procedure whose FIRST failing step wins with one exact
-# stderr message, the one rejected combination (public + sonarqube, since
-# SonarQube runs on a self-hosted runner), the temporary #1670 guard that keeps
-# its key=value lines on stdout, and --record's byte-preserving merge.
+# stderr message, the two rejected combinations (public + sonarqube, since
+# SonarQube runs on a self-hosted runner; private + codeql, since CodeQL on a
+# private repository needs GitHub Advanced Security, #1670), and --record's
+# byte-preserving merge.
 
 bats_require_minimum_version 1.5.0
 load assertions
@@ -26,9 +27,7 @@ lines() { # <sa> <sa_src> <v> <v_src> <cs> <cs_src> <runner>
 
 STEP4='resolve-tools: tools.static_analysis: sonarqube is not supported on a public repository — SonarQube runs on a self-hosted runner, and a public repository must never have one (fork pull requests could run code on it). Declare static_analysis: sonarcloud, or make the repository private.'
 
-guard_msg() { # <triple> <visibility> <default triple>
-  printf 'resolve-tools: toolchain %s is valid but cannot be rendered yet — until composable workflow rendering ships, a %s repository renders only %s. Nothing was rendered.' "$@"
-}
+STEP4_CODEQL='resolve-tools: tools.code_scanning: codeql is not supported on a private repository — CodeQL on a private repository needs GitHub Advanced Security. Declare code_scanning: none, or make the repository public.'
 
 # --- defaults -------------------------------------------------------------------
 
@@ -80,10 +79,9 @@ guard_msg() { # <triple> <visibility> <default triple>
 }
 
 @test "resolve-tools: self_hosted_runner follows static_analysis alone" {
-  # sonarcloud on a private repo is GitHub-hosted even with trivy and no codeql —
-  # read off the guard's stdout, since that triple is not the private default
+  # sonarcloud on a private repo is GitHub-hosted even with trivy and no codeql
   run --separate-stderr zsh "$S" --visibility private --static-analysis sonarcloud
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [ "$output" = "$(lines sonarcloud chosen trivy default none default false)" ]
 }
 
@@ -199,48 +197,83 @@ guard_msg() { # <triple> <visibility> <default triple>
   [ "$stderr" = "$STEP4" ]
 }
 
-@test "resolve-tools: steps 1-4 accept all 4 public and all 8 private combinations" {
-  local vis sa v cs n=0 def runner
+@test "resolve-tools: step 4 — private + codeql is rejected whether chosen or recorded (#1670)" {
+  run --separate-stderr zsh "$S" --visibility private --code-scanning codeql
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ "$stderr" = "$STEP4_CODEQL" ]
+  contains "$stderr" "GitHub Advanced Security"
+  printf 'tools:\n  code_scanning: codeql\n' > "$M"
+  run --separate-stderr zsh "$S" --visibility private --code-scanning none
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ "$stderr" = "$STEP4_CODEQL" ]
+  # public + codeql still resolves, recorded or chosen
+  run --separate-stderr zsh "$S" --visibility public
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(lines sonarcloud default snyk default codeql recorded false)" ]
+  rm "$M"
+  run --separate-stderr zsh "$S" --visibility public --code-scanning codeql
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(lines sonarcloud default snyk default codeql chosen false)" ]
+}
+
+@test "resolve-tools: step 4 — its rejections never record" {
+  printf 'primary: java\n' > "$M"
+  run --separate-stderr zsh "$S" --visibility private --code-scanning codeql --record
+  [ "$status" -eq 1 ]
+  [ "$(cat "$M")" = "primary: java" ]
+  run --separate-stderr zsh "$S" --visibility public --static-analysis sonarqube --record
+  [ "$status" -eq 1 ]
+  [ "$(cat "$M")" = "primary: java" ]
+}
+
+@test "resolve-tools: exactly the 8 D4 combinations resolve (exit 0); the other 8 are rejected at step 4" {
+  local vis sa v cs ok=0 rejected=0 runner
   for vis in public private; do
     for sa in sonarcloud sonarqube; do
-      [ "$vis" = public ] && [ "$sa" = sonarqube ] && continue
       for v in snyk trivy; do
         for cs in codeql none; do
-          n=$((n + 1))
           run --separate-stderr zsh "$S" --visibility "$vis" \
             --static-analysis "$sa" --vulnerabilities "$v" --code-scanning "$cs"
-          if [ "$vis" = public ]; then def=sonarcloud/snyk/codeql; else def=sonarqube/trivy/none; fi
-          if [ "$sa/$v/$cs" = "$def" ]; then
-            [ "$status" -eq 0 ]
-          else
-            # reached step 5, so steps 1-4 passed
+          if [ "$vis/$sa" = public/sonarqube ]; then
             [ "$status" -eq 1 ]
-            [ "$stderr" = "$(guard_msg "$sa/$v/$cs" "$vis" "$def")" ]
+            [ "$stderr" = "$STEP4" ]
+            [ -z "$output" ]
+            rejected=$((rejected + 1))
+          elif [ "$vis/$cs" = private/codeql ]; then
+            [ "$status" -eq 1 ]
+            [ "$stderr" = "$STEP4_CODEQL" ]
+            [ -z "$output" ]
+            rejected=$((rejected + 1))
+          else
+            # every valid combination resolves — no default-only guard (#1670)
+            [ "$status" -eq 0 ]
+            [ -z "$stderr" ]
+            if [ "$sa" = sonarqube ]; then runner=true; else runner=false; fi
+            [ "$output" = "$(lines "$sa" chosen "$v" chosen "$cs" chosen "$runner")" ]
+            ok=$((ok + 1))
           fi
-          if [ "$sa" = sonarqube ]; then runner=true; else runner=false; fi
-          [ "$output" = "$(lines "$sa" chosen "$v" chosen "$cs" chosen "$runner")" ]
         done
       done
     done
   done
-  [ "$n" -eq 12 ]
+  [ "$ok" -eq 8 ]
+  [ "$rejected" -eq 8 ]
 }
 
-# --- step 5: the temporary guard ------------------------------------------------------
-
-@test "resolve-tools: step 5 — a valid non-default toolchain exits 1 but keeps its key=value lines" {
+@test "resolve-tools: a recorded non-default toolchain resolves and --record completes it (no step 5)" {
   printf 'primary: java\ntools:\n  static_analysis: sonarcloud\n  vulnerabilities: snyk\n  code_scanning: none\n' > "$M"
   run --separate-stderr zsh "$S" --visibility private
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "$(guard_msg sonarcloud/snyk/none private sonarqube/trivy/none)" ]
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
   [ "$output" = "$(lines sonarcloud recorded snyk recorded none recorded false)" ]
-}
-
-@test "resolve-tools: step 5 — the guard's exit never records" {
   printf 'primary: java\n' > "$M"
   run --separate-stderr zsh "$S" --visibility public --code-scanning none --record
-  [ "$status" -eq 1 ]
-  [ "$(cat "$M")" = "primary: java" ]
+  [ "$status" -eq 0 ]
+  [ "$(yq -o=json -I=0 '.tools' "$M")" = '{"static_analysis":"sonarcloud","vulnerabilities":"snyk","code_scanning":"none"}' ]
+  # the script no longer describes or implements a temporary guard
+  run ! grep -qiE 'step 5|temporary guard|cannot be rendered yet' "$S"
 }
 
 # --- --record ---------------------------------------------------------------------------

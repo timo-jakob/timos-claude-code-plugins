@@ -126,7 +126,7 @@ Your prompt contains:
   "missing_tool_recommendation": {
     "summary": "Neither Dependabot nor Snyk auto-Fix-PRs are configured for this project.",
     "what_it_provides": "Vendor-opened dependency PRs — Dependabot for version updates grouped by ecosystem (gradle, github-actions, docker), and Snyk auto-Fix-PRs for security vulnerabilities with known fixes. Patch + minor PRs are merged when CI is green and an approving review exists (auto-merge armed otherwise); majors arrive as standalone PRs for human review.",
-    "how_to_add": "Run /development:bootstrap (it generates .github/dependabot.yml with a gradle updates entry AND prints SETUP.md section 2.6 for the one-time Snyk auto-Fix-PR enablement). For just Dependabot: create .github/dependabot.yml with one updates entry per ecosystem (gradle, github-actions, docker)."
+    "how_to_add": "Run /development:bootstrap (it generates .github/dependabot.yml with a gradle updates entry AND prints SETUP.md section 2b.2 — rendered when the repo's tools.vulnerabilities is snyk — for the one-time Snyk auto-Fix-PR enablement). For just Dependabot: create .github/dependabot.yml with one updates entry per ecosystem (gradle, github-actions, docker)."
   },
   "actions_taken": [],
   "unable_to_fix": []
