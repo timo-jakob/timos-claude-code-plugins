@@ -33,6 +33,35 @@ This skill is for repos where the **writer App is installed** — typically a
 `claude-plugin`-primary repo (check `.maintenance.yml` says `primary:
 claude-plugin`). It works on any repo with the Maintenance App installed.
 
+## Step 1b — rebase onto main if main is ahead
+
+A branch cut from an older `main` opens a PR that may already conflict, or that
+CI validates against a stale base. Before pushing, fetch and check whether
+`origin/main` has commits the branch lacks; if so, rebase onto it:
+
+```bash
+git fetch origin main
+if [[ -n "$(git rev-list HEAD..origin/main)" ]]; then
+  git rebase origin/main || { git rebase --abort; echo "rebase onto origin/main conflicts — resolve by hand, then re-run"; exit 1; }
+fi
+```
+
+- **main not ahead** (`rev-list` empty) → nothing to do; continue with Step 2.
+- **Rebase succeeded** → continue. Tell the user in the Step 5 report that the
+  branch was rebased and onto which `origin/main` sha. If the caller validated
+  the branch (a test gate, a review loop) before this step, say so too: that
+  result was against the old base, and CI on the PR is now the check against
+  the new one.
+- **Rebase conflicted** → the `--abort` restores the branch exactly as it was.
+  **Stop — open no PR** and report the conflicting files (`git rebase` printed
+  them). A conflict needs a human's or the caller's judgment; never resolve it
+  by picking a side automatically. A plugin-version conflict in `plugin.json` /
+  `marketplace.json` is the common case: re-bump to the next version above
+  main's and re-run this skill.
+
+The push in Step 3 already uses `--force-with-lease`, so a rebased branch that
+was pushed before is updated safely.
+
 ## Step 2 — mint the writer token
 
 The mint script writes the token to a mode-600 temp file and prints the
@@ -262,7 +291,7 @@ else to run; you don't need to babysit it.
 
 Tell the user: the PR URL, that it's **authored by the bot and awaiting their
 approval**, and that auto-merge (squash) is armed. They review + approve; it
-merges itself. No admin-merge needed.
+merges itself. No admin-merge needed. If Step 1b rebased the branch, say so.
 
 ## Guardrails
 
