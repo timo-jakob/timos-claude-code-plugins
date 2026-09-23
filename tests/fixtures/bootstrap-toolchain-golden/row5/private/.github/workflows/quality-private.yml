@@ -1,10 +1,7 @@
 # Quality + security pipeline for PRIVATE repositories.
-# Composed from the repo's resolved quality toolchain (.maintenance.yml's
-# `tools:`, #1651/#1670). The static analyser picks the runner: SonarQube CE
-# runs every job on a self-hosted runner that can reach the local SonarQube
-# instance; SonarCloud runs every job on GitHub-hosted runners. The
-# vulnerability scanner is Trivy (filesystem deps + container image) or Snyk
-# (its GitHub App out of CI, plus the `image` job's container scan).
+# Runs on a self-hosted runner that can reach the local SonarQube instance.
+# Uses SonarQube CE for static analysis + coverage and Trivy for security
+# (filesystem deps + container image).
 #
 # Image publishing: built image is scanned (`image` job), then pushed to
 # GitHub Container Registry (ghcr.io/<owner>/<repo>) on merge to main +
@@ -16,14 +13,14 @@ name: Quality (private)
 
 on:
   pull_request:
-    branches: ["{{DEFAULT_BRANCH}}"]
+    branches: ["main"]
     paths-ignore:
       - "**.md"
       - "LICENSE"
       - ".gitignore"
       - "docs/**"
   push:
-    branches: ["{{DEFAULT_BRANCH}}"]
+    branches: ["main"]
     paths-ignore:
       - "**.md"
       - "LICENSE"
@@ -59,7 +56,7 @@ jobs:
   # here — xcodebuild/xcrun don't exist on Linux runners.
   # --- LINUX_TESTS-START -------------------------------------------------------
   test-and-coverage:
-    runs-on: {{RUNNER}}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -67,26 +64,11 @@ jobs:
           # and a shallow PR checkout has none (its parent link is cut).
           fetch-depth: 0
 
-      # --- JAVASCRIPT-START ------------------------------------------------
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: "24"
-          cache: "npm"
-      - name: Install (npm ci)
-        run: npm ci
-      - name: Lint (ESLint)
-        run: npx eslint .
-      - name: Format check (Prettier)
-        run: npx prettier --check .
-      - name: Test + coverage (vitest)
-        run: npx vitest run --coverage
-      # --- JAVASCRIPT-END --------------------------------------------------
 
       # --- PYTHON-START ----------------------------------------------------
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "{{PYTHON_VERSION}}"
+          python-version: "3.12"
           cache: "pip"
       - run: |
           [[ -f requirements.txt ]] && pip install -r requirements.txt
@@ -123,51 +105,6 @@ jobs:
             --show-uncovered
       # --- PYTHON-END ------------------------------------------------------
 
-      # --- GO-START --------------------------------------------------------
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: "stable"
-      # -race + per-package coverage (no -coverpkg), matching the #874 gate.
-      - run: go test -race ./... -coverprofile=coverage.out -covermode=atomic
-      # Cobertura conversion so the shared diff-cover new-code gate reads it.
-      - if: github.event_name == 'pull_request'
-        run: go run github.com/boumenot/gocover-cobertura@v1.3.0 < coverage.out > coverage.xml
-      - if: github.event_name == 'pull_request'
-        run: pip install 'diff-cover>=9'
-      - if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          diff-cover coverage.xml \
-            --compare-branch="origin/${BASE_REF}" \
-            --fail-under=90 \
-            --show-uncovered
-      # --- GO-END ----------------------------------------------------------
-
-      # --- JAVA-START ------------------------------------------------------
-      - name: Setup JDK
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
-        with:
-          distribution: "temurin"
-          java-version: "{{JAVA_VERSION}}"
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
-      - name: Build + test + coverage (Java)
-        run: ./gradlew --no-daemon build jacocoTestReport
-      - name: Install diff-cover (Java — coverage floor)
-        if: github.event_name == 'pull_request'
-        run: pipx install 'diff-cover>=9'
-      - name: Coverage floor — 90% on new code (Java)
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          diff-cover build/reports/jacoco/test/jacocoTestReport.xml \
-            --compare-branch="origin/${BASE_REF}" \
-            --fail-under=90 \
-            --show-uncovered
-      # --- JAVA-END --------------------------------------------------------
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-reports
@@ -179,98 +116,10 @@ jobs:
             build/reports/jacoco/test/jacocoTestReport.xml
           if-no-files-found: ignore
   # --- LINUX_TESTS-END ---------------------------------------------------------
-  # --- SWIFT-START -----------------------------------------------------------
-  # Swift tests need a macOS runner (xcodebuild/xcrun are macOS-only). On a
-  # self-hosted runner (SonarQube) that means registering a SELF-HOSTED macOS
-  # runner and giving it the `macos` label — see SETUP.md; on GitHub-hosted
-  # runners (SonarCloud) it is `macos-latest`. This job REPLACES the Linux
-  # test-and-coverage job on Swift-only repos: its `name:` is the same
-  # `test-and-coverage` context, so branch protection's required checks are
-  # unchanged. When the Linux job was stripped (Swift-only), point the
-  # analyser job's `needs:` at `test-and-coverage-swift` (see the bootstrap
-  # skill's Swift notes; on a rare Swift+other-language repo keep both jobs,
-  # extend `needs:` to both, and give this job's artifact a distinct name
-  # plus a second download step).
-  test-and-coverage-swift:
-    name: test-and-coverage
-    runs-on: {{SWIFT_RUNNER}}
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          # Full history: diff-cover needs a merge base with origin/<base>,
-          # and a shallow PR checkout has none (its parent link is cut).
-          fetch-depth: 0
 
-      # --- SWIFT_SWIFTPM-START -----------------------------------------------
-      - name: Build + test with coverage (SwiftPM)
-        run: swift test --enable-code-coverage
-      - name: Export lcov (SwiftPM)
-        # llvm-cov reads the profdata SwiftPM wrote next to the build
-        # products; the .xctest bundle binary carries the instrumentation.
-        run: |
-          BIN_PATH=$(swift build --show-bin-path)
-          XCTEST_BUNDLE=$(find "$BIN_PATH" -maxdepth 1 -name '*.xctest' | head -1)
-          XCTEST_BIN="$XCTEST_BUNDLE/Contents/MacOS/$(basename "$XCTEST_BUNDLE" .xctest)"
-          xcrun llvm-cov export "$XCTEST_BIN" \
-            -instr-profile "$BIN_PATH/codecov/default.profdata" \
-            -format=lcov \
-            -ignore-filename-regex='(\.build|Tests)/' > coverage.lcov
-      # --- SWIFT_SWIFTPM-END -------------------------------------------------
-
-      # --- SWIFT_XCODE-START ---------------------------------------------------
-      - name: Build + test with coverage (Xcode)
-        run: |
-          xcodebuild test \
-            -scheme "{{XCODE_SCHEME}}" \
-            -destination 'platform=macOS' \
-            -derivedDataPath DerivedData \
-            -enableCodeCoverage YES
-      - name: Export lcov (Xcode)
-        # llvm-cov needs the instrumented binaries plus the profdata that
-        # xcodebuild wrote into DerivedData. The app binary is primary; every
-        # .xctest binary is added via -object (unit-test-target coverage
-        # lives there for library/framework schemes).
-        run: |
-          PROFDATA=$(find DerivedData -name 'Coverage.profdata' | head -1)
-          APP_BIN=$(find DerivedData/Build/Products -type f -path '*.app/Contents/MacOS/*' | head -1)
-          OBJECTS=()
-          while IFS= read -r xctest; do
-            OBJECTS+=(-object "$xctest/Contents/MacOS/$(basename "$xctest" .xctest)")
-          done < <(find DerivedData/Build/Products -maxdepth 3 -name '*.xctest')
-          xcrun llvm-cov export "$APP_BIN" "${OBJECTS[@]}" \
-            -instr-profile "$PROFDATA" \
-            -format=lcov \
-            -ignore-filename-regex='(DerivedData|Tests)/' > coverage.lcov
-      # --- SWIFT_XCODE-END -----------------------------------------------------
-
-      # Coverage floor — 90% on new code (mirrors the Python/Java diff-cover
-      # gate; diff-cover reads lcov natively). PR-only — push to the default
-      # branch has no "new code" diff to enforce against.
-      - name: Install diff-cover (Swift — coverage floor)
-        if: github.event_name == 'pull_request'
-        run: pipx install 'diff-cover>=9'
-      - name: Coverage floor — 90% on new code (Swift)
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          diff-cover coverage.lcov \
-            --compare-branch="origin/${BASE_REF}" \
-            --fail-under=90 \
-            --show-uncovered
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: coverage-reports
-          path: coverage.lcov
-          if-no-files-found: ignore
-  # --- SWIFT-END ---------------------------------------------------------------
-
-  # --- SONARQUBE-START -------------------------------------------------------
   sonarqube:
     needs: test-and-coverage
-    runs-on: {{RUNNER}}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -289,39 +138,12 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-  # --- SONARQUBE-END ---------------------------------------------------------
 
-  # --- SONARCLOUD-START ------------------------------------------------------
-  sonarcloud:
-    needs: test-and-coverage
-    runs-on: {{RUNNER}}
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          fetch-depth: 0
-      - name: Download coverage
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: coverage-reports
-          path: .
-        # No continue-on-error: if test-and-coverage didn't produce coverage,
-        # Sonar should fail loudly rather than silently report green without it.
-      - name: SonarCloud scan
-        # The 40-hex commit pin trips semgrep's SonarQube-docs-API-key
-        # detector; it's a git SHA, not a credential.
-        # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
-        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: https://sonarcloud.io
-  # --- SONARCLOUD-END --------------------------------------------------------
-
-  # --- TRIVY-START -----------------------------------------------------------
   # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.
   # Scoped to vuln/secret/misconfig only; license scanning is a separate job
   # for clearer triage (was this PR blocked by a CVE or by a license?).
   trivy-fs:
-    runs-on: {{RUNNER}}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -334,20 +156,11 @@ jobs:
           exit-code: "1"
           format: "table"
           trivy-config: trivy.yaml
-  # --- TRIVY-END -------------------------------------------------------------
-
-  # --- SNYK-START ------------------------------------------------------------
-  # Snyk's source-code + open-source scans are NOT a CI job: they run through
-  # the Snyk GitHub integration (App), configured in the Snyk Web UI — see
-  # SETUP.md's Snyk setup section. SAST on our own code stays with
-  # {{SAST_GATE}}. The `image` job's Snyk container scan below is the one Snyk
-  # step in CI, because the integration only scans the Dockerfile statically.
-  # --- SNYK-END --------------------------------------------------------------
 
   # License compliance on dependencies — separate job so license failures
   # don't get conflated with vulnerability failures.
   license-fs:
-    runs-on: {{RUNNER}}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -386,7 +199,7 @@ jobs:
   # `push-and-sign` never runs on PRs, so it is NOT a required check and
   # needs no noop mirror.
   image:
-    runs-on: {{RUNNER}}
+    runs-on: self-hosted
     permissions:
       contents: read
     steps:
@@ -412,12 +225,7 @@ jobs:
             echo "Non-PR event ($EVENT_NAME) — scanning the image."
             exit 0
           fi
-          # --- TRIVY-START ---
           container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$|(^|/)trivy\.ya?ml$'
-          # --- TRIVY-END ---
-          # --- SNYK-START ---
-          container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$|(^|/)\.snyk$'
-          # --- SNYK-END ---
           if ! changed=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null); then
             echo "do_scan=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Could not compute the PR diff against $BASE_SHA — scanning to be safe."
@@ -482,7 +290,6 @@ jobs:
           tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      # --- TRIVY-START -------------------------------------------------------
       - name: Trivy image vulnerability scan
         if: steps.scan_decision.outputs.do_scan == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -495,38 +302,6 @@ jobs:
           exit-code: "1"
           format: "table"
           trivy-config: trivy.yaml
-      # --- TRIVY-END ---------------------------------------------------------
-
-      # --- SNYK-START --------------------------------------------------------
-      - name: Snyk container scan
-        if: steps.scan_decision.outputs.do_scan == 'true'
-        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
-      - if: steps.scan_decision.outputs.do_scan == 'true'
-        run: |
-          # --policy-path makes Snyk read .snyk ignores for container scans
-          # (it doesn't auto-discover the policy file in container mode).
-          # --json-file-output writes the full machine-readable report
-          # regardless of exit code, so the scan still gates the GHCR push
-          # below while also producing the artifact harvested next.
-          snyk container test "${{ steps.pick.outputs.tag }}" \
-            --severity-threshold=high --file=Dockerfile --policy-path=.snyk \
-            --json-file-output=snyk-container.json
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      # Harvest the container scan as a CI artifact so the maintenance
-      # pipeline (/development:maintenance) can ingest base-image CVEs.
-      # Gated to push/release: the artifact describes the pushed image.
-      # `always()` so it still uploads when the scan exited non-zero.
-      - name: Upload Snyk container scan (for maintenance ingestion)
-        if: always() && (github.event_name == 'push' || github.event_name == 'release')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: snyk-container-scan
-          path: snyk-container.json
-          if-no-files-found: error
-          retention-days: 90
-      # --- SNYK-END ----------------------------------------------------------
 
       # NOTE: image-level license scan intentionally omitted. Trivy's
       # `restricted` classification flags every transitive Debian GPL/LGPL
@@ -538,13 +313,13 @@ jobs:
   # Publish job — the ONLY job holding write-capable permissions, and it
   # never runs on PRs. `needs: image` makes the scan gate the push: a
   # vulnerable image never reaches the registry. Multi-arch via QEMU on the
-  # runner. If a self-hosted runner is an Apple Silicon Mac, the
+  # self-hosted runner. If your runner is an Apple Silicon Mac, the
   # linux/arm64 build is native (fast) and linux/amd64 is QEMU-emulated; on
   # an Intel Mac or Linux x86 host it's the reverse.
   push-and-sign:
     needs: image
     if: github.event_name == 'push' || github.event_name == 'release'
-    runs-on: {{RUNNER}}
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write    # ghcr.io push
@@ -643,52 +418,27 @@ jobs:
           done
   # --- DOCKER-END -----------------------------------------------------------
 
-  # Semgrep — two shapes by runner. A self-hosted runner (SonarQube) reuses a
-  # semgrep it already has; GitHub-hosted runners (SonarCloud — the only other
-  # analyser, so hosted iff SONARCLOUD) run the pinned container image, exactly
-  # as the public workflow does.
   semgrep:
-    runs-on: {{RUNNER}}
-    # --- SONARCLOUD-START ----------------------------------------------------
-    container:
-      # Pinned. Matches the pre-commit hook's semgrep version so local + CI
-      # behave identically. Bump in lockstep with `.pre-commit-config.yaml`.
-      image: returntocorp/semgrep:1.163.0
-    # --- SONARCLOUD-END ------------------------------------------------------
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      # --- SELF_HOSTED-START -------------------------------------------------
       - run: |
           if ! command -v semgrep >/dev/null; then
             pip install --user semgrep
             export PATH="$HOME/.local/bin:$PATH"
           fi
           semgrep ci --config=auto
-      # --- SELF_HOSTED-END ---------------------------------------------------
-      # --- SONARCLOUD-START --------------------------------------------------
-      - run: semgrep ci --config=auto
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional
-      # --- SONARCLOUD-END ----------------------------------------------------
 
   # --- Pre-commit (CI backstop) ---------------------------------------------
   # Catches contributors who bypassed local hooks with `git commit
   # --no-verify`. Runs the exact same hooks as locally.
   pre-commit:
-    runs-on: {{RUNNER}}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0   # some hooks (gitleaks) want history
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "{{PYTHON_VERSION}}"
+          python-version: "3.12"
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
-      # --- SONARCLOUD-START --------------------------------------------------
-      # --- TRIVY-START -------------------------------------------------------
-        # GitHub-hosted runners carry no trivy binary for the local trivy-fs hook;
-        # the trivy-fs job above runs the same scan, so skip the hook here.
-        env:
-          SKIP: trivy-fs
-      # --- TRIVY-END ---------------------------------------------------------
-      # --- SONARCLOUD-END ----------------------------------------------------

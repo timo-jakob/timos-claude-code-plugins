@@ -2028,9 +2028,10 @@ k8s_detect() { bash "$DETECT" 2>/dev/null | jq -r .is_kubernetes; }
 # set §3l forbids — and `codeql-noop.yml` cannot even render with no language
 # (its {{CODEQL_LANGUAGES}} placeholder never resolves), so that one hard-fails.
 #
-# VISIBILITY IS LOAD-BEARING here: collect_from only visits templates/public|
-# private under `case "$visibility"`, and with no remote the visibility is
-# "unknown" and neither is collected. A hold-out assertion written without the
+# VISIBILITY IS LOAD-BEARING here: the tool-scoped templates (templates/public|
+# private) are collected only for a resolved toolchain (#1670), which needs a
+# known visibility — with no remote the visibility is "unknown" and none is
+# collected. A hold-out assertion written without the
 # stub below would pass with the whole `iac_only` block deleted, so each of
 # these stubs `gh` and asserts a positive control.
 
@@ -2210,6 +2211,111 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(missing_has "$out" ".github/workflows/quality-private.yml")" = "number" ]
   [ "$(missing_has "$out" "infra/sonarqube/docker-compose.yml")" = "number" ]
+}
+
+# --- #1670: the tool-scoped candidates follow the RESOLVED toolchain (D7) --------
+
+# every tool-scoped deploy path the templates/public|private trees can produce
+TOOL_SCOPED=(.github/workflows/quality-public.yml .github/workflows/quality-public-noop.yml
+  .github/workflows/quality-private.yml .github/workflows/quality-private-noop.yml
+  .github/workflows/codeql.yml .github/workflows/codeql-noop.yml .github/workflows/scorecard.yml
+  sonar-project.properties .snyk infra/sonarqube/docker-compose.yml infra/sonarqube/README.md
+  infra/github-runner/README.md)
+
+@test "detect-stack #1670: a private sonarcloud+snyk repo is scoped to its own tools, not the private default" {
+  printf '[project]\nname = "x"\n' > pyproject.toml
+  printf 'primary: python\ntools:\n  static_analysis: sonarcloud\n  vulnerabilities: snyk\n  code_scanning: none\n' \
+    > .maintenance.yml
+  stub_gh PRIVATE
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .visibility <<<"$out")" = "private" ]
+  # no SonarQube, runner or CodeQL artifact — and no other visibility's workflows
+  local p
+  for p in infra/sonarqube/docker-compose.yml infra/sonarqube/README.md infra/github-runner/README.md \
+    .github/workflows/codeql.yml .github/workflows/codeql-noop.yml .github/workflows/scorecard.yml \
+    .github/workflows/quality-public.yml .github/workflows/quality-public-noop.yml; do
+    [ "$(missing_has "$out" "$p")" = "null" ]
+  done
+  # POSITIVE CONTROL: its own tools' artifacts ARE the gaps
+  for p in .github/workflows/quality-private.yml .github/workflows/quality-private-noop.yml \
+    sonar-project.properties .snyk; do
+    [ "$(missing_has "$out" "$p")" = "number" ]
+  done
+  # a tool file the repo HAS stays in existing_artifacts though outside the resolved scope
+  mkdir -p infra/sonarqube
+  printf 'services: {}\n' > infra/sonarqube/docker-compose.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts["infra/sonarqube/docker-compose.yml"]' <<<"$out")" = true ]
+}
+
+@test "detect-stack #1670: with no .maintenance.yml the visibility defaults scope the candidates" {
+  printf '[project]\nname = "x"\n' > pyproject.toml
+  stub_gh PRIVATE
+  out=$(bash "$DETECT" 2>/dev/null)
+  local p
+  for p in infra/sonarqube/docker-compose.yml infra/github-runner/README.md sonar-project.properties; do
+    [ "$(missing_has "$out" "$p")" = "number" ]
+  done
+  # the private default is trivy + none: no Snyk policy, no CodeQL
+  for p in .snyk .github/workflows/codeql.yml; do
+    [ "$(missing_has "$out" "$p")" = "null" ]
+  done
+}
+
+@test "detect-stack #1670: an unresolvable toolchain proposes no tool-scoped candidate" {
+  printf '[project]\nname = "x"\n' > pyproject.toml
+  # private + codeql is rejected at resolve-tools.zsh step 4 — so nothing is scoped
+  printf 'primary: python\ntools:\n  code_scanning: codeql\n' > .maintenance.yml
+  stub_gh PRIVATE
+  out=$(bash "$DETECT" 2>/dev/null)
+  local p
+  for p in "${TOOL_SCOPED[@]}"; do
+    [ "$(missing_has "$out" "$p")" = "null" ]
+  done
+  # POSITIVE CONTROL: scope-free candidates are still reported
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+  # and the resolver really runs here: the same repo on code_scanning: none scopes
+  printf 'primary: python\ntools:\n  code_scanning: none\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/quality-private.yml")" = "number" ]
+}
+
+@test "detect-stack #1670: an unresolvable toolchain still lists present tool files, and says why on stderr" {
+  printf '[project]\nname = "x"\n' > pyproject.toml
+  printf 'primary: python\ntools:\n  code_scanning: codeql\n' > .maintenance.yml
+  mkdir -p .github/workflows
+  printf 'name: q\n' > .github/workflows/quality-private.yml
+  stub_gh PRIVATE
+  run --separate-stderr bash "$DETECT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.existing_artifacts[".github/workflows/quality-private.yml"]' <<<"$output")" = true ]
+  [ "$(missing_has "$output" "sonar-project.properties")" = "null" ]
+  printf '%s\n' "$stderr" | grep -qF "detect-stack: toolchain unresolved — resolve-tools: tools.code_scanning: codeql is not supported on a private repository"
+}
+
+@test "detect-stack #1670: a public repo recording trivy + none drops .snyk and CodeQL from its candidates" {
+  printf '[project]\nname = "x"\n' > pyproject.toml
+  printf 'primary: python\ntools:\n  vulnerabilities: trivy\n  code_scanning: none\n' > .maintenance.yml
+  stub_gh PUBLIC
+  out=$(bash "$DETECT" 2>/dev/null)
+  local p
+  for p in .snyk .github/workflows/codeql.yml .github/workflows/codeql-noop.yml; do
+    [ "$(missing_has "$out" "$p")" = "null" ]
+  done
+  for p in .github/workflows/scorecard.yml .github/workflows/quality-public.yml sonar-project.properties; do
+    [ "$(missing_has "$out" "$p")" = "number" ]
+  done
+}
+
+@test "detect-stack #1670: unknown visibility lists no tool-scoped artifact at all" {
+  printf '[project]\nname = "x"\n' > pyproject.toml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .visibility <<<"$out")" = "unknown" ]
+  local p
+  for p in "${TOOL_SCOPED[@]}"; do
+    [ "$(missing_has "$out" "$p")" = "null" ]
+  done
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
 }
 
 @test "detect-stack #1154: a .maintenance.yml with no resolvable primary keeps the heuristic" {

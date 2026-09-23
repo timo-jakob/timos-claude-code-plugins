@@ -43,7 +43,8 @@
 #   The relpaths are relative to --templates (e.g.
 #   `public/.github/workflows/quality-public.yml.tmpl`). WHICH templates
 #   apply stays the skill's judgment (Step 3a-3f, dependabot-vs-renovate,
-#   idempotency decisions); this script only renders the chosen set.
+#   idempotency decisions) — except the tool-scoped set, which is
+#   toolchain-templates.zsh's (#1670); this script only renders the chosen set.
 #
 # Value flags (source: detect-stack.sh output + the Step 1 questions):
 #   --project-name <s>            {{PROJECT_NAME}}
@@ -66,7 +67,26 @@
 #                                 the TOOLCHAIN block (kept unless --primary is
 #                                 `kubernetes`), so a language-path render that
 #                                 forgot them trips the leftover check; a blank
-#                                 value is a usage error (exit 2)
+#                                 value, or one outside its category's set, is a
+#                                 usage error (exit 2). They ALSO compose the
+#                                 quality workflows per tool (#1670): the
+#                                 SONARCLOUD / SONARQUBE / SNYK / TRIVY / CODEQL /
+#                                 SELF_HOSTED blocks below, and three derived
+#                                 placeholders, each derived only when its flag
+#                                 was passed (so a quality template rendered
+#                                 without the toolchain trips the leftover check):
+#                                   {{RUNNER}}        self-hosted | ubuntu-latest
+#                                   {{SWIFT_RUNNER}}  [self-hosted, macos] | macos-latest
+#                                                     (both only when all three
+#                                                     flags were passed; self-hosted
+#                                                     iff sonarqube)
+#                                   {{SAST_GATE}}     the SAST gate's name, from
+#                                                     --code-scanning: CodeQL's
+#                                                     `analyze` checks iff codeql,
+#                                                     else the `semgrep` check
+#                                 The two combinations resolve-tools.zsh rejects —
+#                                 public + sonarqube, private + codeql — are
+#                                 refused here too (exit 2), so neither renders.
 #   --coverage-threshold <n>      {{COVERAGE_THRESHOLD}} (default: 90)
 #   --python-version <x.y>        {{PYTHON_VERSION}} (default: 3.12; the
 #                                 compact form {{PYTHON_VERSION_COMPACT}} is
@@ -104,7 +124,14 @@
 #                                 when non-empty, the no-email fallback block
 #                                 when passed empty; without the flag the
 #                                 placeholder survives to the leftover check
-#   --visibility public|private   PRIVATE block (default: public)
+#   --visibility public|private   PUBLIC block (default: public). Block tags from
+#                                 the toolchain flags above: SONARCLOUD, SONARQUBE
+#                                 (--static-analysis), SNYK, TRIVY
+#                                 (--vulnerabilities), CODEQL (--code-scanning),
+#                                 SELF_HOSTED (--static-analysis sonarqube) — each
+#                                 kept iff its tool is resolved, all stripped when
+#                                 the flag is absent (the §3l IaC path). PUBLIC
+#                                 wraps only SETUP.md's public-only parts.
 #   --docker true|false           DOCKER block (default: false)
 #   --claude-plugin true|false    CLAUDE_PLUGIN block (default: false)
 #   --swift-build-system swiftpm|xcode
@@ -191,6 +218,33 @@ done
 
 [[ -n "$templates" && -n "$out" ]] || usage
 ((${#files} > 0)) || usage
+[[ "$visibility" == public || "$visibility" == private ]] ||
+	{ print -u2 -- "render.zsh: --visibility must be public or private, got: $visibility" && usage; }
+
+# The toolchain values select blocks, so a typo must not silently strip them all.
+typeset -A tool_set=(
+	STATIC_ANALYSIS "sonarcloud sonarqube"
+	VULNERABILITIES "snyk trivy"
+	CODE_SCANNING "codeql none"
+)
+typeset _k
+typeset -a _set
+for _k in "${(k)tool_set[@]}"; do
+	((${+vals[$_k]})) || continue
+	_set=(${=tool_set[$_k]})
+	((${_set[(Ie)${vals[$_k]}]})) || {
+		print -u2 -- "render.zsh: --${${_k:l}//_/-} must be one of ${tool_set[$_k]// / | }, got: ${vals[$_k]}" && usage
+	}
+done
+# resolve-tools.zsh step 4 rejects these two at the plan; no template carries a
+# branch for either, so refuse them rather than render a half-right workflow.
+if [[ "$visibility" == public && "${vals[STATIC_ANALYSIS]:-}" == sonarqube ]]; then
+	print -u2 -- "render.zsh: public + sonarqube is never rendered (a public repository never gets a self-hosted runner)" && usage
+fi
+if [[ "$visibility" == private && "${vals[CODE_SCANNING]:-}" == codeql ]]; then
+	print -u2 -- "render.zsh: private + codeql is never rendered (it needs GitHub Advanced Security)" && usage
+fi
+
 [[ -d "$templates" ]] || die "template root not found: $templates"
 
 # --- derived values ----------------------------------------------------------
@@ -228,6 +282,56 @@ if ((languages_set)); then
 		# own gate (#781).
 		((${#codeql})) && vals[CODEQL_LANGUAGES]="${(j:, :)codeql}"
 	fi
+fi
+
+# The runner rule (#1670): the quality workflows run self-hosted iff the static
+# analyser is sonarqube, the Swift leg on its own macOS label. Derived only when
+# the WHOLE toolchain was passed, so a quality template rendered without it — or
+# with only part of it, which would silently strip its scanner blocks — fails the
+# leftover check instead of guessing.
+if (( ${+vals[STATIC_ANALYSIS]} && ${+vals[VULNERABILITIES]} && ${+vals[CODE_SCANNING]} )); then
+	if [[ "${vals[STATIC_ANALYSIS]}" == sonarqube ]]; then
+		vals[RUNNER]="self-hosted" vals[SWIFT_RUNNER]="[self-hosted, macos]"
+	else
+		vals[RUNNER]="ubuntu-latest" vals[SWIFT_RUNNER]="macos-latest"
+	fi
+fi
+# The SAST gate Snyk Code defers to: CodeQL where it runs (a CodeQL language to
+# analyse, as {{REQUIRED_CONTEXTS}} lists it), else the semgrep job.
+if (( ${+vals[CODE_SCANNING]} )); then
+	if [[ "${vals[CODE_SCANNING]}" == codeql && -n "${vals[CODEQL_LANGUAGES]:-}" ]]; then
+		vals[SAST_GATE]="CodeQL's required \`analyze (<lang>)\` checks"
+	else
+		vals[SAST_GATE]="the required \`semgrep\` check"
+	fi
+fi
+
+# {{REQUIRED_CONTEXTS}} (#1670): SETUP.md §4's required-status-check list, one
+# markdown bullet per context. The context set is fixed by the toolchain and the
+# stack, never read back from a render: always test-and-coverage, semgrep,
+# pre-commit, license-fs; the analyser's job; trivy-fs iff trivy (Snyk has no CI
+# job); one `analyze (<lang>)` per CodeQL language iff codeql; image iff a
+# Dockerfile — plus no-cluster-deploy, which comes from its own workflow. Derived
+# only when all three toolchain flags were passed, so a SETUP.md rendered without
+# the toolchain trips the leftover check (its §4 list sits in the TOOLCHAIN
+# block, which the §3l IaC path strips).
+contexts_block=""
+if (( ${+vals[STATIC_ANALYSIS]} && ${+vals[VULNERABILITIES]} && ${+vals[CODE_SCANNING]} )); then
+	typeset -a ctx=(test-and-coverage "${vals[STATIC_ANALYSIS]}")
+	[[ "${vals[VULNERABILITIES]}" == trivy ]] && ctx+=(trivy-fs)
+	ctx+=(semgrep license-fs pre-commit no-cluster-deploy)
+	if [[ "${vals[CODE_SCANNING]}" == codeql && -n "${vals[CODEQL_LANGUAGES]:-}" ]]; then
+		typeset _l
+		for _l in "${(@s:,:)vals[CODEQL_LANGUAGES]}"; do
+			_l="${_l// /}"
+			[[ -n "$_l" ]] && ctx+=("analyze ($_l)")
+		done
+	fi
+	[[ "$docker" == "true" ]] && ctx+=(image)
+	typeset -a _items=()
+	typeset _c
+	for _c in "${ctx[@]}"; do _items+=("  - \`$_c\`"); done
+	contexts_block="${(F)_items}"
 fi
 
 # {{PYTHON_VERSION_COMPACT}} is always PYTHON_VERSION minus the dot.
@@ -283,7 +387,15 @@ keep_block() {
 	SWIFT_SWIFTPM) has_lang swift && [[ "$swift_build_system" == "swiftpm" ]] ;;
 	SWIFT_XCODE) has_lang swift && [[ "$swift_build_system" == "xcode" ]] ;;
 	DOCKER) [[ "$docker" == "true" ]] ;;
-	PRIVATE) [[ "$visibility" == "private" ]] ;;
+	PUBLIC) [[ "$visibility" == "public" ]] ;;
+	# the per-tool tags (#1670): kept iff that tool is resolved; an absent
+	# toolchain flag resolves nothing, so all of them strip
+	SONARCLOUD) [[ "${vals[STATIC_ANALYSIS]:-}" == sonarcloud ]] ;;
+	SONARQUBE) [[ "${vals[STATIC_ANALYSIS]:-}" == sonarqube ]] ;;
+	SELF_HOSTED) [[ "${vals[STATIC_ANALYSIS]:-}" == sonarqube ]] ;;
+	SNYK) [[ "${vals[VULNERABILITIES]:-}" == snyk ]] ;;
+	TRIVY) [[ "${vals[VULNERABILITIES]:-}" == trivy ]] ;;
+	CODEQL) [[ "${vals[CODE_SCANNING]:-}" == codeql ]] ;;
 	CLAUDE_PLUGIN) [[ "$claude_plugin" == "true" ]] ;;
 	SURFACE_CLI) has_surface cli ;;
 	SURFACE_REST) has_surface rest ;;
@@ -338,6 +450,10 @@ render_file() {
 
 		if [[ "$line" == *'{{SECURITY_CONTACT_BLOCK}}'* && -n "$security_block" ]]; then
 			out_lines+=("${(@f)security_block}")
+			continue
+		fi
+		if [[ "$line" == *'{{REQUIRED_CONTEXTS}}'* && -n "$contexts_block" ]]; then
+			out_lines+=("${(@f)contexts_block}")
 			continue
 		fi
 		for key in "${(k)vals[@]}"; do

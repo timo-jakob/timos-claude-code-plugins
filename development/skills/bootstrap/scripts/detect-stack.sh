@@ -90,7 +90,7 @@
 #                                  alone.
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #   missing_artifacts     []string templates expected under THIS repo's conditions
-#                                  (visibility/languages/bot path) that are absent —
+#                                  (resolved toolchain/languages/bot path) that are absent —
 #                                  the State D auto-render gap-fill signal. Carries
 #                                  only confidently-expected gaps; holds out non-1:1
 #                                  candidates (.gitignore, LICENSE), the non-selected
@@ -1308,7 +1308,9 @@ fi
 # --- existing artifacts ------------------------------------------------------
 # Files we would generate. We mark which already exist so the skill can
 # skip/diff. The candidate list is derived dynamically from the templates
-# directory so new templates auto-include without touching this script.
+# directory so new templates auto-include without touching this script —
+# except templates/public and templates/private, whose tool-scoped files come
+# from toolchain-templates.zsh's map (#1670), so a new one is added there.
 #
 # Mapping rules:
 #   templates/<scope>/foo              → foo
@@ -1340,16 +1342,41 @@ collect_from() {
 
 candidate_paths=()
 collect_from "$templates_dir/common"
-# Scope by visibility: a public repo never expects private-path files and vice
-# versa. Over-collecting both was harmless for the present-only existing_artifacts
-# map (an absent out-of-scope file just didn't appear), but missing_artifacts must
-# not flag out-of-scope files as gaps. When visibility is still unknown (no remote
-# yet), the scope can't be determined, so collect neither — missing_artifacts then
-# carries only scope-free candidates until the path is locked in.
+# Scope by the resolved quality TOOLCHAIN (#1670), not by visibility alone: a
+# repo expects exactly the tool-scoped artifacts of the tools it resolved — a
+# private sonarcloud+snyk repo never expects SonarQube's infra/, the runner
+# README or a trivy job, and vice versa. Over-collecting was harmless for the
+# present-only existing_artifacts map, but missing_artifacts must not flag
+# out-of-scope files as gaps. The toolchain comes from resolve-tools.zsh with no
+# choice flags — a recorded `tools:` wins, else the visibility defaults — and the
+# file-level artifact map from toolchain-templates.zsh, the one place it is
+# written down. When visibility is still unknown (no remote yet), or resolution
+# fails for any reason (a malformed or rejected `tools:`, yq missing), the scope
+# can't be determined, so collect none — missing_artifacts then carries only
+# scope-free candidates until the toolchain is settled.
+tc_templates=""
 case "$visibility" in
-public) collect_from "$templates_dir/public" ;;
-private) collect_from "$templates_dir/private" ;;
+public | private)
+	# the resolver's own message names the fix (install yq, correct tools:), so
+	# it is forwarded rather than swallowed — the JSON alone cannot say why no
+	# tool-scoped gap was reported
+	if tc_resolved="$(zsh "$script_dir/resolve-tools.zsh" --visibility "$visibility" \
+		--maintenance-file "$cwd/.maintenance.yml" 2> >(sed 's/^/detect-stack: toolchain unresolved — /' >&2))"; then
+		tc_static_analysis="$(printf '%s\n' "$tc_resolved" | sed -n 's/^static_analysis=//p')"
+		tc_vulnerabilities="$(printf '%s\n' "$tc_resolved" | sed -n 's/^vulnerabilities=//p')"
+		tc_code_scanning="$(printf '%s\n' "$tc_resolved" | sed -n 's/^code_scanning=//p')"
+		tc_templates="$(zsh "$script_dir/toolchain-templates.zsh" --visibility "$visibility" \
+			--static-analysis "$tc_static_analysis" --vulnerabilities "$tc_vulnerabilities" \
+			--code-scanning "$tc_code_scanning" 2>/dev/null)" || tc_templates=""
+	fi
+	;;
 esac
+while IFS= read -r tool_tmpl; do
+	[[ -n "$tool_tmpl" ]] || continue
+	# public/.snyk.tmpl -> .snyk: the tree dir is not part of the deploy path
+	rel="${tool_tmpl#*/}"
+	candidate_paths+=("${rel%.tmpl}")
+done <<<"$tc_templates"
 
 # Language-specific fragments (only for detected languages).
 # `${langs[@]+...}` guards against the array being empty under `set -u`.
@@ -1362,8 +1389,8 @@ done
 #   LICENSE (asked of user if missing)
 candidate_paths+=(".gitignore" "LICENSE")
 
-# Dedupe (some files like sonar-project.properties exist in both public/ and
-# private/ scope — we'd otherwise list it twice).
+# Dedupe (defensive: two templates collected from different trees could share a
+# deploy path — we'd otherwise list it twice).
 # NOTE: `mapfile`/`readarray` is bash 4+; this script runs on macOS's stock bash
 # 3.2, so we use the array-from-command-substitution form instead. The candidate
 # paths are known config filenames from `find` (no spaces), so the intentional
@@ -1676,8 +1703,8 @@ fi
 
 # existing_artifacts: present-only map (path -> true) — unchanged.
 # missing_artifacts: candidates that detect-stack can say WITH CONFIDENCE are an
-#   expected-but-absent gap, given only what it reliably sees (visibility,
-#   languages, bot path). It is the deterministic auto-render signal for State D,
+#   expected-but-absent gap, given only what it reliably sees (the resolved
+#   toolchain, languages, bot path). It is the deterministic auto-render signal for State D,
 #   so it must never include a file whose render is gated by a signal detect-stack
 #   can't observe — otherwise gap-fill installs something a fresh bootstrap would
 #   not have. Held-out candidates (tracked in existing_artifacts when PRESENT, but
@@ -1908,6 +1935,18 @@ for p in "${candidate_paths[@]}"; do
 	[[ $mfirst -eq 1 ]] && mfirst=0 || missing_json+=","
 	missing_json+="$(json_str "$p")"
 done
+# A tool-scoped file the repo HAS stays in the present-only map even when it is
+# outside the resolved scope, or the scope could not be resolved at all: only
+# missing_artifacts is scoped by the toolchain, never what is already on disk.
+while IFS= read -r tool_tmpl; do
+	[[ -n "$tool_tmpl" ]] || continue
+	rel="${tool_tmpl#*/}"
+	p="${rel%.tmpl}"
+	[[ -e "$cwd/$p" ]] || continue
+	case "$artifacts_json" in *"$(json_str "$p"):true"*) continue ;; esac
+	[[ $first -eq 1 ]] && first=0 || artifacts_json+=","
+	artifacts_json+="$(json_str "$p"):true"
+done < <(cd "$templates_dir" && find public private -type f 2>/dev/null | LC_ALL=C sort)
 artifacts_json+="}"
 missing_json+="]"
 

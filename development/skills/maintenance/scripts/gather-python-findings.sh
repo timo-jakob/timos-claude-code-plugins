@@ -271,7 +271,7 @@ fi
 
 # snyk_prs — query GitHub for open PRs whose head branch starts with
 # snyk-fix- or snyk-upgrade-. These are opened by Snyk's GitHub App when
-# autoFixPR/autoUpgradePR is enabled per SETUP.md section 2.6. Treated
+# autoFixPR/autoUpgradePR is enabled per SETUP.md section 2b.2. Treated
 # alongside Dependabot PRs by python-dependabot-snyk-triage.
 if [[ "$has_snyk_prs_config" == "true" ]]; then
 	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then

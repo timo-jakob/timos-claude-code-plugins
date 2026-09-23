@@ -1,8 +1,10 @@
-# Doc-only PR companion for quality-private.yml — see the public-path
-# noop's header for the rationale and mixed-PR caveat. Runs on the same
-# self-hosted runner as the main workflow so the noop ALSO exercises the
-# runner availability (a self-hosted runner being down would otherwise
-# silently fail to satisfy required-checks even on doc-only PRs).
+# Doc-only PR companion for quality-private.yml — see the public
+# workflow's noop header for the rationale and mixed-PR caveat. Runs on the
+# same runner as the main workflow, so on a self-hosted runner (SonarQube) the
+# noop ALSO exercises the runner availability (a self-hosted runner being down
+# would otherwise silently fail to satisfy required-checks even on doc-only
+# PRs). Its jobs mirror the main workflow's required checks for the resolved
+# toolchain.
 
 name: Quality (private) — docs noop
 
@@ -20,38 +22,49 @@ permissions:
 
 jobs:
   test-and-coverage:
-    runs-on: self-hosted
+    runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping tests."
 
+  # --- SONARQUBE-START -------------------------------------------------------
   sonarqube:
-    runs-on: self-hosted
+    runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping SonarQube scan."
+  # --- SONARQUBE-END ---------------------------------------------------------
 
+  # --- SONARCLOUD-START ------------------------------------------------------
+  sonarcloud:
+    runs-on: {{RUNNER}}
+    steps:
+      - run: echo "Doc-only PR — skipping SonarCloud scan."
+  # --- SONARCLOUD-END --------------------------------------------------------
+
+  # --- TRIVY-START -----------------------------------------------------------
   trivy-fs:
-    runs-on: self-hosted
+    runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping trivy filesystem scan."
+  # --- TRIVY-END -------------------------------------------------------------
 
   license-fs:
-    runs-on: self-hosted
+    runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping license scan."
 
   semgrep:
-    runs-on: self-hosted
+    runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping semgrep scan."
 
   pre-commit:
-    runs-on: self-hosted
+    runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping pre-commit."
 
   # --- DOCKER-START ---------------------------------------------------------
   image:
-    runs-on: self-hosted
+    runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping image build/scan."
   # --- DOCKER-END -----------------------------------------------------------

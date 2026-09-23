@@ -1,0 +1,28 @@
+# Doc-only PR companion for codeql.yml — see quality-public-noop.yml's
+# header for the rationale and mixed-PR caveat. Mirrors the matrix shape
+# of the main analyze job so each `analyze (<lang>)` required-status
+# context resolves to success on doc-only PRs.
+
+name: CodeQL — docs noop
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+    steps:
+      - run: echo "Doc-only PR — skipping CodeQL analysis for ${{ matrix.language }}."

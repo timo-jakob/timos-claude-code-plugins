@@ -1,0 +1,50 @@
+# CodeQL — GitHub-native SAST, free for public repos. The primary SAST
+# signal consumed by /development:maintenance via the Code Scanning API.
+# Sonar adds a second opinion. Snyk's GitHub App also posts a SAST PR
+# check (advisory only — not gathered by the maintenance pipeline).
+
+name: CodeQL
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  schedule:
+    - cron: "0 6 * * 1"   # weekly Monday 06:00 UTC — drift detection
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Languages auto-filled by bootstrap. CodeQL supports:
+        # cpp, csharp, go, java, javascript, python, ruby, swift
+        language: [python]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: github/codeql-action/init@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+      - uses: github/codeql-action/autobuild@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4
+      - uses: github/codeql-action/analyze@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4
+        with:
+          category: "/language:${{ matrix.language }}"

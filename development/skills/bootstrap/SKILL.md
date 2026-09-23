@@ -4,8 +4,10 @@ description: >
   Bootstraps a project with the full quality + security toolchain. Detects repo
   visibility (public vs private), languages, and Docker presence, then generates
   GitHub Actions workflows, scanner configs, pre-commit hooks, branch protection,
-  Dependabot, templates, and developer docs. Public repos use SonarCloud + Snyk;
-  private repos use self-hosted SonarQube + Trivy. Enforces a Zero Tolerance
+  Dependabot, templates, and developer docs. The quality toolchain is a
+  declaration composed per tool; visibility picks its defaults — public repos
+  default to SonarCloud + Snyk + CodeQL, private repos to self-hosted SonarQube +
+  Trivy. Enforces a Zero Tolerance
   standard via layered CI + pre-push + Sonar enforcement (falls back to `Sonar
   way` on SonarCloud free). Idempotent — safe to re-run on partially configured
   repos. Also reconciles GitHub-side state (branch protection, secrets, Sonar
@@ -118,8 +120,10 @@ Supported flags:
 - **Never put a self-hosted runner on a public repository** — fork pull requests
   could run code on it. The toolchain is a declaration (`.maintenance.yml`'s
   `tools:`, Q3a, #1651) resolved by `scripts/resolve-tools.zsh`, which rejects
-  the one combination that would break this rule: a public repo with
-  `static_analysis: sonarqube`.
+  the combination that would break this rule — a public repo with
+  `static_analysis: sonarqube` — and one more it could never run: a private
+  repo with `code_scanning: codeql`, since CodeQL on a private repository needs
+  GitHub Advanced Security (#1670).
 
 ## Step 1: Detect Repo State
 
@@ -305,7 +309,13 @@ flow. Stop and ask for input wherever marked; do not guess.
    `missing_artifacts` is empty (every expected file present) AND
    `github_state` reports any of the following gaps, the right next action
    is a **gap-fill flow**, not the template-drift menu — Step 4 of a prior
-   bootstrap clearly didn't complete:
+   bootstrap clearly didn't complete. **Off the §3l path (once Q4 has settled
+   it — a repo with no detected language asks Q4 first, as step 4's IaC set
+   does), take the toolchain gate first** — the same one step 4 states (*Resolve the toolchain*'s step 1,
+   no toolchain flags, never Q3a): on an exit 1 or a toolchain other than the
+   visibility default, offer **none** of the GitHub-side gap-fill below and
+   report *Resolve the toolchain*'s #1671 stop instead, since every item here
+   keys on visibility:
 
    > **The IaC set is NOT blind-renderable.** `detect-stack.sh` lists
    > `.github/workflows/kubernetes-ci.yml` as a candidate on the
@@ -459,10 +469,21 @@ flow. Stop and ask for input wherever marked; do not guess.
    **The toolchain gates the gap-fill, and step 5b's re-render, first (#1651).**
    Off the §3l path (once the IaC set's Q4 below has settled it), run
    *Resolve the toolchain*'s step 1 before rendering anything here — no
-   toolchain flags, never Q3a — and take its exit-code branch: any exit 1
-   renders **nothing** (a recorded toolchain the guard or validation refuses
-   must not be rendered blind as the visibility default), and an exit 0
-   supplies the toolchain flags a missing `.maintenance.yml` needs.
+   toolchain flags, never Q3a — and take its branch: an exit 1, or a toolchain
+   other than the visibility default (*Resolve the toolchain*'s stop, until
+   #1671), renders **nothing** — a recorded toolchain must never be rendered
+   blind as the visibility default, nor handed to step 3's visibility-keyed
+   branch-protection gap-fill — and an exit 0 on the default supplies the
+   toolchain flags **every** render here passes. That result is this run's
+   toolchain: a gap-fill run does not re-ask Q3a later, and its `--record`
+   (*Recording it*) runs as in Step 3. The quality workflows,
+   the pre-commit config and `SETUP.md` are composed from them (#1670); the
+   quality workflows and `SETUP.md` trip `render.zsh`'s leftover check without
+   them, but the pre-commit config does not — it would silently lose its
+   per-tool hooks — so never render it without them either. They are also the
+   values a missing `.maintenance.yml` records. `detect-stack.sh` scoped
+   `missing_artifacts` to that same toolchain, so its tool-scoped gaps are
+   exactly the ones this render set covers.
 
    **The docs machinery (#766) is the second not-blind set.** An
    already-bootstrapped repo that predates the docs templates reports the
@@ -565,8 +586,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    `missing_artifacts`, and it carries no provenance marker so the drift check
    is blind to it. The config then sits orphaned (yamllint never runs; false
    assurance). So whenever `.pre-commit-config.yaml` already exists, render the
-   template the normal way (substitute `{{DEFAULT_BRANCH}}`, keep only the
-   detected-language / scope blocks) to a temp file and reconcile the on-disk
+   template the normal way (the same toolchain flags as the gap-fill — its
+   `TRIVY` hook drops out silently without them — substitute
+   `{{DEFAULT_BRANCH}}`, keep only the detected-language / scope blocks) to a
+   temp file and reconcile the on-disk
    config against it:
 
    ```bash
@@ -611,7 +634,14 @@ flow. Stop and ask for input wherever marked; do not guess.
 
 5. When `missing_artifacts` is empty AND `github_state` shows no gaps,
    THEN fall through to the **template-drift check** — deterministic first,
-   the reviewer only when there's something to classify:
+   the reviewer only when there's something to classify. **Off the §3l path
+   (settled by Q4 first, exactly as step 3 says), take the toolchain gate
+   first** — the one steps 3 and 4 state, unless this
+   run already took it there: on an exit 1 or a toolchain other than the
+   visibility default, take *Resolve the toolchain*'s branch and stop before
+   the detector. An empty `missing_artifacts` then proves nothing — it was
+   scoped to a toolchain bootstrap cannot finish, or to none — so this run
+   never reports "toolchain is current", and renders or stamps nothing:
 
    a. **Run the drift detector** — the same marker-sha256 mechanism
       `/development:maintenance` uses. Don't re-roll the comparison by hand,
@@ -643,8 +673,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    b. **Only for the files the detector flags**, invoke
       `bootstrap-idempotency-reviewer` to classify each and recommend apply /
       skip / cherry-pick — passing the on-disk content AND the rendered
-      template content (after substitution), rendered only once step 4's
-      toolchain gate has passed; a run that skipped step 4 takes that gate here. The reviewer is the only contract
+      template content (after substitution), rendered with the toolchain
+      flags the gate above resolved. The reviewer is the only contract
       that distinguishes:
       - **user customization** (skip-default — user edits the template would
         overwrite)
@@ -686,7 +716,7 @@ wording so behavior stays consistent:
 | **Q1: Create GitHub repo now?** | State A, or State B without a GitHub remote | "Do you want me to create a GitHub repo for this and connect it as `origin` now?" | If yes → Q2 + Q3 + run `gh repo create <name> --<vis> --source=. --remote=origin`. If no → Q3 only. |
 | **Q2: Repo name** | Only if Q1=yes | "What should the GitHub repo be named? (default: `<current-directory-name>`)" | Used in `gh repo create`. |
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the default toolchain — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the visibility for the rest of the skill, and with it the toolchain **defaults** Q3a offers. |
-| **Q3a: Toolchain** | After Q3 **and** after Q4 has settled that this run is not the §3l IaC path — asked from *Resolve the toolchain* (below the decision tree), which says exactly when: only while a category is still **open** (nothing recorded in `.maintenance.yml`'s `tools:`), so a re-run with all three recorded never asks it. **Never on the §3l IaC path.** | "This is a `<public\|private>` repository, so the default toolchain is `<static_analysis>` / `<vulnerabilities>` / `<code_scanning>`. Use it?" | **Yes** → the open categories stay on the default. **No** → an `AskUserQuestion` picker with one named tab per open category that has a choice: **Analysis** (`sonarcloud` \| `sonarqube`), **Vulns** (`snyk` \| `trivy`), **Code scan** (`codeql` \| `none`). Recorded categories — and, on a public repo, Analysis, which has only `sonarcloud` there — are shown fixed in the question text, never as tabs. Picker answers reach `resolve-tools.zsh` as flags (source `chosen`). |
+| **Q3a: Toolchain** | After Q3 **and** after Q4 has settled that this run is not the §3l IaC path — asked from *Resolve the toolchain* (below the decision tree), which says exactly when: only while a category is still **open** (nothing recorded in `.maintenance.yml`'s `tools:`), so a re-run with all three recorded never asks it. **Never on the §3l IaC path.** | "This is a `<public\|private>` repository, so the default toolchain is `<static_analysis>` / `<vulnerabilities>` / `<code_scanning>`. Use it?" | **Yes** → the open categories stay on the default. **No** → an `AskUserQuestion` picker with one named tab per open category that has a choice: **Analysis** (`sonarcloud` \| `sonarqube`), **Vulns** (`snyk` \| `trivy`), **Code scan** (`codeql` \| `none`). Recorded categories — and the categories this visibility leaves one value: on a public repo Analysis, which has only `sonarcloud` there, and on a private repo Code scan, which has only `none` there (CodeQL on a private repository needs GitHub Advanced Security, #1670) — are shown fixed in the question text, never as tabs. Picker answers reach `resolve-tools.zsh` as flags (source `chosen`). |
 | **Q4: Languages** | Whenever detected `languages=[]` — with the IaC wording when `is_kubernetes=true`. A recorded `primary: kubernetes` does **not** skip it — the record can veto this path but never grant it (§3l; the mixed repo is #1193) | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)". When `is_kubernetes=true`, offer **"none — this is a GitOps/IaC repo"** as a first-class answer: "This looks like an infrastructure-as-code repo (charts / overlays / Argo CD resources) with no application language. Bootstrap it as one, or will it also hold application code?" | Selects per-language fragments and CodeQL matrix. **"None" is a valid answer for an IaC repo** — it takes §3l, not a halt: the manifest checks stand on their own, so a language is never a precondition for bootstrapping. **"None" with `is_kubernetes=false`** asks the **empty-repo confirmation** instead of halting: "There is no chart, kustomization or Argo CD resource here yet. Bootstrap this as an empty GitOps/IaC repository anyway — one required `gate` check, the `make lint` pre-push hook, and `primary: kubernetes`?" Three outcomes: **confirmed** → §3l, and `primary: kubernetes` is written; **declined** → halt: ask the user to add a marker artifact or name a language, and stop; **another `primary:` already recorded** in `.maintenance.yml` → §3l's conflict branch — the confirmation is never granted over a recorded primary. Nothing records the confirmation, so until a marker exists every re-run asks Q4 and the confirmation again (§3l, #1193). The answer resolves the language set the rest of the skill reads — §3l and `{{PRIMARY}}` branch (2) key on the RESOLVED set, so a language named here makes this a language repo however empty detection was. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
@@ -752,11 +782,12 @@ empty or null `tools:` records nothing, like `gate:`. Reading an existing
    `default` is **open**; a `recorded` one is fixed.
 2. **Q3a**, only when an open category has a **choice** on this visibility —
    every open category does, except `static_analysis` on a public repo, where
-   `sonarcloud` is the only value. So a re-run with all three recorded never
-   asks it, and neither does a public repo whose only open category is
-   `static_analysis`. Offer the visibility default; on **No**, the picker's tabs
-   are exactly the open categories with a choice, and everything else is shown
-   fixed.
+   `sonarcloud` is the only value, and `code_scanning` on a private repo, where
+   `none` is the only value (CodeQL there needs GitHub Advanced Security,
+   #1670). So a re-run with all three recorded never asks it, and neither does
+   a repo whose only open category is the one its visibility fixes. Offer the
+   visibility default; on **No**, the picker's tabs are exactly the open
+   categories with a choice, and everything else is shown fixed.
 3. **Run it again with the picker's answers as flags** (source `chosen`) —
    skip this when Q3a was not asked or was answered **Yes**, since the first
    run's output already stands. That output is the resolved toolchain the Step
@@ -764,20 +795,27 @@ empty or null `tools:` records nothing, like `gate:`. Reading an existing
 
 Branch on the exit code **and** stdout:
 
-- **exit 0** → resolved; carry the lines into the Step 2 plan and Step 3.
-- **exit 1, stdout empty** → relay the one stderr message verbatim and
+- **exit 0, the visibility default** (public `sonarcloud` / `snyk` / `codeql`,
+  private `sonarqube` / `trivy` / `none`) → resolved; carry the lines into the
+  Step 2 plan and Step 3.
+- **exit 0, any other toolchain** → valid, and the templates compose it (#1670),
+  but bootstrap **cannot finish it yet**: branch protection (Step 4b), the Step
+  4.5 preflight and automation, and State D's GitHub-side gap-fill still key on
+  visibility, so they would require checks no rendered job reports and wedge
+  every PR. Until [#1671](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1671)
+  makes them follow the toolchain, show the Step 2 plan with its `Toolchain:`
+  and `CI runner:` lines, say that this toolchain is supported from #1671 on,
+  and **stop before rendering — write nothing**. This stop is the one place the
+  rule lives; every other step is reached only past it.
+- **exit 1** → stdout is empty; relay the one stderr message verbatim and
   **stop**. It is either a **validation** step (a missing or unsupported
-  `--visibility`, a malformed `tools:`, an unsupported value, or a public repo
-  with `static_analysis: sonarqube`) — the fix is the declaration or the
-  visibility, which is the user's to change, and never pick a different value
-  over a recorded one — or the **file or tool** (a `.maintenance.yml` that does
-  not parse, or `yq` missing or not mikefarah's), where the fix is exactly what
-  the message names.
-- **exit 1, stdout non-empty** → the **temporary guard** (until #1670 ships
-  composable workflow rendering): the toolchain is **valid** but differs from
-  its visibility default, and only the default can be rendered today. Show the
-  Step 2 plan with its `Toolchain:` and `CI runner:` lines from stdout, relay
-  the stderr message, then **stop before rendering — write nothing**.
+  `--visibility`, a malformed `tools:`, an unsupported value, a public repo
+  with `static_analysis: sonarqube`, or a private repo with
+  `code_scanning: codeql`) — the fix is the declaration or the visibility,
+  which is the user's to change, and never pick a different value over a
+  recorded one — or the **file or tool** (a `.maintenance.yml` that does not
+  parse, or `yq` missing or not mikefarah's), where the fix is exactly what the
+  message names.
 - **exit 2** → your own malformed invocation: fix the command and re-run.
 
 **Recording it (Step 3).** A repo with **no** `.maintenance.yml` gets `tools:`
@@ -840,9 +878,10 @@ output** (*Resolve the toolchain*, #1651): name each category's value with its
 source in parentheses — for example `static analysis sonarcloud (default) ·
 vulnerabilities snyk (recorded) · code scanning codeql (chosen)` — and derive
 `CI runner:` from `self_hosted_runner` alone: `self-hosted` exactly when it is
-`true`, else `github-hosted`. On the temporary-guard exit (a valid toolchain
-that differs from its visibility default) show the plan with both lines, relay
-the guard's message, and stop there: there is nothing to confirm, because
+`true`, else `github-hosted`. The `Will create:` list's tool-scoped files come
+from `toolchain-templates.zsh` for that same toolchain (Step 3). On a toolchain
+other than the visibility default, show the plan with both lines and stop there
+(*Resolve the toolchain*, until #1671): there is nothing to confirm, because
 nothing will be rendered.
 
 **On the §3l IaC path the plan takes a different shape**, and the difference is
@@ -1031,10 +1070,21 @@ placeholder (GitHub `${{ ... }}` expressions and docker-metadata literals
 like `{{version}}` are exempt by design). Spec defaults are built in
 (`PYTHON_VERSION=3.12`, `JAVA_VERSION=21`, `COVERAGE_THRESHOLD=90`,
 `DEFAULT_BRANCH=main`); `{{PYTHON_VERSION_COMPACT}}` and
-`{{CODEQL_LANGUAGES}}` are derived automatically. Output is byte-identical
-across sessions for the same inputs.
+`{{CODEQL_LANGUAGES}}` are derived automatically, and so are the four
+toolchain-derived values (#1670) — each only when the toolchain flags it needs
+were passed, so a quality template or `SETUP.md` rendered without the toolchain
+fails loudly rather than guessing:
 
-**What stays your judgment:** WHICH templates apply (3a–3l below,
+| Derived placeholder | Value |
+| --- | --- |
+| `{{RUNNER}}` / `{{SWIFT_RUNNER}}` | the quality workflows' runner rule, from `--static-analysis`: `self-hosted` / `[self-hosted, macos]` iff `sonarqube`, else `ubuntu-latest` / `macos-latest`. `codeql.yml` keeps its hard-coded `ubuntu-latest` — it renders only on public repos |
+| `{{SAST_GATE}}` | the SAST gate Snyk Code defers to, from `--code-scanning`: CodeQL's `analyze (<lang>)` checks iff `codeql`, else the required `semgrep` check |
+| `{{REQUIRED_CONTEXTS}}` | `SETUP.md` §4's required-check list, one bullet per context, from all three toolchain flags plus `--languages` and `--docker`: `test-and-coverage`, the analyser's job, `trivy-fs` iff `trivy` (Snyk has no CI job), `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, one `analyze (<lang>)` per CodeQL language iff `codeql`, and `image` iff a Dockerfile (D1 in #1670; a ko repo's `image` comes from `ko-image.yml`, which `SETUP.md` §4's `image` note covers) |
+
+Output is byte-identical across sessions for the same inputs.
+
+**What stays your judgment:** WHICH templates apply (3a–3l below — except
+the tool-scoped set, which is `toolchain-templates.zsh`'s, §3b —
 dependabot-vs-renovate, per-language fragments), the idempotency decisions,
 the `{{XCODE_SCHEME}}` resolution (`xcodebuild -list`, ask if ambiguous —
 pass it via `--xcode-scheme`), `.gitignore` merging, the Swift `needs:`
@@ -1289,14 +1339,20 @@ in the same PR:
 | `SWIFT_SWIFTPM` | swift detected AND `language_meta.swift.build_system == "swiftpm"` |
 | `SWIFT_XCODE` | swift detected AND `language_meta.swift.build_system == "xcode"` |
 | `DOCKER` | Dockerfile detected |
-| `PRIVATE` | visibility == private |
+| `PUBLIC` | visibility == public — wraps only `SETUP.md`'s public-only parts (the `automate-public.sh` callout, OpenSSF Scorecard, the Snyk import-while-public sentence) |
+| `SONARCLOUD` | `--static-analysis sonarcloud` (the `sonarcloud` job + noop, `SETUP.md` §2) |
+| `SONARQUBE` | `--static-analysis sonarqube` (the `sonarqube` job + noop, `SETUP.md` §3) |
+| `SELF_HOSTED` | `self_hosted_runner` — `--static-analysis sonarqube` (the self-hosted `semgrep` shape, `SETUP.md`'s self-hosted-runner section) |
+| `SNYK` | `--vulnerabilities snyk` (the `image` job's Snyk container scan, `SETUP.md` §2b; Snyk has no CI job of its own) |
+| `TRIVY` | `--vulnerabilities trivy` (the `trivy-fs` job + noop, the `image` job's Trivy scan, the pre-commit `trivy-fs` hook, `SETUP.md`'s `brew install trivy`) |
+| `CODEQL` | `--code-scanning codeql` |
 | `CLAUDE_PLUGIN` | `--claude-plugin true` |
 | `SURFACE_CLI` | `cli` in `--acceptance-interfaces` |
 | `SURFACE_REST` | `rest` in `--acceptance-interfaces` |
 | `SURFACE_WEB_UI` | `web-ui` in `--acceptance-interfaces` |
 | `SURFACE_GRPC` | `grpc` in `--acceptance-interfaces` |
 | `KUBERNETES` | `--primary kubernetes` (the §3l IaC path — gates `.maintenance.yml`'s `gate:` line, #1604) |
-| `TOOLCHAIN` | `--primary` is anything but `kubernetes` (gates `.maintenance.yml`'s `tools:` block, #1651 — §3l renders no quality workflow, so it declares no toolchain) |
+| `TOOLCHAIN` | `--primary` is anything but `kubernetes` (gates `.maintenance.yml`'s `tools:` block, #1651, and `SETUP.md` §4's `{{REQUIRED_CONTEXTS}}` list, #1670 — §3l renders no quality workflow, so it declares no toolchain) |
 
 The `SURFACE_*` tags (#766) gate the docs templates' per-interface nav/MOC
 entries (§3h); when `--acceptance-interfaces` isn't passed at all, every
@@ -1306,28 +1362,39 @@ because a `# --- … ---` line would render as a Markdown heading; the
 stripping rules are identical, and a kept block's HTML-comment markers are
 invisible on the rendered page.
 
+The per-tool tags (#1670) — `SONARCLOUD`, `SONARQUBE`, `SELF_HOSTED`, `SNYK`,
+`TRIVY`, `CODEQL` — are kept iff that tool is in the resolved toolchain passed
+as `--static-analysis` / `--vulnerabilities` / `--code-scanning`; with none of
+those flags (the §3l IaC path) every one of them strips. `render.zsh` refuses a
+value outside its category's set, and the two combinations `resolve-tools.zsh`
+rejects (public + sonarqube, private + codeql), so a typo can never silently
+strip a tool's jobs.
+
 If a tag does not apply, the script deletes the START line, the END line,
 and everything between them, then collapses any run of 3+ consecutive blank
 lines down to one — adjacent stripped blocks otherwise leave a blank-line
 pileup that fails the repo's yamllint (`empty-lines: max 2`).
 
 **Swift job wiring (quality workflows).** Swift's lane is a separate
-`test-and-coverage-swift` job on a macOS runner (`macos-latest` public;
-a self-hosted runner labelled `macos` private) rather than steps in the
+`test-and-coverage-swift` job on a macOS runner (`{{SWIFT_RUNNER}}`:
+`macos-latest` on GitHub-hosted runners, a self-hosted runner labelled `macos`
+when the toolchain is self-hosted) rather than steps in the
 Linux job — `xcodebuild`/`xcrun` don't exist on Linux. Its `name:` is
 `test-and-coverage`, so branch protection's required contexts are
 unchanged. Render rules:
 
 - **Swift-only repo**: the `LINUX_TESTS` block is stripped; update the
-  `sonarcloud` (public) / `sonarqube` (private) job's
+  analyser job's (`sonarcloud` or `sonarqube`)
   `needs: test-and-coverage` to `needs: test-and-coverage-swift`.
 - **Swift + another test-lane language** (rare): keep both jobs, extend
   `needs:` to both, rename the Swift job's uploaded artifact (e.g.
   `coverage-reports-swift`) and add a matching second download step —
   two uploads must not share one artifact name.
-- macOS minutes are free on public repos but bill at 10× Linux on
-  private ones — say so in the Step 2 plan when the private path + Swift
-  combine, so the runner cost is a conscious choice.
+- GitHub-hosted macOS minutes are free on public repos but bill at 10×
+  Linux on private ones — say so in the Step 2 plan when a private repo on
+  SonarCloud (GitHub-hosted runners) has Swift, so the runner cost is a
+  conscious choice. A private repo on SonarQube runs the Swift job on its own
+  self-hosted `macos` runner instead.
 - The app-vs-container check separation applies unchanged: the `image`
   job stays path-conditional, so a Swift app PR is never blocked by
   Docker base-image findings.
@@ -1458,22 +1525,61 @@ Copy from `templates/common/`:
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
 
-### 3b. Public path (SonarCloud + Snyk)
+### 3b. Tool-scoped artifacts (the resolved toolchain, #1670)
 
-Copy from `templates/public/`:
+WHICH of `templates/public/` and `templates/private/` render is keyed on the
+**resolved toolchain** (*Resolve the toolchain*), never on visibility alone. The
+file-level map is the shipped script's, never re-derived here — render exactly
+what it prints, with the same toolchain flags:
 
-- `.github/workflows/quality-public.yml`
-- `.github/workflows/quality-public-noop.yml` (doc-only PR companion — see below)
-- `.github/workflows/codeql.yml`
-- `.github/workflows/codeql-noop.yml` (doc-only PR companion for CodeQL)
-- `.github/workflows/scorecard.yml` (OpenSSF Scorecard — weekly supply-chain health check; public-only because the
-  score is publicly visible)
-- `sonar-project.properties`
-- `.snyk`
+```bash
+"<skill-base-dir>/scripts/toolchain-templates.zsh" --visibility <public|private> \
+  --static-analysis <v> --vulnerabilities <v> --code-scanning <v>
+```
+
+It prints one template relpath per line (exit 0), refuses the two combinations
+`resolve-tools.zsh` rejects (exit 1 — unreachable after an exit-0 resolution),
+and exits 2 on a malformed invocation (fix it and re-run). What it selects:
+
+| Resolved | Renders |
+| --- | --- |
+| every combination | `.github/workflows/quality-<visibility>.yml` + its `-noop` companion — the file names stay keyed on visibility, so an existing repo's workflow never moves |
+| public | `.github/workflows/scorecard.yml` (OpenSSF Scorecard — weekly supply-chain health check; public-only because the score is publicly visible) |
+| `sonarcloud` | the SonarCloud `sonar-project.properties` (`templates/public/`) |
+| `sonarqube` | the SonarQube `sonar-project.properties` (`templates/private/`), `infra/sonarqube/docker-compose.yml`, `infra/sonarqube/README.md` |
+| `self_hosted_runner` (iff `sonarqube`) | `infra/github-runner/README.md` |
+| `snyk` | `.snyk` |
+| `trivy` | no file of its own — `trivy.yaml` is common (§3a) |
+| `codeql` (public only) | `.github/workflows/codeql.yml` + `codeql-noop.yml`, on their hard-coded `runs-on: ubuntu-latest` |
+
+A template's tree (`public/`, `private/`) is where it was first written, not a
+visibility rule: a private repo on SonarCloud renders
+`public/sonar-project.properties.tmpl`. Every file deploys at its path relative
+to its tree.
+
+### 3c. The quality workflows are composed per tool
+
+Inside the files, `render.zsh`'s per-tool block tags compose the jobs from the
+same toolchain flags (*Block stripping in templates*):
+
+- the analyser's job — `sonarcloud` or `sonarqube` — and its noop;
+- `trivy-fs` + its noop iff `trivy`; Snyk has **no** CI job (its GitHub App
+  does the scanning), so `snyk` adds none;
+- the `image` job's scanner (only with a Dockerfile): the Snyk container scan iff
+  `snyk`, the Trivy image scan iff `trivy`;
+- every job's runner from `{{RUNNER}}` / `{{SWIFT_RUNNER}}`: self-hosted iff
+  `sonarqube` (then **every** quality job, noop included, runs self-hosted), else
+  GitHub-hosted. CodeQL never follows it — it renders only on public repos, on
+  `ubuntu-latest`.
+
+`license-fs`, `semgrep`, `pre-commit` and `test-and-coverage` render for every
+combination; `image` / `push-and-sign` iff a Dockerfile. The required contexts
+these jobs report are exactly `SETUP.md` §4's composed list
+(`{{REQUIRED_CONTEXTS}}`).
 
 The `image` job (build → scan → conditional GHCR push) is only kept if
-`has_dockerfile=true` in both `quality-public.yml` AND
-`quality-public-noop.yml` — see "Container image publishing" below.
+`has_dockerfile=true`, in both the workflow AND its noop — see "Container image
+publishing" below.
 
 The `-noop.yml` companion workflows define dummy jobs with the SAME
 names as the required-status-check jobs in their main counterparts,
@@ -1481,25 +1587,8 @@ but trigger only on doc-only PRs (the inverse of the main workflow's
 `paths-ignore`). Without these companions, doc-only PRs would sit
 unmergeable forever because GitHub leaves a required check in the
 `expected` state when its defining workflow is skipped via
-`paths-ignore`. See issue #96.
-
-### 3c. Private path (SonarQube + Trivy)
-
-Copy from `templates/private/`:
-
-- `.github/workflows/quality-private.yml` (runs on `self-hosted`)
-- `.github/workflows/quality-private-noop.yml` (doc-only PR companion — runs on `self-hosted` too so it also catches
-  runner-down failures on doc PRs)
-- `sonar-project.properties`
-- `infra/sonarqube/docker-compose.yml`
-- `infra/sonarqube/README.md`
-- `infra/github-runner/README.md`
-
-(`trivy.yaml` is now common — see 3a — because both paths run Trivy for
-license scanning.)
-
-The `image` job (build → Trivy scan → conditional GHCR push) is only kept if
-`has_dockerfile=true` — see "Container image publishing" below.
+`paths-ignore`. See issue #96. On a self-hosted runner the noop runs there
+too, so it also catches runner-down failures on doc PRs.
 
 ### Container image publishing (both paths, if Dockerfile present)
 
@@ -1509,7 +1598,7 @@ PR runs never execute):
 
 | Job | Events | Permissions | Steps |
 | --- | --- | --- | --- |
-| `image` (scan) | PR + push + release | `contents: read` only | Buildx build (amd64), tags via `docker/metadata-action` (semver + `sha-<7>` + `latest`), scan (Snyk container on public / Trivy image on private) |
+| `image` (scan) | PR + push + release | `contents: read` only | Buildx build (amd64), tags via `docker/metadata-action` (semver + `sha-<7>` + `latest`), scan (Snyk container iff `vulnerabilities: snyk`, Trivy image iff `trivy`) |
 | `push-and-sign` | push / release only (`needs: image`) | `packages: write` + `id-token: write` | GHCR login with `GITHUB_TOKEN`, multi-arch push to `ghcr.io/<owner>/<repo>`, SBOM, provenance, cosign |
 
 Behaviour summary:
@@ -3875,9 +3964,9 @@ recorded primary on its own. **Both answers have a defined outcome:**
   not the IaC path: never emit the workflow or pass `--iac-only true`. But do
   not simply "take that primary's path" either — this branch is only reachable
   with an **empty** resolved language set, so for a recorded *language* primary
-  there is no language path to fall back to: §3b/§3c key on visibility with no
-  language condition, so continuing would render a `quality-*.yml` whose
-  `sonarcloud` job needs a `test-and-coverage` job the stripped `LINUX_TESTS`
+  there is no language path to fall back to: §3b/§3c key on the toolchain with
+  no language condition, so continuing would render a `quality-*.yml` whose
+  analyser job needs a `test-and-coverage` job the stripped `LINUX_TESTS`
   block never produced — a workflow GitHub refuses to run. **Stop and ask** the
   user to either change the record or name the language the repo will hold (the
   same halt Q4 takes for "none" with `is_kubernetes=false`). The one exception
@@ -3931,7 +4020,9 @@ artifacts — `.github/workflows/kubernetes-ci.yml`, `scripts/k8s-gate.zsh`,
 end-user docs machinery (a GitOps repo has users and runbooks like any other,
 and §3h's set is language-neutral — its `surface: none` shape is exactly this
 case). From §3b/§3c it emits **only** the language-agnostic supply-chain pieces
-(`scorecard.yml` on the public path). It does **not** emit any of:
+(`scorecard.yml` on the public path, rendered from
+`public/.github/workflows/scorecard.yml.tmpl` directly — never through §3b's
+selector, which needs a toolchain this path never resolves). It does **not** emit any of:
 
 | Not emitted | Why |
 | --- | --- |
@@ -4329,10 +4420,10 @@ equivalent manual instructions itself (the required-check list plus the
 auto-merge / delete-branch settings) and exits 0, because a hand-applied rule is
 a legitimate outcome. So detect the fallback from that **output**, not from the
 status — Step 5 keys its branch-protection checklist item on it. Do not retry.
-**On the §3l IaC path, cite `SETUP.md`'s IaC context bullet, not its
-PUBLIC/PRIVATE ones** — the single `kubernetes-ci.yml` context, `gate`, which is also what
+**On the §3l IaC path, cite `SETUP.md`'s IaC context bullet, not its composed
+§4 context list** — the single `kubernetes-ci.yml` context, `gate`, which is also what
 `branch-protection.sh` itself prints on a 403 and what the Step 5 IaC checklist
-carries. Relaying the language-app bullets instead would hand the user two
+carries. Relaying the language-app list instead would hand the user two
 conflicting recipes in one run.
 
 ### 4b.5. Workflow labels (`blocked`)
@@ -5152,7 +5243,9 @@ list for exactly this reason.
 > (token lacks repo admin), include: "Enable GitHub Pages with Source:
 > GitHub Actions (Settings → Pages) — `docs deploy` fails until you do."
 
-Example for public path:
+Compose the list from the **resolved toolchain** (#1670), as `SETUP.md` is:
+the SonarCloud items only with `sonarcloud`, the Snyk items only with `snyk`.
+Example for the public default toolchain (sonarcloud / snyk / codeql):
 
 ```text
 NEXT STEPS:
@@ -5165,7 +5258,7 @@ NEXT STEPS:
    SETUP.md) and assign it. **SonarCloud free: skip this step** — custom-gate
    assignment is paywalled; the CI `coverage-floor` step + `Sonar way` gate
    together carry the standard (see *Guiding Principles* for details).
-5. Enable Snyk auto-Fix-PRs in the Snyk UI (SETUP.md section 2.6) — one-time
+5. Enable Snyk auto-Fix-PRs in the Snyk UI (SETUP.md section 2b.2) — one-time
    UI step (Snyk org → Integrations → GitHub → Edit Settings → toggle on).
    Required because Snyk's API gates this behind paid plan; UI is the only
    path on free.
@@ -5190,7 +5283,8 @@ NEXT STEPS:
 > won't merge it). The list is only the secrets/UI setup, the re-trigger, and
 > (Approver repos) the approve drive that are genuinely outstanding.
 
-For private path the checklist additionally includes:
+For a SonarQube toolchain (`static_analysis: sonarqube` — self-hosted) the
+checklist replaces the SonarCloud items with:
 
 - Start SonarQube: `cd infra/sonarqube && docker compose up -d`
 - Register self-hosted runner (see `infra/github-runner/README.md`).

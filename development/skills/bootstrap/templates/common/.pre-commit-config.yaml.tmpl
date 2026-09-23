@@ -289,10 +289,11 @@ repos:
         stages: [pre-push]
   # --- JAVA-END --------------------------------------------------------------
 
-  # --- PRIVATE-START ---------------------------------------------------------
-  # Trivy filesystem scan — kept private-only because public repos run Snyk in
-  # CI, and Snyk locally requires authentication. Trivy is unauthenticated and
-  # fast enough to gate pre-commit on. Install: brew install trivy.
+  # --- TRIVY-START -----------------------------------------------------------
+  # Trivy filesystem scan — kept only when the repo's vulnerability scanner is
+  # Trivy (#1670): a Snyk repo runs Snyk through its GitHub App, and Snyk locally
+  # requires authentication. Trivy is unauthenticated and fast enough to gate
+  # pre-commit on. Install: brew install trivy.
   - repo: local
     hooks:
       - id: trivy-fs
@@ -301,4 +302,4 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit]
-  # --- PRIVATE-END -----------------------------------------------------------
+  # --- TRIVY-END -------------------------------------------------------------

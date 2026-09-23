@@ -312,7 +312,7 @@ info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
 info "  2. Click the GitHub integration → 'Edit Settings'."
 info "  3. Toggle 'Automatic Fix PRs' ON; set max open PRs to 5."
 info "  4. Leave 'Automatic Upgrade PRs' OFF (Dependabot handles upgrades)."
-info "See SETUP.md section 2.6 for the full recipe."
+info "See SETUP.md section 2b.2 for the full recipe."
 
 echo
 info "═══ Manual step: configure Snyk PR status checks ═══"
@@ -322,7 +322,7 @@ info "  1. Open: https://app.snyk.io/org/$SNYK_ORG_SLUG/manage/integrations"
 info "  2. GitHub integration → 'Pull request status checks'."
 info "  3. 'Open Source security and licenses' → DISABLE (drops security/snyk)."
 info "  4. 'Code analysis' → DISABLE (drops code/snyk — CodeQL covers SAST; Snyk Code's free-tier cap breaks the Approver, #387)."
-info "See SETUP.md section 2.5 for the rationale."
+info "See SETUP.md section 2b.1 for the rationale."
 
 # --- GitHub Security & Quality features --------------------------------------
 # All four are free on public repos. Each `gh api` call is idempotent — running
