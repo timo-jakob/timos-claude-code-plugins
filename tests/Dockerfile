@@ -10,10 +10,14 @@ FROM debian:stable-slim
 # package". They are installed rather than stubbed: a stubbed toolchain stops the
 # test proving the thing it exists to prove. The `--local` host lane is
 # unaffected — Homebrew's python3 ships both.
+#
+# procps: the slim base has no `ps` or `pgrep`, and tests/flake-hunt.bats (#1796)
+# needs both to prove the flake hunt ends every process group it starts — the
+# one thing that suite exists to check. macOS and the ubuntu runner ship them.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bats jq shellcheck zsh python3 python3-venv python3-pip git ca-certificates \
-      nodejs yamllint curl make \
+      nodejs yamllint curl make procps \
  && rm -rf /var/lib/apt/lists/*
 # mikefarah yq, NOT Debian's `yq` apt package (which is kislyuk's python-yq, a
 # different query language): the suite and the shipped kubernetes-ci template

@@ -1,8 +1,9 @@
 # Maintaining this plugin repo
 
-Three things live here: **per-merge plugin version bumps** (critical, every PR
+Four things live here: **per-merge plugin version bumps** (critical, every PR
 that changes plugin content), a **quarterly template refresh** (slower-paced,
-the original purpose of this doc), and the **propagation-invariant pattern**
+the original purpose of this doc), **hunting load-dependent flakes** in the bats
+suite, and the **propagation-invariant pattern**
 plus the registry of invariants in force — a repo-wide testing convention rather
 than a template task, at the end of this file, which two bats suites assert
 against.
@@ -402,6 +403,80 @@ existing bootstrap-* review agents if the changes are significant.
 If the manual cadence ever starts feeling tedious, revisit the
 self-hosted-updater option. Until then, this checklist is the cheapest
 path.
+
+## Hunting load-dependent flakes
+
+Some bats tests pass on a quiet host and fail only when it is busy — typically a
+race such as a `producer | grep -q` pipe, which load merely exposes (epic #1795).
+Waiting for load to reproduce them proves nothing, so `scripts/flake-hunt.zsh`
+forces it: it runs the suite, or the `.bats` files you name, `--iterations`
+times under an oversubscribed `bats --jobs`, one busy loop per CPU and
+`LC_ALL=C`, then prints every test that failed at least once with its failure
+count and the first failure's TAP diagnostics. Its header documents the flags,
+the report format and the exit codes.
+
+```sh
+scripts/flake-hunt.zsh --iterations 20 tests/reference-pointer-sweeps.bats
+scripts/flake-hunt.zsh --iterations 3            # the whole suite: slow
+```
+
+**Reading a hunt.** Decide by the exit status first. Only `0` (nothing failed)
+and `1` (the report lists what failed) mean the hunt finished. Any other status
+means it did not finish, even when stdout is empty, so it tells you nothing: fix
+the cause and hunt again. Then judge each test by **its own**
+`<file>: <test name>: <fails>/<iterations>` line, never by whether the report
+as a whole is empty.
+
+**Comparing two hunts.** The decisions below compare one test's failure counts
+in two hunts, A and B. Both hunts use the same targets and the same number of
+iterations, and both finished. **A fails more than B** when A's count is at
+least 3 higher than B's: 18 against 1, or 3 against 0, both qualify. When the
+gap is smaller and both counts are below 3 (1 against 0, 2 against 1), the
+hunts are too small to tell. For hunts of named files, rerun both at 100
+iterations, once, and apply the same rule to the new counts. Never rerun
+whole-suite hunts that way, which would take many hours: their answer stays
+**undecided**. In every other case, including counts still too small after the
+rerun, A and B fail **alike**.
+
+**Branch or main?** A test that fails in a hunt on a change's branch is not yet
+known to be a flake. The change may have broken it, or made it flakier. Rerun
+the same hunt on a checkout of `origin/main` and compare the two:
+
+- **the branch fails more than `origin/main`** — the change caused it. Rework
+  the change;
+- **they fail alike** — the test was already broken or flaky before the change.
+  Record it on the flake-fix list (#1797) with both hunts' lines, and do not
+  rework the change for it;
+- **undecided** — post both hunts' lines on the change's issue and ask a human
+  whether to merge.
+
+This applies to **every** test in a branch hunt's report, not only the one you
+were asking about.
+
+**Run it:**
+
+- **Before closing a flake fix.** Hunt the unfixed tree first: the test's file
+  for 20 iterations, or the whole suite for 5 if the file alone gives the test
+  no line. Then run the same hunt on the fixed tree. Close the issue as verified
+  only when the fixed-tree hunt gives the test no line **and** the unfixed hunt
+  fails more than it. If *Comparing two hunts* called for the 100-iteration
+  rerun, both conditions are judged on the rerun. A hunt that never reproduced the flake cannot prove it
+  fixed. In **every** other case, post both hunts' lines on the issue and leave
+  the decision to close it to a human. That includes an unfixed tree that gives
+  the test no line even on the whole suite, and an unfixed hunt that does not
+  fail more.
+- **After a gate reds on a test the change did not touch.** Hunt that test's
+  file on the change's branch for 20 iterations. If the test has a line, settle
+  it by *Branch or main?* If it has no line, hunt the whole suite for 5
+  iterations and, if it has a line there, settle it the same way with whole-suite
+  hunts. If it still has no line, the red is unexplained. Post both hunts'
+  outputs on the change's issue and ask a human whether to merge. Do not merge
+  past an unexplained red on your own.
+
+It saturates every core for as long as it runs, so it slows any other session's
+gate on the same machine. When it exits, including on Ctrl-C or a closed pipe,
+it ends every process group it started. Its header names the one narrow case a
+process can still escape.
 
 ## Propagation invariants
 
