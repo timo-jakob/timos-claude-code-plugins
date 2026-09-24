@@ -4360,7 +4360,7 @@ approval):
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — whether a root .ko.yaml exists (Go ko image path, #875)>" \
   --has-codeql "<true exactly when resolve-tools.zsh's code_scanning is codeql, else false>" \
-  --codeql-languages "<SPACE-separated CodeQL language list, e.g. 'python javascript', when has-codeql=true — NOT the comma-separated {{CODEQL_LANGUAGES}} form; the script splits on whitespace>" \
+  --codeql-languages "<CodeQL language list when has-codeql=true — the same mapped IDs as {{CODEQL_LANGUAGES}}, e.g. 'python javascript-typescript'; either form is accepted: space-separated, or comma-separated as {{CODEQL_LANGUAGES}} renders it; the script splits on commas and whitespace>" \
   --iac-only "<true on the §3l IaC path — the kubernetes topic marker with an empty RESOLVED language set (after Q4) and no other `primary:` recorded, or a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --require-signed-commits "<Step 4b's signing value — below>"

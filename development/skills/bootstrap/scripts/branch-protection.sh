@@ -8,7 +8,7 @@
 #                        --has-dockerfile true|false \
 #                        [--has-ko true|false] \
 #                        --has-codeql true|false \
-#                        [--codeql-languages "python javascript ..."] \
+#                        [--codeql-languages "python javascript-typescript ..."] \
 #                        [--iac-only true|false] \
 #                        --default-branch main \
 #                        [--require-signed-commits true|false]
@@ -40,7 +40,8 @@
 #
 # --has-codeql is true exactly when the resolved `code_scanning` is `codeql`;
 # CodeQL's public-only rule is enforced at the plan (resolve-tools.zsh step 4,
-# #1670 D8), not here. --codeql-languages is required when --has-codeql=true.
+# #1670 D8), not here. --codeql-languages is required when --has-codeql=true,
+# and takes the languages space- or comma-separated (#1793).
 # CodeQL's analyze job runs as a matrix per language and GitHub reports each one
 # as `analyze (<lang>)`, so a bare `analyze` context never resolves.
 #
@@ -306,7 +307,11 @@ if [[ "$IAC_ONLY" != "true" ]]; then
 			# CodeQL's `analyze` job is a matrix over `language`, so GitHub
 			# reports one check per language as `analyze (<lang>)`. The bare
 			# `analyze` context never resolves to a real check — must be
-			# language-suffixed.
+			# language-suffixed. Commas are normalised to spaces first, so the
+			# comma-separated {{CODEQL_LANGUAGES}} form splits like the spaced one
+			# instead of becoming one `analyze (python,javascript)` context
+			# nothing reports (#1793).
+			CODEQL_LANGUAGES=${CODEQL_LANGUAGES//,/ }
 			for lang in $CODEQL_LANGUAGES; do
 				checks+=("analyze ($lang)")
 			done
@@ -314,7 +319,7 @@ if [[ "$IAC_ONLY" != "true" ]]; then
 			warn "--has-codeql=true but --codeql-languages was not provided."
 			warn "Skipping CodeQL contexts — without language list, the bare"
 			warn "'analyze' context would never resolve. Pass --codeql-languages"
-			warn "\"python javascript ...\" (space-separated) to enable them."
+			warn "\"python javascript-typescript ...\" (space- or comma-separated) to enable them."
 		fi
 	fi
 fi

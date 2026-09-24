@@ -286,6 +286,40 @@ protect_in_fixture() {
   [ "$(put_contexts)" = "$want" ]
 }
 
+@test "#1793: comma- and space-separated --codeql-languages require the identical set, and no context holds a comma" {
+  protection_stubs
+  touch "$W/.github/workflows/codeql.yml"
+  # the literal oracle: row 4's set plus one analyze context per language
+  local want langs
+  want="$({ d4_contexts 4; printf '%s\n' "analyze (python)" "analyze (javascript)"; } | LC_ALL=C sort)"
+  # space-separated, comma-separated, and the rendered `, ` form of {{CODEQL_LANGUAGES}}
+  for langs in "python javascript" "python,javascript" "python, javascript"; do
+    : > "$CURL_DATA"
+    run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+      --has-dockerfile true --has-codeql true --codeql-languages "$langs" --default-branch main
+    [ "$status" -eq 0 ] || { echo "[$langs] exited $status: $output"; return 1; }
+    [ "$(put_contexts)" = "$want" ] ||
+      { echo "[$langs]: got [$(put_contexts | paste -sd '|' -)] want [$(printf '%s\n' "$want" | paste -sd '|' -)]"; return 1; }
+    run ! grep -q ',' <<< "$(put_contexts)"
+  done
+  # every comma is a separator, not just the first
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+    --has-dockerfile true --has-codeql true --codeql-languages "python,javascript,go" --default-branch main
+  [ "$(put_contexts)" = "$({ d4_contexts 4; printf '%s\n' "analyze (python)" "analyze (javascript)" "analyze (go)"; } | LC_ALL=C sort)" ]
+}
+
+@test "#1793: SKILL.md Step 4b accepts either --codeql-languages form" {
+  local block
+  block="$(awk -v s="scripts/branch-protection.sh\" \\\\" 'index($0, s) { on = 1 } on { print } on && !/\\$/ { exit }' "$SKILL")"
+  contains "$block" '--codeql-languages "<CodeQL language list when has-codeql=true'
+  contains "$block" 'either form is accepted'
+  lacks "$block" 'NOT the comma-separated'
+  # the example is the mapped CodeQL ID a codeql.yml matrix reports, never the detected name
+  contains "$block" "the same mapped IDs as {{CODEQL_LANGUAGES}}, e.g. 'python javascript-typescript'"
+  lacks "$block" "e.g. 'python javascript'"
+}
+
 @test "#1671: the ko lane provides image only when ko-image.yml is on disk, and says so otherwise" {
   protection_stubs
   # ko without its workflow: no image, and the fail-open is visible
