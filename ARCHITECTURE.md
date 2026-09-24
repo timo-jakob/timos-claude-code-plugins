@@ -3337,9 +3337,9 @@ registry row points at — a profile written to the list above alone would red:
 - a `none` heading carries a **reason**, not the bare word, so the next author
   can tell a heading that is empty by decision from one that is empty by
   accident;
-- in a profile with no attestable runner, each of the three trailing `none`
-  headings names the **evidence source** that would produce a rule for it
-  (#1502 today);
+- in a profile with no attestable runner, each trailing `none` heading that a
+  step dereferences names the **evidence source** that would produce a rule for
+  it (#1502 today);
 - such a profile's **Gate** states `--gate-attest: not applicable` explicitly —
   the flag is fail-closed only on a *mismatch*, so silence invites a caller to
   pass a value no gate ever produced;
@@ -3424,6 +3424,17 @@ A profile's **Panel** heading *records* the panel that
 `review-dispatch.zsh plan` computes as `review_skill`; it never overrides it,
 because §3.5 dispatches the descriptor's value and one fact needs one owner.
 
+**Every heading has a settled dereference role (#1805).** **Gate** is
+dereferenced at §3 and E4, **Version bump** at §4, **Fix-pass rules** at §3.5's
+fix pass (`development/skills/resolve-issue/reference/review-loop.md`, recorded
+beside the byte-frozen span that holds the fix pass), and **Documentation
+expectations** at §2's same-PR user-docs step. Those last two sites apply the
+heading's rule unless its body begins with `none` (the conductor's §1b test).
+**Panel** and **Residue** are records that no step dereferences: Panel for the
+reason above, and Residue because
+`development/skills/resolve-issue/reference/residue.md` is the same for every
+repo type, so no profile has a residue rule to state.
+
 Profiles populated today: **6** — **claude-plugin** (its blessed
 `run-gate.zsh` gate and attestation capture, its degraded-mode relay, its epic
 verification command, §4's version-bump rule, and the **Panel** pointer above),
@@ -3439,7 +3450,7 @@ loads *its* profile and would otherwise lose §4's floor entirely; the kubernete
 profile's `none` rests on a cluster-definition repo, not an app one. The
 plugin-only rules that sit
 inside `development/skills/resolve-issue/reference/*.md` byte-frozen sentinel
-spans are **not** in it: extracting those is #1506.
+spans are **not** in it: extracting those is #1804.
 
 With every `repo_type` the dispatcher can emit now carrying a profile, the
 profile→type check `tests/resolve-profile-contract.bats` has always made is

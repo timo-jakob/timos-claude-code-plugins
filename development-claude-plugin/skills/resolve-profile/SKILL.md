@@ -114,7 +114,7 @@ pointer; neither half is restated here, severity included.
 **none** — for now. The claude-plugin fix-pass rules that exist today live
 inside `development/skills/resolve-issue/reference/*.md` byte-frozen
 `<!-- moved: … -->` sentinel spans, which #1504 deliberately did not touch.
-Extracting them into this heading is **#1506**.
+Extracting them into this heading is **#1804**.
 
 ## Documentation expectations
 
@@ -126,9 +126,9 @@ them there; this heading adds no type-specific rule of its own.
 
 ## Residue
 
-**none**, and — unlike the two headings above — not because the rule is parked
+**none**, and — unlike Fix-pass rules above — not because the rule is parked
 in a frozen span. The residue procedure (#1435) in
 `development/skills/resolve-issue/reference/residue.md` is entirely
 repo-type-agnostic: issue filing, labels and the dossier, with nothing specific
-to a plugin repo in it. So there is no claude-plugin residue rule to extract;
-**#1506** confirms that rather than moving anything here.
+to a plugin repo in it. It applies to every repo type as it stands, so there is
+no claude-plugin residue rule to extract, and none will be moved here.
