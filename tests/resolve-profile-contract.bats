@@ -596,7 +596,7 @@ _name_of() {
 
 # The conductor as a session actually reads it — `SKILL.md` plus every
 # `reference/*.md` — MINUS the byte-frozen `<!-- moved: … -->` spans, which
-# #1504 deliberately did not touch and #1506 will. Writes to $1.
+# #1504 deliberately did not touch and #1804 will. Writes to $1.
 #
 # Stripping the spans is what makes the negative sweep BOTH honest and
 # achievable: one moved needle (`run-gate.zsh --tests-dir tests`) has a live
@@ -1436,8 +1436,8 @@ _gate_pair_violations() {
 
 @test "#1505 every profile's three trailing headings say none, with a reason" {
   # #1504 asserted this for the exemplar only. Swept, it is what stops #1505's
-  # five copies quietly acquiring a rule in a position NO step is contracted to
-  # dereference (§1b: those positions are #1506's to decide). A bare `**none**`
+  # five copies quietly acquiring a rule nobody decided on (§1b settles each
+  # position's role, #1805). A bare `**none**`
   # is not enough either — the reason is what tells the next author whether the
   # heading is empty by accident or by decision.
   local p h first sec bad=""
@@ -2090,22 +2090,28 @@ _gate_pair_violations() {
 }
 
 @test "#1505 every app-type profile names where a type-specific rule would come from" {
-  # The five #1505 profiles defer their three `none` headings to #1502's
-  # read-out. Pinning the pointer keeps "none" a DECISION with a named trigger
-  # rather than an omission — the exemplar defers to #1506 instead, which is why
-  # this is scoped to the profiles with no attestable runner.
+  # The five #1505 profiles defer their two DEREFERENCED `none` headings to
+  # #1502's read-out. Pinning the pointer keeps "none" a DECISION with a named
+  # trigger rather than an omission — the exemplar defers to #1804 instead, which
+  # is why this is scoped to the profiles with no attestable runner. Residue is a
+  # record no step dereferences (#1805), so it must NOT promise a future rule:
+  # one written there would never be applied.
   #
   # Scoped PER HEADING, not per file: a whole-file grep passes on one surviving
-  # mention, so the pointer could be deleted from two of the three headings with
-  # the check still clean.
+  # mention, so the pointer could be deleted from one heading with the check
+  # still clean.
   local p h sec bad=""
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    for h in "Fix-pass rules" "Documentation expectations" "Residue"; do
+    for h in "Fix-pass rules" "Documentation expectations"; do
       sec="$(_profile_section "$REPO_ROOT/$p" "$h")"
       printf '%s' "$sec" | grep -qF -- '#1502' \
         || bad+="$p / $h: names no evidence source"$'\n'
     done
+    sec="$(_profile_section "$REPO_ROOT/$p" "Residue")"
+    if printf '%s' "$sec" | grep -qF -- '#1502'; then
+      bad+="$p / Residue: promises a rule no step would apply"$'\n'
+    fi
   done < <(_profiles_without_runner)
   [ -z "$bad" ] || {
     printf 'heading(s) whose `none` names no evidence source:\n%s\n' "$bad" >&2
@@ -2165,7 +2171,7 @@ _moved_needles() {
   # `<!-- moved: round-protocol-tail -->` span (#1582 split the original
   # `round-protocol` span into head + tail; the needle lives in the tail),
   # which #1504 is contractually
-  # forbidden to edit and #1506 will extract. Pin it: the sweep above is honest
+  # forbidden to edit and #1804 will extract. Pin it: the sweep above is honest
   # only if the text it skips is exactly that, and this reds if the span ever
   # stops holding it (the exemption became unnecessary) or if the stripper stops
   # stripping (the sweep silently narrowed).
@@ -2208,13 +2214,21 @@ _moved_needles() {
   grep -qF -- '**Claude-plugin repo (human-only)**' "$CONDUCTOR"
 }
 
-# --- the vacated sites carry a pointer --------------------------------------
+# --- every dereference site carries a pointer -------------------------------
 
-@test "#1504 each of the three vacated sites carries a profile pointer" {
-  local n
+@test "#1504/#1805 every dereference site carries a profile pointer" {
+  # §3, §4 and §E4 are #1504's vacated sites; §2 and review-loop.md's fix-pass
+  # note are #1805's settled ones. review-loop.md is counted on its own, since
+  # its pointer sits outside the conductor.
+  local n loop="$REF_DIR/review-loop.md"
   n="$(grep -oF -- "$POINTER" "$CONDUCTOR" | grep -c . || true)"
-  [ "$n" -eq 3 ] || {
-    printf 'the conductor carries %s profile pointer(s), expected 3 (§3, §4, §E4).\n' "$n" >&2
+  [ "$n" -eq 4 ] || {
+    printf 'the conductor carries %s profile pointer(s), expected 4 (§2, §3, §4, §E4).\n' "$n" >&2
+    return 1
+  }
+  n="$(grep -oF -- "$POINTER" "$loop" | grep -c . || true)"
+  [ "$n" -eq 1 ] || {
+    printf 'review-loop.md carries %s profile pointer(s), expected 1 (the fix pass).\n' "$n" >&2
     return 1
   }
   # ...and they name headings the profile actually has, so a renamed heading
@@ -2224,9 +2238,58 @@ _moved_needles() {
   while IFS= read -r h; do
     [ -n "$h" ] || continue
     printf '%s' "$headings" | grep -qxF -- "$h" || bad+="$h"$'\n'
-  done < <(grep -o 'profile: `development-<repo_type>:resolve-profile` § .*$' "$CONDUCTOR" \
+  done < <(grep -ho 'profile: `development-<repo_type>:resolve-profile` § .*$' "$CONDUCTOR" "$loop" \
              | sed 's/^profile: `development-<repo_type>:resolve-profile` § //')
   [ -z "$bad" ] || { printf 'pointer(s) naming no such profile heading:\n%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#1805 the two new dereference sites skip a none heading, and the roles are settled" {
+  local sec flat loop="$REF_DIR/review-loop.md"
+  # §2's site: the `none` qualifier, and it applies even when the generic
+  # user-docs step no-oped (else every unrefined issue skips it).
+  sec="$BATS_TEST_TMPDIR/step-2.md"
+  awk '/^### 2\. /{f=1;next} f&&/^### /{exit} f' "$CONDUCTOR" > "$sec"
+  flat="$(tr '\n' ' ' < "$sec" | tr -s ' ')"
+  case "$flat" in *'whether or not the step above no-oped, unless its body begins with `none`'*) : ;;
+    *) echo "§2's documentation pointer lost its none qualifier or no-op clause" >&2; return 1 ;; esac
+  grep -qxF -- "${POINTER}Documentation expectations" "$sec"
+  # the fix pass's site, outside the frozen spans
+  flat="$(awk '/^<!-- moved: /{s=1;next} /^<!-- \/moved: /{s=0;next} !s' "$loop" | tr '\n' ' ' | tr -s ' ')"
+  case "$flat" in *"apply its rule to each fix pass, unless its body begins with \`none\`"*) : ;;
+    *) echo "review-loop.md's fix-pass pointer lost its none qualifier" >&2; return 1 ;; esac
+  grep -qxF -- "${POINTER}Fix-pass rules" "$loop"
+  # §1b's position-to-site mapping: which positions the none test covers, and
+  # that the sixth is a record.
+  sec="$BATS_TEST_TMPDIR/step-1b.md"
+  awk '/^### 1b\. /{f=1;next} f&&/^### /{exit} f' "$CONDUCTOR" > "$sec"
+  flat="$(tr '\n' ' ' < "$sec" | tr -s ' ')"
+  local n
+  for n in 'points at the fourth, and §2'"'"'s same-PR user-docs step at the fifth' \
+           'The **sixth** is a record no step dereferences' \
+           '§3 and E4 point at the first, §4 at the second. The **third** merely *records* the panel' \
+           "The first two positions' rules are always applied" \
+           'A heading in the fourth or fifth position is `none`' \
+           'neither record position is ever applied as a rule'; do
+    case "$flat" in *"$n"*) : ;; *) printf '§1b lost: %s\n' "$n" >&2; return 1 ;; esac
+  done
+  # ARCHITECTURE.md names both sites and both records
+  flat="$(_arch_contract_flat "$ARCH")"
+  for n in '**Gate** is dereferenced at §3 and E4, **Version bump** at §4' \
+           "**Fix-pass rules** at §3.5's fix pass" \
+           "expectations** at §2's same-PR user-docs step" \
+           '**Panel** and **Residue** are records that no step dereferences'; do
+    case "$flat" in *"$n"*) : ;; *) printf 'ARCHITECTURE.md lost: %s\n' "$n" >&2; return 1 ;; esac
+  done
+  # the exemplar: Fix-pass points at #1804, Residue is settled, neither names #1506
+  sec="$(_profile_section "$PROFILE" "Fix-pass rules")"
+  printf '%s' "$sec" | grep -qF -- '#1804'
+  _profile_section "$PROFILE" "Residue" | grep -qF -- 'applies to every repo type'
+  sec="$sec$(_profile_section "$PROFILE" "Residue")"
+  run grep -qF -- '#1506' <<< "$sec"
+  [ "$status" -eq 1 ]
+  # and nothing under development* still defers to #1506 (AC5)
+  run git -C "$REPO_ROOT" grep -n -e '#1506 decides' -e 'against #1506' -- 'development*'
+  [ "$status" -eq 1 ] && [ -z "$output" ]
 }
 
 @test "#1504 the conductor keeps the §4 heading the frozen references resolve to" {
@@ -2515,22 +2578,20 @@ _roster_sites() {
   case "$flat" in *"referred to here by POSITION rather than by name"*) : ;;
     *) echo "§1b no longer states why it names no heading" >&2; return 1 ;;
   esac
-  # ...and the round-4 remedy itself: the LITERAL `none` test and the filing
-  # duty. Unpinned, "BEGINS with" could be weakened to "IS", at which point the
-  # shipped profile's three `none`-prefixed headings all read as non-`none` and
-  # every run of a plugin repo files spurious issues.
+  # ...and the LITERAL `none` test. Unpinned, "BEGINS with" could be weakened
+  # to "IS", at which point the shipped profile's `none`-prefixed headings all
+  # read as non-`none` and their dereference sites apply prose as a rule.
   case "$flat" in *"BEGINS with \`none\`"*) : ;;
     *) echo "§1b no longer defines \`none\` literally" >&2; return 1 ;; esac
   case "$flat" in *"does **not** make it non-\`none\`"*) : ;;
     *) echo "§1b no longer says qualifying prose leaves a heading none" >&2; return 1 ;; esac
-  case "$flat" in *"file an issue against #1506"*) : ;;
-    *) echo "§1b no longer states the filing duty" >&2; return 1 ;; esac
-  case "$flat" in *"never add the dereference to this conductor yourself"*) : ;;
-    *) echo "§1b no longer forbids editing the conductor instead of filing" >&2; return 1 ;; esac
-  # ...and the rule is SCOPED: without this it also selects the dereferenced
-  # positions, licensing a run to skip the profile's blessed gate.
-  case "$flat" in *"The first three positions are never filed against #1506"*) : ;;
-    *) echo "§1b's none rule is not scoped away from the dereferenced positions" >&2; return 1 ;; esac
+  # ...and the rule is SCOPED: without this it also selects the first two
+  # positions, licensing a run to skip the profile's blessed gate (#1805).
+  case "$flat" in *"That test belongs to those two sites alone."*) : ;;
+    *) echo "§1b's none rule is not scoped to its two dereference sites" >&2; return 1 ;; esac
+  # ...and the #1506 deferral is retired, not restated (#1805).
+  case "$flat" in *"#1506"*)
+    echo "§1b still defers a heading's role to #1506" >&2; return 1 ;; esac
   # ...and it names NONE of them. The derived sweep above only reds on a file
   # carrying the WHOLE roster, so a five-of-six restatement here — the exact
   # shape rounds 2 and 3 both blocked on — would otherwise ship green.

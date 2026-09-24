@@ -139,9 +139,7 @@ them where they live.
 
 **none** — no java-specific fix-pass rule has been established. #1502's read-out
 is the evidence that would produce one; until it arrives, a rule here would
-encode a guess as contract. This position has no dereference site today either
-(#1506 decides which of the last three acquire one), so a rule written here
-would be one no step is contracted to consult.
+encode a guess as contract.
 
 ## Documentation expectations
 
@@ -154,5 +152,4 @@ come from.
 
 **none** — the residue procedure (#1435) in
 `development/skills/resolve-issue/reference/residue.md` is repo-type-agnostic:
-issue filing, labels and the dossier, with nothing java-specific in it. If a
-type-specific rule ever exists, #1502's read-out is where it would come from.
+issue filing, labels and the dossier, with nothing java-specific in it.

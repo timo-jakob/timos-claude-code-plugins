@@ -16,8 +16,8 @@ check. The text between `<!-- /moved: round-protocol-head -->` and
 proves only that no *original* line migrated into it, by asserting the two
 anchors stay adjacent in the pinned commit. And **everything after
 `<!-- /moved: round-protocol-tail -->`** is unproven too: the #1571 correction, the #1485 empty-story-diff note,
-*The decided pass* (#1584), *Carry accounting* (#1583) and the #1226
-`loop_args` note all live there,
+the #1805 fix-pass rule pointer, *The decided pass* (#1584), *Carry accounting*
+(#1583) and the #1226 `loop_args` note all live there,
 because a byte-frozen span cannot be edited and those rules had to correct or
 extend what it says. Edit either region knowing the byte check does not cover
 it.
@@ -1351,6 +1351,13 @@ Whether the panel wrote an aggregate or, as its contract says, none at all,
 step 2's arms that re-invoke with the `--findings-file` or re-run the panel look
 like they apply. Take neither. Both plan the same empty scope and are refused
 again.
+
+**Every fix pass also applies the loaded profile's fix-pass rule (#1805).**
+Step 3's fix pass sits inside the byte-frozen span, so this is recorded here:
+read the heading below and apply its rule to each fix pass, unless its body
+begins with `none` (the conductor's §1b test). With no profile loaded there is
+nothing to apply.
+profile: `development-<repo_type>:resolve-profile` § Fix-pass rules
 
 ### The decided pass — run every `decides:` command before consolidating (#1584)
 

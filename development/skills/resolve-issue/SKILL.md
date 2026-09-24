@@ -348,27 +348,20 @@ and it is stated in ARCHITECTURE.md's *Resolve profile contract* and in each
 profile — **and nowhere else**. Read the roster there; naming it here too would
 be one more copy to drift.
 
-**Only the first two headings in that declared order have a dereference site
-today** — §3 and E4 point at the first, §4 at the second. The **third** merely
-*records* the panel `review-dispatch.zsh plan` already computes, and is never
-dereferenced (ARCHITECTURE.md states that). The remaining three have no
-dereference site at all; **#1506 decides which of them acquire one** (the
-claude-plugin profile already records that at least one of them has nothing to
-extract). Until then, a profile that populates one of them carries a rule no
-step is told to consult — so:
+**Every heading in that declared order has a settled role** (ARCHITECTURE.md
+states them). §3 and E4 point at the first, §4 at the second. The **third**
+merely *records* the panel `review-dispatch.zsh plan` already computes. §3.5's
+fix pass (`reference/review-loop.md`) points at the fourth, and §2's same-PR
+user-docs step at the fifth. The **sixth** is a record no step dereferences,
+because the residue procedure is the same for every repo type — so:
 
-- **A heading in one of those last three positions is `none` when its body
-  BEGINS with `none`.** Qualifying prose after that word — a pointer, a reason,
-  a `none beyond X` — does **not** make it non-`none`. The shipped claude-plugin
-  profile writes exactly that shape.
-- **A heading in one of those three positions that is non-`none` by that test:**
-  do not apply its rule (no step is contracted to consult it), **file an issue
-  against #1506** naming the profile and the heading, and continue. *File* means
-  open an issue — never add the dereference to this conductor yourself, which is
-  both out of scope and a charge against its line budget.
-- **The first three positions are never filed against #1506** and their rules
-  are always applied: two are dereferenced by §3, §4 and E4, and the third is
-  deliberately a record. Nothing above licenses skipping them.
+- **A heading in the fourth or fifth position is `none` when its body BEGINS
+  with `none`** (bold or not), and its site then applies nothing from it. Qualifying prose
+  after that word — a pointer, a reason, a `none beyond X` — does **not** make
+  it non-`none`. The shipped claude-plugin profile writes exactly that shape.
+- **That test belongs to those two sites alone.** The first two positions'
+  rules are always applied, and neither record position is ever applied as a
+  rule.
 
 The headings are referred to here by POSITION rather than by name on purpose —
 naming them would be the extra copy this section just said not to make.
@@ -485,6 +478,10 @@ new page** in `mkdocs.yml`'s `nav:` and the `docs/index.md` MOC — the strict
 docs build fails on an omitted page, which is exactly the drift-proofing the
 step exists for. The docs change rides the same commit/PR as the feature
 (Step 3 gates it, Step 6 reports it).
+
+**Then apply the loaded profile's documentation rule**, whether or not the step
+above no-oped, unless its body begins with `none` (§1b's test):
+profile: `development-<repo_type>:resolve-profile` § Documentation expectations
 
 **Graceful fallback — no block (exit 1).** Most issues have never been refined
 and carry **no** `story-spec/v1` block; that is **not** an error. Behave exactly
